@@ -824,30 +824,6 @@ abstract class AppLocalizations {
   /// **'{count} tasks'**
   String taskCountLabel(int count);
 
-  /// Display name for the draft Business category card.
-  ///
-  /// In en, this message translates to:
-  /// **'Business'**
-  String get categoryBusiness;
-
-  /// Display name for the draft Personal category card.
-  ///
-  /// In en, this message translates to:
-  /// **'Personal'**
-  String get categoryPersonal;
-
-  /// Display name for the draft Home location card.
-  ///
-  /// In en, this message translates to:
-  /// **'Home'**
-  String get locationHome;
-
-  /// Display name for the draft Office location card.
-  ///
-  /// In en, this message translates to:
-  /// **'Office'**
-  String get locationOffice;
-
   /// Tooltip for the top-left navigation menu button.
   ///
   /// In en, this message translates to:
@@ -865,6 +841,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Search focus tasks...'**
   String get searchHint;
+
+  /// Side panel menu item and sheet title for managing categories.
+  ///
+  /// In en, this message translates to:
+  /// **'Categories'**
+  String get drawerCategories;
+
+  /// Side panel menu item and sheet title for managing locations.
+  ///
+  /// In en, this message translates to:
+  /// **'Locations'**
+  String get drawerLocations;
+
+  /// Placeholder hint inside the category name input field.
+  ///
+  /// In en, this message translates to:
+  /// **'New category name...'**
+  String get categoryNameHint;
+
+  /// Placeholder hint inside the location name input field.
+  ///
+  /// In en, this message translates to:
+  /// **'New location name...'**
+  String get locationNameHint;
+
+  /// Input label for the direct hexadecimal color field.
+  ///
+  /// In en, this message translates to:
+  /// **'Hex Color'**
+  String get colorHexLabel;
+
+  /// Empty-state hint shown in the Categories panel when no categories exist.
+  ///
+  /// In en, this message translates to:
+  /// **'No categories created yet.'**
+  String get emptyCategoriesHint;
+
+  /// Empty-state hint shown in the Locations panel when no locations exist.
+  ///
+  /// In en, this message translates to:
+  /// **'No locations created yet.'**
+  String get emptyLocationsHint;
+
+  /// Tooltip for the button that deletes a category.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete category'**
+  String get tooltipDeleteCategory;
+
+  /// Tooltip for the button that deletes a location.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete location'**
+  String get tooltipDeleteLocation;
 }
 
 class _AppLocalizationsDelegate

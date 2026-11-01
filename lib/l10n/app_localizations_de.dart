@@ -424,18 +424,6 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get categoryBusiness => 'Geschäftlich';
-
-  @override
-  String get categoryPersonal => 'Privat';
-
-  @override
-  String get locationHome => 'Zuhause';
-
-  @override
-  String get locationOffice => 'Büro';
-
-  @override
   String get tooltipMenu => 'Menü öffnen';
 
   @override
@@ -443,4 +431,31 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get searchHint => 'Fokusaufgaben durchsuchen...';
+
+  @override
+  String get drawerCategories => 'Kategorien';
+
+  @override
+  String get drawerLocations => 'Orte';
+
+  @override
+  String get categoryNameHint => 'Neuer Kategoriename...';
+
+  @override
+  String get locationNameHint => 'Neuer Ortsname...';
+
+  @override
+  String get colorHexLabel => 'Hex-Farbe';
+
+  @override
+  String get emptyCategoriesHint => 'Noch keine Kategorien angelegt.';
+
+  @override
+  String get emptyLocationsHint => 'Noch keine Orte angelegt.';
+
+  @override
+  String get tooltipDeleteCategory => 'Kategorie löschen';
+
+  @override
+  String get tooltipDeleteLocation => 'Ort löschen';
 }

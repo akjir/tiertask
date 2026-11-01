@@ -20,6 +20,7 @@ import '../../l10n/app_localizations.dart';
 import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
+import '../../models/tdf_metadata.dart';
 import '../../providers/task_providers.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
@@ -33,7 +34,14 @@ const Color _mutedLabelColor = Color(0xFF9BA8E5);
 /// and an extendable view for defining subtasks.
 class QuickAddBar extends ConsumerStatefulWidget {
   /// Creates a [QuickAddBar] widget.
-  const QuickAddBar({super.key, this.onSubmitted});
+  const QuickAddBar({
+    super.key,
+    this.initialCategoryIds = const <String>{},
+    this.onSubmitted,
+  });
+
+  /// Category IDs pre-selected when opening the quick-add bar from a category screen.
+  final Set<String> initialCategoryIds;
 
   /// Optional callback invoked after a non-empty task is submitted.
   final VoidCallback? onSubmitted;
@@ -60,6 +68,160 @@ enum QuickAddMode {
       QuickAddMode.priority => TaskTier.focus,
       QuickAddMode.someday => TaskTier.someday,
     };
+  }
+}
+
+/// Multi-select category chip group rendered inside [_QuickAddContextSelectors].
+class _CategoryChipsGroup extends StatelessWidget {
+  /// Creates a [_CategoryChipsGroup].
+  const _CategoryChipsGroup({
+    required this.categories,
+    required this.selectedCategoryIds,
+    required this.onToggleCategory,
+  });
+
+  /// Categories defined on the board.
+  final List<TdfCategory> categories;
+
+  /// Callback invoked when a category chip is tapped.
+  final ValueChanged<String> onToggleCategory;
+
+  /// Selected category IDs.
+  final Set<String> selectedCategoryIds;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          localizations.sectionCategories,
+          style: const TextStyle(
+            color: _mutedLabelColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final category in categories)
+              _QuickAddContextFilterChip(
+                chipKey: ValueKey('quick_add_category_${category.id}'),
+                icon: Icons.label_outline_rounded,
+                label: category.name,
+                selected: selectedCategoryIds.contains(category.id),
+                accentColor: _QuickAddContextSelectors.resolveChipColor(
+                  category.color,
+                  _accentMagenta,
+                ),
+                onToggle: () => onToggleCategory(category.id),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact task creation view inside [QuickAddBar].
+class _CompactQuickAddView extends StatelessWidget {
+  /// Creates a [_CompactQuickAddView].
+  const _CompactQuickAddView({
+    required this.categories,
+    required this.controller,
+    required this.effectiveTier,
+    required this.hasTaskText,
+    required this.locations,
+    required this.mode,
+    required this.selectedCategoryIds,
+    required this.selectedLocationIds,
+    required this.onOpenAdvanced,
+    required this.onSubmit,
+    required this.onToggleCategory,
+    required this.onToggleLocation,
+    required this.onTogglePriority,
+    required this.onToggleSomeday,
+  });
+
+  /// Available categories for multi-selection.
+  final List<TdfCategory> categories;
+
+  /// Controller for the task title input.
+  final TextEditingController controller;
+
+  /// Target tier corresponding to [mode].
+  final TaskTier effectiveTier;
+
+  /// Whether the task title input contains non-whitespace text.
+  final bool hasTaskText;
+
+  /// Available locations for multi-selection.
+  final List<TdfLocation> locations;
+
+  /// Active scheduling mode.
+  final QuickAddMode mode;
+
+  /// Callback to open the extended view.
+  final VoidCallback onOpenAdvanced;
+
+  /// Callback to submit the task.
+  final VoidCallback onSubmit;
+
+  /// Callback invoked when a category chip is toggled.
+  final ValueChanged<String> onToggleCategory;
+
+  /// Callback invoked when a location chip is toggled.
+  final ValueChanged<String> onToggleLocation;
+
+  /// Callback invoked when the Priority chip is toggled.
+  final VoidCallback onTogglePriority;
+
+  /// Callback invoked when the Someday chip is toggled.
+  final VoidCallback onToggleSomeday;
+
+  /// Selected category IDs.
+  final Set<String> selectedCategoryIds;
+
+  /// Selected location IDs.
+  final Set<String> selectedLocationIds;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _QuickAddInputRow(
+          controller: controller,
+          effectiveTier: effectiveTier,
+          hasText: hasTaskText,
+          onSubmit: onSubmit,
+        ),
+        const SizedBox(height: 8),
+        _QuickAddActionRow(
+          mode: mode,
+          showAdvancedButton: true,
+          onOpenAdvanced: onOpenAdvanced,
+          onTogglePriority: onTogglePriority,
+          onToggleSomeday: onToggleSomeday,
+        ),
+        _QuickAddContextSelectors(
+          categories: categories,
+          locations: locations,
+          selectedCategoryIds: selectedCategoryIds,
+          selectedLocationIds: selectedLocationIds,
+          onToggleCategory: onToggleCategory,
+          onToggleLocation: onToggleLocation,
+        ),
+      ],
+    );
   }
 }
 
@@ -103,19 +265,28 @@ class _ExtendedHeaderRow extends StatelessWidget {
 class _ExtendedQuickAddView extends StatelessWidget {
   /// Creates an [_ExtendedQuickAddView].
   const _ExtendedQuickAddView({
+    required this.categories,
     required this.controller,
     required this.hasTaskText,
     required this.hasSubtaskText,
+    required this.locations,
     required this.mode,
+    required this.selectedCategoryIds,
+    required this.selectedLocationIds,
     required this.subtaskController,
     required this.subtasks,
     required this.onAddSubtask,
     required this.onCollapse,
     required this.onRemoveSubtask,
     required this.onSubmit,
+    required this.onToggleCategory,
+    required this.onToggleLocation,
     required this.onTogglePriority,
     required this.onToggleSomeday,
   });
+
+  /// Available TDF categories for multi-selection.
+  final List<TdfCategory> categories;
 
   /// Text controller for the main task title.
   final TextEditingController controller;
@@ -125,6 +296,9 @@ class _ExtendedQuickAddView extends StatelessWidget {
 
   /// Whether the main task input currently contains non-whitespace text.
   final bool hasTaskText;
+
+  /// Available TDF locations for multi-selection.
+  final List<TdfLocation> locations;
 
   /// Active scheduling mode (`standard`, `priority`, or `someday`).
   final QuickAddMode mode;
@@ -141,11 +315,23 @@ class _ExtendedQuickAddView extends StatelessWidget {
   /// Callback to submit the task with its subtasks.
   final VoidCallback onSubmit;
 
+  /// Callback invoked when a category chip is toggled.
+  final ValueChanged<String> onToggleCategory;
+
+  /// Callback invoked when a location chip is toggled.
+  final ValueChanged<String> onToggleLocation;
+
   /// Callback to toggle Priority mode on or off.
   final VoidCallback onTogglePriority;
 
   /// Callback to toggle Someday mode on or off.
   final VoidCallback onToggleSomeday;
+
+  /// Currently selected category IDs.
+  final Set<String> selectedCategoryIds;
+
+  /// Currently selected location IDs.
+  final Set<String> selectedLocationIds;
 
   /// Text controller for the subtask input field.
   final TextEditingController subtaskController;
@@ -175,6 +361,14 @@ class _ExtendedQuickAddView extends StatelessWidget {
           onTogglePriority: onTogglePriority,
           onToggleSomeday: onToggleSomeday,
         ),
+        _QuickAddContextSelectors(
+          categories: categories,
+          locations: locations,
+          selectedCategoryIds: selectedCategoryIds,
+          selectedLocationIds: selectedLocationIds,
+          onToggleCategory: onToggleCategory,
+          onToggleLocation: onToggleLocation,
+        ),
         const SizedBox(height: 12),
         _SubtaskEditorSection(
           hasSubtaskText: hasSubtaskText,
@@ -182,6 +376,65 @@ class _ExtendedQuickAddView extends StatelessWidget {
           subtasks: subtasks,
           onAddSubtask: onAddSubtask,
           onRemoveSubtask: onRemoveSubtask,
+        ),
+      ],
+    );
+  }
+}
+
+/// Multi-select location chip group rendered inside [_QuickAddContextSelectors].
+class _LocationChipsGroup extends StatelessWidget {
+  /// Creates a [_LocationChipsGroup].
+  const _LocationChipsGroup({
+    required this.locations,
+    required this.selectedLocationIds,
+    required this.onToggleLocation,
+  });
+
+  /// Locations defined on the board.
+  final List<TdfLocation> locations;
+
+  /// Callback invoked when a location chip is tapped.
+  final ValueChanged<String> onToggleLocation;
+
+  /// Selected location IDs.
+  final Set<String> selectedLocationIds;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+        Text(
+          localizations.sectionLocations,
+          style: const TextStyle(
+            color: _mutedLabelColor,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final location in locations)
+              _QuickAddContextFilterChip(
+                chipKey: ValueKey('quick_add_location_${location.id}'),
+                icon: Icons.location_on_outlined,
+                label: location.name,
+                selected: selectedLocationIds.contains(location.id),
+                accentColor: _QuickAddContextSelectors.resolveChipColor(
+                  location.color,
+                  _accentCyan,
+                ),
+                onToggle: () => onToggleLocation(location.id),
+              ),
+          ],
         ),
       ],
     );
@@ -256,6 +509,8 @@ class _QuickAddActionRow extends StatelessWidget {
 class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   final TextEditingController _controller = TextEditingController();
   QuickAddMode _mode = QuickAddMode.standard;
+  final Set<String> _selectedCategoryIds = <String>{};
+  final Set<String> _selectedLocationIds = <String>{};
   final TextEditingController _subtaskController = TextEditingController();
   final List<SubtaskItem> _subtasks = <SubtaskItem>[];
   _QuickAddViewState _viewState = _QuickAddViewState.compact;
@@ -267,6 +522,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   @override
   void initState() {
     super.initState();
+    _selectedCategoryIds.addAll(widget.initialCategoryIds);
     _controller.addListener(_handleControllerChanged);
     _subtaskController.addListener(_handleControllerChanged);
   }
@@ -282,6 +538,19 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
   @override
   Widget build(BuildContext context) {
+    final categories = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.categories ?? const <TdfCategory>[],
+      ),
+    );
+    final locations = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.locations ?? const <TdfLocation>[],
+      ),
+    );
+
     return Material(
       elevation: 8,
       color: _cardColor,
@@ -289,42 +558,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: switch (_viewState) {
-            _QuickAddViewState.compact => Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _QuickAddInputRow(
-                  controller: _controller,
-                  effectiveTier: _mode.targetTier,
-                  hasText: _hasTaskText,
-                  onSubmit: _submit,
-                ),
-                const SizedBox(height: 8),
-                _QuickAddActionRow(
-                  mode: _mode,
-                  showAdvancedButton: true,
-                  onOpenAdvanced: _openExtendedView,
-                  onTogglePriority: _togglePriority,
-                  onToggleSomeday: _toggleSomeday,
-                ),
-              ],
-            ),
-            _QuickAddViewState.extended => _ExtendedQuickAddView(
-              controller: _controller,
-              hasTaskText: _hasTaskText,
-              hasSubtaskText: _hasSubtaskText,
-              mode: _mode,
-              subtaskController: _subtaskController,
-              subtasks: List<SubtaskItem>.unmodifiable(_subtasks),
-              onAddSubtask: _addSubtask,
-              onCollapse: _collapseExtendedView,
-              onRemoveSubtask: _removeSubtask,
-              onSubmit: _submit,
-              onTogglePriority: _togglePriority,
-              onToggleSomeday: _toggleSomeday,
-            ),
-          },
+          child: _buildActiveView(categories, locations),
         ),
       ),
     );
@@ -340,6 +574,51 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
       _subtasks.add(SubtaskItem(title: text));
       _subtaskController.clear();
     });
+  }
+
+  /// Builds either the compact or extended quick-add view based on [_viewState].
+  Widget _buildActiveView(
+    List<TdfCategory> categories,
+    List<TdfLocation> locations,
+  ) {
+    return switch (_viewState) {
+      _QuickAddViewState.compact => _CompactQuickAddView(
+        categories: categories,
+        controller: _controller,
+        effectiveTier: _mode.targetTier,
+        hasTaskText: _hasTaskText,
+        locations: locations,
+        mode: _mode,
+        selectedCategoryIds: _selectedCategoryIds,
+        selectedLocationIds: _selectedLocationIds,
+        onOpenAdvanced: _openExtendedView,
+        onSubmit: _submit,
+        onToggleCategory: _toggleCategory,
+        onToggleLocation: _toggleLocation,
+        onTogglePriority: _togglePriority,
+        onToggleSomeday: _toggleSomeday,
+      ),
+      _QuickAddViewState.extended => _ExtendedQuickAddView(
+        categories: categories,
+        controller: _controller,
+        hasTaskText: _hasTaskText,
+        hasSubtaskText: _hasSubtaskText,
+        locations: locations,
+        mode: _mode,
+        selectedCategoryIds: _selectedCategoryIds,
+        selectedLocationIds: _selectedLocationIds,
+        subtaskController: _subtaskController,
+        subtasks: List<SubtaskItem>.unmodifiable(_subtasks),
+        onAddSubtask: _addSubtask,
+        onCollapse: _collapseExtendedView,
+        onRemoveSubtask: _removeSubtask,
+        onSubmit: _submit,
+        onToggleCategory: _toggleCategory,
+        onToggleLocation: _toggleLocation,
+        onTogglePriority: _togglePriority,
+        onToggleSomeday: _toggleSomeday,
+      ),
+    };
   }
 
   /// Switches back from the extended subtask view to the compact quick-add bar.
@@ -371,7 +650,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
     });
   }
 
-  /// Submits the entered task title, priority/someday selection, and any defined subtasks.
+  /// Submits the entered task title, priority/someday selection, locations, categories, and subtasks.
   Future<void> _submit() async {
     final text = _controller.text.trim();
     if (text.isEmpty) {
@@ -384,11 +663,26 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
       if (pendingSubtask.isNotEmpty) SubtaskItem(title: pendingSubtask),
     ];
     final selectedMode = _mode;
+    final board = ref.read(taskNotifierProvider).asData?.value;
+    final submittedCategoryIds = <String>[
+      if (board != null)
+        for (final category in board.categories)
+          if (_selectedCategoryIds.contains(category.id)) category.id,
+    ];
+    final submittedLocationIds = <String>[
+      if (board != null)
+        for (final location in board.locations)
+          if (_selectedLocationIds.contains(location.id)) location.id,
+    ];
 
     _controller.clear();
     _subtaskController.clear();
     setState(() {
       _subtasks.clear();
+      _selectedCategoryIds
+        ..clear()
+        ..addAll(widget.initialCategoryIds);
+      _selectedLocationIds.clear();
       _mode = QuickAddMode.standard;
       _viewState = _QuickAddViewState.compact;
     });
@@ -400,8 +694,28 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
           targetTier: selectedMode.targetTier,
           isPriority: selectedMode == QuickAddMode.priority,
           subtasks: submittedSubtasks,
+          categoryIds: submittedCategoryIds,
+          locationIds: submittedLocationIds,
         );
     widget.onSubmitted?.call();
+  }
+
+  /// Toggles selection of [categoryId] for the task being created.
+  void _toggleCategory(String categoryId) {
+    setState(() {
+      if (!_selectedCategoryIds.remove(categoryId)) {
+        _selectedCategoryIds.add(categoryId);
+      }
+    });
+  }
+
+  /// Toggles selection of [locationId] for the task being created.
+  void _toggleLocation(String locationId) {
+    setState(() {
+      if (!_selectedLocationIds.remove(locationId)) {
+        _selectedLocationIds.add(locationId);
+      }
+    });
   }
 
   /// Toggles Priority on or off, automatically turning Someday off when enabled.
@@ -420,6 +734,129 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
           ? QuickAddMode.standard
           : QuickAddMode.someday;
     });
+  }
+}
+
+/// Multi-select [FilterChip] used for category and location selection in [QuickAddBar].
+class _QuickAddContextFilterChip extends StatelessWidget {
+  /// Creates a [_QuickAddContextFilterChip].
+  const _QuickAddContextFilterChip({
+    required this.chipKey,
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.accentColor,
+    required this.onToggle,
+  });
+
+  /// Accent color for the chip icon and selected background.
+  final Color accentColor;
+
+  /// Deterministic widget key for the chip.
+  final Key chipKey;
+
+  /// Leading icon displayed inside the chip avatar.
+  final IconData icon;
+
+  /// Display name of the category or location.
+  final String label;
+
+  /// Callback invoked when the chip is tapped.
+  final VoidCallback onToggle;
+
+  /// Whether this category or location is currently selected.
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilterChip(
+      key: chipKey,
+      avatar: Icon(
+        icon,
+        size: 16,
+        color: selected ? Colors.white : accentColor,
+      ),
+      label: Text(label),
+      selected: selected,
+      showCheckmark: false,
+      backgroundColor: _canvasColor,
+      selectedColor: accentColor,
+      labelStyle: TextStyle(
+        color: selected ? Colors.white : _mutedLabelColor,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+      ),
+      side: BorderSide(
+        color: selected
+            ? accentColor
+            : _mutedLabelColor.withValues(alpha: 0.35),
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      visualDensity: VisualDensity.compact,
+      onSelected: (_) => onToggle(),
+    );
+  }
+}
+
+/// Multi-select filter chip sections for choosing categories and locations in [QuickAddBar].
+class _QuickAddContextSelectors extends StatelessWidget {
+  /// Creates a [_QuickAddContextSelectors].
+  const _QuickAddContextSelectors({
+    required this.categories,
+    required this.locations,
+    required this.selectedCategoryIds,
+    required this.selectedLocationIds,
+    required this.onToggleCategory,
+    required this.onToggleLocation,
+  });
+
+  /// Defined categories on the board.
+  final List<TdfCategory> categories;
+
+  /// Defined locations on the board.
+  final List<TdfLocation> locations;
+
+  /// Callback invoked when a category chip is tapped.
+  final ValueChanged<String> onToggleCategory;
+
+  /// Callback invoked when a location chip is tapped.
+  final ValueChanged<String> onToggleLocation;
+
+  /// Currently selected category IDs.
+  final Set<String> selectedCategoryIds;
+
+  /// Currently selected location IDs.
+  final Set<String> selectedLocationIds;
+
+  @override
+  Widget build(BuildContext context) {
+    if (categories.isEmpty && locations.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (categories.isNotEmpty)
+          _CategoryChipsGroup(
+            categories: categories,
+            selectedCategoryIds: selectedCategoryIds,
+            onToggleCategory: onToggleCategory,
+          ),
+        if (locations.isNotEmpty)
+          _LocationChipsGroup(
+            locations: locations,
+            selectedLocationIds: selectedLocationIds,
+            onToggleLocation: onToggleLocation,
+          ),
+      ],
+    );
+  }
+
+  /// Resolves a `#RRGGBB` color string or falls back to [fallback].
+  static Color resolveChipColor(String? rawHex, Color fallback) {
+    final parsed = TdfColor.tryParseArgb(rawHex);
+    return parsed != null ? Color(parsed) : fallback;
   }
 }
 

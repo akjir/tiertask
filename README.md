@@ -51,7 +51,8 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 1. Launch `TierTask` and open the settings screen via the menu drawer.
 2. Select the display language (`System`, `English`, or `Deutsch`) and color theme (`System`, `Light`, or `Dark`).
 3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local TDF file name (default `tiertask.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and remote file path `tiertask.tdf`).
-4. Add tasks via the floating action button (`QuickAddBar`) using the input field, mutually exclusive `Priority` and `Someday` toggles, or the `Advanced` view to define subtasks; changes persist immediately to the configured `.tdf` file.
+4. Open `Categories` or `Locations` in the side navigation drawer to create and view categories and locations, choosing their accent color via the interactive color wheel or direct `#RRGGBB` hex input. Tapping a category card on the landing page opens a dedicated category screen showing the 3 `Focus` tasks derived for that category while keeping all other filters active.
+5. Add tasks via the floating action button (`QuickAddBar`) using the input field, mutually exclusive `Priority` and `Someday` toggles, multi-select `Categories` and `Locations` chips, or the `Advanced` view to define subtasks; changes persist immediately to the configured `.tdf` file.
 
 ## Tier System & TDF Format
 

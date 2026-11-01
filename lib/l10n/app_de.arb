@@ -121,11 +121,16 @@
   "sectionCategories": "KATEGORIEN",
   "sectionLocations": "ORTE",
   "taskCountLabel": "{count} Aufgaben",
-  "categoryBusiness": "Geschäftlich",
-  "categoryPersonal": "Privat",
-  "locationHome": "Zuhause",
-  "locationOffice": "Büro",
   "tooltipMenu": "Menü öffnen",
   "tooltipSearch": "Aufgaben suchen",
-  "searchHint": "Fokusaufgaben durchsuchen..."
+  "searchHint": "Fokusaufgaben durchsuchen...",
+  "drawerCategories": "Kategorien",
+  "drawerLocations": "Orte",
+  "categoryNameHint": "Neuer Kategoriename...",
+  "locationNameHint": "Neuer Ortsname...",
+  "colorHexLabel": "Hex-Farbe",
+  "emptyCategoriesHint": "Noch keine Kategorien angelegt.",
+  "emptyLocationsHint": "Noch keine Orte angelegt.",
+  "tooltipDeleteCategory": "Kategorie löschen",
+  "tooltipDeleteLocation": "Ort löschen"
 }

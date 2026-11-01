@@ -257,6 +257,15 @@ class TdfService {
           lineNumber,
           enforceMaxLength: true,
         );
+      case 'color':
+        if (builder.color != null) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.color = _requireSingleTextArg(
+          args,
+          lineNumber,
+          enforceMaxLength: false,
+        );
       case 'note':
         if (builder.note != null) {
           _throwDuplicateDirective(directive, lineNumber);
@@ -1449,6 +1458,11 @@ class TdfService {
     buffer.write(' {\n    name ');
     buffer.write(_escapeQuotedString(location.name));
     buffer.write('\n');
+    if (location.color case final color?) {
+      buffer.write('    color ');
+      buffer.write(_escapeQuotedString(color));
+      buffer.write('\n');
+    }
     if (location.note case final note?) {
       buffer.write('    note ');
       buffer.write(_escapeQuotedString(note));
@@ -1606,6 +1620,9 @@ final class _LocationBuilder extends _BlockBuilder {
   /// Location `<id>`.
   final String id;
 
+  /// Optional `color` value.
+  String? color;
+
   /// Whether a `gps` directive has been parsed.
   bool hasGps = false;
 
@@ -1637,6 +1654,7 @@ final class _LocationBuilder extends _BlockBuilder {
     return TdfLocation(
       id: id,
       name: resolvedName,
+      color: color,
       note: note,
       latitude: latitude,
       longitude: longitude,

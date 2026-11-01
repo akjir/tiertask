@@ -20,8 +20,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+
+/// Fake [LocalFileRepository] returning an in-memory `.tdf` document for widget tests.
+class _FakeLocalFileRepository extends LocalFileRepository {
+  /// Creates a [_FakeLocalFileRepository].
+  _FakeLocalFileRepository({required super.config, required this.initialTdf});
+
+  /// Initial `.tdf` content returned by [loadTdf] before any mutations are saved.
+  String initialTdf;
+
+  @override
+  Future<String> loadTdf() async => initialTdf;
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    initialTdf = tdfContent;
+  }
+}
 
 /// Fake [WebDavRepository] for deterministic widget tests of connection status banners.
 class _FakeWebDavRepository extends WebDavRepository {
@@ -63,7 +81,7 @@ Future<void> _openSettingsFromMenu(WidgetTester tester) async {
 
 void main() {
   testWidgets(
-    'Landing page renders greeting, focus tasks only, category and location cards with solid color bars, top-right search, and top-left menu',
+    'Landing page hides categories and locations when none exist and renders greeting, focus tasks, top-right search, and top-left menu',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         ProviderScope(
@@ -119,73 +137,36 @@ void main() {
       );
       expect(
         find.text('CATEGORIES'),
-        findsOneWidget,
-        reason: 'Categories section must appear on the landing page',
+        findsNothing,
+        reason:
+            'Categories section must be hidden when no categories are defined',
       );
       expect(
         find.text('LOCATIONS'),
-        findsOneWidget,
-        reason: 'Locations section must appear on the landing page',
-      );
-      expect(find.text('Business'), findsOneWidget);
-      expect(
-        find.text('40 tasks'),
         findsNothing,
-        reason: 'Category total task count must be hidden when showOpenTaskCount is off by default',
-      );
-      expect(find.text('Personal'), findsOneWidget);
-      expect(
-        find.text('18 tasks'),
-        findsNothing,
-        reason: 'Category total task count must be hidden when showOpenTaskCount is off by default',
-      );
-      expect(find.text('Home'), findsOneWidget);
-      expect(
-        find.text('12 tasks'),
-        findsNothing,
-        reason: 'Location total task count must be hidden when showOpenTaskCount is off by default',
-      );
-      expect(find.text('Office'), findsOneWidget);
-      expect(
-        find.text('24 tasks'),
-        findsNothing,
-        reason: 'Location total task count must be hidden when showOpenTaskCount is off by default',
-      );
-      expect(
-        find.byType(LinearProgressIndicator),
-        findsNothing,
-        reason: 'Category and location cards must not render a done progress indicator',
+        reason:
+            'Locations section must be hidden when no locations are defined',
       );
       expect(
         find.byKey(const ValueKey('accent_bar_category_business')),
-        findsOneWidget,
-        reason: 'Category card must render a solid colored line bar',
+        findsNothing,
+        reason:
+            'No category card accent bar must render when categories are empty',
       );
       expect(
         find.byKey(const ValueKey('accent_bar_location_home')),
-        findsOneWidget,
-        reason: 'Location card must render a solid colored line bar',
+        findsNothing,
+        reason:
+            'No location card accent bar must render when locations are empty',
       );
 
       final greetingDy = tester.getTopLeft(find.text("What's up!")).dy;
       final focusDy = tester.getTopLeft(find.text('FOCUS TASKS')).dy;
-      final categoriesDy = tester.getTopLeft(find.text('CATEGORIES')).dy;
-      final locationsDy = tester.getTopLeft(find.text('LOCATIONS')).dy;
 
       expect(
         greetingDy < focusDy,
         isTrue,
         reason: 'Greeting must appear above Focus tasks',
-      );
-      expect(
-        focusDy < categoriesDy,
-        isTrue,
-        reason: 'Focus tasks must appear above Categories',
-      );
-      expect(
-        categoriesDy < locationsDy,
-        isTrue,
-        reason: 'Categories must appear above Locations',
       );
 
       await tester.tap(find.byType(FloatingActionButton));
@@ -223,7 +204,101 @@ void main() {
   );
 
   testWidgets(
-    'Landing page renders German labels and exposes secondary tiers and actions in the top-left menu',
+    'Landing page shows only Categories when locations are empty and only Locations when categories are empty',
+    (WidgetTester tester) async {
+      const categoriesOnlyTdf = '''
+category business {
+  name "Business"
+  color "#EB06FF"
+}
+''';
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => _FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: categoriesOnlyTdf,
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('CATEGORIES'),
+        findsOneWidget,
+        reason: 'Categories section must appear when categories exist in TDF',
+      );
+      expect(find.text('Business'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('accent_bar_category_business')),
+        findsOneWidget,
+      );
+      expect(
+        find.text('LOCATIONS'),
+        findsNothing,
+        reason: 'Locations section must remain hidden when locations are empty',
+      );
+
+      const locationsOnlyTdf = '''
+location home {
+  name "Home"
+}
+''';
+      await tester.pumpWidget(
+        ProviderScope(
+          key: UniqueKey(),
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => _FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: locationsOnlyTdf,
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('CATEGORIES'),
+        findsNothing,
+        reason:
+            'Categories section must remain hidden when categories are empty',
+      );
+      expect(
+        find.text('LOCATIONS'),
+        findsOneWidget,
+        reason: 'Locations section must appear when locations exist in TDF',
+      );
+      expect(find.text('Home'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('accent_bar_location_home')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'Landing page renders German labels, hides empty categories and locations, and exposes secondary tiers in the top-left menu',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         ProviderScope(
@@ -244,17 +319,15 @@ void main() {
       expect(find.text('Was steht an!'), findsOneWidget);
       expect(find.textContaining('Olivia'), findsNothing);
       expect(find.text('FOKUSAUFGABEN'), findsOneWidget);
-      expect(find.text('KATEGORIEN'), findsOneWidget);
-      expect(find.text('ORTE'), findsOneWidget);
       expect(
-        find.text('40 Aufgaben'),
+        find.text('KATEGORIEN'),
         findsNothing,
-        reason: 'German category task count must be hidden by default when showOpenTaskCount is off',
+        reason: 'German categories heading must be hidden when none exist',
       );
       expect(
-        find.text('18 Aufgaben'),
+        find.text('ORTE'),
         findsNothing,
-        reason: 'German category task count must be hidden by default when showOpenTaskCount is off',
+        reason: 'German locations heading must be hidden when none exist',
       );
 
       await tester.tap(find.byIcon(Icons.menu_rounded));
@@ -272,14 +345,63 @@ void main() {
   testWidgets(
     'SettingsScreen defaults open task count display to Off and toggles total task count on category and location cards',
     (WidgetTester tester) async {
+      const seededTdf = '''
+location home {
+  name "Home"
+}
+location office {
+  name "Office"
+}
+category business {
+  name "Business"
+  color "#EB06FF"
+}
+category personal {
+  name "Personal"
+}
+task t001 {
+  name "Prepare quarterly report"
+  created 2026-11-01 08:00
+  queued 2026-11-01 08:00
+  categories business
+  locations office
+}
+task t002 {
+  name "Review client contract"
+  created 2026-11-01 09:00
+  queued 2026-11-01 09:00
+  categories business
+  locations office
+}
+task t003 {
+  name "Water plants"
+  created 2026-11-01 10:00
+  queued 2026-11-01 10:00
+  categories personal
+  locations home
+}
+task t004 {
+  name "Archived invoice"
+  created 2026-10-28 10:00
+  queued 2026-10-28 10:00
+  finished 2026-10-29 12:00
+  categories business
+  locations office
+}
+''';
       final settingsRepository = InMemorySettingsRepository(
         const WebDavConfig(language: AppLanguage.english),
+      );
+      final fakeLocalRepo = _FakeLocalFileRepository(
+        config: const WebDavConfig(language: AppLanguage.english),
+        initialTdf: seededTdf,
       );
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localFileRepositoryProvider.overrideWithValue(fakeLocalRepo),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
           child: const TierTaskApp(),
@@ -288,15 +410,32 @@ void main() {
 
       await tester.pumpAndSettle();
 
+      final focusDy = tester.getTopLeft(find.text('FOCUS TASKS')).dy;
+      final categoriesDy = tester.getTopLeft(find.text('CATEGORIES')).dy;
+      final locationsDy = tester.getTopLeft(find.text('LOCATIONS')).dy;
       expect(
-        find.text('40 tasks'),
-        findsNothing,
-        reason: 'Total task count must be hidden by default on category cards',
+        focusDy < categoriesDy,
+        isTrue,
+        reason: 'Focus tasks must appear above Categories when both exist',
       );
       expect(
-        find.text('12 tasks'),
+        categoriesDy < locationsDy,
+        isTrue,
+        reason: 'Categories must appear above Locations when both exist',
+      );
+      expect(find.text('Business'), findsOneWidget);
+      expect(find.text('Personal'), findsOneWidget);
+      expect(find.text('Home'), findsOneWidget);
+      expect(find.text('Office'), findsOneWidget);
+      expect(
+        find.text('2 tasks'),
         findsNothing,
-        reason: 'Total task count must be hidden by default on location cards',
+        reason: 'Total task count must be hidden by default on cards',
+      );
+      expect(
+        find.text('1 tasks'),
+        findsNothing,
+        reason: 'Total task count must be hidden by default on cards',
       );
 
       await _openSettingsFromMenu(tester);
@@ -323,24 +462,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('40 tasks'),
-        findsOneWidget,
-        reason: 'Enabling showOpenTaskCount must display total tasks on Business category card',
+        find.text('2 tasks'),
+        findsNWidgets(2),
+        reason: 'Enabling showOpenTaskCount must display 2 open tasks on Business category and Office location cards',
       );
       expect(
-        find.text('18 tasks'),
-        findsOneWidget,
-        reason: 'Enabling showOpenTaskCount must display total tasks on Personal category card',
-      );
-      expect(
-        find.text('12 tasks'),
-        findsOneWidget,
-        reason: 'Enabling showOpenTaskCount must display total tasks on Home location card',
-      );
-      expect(
-        find.text('24 tasks'),
-        findsOneWidget,
-        reason: 'Enabling showOpenTaskCount must display total tasks on Office location card',
+        find.text('1 tasks'),
+        findsNWidgets(2),
+        reason: 'Enabling showOpenTaskCount must display 1 open task on Personal category and Home location cards',
       );
 
       await _openSettingsFromMenu(tester);
@@ -358,14 +487,14 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('40 tasks'),
+        find.text('2 tasks'),
         findsNothing,
-        reason: 'Disabling showOpenTaskCount must hide total tasks on category cards',
+        reason: 'Disabling showOpenTaskCount must hide total tasks on category and location cards',
       );
       expect(
-        find.text('12 tasks'),
+        find.text('1 tasks'),
         findsNothing,
-        reason: 'Disabling showOpenTaskCount must hide total tasks on location cards',
+        reason: 'Disabling showOpenTaskCount must hide total tasks on category and location cards',
       );
     },
   );
@@ -1140,6 +1269,529 @@ void main() {
         createdTask.subtasks.map((subtask) => subtask.title),
         equals(['Run test suite', 'Tag git release']),
         reason: 'Created task must store the defined subtasks in order',
+      );
+    },
+  );
+
+  testWidgets(
+    'Side panel opens Categories and Locations panels where entries can be created via Color Wheel or direct Hex input and viewed',
+    (WidgetTester tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+
+      final categoriesTileFinder = find.byKey(
+        const ValueKey('drawer_categories_tile'),
+      );
+      final locationsTileFinder = find.byKey(
+        const ValueKey('drawer_locations_tile'),
+      );
+      expect(
+        categoriesTileFinder,
+        findsOneWidget,
+        reason: 'Side panel must expose the Categories panel item',
+      );
+      expect(
+        locationsTileFinder,
+        findsOneWidget,
+        reason: 'Side panel must expose the Locations panel item',
+      );
+
+      await tester.tap(categoriesTileFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('No categories created yet.'),
+        findsOneWidget,
+        reason: 'Empty Categories panel must show the empty-state hint',
+      );
+
+      final categoryNameInput = find.byKey(
+        const ValueKey('category_name_input'),
+      );
+      final hexInput = find.byKey(const ValueKey('color_hex_input'));
+      final colorWheel = find.byKey(const ValueKey('color_wheel_picker'));
+      final addCategoryButton = find.byKey(
+        const ValueKey('add_category_button'),
+      );
+
+      expect(categoryNameInput, findsOneWidget);
+      expect(hexInput, findsOneWidget);
+      expect(colorWheel, findsOneWidget);
+      expect(addCategoryButton, findsOneWidget);
+
+      await tester.enterText(categoryNameInput, 'Backend');
+      await tester.enterText(hexInput, '#4caf50');
+      await tester.pump();
+
+      await tester.tap(addCategoryButton);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('category_item_c_backend')),
+        findsOneWidget,
+        reason:
+            'Newly created category must be displayed in the Categories panel',
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('category_item_c_backend')),
+          matching: find.text('#4CAF50'),
+        ),
+        findsOneWidget,
+        reason: 'Category item must display its normalized hex color',
+      );
+
+      final wheelTopLeft = tester.getTopLeft(colorWheel);
+      await tester.tapAt(wheelTopLeft + const Offset(25, 75));
+      await tester.pump();
+
+      final hexFieldAfterWheelTap = tester.widget<TextField>(hexInput);
+      final wheelSelectedHex = hexFieldAfterWheelTap.controller?.text ?? '';
+      expect(
+        wheelSelectedHex.startsWith('#') && wheelSelectedHex.length == 7,
+        isTrue,
+        reason:
+            'Selecting a color on the color wheel must update the hex input',
+      );
+      expect(
+        wheelSelectedHex,
+        isNot(equals('#4CAF50')),
+        reason: 'Tapping the left side of the color wheel must change the hex value',
+      );
+
+      await tester.enterText(categoryNameInput, 'Design');
+      await tester.pump();
+      await tester.tap(addCategoryButton);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('category_item_c_design')),
+        findsOneWidget,
+      );
+
+      Navigator.of(tester.element(addCategoryButton)).pop();
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(locationsTileFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('No locations created yet.'),
+        findsOneWidget,
+        reason: 'Empty Locations panel must show the empty-state hint',
+      );
+
+      final locationNameInput = find.byKey(
+        const ValueKey('location_name_input'),
+      );
+      final addLocationButton = find.byKey(
+        const ValueKey('add_location_button'),
+      );
+
+      await tester.enterText(locationNameInput, 'Headquarters');
+      await tester.enterText(
+        find.byKey(const ValueKey('color_hex_input')),
+        'ff9100',
+      );
+      await tester.pump();
+      await tester.tap(addLocationButton);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('location_item_l_headquarters')),
+        findsOneWidget,
+        reason:
+            'Newly created location must be displayed in the Locations panel',
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('location_item_l_headquarters')),
+          matching: find.text('#FF9100'),
+        ),
+        findsOneWidget,
+        reason: 'Location item must display its normalized hex color',
+      );
+
+      Navigator.of(tester.element(addLocationButton)).pop();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('CATEGORIES'),
+        findsOneWidget,
+        reason: 'Landing page must now display the Categories section',
+      );
+      expect(
+        find.text('LOCATIONS'),
+        findsOneWidget,
+        reason: 'Landing page must now display the Locations section',
+      );
+    },
+  );
+
+  testWidgets(
+    'QuickAddBar allows selecting multiple locations and multiple categories when creating a task',
+    (WidgetTester tester) async {
+      const seededContextsTdf = '''
+location home {
+  name "Home"
+  color "#00E5FF"
+}
+location office {
+  name "Office"
+  color "#FF9100"
+}
+category c_it {
+  name "IT"
+  color "#2196F3"
+}
+category c_ops {
+  name "Operations"
+  color "#EB06FF"
+}
+category c_hr {
+  name "HR"
+  color "#4CAF50"
+}
+''';
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: seededContextsTdf,
+            ),
+          ),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      final catItChip = find.byKey(const ValueKey('quick_add_category_c_it'));
+      final catOpsChip = find.byKey(const ValueKey('quick_add_category_c_ops'));
+      final catHrChip = find.byKey(const ValueKey('quick_add_category_c_hr'));
+      final locHomeChip = find.byKey(const ValueKey('quick_add_location_home'));
+      final locOfficeChip = find.byKey(
+        const ValueKey('quick_add_location_office'),
+      );
+
+      expect(catItChip, findsOneWidget);
+      expect(catOpsChip, findsOneWidget);
+      expect(catHrChip, findsOneWidget);
+      expect(locHomeChip, findsOneWidget);
+      expect(locOfficeChip, findsOneWidget);
+
+      await tester.tap(catItChip);
+      await tester.pump();
+      await tester.tap(catOpsChip);
+      await tester.pump();
+      await tester.tap(locHomeChip);
+      await tester.pump();
+      await tester.tap(locOfficeChip);
+      await tester.pump();
+
+      expect(tester.widget<FilterChip>(catItChip).selected, isTrue);
+      expect(tester.widget<FilterChip>(catOpsChip).selected, isTrue);
+      expect(tester.widget<FilterChip>(catHrChip).selected, isFalse);
+      expect(tester.widget<FilterChip>(locHomeChip).selected, isTrue);
+      expect(tester.widget<FilterChip>(locOfficeChip).selected, isTrue);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('quick_add_input')),
+        'Audit hybrid network',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('quick_add_submit_button')));
+      await tester.pumpAndSettle();
+
+      final board = container.read(taskNotifierProvider).value!;
+      expect(board.focus.length, equals(1));
+      final createdTask = board.focus.single;
+      expect(createdTask.title, equals('Audit hybrid network'));
+      expect(
+        createdTask.categoryIds,
+        equals(['c_it', 'c_ops']),
+        reason: 'Created task must store all selected categories',
+      );
+      expect(
+        createdTask.locationIds,
+        equals(['home', 'office']),
+        reason: 'Created task must store all selected locations',
+      );
+    },
+  );
+
+  testWidgets(
+    'Clicking a category card on the home page opens a category page displaying the 3 derived Focus tasks for that category while keeping all other filters',
+    (WidgetTester tester) async {
+      const categoryFilterTdf = '''
+category c_business {
+  name "Business"
+  color "#EB06FF"
+}
+category c_personal {
+  name "Personal"
+  color "#2196F3"
+}
+
+task p1 priority {
+  name "Personal Urgent 1"
+  created 2026-11-01 07:00
+  queued 2026-11-01 07:00
+  categories c_personal
+}
+task p2 priority {
+  name "Personal Urgent 2"
+  created 2026-11-01 07:10
+  queued 2026-11-01 07:10
+  categories c_personal
+}
+task b_prio priority {
+  name "Business Priority Task"
+  created 2026-11-01 07:20
+  queued 2026-11-01 07:20
+  categories c_business
+}
+task b_first {
+  name "Business Active 1"
+  created 2026-11-01 08:00
+  queued 2026-11-01 08:00
+  categories c_business
+}
+task b_second {
+  name "Business Active 2"
+  created 2026-11-01 08:30
+  queued 2026-11-01 08:30
+  categories c_business
+}
+task b_fourth {
+  name "Business Active 3"
+  created 2026-11-01 09:00
+  queued 2026-11-01 09:00
+  categories c_business
+}
+task b_blocked {
+  name "Business Blocked By Personal"
+  created 2026-11-01 07:30
+  queued 2026-11-01 07:30
+  categories c_business
+  blocked p1
+}
+task b_suspended {
+  name "Business Suspended Task"
+  created 2026-11-01 07:35
+  queued 2026-11-01 07:35
+  categories c_business
+  suspended 2026-11-05 09:00
+}
+task b_monday_only {
+  name "Business Monday Condition Task"
+  created 2026-11-01 07:40
+  queued 2026-11-01 07:40
+  categories c_business
+  condition day mon
+}
+task b_someday {
+  name "Business Someday Idea"
+  created 2026-11-01 07:45
+  categories c_business
+}
+task b_done {
+  name "Business Finished Task"
+  created 2026-10-28 08:00
+  queued 2026-10-28 08:00
+  finished 2026-10-29 10:00
+  categories c_business
+}
+''';
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => _FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: categoryFilterTdf,
+              ),
+            ),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 1, 12, 0),
+            ),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Personal Urgent 1'),
+        findsOneWidget,
+        reason: 'Global Focus on home page must include Personal Urgent 1',
+      );
+      expect(
+        find.text('Personal Urgent 2'),
+        findsOneWidget,
+        reason: 'Global Focus on home page must include Personal Urgent 2',
+      );
+      expect(
+        find.text('Business Priority Task'),
+        findsOneWidget,
+        reason: 'Global Focus on home page must include Business Priority Task',
+      );
+      expect(
+        find.text('Business Active 1'),
+        findsNothing,
+        reason:
+            'Business Active 1 is pushed out of global Focus by Personal tasks',
+      );
+
+      await tester.tap(find.text('Business'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byType(BackButton),
+        findsOneWidget,
+        reason:
+            'Clicking a category card must open a new page with a BackButton',
+      );
+      expect(
+        find.text('Business'),
+        findsOneWidget,
+        reason: 'Category page must display the selected category name',
+      );
+      expect(
+        find.text('Business Priority Task'),
+        findsOneWidget,
+        reason: '1st Business Focus task must appear on the Business page',
+      );
+      expect(
+        find.text('Business Active 1'),
+        findsOneWidget,
+        reason: '2nd Business Focus task must appear on the Business page',
+      );
+      expect(
+        find.text('Business Active 2'),
+        findsOneWidget,
+        reason: '3rd Business Focus task must appear on the Business page',
+      );
+      expect(
+        find.text('Business Active 3'),
+        findsNothing,
+        reason: '4th active Business task must not appear while 3 Focus slots are full',
+      );
+      expect(
+        find.text('Personal Urgent 1'),
+        findsNothing,
+        reason: 'Tasks from other categories must not appear on Business page',
+      );
+      expect(
+        find.text('Business Blocked By Personal'),
+        findsNothing,
+        reason: 'Blocked tasks must remain filtered out on the category page',
+      );
+      expect(
+        find.text('Business Suspended Task'),
+        findsNothing,
+        reason: 'Suspended tasks must remain filtered out on the category page',
+      );
+      expect(
+        find.text('Business Monday Condition Task'),
+        findsNothing,
+        reason: 'Tasks with unmet conditions must remain filtered out on the category page',
+      );
+      expect(
+        find.text('Business Someday Idea'),
+        findsNothing,
+        reason: 'Someday tasks must remain filtered out on the category page',
+      );
+      expect(
+        find.text('Business Finished Task'),
+        findsNothing,
+        reason: 'Completed tasks must remain filtered out on the category page',
+      );
+
+      await tester.tap(find.text('Business Active 1'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Business Active 1'),
+        findsNothing,
+        reason: 'Completing Business Active 1 must remove it from Focus',
+      );
+      expect(
+        find.text('Business Active 3'),
+        findsOneWidget,
+        reason: 'Completing a Business Focus task must pull Business Active 3 into the 3 Focus tasks',
+      );
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text("What's up!"),
+        findsOneWidget,
+        reason: 'BackButton must return to the home page',
+      );
+
+      await tester.tap(find.byIcon(Icons.search_rounded));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Active 3');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Business'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Business Active 3'),
+        findsOneWidget,
+        reason: 'Active search filter from home page must continue to apply on the category page',
+      );
+      expect(
+        find.text('Business Priority Task'),
+        findsNothing,
+        reason: 'Tasks not matching the active search filter must be hidden on the category page',
       );
     },
   );

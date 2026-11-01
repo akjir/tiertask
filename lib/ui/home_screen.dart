@@ -21,8 +21,11 @@ import '../l10n/tier_localization_extension.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
+import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
+import 'category_screen.dart';
 import 'settings_screen.dart';
+import 'widgets/context_management_sheet.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_tile.dart';
 
@@ -85,7 +88,7 @@ class _ContextCardCarousel extends StatelessWidget {
   }
 }
 
-/// Immutable display model for a draft category or location card on the landing page.
+/// Immutable display model for a category or location card on the landing page.
 @immutable
 class _ContextCardData {
   /// Creates a [_ContextCardData] instance.
@@ -94,6 +97,7 @@ class _ContextCardData {
     required this.name,
     required this.taskCount,
     required this.accentColor,
+    this.onTap,
   });
 
   /// Color of the solid bottom accent bar.
@@ -104,6 +108,9 @@ class _ContextCardData {
 
   /// Display name of the category or location.
   final String name;
+
+  /// Optional callback invoked when the card is tapped.
+  final VoidCallback? onTap;
 
   /// Total number of tasks associated with this context.
   final int taskCount;
@@ -125,11 +132,8 @@ class _ContextSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
     return Container(
       width: 190,
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
       decoration: BoxDecoration(
         color: _cardColor,
         borderRadius: BorderRadius.circular(20),
@@ -141,35 +145,71 @@ class _ContextSummaryCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          if (showOpenTaskCount)
-            Text(
-              localizations.taskCountLabel(item.taskCount),
-              style: const TextStyle(
-                color: _mutedLabelColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          Text(
-            item.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: ValueKey('card_${item.id}'),
+          borderRadius: BorderRadius.circular(20),
+          onTap: item.onTap,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            child: _ContextSummaryCardColumn(
+              item: item,
+              showOpenTaskCount: showOpenTaskCount,
             ),
           ),
-          _SolidAccentBar(
-            barKey: ValueKey('accent_bar_${item.id}'),
-            color: item.accentColor,
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+/// Inner column layout for [_ContextSummaryCard].
+class _ContextSummaryCardColumn extends StatelessWidget {
+  /// Creates a [_ContextSummaryCardColumn].
+  const _ContextSummaryCardColumn({
+    required this.item,
+    required this.showOpenTaskCount,
+  });
+
+  /// Card data to render.
+  final _ContextCardData item;
+
+  /// Whether to display the total open task count label at the top of the card.
+  final bool showOpenTaskCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        if (showOpenTaskCount)
+          Text(
+            localizations.taskCountLabel(item.taskCount),
+            style: const TextStyle(
+              color: _mutedLabelColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        Text(
+          item.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        _SolidAccentBar(
+          barKey: ValueKey('accent_bar_${item.id}'),
+          color: item.accentColor,
+        ),
+      ],
     );
   }
 }
@@ -178,10 +218,15 @@ class _ContextSummaryCard extends StatelessWidget {
 class _DrawerActionTile extends StatelessWidget {
   /// Creates a [_DrawerActionTile].
   const _DrawerActionTile({
+    super.key,
     required this.icon,
     required this.title,
     required this.onAction,
+    this.count,
   });
+
+  /// Optional item counter badge displayed at the trailing edge.
+  final int? count;
 
   /// Leading icon for the menu item.
   final IconData icon;
@@ -194,13 +239,84 @@ class _DrawerActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final badgeCount = count;
     return ListTile(
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -2),
       leading: Icon(icon),
       title: Text(title),
+      trailing: badgeCount != null ? Badge.count(count: badgeCount) : null,
       onTap: () {
         Navigator.of(context).pop();
         onAction();
       },
+    );
+  }
+}
+
+/// Footer actions inside [_LandingDrawer] for synchronization, preview, and settings.
+class _DrawerFooterSection extends StatelessWidget {
+  /// Creates a [_DrawerFooterSection].
+  const _DrawerFooterSection({
+    required this.onOpenMarkdownPreview,
+    required this.onOpenSettings,
+    required this.onSyncRemote,
+  });
+
+  /// Callback to open the raw TDF preview dialog.
+  final VoidCallback onOpenMarkdownPreview;
+
+  /// Callback to navigate to [SettingsScreen].
+  final VoidCallback onOpenSettings;
+
+  /// Callback to trigger remote synchronization.
+  final VoidCallback onSyncRemote;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _DrawerActionTile(
+          icon: Icons.sync_rounded,
+          title: localizations.tooltipSyncWebDav,
+          onAction: onSyncRemote,
+        ),
+        _DrawerActionTile(
+          icon: Icons.code_rounded,
+          title: localizations.tooltipMarkdownPreview,
+          onAction: onOpenMarkdownPreview,
+        ),
+        _DrawerActionTile(
+          icon: Icons.settings_outlined,
+          title: localizations.tooltipSettings,
+          onAction: onOpenSettings,
+        ),
+      ],
+    );
+  }
+}
+
+/// Header title block inside [_LandingDrawer].
+class _DrawerHeader extends StatelessWidget {
+  /// Creates a [_DrawerHeader].
+  const _DrawerHeader({required this.title});
+
+  /// Header title text.
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+      child: Text(
+        title,
+        style: theme.textTheme.headlineSmall?.copyWith(
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }
@@ -445,6 +561,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       backgroundColor: _canvasColor,
       drawer: _LandingDrawer(
         board: boardAsync.asData?.value ?? TaskBoard.empty(),
+        onOpenContextSheet: (kind) => _showContextSheet(context, kind),
         onOpenMarkdownPreview: () => _showMarkdownPreviewDialog(context),
         onOpenSettings: () => _openSettings(context),
         onOpenTierSheet: (tier) => _showTierSheet(context, tier),
@@ -485,6 +602,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _openSettings(BuildContext context) {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  }
+
+  /// Opens a modal bottom sheet for managing categories or locations ([kind]).
+  void _showContextSheet(BuildContext context, ContextPanelKind kind) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => ContextManagementSheet(kind: kind),
+    );
   }
 
   /// Displays a dialog containing the serialized `.tdf` representation of the board.
@@ -606,11 +733,12 @@ class _LandingContentSwitcher extends StatelessWidget {
   }
 }
 
-/// Left-side navigation drawer containing secondary tiers, sync, Markdown preview, and settings.
+/// Left-side navigation drawer containing secondary tiers, categories, locations, sync, preview, and settings.
 class _LandingDrawer extends StatelessWidget {
   /// Creates a [_LandingDrawer].
   const _LandingDrawer({
     required this.board,
+    required this.onOpenContextSheet,
     required this.onOpenMarkdownPreview,
     required this.onOpenSettings,
     required this.onOpenTierSheet,
@@ -628,6 +756,9 @@ class _LandingDrawer extends StatelessWidget {
   /// Current task board snapshot.
   final TaskBoard board;
 
+  /// Callback to open the Categories or Locations management sheet.
+  final ValueChanged<ContextPanelKind> onOpenContextSheet;
+
   /// Callback to open the raw Markdown preview dialog.
   final VoidCallback onOpenMarkdownPreview;
 
@@ -643,48 +774,41 @@ class _LandingDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final theme = Theme.of(context);
 
     return Drawer(
       child: SafeArea(
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-              child: Text(
-                localizations.appTitle,
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const Divider(),
+            _DrawerHeader(title: localizations.appTitle),
+            const Divider(height: 8),
             for (final tier in _secondaryTiers)
-              ListTile(
-                leading: const Icon(Icons.folder_outlined),
-                title: Text(localizations.tierName(tier)),
-                trailing: Badge.count(count: board.tasksForTier(tier).length),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onOpenTierSheet(tier);
-                },
+              _DrawerActionTile(
+                icon: Icons.folder_outlined,
+                title: localizations.tierName(tier),
+                count: board.tasksForTier(tier).length,
+                onAction: () => onOpenTierSheet(tier),
               ),
-            const Divider(),
+            const Divider(height: 8),
             _DrawerActionTile(
-              icon: Icons.sync_rounded,
-              title: localizations.tooltipSyncWebDav,
-              onAction: onSyncRemote,
+              key: const ValueKey('drawer_categories_tile'),
+              icon: Icons.label_outline_rounded,
+              title: localizations.drawerCategories,
+              count: board.categories.length,
+              onAction: () => onOpenContextSheet(ContextPanelKind.categories),
             ),
             _DrawerActionTile(
-              icon: Icons.code_rounded,
-              title: localizations.tooltipMarkdownPreview,
-              onAction: onOpenMarkdownPreview,
+              key: const ValueKey('drawer_locations_tile'),
+              icon: Icons.location_on_outlined,
+              title: localizations.drawerLocations,
+              count: board.locations.length,
+              onAction: () => onOpenContextSheet(ContextPanelKind.locations),
             ),
-            _DrawerActionTile(
-              icon: Icons.settings_outlined,
-              title: localizations.tooltipSettings,
-              onAction: onOpenSettings,
+            const Divider(height: 8),
+            _DrawerFooterSection(
+              onOpenMarkdownPreview: onOpenMarkdownPreview,
+              onOpenSettings: onOpenSettings,
+              onSyncRemote: onSyncRemote,
             ),
           ],
         ),
@@ -807,8 +931,13 @@ class _LandingScrollView extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final filteredFocus = _filterFocusTasks(board.focus, searchQuery);
-    final categories = _buildDraftCategories(localizations);
-    final locations = _buildDraftLocations(localizations);
+    final openTasks = _collectOpenTasks(board);
+    final categories = _buildCategoryCards(
+      context,
+      board.categories,
+      openTasks,
+    );
+    final locations = _buildLocationCards(board.locations, openTasks);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
@@ -824,56 +953,95 @@ class _LandingScrollView extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         _FocusTasksSection(tasks: filteredFocus),
-        const SizedBox(height: 28),
-        _ContextCardCarousel(
-          sectionTitle: localizations.sectionCategories,
-          items: categories,
-          showOpenTaskCount: showOpenTaskCount,
-        ),
-        const SizedBox(height: 28),
-        _ContextCardCarousel(
-          sectionTitle: localizations.sectionLocations,
-          items: locations,
-          showOpenTaskCount: showOpenTaskCount,
-        ),
+        if (categories.isNotEmpty) ...[
+          const SizedBox(height: 28),
+          _ContextCardCarousel(
+            sectionTitle: localizations.sectionCategories,
+            items: categories,
+            showOpenTaskCount: showOpenTaskCount,
+          ),
+        ],
+        if (locations.isNotEmpty) ...[
+          const SizedBox(height: 28),
+          _ContextCardCarousel(
+            sectionTitle: localizations.sectionLocations,
+            items: locations,
+            showOpenTaskCount: showOpenTaskCount,
+          ),
+        ],
       ],
     );
   }
 
-  /// Builds the draft category cards with configurable accent line colors.
-  List<_ContextCardData> _buildDraftCategories(AppLocalizations localizations) {
+  /// Builds category summary cards from [categories] and counts matching [openTasks].
+  List<_ContextCardData> _buildCategoryCards(
+    BuildContext context,
+    List<TdfCategory> categories,
+    List<TaskItem> openTasks,
+  ) {
     return [
-      _ContextCardData(
-        id: 'category_business',
-        name: localizations.categoryBusiness,
-        taskCount: 40,
-        accentColor: _accentMagenta,
-      ),
-      _ContextCardData(
-        id: 'category_personal',
-        name: localizations.categoryPersonal,
-        taskCount: 18,
-        accentColor: _accentBlue,
-      ),
+      for (var i = 0; i < categories.length; i++)
+        _ContextCardData(
+          id: 'category_${categories[i].id}',
+          name: categories[i].name,
+          taskCount: _countCategoryTasks(openTasks, categories[i].id),
+          accentColor: _resolveCategoryColor(categories[i].color, i),
+          onTap: () => _openCategoryScreen(
+            context,
+            categories[i],
+            _resolveCategoryColor(categories[i].color, i),
+          ),
+        ),
     ];
   }
 
-  /// Builds the draft location cards with configurable accent line colors.
-  List<_ContextCardData> _buildDraftLocations(AppLocalizations localizations) {
+  /// Builds location summary cards from [locations] and counts matching [openTasks].
+  List<_ContextCardData> _buildLocationCards(
+    List<TdfLocation> locations,
+    List<TaskItem> openTasks,
+  ) {
     return [
-      _ContextCardData(
-        id: 'location_home',
-        name: localizations.locationHome,
-        taskCount: 12,
-        accentColor: _accentCyan,
-      ),
-      _ContextCardData(
-        id: 'location_office',
-        name: localizations.locationOffice,
-        taskCount: 24,
-        accentColor: _accentOrange,
-      ),
+      for (var i = 0; i < locations.length; i++)
+        _ContextCardData(
+          id: 'location_${locations[i].id}',
+          name: locations[i].name,
+          taskCount: _countLocationTasks(openTasks, locations[i].id),
+          accentColor: _resolveLocationColor(locations[i].color, i),
+        ),
     ];
+  }
+
+  /// Returns all open (uncompleted) tasks across active and backlog tiers on [board].
+  List<TaskItem> _collectOpenTasks(TaskBoard board) {
+    return [
+      ...board.focus,
+      ...board.ready,
+      ...board.planned,
+      ...board.blocked,
+      ...board.someday,
+    ];
+  }
+
+  /// Counts how many tasks in [openTasks] reference [categoryId].
+  int _countCategoryTasks(List<TaskItem> openTasks, String categoryId) {
+    var count = 0;
+    for (final task in openTasks) {
+      if (task.categoryIds.contains(categoryId)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// Counts how many tasks in [openTasks] reference [locationId].
+  int _countLocationTasks(List<TaskItem> openTasks, String locationId) {
+    var count = 0;
+    for (final task in openTasks) {
+      if (task.locationIds.contains(locationId)) {
+        count++;
+      }
+    }
+    return count;
   }
 
   /// Filters [tasks] by a case-insensitive substring match against [query].
@@ -886,6 +1054,37 @@ class _LandingScrollView extends StatelessWidget {
       for (final task in tasks)
         if (task.title.toLowerCase().contains(trimmed)) task,
     ];
+  }
+
+  /// Pushes [CategoryScreen] for [category] onto the navigation stack.
+  void _openCategoryScreen(
+    BuildContext context,
+    TdfCategory category,
+    Color accentColor,
+  ) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CategoryScreen(
+          category: category,
+          accentColor: accentColor,
+          initialSearchQuery: searchQuery,
+        ),
+      ),
+    );
+  }
+
+  /// Parses a `#RRGGBB` hex color string or falls back to the default category accent palette.
+  Color _resolveCategoryColor(String? rawHexColor, int index) {
+    final fallback = index.isEven ? _accentMagenta : _accentBlue;
+    final parsedArgb = TdfColor.tryParseArgb(rawHexColor);
+    return parsedArgb != null ? Color(parsedArgb) : fallback;
+  }
+
+  /// Parses a `#RRGGBB` hex color string or falls back to the default location accent palette.
+  Color _resolveLocationColor(String? rawHexColor, int index) {
+    final fallback = index.isEven ? _accentCyan : _accentOrange;
+    final parsedArgb = TdfColor.tryParseArgb(rawHexColor);
+    return parsedArgb != null ? Color(parsedArgb) : fallback;
   }
 }
 

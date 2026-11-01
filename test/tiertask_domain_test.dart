@@ -23,6 +23,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
@@ -1395,6 +1396,290 @@ task b1 {
       expect(remotePutCount, greaterThanOrEqualTo(1));
     });
   });
+
+  group(
+    'Locations & Categories Creation, Color Parsing, and Multi-Assignment',
+    () {
+      test('normalizes hex colors, parses/serializes location colors, and rejects duplicate location color directives', () {
+        expect(
+          TdfColor.normalizeHex('#4caf50'),
+          equals('#4CAF50'),
+          reason:
+              'Hex string with leading # must normalize to uppercase #RRGGBB',
+        );
+        expect(
+          TdfColor.normalizeHex('  2196f3 '),
+          equals('#2196F3'),
+          reason:
+              'Hex string without # must prepend # and normalize to uppercase',
+        );
+        expect(
+          TdfColor.normalizeHex('#GGGGGG'),
+          isNull,
+          reason: 'Non-hex characters must be rejected',
+        );
+        expect(
+          TdfColor.normalizeHex('#12345'),
+          isNull,
+          reason: '5-character hex string must be rejected',
+        );
+        expect(
+          TdfColor.tryParseArgb('eb06ff'),
+          equals(0xFFEB06FF),
+          reason: 'Valid 6-digit hex must parse to opaque 32-bit ARGB int',
+        );
+        expect(
+          TdfColor.formatArgb(0xFF00E5FF),
+          equals('#00E5FF'),
+          reason: '32-bit ARGB int must format to canonical #RRGGBB',
+        );
+
+        const locationWithColorTdf = '''
+location office {
+    name  "Main Office"
+    color "#FF9100"
+    note  "Downtown"
+}
+''';
+        final parsed = tdfService.parse(
+          locationWithColorTdf,
+          evaluationTime: fixedDate,
+        );
+        expect(parsed.locations.single.id, equals('office'));
+        expect(parsed.locations.single.name, equals('Main Office'));
+        expect(
+          parsed.locations.single.color,
+          equals('#FF9100'),
+          reason: 'Location block must parse optional color directive',
+        );
+
+        final serialized = tdfService.serialize(parsed);
+        expect(
+          serialized,
+          contains('color "#FF9100"'),
+          reason: 'Serializer must emit color directive for location block',
+        );
+
+        expect(
+          () => tdfService.parse(
+            'location home {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
+            evaluationTime: fixedDate,
+          ),
+          throwsA(
+            isA<TdfException>().having(
+              (error) => error.kind,
+              'kind',
+              TdfErrorKind.duplicateDirective,
+            ),
+          ),
+          reason: 'Duplicate color directive in location block must fail',
+        );
+      });
+
+      test('adds and deletes categories and locations on TaskBoard and assigns multiple locations and categories to tasks', () {
+        var board = TaskBoard.empty();
+        board = board.addCategory('IT & Servers', color: '2196f3');
+        board = board.addCategory('IT & Servers', color: '#4CAF50');
+        board = board.addCategory('   ', color: '#000000');
+        board = board.addLocation('Home Office', color: 'ff9100');
+        board = board.addLocation('Client Site', color: '#00E5FF');
+
+        expect(
+          board.categories.map((category) => category.id),
+          equals(['c_it_servers', 'c_it_servers_2']),
+          reason:
+              'Duplicate category names must generate distinct TDF identifiers',
+        );
+        expect(
+          board.categories.first.color,
+          equals('#2196F3'),
+          reason: 'Category color must be normalized to #RRGGBB',
+        );
+        expect(
+          board.locations.map((location) => location.id),
+          equals(['l_home_office', 'l_client_site']),
+          reason: 'Location names must generate valid TDF identifiers',
+        );
+        expect(
+          board.locations.first.color,
+          equals('#FF9100'),
+          reason: 'Location color must be normalized to #RRGGBB',
+        );
+
+        board = board.addTask(
+          'Configure VPN router',
+          currentDate: fixedDate,
+          categoryIds: const ['c_it_servers', 'c_it_servers_2'],
+          locationIds: const ['l_home_office', 'l_client_site'],
+        );
+
+        expect(
+          board.focus.single.categoryIds,
+          equals(['c_it_servers', 'c_it_servers_2']),
+          reason: 'Task must store multiple selected category IDs',
+        );
+        expect(
+          board.focus.single.locationIds,
+          equals(['l_home_office', 'l_client_site']),
+          reason: 'Task must store multiple selected location IDs',
+        );
+
+        board = board.deleteCategory('c_it_servers');
+        expect(
+          board.categories.map((category) => category.id),
+          equals(['c_it_servers_2']),
+          reason: 'Deleting a category must remove it from board.categories',
+        );
+        expect(
+          board.focus.single.categoryIds,
+          equals(['c_it_servers_2']),
+          reason:
+              'Deleting a category must strip its ID from referencing tasks',
+        );
+
+        board = board.deleteLocation('l_home_office');
+        expect(
+          board.locations.map((location) => location.id),
+          equals(['l_client_site']),
+          reason: 'Deleting a location must remove it from board.locations',
+        );
+        expect(
+          board.focus.single.locationIds,
+          equals(['l_client_site']),
+          reason:
+              'Deleting a location must strip its ID from referencing tasks',
+        );
+      });
+
+      test('evaluateForContext derives top 3 Focus tasks for a category while preserving all other filters', () {
+        const multiCategoryTdf = '''
+location home {
+    name "Home"
+}
+location office {
+    name "Office"
+}
+category c_house {
+    name "Household"
+}
+category c_it {
+    name "IT"
+}
+
+task house_prio priority {
+    name "Urgent roof repair"
+    created 2026-11-01 11:00
+    queued 2026-11-01 11:00
+    categories c_house
+}
+task house_regular {
+    name "Mow lawn"
+    created 2026-11-01 07:30
+    queued 2026-11-01 07:30
+    categories c_house
+}
+task it_first {
+    name "Patch database"
+    created 2026-11-01 08:00
+    queued 2026-11-01 08:00
+    categories c_it
+    locations office
+}
+task it_second {
+    name "Rotate TLS certificates"
+    created 2026-11-01 08:30
+    queued 2026-11-01 08:30
+    categories c_it
+}
+task it_prio priority {
+    name "Restore production cluster"
+    created 2026-11-01 09:30
+    queued 2026-11-01 09:30
+    categories c_it
+    locations office
+}
+task it_fourth {
+    name "Audit SSH keys"
+    created 2026-11-01 10:00
+    queued 2026-11-01 10:00
+    categories c_it
+}
+task it_blocked_prereq {
+    name "Deploy app after lawn"
+    created 2026-11-01 08:05
+    queued 2026-11-01 08:05
+    categories c_it
+    blocked house_regular
+}
+task it_suspended {
+    name "Deferred hardware upgrade"
+    created 2026-11-01 08:10
+    queued 2026-11-01 08:10
+    categories c_it
+    suspended 2026-11-05 09:00
+}
+task it_wrong_day {
+    name "Monday maintenance window"
+    created 2026-11-01 08:15
+    queued 2026-11-01 08:15
+    categories c_it
+    condition day mon
+}
+task it_someday {
+    name "Evaluate Rust kernel module"
+    created 2026-11-01 08:20
+    categories c_it
+}
+task it_completed {
+    name "Decommission old switch"
+    created 2026-10-25 08:00
+    queued 2026-10-25 08:00
+    finished 2026-10-26 10:00
+    categories c_it
+}
+''';
+
+        final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+        final globalBoard = tdfService.parse(
+          multiCategoryTdf,
+          evaluationTime: sundayNoon,
+        );
+
+        expect(
+          globalBoard.focus.map((task) => task.id),
+          equals(['it_prio', 'house_prio', 'house_regular']),
+          reason: 'Global Focus must contain top 3 tasks across all categories',
+        );
+
+        final itBoard = globalBoard.evaluateForContext(
+          activeCategoryId: 'c_it',
+          evaluationTime: sundayNoon,
+        );
+
+        expect(
+          itBoard.focus.map((task) => task.id),
+          equals(['it_prio', 'it_first', 'it_second']),
+          reason: 'Category c_it Focus must contain top 3 unblocked scheduled c_it tasks in priority then FIFO order',
+        );
+        expect(
+          itBoard.ready.map((task) => task.id),
+          equals(['it_fourth']),
+          reason: '4th active c_it task must overflow into Ready when Focus has 3 tasks',
+        );
+
+        final itHomeBoard = globalBoard.evaluateForContext(
+          activeCategoryId: 'c_it',
+          activeLocationId: 'home',
+          evaluationTime: sundayNoon,
+        );
+        expect(
+          itHomeBoard.focus.map((task) => task.id),
+          equals(['it_second', 'it_fourth']),
+          reason: 'Combining category c_it and location home must keep location-independent tasks and exclude office-only tasks',
+        );
+      });
+    },
+  );
 }
 
 /// Verifies that [arbMap] defines an `@<key>` metadata map with a non-empty description.

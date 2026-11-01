@@ -549,22 +549,6 @@
       }
     }
   },
-  "categoryBusiness": "Business",
-  "@categoryBusiness": {
-    "description": "Display name for the draft Business category card."
-  },
-  "categoryPersonal": "Personal",
-  "@categoryPersonal": {
-    "description": "Display name for the draft Personal category card."
-  },
-  "locationHome": "Home",
-  "@locationHome": {
-    "description": "Display name for the draft Home location card."
-  },
-  "locationOffice": "Office",
-  "@locationOffice": {
-    "description": "Display name for the draft Office location card."
-  },
   "tooltipMenu": "Open menu",
   "@tooltipMenu": {
     "description": "Tooltip for the top-left navigation menu button."
@@ -576,5 +560,41 @@
   "searchHint": "Search focus tasks...",
   "@searchHint": {
     "description": "Placeholder hint inside the landing page search field."
+  },
+  "drawerCategories": "Categories",
+  "@drawerCategories": {
+    "description": "Side panel menu item and sheet title for managing categories."
+  },
+  "drawerLocations": "Locations",
+  "@drawerLocations": {
+    "description": "Side panel menu item and sheet title for managing locations."
+  },
+  "categoryNameHint": "New category name...",
+  "@categoryNameHint": {
+    "description": "Placeholder hint inside the category name input field."
+  },
+  "locationNameHint": "New location name...",
+  "@locationNameHint": {
+    "description": "Placeholder hint inside the location name input field."
+  },
+  "colorHexLabel": "Hex Color",
+  "@colorHexLabel": {
+    "description": "Input label for the direct hexadecimal color field."
+  },
+  "emptyCategoriesHint": "No categories created yet.",
+  "@emptyCategoriesHint": {
+    "description": "Empty-state hint shown in the Categories panel when no categories exist."
+  },
+  "emptyLocationsHint": "No locations created yet.",
+  "@emptyLocationsHint": {
+    "description": "Empty-state hint shown in the Locations panel when no locations exist."
+  },
+  "tooltipDeleteCategory": "Delete category",
+  "@tooltipDeleteCategory": {
+    "description": "Tooltip for the button that deletes a category."
+  },
+  "tooltipDeleteLocation": "Delete location",
+  "@tooltipDeleteLocation": {
+    "description": "Tooltip for the button that deletes a location."
   }
 }

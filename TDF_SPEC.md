@@ -258,15 +258,17 @@ Defines a named location at nesting depth `0` that tasks can reference via the `
 
 ```text
 location <id> {
-    name "<display_name>"
-    note "<optional_description>"
-    gps  <latitude> <longitude> [<radius_in_meters>]
+    name  "<display_name>"
+    color "<hex_color_code>"
+    note  "<optional_description>"
+    gps   <latitude> <longitude> [<radius_in_meters>]
 }
 ```
 
 | Directive | Required | Multiplicity | Format / Arguments | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `name` | Yes | `1` | `"<text>"` | Human-readable display name of the location (e.g., `"Work"`). |
+| `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the location. |
 | `note` | No | `0..1` | `"<text>"` | Optional description of the location. |
 | `gps` | No | `0..1` | `<lat> <lon> [<radius>]` | Optional decimal coordinates and optional radius in meters for geofencing or automatic location selection. |
 

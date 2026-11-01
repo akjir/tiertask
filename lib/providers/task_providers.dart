@@ -177,6 +177,38 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return _fetchAndNormalizeBoard(config);
   }
 
+  /// Adds a new TDF `category` block with [name] and optional `#RRGGBB` [color] and persists to storage.
+  Future<void> addCategory(
+    String name, {
+    String? color,
+    String? id,
+    String? note,
+  }) async {
+    final updated = _currentBoard.addCategory(
+      name,
+      color: color,
+      id: id,
+      note: note,
+    );
+    await _commitMutation(updated);
+  }
+
+  /// Adds a new TDF `location` block with [name] and optional `#RRGGBB` [color] and persists to storage.
+  Future<void> addLocation(
+    String name, {
+    String? color,
+    String? id,
+    String? note,
+  }) async {
+    final updated = _currentBoard.addLocation(
+      name,
+      color: color,
+      id: id,
+      note: note,
+    );
+    await _commitMutation(updated);
+  }
+
   /// Adds a new task to [targetTier] (defaulting to [TaskTier.planned]), runs the
   /// Auto-Pull Cascade, and persists to the active `.tdf` storage backend.
   Future<void> addTask(
@@ -185,6 +217,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool isPriority = false,
     bool subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
+    List<String> locationIds = const [],
+    List<String> categoryIds = const [],
     DateTime? currentDate,
     String? id,
   }) async {
@@ -195,6 +229,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       isPriority: isPriority,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
+      locationIds: locationIds,
+      categoryIds: categoryIds,
       currentDate: now,
       id: id,
     );
@@ -221,6 +257,18 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<void> completeTask(String taskId, {DateTime? currentDate}) async {
     final now = currentDate ?? ref.read(clockProvider)();
     final updated = _currentBoard.completeTask(taskId, currentDate: now);
+    await _commitMutation(updated);
+  }
+
+  /// Deletes the category with [categoryId] and persists the updated `.tdf` document.
+  Future<void> deleteCategory(String categoryId) async {
+    final updated = _currentBoard.deleteCategory(categoryId);
+    await _commitMutation(updated);
+  }
+
+  /// Deletes the location with [locationId] and persists the updated `.tdf` document.
+  Future<void> deleteLocation(String locationId) async {
+    final updated = _currentBoard.deleteLocation(locationId);
     await _commitMutation(updated);
   }
 

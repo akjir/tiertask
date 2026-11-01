@@ -164,6 +164,66 @@ class TaskBoard {
     ...completed,
   ]);
 
+  /// Adds a new TDF `category` block with a unique identifier and optional `#RRGGBB` [color].
+  TaskBoard addCategory(
+    String name, {
+    String? color,
+    String? id,
+    String? note,
+  }) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return this;
+    }
+    final existingIds = <String>{
+      for (final category in categories) category.id,
+    };
+    final baseId = (id != null && id.trim().isNotEmpty)
+        ? id.trim()
+        : _slugifyContextName(trimmed, 'c');
+    final categoryId = _ensureUniqueContextId(baseId, existingIds);
+    final normalizedColor = TdfColor.normalizeHex(color);
+    final newCategory = TdfCategory(
+      id: categoryId,
+      name: trimmed,
+      color: normalizedColor,
+      note: note,
+    );
+    return copyWith(categories: [...categories, newCategory]);
+  }
+
+  /// Adds a new TDF `location` block with a unique identifier and optional `#RRGGBB` [color].
+  TaskBoard addLocation(
+    String name, {
+    String? color,
+    String? id,
+    String? note,
+    double? latitude,
+    double? longitude,
+    double? radiusMeters,
+  }) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return this;
+    }
+    final existingIds = <String>{for (final location in locations) location.id};
+    final baseId = (id != null && id.trim().isNotEmpty)
+        ? id.trim()
+        : _slugifyContextName(trimmed, 'l');
+    final locationId = _ensureUniqueContextId(baseId, existingIds);
+    final normalizedColor = TdfColor.normalizeHex(color);
+    final newLocation = TdfLocation(
+      id: locationId,
+      name: trimmed,
+      color: normalizedColor,
+      note: note,
+      latitude: latitude,
+      longitude: longitude,
+      radiusMeters: radiusMeters,
+    );
+    return copyWith(locations: [...locations, newLocation]);
+  }
+
   /// Adds a new task per `TDF_SPEC.md` Section 6.1, prunes expired completed tasks,
   /// and runs the dynamic 6-tier derivation pipeline.
   TaskBoard addTask(
@@ -336,6 +396,46 @@ class TaskBoard {
     );
   }
 
+  /// Deletes the category with [categoryId] and removes its reference from all tasks.
+  TaskBoard deleteCategory(String categoryId) {
+    final nextCategories = <TdfCategory>[
+      for (final category in categories)
+        if (category.id != categoryId) category,
+    ];
+    if (nextCategories.length == categories.length) {
+      return this;
+    }
+    return copyWith(
+      focus: _stripCategoryFromTasks(focus, categoryId),
+      ready: _stripCategoryFromTasks(ready, categoryId),
+      planned: _stripCategoryFromTasks(planned, categoryId),
+      blocked: _stripCategoryFromTasks(blocked, categoryId),
+      someday: _stripCategoryFromTasks(someday, categoryId),
+      completed: _stripCategoryFromTasks(completed, categoryId),
+      categories: nextCategories,
+    );
+  }
+
+  /// Deletes the location with [locationId] and removes its reference from all tasks.
+  TaskBoard deleteLocation(String locationId) {
+    final nextLocations = <TdfLocation>[
+      for (final location in locations)
+        if (location.id != locationId) location,
+    ];
+    if (nextLocations.length == locations.length) {
+      return this;
+    }
+    return copyWith(
+      focus: _stripLocationFromTasks(focus, locationId),
+      ready: _stripLocationFromTasks(ready, locationId),
+      planned: _stripLocationFromTasks(planned, locationId),
+      blocked: _stripLocationFromTasks(blocked, locationId),
+      someday: _stripLocationFromTasks(someday, locationId),
+      completed: _stripLocationFromTasks(completed, locationId),
+      locations: nextLocations,
+    );
+  }
+
   /// Permanently deletes a task and runs the Auto-Pull Cascade if an active slot opened.
   TaskBoard deleteTask(String taskId, {DateTime? currentDate}) {
     final now = currentDate ?? DateTime.now().toUtc();
@@ -400,6 +500,24 @@ class TaskBoard {
         completed: _renameInList(completed, taskId, trimmed),
       ),
     };
+  }
+
+  /// Derives a filtered [TaskBoard] considering only active tasks matching
+  /// [activeCategoryId] and [activeLocationId] while preserving all other
+  /// `TDF_SPEC.md` Section 5 evaluation rules.
+  TaskBoard evaluateForContext({
+    String? activeCategoryId,
+    String? activeLocationId,
+    DateTime? evaluationTime,
+  }) {
+    return TaskBoard.evaluate(
+      tasks: allTasks,
+      evaluationTime: evaluationTime,
+      locations: locations,
+      categories: categories,
+      activeCategoryId: activeCategoryId,
+      activeLocationId: activeLocationId,
+    );
   }
 
   /// Finds the [TaskItem] with [taskId], or `null` if not found.
@@ -764,6 +882,21 @@ class TaskBoard {
     ).pruneCompletedTasks(currentDate: now);
   }
 
+  /// Appends a numeric suffix (`_2`, `_3`, ...) if [baseId] already exists in [existingIds].
+  static String _ensureUniqueContextId(String baseId, Set<String> existingIds) {
+    if (!existingIds.contains(baseId)) {
+      return baseId;
+    }
+    var suffix = 2;
+    while (true) {
+      final candidate = '${baseId}_$suffix';
+      if (!existingIds.contains(candidate)) {
+        return candidate;
+      }
+      suffix++;
+    }
+  }
+
   /// Returns a new list excluding the task with [taskId].
   static List<TaskItem> _filterOutList(List<TaskItem> list, String taskId) {
     return [
@@ -870,24 +1003,23 @@ class TaskBoard {
     }
   }
 
-  /// Normalizes a single active task at [index] in [list] and returns the updated cursor timestamp.
+  /// Normalizes a single active task at [index] in [list] and returns the updated fallback timestamp.
   static DateTime _normalizeSingleActiveTask(
     List<TaskItem> list,
     int index,
-    DateTime minimumTime,
+    DateTime defaultQueuedTime,
   ) {
     final current = list[index];
-    final existingQueued = current.queuedAt;
-    final effectiveQueued =
-        (existingQueued != null && !existingQueued.isBefore(minimumTime))
-        ? existingQueued
-        : minimumTime;
+    final effectiveQueued = current.queuedAt ?? defaultQueuedTime;
     list[index] = current.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
       queuedAt: effectiveQueued,
     );
-    return effectiveQueued;
+    if (!current.isPriority && effectiveQueued.isAfter(defaultQueuedTime)) {
+      return effectiveQueued;
+    }
+    return defaultQueuedTime;
   }
 
   /// Normalizes all 6 tier slices so their TDF directives match their tier placement.
@@ -990,6 +1122,35 @@ class TaskBoard {
     };
   }
 
+  /// Returns [task] without [categoryId] in its `categoryIds` list.
+  static TaskItem _removeIdFromTaskCategories(
+    TaskItem task,
+    String categoryId,
+  ) {
+    if (!task.categoryIds.contains(categoryId)) {
+      return task;
+    }
+    return task.copyWith(
+      categoryIds: [
+        for (final id in task.categoryIds)
+          if (id != categoryId) id,
+      ],
+    );
+  }
+
+  /// Returns [task] without [locationId] in its `locationIds` list.
+  static TaskItem _removeIdFromTaskLocations(TaskItem task, String locationId) {
+    if (!task.locationIds.contains(locationId)) {
+      return task;
+    }
+    return task.copyWith(
+      locationIds: [
+        for (final id in task.locationIds)
+          if (id != locationId) id,
+      ],
+    );
+  }
+
   /// Returns a new list with the task matching [taskId] renamed to [newTitle].
   static List<TaskItem> _renameInList(
     List<TaskItem> list,
@@ -1037,6 +1198,54 @@ class TaskBoard {
         plannedList.add(task);
       }
     }
+  }
+
+  /// Builds a lowercase ASCII TDF entity identifier (`<prefix>_<slug>`) from [name].
+  static String _slugifyContextName(String name, String prefix) {
+    final buffer = StringBuffer();
+    var lastWasSeparator = false;
+    for (var i = 0; i < name.length; i++) {
+      final unit = name.codeUnitAt(i);
+      if (unit >= 0x41 && unit <= 0x5A) {
+        buffer.writeCharCode(unit + 0x20);
+        lastWasSeparator = false;
+      } else if ((unit >= 0x61 && unit <= 0x7A) ||
+          (unit >= 0x30 && unit <= 0x39)) {
+        buffer.writeCharCode(unit);
+        lastWasSeparator = false;
+      } else if (buffer.isNotEmpty && !lastWasSeparator) {
+        buffer.write('_');
+        lastWasSeparator = true;
+      }
+    }
+    var slug = buffer.toString();
+    if (slug.endsWith('_')) {
+      slug = slug.substring(0, slug.length - 1);
+    }
+    if (slug.isEmpty) {
+      return '${prefix}001';
+    }
+    return '${prefix}_$slug';
+  }
+
+  /// Removes [categoryId] from every task in [tasks].
+  static List<TaskItem> _stripCategoryFromTasks(
+    List<TaskItem> tasks,
+    String categoryId,
+  ) {
+    return [
+      for (final task in tasks) _removeIdFromTaskCategories(task, categoryId),
+    ];
+  }
+
+  /// Removes [locationId] from every task in [tasks].
+  static List<TaskItem> _stripLocationFromTasks(
+    List<TaskItem> tasks,
+    String locationId,
+  ) {
+    return [
+      for (final task in tasks) _removeIdFromTaskLocations(task, locationId),
+    ];
   }
 }
 

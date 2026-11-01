@@ -415,18 +415,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get categoryBusiness => 'Business';
-
-  @override
-  String get categoryPersonal => 'Personal';
-
-  @override
-  String get locationHome => 'Home';
-
-  @override
-  String get locationOffice => 'Office';
-
-  @override
   String get tooltipMenu => 'Open menu';
 
   @override
@@ -434,4 +422,31 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get searchHint => 'Search focus tasks...';
+
+  @override
+  String get drawerCategories => 'Categories';
+
+  @override
+  String get drawerLocations => 'Locations';
+
+  @override
+  String get categoryNameHint => 'New category name...';
+
+  @override
+  String get locationNameHint => 'New location name...';
+
+  @override
+  String get colorHexLabel => 'Hex Color';
+
+  @override
+  String get emptyCategoriesHint => 'No categories created yet.';
+
+  @override
+  String get emptyLocationsHint => 'No locations created yet.';
+
+  @override
+  String get tooltipDeleteCategory => 'Delete category';
+
+  @override
+  String get tooltipDeleteLocation => 'Delete location';
 }

@@ -190,6 +190,59 @@ class TdfCategory {
   String toString() => 'category $id ($name)';
 }
 
+/// Pure hexadecimal color validation and formatting helper for TDF `category` and `location` blocks.
+@immutable
+class TdfColor {
+  const TdfColor._();
+
+  /// Formats the lower 24 RGB bits of [argb] as a canonical uppercase `#RRGGBB` string.
+  static String formatArgb(int argb) {
+    final rgb = argb & 0xFFFFFF;
+    return '#${rgb.toRadixString(16).toUpperCase().padLeft(6, '0')}';
+  }
+
+  /// Validates and normalizes [rawHex] (`#RRGGBB` or `RRGGBB`) to `#RRGGBB`, or `null` if invalid.
+  static String? normalizeHex(String? rawHex) {
+    if (rawHex == null) {
+      return null;
+    }
+    final trimmed = rawHex.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final hex = trimmed.startsWith('#') ? trimmed.substring(1) : trimmed;
+    if (hex.length != 6) {
+      return null;
+    }
+    for (var i = 0; i < 6; i++) {
+      if (!_isHexCodeUnit(hex.codeUnitAt(i))) {
+        return null;
+      }
+    }
+    return '#${hex.toUpperCase()}';
+  }
+
+  /// Parses [rawHex] into an opaque 32-bit `0xFFRRGGBB` integer, or `null` if invalid.
+  static int? tryParseArgb(String? rawHex) {
+    final normalized = normalizeHex(rawHex);
+    if (normalized == null) {
+      return null;
+    }
+    final parsed = int.tryParse(normalized.substring(1), radix: 16);
+    if (parsed == null) {
+      return null;
+    }
+    return 0xFF000000 | parsed;
+  }
+
+  /// Checks whether [unit] is an ASCII hexadecimal character (`0-9`, `A-F`, `a-f`).
+  static bool _isHexCodeUnit(int unit) {
+    return (unit >= 0x30 && unit <= 0x39) ||
+        (unit >= 0x41 && unit <= 0x46) ||
+        (unit >= 0x61 && unit <= 0x66);
+  }
+}
+
 /// Immutable representation of a TDF `location` root block.
 @immutable
 class TdfLocation {
@@ -197,11 +250,15 @@ class TdfLocation {
   const TdfLocation({
     required this.id,
     required this.name,
+    this.color,
     this.note,
     this.latitude,
     this.longitude,
     this.radiusMeters,
   });
+
+  /// Optional hexadecimal color code (`"#RRGGBB"`).
+  final String? color;
 
   /// Unique location identifier (`<id>`).
   final String id;
@@ -225,6 +282,7 @@ class TdfLocation {
   TdfLocation copyWith({
     String? id,
     String? name,
+    String? color,
     String? note,
     double? latitude,
     double? longitude,
@@ -233,6 +291,7 @@ class TdfLocation {
     return TdfLocation(
       id: id ?? this.id,
       name: name ?? this.name,
+      color: color ?? this.color,
       note: note ?? this.note,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
@@ -246,6 +305,7 @@ class TdfLocation {
     return other is TdfLocation &&
         other.id == id &&
         other.name == name &&
+        other.color == color &&
         other.note == note &&
         other.latitude == latitude &&
         other.longitude == longitude &&
@@ -254,7 +314,7 @@ class TdfLocation {
 
   @override
   int get hashCode =>
-      Object.hash(id, name, note, latitude, longitude, radiusMeters);
+      Object.hash(id, name, color, note, latitude, longitude, radiusMeters);
 
   @override
   String toString() => 'location $id ($name)';
