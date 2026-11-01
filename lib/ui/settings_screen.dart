@@ -49,8 +49,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _serverUrlController.text = config.serverUrl;
     _usernameController.text = config.username;
     _passwordController.text = config.password;
-    _filePathController.text =
-        config.filePath.isEmpty ? 'tiertask.md' : config.filePath;
+    _filePathController.text = config.filePath.isEmpty
+        ? 'tiertask.md'
+        : config.filePath;
   }
 
   WebDavConfig _buildCurrentConfig() {
@@ -86,13 +87,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
 
     try {
-      await ref.read(taskNotifierProvider.notifier).testConnectionAndSync(config);
+      await ref
+          .read(taskNotifierProvider.notifier)
+          .testConnectionAndSync(config);
       if (!mounted) return;
       setState(() {
         _isTesting = false;
         _statusIsError = false;
-        _statusBannerMessage =
-            'Verbindung erfolgreich! Markdown-Datei wurde mit Nextcloud synchronisiert.';
+        _statusBannerMessage = 'Verbindung erfolgreich! Markdown-Datei wurde mit Nextcloud synchronisiert.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -117,9 +119,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final resolvedUri = previewConfig.resolveEndpointUri();
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('WebDAV Einstellungen'),
-      ),
+      appBar: AppBar(title: const Text('WebDAV Einstellungen')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(

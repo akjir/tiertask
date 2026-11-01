@@ -70,17 +70,21 @@ class TaskTile extends ConsumerWidget {
                 children: [
                   Text(
                     task.title,
-                    style: (isProminent
-                            ? theme.textTheme.titleMedium
-                            : theme.textTheme.bodyLarge)
-                        ?.copyWith(
-                      fontWeight:
-                          isProminent ? FontWeight.w600 : FontWeight.w500,
-                      decoration: isDone ? TextDecoration.lineThrough : null,
-                      color: isDone
-                          ? colorScheme.onSurfaceVariant
-                          : colorScheme.onSurface,
-                    ),
+                    style:
+                        (isProminent
+                                ? theme.textTheme.titleMedium
+                                : theme.textTheme.bodyLarge)
+                            ?.copyWith(
+                              fontWeight: isProminent
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              decoration: isDone
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              color: isDone
+                                  ? colorScheme.onSurfaceVariant
+                                  : colorScheme.onSurface,
+                            ),
                   ),
                   if (isDone && task.completedAt != null)
                     Padding(

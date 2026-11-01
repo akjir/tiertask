@@ -6,14 +6,14 @@ description: Updates and maintains CHANGELOG.md adhering to Keep a Changelog und
 **Goal:** Maintain `CHANGELOG.md` per Keep a Changelog 1.1.0 and SemVer 2.0.0.
 
 ## USE WHEN
-- Implementing, changing, or removing user-facing features or options (task tiers, auto-pull cascade, WIP limits, 30-day pruning, Markdown task schema, WebDAV synchronization, UI screens/interactions, settings).
+- Implementing, changing, or removing user-facing features or options (supported platforms, task tiers, auto-pull cascade, WIP limits, 30-day pruning, Markdown task schema, local Markdown file persistence, WebDAV synchronization, UI screens/interactions, settings).
 - Fixing user-facing bugs.
 
 ## RULES
 - **Section:** ONLY under `## [Unreleased]`. Never commit or leave an empty `[Unreleased]` section.
 - **Allowed Categories:** `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`. Only include non-empty categories.
 - **Scope (User-Facing ONLY):**
-  - **INCLUDE:** Visible UI features, task management rules (tiers, soft limits, retention pruning, downgrade/block/restore actions), Markdown file format changes, WebDAV sync and authentication behavior, user bugfixes.
+  - **INCLUDE:** Visible UI features, task management rules (tiers, soft limits, retention pruning, downgrade/block/restore actions), Markdown file format changes, local Markdown file persistence, generic WebDAV sync and authentication behavior, user bugfixes.
   - **BANNED:** Internal refactors, test additions or modifications (`M-*` rules), internal analyzer/build configurations (`analysis_options.yaml`), internal agent directives/skills, toolchain adjustments without user impact.
 - **Entry Format (`P-LANG-RULES`):**
   - 1-line concise bullet.

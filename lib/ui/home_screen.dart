@@ -96,9 +96,7 @@ class HomeScreen extends ConsumerWidget {
               ),
             Expanded(
               child: boardAsync.when(
-                loading: () => const Center(
-                  child: CircularProgressIndicator(),
-                ),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (error, _) => _ErrorStateView(
                   error: error.toString(),
                   onRetry: () =>
@@ -520,10 +518,7 @@ class _UnconfiguredBanner extends StatelessWidget {
                 ),
               ),
             ),
-            TextButton(
-              onPressed: onConfigure,
-              child: const Text('Einrichten'),
-            ),
+            TextButton(onPressed: onConfigure, child: const Text('Einrichten')),
           ],
         ),
       ),
@@ -532,10 +527,7 @@ class _UnconfiguredBanner extends StatelessWidget {
 }
 
 class _SyncErrorBanner extends StatelessWidget {
-  const _SyncErrorBanner({
-    required this.message,
-    required this.onDismiss,
-  });
+  const _SyncErrorBanner({required this.message, required this.onDismiss});
 
   final String message;
   final VoidCallback onDismiss;

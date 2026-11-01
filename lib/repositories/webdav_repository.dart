@@ -69,7 +69,10 @@ class WebDavRepository {
 
       final response = await request.close().timeout(timeout);
       final status = response.statusCode;
-      final body = await response.transform(utf8.decoder).join().timeout(timeout);
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(timeout);
 
       if (status >= 200 && status < 300) {
         return body;
@@ -91,9 +94,13 @@ class WebDavRepository {
     } on WebDavException {
       rethrow;
     } on SocketException catch (e) {
-      throw WebDavException('Netzwerkfehler: Server nicht erreichbar (${e.message}).');
+      throw WebDavException(
+        'Netzwerkfehler: Server nicht erreichbar (${e.message}).',
+      );
     } on TimeoutException {
-      throw const WebDavException('Zeitüberschreitung bei der Verbindung zum Nextcloud-Server.');
+      throw const WebDavException(
+        'Zeitüberschreitung bei der Verbindung zum Nextcloud-Server.',
+      );
     } on HandshakeException catch (e) {
       throw WebDavException('TLS/SSL-Verbindungsfehler: ${e.message}');
     } catch (e) {
@@ -144,7 +151,9 @@ class WebDavRepository {
     } on SocketException catch (e) {
       throw WebDavException('Netzwerkfehler beim Speichern (${e.message}).');
     } on TimeoutException {
-      throw const WebDavException('Zeitüberschreitung beim Speichern auf Nextcloud.');
+      throw const WebDavException(
+        'Zeitüberschreitung beim Speichern auf Nextcloud.',
+      );
     } on HandshakeException catch (e) {
       throw WebDavException('TLS/SSL-Fehler beim Speichern: ${e.message}');
     } catch (e) {

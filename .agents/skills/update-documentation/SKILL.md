@@ -1,23 +1,23 @@
 ---
 name: update-documentation
 description: >-
-  Maintain and update README.md, ARCHITECTURE.md, and AGENTS.md for TierTask. Activate whenever editing documentation or when task tier rules, Markdown file schemas, WebDAV synchronization, architecture layers, or system requirements change.
+  Maintain and update README.md, ARCHITECTURE.md, and AGENTS.md for TierTask. Activate whenever editing documentation or when supported platforms, task tier rules, Markdown file schemas, local file or WebDAV synchronization, architecture layers, or system requirements change.
 ---
 
 # Updating Documentation
 
 ## 1. Strict Separation of Concerns (Single Source of Truth)
-* **`README.md` (Project Entry Point):** Keep under 130 lines. Do NOT copy detailed per-file class inventories or internal test matrices into `README.md`. Update `README.md` ONLY when top-level features, tier definitions, Markdown format rules, system requirements, build/run steps, or repository document links change.
-* **`ARCHITECTURE.md` (Architecture & File Structure):** Single Source of Truth for the architectural layers (`models`, `services`, `repositories`, `providers`, `ui`), directory tree, file responsibilities, and synchronization flow.
+* **`README.md` (Project Entry Point):** Keep under 130 lines. Do NOT copy detailed per-file class inventories or internal test matrices into `README.md`. Update `README.md` ONLY when top-level features, supported platforms (`Linux`, `Android`, `Windows`), tier definitions, Markdown format rules, system requirements, build/run steps, or repository document links change.
+* **`ARCHITECTURE.md` (Architecture & File Structure):** Single Source of Truth for the architectural layers (`models`, `services`, `repositories`, `providers`, `ui`), directory tree, file responsibilities, and local file / WebDAV synchronization flow.
 * **`AGENTS.md` (AI Engineering & TDD Rules):** Single Source of Truth for TDD workflow (`P-TDD-FIRST`), language rules (`P-LANG-RULES`), deterministic `.dart` file layout, static analysis rules, and mandatory `M-*` test categories.
 
 ## 2. `README.md` Structure (<130 Lines)
 Omit a Table of Contents. Maintain this exact section order:
-1. **`# TierTask`:** 1-sentence factual summary of `TierTask` and its single-file WebDAV Markdown architecture.
-2. **`## Overview`:** Short intro + bullet list of core architectural traits (6 priority/status tiers, deterministic auto-pull cascade with soft WIP limits, 30-day completed task pruning, anti-ping-pong downgrade, native `dart:io` WebDAV synchronization, encrypted credentials via `flutter_secure_storage`).
+1. **`# TierTask`:** 1-sentence factual summary of `TierTask`, its supported platforms (`Linux`, `Android`, `Windows`), and its single-file Markdown architecture (local file or any WebDAV server).
+2. **`## Overview`:** Short intro + bullet list of core architectural traits (supported platforms: `Linux`, `Android`, `Windows` only; 6 priority/status tiers; deterministic auto-pull cascade with soft WIP limits; 30-day completed task pruning; anti-ping-pong downgrade; local Markdown file persistence via `dart:io` `File` and native `dart:io` `HttpClient` WebDAV synchronization across any WebDAV server; encrypted credentials via `flutter_secure_storage`).
 3. **`## Requirements`:** 2-column table (`Component | Requirement`).
-4. **`## Installation & Build`:** Copy-paste ready `git clone`, `flutter pub get`, and `flutter run` / `flutter build` commands.
-5. **`## Quick Start`:** Self-contained numbered steps for configuring Nextcloud WebDAV, adding tasks, and synchronizing `tiertask.md`.
+4. **`## Installation & Build`:** Copy-paste ready `git clone`, `flutter pub get`, and `flutter run` / `flutter build` commands for `linux`, `apk`, and `windows`.
+5. **`## Quick Start`:** Self-contained numbered steps for configuring either a local Markdown file (`tiertask.md`) or any WebDAV server endpoint, adding tasks, and synchronizing the board.
 6. **`## Tier System & Markdown Format`:** Summary table of the 6 tiers (`Tier | Markdown Heading | Soft Limit | Auto-Pull Behavior`), canonical `tiertask.md` example, and links to `[ARCHITECTURE.md](ARCHITECTURE.md)` and `[CHANGELOG.md](CHANGELOG.md)`.
 7. **`## Development`:** Self-contained `flutter test`, `flutter analyze --fatal-infos --fatal-warnings`, and `dart format --output=none --set-exit-if-changed lib test` commands.
 8. **`## Disclaimer & License`:** 2-sentence warranty disclaimer and GPL-3.0 link to `[LICENSE](LICENSE)`.
@@ -26,9 +26,9 @@ Omit a Table of Contents. Maintain this exact section order:
 Maintain this exact section order:
 1. **`# TierTask Architecture and File Structure`** + update callout referencing `AGENTS.md`.
 2. **`## Architectural Layers`:** Table of layers (`Models`, `Services`, `Repositories`, `Providers`, `UI`) with paths and responsibilities, plus `P-IO-ISOLATION` note.
-3. **`## Directory Layout`:** ASCII tree of the repository structure.
+3. **`## Directory Layout`:** ASCII tree of the repository structure (`android/`, `linux/`, `windows/`, `lib/`, `test/`).
 4. **Layer Sections (`## Root Files`, `## Domain Models`, `## Services`, `## Repositories`, `## State Providers`, `## User Interface`):** 2-column tables (`File | Function`) describing each file concisely.
-5. **`## Execution & Synchronization Flow`:** Numbered end-to-end flow from app startup and credential loading to WebDAV `GET`/`PUT`, Markdown parsing/serialization, auto-pull cascade, and 30-day pruning.
+5. **`## Execution & Synchronization Flow`:** Numbered end-to-end flow from app startup and configuration loading to local Markdown file read/write or WebDAV `GET`/`PUT`, Markdown parsing/serialization, auto-pull cascade, and 30-day pruning.
 
 ## 4. Style, Tone & Formatting Enforcement (`P-LANG-RULES`)
 * **Language & Tone:** Write all documentation in concise, factual English following ASD-STE100 (80%). Never use emojis, marketing adjectives ("powerful", "seamless", "intuitive"), greetings, concluding summary paragraphs, or redundant explanations.

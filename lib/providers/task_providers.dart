@@ -94,8 +94,8 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
 
 final webDavConfigProvider =
     AsyncNotifierProvider<WebDavConfigNotifier, WebDavConfig>(
-  WebDavConfigNotifier.new,
-);
+      WebDavConfigNotifier.new,
+    );
 
 /// Provides a [WebDavRepository] configured with the current [WebDavConfig].
 final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
@@ -125,8 +125,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     try {
       final rawMarkdown = await webDavRepo.fetchMarkdown();
       final parsedBoard = markdownService.parse(rawMarkdown);
-      final normalizedBoard =
-          parsedBoard.pruneCompletedTasks(currentDate: now).applyAutoPull();
+      final normalizedBoard = parsedBoard
+          .pruneCompletedTasks(currentDate: now)
+          .applyAutoPull();
 
       final normalizedMarkdown = markdownService.serialize(normalizedBoard);
       if (rawMarkdown.trim().isNotEmpty &&
@@ -146,7 +147,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<void> syncFromRemote() async {
     final config = await ref.read(webDavConfigProvider.future);
     if (!config.isConfigured) {
-      ref.read(syncStateProvider.notifier).setError(
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(
             'Bitte zuerst Nextcloud WebDAV in den Einstellungen konfigurieren.',
           );
       return;
@@ -191,8 +194,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       if (rawMarkdown.trim().isEmpty) {
         // If remote file does not exist yet or is empty, upload current board
         final currentBoard = state.asData?.value ?? TaskBoard.empty();
-        board =
-            currentBoard.pruneCompletedTasks(currentDate: now).applyAutoPull();
+        board = currentBoard
+            .pruneCompletedTasks(currentDate: now)
+            .applyAutoPull();
         await webDavRepo.saveMarkdown(markdownService.serialize(board));
       } else {
         final parsed = markdownService.parse(rawMarkdown);

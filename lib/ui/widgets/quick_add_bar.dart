@@ -29,10 +29,9 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
     final targetTier = _effectiveTier;
     _controller.clear();
 
-    await ref.read(taskNotifierProvider.notifier).addTask(
-          text,
-          targetTier: targetTier,
-        );
+    await ref
+        .read(taskNotifierProvider.notifier)
+        .addTask(text, targetTier: targetTier);
   }
 
   @override

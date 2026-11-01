@@ -5,11 +5,7 @@ import 'ui/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(
-    const ProviderScope(
-      child: TierTaskApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: TierTaskApp()));
 }
 
 class TierTaskApp extends StatelessWidget {

@@ -10,12 +10,12 @@ class TaskBoard {
     List<TaskItem> blockiert = const [],
     List<TaskItem> geplant = const [],
     List<TaskItem> erledigt = const [],
-  })  : fokus = List<TaskItem>.unmodifiable(fokus),
-        bereit = List<TaskItem>.unmodifiable(bereit),
-        irgendwann = List<TaskItem>.unmodifiable(irgendwann),
-        blockiert = List<TaskItem>.unmodifiable(blockiert),
-        geplant = List<TaskItem>.unmodifiable(geplant),
-        erledigt = List<TaskItem>.unmodifiable(erledigt);
+  }) : fokus = List<TaskItem>.unmodifiable(fokus),
+       bereit = List<TaskItem>.unmodifiable(bereit),
+       irgendwann = List<TaskItem>.unmodifiable(irgendwann),
+       blockiert = List<TaskItem>.unmodifiable(blockiert),
+       geplant = List<TaskItem>.unmodifiable(geplant),
+       erledigt = List<TaskItem>.unmodifiable(erledigt);
 
   factory TaskBoard.empty() => TaskBoard();
 
@@ -121,11 +121,7 @@ class TaskBoard {
       }
     }
 
-    return copyWith(
-      fokus: nextFokus,
-      bereit: nextBereit,
-      geplant: nextGeplant,
-    );
+    return copyWith(fokus: nextFokus, bereit: nextBereit, geplant: nextGeplant);
   }
 
   /// 30-Day Pruning: Iterates through all items in `# Erledigt`.
@@ -207,9 +203,10 @@ class TaskBoard {
     final task = findTask(taskId)!;
     final completedTask = task.toCompleted(now);
 
-    final updated = _removeTaskFromTier(taskId, sourceTier).copyWith(
-      erledigt: [completedTask, ...erledigt],
-    );
+    final updated = _removeTaskFromTier(
+      taskId,
+      sourceTier,
+    ).copyWith(erledigt: [completedTask, ...erledigt]);
 
     return updated.pruneCompletedTasks(currentDate: now).applyAutoPull();
   }
@@ -356,8 +353,10 @@ class TaskBoard {
     // before appending the moved task to the end of # Geplant.
     if (sourceTier == TaskTier.fokus && targetTier == TaskTier.geplant) {
       final task = findTask(taskId)!.toActive();
-      final afterRemovalAndPull =
-          _removeTaskFromTier(taskId, TaskTier.fokus).applyAutoPull();
+      final afterRemovalAndPull = _removeTaskFromTier(
+        taskId,
+        TaskTier.fokus,
+      ).applyAutoPull();
       return afterRemovalAndPull
           ._appendTaskToTier(task, TaskTier.geplant)
           .pruneCompletedTasks(currentDate: now);
@@ -409,9 +408,10 @@ class TaskBoard {
     final tier = findTierOfTask(taskId);
     if (tier == null) return this;
 
-    return _removeTaskFromTier(taskId, tier)
-        .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull();
+    return _removeTaskFromTier(
+      taskId,
+      tier,
+    ).pruneCompletedTasks(currentDate: now).applyAutoPull();
   }
 
   TaskBoard _removeTaskFromTier(String taskId, TaskTier tier) {

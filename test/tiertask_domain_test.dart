@@ -48,10 +48,10 @@ void main() {
       expect(board.bereit.map((t) => t.title), ['Task D', 'Task E']);
       expect(board.irgendwann.map((t) => t.title), ['Someday Idea 1']);
       expect(board.blockiert.map((t) => t.title), ['Blocked Task 1']);
-      expect(
-        board.geplant.map((t) => t.title),
-        ['Backlog Task 1', 'Backlog Task 2'],
-      );
+      expect(board.geplant.map((t) => t.title), [
+        'Backlog Task 1',
+        'Backlog Task 2',
+      ]);
       expect(board.erledigt.length, 2);
       expect(board.erledigt[0].title, 'Completed Task 1');
       expect(board.erledigt[0].isCompleted, isTrue);
@@ -64,7 +64,8 @@ void main() {
     });
 
     test('gracefully handles empty sections and trailing whitespace', () {
-      const sparseMarkdown = '# Fokus\r\n- [ ] Only Focus   \r\n\r\n# Bereit\r\n\r\n# Geplant\r\n';
+      const sparseMarkdown =
+          '# Fokus\r\n- [ ] Only Focus   \r\n\r\n# Bereit\r\n\r\n# Geplant\r\n';
       final board = markdownService.parse(sparseMarkdown);
 
       expect(board.fokus.map((t) => t.title), ['Only Focus']);
@@ -77,6 +78,65 @@ void main() {
       final serialized = markdownService.serialize(board);
       expect(serialized, contains('# Fokus\n- [ ] Only Focus'));
       expect(serialized, contains('# Bereit\n\n# Irgendwann'));
+    });
+
+    test('validates ISO-8601 dates strictly and rejects impossible calendar rollover dates', () {
+      const markdownWithDates = '''
+# Erledigt
+- [x] 2024-02-29 Valid Leap Day Task
+- [x] 2026-02-29 Invalid Non-Leap Day Task
+- [x] 2026-02-31 Invalid February Day Task
+- [x] 2026-13-45 Invalid Month And Day Task
+- [x] 2026-00-00 Zero Month And Day Task
+''';
+
+      final board = markdownService.parse(markdownWithDates);
+
+      expect(
+        board.erledigt.length,
+        equals(5),
+        reason: 'All 5 completed task lines must be parsed',
+      );
+      expect(
+        board.erledigt[0].completedAt,
+        equals(DateTime.utc(2024, 2, 29)),
+        reason: '2024 is a leap year so 2024-02-29 is valid',
+      );
+      expect(
+        board.erledigt[1].completedAt,
+        isNull,
+        reason: '2026-02-29 must not roll over to 2026-03-01',
+      );
+      expect(
+        board.erledigt[2].completedAt,
+        isNull,
+        reason: '2026-02-31 must not roll over to 2026-03-03',
+      );
+      expect(
+        board.erledigt[3].completedAt,
+        isNull,
+        reason: '2026-13-45 must not roll over to 2027-02-14',
+      );
+      expect(
+        board.erledigt[4].completedAt,
+        isNull,
+        reason: '2026-00-00 must not underflow to 2025-11-30',
+      );
+      expect(
+        TaskItem.formatIsoDate(DateTime.utc(2026, 1, 5)),
+        equals('2026-01-05'),
+        reason: 'Single-digit month and day must be zero-padded',
+      );
+      expect(
+        TaskItem.tryParseIsoDate('2026-11-01'),
+        equals(DateTime.utc(2026, 11, 1)),
+        reason: 'Valid ISO date must parse to UTC midnight',
+      );
+      expect(
+        TaskItem.tryParseIsoDate('2026-02-30'),
+        isNull,
+        reason: 'Out-of-range day for February must return null',
+      );
     });
   });
 
@@ -105,10 +165,13 @@ void main() {
       // Fokus had 1, pulls B1 and B2 from Bereit -> [F1, B1, B2] (3 items)
       expect(cascaded.fokus.map((t) => t.title), ['F1', 'B1', 'B2']);
       // Bereit had B3 left, pulls G1..G4 from Geplant -> [B3, G1, G2, G3, G4] (5 items)
-      expect(
-        cascaded.bereit.map((t) => t.title),
-        ['B3', 'G1', 'G2', 'G3', 'G4'],
-      );
+      expect(cascaded.bereit.map((t) => t.title), [
+        'B3',
+        'G1',
+        'G2',
+        'G3',
+        'G4',
+      ]);
       // Geplant has G5 remaining
       expect(cascaded.geplant.map((t) => t.title), ['G5']);
       // Static tiers untouched
@@ -163,9 +226,7 @@ void main() {
           TaskItem(id: 'f2', title: 'Task 2'),
           TaskItem(id: 'f3', title: 'Task 3'),
         ],
-        bereit: [
-          TaskItem(id: 'b1', title: 'Ready 1'),
-        ],
+        bereit: [TaskItem(id: 'b1', title: 'Ready 1')],
         erledigt: [
           // 30 days old on 2026-11-01 -> should be kept (difference == 30)
           TaskItem(
@@ -187,17 +248,18 @@ void main() {
       final afterComplete = board.completeTask('f1', currentDate: fixedDate);
 
       // Fokus refilled with Ready 1
-      expect(
-        afterComplete.fokus.map((t) => t.title),
-        ['Task 2', 'Task 3', 'Ready 1'],
-      );
+      expect(afterComplete.fokus.map((t) => t.title), [
+        'Task 2',
+        'Task 3',
+        'Ready 1',
+      ]);
       expect(afterComplete.bereit, isEmpty);
 
       // Erledigt has newly completed task at index 0, kept 30-day task, and pruned 31-day task
-      expect(
-        afterComplete.erledigt.map((t) => t.title),
-        ['Finish spec', '30 Days Ago'],
-      );
+      expect(afterComplete.erledigt.map((t) => t.title), [
+        'Finish spec',
+        '30 Days Ago',
+      ]);
       expect(afterComplete.erledigt.first.completedAt, fixedDate);
       expect(
         afterComplete.erledigt.first.toMarkdownLine(inErledigt: true),
@@ -247,32 +309,28 @@ void main() {
           TaskItem(id: 'b1', title: 'Bereit 1 (Should Pull Up)'),
           TaskItem(id: 'b2', title: 'Bereit 2'),
         ],
-        geplant: [
-          TaskItem(id: 'g1', title: 'Geplant 1'),
-        ],
+        geplant: [TaskItem(id: 'g1', title: 'Geplant 1')],
       );
 
       final downgraded = board.downgradeTask('f1', currentDate: fixedDate);
 
-      expect(
-        downgraded.fokus.map((t) => t.title),
-        ['Fokus 2', 'Fokus 3', 'Bereit 1 (Should Pull Up)'],
-      );
-      expect(
-        downgraded.bereit.map((t) => t.title),
-        ['Bereit 2', 'Fokus 1 (Downgrade Me)', 'Geplant 1'],
-      );
+      expect(downgraded.fokus.map((t) => t.title), [
+        'Fokus 2',
+        'Fokus 3',
+        'Bereit 1 (Should Pull Up)',
+      ]);
+      expect(downgraded.bereit.map((t) => t.title), [
+        'Bereit 2',
+        'Fokus 1 (Downgrade Me)',
+        'Geplant 1',
+      ]);
       expect(downgraded.geplant, isEmpty);
     });
 
     test('downgrading from # Fokus to # Bereit when # Fokus has < 3 tasks does NOT ping-pong back to # Fokus', () {
       final board = TaskBoard(
-        fokus: [
-          TaskItem(id: 'f1', title: 'Sole Fokus Task'),
-        ],
-        bereit: [
-          TaskItem(id: 'b1', title: 'Sole Bereit Task'),
-        ],
+        fokus: [TaskItem(id: 'f1', title: 'Sole Fokus Task')],
+        bereit: [TaskItem(id: 'b1', title: 'Sole Bereit Task')],
       );
 
       final downgraded = board.downgradeTask('f1', currentDate: fixedDate);
@@ -293,23 +351,20 @@ void main() {
           TaskItem(id: 'b1', title: 'Bereit 1 (Downgrade Me)'),
           TaskItem(id: 'b2', title: 'Bereit 2'),
         ],
-        geplant: [
-          TaskItem(id: 'g1', title: 'Geplant 1 (Replacement)'),
-        ],
+        geplant: [TaskItem(id: 'g1', title: 'Geplant 1 (Replacement)')],
       );
 
       final downgraded = board.downgradeTask('b1', currentDate: fixedDate);
 
       // Even though Bereit only has 2 items (< 5), g1 is pulled into Bereit first
       // and b1 stays in Geplant without being auto-pulled right back!
-      expect(
-        downgraded.bereit.map((t) => t.title),
-        ['Bereit 2', 'Geplant 1 (Replacement)'],
-      );
-      expect(
-        downgraded.geplant.map((t) => t.title),
-        ['Bereit 1 (Downgrade Me)'],
-      );
+      expect(downgraded.bereit.map((t) => t.title), [
+        'Bereit 2',
+        'Geplant 1 (Replacement)',
+      ]);
+      expect(downgraded.geplant.map((t) => t.title), [
+        'Bereit 1 (Downgrade Me)',
+      ]);
     });
 
     test('Quick-Block moves task from # Fokus to # Blockiert and cascades # Bereit/# Geplant upward', () {
@@ -319,9 +374,7 @@ void main() {
           TaskItem(id: 'f2', title: 'F2'),
           TaskItem(id: 'f3', title: 'F3'),
         ],
-        bereit: [
-          TaskItem(id: 'b1', title: 'B1'),
-        ],
+        bereit: [TaskItem(id: 'b1', title: 'B1')],
       );
 
       final blocked = board.blockTask('f1', currentDate: fixedDate);
@@ -410,10 +463,10 @@ void main() {
 
       // Remote Backlog 1 automatically pulled into # Bereit (since Bereit had 1 < 5)
       expect(initialBoard.fokus.length, 3);
-      expect(
-        initialBoard.bereit.map((t) => t.title),
-        ['Remote Ready 1', 'Remote Backlog 1'],
-      );
+      expect(initialBoard.bereit.map((t) => t.title), [
+        'Remote Ready 1',
+        'Remote Backlog 1',
+      ]);
       expect(initialBoard.geplant, isEmpty);
 
       // Complete a task in # Fokus through Riverpod TaskNotifier
@@ -423,10 +476,11 @@ void main() {
           .completeTask(firstFocusId);
 
       final updatedBoard = container.read(taskNotifierProvider).value!;
-      expect(
-        updatedBoard.fokus.map((t) => t.title),
-        ['Remote Focus 2', 'Remote Focus 3', 'Remote Ready 1'],
-      );
+      expect(updatedBoard.fokus.map((t) => t.title), [
+        'Remote Focus 2',
+        'Remote Focus 3',
+        'Remote Ready 1',
+      ]);
       expect(updatedBoard.bereit.map((t) => t.title), ['Remote Backlog 1']);
       expect(
         updatedBoard.erledigt.first.toMarkdownLine(inErledigt: true),
