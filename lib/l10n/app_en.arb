@@ -1,27 +1,88 @@
 {
   "@@locale": "en",
-  "appTitle": "TierTask (T2)",
+  "appTitle": "TierTask",
+  "@appTitle": {
+    "description": "Application title shown in the app bar and window header."
+  },
   "tier1Name": "Focus",
+  "@tier1Name": {
+    "description": "Display name for tier 1 (Focus)."
+  },
   "tier2Name": "Ready",
+  "@tier2Name": {
+    "description": "Display name for tier 2 (Ready)."
+  },
   "tier3Name": "Planned",
+  "@tier3Name": {
+    "description": "Display name for tier 3 (Planned)."
+  },
   "tier4Name": "Blocked",
+  "@tier4Name": {
+    "description": "Display name for tier 4 (Blocked)."
+  },
   "tier5Name": "Someday",
+  "@tier5Name": {
+    "description": "Display name for tier 5 (Someday)."
+  },
   "tier6Name": "Completed",
+  "@tier6Name": {
+    "description": "Display name for tier 6 (Completed)."
+  },
   "tier1Description": "Active top priority (Soft limit: 3)",
+  "@tier1Description": {
+    "description": "Subtitle description for tier 1 (Focus)."
+  },
   "tier2Description": "Ready for Focus (Soft limit: 5)",
+  "@tier2Description": {
+    "description": "Subtitle description for tier 2 (Ready)."
+  },
   "tier3Description": "Active backlog (automatically pulls into Ready)",
+  "@tier3Description": {
+    "description": "Subtitle description for tier 3 (Planned)."
+  },
   "tier4Description": "Waiting on external events or third parties",
+  "@tier4Description": {
+    "description": "Subtitle description for tier 4 (Blocked)."
+  },
   "tier5Description": "Idea storage without automatic pull",
+  "@tier5Description": {
+    "description": "Subtitle description for tier 5 (Someday)."
+  },
   "tier6Description": "Completed tasks (30-day retention)",
-  "tabFocusAndReady": "[1] Focus & [2] Ready",
-  "emptyFocusHint": "No tasks in # [1] Focus. Tasks from # [2] Ready or # [3] Planned automatically move up here.",
-  "emptyReadyHint": "No tasks in # [2] Ready.",
-  "emptyPlannedHint": "No tasks in active backlog (# [3] Planned).",
-  "emptyBlockedHint": "No blocked tasks (# [4] Blocked).",
-  "emptySomedayHint": "No ideas stored in # [5] Someday.",
+  "@tier6Description": {
+    "description": "Subtitle description for tier 6 (Completed)."
+  },
+  "tabFocusAndReady": "Focus & Ready",
+  "@tabFocusAndReady": {
+    "description": "Tab label for the combined Focus and Ready view."
+  },
+  "emptyFocusHint": "No tasks in Focus. Tasks from Ready or Planned automatically move up here.",
+  "@emptyFocusHint": {
+    "description": "Empty-state hint shown when tier 1 (Focus) contains no tasks."
+  },
+  "emptyReadyHint": "No tasks in Ready.",
+  "@emptyReadyHint": {
+    "description": "Empty-state hint shown when tier 2 (Ready) contains no tasks."
+  },
+  "emptyPlannedHint": "No tasks in active backlog (Planned).",
+  "@emptyPlannedHint": {
+    "description": "Empty-state hint shown when tier 3 (Planned) contains no tasks."
+  },
+  "emptyBlockedHint": "No blocked tasks (Blocked).",
+  "@emptyBlockedHint": {
+    "description": "Empty-state hint shown when tier 4 (Blocked) contains no tasks."
+  },
+  "emptySomedayHint": "No ideas stored in Someday.",
+  "@emptySomedayHint": {
+    "description": "Empty-state hint shown when tier 5 (Someday) contains no tasks."
+  },
   "emptyCompletedHint": "No completed tasks from the last 30 days.",
+  "@emptyCompletedHint": {
+    "description": "Empty-state hint shown when tier 6 (Completed) contains no tasks."
+  },
   "emptySectionEntries": "No entries in {heading}.",
   "@emptySectionEntries": {
+    "description": "Fallback empty-state message for a section with the given heading.",
     "placeholders": {
       "heading": {
         "type": "String"
@@ -29,17 +90,48 @@
     }
   },
   "tooltipSyncWebDav": "Synchronize with WebDAV",
+  "@tooltipSyncWebDav": {
+    "description": "Tooltip for the WebDAV synchronization button in the app bar."
+  },
   "tooltipMarkdownPreview": "Show Markdown preview",
+  "@tooltipMarkdownPreview": {
+    "description": "Tooltip for the raw Markdown preview button in the app bar."
+  },
   "tooltipSettings": "Settings",
+  "@tooltipSettings": {
+    "description": "Tooltip for the settings button in the app bar."
+  },
   "markdownPreviewTitle": "Raw Markdown (Single Source of Truth)",
+  "@markdownPreviewTitle": {
+    "description": "Dialog title for the raw Markdown preview dialog."
+  },
   "actionClose": "Close",
+  "@actionClose": {
+    "description": "Button label to close a dialog."
+  },
   "unconfiguredBannerText": "Local mode active. Configure WebDAV for synchronization.",
+  "@unconfiguredBannerText": {
+    "description": "Banner message shown when WebDAV synchronization is not configured."
+  },
   "actionConfigure": "Configure",
+  "@actionConfigure": {
+    "description": "Button label to open configuration settings from the banner."
+  },
   "syncErrorTitle": "WebDAV Synchronization Error",
+  "@syncErrorTitle": {
+    "description": "Heading for the WebDAV synchronization error card."
+  },
   "actionSettings": "Settings",
+  "@actionSettings": {
+    "description": "Button label to navigate to the settings screen."
+  },
   "actionRetry": "Retry",
+  "@actionRetry": {
+    "description": "Button label to retry a failed synchronization operation."
+  },
   "defaultTierChipLabel": "{heading} (Default)",
   "@defaultTierChipLabel": {
+    "description": "Chip label indicating the default target tier in the quick-add bar.",
     "placeholders": {
       "heading": {
         "type": "String"
@@ -48,6 +140,7 @@
   },
   "quickAddHint": "Add new task to {heading}...",
   "@quickAddHint": {
+    "description": "Placeholder hint inside the quick-add text field for the selected tier.",
     "placeholders": {
       "heading": {
         "type": "String"
@@ -55,10 +148,20 @@
     }
   },
   "actionAdd": "Add",
+  "@actionAdd": {
+    "description": "Button label to add a new task."
+  },
   "restoreTaskTitle": "Restore Task",
+  "@restoreTaskTitle": {
+    "description": "Bottom sheet title when restoring a completed task to an active tier."
+  },
   "moveTaskTitle": "Move Task",
+  "@moveTaskTitle": {
+    "description": "Bottom sheet title when moving an active task to another tier."
+  },
   "selectTargetTierSubtitle": "\"{taskTitle}\" - Select target tier:",
   "@selectTargetTierSubtitle": {
+    "description": "Subtitle in the move or restore sheet prompting selection of a target tier.",
     "placeholders": {
       "taskTitle": {
         "type": "String"
@@ -67,52 +170,232 @@
   },
   "completedOnDate": "Completed on {date}",
   "@completedOnDate": {
+    "description": "Subtitle displaying the ISO completion date of a completed task.",
     "placeholders": {
       "date": {
         "type": "String"
       }
     }
   },
-  "tooltipDowngradeToReady": "Downgrade to # [2] Ready",
-  "tooltipDowngradeToPlanned": "Downgrade to # [3] Planned",
-  "tooltipBlockTask": "Move immediately to # [4] Blocked",
-  "tooltipPromoteToPlanned": "Queue in # [3] Planned",
+  "tooltipDowngradeToReady": "Downgrade to Ready",
+  "@tooltipDowngradeToReady": {
+    "description": "Tooltip for downgrading a task from Focus to Ready."
+  },
+  "tooltipDowngradeToPlanned": "Downgrade to Planned",
+  "@tooltipDowngradeToPlanned": {
+    "description": "Tooltip for downgrading a task from Ready to Planned."
+  },
+  "tooltipBlockTask": "Move immediately to Blocked",
+  "@tooltipBlockTask": {
+    "description": "Tooltip for moving a task directly to the Blocked tier."
+  },
+  "tooltipPromoteToPlanned": "Queue in Planned",
+  "@tooltipPromoteToPlanned": {
+    "description": "Tooltip for promoting a task into the Planned tier."
+  },
   "tooltipMoreActions": "More actions",
+  "@tooltipMoreActions": {
+    "description": "Tooltip for the task overflow action menu button."
+  },
   "menuMoveTo": "Move to...",
+  "@menuMoveTo": {
+    "description": "Menu item label to move a task to another tier."
+  },
   "menuEditText": "Edit text",
+  "@menuEditText": {
+    "description": "Menu item label to edit a task title."
+  },
   "menuDelete": "Delete",
+  "@menuDelete": {
+    "description": "Menu item label to delete a task."
+  },
   "editTaskDialogTitle": "Edit Task",
+  "@editTaskDialogTitle": {
+    "description": "Dialog title for editing an existing task."
+  },
   "editTaskFieldLabel": "Task text",
+  "@editTaskFieldLabel": {
+    "description": "Input field label for the task title in the edit dialog."
+  },
   "actionCancel": "Cancel",
+  "@actionCancel": {
+    "description": "Button label to cancel an action or dialog."
+  },
   "actionSave": "Save",
+  "@actionSave": {
+    "description": "Button label to save changes."
+  },
   "settingsTitle": "Settings",
+  "@settingsTitle": {
+    "description": "App bar title for the settings screen."
+  },
   "languageSectionTitle": "Language",
+  "@languageSectionTitle": {
+    "description": "Section heading for display language selection in settings."
+  },
   "languageSectionDescription": "Select the display language. System uses German on German systems and English otherwise.",
+  "@languageSectionDescription": {
+    "description": "Helper description explaining how the display language setting behaves."
+  },
   "languageSystem": "System",
+  "@languageSystem": {
+    "description": "Option label to follow the operating system locale."
+  },
   "languageEnglish": "English",
+  "@languageEnglish": {
+    "description": "Option label for the English display language."
+  },
   "languageGerman": "Deutsch",
+  "@languageGerman": {
+    "description": "Option label for the German display language."
+  },
+  "themeSectionTitle": "Theme",
+  "@themeSectionTitle": {
+    "description": "Section heading for color theme selection in settings."
+  },
+  "themeSectionDescription": "Select the color theme. System follows the operating system brightness setting.",
+  "@themeSectionDescription": {
+    "description": "Helper description explaining how the color theme setting behaves."
+  },
+  "themeSystem": "System",
+  "@themeSystem": {
+    "description": "Option label to follow the operating system brightness setting."
+  },
+  "themeLight": "Light",
+  "@themeLight": {
+    "description": "Option label for the light color theme."
+  },
+  "themeDark": "Dark",
+  "@themeDark": {
+    "description": "Option label for the dark color theme."
+  },
+  "storageModeSectionTitle": "Storage Mode",
+  "@storageModeSectionTitle": {
+    "description": "Section heading for storage mode selection in settings."
+  },
+  "storageModeSectionDescription": "Select whether tasks are stored in a local Markdown file, on a WebDAV server, or in both locations.",
+  "@storageModeSectionDescription": {
+    "description": "Helper description explaining the storage mode options."
+  },
+  "storageModeLocal": "Local",
+  "@storageModeLocal": {
+    "description": "Option label for local-only Markdown file storage."
+  },
+  "storageModeWebDav": "WebDAV",
+  "@storageModeWebDav": {
+    "description": "Option label for WebDAV-only Markdown synchronization."
+  },
+  "storageModeBoth": "Both",
+  "@storageModeBoth": {
+    "description": "Option label for combined local and WebDAV Markdown storage."
+  },
+  "localSectionTitle": "Local Markdown File",
+  "@localSectionTitle": {
+    "description": "Section heading for local Markdown file settings."
+  },
+  "localSectionDescription": "Stores all tasks in a local Markdown file on this device.",
+  "@localSectionDescription": {
+    "description": "Helper description explaining local Markdown file persistence."
+  },
+  "localFilePathLabel": "Local Markdown File Name",
+  "@localFilePathLabel": {
+    "description": "Input label for the local Markdown file name or path field."
+  },
+  "localFilePathHint": "tiertask.md or t2.md",
+  "@localFilePathHint": {
+    "description": "Placeholder hint for the local Markdown file name field."
+  },
+  "localFilePathErrorEmpty": "Please enter a local file name.",
+  "@localFilePathErrorEmpty": {
+    "description": "Validation error shown when the local file name field is empty."
+  },
+  "resolvedLocalPathLabel": "Resolved Local File Path:",
+  "@resolvedLocalPathLabel": {
+    "description": "Label above the resolved local Markdown file path preview."
+  },
   "webdavSectionTitle": "WebDAV Synchronization (Single Source of Truth)",
+  "@webdavSectionTitle": {
+    "description": "Section heading for WebDAV synchronization settings."
+  },
   "webdavSectionDescription": "TierTask stores all tasks in a single Markdown file (tiertask.md) on your WebDAV server. Use an application password when supported by your server.",
+  "@webdavSectionDescription": {
+    "description": "Helper description explaining WebDAV Markdown synchronization."
+  },
   "serverUrlLabel": "WebDAV Server URL",
+  "@serverUrlLabel": {
+    "description": "Input label for the WebDAV server URL field."
+  },
   "serverUrlErrorEmpty": "Please enter a server URL.",
+  "@serverUrlErrorEmpty": {
+    "description": "Validation error shown when the WebDAV server URL is empty."
+  },
   "usernameLabel": "Username",
+  "@usernameLabel": {
+    "description": "Input label for the WebDAV username field."
+  },
   "usernameErrorEmpty": "Please enter a username.",
+  "@usernameErrorEmpty": {
+    "description": "Validation error shown when the WebDAV username is empty."
+  },
   "passwordLabel": "App Password / Password",
+  "@passwordLabel": {
+    "description": "Input label for the WebDAV password or application password field."
+  },
   "tooltipShowPassword": "Show password",
+  "@tooltipShowPassword": {
+    "description": "Tooltip for the button that reveals the password text."
+  },
   "tooltipHidePassword": "Hide password",
+  "@tooltipHidePassword": {
+    "description": "Tooltip for the button that obscures the password text."
+  },
   "passwordErrorEmpty": "Please enter a password or app password.",
+  "@passwordErrorEmpty": {
+    "description": "Validation error shown when the WebDAV password is empty."
+  },
   "filePathLabel": "Markdown File Name / Path",
+  "@filePathLabel": {
+    "description": "Input label for the remote Markdown file name or path field."
+  },
   "filePathHint": "tiertask.md or t2.md",
+  "@filePathHint": {
+    "description": "Placeholder hint for the remote Markdown file name field."
+  },
   "resolvedEndpointLabel": "Resolved WebDAV Endpoint (GET / PUT):",
+  "@resolvedEndpointLabel": {
+    "description": "Label above the resolved full WebDAV URL preview."
+  },
   "credentialsSavedBanner": "Settings saved locally.",
+  "@credentialsSavedBanner": {
+    "description": "Status message shown when settings are saved locally."
+  },
   "connectionSuccessBanner": "Connection succeeded. Markdown file synchronized with WebDAV.",
+  "@connectionSuccessBanner": {
+    "description": "Status message shown when WebDAV connection and synchronization succeed."
+  },
   "actionTestConnectionAndSync": "Test Connection / Sync Now",
+  "@actionTestConnectionAndSync": {
+    "description": "Button label to test the WebDAV connection and synchronize immediately."
+  },
   "errorWebDavNotConfigured": "Please configure WebDAV in Settings first.",
+  "@errorWebDavNotConfigured": {
+    "description": "Error message shown when attempting WebDAV sync before configuring credentials."
+  },
   "errorInvalidServerUrl": "Invalid WebDAV server URL.",
+  "@errorInvalidServerUrl": {
+    "description": "Error message shown when the configured WebDAV URL is invalid."
+  },
   "errorAuthFailedLoad": "Authentication failed. Please check username and app password.",
+  "@errorAuthFailedLoad": {
+    "description": "Error message shown when HTTP 401/403 occurs while loading from WebDAV."
+  },
   "errorLoadMarkdownFailed": "Failed to load Markdown file from server.",
+  "@errorLoadMarkdownFailed": {
+    "description": "Error message shown when loading the Markdown file fails with a non-success status."
+  },
   "errorNetworkUnreachable": "Network error: Server unreachable ({details}).",
   "@errorNetworkUnreachable": {
+    "description": "Error message shown when the WebDAV server cannot be reached over the network.",
     "placeholders": {
       "details": {
         "type": "String"
@@ -120,8 +403,12 @@
     }
   },
   "errorTimeoutLoad": "Connection to WebDAV server timed out.",
+  "@errorTimeoutLoad": {
+    "description": "Error message shown when a WebDAV load request times out."
+  },
   "errorTlsLoad": "TLS/SSL connection error: {details}",
   "@errorTlsLoad": {
+    "description": "Error message shown when TLS handshake fails while loading from WebDAV.",
     "placeholders": {
       "details": {
         "type": "String"
@@ -130,6 +417,7 @@
   },
   "errorUnexpectedLoad": "Unexpected WebDAV error while loading: {details}",
   "@errorUnexpectedLoad": {
+    "description": "Error message shown when an unexpected error occurs while loading from WebDAV.",
     "placeholders": {
       "details": {
         "type": "String"
@@ -137,9 +425,16 @@
     }
   },
   "errorAuthFailedSave": "Authentication failed while saving. Please check app password.",
+  "@errorAuthFailedSave": {
+    "description": "Error message shown when HTTP 401/403 occurs while saving to WebDAV."
+  },
   "errorSaveMarkdownFailed": "Failed to save Markdown file on server.",
+  "@errorSaveMarkdownFailed": {
+    "description": "Error message shown when saving the Markdown file fails with a non-success status."
+  },
   "errorNetworkSave": "Network error while saving ({details}).",
   "@errorNetworkSave": {
+    "description": "Error message shown when a network error occurs while saving to WebDAV.",
     "placeholders": {
       "details": {
         "type": "String"
@@ -147,8 +442,12 @@
     }
   },
   "errorTimeoutSave": "Timed out while saving to WebDAV server.",
+  "@errorTimeoutSave": {
+    "description": "Error message shown when a WebDAV save request times out."
+  },
   "errorTlsSave": "TLS/SSL error while saving: {details}",
   "@errorTlsSave": {
+    "description": "Error message shown when a TLS error occurs while saving to WebDAV.",
     "placeholders": {
       "details": {
         "type": "String"
@@ -157,6 +456,33 @@
   },
   "errorUnexpectedSave": "Unexpected WebDAV error while saving: {details}",
   "@errorUnexpectedSave": {
+    "description": "Error message shown when an unexpected error occurs while saving to WebDAV.",
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorInvalidLocalFilePath": "Invalid local Markdown file name or path.",
+  "@errorInvalidLocalFilePath": {
+    "description": "Error message shown when the configured local Markdown file path is invalid."
+  },
+  "errorLocalFileTooLarge": "Markdown file exceeds the maximum allowed size.",
+  "@errorLocalFileTooLarge": {
+    "description": "Error message shown when a Markdown file exceeds maxFileBytes."
+  },
+  "errorLoadLocalFileFailed": "Failed to read local Markdown file ({details}).",
+  "@errorLoadLocalFileFailed": {
+    "description": "Error message shown when reading the local Markdown file fails.",
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorSaveLocalFileFailed": "Failed to write local Markdown file ({details}).",
+  "@errorSaveLocalFileFailed": {
+    "description": "Error message shown when writing the local Markdown file fails.",
     "placeholders": {
       "details": {
         "type": "String"

@@ -10,7 +10,7 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
-  String get appTitle => 'TierTask (T2)';
+  String get appTitle => 'TierTask';
 
   @override
   String get tier1Name => 'Fokus';
@@ -51,25 +51,23 @@ class AppLocalizationsDe extends AppLocalizations {
       'Abgeschlossene Aufgaben (30 Tage Aufbewahrung)';
 
   @override
-  String get tabFocusAndReady => '[1] Fokus & [2] Bereit';
+  String get tabFocusAndReady => 'Fokus & Bereit';
 
   @override
   String get emptyFocusHint =>
-      'Keine Aufgaben in # [1] Fokus. Neue Aufgaben aus # [2] Bereit oder # [3] Geplant rücken automatisch hierher nach.';
+      'Keine Aufgaben in Fokus. Neue Aufgaben aus Bereit oder Geplant rücken automatisch hierher nach.';
 
   @override
-  String get emptyReadyHint => 'Keine Aufgaben in # [2] Bereit.';
+  String get emptyReadyHint => 'Keine Aufgaben in Bereit.';
 
   @override
-  String get emptyPlannedHint =>
-      'Keine Aufgaben im aktiven Backlog (# [3] Geplant).';
+  String get emptyPlannedHint => 'Keine Aufgaben im aktiven Backlog (Geplant).';
 
   @override
-  String get emptyBlockedHint =>
-      'Keine blockierten Aufgaben (# [4] Blockiert).';
+  String get emptyBlockedHint => 'Keine blockierten Aufgaben (Blockiert).';
 
   @override
-  String get emptySomedayHint => 'Keine Ideen in # [5] Irgendwann gespeichert.';
+  String get emptySomedayHint => 'Keine Ideen in Irgendwann gespeichert.';
 
   @override
   String get emptyCompletedHint =>
@@ -141,16 +139,16 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get tooltipDowngradeToReady => 'Herabstufen nach # [2] Bereit';
+  String get tooltipDowngradeToReady => 'Herabstufen nach Bereit';
 
   @override
-  String get tooltipDowngradeToPlanned => 'Herabstufen nach # [3] Geplant';
+  String get tooltipDowngradeToPlanned => 'Herabstufen nach Geplant';
 
   @override
-  String get tooltipBlockTask => 'Sofort nach # [4] Blockiert verschieben';
+  String get tooltipBlockTask => 'Sofort nach Blockiert verschieben';
 
   @override
-  String get tooltipPromoteToPlanned => 'In # [3] Geplant einreihen';
+  String get tooltipPromoteToPlanned => 'In Geplant einreihen';
 
   @override
   String get tooltipMoreActions => 'Weitere Aktionen';
@@ -194,6 +192,58 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get languageGerman => 'Deutsch';
+
+  @override
+  String get themeSectionTitle => 'Erscheinungsbild';
+
+  @override
+  String get themeSectionDescription =>
+      'Farbschema auswählen. System folgt der Einstellung des Betriebssystems.';
+
+  @override
+  String get themeSystem => 'System';
+
+  @override
+  String get themeLight => 'Hell';
+
+  @override
+  String get themeDark => 'Dunkel';
+
+  @override
+  String get storageModeSectionTitle => 'Speichermodus';
+
+  @override
+  String get storageModeSectionDescription =>
+      'Wähle aus, ob Aufgaben lokal in einer Markdown-Datei, auf einem WebDAV-Server oder an beiden Orten gespeichert werden.';
+
+  @override
+  String get storageModeLocal => 'Lokal';
+
+  @override
+  String get storageModeWebDav => 'WebDAV';
+
+  @override
+  String get storageModeBoth => 'Beides';
+
+  @override
+  String get localSectionTitle => 'Lokale Markdown-Datei';
+
+  @override
+  String get localSectionDescription =>
+      'Speichert alle Aufgaben in einer lokalen Markdown-Datei auf diesem Gerät.';
+
+  @override
+  String get localFilePathLabel => 'Lokaler Markdown-Dateiname';
+
+  @override
+  String get localFilePathHint => 'tiertask.md oder t2.md';
+
+  @override
+  String get localFilePathErrorEmpty =>
+      'Bitte einen lokalen Dateinamen eingeben.';
+
+  @override
+  String get resolvedLocalPathLabel => 'Aufgelöster lokaler Dateipfad:';
 
   @override
   String get webdavSectionTitle =>
@@ -307,5 +357,23 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String errorUnexpectedSave(String details) {
     return 'Unerwarteter WebDAV-Fehler beim Speichern: $details';
+  }
+
+  @override
+  String get errorInvalidLocalFilePath =>
+      'Ungültiger lokaler Markdown-Dateiname oder Pfad.';
+
+  @override
+  String get errorLocalFileTooLarge =>
+      'Die Markdown-Datei überschreitet die maximal zulässige Größe.';
+
+  @override
+  String errorLoadLocalFileFailed(String details) {
+    return 'Fehler beim Lesen der lokalen Markdown-Datei ($details).';
+  }
+
+  @override
+  String errorSaveLocalFileFailed(String details) {
+    return 'Fehler beim Schreiben der lokalen Markdown-Datei ($details).';
   }
 }

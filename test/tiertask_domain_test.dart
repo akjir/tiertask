@@ -27,7 +27,9 @@ import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/markdown_service.dart';
 
 void main() {
@@ -674,4 +676,343 @@ void main() {
       expect(remoteMarkdownStore, contains('- [x] 2026-11-01 Remote Focus 1'));
     });
   });
+
+  group('Localization ARB Metadata & Key Parity', () {
+    test('every message key in app_en.arb defines @key metadata with a non-empty description and matches app_de.arb keys', () {
+      final enRaw = File('lib/l10n/app_en.arb').readAsStringSync();
+      final deRaw = File('lib/l10n/app_de.arb').readAsStringSync();
+      final enDecoded = jsonDecode(enRaw);
+      final deDecoded = jsonDecode(deRaw);
+
+      expect(enDecoded, isA<Map<String, Object?>>());
+      expect(deDecoded, isA<Map<String, Object?>>());
+      if (enDecoded is! Map<String, Object?> ||
+          deDecoded is! Map<String, Object?>) {
+        return;
+      }
+
+      final enMessageKeys = <String>[
+        for (final key in enDecoded.keys)
+          if (!key.startsWith('@')) key,
+      ];
+      final deMessageKeys = <String>[
+        for (final key in deDecoded.keys)
+          if (!key.startsWith('@')) key,
+      ];
+
+      expect(
+        enMessageKeys,
+        contains('moveTaskTitle'),
+        reason: 'Template ARB must include moveTaskTitle',
+      );
+      expect(
+        deMessageKeys,
+        equals(enMessageKeys),
+        reason: 'German ARB must define the exact same message keys in order',
+      );
+
+      for (final key in enMessageKeys) {
+        _expectArbKeyMetadata(enDecoded, key);
+      }
+    });
+  });
+
+  group('AppThemeMode, StorageMode & WebDavConfig Resolution', () {
+    test('resolves AppThemeMode and StorageMode codes with system and local defaults', () {
+      expect(
+        AppThemeMode.fromCode('light'),
+        equals(AppThemeMode.light),
+        reason: 'Code light must resolve to AppThemeMode.light',
+      );
+      expect(
+        AppThemeMode.fromCode('DARK'),
+        equals(AppThemeMode.dark),
+        reason: 'Case-insensitive dark code must resolve to AppThemeMode.dark',
+      );
+      expect(
+        AppThemeMode.fromCode('system'),
+        equals(AppThemeMode.system),
+        reason: 'Code system must resolve to AppThemeMode.system',
+      );
+      expect(
+        AppThemeMode.fromCode('invalid'),
+        equals(AppThemeMode.system),
+        reason: 'Unknown theme code must default to AppThemeMode.system',
+      );
+      expect(
+        AppThemeMode.fromCode(null),
+        equals(AppThemeMode.system),
+        reason: 'Null theme code must default to AppThemeMode.system',
+      );
+
+      expect(
+        StorageMode.fromCode('local'),
+        equals(StorageMode.local),
+        reason: 'Code local must resolve to StorageMode.local',
+      );
+      expect(
+        StorageMode.fromCode('webdav'),
+        equals(StorageMode.webdav),
+        reason: 'Code webdav must resolve to StorageMode.webdav',
+      );
+      expect(
+        StorageMode.fromCode('BOTH'),
+        equals(StorageMode.both),
+        reason: 'Case-insensitive both code must resolve to StorageMode.both',
+      );
+      expect(
+        StorageMode.fromCode(null),
+        equals(StorageMode.local),
+        reason: 'Null storage mode code must default to StorageMode.local',
+      );
+
+      expect(StorageMode.local.usesLocal, isTrue);
+      expect(StorageMode.local.usesWebDav, isFalse);
+      expect(StorageMode.webdav.usesLocal, isFalse);
+      expect(StorageMode.webdav.usesWebDav, isTrue);
+      expect(StorageMode.both.usesLocal, isTrue);
+      expect(StorageMode.both.usesWebDav, isTrue);
+
+      const defaultConfig = WebDavConfig();
+      expect(
+        defaultConfig.themeMode,
+        equals(AppThemeMode.system),
+        reason: 'Default themeMode must be AppThemeMode.system',
+      );
+      expect(
+        defaultConfig.storageMode,
+        equals(StorageMode.local),
+        reason: 'Default storageMode must be StorageMode.local',
+      );
+      expect(
+        defaultConfig.localFilePath,
+        equals('tiertask.md'),
+        reason: 'Default localFilePath must be tiertask.md',
+      );
+      expect(
+        defaultConfig.isConfigured,
+        isTrue,
+        reason: 'Local mode with non-empty localFilePath is configured',
+      );
+
+      final unconfiguredBoth = defaultConfig.copyWith(
+        storageMode: StorageMode.both,
+      );
+      expect(
+        unconfiguredBoth.isConfigured,
+        isFalse,
+        reason: 'Both mode requires both local file and WebDAV credentials',
+      );
+    });
+  });
+
+  group('LocalFileRepository & StorageMode Synchronization', () {
+    late Directory tempDir;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('tiertask_local_test_');
+    });
+
+    tearDown(() async {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test('reads and writes local Markdown files and rejects traversal or oversized payloads', () async {
+      const config = WebDavConfig(
+        localFilePath: 'custom_tasks.md',
+        storageMode: StorageMode.local,
+      );
+      final repository = LocalFileRepository(
+        config: config,
+        baseDirectoryPath: tempDir.path,
+        maxFileBytes: 256,
+      );
+
+      expect(
+        await repository.loadMarkdown(),
+        isEmpty,
+        reason: 'Missing local Markdown file must return empty string',
+      );
+
+      await repository.saveMarkdown('# [1] Focus\n- [ ] Local Task\n');
+      final loaded = await repository.loadMarkdown();
+      expect(loaded, contains('- [ ] Local Task'));
+
+      final traversalRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: '../escape.md'),
+        baseDirectoryPath: tempDir.path,
+      );
+      await expectLater(
+        traversalRepo.loadMarkdown,
+        throwsA(isA<LocalFileException>()),
+        reason: 'Relative parent traversal (..) must be rejected',
+      );
+
+      final nullByteRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'bad\x00file.md'),
+        baseDirectoryPath: tempDir.path,
+      );
+      await expectLater(
+        nullByteRepo.saveMarkdown('content'),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Null bytes in local file name must be rejected',
+      );
+
+      await expectLater(
+        repository.saveMarkdown('A' * 300),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Content exceeding maxFileBytes must be rejected before write',
+      );
+    });
+
+    test('synchronizes tasks in StorageMode.local and StorageMode.both', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+
+      var remoteMarkdown = '';
+      var remotePutCount = 0;
+      server.listen((HttpRequest request) async {
+        if (request.method == 'GET') {
+          request.response.statusCode = remoteMarkdown.isEmpty
+              ? HttpStatus.notFound
+              : HttpStatus.ok;
+          request.response.write(remoteMarkdown);
+          await request.response.close();
+        } else if (request.method == 'PUT') {
+          remotePutCount++;
+          remoteMarkdown = await utf8.decoder.bind(request).join();
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+        }
+      });
+
+      const localOnlyConfig = WebDavConfig(
+        localFilePath: 'local_only.md',
+        storageMode: StorageMode.local,
+        language: AppLanguage.english,
+      );
+
+      final localContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(localOnlyConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(localContainer.dispose);
+
+      await localContainer.read(taskNotifierProvider.future);
+      await localContainer
+          .read(taskNotifierProvider.notifier)
+          .addTask('Local Mode Task');
+
+      final localFile = File('${tempDir.path}/local_only.md');
+      expect(
+        await localFile.exists(),
+        isTrue,
+        reason: 'Local mode must persist local_only.md on disk',
+      );
+      expect(await localFile.readAsString(), contains('- [ ] Local Mode Task'));
+      expect(
+        remotePutCount,
+        equals(0),
+        reason: 'Local mode must not send WebDAV PUT requests',
+      );
+
+      final bothConfig = WebDavConfig(
+        serverUrl: 'http://${server.address.host}:${server.port}',
+        username: 'stefan',
+        password: 'secret',
+        filePath: 'remote_both.md',
+        localFilePath: 'both_mode.md',
+        storageMode: StorageMode.both,
+        language: AppLanguage.english,
+      );
+
+      final bothContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(bothConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(bothContainer.dispose);
+
+      await bothContainer.read(taskNotifierProvider.future);
+      await bothContainer
+          .read(taskNotifierProvider.notifier)
+          .addTask('Dual Synced Task');
+
+      final bothFile = File('${tempDir.path}/both_mode.md');
+      expect(
+        await bothFile.exists(),
+        isTrue,
+        reason: 'Both mode must persist both_mode.md locally',
+      );
+      expect(await bothFile.readAsString(), contains('- [ ] Dual Synced Task'));
+      expect(
+        remoteMarkdown,
+        contains('- [ ] Dual Synced Task'),
+        reason: 'Both mode must also push Markdown to WebDAV',
+      );
+      expect(remotePutCount, greaterThanOrEqualTo(1));
+
+      await expectLater(
+        localContainer
+            .read(taskNotifierProvider.notifier)
+            .testConnectionAndSync(localOnlyConfig),
+        throwsA(isA<WebDavException>()),
+        reason: 'testConnectionAndSync must reject StorageMode.local without WebDAV',
+      );
+
+      await expectLater(
+        localContainer
+            .read(taskNotifierProvider.notifier)
+            .testConnectionAndSync(
+              const WebDavConfig(
+                storageMode: StorageMode.webdav,
+                language: AppLanguage.english,
+              ),
+            ),
+        throwsA(isA<WebDavException>()),
+        reason:
+            'testConnectionAndSync must reject unconfigured StorageMode.webdav',
+      );
+    });
+  });
+}
+
+/// Verifies that [arbMap] defines an `@<key>` metadata map with a non-empty description.
+void _expectArbKeyMetadata(Map<String, Object?> arbMap, String key) {
+  final metadataKey = '@$key';
+  final metadata = arbMap[metadataKey];
+  expect(
+    metadata,
+    isA<Map<String, Object?>>(),
+    reason:
+        'The message with key "$key" must have $metadataKey metadata defined',
+  );
+  if (metadata is! Map<String, Object?>) {
+    return;
+  }
+
+  final description = metadata['description'];
+  expect(
+    description,
+    isA<String>(),
+    reason: 'Metadata $metadataKey must define a description string',
+  );
+  if (description is String) {
+    expect(
+      description.trim(),
+      isNotEmpty,
+      reason: 'Metadata $metadataKey description must not be empty',
+    );
+  }
 }

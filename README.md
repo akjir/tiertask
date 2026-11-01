@@ -11,12 +11,13 @@
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
 * **English & German Localization:** Supports English (`en`, default fallback) and German (`de`) via external Flutter ARB language files (`lib/l10n/app_en.arb`, `lib/l10n/app_de.arb`), selectable in Settings (`System`, `English`, or `Deutsch`).
+* **Theme Modes:** Supports `System` (default), `Light`, and `Dark` Material 3 color themes selectable in Settings.
 * **Six Numbered Tiers (`[1]`–`[6]`):** `# [1] Focus`, `# [2] Ready`, `# [3] Planned`, `# [4] Blocked`, `# [5] Someday`, and `# [6] Completed`. The parser matches strictly by tier number (`[1]`–`[6]`), ignores the label text, and creates any missing tiers automatically.
 * **Deterministic Auto-Pull Cascade:** Automatically refills Tier `1` (soft limit `3`) from Tier `2` and Tier `2` (soft limit `5`) from Tier `3` without force-demoting manually overfilled tiers.
 * **Anti-Ping-Pong Downgrade:** Pulls replacement tasks upward before appending a downgraded task to the lower tier.
 * **30-Day Completed Task Pruning:** Stamps completed tasks with `- [x] YYYY-MM-DD` in Tier `6` and removes entries older than `30` days (UTC).
-* **Dual Storage Backends:** Supports direct persistence to a local Markdown (`.md`) file via `dart:io` `File` and remote HTTP `GET`/`PUT` synchronization with any standards-compliant WebDAV server via `dart:io` `HttpClient`.
-* **Encrypted Configuration Persistence:** Stores WebDAV credentials, file configuration, and language settings via `flutter_secure_storage`.
+* **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only Markdown persistence (`LocalFileRepository` with configurable local file name `localFilePath`, defaulting to `tiertask.md`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
+* **Encrypted Configuration Persistence:** Stores storage mode, local and remote file names, WebDAV credentials, language, and theme settings via `flutter_secure_storage`.
 
 ## Requirements
 
@@ -40,17 +41,17 @@ flutter gen-l10n
 flutter run -d linux
 flutter run -d windows
 
-# Build release artifacts for supported platforms
-flutter build linux --release
-flutter build apk --release
-flutter build windows --release
+# Build obfuscated release artifacts for supported platforms
+flutter build linux --release --obfuscate --split-debug-info=build/symbols
+flutter build apk --release --obfuscate --split-debug-info=build/symbols
+flutter build windows --release --obfuscate --split-debug-info=build/symbols
 ```
 
 ## Quick Start
 
 1. Launch `TierTask` and open the settings screen via the toolbar icon.
-2. Select the display language (`System`, `English`, or `Deutsch`); `System` uses German on German OS locales and defaults to English otherwise.
-3. Configure either a local Markdown file path (for example `/home/example-user/tiertask.md` or `C:\Users\example-user\tiertask.md`) or a WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and file path `tiertask.md`).
+2. Select the display language (`System`, `English`, or `Deutsch`) and color theme (`System`, `Light`, or `Dark`).
+3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local Markdown file name (default `tiertask.md`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and remote file path `tiertask.md`).
 4. Activate connection test and synchronization to load an existing Markdown file or initialize a new 6-tier `tiertask.md` file.
 5. Add tasks via the bottom input bar (`QuickAddBar`); new tasks enter `# [3] Planned` by default and cascade into `# [2] Ready` or `# [1] Focus` when slots are open.
 

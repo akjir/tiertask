@@ -185,7 +185,7 @@ class WebDavRepository {
 
   /// Validates and returns the resolved WebDAV [Uri] or throws a [WebDavException].
   Uri _requireUri(AppLocalizations localizations) {
-    if (!config.isConfigured) {
+    if (!config.isWebDavConfigured) {
       throw WebDavException(localizations.errorWebDavNotConfigured);
     }
     final uri = config.resolveEndpointUri();

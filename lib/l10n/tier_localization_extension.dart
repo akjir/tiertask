@@ -16,7 +16,7 @@
 import '../models/task_tier.dart';
 import 'app_localizations.dart';
 
-/// Maps [TaskTier] values (`1` through `6`) to localized names, Markdown headings,
+/// Maps [TaskTier] values (`1` through `6`) to localized display names,
 /// descriptions, and empty-state hints from [AppLocalizations].
 extension TierLocalizationExtension on AppLocalizations {
   /// Returns the localized description for [tier].
@@ -41,11 +41,6 @@ extension TierLocalizationExtension on AppLocalizations {
       TaskTier.someday => emptySomedayHint,
       TaskTier.completed => emptyCompletedHint,
     };
-  }
-
-  /// Returns the localized Markdown H1 heading (`# [<number>] <localizedName>`) for [tier].
-  String tierMarkdownHeading(TaskTier tier) {
-    return tier.formatHeading(tierName(tier));
   }
 
   /// Returns the localized display name for [tier] without the `# [n]` prefix.

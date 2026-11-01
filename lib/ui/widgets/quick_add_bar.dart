@@ -124,7 +124,7 @@ class _QuickAddInputRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final localizations = AppLocalizations.of(context);
-    final heading = localizations.tierMarkdownHeading(effectiveTier);
+    final heading = localizations.tierName(effectiveTier);
 
     return Row(
       children: [
@@ -203,7 +203,7 @@ class _TierSelectionChipRow extends StatelessWidget {
 
   /// Formats the localized label for [tier] chip.
   String _chipLabel(AppLocalizations localizations, TaskTier tier) {
-    final heading = localizations.tierMarkdownHeading(tier);
+    final heading = localizations.tierName(tier);
     if (tier == TaskTier.planned && explicitSelectedTier == null) {
       return localizations.defaultTierChipLabel(heading);
     }

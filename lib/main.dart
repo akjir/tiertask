@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'l10n/app_localizations.dart';
+import 'models/webdav_config.dart';
 import 'providers/task_providers.dart';
 import 'ui/home_screen.dart';
 
@@ -28,6 +29,7 @@ class TierTaskApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locale = ref.watch(appLocaleProvider);
+    final appThemeMode = ref.watch(appThemeModeProvider);
 
     return MaterialApp(
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
@@ -35,7 +37,7 @@ class TierTaskApp extends ConsumerWidget {
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      themeMode: ThemeMode.system,
+      themeMode: _toFlutterThemeMode(appThemeMode),
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.teal,
@@ -48,6 +50,15 @@ class TierTaskApp extends ConsumerWidget {
       ),
       home: const HomeScreen(),
     );
+  }
+
+  /// Maps [AppThemeMode] to Flutter's [ThemeMode].
+  ThemeMode _toFlutterThemeMode(AppThemeMode mode) {
+    return switch (mode) {
+      AppThemeMode.system => ThemeMode.system,
+      AppThemeMode.light => ThemeMode.light,
+      AppThemeMode.dark => ThemeMode.dark,
+    };
   }
 }
 

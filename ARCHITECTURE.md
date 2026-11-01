@@ -8,14 +8,14 @@
 | Layer | Path | Responsibility |
 | :--- | :--- | :--- |
 | Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, and `TaskTier` localization mappings. |
-| Models | `lib/models/` | Immutable domain data structures (`TaskTier`, `TaskItem`, `TaskBoard`, `AppLanguage`, `WebDavConfig`) and deterministic pull/pruning business rules. |
+| Models | `lib/models/` | Immutable domain data structures (`TaskTier`, `TaskItem`, `TaskBoard`, `AppLanguage`, `AppThemeMode`, `StorageMode`, `WebDavConfig`) and deterministic pull/pruning business rules. |
 | Services | `lib/services/` | Stateless single-pass Markdown parsing and serialization (`MarkdownService`) matching numbered tiers `[1]`–`[6]`. |
 | Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local Markdown file reads/writes (`dart:io` `File`), and encrypted settings persistence (`flutter_secure_storage`). |
-| Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating locale resolution, domain mutations, and repository synchronization. |
+| Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating locale and theme resolution, domain mutations, and repository synchronization. |
 | UI | `lib/ui/` | Localized Material 3 screens and modular leaf widgets for Linux, Android, and Windows. |
 
 > [!NOTE]
-> Per `P-IO-ISOLATION` and `P-WEBDAV-API`, all network (`HttpClient`), local filesystem (`File`), and secure storage (`FlutterSecureStorage`) operations are strictly isolated in `lib/repositories/`. Domain models, services, and UI widgets remain free of direct `dart:io` calls.
+> Per Google's Flutter App Architecture guidelines (`P-UDF-ARCHITECTURE`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-GLOBAL-ERROR-BOUNDARY`, `P-ATOMIC-STATE`, `P-SECRET-HYGIENE`, `P-TRANSPORT-SECURITY`), data flows unidirectionally from single-source-of-truth repositories (`lib/repositories/`) through state notifiers (`lib/providers/`) to stateless views (`lib/ui/`). All network (`HttpClient`), local filesystem (`File`), and secure storage (`FlutterSecureStorage`) operations are strictly isolated in `lib/repositories/`, global synchronous and asynchronous error boundaries (`FlutterError.onError` and `PlatformDispatcher.instance.onError`) guard runtime stability, and credentials are redacted from logs and error messages.
 
 ## Directory Layout
 
@@ -49,6 +49,7 @@ tiertask/
 │   ├── providers/
 │   │   └── task_providers.dart
 │   ├── repositories/
+│   │   ├── local_file_repository.dart
 │   │   ├── settings_repository.dart
 │   │   └── webdav_repository.dart
 │   ├── services/
@@ -83,7 +84,7 @@ tiertask/
 | :--- | :--- |
 | `lib/l10n/app_en.arb` | External English (`en`, default fallback) translation bundle for all UI labels, tier headings/descriptions, and error messages. |
 | `lib/l10n/app_de.arb` | External German (`de`) translation bundle for all UI labels, tier headings/descriptions, and error messages. |
-| `lib/l10n/tier_localization_extension.dart` | Extension on `AppLocalizations` mapping `TaskTier` (`1`–`6`) to localized tier names, `# [<number>] <name>` headings, descriptions, and empty-state hints. |
+| `lib/l10n/tier_localization_extension.dart` | Extension on `AppLocalizations` mapping `TaskTier` (`1`–`6`) to localized tier names, descriptions, and empty-state hints. |
 
 ## Domain Models
 
@@ -92,7 +93,7 @@ tiertask/
 | `lib/models/task_tier.dart` | Defines the `TaskTier` enum for the 6 numbered tiers (`1` `focus`, `2` `ready`, `3` `planned`, `4` `blocked`, `5` `someday`, `6` `completed`), soft limits, `# [n]` formatting, and label-independent tier-number parsing. |
 | `lib/models/task_item.dart` | Immutable `TaskItem` value class with completion state, UTC `YYYY-MM-DD` date normalization, and Markdown line serialization. |
 | `lib/models/task_board.dart` | Immutable `TaskBoard` aggregate enforcing the auto-pull cascade (`Tier 3 -> Tier 2 -> Tier 1`), 30-day completed task pruning in Tier `6`, and anti-ping-pong downgrades. |
-| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`) with English default fallback resolution and the immutable `WebDavConfig` model. |
+| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model. |
 
 ## Services
 
@@ -104,22 +105,23 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting WebDAV and `AppLanguage` settings. |
-| `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository executing authenticated HTTP `GET` and `PUT` operations with localized `WebDavException` error mapping; local `.md` file persistence is also isolated in `lib/repositories/`. |
+| `lib/repositories/local_file_repository.dart` | Native `dart:io` `File` repository reading and writing the local Markdown file (`localFilePath`) with path traversal validation and `maxFileBytes` bounds checking. |
+| `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting `StorageMode`, local and remote file paths, WebDAV credentials, `AppLanguage`, and `AppThemeMode`. |
+| `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository executing authenticated HTTP `GET` and `PUT` operations with localized `WebDavException` error mapping. |
 
 ## State Providers
 
 | File | Function |
 | :--- | :--- |
-| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale resolution, board loading, mutations, and localized Markdown persistence. |
+| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `localFileRepositoryProvider`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme resolution, board loading, mutations, and local/WebDAV Markdown persistence. |
 
 ## User Interface
 
 | File | Function |
 | :--- | :--- |
-| `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 themes and `AppLocalizations` delegates (`en` and `de`). |
-| `lib/ui/home_screen.dart` | Primary board screen displaying `# [1] Focus`, `# [2] Ready`, and tabbed/expandable secondary tiers (`# [3]` through `# [6]`). |
-| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), WebDAV endpoint parameters, file path, and connection testing. |
+| `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
+| `lib/ui/home_screen.dart` | Primary board screen displaying `Focus`, `Ready`, and tabbed/expandable secondary tiers (`Planned`, `Blocked`, `Someday`, and `Completed`). |
+| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), storage mode (`Local`, `WebDAV`, `Both`), local file name, WebDAV endpoint parameters, and synchronization testing. |
 | `lib/ui/widgets/quick_add_bar.dart` | Bottom input bar for creating tasks with optional target tier selection (`1` through `5`, defaulting to Tier `3`). |
 | `lib/ui/widgets/restore_task_sheet.dart` | Modal bottom sheet for selecting the destination active tier (`1` through `5`) when restoring or moving a task. |
 | `lib/ui/widgets/task_tile.dart` | Individual task card providing completion, downgrade, quick-block, title editing, move, and delete actions. |

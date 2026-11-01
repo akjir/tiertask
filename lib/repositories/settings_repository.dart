@@ -17,7 +17,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/webdav_config.dart';
 
-/// Repository contract for persisting WebDAV credentials and language settings.
+/// Repository contract for persisting storage mode, file paths, WebDAV credentials,
+/// language, and theme settings.
 abstract class SettingsRepository {
   /// Loads the persisted [WebDavConfig].
   Future<WebDavConfig> loadConfig();
@@ -34,8 +35,11 @@ class SecureSettingsRepository implements SettingsRepository {
 
   static const String _keyFilePath = 't2_webdav_file_path';
   static const String _keyLanguage = 't2_app_language';
+  static const String _keyLocalFilePath = 't2_local_file_path';
   static const String _keyPassword = 't2_webdav_password';
   static const String _keyServerUrl = 't2_webdav_server_url';
+  static const String _keyStorageMode = 't2_storage_mode';
+  static const String _keyThemeMode = 't2_theme_mode';
   static const String _keyUsername = 't2_webdav_username';
 
   final FlutterSecureStorage _storage;
@@ -47,13 +51,25 @@ class SecureSettingsRepository implements SettingsRepository {
       final username = await _storage.read(key: _keyUsername) ?? '';
       final password = await _storage.read(key: _keyPassword) ?? '';
       final filePath = await _storage.read(key: _keyFilePath) ?? 'tiertask.md';
+      final localFilePath =
+          await _storage.read(key: _keyLocalFilePath) ?? 'tiertask.md';
+      final rawStorageMode = await _storage.read(key: _keyStorageMode);
       final rawLanguage = await _storage.read(key: _keyLanguage);
+      final rawThemeMode = await _storage.read(key: _keyThemeMode);
+
       return WebDavConfig(
         serverUrl: serverUrl,
         username: username,
         password: password,
         filePath: filePath.trim().isEmpty ? 'tiertask.md' : filePath,
+        localFilePath: localFilePath.trim().isEmpty
+            ? 'tiertask.md'
+            : localFilePath,
+        storageMode: rawStorageMode == null
+            ? null
+            : StorageMode.fromCode(rawStorageMode),
         language: AppLanguage.fromCode(rawLanguage),
+        themeMode: AppThemeMode.fromCode(rawThemeMode),
       );
     } on Object {
       return const WebDavConfig();
@@ -71,7 +87,15 @@ class SecureSettingsRepository implements SettingsRepository {
           ? 'tiertask.md'
           : config.filePath.trim(),
     );
+    await _storage.write(
+      key: _keyLocalFilePath,
+      value: config.localFilePath.trim().isEmpty
+          ? 'tiertask.md'
+          : config.localFilePath.trim(),
+    );
+    await _storage.write(key: _keyStorageMode, value: config.storageMode.code);
     await _storage.write(key: _keyLanguage, value: config.language.code);
+    await _storage.write(key: _keyThemeMode, value: config.themeMode.code);
   }
 }
 

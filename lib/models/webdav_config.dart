@@ -59,7 +59,67 @@ enum AppLanguage {
   }
 }
 
-/// Immutable configuration for WebDAV synchronization and application language.
+/// Supported color theme modes in TierTask.
+enum AppThemeMode {
+  /// Follows the operating system brightness setting.
+  system(code: 'system'),
+
+  /// Forces the light Material 3 theme.
+  light(code: 'light'),
+
+  /// Forces the dark Material 3 theme.
+  dark(code: 'dark');
+
+  /// Creates an [AppThemeMode] option.
+  const AppThemeMode({required this.code});
+
+  /// Storage identifier persisted in settings (`'system'`, `'light'`, or `'dark'`).
+  final String code;
+
+  /// Resolves an [AppThemeMode] from its persisted [rawCode], defaulting to [AppThemeMode.system].
+  static AppThemeMode fromCode(String? rawCode) {
+    return switch (rawCode?.trim().toLowerCase()) {
+      'light' => AppThemeMode.light,
+      'dark' => AppThemeMode.dark,
+      _ => AppThemeMode.system,
+    };
+  }
+}
+
+/// Supported Markdown persistence and synchronization modes in TierTask.
+enum StorageMode {
+  /// Persists the Markdown file only on the local filesystem.
+  local(code: 'local'),
+
+  /// Synchronizes the Markdown file only with a remote WebDAV server.
+  webdav(code: 'webdav'),
+
+  /// Persists the Markdown file locally and synchronizes it with a WebDAV server.
+  both(code: 'both');
+
+  /// Creates a [StorageMode] option.
+  const StorageMode({required this.code});
+
+  /// Storage identifier persisted in settings (`'local'`, `'webdav'`, or `'both'`).
+  final String code;
+
+  /// Whether local Markdown file persistence is enabled in this mode.
+  bool get usesLocal => this == StorageMode.local || this == StorageMode.both;
+
+  /// Whether remote WebDAV synchronization is enabled in this mode.
+  bool get usesWebDav => this == StorageMode.webdav || this == StorageMode.both;
+
+  /// Resolves a [StorageMode] from its persisted [rawCode], defaulting to [StorageMode.local].
+  static StorageMode fromCode(String? rawCode) {
+    return switch (rawCode?.trim().toLowerCase()) {
+      'webdav' => StorageMode.webdav,
+      'both' => StorageMode.both,
+      _ => StorageMode.local,
+    };
+  }
+}
+
+/// Immutable configuration for local file storage, WebDAV synchronization, language, and theme.
 @immutable
 class WebDavConfig {
   /// Creates a [WebDavConfig] instance.
@@ -68,8 +128,15 @@ class WebDavConfig {
     this.username = '',
     this.password = '',
     this.filePath = 'tiertask.md',
+    this.localFilePath = 'tiertask.md',
+    StorageMode? storageMode,
     this.language = AppLanguage.system,
-  });
+    this.themeMode = AppThemeMode.system,
+  }) : storageMode =
+           storageMode ??
+           (serverUrl != '' && username != '' && password != ''
+               ? StorageMode.webdav
+               : StorageMode.local);
 
   static final RegExp _leadingSlashesPattern = RegExp(r'^/+');
 
@@ -82,17 +149,48 @@ class WebDavConfig {
   /// WebDAV password or application password.
   final String password;
 
-  /// Remote Markdown file name or relative path (for example `tiertask.md`).
+  /// Remote Markdown file name or relative path on the WebDAV server.
   final String filePath;
+
+  /// Local Markdown file name or path on the device filesystem.
+  final String localFilePath;
+
+  /// Active persistence mode (`local`, `webdav`, or `both`).
+  final StorageMode storageMode;
 
   /// Selected display language preference (`system`, `english`, or `german`).
   final AppLanguage language;
 
+  /// Selected color theme preference (`system`, `light`, or `dark`).
+  final AppThemeMode themeMode;
+
+  /// Whether at least one storage backend required by [storageMode] is ready for I/O.
+  bool get hasActiveStorage {
+    return switch (storageMode) {
+      StorageMode.local => isLocalConfigured,
+      StorageMode.webdav => isWebDavConfigured,
+      StorageMode.both => isLocalConfigured || isWebDavConfigured,
+    };
+  }
+
+  /// Whether all storage backends required by [storageMode] are fully configured.
+  bool get isConfigured {
+    return switch (storageMode) {
+      StorageMode.local => isLocalConfigured,
+      StorageMode.webdav => isWebDavConfigured,
+      StorageMode.both => isLocalConfigured && isWebDavConfigured,
+    };
+  }
+
+  /// Whether the local Markdown file name or path is non-empty.
+  bool get isLocalConfigured => localFilePath.trim().isNotEmpty;
+
   /// Whether all required WebDAV connection fields are populated.
-  bool get isConfigured =>
+  bool get isWebDavConfigured =>
       serverUrl.trim().isNotEmpty &&
       username.trim().isNotEmpty &&
-      password.isNotEmpty;
+      password.isNotEmpty &&
+      resolveEndpointUri() != null;
 
   /// Returns a copy of this configuration with updated fields.
   WebDavConfig copyWith({
@@ -100,14 +198,20 @@ class WebDavConfig {
     String? username,
     String? password,
     String? filePath,
+    String? localFilePath,
+    StorageMode? storageMode,
     AppLanguage? language,
+    AppThemeMode? themeMode,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
       username: username ?? this.username,
       password: password ?? this.password,
       filePath: filePath ?? this.filePath,
+      localFilePath: localFilePath ?? this.localFilePath,
+      storageMode: storageMode ?? this.storageMode,
       language: language ?? this.language,
+      themeMode: themeMode ?? this.themeMode,
     );
   }
 
@@ -124,6 +228,11 @@ class WebDavConfig {
 
     while (rawUrl.endsWith('/')) {
       rawUrl = rawUrl.substring(0, rawUrl.length - 1);
+    }
+
+    final baseUri = Uri.tryParse(rawUrl);
+    if (baseUri == null || !baseUri.hasScheme || baseUri.host.isEmpty) {
+      return null;
     }
 
     final cleanFile = filePath.trim().isEmpty
@@ -163,10 +272,21 @@ class WebDavConfig {
         other.username == username &&
         other.password == password &&
         other.filePath == filePath &&
-        other.language == language;
+        other.localFilePath == localFilePath &&
+        other.storageMode == storageMode &&
+        other.language == language &&
+        other.themeMode == themeMode;
   }
 
   @override
-  int get hashCode =>
-      Object.hash(serverUrl, username, password, filePath, language);
+  int get hashCode => Object.hash(
+    serverUrl,
+    username,
+    password,
+    filePath,
+    localFilePath,
+    storageMode,
+    language,
+    themeMode,
+  );
 }

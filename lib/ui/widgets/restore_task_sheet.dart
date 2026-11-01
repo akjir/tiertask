@@ -81,7 +81,7 @@ class _TierOptionTile extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       leading: Icon(_iconForTier(tier)),
       title: Text(
-        localizations.tierMarkdownHeading(tier),
+        localizations.tierName(tier),
         style: const TextStyle(fontWeight: FontWeight.w600),
       ),
       subtitle: Text(localizations.tierDescription(tier)),

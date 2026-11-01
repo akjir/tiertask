@@ -106,9 +106,6 @@ enum TaskTier {
   /// Whether this tier is static (excluded from automatic pull operations).
   final bool isStatic;
 
-  /// Default English Markdown H1 line (`# [<number>] <defaultLabel>`).
-  String get markdownHeading => formatHeading();
-
   /// Formats the Markdown H1 heading (`# [<number>] <label>`) using [label] or [defaultLabel].
   String formatHeading([String? label]) {
     final effectiveLabel = (label == null || label.trim().isEmpty)

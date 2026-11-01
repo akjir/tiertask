@@ -118,10 +118,10 @@ class HomeScreen extends ConsumerWidget {
         tabAlignment: TabAlignment.start,
         tabs: [
           Tab(text: localizations.tabFocusAndReady),
-          Tab(text: localizations.tierMarkdownHeading(TaskTier.planned)),
-          Tab(text: localizations.tierMarkdownHeading(TaskTier.blocked)),
-          Tab(text: localizations.tierMarkdownHeading(TaskTier.someday)),
-          Tab(text: localizations.tierMarkdownHeading(TaskTier.completed)),
+          Tab(text: localizations.tierName(TaskTier.planned)),
+          Tab(text: localizations.tierName(TaskTier.blocked)),
+          Tab(text: localizations.tierName(TaskTier.someday)),
+          Tab(text: localizations.tierName(TaskTier.completed)),
         ],
       ),
     );
@@ -303,7 +303,7 @@ class _ExpandableTierSection extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final localizations = AppLocalizations.of(context);
-    final heading = localizations.tierMarkdownHeading(tier);
+    final heading = localizations.tierName(tier);
 
     return Card(
       elevation: 0,
@@ -518,7 +518,7 @@ class _ReadySection extends StatelessWidget {
   }
 }
 
-/// Section header displaying the localized `# [n]` heading, description, and WIP counter pill.
+/// Section header displaying the localized tier name, description, and WIP counter pill.
 class _SectionHeader extends StatelessWidget {
   /// Creates a [_SectionHeader].
   const _SectionHeader({
@@ -561,7 +561,7 @@ class _SectionHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                localizations.tierMarkdownHeading(tier),
+                localizations.tierName(tier),
                 style: theme.textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),

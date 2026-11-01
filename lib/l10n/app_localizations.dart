@@ -98,521 +98,641 @@ abstract class AppLocalizations {
     Locale('en'),
   ];
 
-  /// No description provided for @appTitle.
+  /// Application title shown in the app bar and window header.
   ///
   /// In en, this message translates to:
-  /// **'TierTask (T2)'**
+  /// **'TierTask'**
   String get appTitle;
 
-  /// No description provided for @tier1Name.
+  /// Display name for tier 1 (Focus).
   ///
   /// In en, this message translates to:
   /// **'Focus'**
   String get tier1Name;
 
-  /// No description provided for @tier2Name.
+  /// Display name for tier 2 (Ready).
   ///
   /// In en, this message translates to:
   /// **'Ready'**
   String get tier2Name;
 
-  /// No description provided for @tier3Name.
+  /// Display name for tier 3 (Planned).
   ///
   /// In en, this message translates to:
   /// **'Planned'**
   String get tier3Name;
 
-  /// No description provided for @tier4Name.
+  /// Display name for tier 4 (Blocked).
   ///
   /// In en, this message translates to:
   /// **'Blocked'**
   String get tier4Name;
 
-  /// No description provided for @tier5Name.
+  /// Display name for tier 5 (Someday).
   ///
   /// In en, this message translates to:
   /// **'Someday'**
   String get tier5Name;
 
-  /// No description provided for @tier6Name.
+  /// Display name for tier 6 (Completed).
   ///
   /// In en, this message translates to:
   /// **'Completed'**
   String get tier6Name;
 
-  /// No description provided for @tier1Description.
+  /// Subtitle description for tier 1 (Focus).
   ///
   /// In en, this message translates to:
   /// **'Active top priority (Soft limit: 3)'**
   String get tier1Description;
 
-  /// No description provided for @tier2Description.
+  /// Subtitle description for tier 2 (Ready).
   ///
   /// In en, this message translates to:
   /// **'Ready for Focus (Soft limit: 5)'**
   String get tier2Description;
 
-  /// No description provided for @tier3Description.
+  /// Subtitle description for tier 3 (Planned).
   ///
   /// In en, this message translates to:
   /// **'Active backlog (automatically pulls into Ready)'**
   String get tier3Description;
 
-  /// No description provided for @tier4Description.
+  /// Subtitle description for tier 4 (Blocked).
   ///
   /// In en, this message translates to:
   /// **'Waiting on external events or third parties'**
   String get tier4Description;
 
-  /// No description provided for @tier5Description.
+  /// Subtitle description for tier 5 (Someday).
   ///
   /// In en, this message translates to:
   /// **'Idea storage without automatic pull'**
   String get tier5Description;
 
-  /// No description provided for @tier6Description.
+  /// Subtitle description for tier 6 (Completed).
   ///
   /// In en, this message translates to:
   /// **'Completed tasks (30-day retention)'**
   String get tier6Description;
 
-  /// No description provided for @tabFocusAndReady.
+  /// Tab label for the combined Focus and Ready view.
   ///
   /// In en, this message translates to:
-  /// **'[1] Focus & [2] Ready'**
+  /// **'Focus & Ready'**
   String get tabFocusAndReady;
 
-  /// No description provided for @emptyFocusHint.
+  /// Empty-state hint shown when tier 1 (Focus) contains no tasks.
   ///
   /// In en, this message translates to:
-  /// **'No tasks in # [1] Focus. Tasks from # [2] Ready or # [3] Planned automatically move up here.'**
+  /// **'No tasks in Focus. Tasks from Ready or Planned automatically move up here.'**
   String get emptyFocusHint;
 
-  /// No description provided for @emptyReadyHint.
+  /// Empty-state hint shown when tier 2 (Ready) contains no tasks.
   ///
   /// In en, this message translates to:
-  /// **'No tasks in # [2] Ready.'**
+  /// **'No tasks in Ready.'**
   String get emptyReadyHint;
 
-  /// No description provided for @emptyPlannedHint.
+  /// Empty-state hint shown when tier 3 (Planned) contains no tasks.
   ///
   /// In en, this message translates to:
-  /// **'No tasks in active backlog (# [3] Planned).'**
+  /// **'No tasks in active backlog (Planned).'**
   String get emptyPlannedHint;
 
-  /// No description provided for @emptyBlockedHint.
+  /// Empty-state hint shown when tier 4 (Blocked) contains no tasks.
   ///
   /// In en, this message translates to:
-  /// **'No blocked tasks (# [4] Blocked).'**
+  /// **'No blocked tasks (Blocked).'**
   String get emptyBlockedHint;
 
-  /// No description provided for @emptySomedayHint.
+  /// Empty-state hint shown when tier 5 (Someday) contains no tasks.
   ///
   /// In en, this message translates to:
-  /// **'No ideas stored in # [5] Someday.'**
+  /// **'No ideas stored in Someday.'**
   String get emptySomedayHint;
 
-  /// No description provided for @emptyCompletedHint.
+  /// Empty-state hint shown when tier 6 (Completed) contains no tasks.
   ///
   /// In en, this message translates to:
   /// **'No completed tasks from the last 30 days.'**
   String get emptyCompletedHint;
 
-  /// No description provided for @emptySectionEntries.
+  /// Fallback empty-state message for a section with the given heading.
   ///
   /// In en, this message translates to:
   /// **'No entries in {heading}.'**
   String emptySectionEntries(String heading);
 
-  /// No description provided for @tooltipSyncWebDav.
+  /// Tooltip for the WebDAV synchronization button in the app bar.
   ///
   /// In en, this message translates to:
   /// **'Synchronize with WebDAV'**
   String get tooltipSyncWebDav;
 
-  /// No description provided for @tooltipMarkdownPreview.
+  /// Tooltip for the raw Markdown preview button in the app bar.
   ///
   /// In en, this message translates to:
   /// **'Show Markdown preview'**
   String get tooltipMarkdownPreview;
 
-  /// No description provided for @tooltipSettings.
+  /// Tooltip for the settings button in the app bar.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get tooltipSettings;
 
-  /// No description provided for @markdownPreviewTitle.
+  /// Dialog title for the raw Markdown preview dialog.
   ///
   /// In en, this message translates to:
   /// **'Raw Markdown (Single Source of Truth)'**
   String get markdownPreviewTitle;
 
-  /// No description provided for @actionClose.
+  /// Button label to close a dialog.
   ///
   /// In en, this message translates to:
   /// **'Close'**
   String get actionClose;
 
-  /// No description provided for @unconfiguredBannerText.
+  /// Banner message shown when WebDAV synchronization is not configured.
   ///
   /// In en, this message translates to:
   /// **'Local mode active. Configure WebDAV for synchronization.'**
   String get unconfiguredBannerText;
 
-  /// No description provided for @actionConfigure.
+  /// Button label to open configuration settings from the banner.
   ///
   /// In en, this message translates to:
   /// **'Configure'**
   String get actionConfigure;
 
-  /// No description provided for @syncErrorTitle.
+  /// Heading for the WebDAV synchronization error card.
   ///
   /// In en, this message translates to:
   /// **'WebDAV Synchronization Error'**
   String get syncErrorTitle;
 
-  /// No description provided for @actionSettings.
+  /// Button label to navigate to the settings screen.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get actionSettings;
 
-  /// No description provided for @actionRetry.
+  /// Button label to retry a failed synchronization operation.
   ///
   /// In en, this message translates to:
   /// **'Retry'**
   String get actionRetry;
 
-  /// No description provided for @defaultTierChipLabel.
+  /// Chip label indicating the default target tier in the quick-add bar.
   ///
   /// In en, this message translates to:
   /// **'{heading} (Default)'**
   String defaultTierChipLabel(String heading);
 
-  /// No description provided for @quickAddHint.
+  /// Placeholder hint inside the quick-add text field for the selected tier.
   ///
   /// In en, this message translates to:
   /// **'Add new task to {heading}...'**
   String quickAddHint(String heading);
 
-  /// No description provided for @actionAdd.
+  /// Button label to add a new task.
   ///
   /// In en, this message translates to:
   /// **'Add'**
   String get actionAdd;
 
-  /// No description provided for @restoreTaskTitle.
+  /// Bottom sheet title when restoring a completed task to an active tier.
   ///
   /// In en, this message translates to:
   /// **'Restore Task'**
   String get restoreTaskTitle;
 
-  /// No description provided for @moveTaskTitle.
+  /// Bottom sheet title when moving an active task to another tier.
   ///
   /// In en, this message translates to:
   /// **'Move Task'**
   String get moveTaskTitle;
 
-  /// No description provided for @selectTargetTierSubtitle.
+  /// Subtitle in the move or restore sheet prompting selection of a target tier.
   ///
   /// In en, this message translates to:
   /// **'\"{taskTitle}\" - Select target tier:'**
   String selectTargetTierSubtitle(String taskTitle);
 
-  /// No description provided for @completedOnDate.
+  /// Subtitle displaying the ISO completion date of a completed task.
   ///
   /// In en, this message translates to:
   /// **'Completed on {date}'**
   String completedOnDate(String date);
 
-  /// No description provided for @tooltipDowngradeToReady.
+  /// Tooltip for downgrading a task from Focus to Ready.
   ///
   /// In en, this message translates to:
-  /// **'Downgrade to # [2] Ready'**
+  /// **'Downgrade to Ready'**
   String get tooltipDowngradeToReady;
 
-  /// No description provided for @tooltipDowngradeToPlanned.
+  /// Tooltip for downgrading a task from Ready to Planned.
   ///
   /// In en, this message translates to:
-  /// **'Downgrade to # [3] Planned'**
+  /// **'Downgrade to Planned'**
   String get tooltipDowngradeToPlanned;
 
-  /// No description provided for @tooltipBlockTask.
+  /// Tooltip for moving a task directly to the Blocked tier.
   ///
   /// In en, this message translates to:
-  /// **'Move immediately to # [4] Blocked'**
+  /// **'Move immediately to Blocked'**
   String get tooltipBlockTask;
 
-  /// No description provided for @tooltipPromoteToPlanned.
+  /// Tooltip for promoting a task into the Planned tier.
   ///
   /// In en, this message translates to:
-  /// **'Queue in # [3] Planned'**
+  /// **'Queue in Planned'**
   String get tooltipPromoteToPlanned;
 
-  /// No description provided for @tooltipMoreActions.
+  /// Tooltip for the task overflow action menu button.
   ///
   /// In en, this message translates to:
   /// **'More actions'**
   String get tooltipMoreActions;
 
-  /// No description provided for @menuMoveTo.
+  /// Menu item label to move a task to another tier.
   ///
   /// In en, this message translates to:
   /// **'Move to...'**
   String get menuMoveTo;
 
-  /// No description provided for @menuEditText.
+  /// Menu item label to edit a task title.
   ///
   /// In en, this message translates to:
   /// **'Edit text'**
   String get menuEditText;
 
-  /// No description provided for @menuDelete.
+  /// Menu item label to delete a task.
   ///
   /// In en, this message translates to:
   /// **'Delete'**
   String get menuDelete;
 
-  /// No description provided for @editTaskDialogTitle.
+  /// Dialog title for editing an existing task.
   ///
   /// In en, this message translates to:
   /// **'Edit Task'**
   String get editTaskDialogTitle;
 
-  /// No description provided for @editTaskFieldLabel.
+  /// Input field label for the task title in the edit dialog.
   ///
   /// In en, this message translates to:
   /// **'Task text'**
   String get editTaskFieldLabel;
 
-  /// No description provided for @actionCancel.
+  /// Button label to cancel an action or dialog.
   ///
   /// In en, this message translates to:
   /// **'Cancel'**
   String get actionCancel;
 
-  /// No description provided for @actionSave.
+  /// Button label to save changes.
   ///
   /// In en, this message translates to:
   /// **'Save'**
   String get actionSave;
 
-  /// No description provided for @settingsTitle.
+  /// App bar title for the settings screen.
   ///
   /// In en, this message translates to:
   /// **'Settings'**
   String get settingsTitle;
 
-  /// No description provided for @languageSectionTitle.
+  /// Section heading for display language selection in settings.
   ///
   /// In en, this message translates to:
   /// **'Language'**
   String get languageSectionTitle;
 
-  /// No description provided for @languageSectionDescription.
+  /// Helper description explaining how the display language setting behaves.
   ///
   /// In en, this message translates to:
   /// **'Select the display language. System uses German on German systems and English otherwise.'**
   String get languageSectionDescription;
 
-  /// No description provided for @languageSystem.
+  /// Option label to follow the operating system locale.
   ///
   /// In en, this message translates to:
   /// **'System'**
   String get languageSystem;
 
-  /// No description provided for @languageEnglish.
+  /// Option label for the English display language.
   ///
   /// In en, this message translates to:
   /// **'English'**
   String get languageEnglish;
 
-  /// No description provided for @languageGerman.
+  /// Option label for the German display language.
   ///
   /// In en, this message translates to:
   /// **'Deutsch'**
   String get languageGerman;
 
-  /// No description provided for @webdavSectionTitle.
+  /// Section heading for color theme selection in settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme'**
+  String get themeSectionTitle;
+
+  /// Helper description explaining how the color theme setting behaves.
+  ///
+  /// In en, this message translates to:
+  /// **'Select the color theme. System follows the operating system brightness setting.'**
+  String get themeSectionDescription;
+
+  /// Option label to follow the operating system brightness setting.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get themeSystem;
+
+  /// Option label for the light color theme.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get themeLight;
+
+  /// Option label for the dark color theme.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get themeDark;
+
+  /// Section heading for storage mode selection in settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Storage Mode'**
+  String get storageModeSectionTitle;
+
+  /// Helper description explaining the storage mode options.
+  ///
+  /// In en, this message translates to:
+  /// **'Select whether tasks are stored in a local Markdown file, on a WebDAV server, or in both locations.'**
+  String get storageModeSectionDescription;
+
+  /// Option label for local-only Markdown file storage.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get storageModeLocal;
+
+  /// Option label for WebDAV-only Markdown synchronization.
+  ///
+  /// In en, this message translates to:
+  /// **'WebDAV'**
+  String get storageModeWebDav;
+
+  /// Option label for combined local and WebDAV Markdown storage.
+  ///
+  /// In en, this message translates to:
+  /// **'Both'**
+  String get storageModeBoth;
+
+  /// Section heading for local Markdown file settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Local Markdown File'**
+  String get localSectionTitle;
+
+  /// Helper description explaining local Markdown file persistence.
+  ///
+  /// In en, this message translates to:
+  /// **'Stores all tasks in a local Markdown file on this device.'**
+  String get localSectionDescription;
+
+  /// Input label for the local Markdown file name or path field.
+  ///
+  /// In en, this message translates to:
+  /// **'Local Markdown File Name'**
+  String get localFilePathLabel;
+
+  /// Placeholder hint for the local Markdown file name field.
+  ///
+  /// In en, this message translates to:
+  /// **'tiertask.md or t2.md'**
+  String get localFilePathHint;
+
+  /// Validation error shown when the local file name field is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a local file name.'**
+  String get localFilePathErrorEmpty;
+
+  /// Label above the resolved local Markdown file path preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolved Local File Path:'**
+  String get resolvedLocalPathLabel;
+
+  /// Section heading for WebDAV synchronization settings.
   ///
   /// In en, this message translates to:
   /// **'WebDAV Synchronization (Single Source of Truth)'**
   String get webdavSectionTitle;
 
-  /// No description provided for @webdavSectionDescription.
+  /// Helper description explaining WebDAV Markdown synchronization.
   ///
   /// In en, this message translates to:
   /// **'TierTask stores all tasks in a single Markdown file (tiertask.md) on your WebDAV server. Use an application password when supported by your server.'**
   String get webdavSectionDescription;
 
-  /// No description provided for @serverUrlLabel.
+  /// Input label for the WebDAV server URL field.
   ///
   /// In en, this message translates to:
   /// **'WebDAV Server URL'**
   String get serverUrlLabel;
 
-  /// No description provided for @serverUrlErrorEmpty.
+  /// Validation error shown when the WebDAV server URL is empty.
   ///
   /// In en, this message translates to:
   /// **'Please enter a server URL.'**
   String get serverUrlErrorEmpty;
 
-  /// No description provided for @usernameLabel.
+  /// Input label for the WebDAV username field.
   ///
   /// In en, this message translates to:
   /// **'Username'**
   String get usernameLabel;
 
-  /// No description provided for @usernameErrorEmpty.
+  /// Validation error shown when the WebDAV username is empty.
   ///
   /// In en, this message translates to:
   /// **'Please enter a username.'**
   String get usernameErrorEmpty;
 
-  /// No description provided for @passwordLabel.
+  /// Input label for the WebDAV password or application password field.
   ///
   /// In en, this message translates to:
   /// **'App Password / Password'**
   String get passwordLabel;
 
-  /// No description provided for @tooltipShowPassword.
+  /// Tooltip for the button that reveals the password text.
   ///
   /// In en, this message translates to:
   /// **'Show password'**
   String get tooltipShowPassword;
 
-  /// No description provided for @tooltipHidePassword.
+  /// Tooltip for the button that obscures the password text.
   ///
   /// In en, this message translates to:
   /// **'Hide password'**
   String get tooltipHidePassword;
 
-  /// No description provided for @passwordErrorEmpty.
+  /// Validation error shown when the WebDAV password is empty.
   ///
   /// In en, this message translates to:
   /// **'Please enter a password or app password.'**
   String get passwordErrorEmpty;
 
-  /// No description provided for @filePathLabel.
+  /// Input label for the remote Markdown file name or path field.
   ///
   /// In en, this message translates to:
   /// **'Markdown File Name / Path'**
   String get filePathLabel;
 
-  /// No description provided for @filePathHint.
+  /// Placeholder hint for the remote Markdown file name field.
   ///
   /// In en, this message translates to:
   /// **'tiertask.md or t2.md'**
   String get filePathHint;
 
-  /// No description provided for @resolvedEndpointLabel.
+  /// Label above the resolved full WebDAV URL preview.
   ///
   /// In en, this message translates to:
   /// **'Resolved WebDAV Endpoint (GET / PUT):'**
   String get resolvedEndpointLabel;
 
-  /// No description provided for @credentialsSavedBanner.
+  /// Status message shown when settings are saved locally.
   ///
   /// In en, this message translates to:
   /// **'Settings saved locally.'**
   String get credentialsSavedBanner;
 
-  /// No description provided for @connectionSuccessBanner.
+  /// Status message shown when WebDAV connection and synchronization succeed.
   ///
   /// In en, this message translates to:
   /// **'Connection succeeded. Markdown file synchronized with WebDAV.'**
   String get connectionSuccessBanner;
 
-  /// No description provided for @actionTestConnectionAndSync.
+  /// Button label to test the WebDAV connection and synchronize immediately.
   ///
   /// In en, this message translates to:
   /// **'Test Connection / Sync Now'**
   String get actionTestConnectionAndSync;
 
-  /// No description provided for @errorWebDavNotConfigured.
+  /// Error message shown when attempting WebDAV sync before configuring credentials.
   ///
   /// In en, this message translates to:
   /// **'Please configure WebDAV in Settings first.'**
   String get errorWebDavNotConfigured;
 
-  /// No description provided for @errorInvalidServerUrl.
+  /// Error message shown when the configured WebDAV URL is invalid.
   ///
   /// In en, this message translates to:
   /// **'Invalid WebDAV server URL.'**
   String get errorInvalidServerUrl;
 
-  /// No description provided for @errorAuthFailedLoad.
+  /// Error message shown when HTTP 401/403 occurs while loading from WebDAV.
   ///
   /// In en, this message translates to:
   /// **'Authentication failed. Please check username and app password.'**
   String get errorAuthFailedLoad;
 
-  /// No description provided for @errorLoadMarkdownFailed.
+  /// Error message shown when loading the Markdown file fails with a non-success status.
   ///
   /// In en, this message translates to:
   /// **'Failed to load Markdown file from server.'**
   String get errorLoadMarkdownFailed;
 
-  /// No description provided for @errorNetworkUnreachable.
+  /// Error message shown when the WebDAV server cannot be reached over the network.
   ///
   /// In en, this message translates to:
   /// **'Network error: Server unreachable ({details}).'**
   String errorNetworkUnreachable(String details);
 
-  /// No description provided for @errorTimeoutLoad.
+  /// Error message shown when a WebDAV load request times out.
   ///
   /// In en, this message translates to:
   /// **'Connection to WebDAV server timed out.'**
   String get errorTimeoutLoad;
 
-  /// No description provided for @errorTlsLoad.
+  /// Error message shown when TLS handshake fails while loading from WebDAV.
   ///
   /// In en, this message translates to:
   /// **'TLS/SSL connection error: {details}'**
   String errorTlsLoad(String details);
 
-  /// No description provided for @errorUnexpectedLoad.
+  /// Error message shown when an unexpected error occurs while loading from WebDAV.
   ///
   /// In en, this message translates to:
   /// **'Unexpected WebDAV error while loading: {details}'**
   String errorUnexpectedLoad(String details);
 
-  /// No description provided for @errorAuthFailedSave.
+  /// Error message shown when HTTP 401/403 occurs while saving to WebDAV.
   ///
   /// In en, this message translates to:
   /// **'Authentication failed while saving. Please check app password.'**
   String get errorAuthFailedSave;
 
-  /// No description provided for @errorSaveMarkdownFailed.
+  /// Error message shown when saving the Markdown file fails with a non-success status.
   ///
   /// In en, this message translates to:
   /// **'Failed to save Markdown file on server.'**
   String get errorSaveMarkdownFailed;
 
-  /// No description provided for @errorNetworkSave.
+  /// Error message shown when a network error occurs while saving to WebDAV.
   ///
   /// In en, this message translates to:
   /// **'Network error while saving ({details}).'**
   String errorNetworkSave(String details);
 
-  /// No description provided for @errorTimeoutSave.
+  /// Error message shown when a WebDAV save request times out.
   ///
   /// In en, this message translates to:
   /// **'Timed out while saving to WebDAV server.'**
   String get errorTimeoutSave;
 
-  /// No description provided for @errorTlsSave.
+  /// Error message shown when a TLS error occurs while saving to WebDAV.
   ///
   /// In en, this message translates to:
   /// **'TLS/SSL error while saving: {details}'**
   String errorTlsSave(String details);
 
-  /// No description provided for @errorUnexpectedSave.
+  /// Error message shown when an unexpected error occurs while saving to WebDAV.
   ///
   /// In en, this message translates to:
   /// **'Unexpected WebDAV error while saving: {details}'**
   String errorUnexpectedSave(String details);
+
+  /// Error message shown when the configured local Markdown file path is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid local Markdown file name or path.'**
+  String get errorInvalidLocalFilePath;
+
+  /// Error message shown when a Markdown file exceeds maxFileBytes.
+  ///
+  /// In en, this message translates to:
+  /// **'Markdown file exceeds the maximum allowed size.'**
+  String get errorLocalFileTooLarge;
+
+  /// Error message shown when reading the local Markdown file fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to read local Markdown file ({details}).'**
+  String errorLoadLocalFileFailed(String details);
+
+  /// Error message shown when writing the local Markdown file fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to write local Markdown file ({details}).'**
+  String errorSaveLocalFileFailed(String details);
 }
 
 class _AppLocalizationsDelegate
