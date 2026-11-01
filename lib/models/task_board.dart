@@ -30,8 +30,7 @@ class TaskBoard {
     List<TaskItem> blocked = const [],
     List<TaskItem> someday = const [],
     List<TaskItem> completed = const [],
-    List<TdfLocation> locations = const [],
-    List<TdfCategory> categories = const [],
+    List<TdfLabel> labels = const [],
   }) : this._normalized(
          _normalizeTierSlices(
            focus: focus,
@@ -41,22 +40,19 @@ class TaskBoard {
            someday: someday,
            completed: completed,
          ),
-         locations: locations,
-         categories: categories,
+         labels: labels,
        );
 
   TaskBoard._normalized(
     _NormalizedTierSlices slices, {
-    required List<TdfLocation> locations,
-    required List<TdfCategory> categories,
+    required List<TdfLabel> labels,
   }) : focus = List<TaskItem>.unmodifiable(slices.focus),
        ready = List<TaskItem>.unmodifiable(slices.ready),
        planned = List<TaskItem>.unmodifiable(slices.planned),
        blocked = List<TaskItem>.unmodifiable(slices.blocked),
        someday = List<TaskItem>.unmodifiable(slices.someday),
        completed = List<TaskItem>.unmodifiable(slices.completed),
-       locations = List<TdfLocation>.unmodifiable(locations),
-       categories = List<TdfCategory>.unmodifiable(categories);
+       labels = List<TdfLabel>.unmodifiable(labels);
 
   /// Creates an empty [TaskBoard] across all 6 tiers.
   factory TaskBoard.empty() => TaskBoard();
@@ -65,16 +61,19 @@ class TaskBoard {
   factory TaskBoard.evaluate({
     required Iterable<TaskItem> tasks,
     DateTime? evaluationTime,
-    List<TdfLocation> locations = const [],
-    List<TdfCategory> categories = const [],
-    String? activeCategoryId,
-    String? activeLocationId,
+    List<TdfLabel> labels = const [],
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
     bool pruneExpiredCompleted = false,
   }) {
     final now = evaluationTime ?? DateTime.now().toUtc();
     final normalizedNow = DateTime.utc(now.year, now.month, now.day);
     final taskList = List<TaskItem>.from(tasks);
     final unfinishedIds = _collectUnfinishedIds(taskList);
+    final labelMap = <String, TdfLabel>{
+      for (final label in labels) label.id: label,
+    };
 
     final completedList = <TaskItem>[];
     final somedayList = <TaskItem>[];
@@ -88,8 +87,10 @@ class TaskBoard {
         now: now,
         normalizedNow: normalizedNow,
         unfinishedIds: unfinishedIds,
-        activeCategoryId: activeCategoryId,
-        activeLocationId: activeLocationId,
+        labelMap: labelMap,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
         pruneExpiredCompleted: pruneExpiredCompleted,
         completedList: completedList,
         somedayList: somedayList,
@@ -116,8 +117,7 @@ class TaskBoard {
       blocked: blockedList,
       someday: somedayList,
       completed: completedList,
-      locations: locations,
-      categories: categories,
+      labels: labels,
     );
   }
 
@@ -133,17 +133,14 @@ class TaskBoard {
   /// Tier 4 (`Blocked`) task items.
   final List<TaskItem> blocked;
 
-  /// Defined TDF `category` blocks in declaration order.
-  final List<TdfCategory> categories;
-
   /// Tier 6 (`Completed`) task items.
   final List<TaskItem> completed;
 
   /// Tier 1 (`Focus`) task items.
   final List<TaskItem> focus;
 
-  /// Defined TDF `location` blocks in declaration order.
-  final List<TdfLocation> locations;
+  /// Defined TDF `label` blocks in declaration order.
+  final List<TdfLabel> labels;
 
   /// Tier 3 (`Planned`) task items.
   final List<TaskItem> planned;
@@ -164,64 +161,32 @@ class TaskBoard {
     ...completed,
   ]);
 
-  /// Adds a new TDF `category` block with a unique identifier and optional `#RRGGBB` [color].
-  TaskBoard addCategory(
+  /// Adds a new TDF `label` block with a unique identifier and optional `#RRGGBB` [color].
+  TaskBoard addLabel(
     String name, {
     String? color,
     String? id,
     String? note,
+    List<TaskCondition> conditions = const [],
   }) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) {
       return this;
     }
-    final existingIds = <String>{
-      for (final category in categories) category.id,
-    };
-    final baseId = (id != null && id.trim().isNotEmpty)
-        ? id.trim()
-        : _slugifyContextName(trimmed, 'c');
-    final categoryId = _ensureUniqueContextId(baseId, existingIds);
-    final normalizedColor = TdfColor.normalizeHex(color);
-    final newCategory = TdfCategory(
-      id: categoryId,
-      name: trimmed,
-      color: normalizedColor,
-      note: note,
-    );
-    return copyWith(categories: [...categories, newCategory]);
-  }
-
-  /// Adds a new TDF `location` block with a unique identifier and optional `#RRGGBB` [color].
-  TaskBoard addLocation(
-    String name, {
-    String? color,
-    String? id,
-    String? note,
-    double? latitude,
-    double? longitude,
-    double? radiusMeters,
-  }) {
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) {
-      return this;
-    }
-    final existingIds = <String>{for (final location in locations) location.id};
+    final existingIds = <String>{for (final label in labels) label.id};
     final baseId = (id != null && id.trim().isNotEmpty)
         ? id.trim()
         : _slugifyContextName(trimmed, 'l');
-    final locationId = _ensureUniqueContextId(baseId, existingIds);
+    final labelId = _ensureUniqueContextId(baseId, existingIds);
     final normalizedColor = TdfColor.normalizeHex(color);
-    final newLocation = TdfLocation(
-      id: locationId,
+    final newLabel = TdfLabel(
+      id: labelId,
       name: trimmed,
       color: normalizedColor,
       note: note,
-      latitude: latitude,
-      longitude: longitude,
-      radiusMeters: radiusMeters,
+      conditions: List<TaskCondition>.unmodifiable(conditions),
     );
-    return copyWith(locations: [...locations, newLocation]);
+    return copyWith(labels: [...labels, newLabel]);
   }
 
   /// Adds a new task per `TDF_SPEC.md` Section 6.1, prunes expired completed tasks,
@@ -235,15 +200,18 @@ class TaskBoard {
     DateTime? currentDate,
     String? id,
     String? note,
-    List<String> locationIds = const [],
-    List<String> categoryIds = const [],
+    List<String> labelIds = const [],
   }) {
     final trimmed = title.trim();
-    if (trimmed.isEmpty) {
+    if (trimmed.isEmpty || hasDuplicateTaskTitle(trimmed)) {
       return this;
     }
 
     final now = currentDate ?? DateTime.now().toUtc();
+    final trimmedNote = note?.trim();
+    final effectiveNote = (trimmedNote != null && trimmedNote.isNotEmpty)
+        ? trimmedNote
+        : null;
     final effectivePriority = isPriority || targetTier == TaskTier.focus;
     final cleanSubtasks = _cleanSubtasks(subtasks);
     final autoCompleted =
@@ -258,15 +226,14 @@ class TaskBoard {
     final newTask = TaskItem(
       id: taskId,
       title: trimmed,
-      note: note,
+      note: effectiveNote,
       isCompleted: isDone,
       isPriority: effectivePriority && !isSomeday && !isBlocked,
       createdAt: now,
       queuedAt: isSomeday ? null : now,
       completedAt: isDone ? now : null,
       suspendedAt: isBlocked ? TaskItem.defaultSuspendedAt : null,
-      locationIds: locationIds,
-      categoryIds: categoryIds,
+      labelIds: labelIds,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: cleanSubtasks,
     );
@@ -280,8 +247,7 @@ class TaskBoard {
     return TaskBoard.evaluate(
       tasks: [...allTasks, newTask],
       evaluationTime: now,
-      locations: locations,
-      categories: categories,
+      labels: labels,
       pruneExpiredCompleted: true,
     );
   }
@@ -290,13 +256,24 @@ class TaskBoard {
   TaskBoard applyAutoPull({DateTime? currentDate}) {
     final now = currentDate ?? DateTime.now().toUtc();
     final unfinishedIds = _collectUnfinishedIds(allTasks);
+    final labelMap = <String, TdfLabel>{
+      for (final label in labels) label.id: label,
+    };
     final nextFocus = List<TaskItem>.from(focus);
     final nextReady = List<TaskItem>.from(ready);
     final nextPlanned = List<TaskItem>.from(planned);
     final nextBlocked = <TaskItem>[];
 
     for (final task in blocked) {
-      if (_isTaskBlocked(task, unfinishedIds, now)) {
+      if (_isTaskBlocked(
+        task: task,
+        unfinishedIds: unfinishedIds,
+        labelMap: labelMap,
+        evaluationTime: now,
+        activeLabelId: null,
+        currentLatitude: null,
+        currentLongitude: null,
+      )) {
         nextBlocked.add(task);
       } else {
         nextPlanned.add(task.copyWith(queuedAt: task.queuedAt ?? now));
@@ -381,8 +358,7 @@ class TaskBoard {
     List<TaskItem>? blocked,
     List<TaskItem>? someday,
     List<TaskItem>? completed,
-    List<TdfLocation>? locations,
-    List<TdfCategory>? categories,
+    List<TdfLabel>? labels,
   }) {
     return TaskBoard(
       focus: focus ?? this.focus,
@@ -391,53 +367,31 @@ class TaskBoard {
       blocked: blocked ?? this.blocked,
       someday: someday ?? this.someday,
       completed: completed ?? this.completed,
-      locations: locations ?? this.locations,
-      categories: categories ?? this.categories,
+      labels: labels ?? this.labels,
     );
   }
 
-  /// Deletes the category with [categoryId] and removes its reference from all tasks.
-  TaskBoard deleteCategory(String categoryId) {
-    final nextCategories = <TdfCategory>[
-      for (final category in categories)
-        if (category.id != categoryId) category,
+  /// Deletes the label with [labelId] and removes its reference from all tasks.
+  TaskBoard deleteLabel(String labelId) {
+    final nextLabels = <TdfLabel>[
+      for (final label in labels)
+        if (label.id != labelId) label,
     ];
-    if (nextCategories.length == categories.length) {
+    if (nextLabels.length == labels.length) {
       return this;
     }
     return copyWith(
-      focus: _stripCategoryFromTasks(focus, categoryId),
-      ready: _stripCategoryFromTasks(ready, categoryId),
-      planned: _stripCategoryFromTasks(planned, categoryId),
-      blocked: _stripCategoryFromTasks(blocked, categoryId),
-      someday: _stripCategoryFromTasks(someday, categoryId),
-      completed: _stripCategoryFromTasks(completed, categoryId),
-      categories: nextCategories,
+      focus: _stripLabelFromTasks(focus, labelId),
+      ready: _stripLabelFromTasks(ready, labelId),
+      planned: _stripLabelFromTasks(planned, labelId),
+      blocked: _stripLabelFromTasks(blocked, labelId),
+      someday: _stripLabelFromTasks(someday, labelId),
+      completed: _stripLabelFromTasks(completed, labelId),
+      labels: nextLabels,
     );
   }
 
-  /// Deletes the location with [locationId] and removes its reference from all tasks.
-  TaskBoard deleteLocation(String locationId) {
-    final nextLocations = <TdfLocation>[
-      for (final location in locations)
-        if (location.id != locationId) location,
-    ];
-    if (nextLocations.length == locations.length) {
-      return this;
-    }
-    return copyWith(
-      focus: _stripLocationFromTasks(focus, locationId),
-      ready: _stripLocationFromTasks(ready, locationId),
-      planned: _stripLocationFromTasks(planned, locationId),
-      blocked: _stripLocationFromTasks(blocked, locationId),
-      someday: _stripLocationFromTasks(someday, locationId),
-      completed: _stripLocationFromTasks(completed, locationId),
-      locations: nextLocations,
-    );
-  }
-
-  /// Downgrades a task one active tier down per `TDF_SPEC.md` Section 6.3 and Section 6.4,
-  /// stripping the `priority` flag and updating `queued` to prevent ping-pong bounce.
+  /// Downgrades a task in `Focus` (to `Ready`) or `Ready` (to `Planned`) per `TDF_SPEC.md` Section 6.3.
   TaskBoard downgradeTask(String taskId, {DateTime? currentDate}) {
     final now = currentDate ?? DateTime.now().toUtc();
     final sourceTier = findTierOfTask(taskId);
@@ -449,31 +403,30 @@ class TaskBoard {
       return this;
     }
 
-    final demoted = task.toActive(isPriority: false);
     if (sourceTier == TaskTier.focus) {
-      return _downgradeFromFocus(demoted, now);
+      return _downgradeFromFocus(task, now);
     }
     if (sourceTier == TaskTier.ready) {
-      return _downgradeFromReady(demoted, now);
+      return _downgradeToPlanned(task, now);
     }
     return this;
   }
 
-  /// Derives a filtered [TaskBoard] considering only active tasks matching
-  /// [activeCategoryId] and [activeLocationId] while preserving all other
-  /// `TDF_SPEC.md` Section 5 evaluation rules.
+  /// Derives a filtered [TaskBoard] considering only tasks matching [activeLabelId]
+  /// and optional GPS coordinates while preserving all `TDF_SPEC.md` Section 5 rules.
   TaskBoard evaluateForContext({
-    String? activeCategoryId,
-    String? activeLocationId,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
     DateTime? evaluationTime,
   }) {
     return TaskBoard.evaluate(
       tasks: allTasks,
       evaluationTime: evaluationTime,
-      locations: locations,
-      categories: categories,
-      activeCategoryId: activeCategoryId,
-      activeLocationId: activeLocationId,
+      labels: labels,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
     );
   }
 
@@ -497,6 +450,34 @@ class TaskBoard {
     return null;
   }
 
+  /// Returns whether any task on the board (excluding [excludingTaskId]) already uses [title].
+  bool hasDuplicateTaskTitle(String title, {String? excludingTaskId}) {
+    final normalized = title.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    for (final task in allTasks) {
+      if (task.id != excludingTaskId &&
+          task.title.trim().toLowerCase() == normalized) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Counts how many open (non-completed) tasks across tiers `1` to `5` reference [labelId].
+  int openTaskCountForLabel(String labelId) {
+    var count = 0;
+    for (final task in allTasks) {
+      if (!task.isCompleted &&
+          task.completedAt == null &&
+          task.labelIds.contains(labelId)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (UTC) per `TDF_SPEC.md` Section 5.1.
   TaskBoard pruneCompletedTasks({DateTime? currentDate}) {
     final now = currentDate ?? DateTime.now().toUtc();
@@ -508,6 +489,82 @@ class TaskBoard {
     ];
 
     return copyWith(completed: retained);
+  }
+
+  /// Updates the display [name] of the label with [labelId], ignoring empty names.
+  TaskBoard renameLabel(String labelId, String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return this;
+    }
+    final nextLabels = <TdfLabel>[
+      for (final label in labels)
+        label.id == labelId ? label.copyWith(name: trimmed) : label,
+    ];
+    return copyWith(labels: nextLabels);
+  }
+
+  /// Restores a completed task back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
+  TaskBoard restoreTask(
+    String taskId, {
+    TaskTier targetTier = TaskTier.planned,
+    DateTime? currentDate,
+  }) {
+    final now = currentDate ?? DateTime.now().toUtc();
+    final existing = findTask(taskId);
+    if (existing == null) {
+      return this;
+    }
+
+    final isSomeday = targetTier == TaskTier.someday;
+    final isFocus = targetTier == TaskTier.focus;
+    final restored = existing.copyWith(
+      isCompleted: false,
+      clearCompletedAt: true,
+      queuedAt: isSomeday ? null : now,
+      clearQueuedAt: isSomeday,
+      isPriority: isFocus,
+    );
+    final updatedTasks = <TaskItem>[
+      for (final task in allTasks) task.id == taskId ? restored : task,
+    ];
+
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      labels: labels,
+      pruneExpiredCompleted: true,
+    );
+  }
+
+  /// Schedules a task from `Someday` into the active pull cycle per `TDF_SPEC.md` Section 6.2.
+  TaskBoard scheduleTask(
+    String taskId, {
+    DateTime? currentDate,
+    bool isPriority = false,
+  }) {
+    final now = currentDate ?? DateTime.now().toUtc();
+    final existing = findTask(taskId);
+    if (existing == null) {
+      return this;
+    }
+
+    final scheduled = existing.copyWith(
+      isCompleted: false,
+      clearCompletedAt: true,
+      queuedAt: now,
+      isPriority: isPriority || existing.isPriority,
+    );
+    final updatedTasks = <TaskItem>[
+      for (final task in allTasks) task.id == taskId ? scheduled : task,
+    ];
+
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      labels: labels,
+      pruneExpiredCompleted: true,
+    );
   }
 
   /// Returns the task list for a given [tier].
@@ -559,6 +616,156 @@ class TaskBoard {
       return replacedBoard.completeTask(taskId, currentDate: now);
     }
     return replacedBoard;
+  }
+
+  /// Updates an existing task with [taskId], re-evaluates the 6-tier pipeline,
+  /// and ignores empty or duplicate task titles.
+  TaskBoard updateTask(
+    String taskId, {
+    required String title,
+    String? note,
+    TaskTier? targetTier,
+    bool? isPriority,
+    bool? subtasksAutoFinish,
+    List<SubtaskItem>? subtasks,
+    List<String>? labelIds,
+    DateTime? currentDate,
+  }) {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty ||
+        hasDuplicateTaskTitle(trimmed, excludingTaskId: taskId)) {
+      return this;
+    }
+    final existing = findTask(taskId);
+    if (existing == null) {
+      return this;
+    }
+
+    final now = currentDate ?? DateTime.now().toUtc();
+    final updatedTask = _buildUpdatedTask(
+      existing: existing,
+      title: trimmed,
+      note: note,
+      targetTier: targetTier,
+      isPriority: isPriority,
+      subtasksAutoFinish: subtasksAutoFinish,
+      subtasks: subtasks,
+      labelIds: labelIds,
+      now: now,
+    );
+    final updatedTasks = <TaskItem>[
+      for (final task in allTasks) task.id == taskId ? updatedTask : task,
+    ];
+
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      labels: labels,
+      pruneExpiredCompleted: true,
+    );
+  }
+
+  /// Evaluates whether [task]'s effective condition groups are satisfied per `TDF_SPEC.md` Section 4.3.
+  static bool _areTaskConditionsSatisfied({
+    required TaskItem task,
+    required Map<String, TdfLabel> labelMap,
+    required DateTime evaluationTime,
+    required String? activeLabelId,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) {
+    if (_hasGlobalReset(task.conditions)) {
+      return true;
+    }
+    if (task.labelIds.isEmpty) {
+      return _evaluateRuleContext(
+        baseRules: const [],
+        taskRules: task.conditions,
+        evaluationTime: evaluationTime,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      );
+    }
+    if (activeLabelId != null) {
+      final activeLabel = labelMap[activeLabelId];
+      return _evaluateRuleContext(
+        baseRules: activeLabel?.conditions ?? const [],
+        taskRules: task.conditions,
+        evaluationTime: evaluationTime,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      );
+    }
+    for (final labelId in task.labelIds) {
+      final label = labelMap[labelId];
+      if (_evaluateRuleContext(
+        baseRules: label?.conditions ?? const [],
+        taskRules: task.conditions,
+        evaluationTime: evaluationTime,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Builds an updated [TaskItem] from [existing] with normalized scheduling and subtask fields.
+  static TaskItem _buildUpdatedTask({
+    required TaskItem existing,
+    required String title,
+    required String? note,
+    required TaskTier? targetTier,
+    required bool? isPriority,
+    required bool? subtasksAutoFinish,
+    required List<SubtaskItem>? subtasks,
+    required List<String>? labelIds,
+    required DateTime now,
+  }) {
+    final effectiveAutoFinish =
+        subtasksAutoFinish ?? existing.subtasksAutoFinish;
+    final cleanSubtasks = subtasks != null
+        ? _cleanSubtasks(subtasks)
+        : existing.subtasks;
+    final autoCompleted =
+        effectiveAutoFinish &&
+        cleanSubtasks.isNotEmpty &&
+        cleanSubtasks.every((step) => step.isCompleted);
+    final isDone =
+        targetTier == TaskTier.completed ||
+        autoCompleted ||
+        (targetTier == null && existing.isCompleted);
+    final isSomeday =
+        !isDone &&
+        (targetTier == TaskTier.someday ||
+            (targetTier == null && existing.queuedAt == null));
+    final isBlocked = !isDone && targetTier == TaskTier.blocked;
+    final effectivePriority =
+        !isSomeday &&
+        !isBlocked &&
+        ((isPriority ?? existing.isPriority) || targetTier == TaskTier.focus);
+    final trimmedNote = note?.trim();
+
+    return existing.copyWith(
+      title: title,
+      note: (trimmedNote != null && trimmedNote.isNotEmpty)
+          ? trimmedNote
+          : null,
+      clearNote: trimmedNote != null && trimmedNote.isEmpty,
+      isCompleted: isDone,
+      completedAt: isDone ? (existing.completedAt ?? now) : null,
+      clearCompletedAt: !isDone,
+      isPriority: effectivePriority,
+      queuedAt: isSomeday ? null : (existing.queuedAt ?? now),
+      clearQueuedAt: isSomeday,
+      suspendedAt: isBlocked
+          ? (existing.suspendedAt ?? TaskItem.defaultSuspendedAt)
+          : existing.suspendedAt,
+      labelIds: labelIds,
+      subtasksAutoFinish: effectiveAutoFinish,
+      subtasks: cleanSubtasks,
+    );
   }
 
   /// Executes the two-stage pull cascade across mutable queue lists in linear order.
@@ -614,14 +821,20 @@ class TaskBoard {
     required DateTime now,
     required DateTime normalizedNow,
     required Set<String> unfinishedIds,
-    required String? activeCategoryId,
-    required String? activeLocationId,
+    required Map<String, TdfLabel> labelMap,
+    required String? activeLabelId,
+    required double? currentLatitude,
+    required double? currentLongitude,
     required bool pruneExpiredCompleted,
     required List<TaskItem> completedList,
     required List<TaskItem> somedayList,
     required List<TaskItem> blockedList,
     required List<_IndexedTask> activeCandidates,
   }) {
+    if (activeLabelId != null && !task.labelIds.contains(activeLabelId)) {
+      return;
+    }
+
     if (task.completedAt != null || task.isCompleted) {
       if (!pruneExpiredCompleted || _isWithinRetention(task, normalizedNow)) {
         completedList.add(task.copyWith(isCompleted: true));
@@ -634,12 +847,16 @@ class TaskBoard {
       return;
     }
 
-    if (_isTaskBlocked(task, unfinishedIds, now)) {
+    if (_isTaskBlocked(
+      task: task,
+      unfinishedIds: unfinishedIds,
+      labelMap: labelMap,
+      evaluationTime: now,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+    )) {
       blockedList.add(task);
-      return;
-    }
-
-    if (!_matchesContextFilters(task, activeCategoryId, activeLocationId)) {
       return;
     }
 
@@ -680,49 +897,48 @@ class TaskBoard {
     return first.index.compareTo(second.index);
   }
 
-  /// Downgrades [task] from Tier 1 (`Focus`) to the end of Tier 2 (`Ready`) per Section 6.4.
+  /// Downgrades [task] from Tier 1 (`Focus`) to Tier 2 (`Ready`) per `TDF_SPEC.md` Section 6.3.
   TaskBoard _downgradeFromFocus(TaskItem task, DateTime now) {
+    final totalActiveCount = focus.length + ready.length + planned.length;
     final nextFocus = _filterOutList(focus, task.id);
     final nextReady = List<TaskItem>.from(ready);
     final nextPlanned = List<TaskItem>.from(planned);
 
-    var readyIndex = 0;
-    while (nextFocus.length < focusSoftLimit && readyIndex < nextReady.length) {
-      nextFocus.add(nextReady[readyIndex].toActive());
-      readyIndex++;
-    }
-    if (readyIndex > 0) {
-      nextReady.removeRange(0, readyIndex);
-    }
-
-    var plannedForFocusIndex = 0;
-    while (nextFocus.length < focusSoftLimit &&
-        plannedForFocusIndex < nextPlanned.length) {
-      nextFocus.add(nextPlanned[plannedForFocusIndex].toActive());
-      plannedForFocusIndex++;
-    }
-    if (plannedForFocusIndex > 0) {
-      nextPlanned.removeRange(0, plannedForFocusIndex);
-    }
-
-    final referenceQueued = nextReady.isNotEmpty
-        ? (nextReady.last.queuedAt ?? now)
-        : (nextFocus.isNotEmpty ? (nextFocus.last.queuedAt ?? now) : now);
-    nextReady.add(
-      task.copyWith(
-        isPriority: false,
-        queuedAt: referenceQueued.add(const Duration(minutes: 1)),
-      ),
+    _pullForFocusDowngrade(
+      nextFocus: nextFocus,
+      nextReady: nextReady,
+      nextPlanned: nextPlanned,
     );
 
-    var plannedIndex = 0;
-    while (nextReady.length < readySoftLimit &&
-        plannedIndex < nextPlanned.length) {
-      nextReady.add(nextPlanned[plannedIndex].toActive());
-      plannedIndex++;
-    }
-    if (plannedIndex > 0) {
-      nextPlanned.removeRange(0, plannedIndex);
+    if (totalActiveCount < focusSoftLimit + readySoftLimit) {
+      final effectiveQueued = _resolveEndOfRegularQueueTimestamp(
+        now,
+        nextFocus,
+        nextReady,
+        nextPlanned,
+      );
+      final downgradedTask = task.toActive(
+        isPriority: false,
+        queuedAt: effectiveQueued,
+      );
+      if (nextFocus.length < focusSoftLimit) {
+        nextFocus.add(downgradedTask);
+      } else {
+        nextReady.add(downgradedTask);
+      }
+    } else {
+      final slot8Task = nextReady.last;
+      final alignedPriority = slot8Task.isPriority;
+      final slot8Queued = slot8Task.queuedAt ?? slot8Task.createdAt;
+      final downgradedQueued = slot8Queued.add(const Duration(seconds: 1));
+      nextReady.add(
+        task.toActive(isPriority: alignedPriority, queuedAt: downgradedQueued),
+      );
+      _shiftCollidingPlannedTasks(
+        nextPlanned,
+        downgradedQueued,
+        isPriorityGroup: alignedPriority,
+      );
     }
 
     return copyWith(
@@ -732,8 +948,8 @@ class TaskBoard {
     ).pruneCompletedTasks(currentDate: now);
   }
 
-  /// Downgrades [task] from Tier 2 (`Ready`) to Tier 3 (`Planned`) per Section 6.3.
-  TaskBoard _downgradeFromReady(TaskItem task, DateTime now) {
+  /// Downgrades [task] from Tier 2 (`Ready`) to Tier 3 (`Planned`) per `TDF_SPEC.md` Section 6.3.
+  TaskBoard _downgradeToPlanned(TaskItem task, DateTime now) {
     final nextFocus = List<TaskItem>.from(focus);
     final nextReady = _filterOutList(ready, task.id);
     final nextPlanned = List<TaskItem>.from(planned);
@@ -743,7 +959,25 @@ class TaskBoard {
       nextReady: nextReady,
       nextPlanned: nextPlanned,
     );
-    nextPlanned.add(task.copyWith(isPriority: false, queuedAt: now));
+
+    final effectiveQueued = _resolveEndOfRegularQueueTimestamp(
+      now,
+      nextFocus,
+      nextReady,
+      nextPlanned,
+    );
+    final downgradedTask = task.toActive(
+      isPriority: false,
+      queuedAt: effectiveQueued,
+    );
+
+    if (nextFocus.length < focusSoftLimit) {
+      nextFocus.add(downgradedTask);
+    } else if (nextReady.length < readySoftLimit) {
+      nextReady.add(downgradedTask);
+    } else {
+      nextPlanned.add(downgradedTask);
+    }
 
     return copyWith(
       focus: nextFocus,
@@ -765,6 +999,59 @@ class TaskBoard {
       }
       suffix++;
     }
+  }
+
+  /// Evaluates all rules belonging to [group] within [rules] using intra-group `OR` short-circuiting.
+  static bool _evaluateGroupRules({
+    required List<TaskCondition> rules,
+    required ConditionGroup group,
+    required DateTime evaluationTime,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) {
+    var hasRuleInGroup = false;
+    for (final rule in rules) {
+      if (rule.group != group) {
+        continue;
+      }
+      if (rule is GroupResetTaskCondition) {
+        return true;
+      }
+      hasRuleInGroup = true;
+      if (rule.isSatisfiedAt(
+        evaluationTime,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      )) {
+        return true;
+      }
+    }
+    return !hasRuleInGroup;
+  }
+
+  /// Evaluates a single effective condition context (`day` AND `time` AND `location`) per Section 4.3.3.
+  static bool _evaluateRuleContext({
+    required List<TaskCondition> baseRules,
+    required List<TaskCondition> taskRules,
+    required DateTime evaluationTime,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) {
+    for (final group in ConditionGroup.values) {
+      final effectiveSource = _hasTaskRuleForGroup(taskRules, group)
+          ? taskRules
+          : baseRules;
+      if (!_evaluateGroupRules(
+        rules: effectiveSource,
+        group: group,
+        evaluationTime: evaluationTime,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      )) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Returns a new list excluding the task with [taskId].
@@ -798,12 +1085,39 @@ class TaskBoard {
     }
   }
 
-  /// Evaluates whether [task] is blocked at [evaluationTime] per `TDF_SPEC.md` Section 5.3.
-  static bool _isTaskBlocked(
-    TaskItem task,
-    Set<String> unfinishedIds,
-    DateTime evaluationTime,
+  /// Checks whether [conditions] contains a [GlobalResetTaskCondition] (`condition any`).
+  static bool _hasGlobalReset(List<TaskCondition> conditions) {
+    for (final condition in conditions) {
+      if (condition is GlobalResetTaskCondition) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Checks whether [taskRules] defines at least one override or reset for [group].
+  static bool _hasTaskRuleForGroup(
+    List<TaskCondition> taskRules,
+    ConditionGroup group,
   ) {
+    for (final rule in taskRules) {
+      if (rule.group == group) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Evaluates whether [task] is blocked at [evaluationTime] per `TDF_SPEC.md` Section 5.3.
+  static bool _isTaskBlocked({
+    required TaskItem task,
+    required Set<String> unfinishedIds,
+    required Map<String, TdfLabel> labelMap,
+    required DateTime evaluationTime,
+    required String? activeLabelId,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) {
     for (final prerequisiteId in task.blockedByTaskIds) {
       if (unfinishedIds.contains(prerequisiteId)) {
         return true;
@@ -814,10 +1128,15 @@ class TaskBoard {
         return true;
       }
     }
-    for (final condition in task.conditions) {
-      if (!condition.isSatisfiedAt(evaluationTime)) {
-        return true;
-      }
+    if (!_areTaskConditionsSatisfied(
+      task: task,
+      labelMap: labelMap,
+      evaluationTime: evaluationTime,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+    )) {
+      return true;
     }
     return false;
   }
@@ -835,24 +1154,6 @@ class TaskBoard {
     );
     return normalizedNow.difference(normalizedTaskDate).inDays <=
         completedRetentionDays;
-  }
-
-  /// Evaluates whether [task] matches the optional [activeCategoryId] and [activeLocationId] filters.
-  static bool _matchesContextFilters(
-    TaskItem task,
-    String? activeCategoryId,
-    String? activeLocationId,
-  ) {
-    if (activeCategoryId != null &&
-        !task.categoryIds.contains(activeCategoryId)) {
-      return false;
-    }
-    if (activeLocationId != null &&
-        task.locationIds.isNotEmpty &&
-        !task.locationIds.contains(activeLocationId)) {
-      return false;
-    }
-    return true;
   }
 
   /// Normalizes active tasks across `[focus, ready, planned]` so `queuedAt` is always populated and ordered.
@@ -945,6 +1246,55 @@ class TaskBoard {
     );
   }
 
+  /// Pulls active tasks into [nextFocus] (up to 3) and [nextReady] (up to 4) before appending a downgraded `Focus` task.
+  static void _pullForFocusDowngrade({
+    required List<TaskItem> nextFocus,
+    required List<TaskItem> nextReady,
+    required List<TaskItem> nextPlanned,
+  }) {
+    var readyIndex = 0;
+    while (nextFocus.length < focusSoftLimit && readyIndex < nextReady.length) {
+      nextFocus.add(nextReady[readyIndex].toActive());
+      readyIndex++;
+    }
+    if (readyIndex > 0) {
+      nextReady.removeRange(0, readyIndex);
+    }
+
+    var plannedForFocusIndex = 0;
+    while (nextFocus.length < focusSoftLimit &&
+        plannedForFocusIndex < nextPlanned.length) {
+      nextFocus.add(nextPlanned[plannedForFocusIndex].toActive());
+      plannedForFocusIndex++;
+    }
+    if (plannedForFocusIndex > 0) {
+      nextPlanned.removeRange(0, plannedForFocusIndex);
+    }
+
+    var plannedForReadyIndex = 0;
+    while (nextReady.length < readySoftLimit - 1 &&
+        plannedForReadyIndex < nextPlanned.length) {
+      nextReady.add(nextPlanned[plannedForReadyIndex].toActive());
+      plannedForReadyIndex++;
+    }
+    if (plannedForReadyIndex > 0) {
+      nextPlanned.removeRange(0, plannedForReadyIndex);
+    }
+  }
+
+  /// Returns [task] without [labelId] in its `labelIds` list.
+  static TaskItem _removeIdFromTaskLabels(TaskItem task, String labelId) {
+    if (!task.labelIds.contains(labelId)) {
+      return task;
+    }
+    return task.copyWith(
+      labelIds: [
+        for (final id in task.labelIds)
+          if (id != labelId) id,
+      ],
+    );
+  }
+
   /// Removes the task with [taskId] from [tier].
   TaskBoard _removeTaskFromTier(String taskId, TaskTier tier) {
     return switch (tier) {
@@ -957,35 +1307,6 @@ class TaskBoard {
         completed: _filterOutList(completed, taskId),
       ),
     };
-  }
-
-  /// Returns [task] without [categoryId] in its `categoryIds` list.
-  static TaskItem _removeIdFromTaskCategories(
-    TaskItem task,
-    String categoryId,
-  ) {
-    if (!task.categoryIds.contains(categoryId)) {
-      return task;
-    }
-    return task.copyWith(
-      categoryIds: [
-        for (final id in task.categoryIds)
-          if (id != categoryId) id,
-      ],
-    );
-  }
-
-  /// Returns [task] without [locationId] in its `locationIds` list.
-  static TaskItem _removeIdFromTaskLocations(TaskItem task, String locationId) {
-    if (!task.locationIds.contains(locationId)) {
-      return task;
-    }
-    return task.copyWith(
-      locationIds: [
-        for (final id in task.locationIds)
-          if (id != locationId) id,
-      ],
-    );
   }
 
   /// Replaces the task with `updatedTask.id` inside [tier].
@@ -1004,6 +1325,52 @@ class TaskBoard {
       TaskTier.someday => copyWith(someday: replaceIn(someday)),
       TaskTier.completed => copyWith(completed: replaceIn(completed)),
     };
+  }
+
+  /// Resolves the `queued` timestamp for placing a downgraded task at the end of the regular FIFO queue.
+  static DateTime _resolveEndOfRegularQueueTimestamp(
+    DateTime now,
+    List<TaskItem> focusList,
+    List<TaskItem> readyList,
+    List<TaskItem> plannedList,
+  ) {
+    DateTime? latestRegular;
+    for (final item in [...focusList, ...readyList, ...plannedList]) {
+      if (item.isPriority) {
+        continue;
+      }
+      final itemQueued = item.queuedAt ?? item.createdAt;
+      if (latestRegular == null || itemQueued.isAfter(latestRegular)) {
+        latestRegular = itemQueued;
+      }
+    }
+    if (latestRegular != null && !now.isAfter(latestRegular)) {
+      return latestRegular.add(const Duration(seconds: 1));
+    }
+    return now;
+  }
+
+  /// Shifts colliding tasks in [plannedList] belonging to [isPriorityGroup] forward by `+00:00:01` per Section 6.3 Step 3.
+  static void _shiftCollidingPlannedTasks(
+    List<TaskItem> plannedList,
+    DateTime minimumAfterQueued, {
+    required bool isPriorityGroup,
+  }) {
+    var cursor = minimumAfterQueued;
+    for (var i = 0; i < plannedList.length; i++) {
+      final current = plannedList[i];
+      if (current.isPriority != isPriorityGroup) {
+        continue;
+      }
+      final currentQueued = current.queuedAt ?? current.createdAt;
+      if (!currentQueued.isAfter(cursor)) {
+        final shifted = cursor.add(const Duration(seconds: 1));
+        plannedList[i] = current.copyWith(queuedAt: shifted);
+        cursor = shifted;
+      } else {
+        cursor = currentQueued;
+      }
+    }
   }
 
   /// Slices sorted [activeCandidates] into `Focus` (`0..2`), `Ready` (`3..7`), and `Planned` (`>= 8`).
@@ -1053,24 +1420,12 @@ class TaskBoard {
     return '${prefix}_$slug';
   }
 
-  /// Removes [categoryId] from every task in [tasks].
-  static List<TaskItem> _stripCategoryFromTasks(
+  /// Removes [labelId] from every task in [tasks].
+  static List<TaskItem> _stripLabelFromTasks(
     List<TaskItem> tasks,
-    String categoryId,
+    String labelId,
   ) {
-    return [
-      for (final task in tasks) _removeIdFromTaskCategories(task, categoryId),
-    ];
-  }
-
-  /// Removes [locationId] from every task in [tasks].
-  static List<TaskItem> _stripLocationFromTasks(
-    List<TaskItem> tasks,
-    String locationId,
-  ) {
-    return [
-      for (final task in tasks) _removeIdFromTaskLocations(task, locationId),
-    ];
+    return [for (final task in tasks) _removeIdFromTaskLabels(task, labelId)];
   }
 }
 

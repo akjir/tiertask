@@ -21,9 +21,12 @@ import '../l10n/tier_localization_extension.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
+import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
+import 'edit_labels_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/quick_add_bar.dart';
+import 'widgets/task_editor_dialog.dart';
 import 'widgets/tier_page_indicator.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
@@ -48,11 +51,8 @@ class _DrawerActionTile extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.onAction,
-    this.count,
+    this.tileKey,
   });
-
-  /// Optional item counter badge displayed at the trailing edge.
-  final int? count;
 
   /// Leading icon for the menu item.
   final IconData icon;
@@ -60,18 +60,20 @@ class _DrawerActionTile extends StatelessWidget {
   /// Callback invoked after closing the drawer.
   final VoidCallback onAction;
 
+  /// Optional deterministic widget key for the tile.
+  final Key? tileKey;
+
   /// Localized title text.
   final String title;
 
   @override
   Widget build(BuildContext context) {
-    final badgeCount = count;
     return ListTile(
+      key: tileKey,
       dense: true,
       visualDensity: const VisualDensity(vertical: -2),
       leading: Icon(icon),
       title: Text(title),
-      trailing: badgeCount != null ? Badge.count(count: badgeCount) : null,
       onTap: () {
         Navigator.of(context).pop();
         onAction();
@@ -142,6 +144,107 @@ class _DrawerHeader extends StatelessWidget {
         style: theme.textTheme.headlineSmall?.copyWith(
           fontWeight: FontWeight.bold,
         ),
+      ),
+    );
+  }
+}
+
+/// Google Keep style label row inside [_LandingDrawer] with rounded selection pill and task count badge.
+class _DrawerLabelTile extends StatelessWidget {
+  /// Creates a [_DrawerLabelTile].
+  const _DrawerLabelTile({
+    super.key,
+    required this.count,
+    required this.isSelected,
+    required this.label,
+    required this.onTap,
+  });
+
+  /// Open task count associated with [label].
+  final int count;
+
+  /// Whether [label] is currently the active filter.
+  final bool isSelected;
+
+  /// Label definition displayed by this tile.
+  final TdfLabel label;
+
+  /// Callback invoked after closing the drawer.
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedColor = _resolveColor(label.color);
+    final leadingColor = isSelected ? _accentBlue : resolvedColor;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: ListTile(
+        dense: true,
+        selected: isSelected,
+        selectedColor: _accentBlue,
+        selectedTileColor: _accentBlue.withValues(alpha: 0.18),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        visualDensity: const VisualDensity(vertical: -2),
+        leading: Icon(Icons.label_outline_rounded, color: leadingColor),
+        title: Text(
+          label.name,
+          style: TextStyle(
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+        trailing: Badge.count(
+          key: ValueKey('drawer_label_badge_${label.id}'),
+          count: count,
+        ),
+        onTap: () {
+          Navigator.of(context).pop();
+          onTap();
+        },
+      ),
+    );
+  }
+
+  /// Resolves an optional `#RRGGBB` color string or returns `null`.
+  static Color? _resolveColor(String? rawHex) {
+    final parsed = TdfColor.tryParseArgb(rawHex);
+    return parsed != null ? Color(parsed) : null;
+  }
+}
+
+/// Section header row inside [_LandingDrawer] displaying `Labels` on the left and `Edit` on the right.
+class _DrawerLabelsHeader extends StatelessWidget {
+  /// Creates a [_DrawerLabelsHeader].
+  const _DrawerLabelsHeader({required this.onEditLabels});
+
+  /// Callback invoked after closing the drawer when `Edit` is pressed.
+  final VoidCallback onEditLabels;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 12, 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            localizations.drawerLabels,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          TextButton(
+            key: const ValueKey('drawer_edit_labels_button'),
+            onPressed: () {
+              Navigator.of(context).pop();
+              onEditLabels();
+            },
+            child: Text(localizations.actionEdit),
+          ),
+        ],
       ),
     );
   }
@@ -268,6 +371,7 @@ class _ErrorStateView extends StatelessWidget {
 
 /// State for [HomeScreen].
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  String? _activeLabelId;
   TaskTier _activeTier = TaskTier.focus;
   bool _isQuickAddOpen = false;
   bool _isSearching = false;
@@ -285,6 +389,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final boardAsync = ref.watch(taskNotifierProvider);
+    final board = boardAsync.asData?.value ?? TaskBoard.empty();
+    final effectiveLabelId = _resolveEffectiveLabelId(board);
+    final evaluationTime = ref.watch(clockProvider)();
     final syncState = ref.watch(syncStateProvider);
     final showSyncAction = ref.watch(
       webDavConfigProvider.select(
@@ -296,10 +403,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       backgroundColor: _canvasColor,
       drawer: _LandingDrawer(
-        board: boardAsync.asData?.value ?? TaskBoard.empty(),
+        activeLabelId: effectiveLabelId,
+        board: board,
+        onOpenEditLabels: (autofocusCreate) =>
+            _openEditLabels(context, autofocusCreate: autofocusCreate),
         onOpenMarkdownPreview: () => _showMarkdownPreviewDialog(context),
         onOpenSettings: () => _openSettings(context),
-        onSelectTier: _selectTierPane,
+        onSelectLabel: _selectLabel,
         onSyncRemote: () =>
             ref.read(taskNotifierProvider.notifier).syncFromRemote(),
       ),
@@ -325,9 +435,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           : null,
       body: SafeArea(
         child: _LandingScaffoldBody(
+          activeLabelId: effectiveLabelId,
           activeTier: _activeTier,
           boardAsync: boardAsync,
           errorMessage: syncState.errorMessage,
+          evaluationTime: evaluationTime,
           isSearching: _isSearching,
           isSyncing: syncState.isSyncing,
           pageController: _pageController,
@@ -370,6 +482,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
+  /// Pushes [EditLabelsScreen] onto the navigation stack.
+  void _openEditLabels(BuildContext context, {required bool autofocusCreate}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditLabelsScreen(autofocusCreate: autofocusCreate),
+      ),
+    );
+  }
+
   /// Opens the inline [QuickAddBar] in place of the add button.
   void _openQuickAdd() {
     setState(() {
@@ -381,6 +502,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _openSettings(BuildContext context) {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  }
+
+  /// Returns [_activeLabelId] when it still exists in [board.labels], or `null` otherwise.
+  String? _resolveEffectiveLabelId(TaskBoard board) {
+    final currentId = _activeLabelId;
+    if (currentId == null) {
+      return null;
+    }
+    for (final label in board.labels) {
+      if (label.id == currentId) {
+        return currentId;
+      }
+    }
+    return null;
+  }
+
+  /// Updates the active label filter on the board.
+  void _selectLabel(String? labelId) {
+    setState(() {
+      _activeLabelId = labelId;
+    });
   }
 
   /// Jumps directly to the [PageView] pane for [tier].
@@ -446,7 +588,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 class _LandingContentSwitcher extends StatelessWidget {
   /// Creates a [_LandingContentSwitcher].
   const _LandingContentSwitcher({
+    required this.activeLabelId,
     required this.boardAsync,
+    required this.evaluationTime,
     required this.pageController,
     required this.searchQuery,
     required this.onOpenSettings,
@@ -454,8 +598,14 @@ class _LandingContentSwitcher extends StatelessWidget {
     required this.onRetry,
   });
 
+  /// Optional active label filter ID.
+  final String? activeLabelId;
+
   /// Asynchronous board state.
   final AsyncValue<TaskBoard> boardAsync;
+
+  /// Reference evaluation time for active label context derivation.
+  final DateTime evaluationTime;
 
   /// Callback to open settings.
   final VoidCallback onOpenSettings;
@@ -482,41 +632,49 @@ class _LandingContentSwitcher extends StatelessWidget {
         onRetry: onRetry,
         onOpenSettings: onOpenSettings,
       ),
-      data: (board) => PageView.builder(
-        controller: pageController,
-        itemCount: TaskTier.values.length,
-        onPageChanged: onPageChanged,
-        itemBuilder: (context, index) => _TierScrollView(
-          board: board,
-          searchQuery: searchQuery,
-          tier: TaskTier.values[index],
-        ),
-      ),
+      data: (board) {
+        final effectiveBoard = activeLabelId != null
+            ? board.evaluateForContext(
+                activeLabelId: activeLabelId,
+                evaluationTime: evaluationTime,
+              )
+            : board;
+        return PageView.builder(
+          controller: pageController,
+          itemCount: TaskTier.values.length,
+          onPageChanged: onPageChanged,
+          itemBuilder: (context, index) => _TierScrollView(
+            board: effectiveBoard,
+            searchQuery: searchQuery,
+            tier: TaskTier.values[index],
+          ),
+        );
+      },
     );
   }
 }
 
-/// Left-side navigation drawer containing secondary tiers, sync, preview, and settings.
+/// Left-side navigation drawer containing the Google Keep style Labels section, sync, preview, and settings.
 class _LandingDrawer extends StatelessWidget {
   /// Creates a [_LandingDrawer].
   const _LandingDrawer({
+    required this.activeLabelId,
     required this.board,
+    required this.onOpenEditLabels,
     required this.onOpenMarkdownPreview,
     required this.onOpenSettings,
-    required this.onSelectTier,
+    required this.onSelectLabel,
     required this.onSyncRemote,
   });
 
-  static const List<TaskTier> _secondaryTiers = [
-    TaskTier.ready,
-    TaskTier.planned,
-    TaskTier.blocked,
-    TaskTier.someday,
-    TaskTier.completed,
-  ];
+  /// Currently selected label filter ID, or `null` when all tasks are shown.
+  final String? activeLabelId;
 
   /// Current task board snapshot.
   final TaskBoard board;
+
+  /// Callback to open [EditLabelsScreen], passing whether the create input should autofocus.
+  final ValueChanged<bool> onOpenEditLabels;
 
   /// Callback to open the raw TDF preview dialog.
   final VoidCallback onOpenMarkdownPreview;
@@ -524,8 +682,8 @@ class _LandingDrawer extends StatelessWidget {
   /// Callback to navigate to [SettingsScreen].
   final VoidCallback onOpenSettings;
 
-  /// Callback to jump to a specific [TaskTier] pane.
-  final ValueChanged<TaskTier> onSelectTier;
+  /// Callback to select or clear a label filter.
+  final ValueChanged<String?> onSelectLabel;
 
   /// Callback to trigger remote synchronization.
   final VoidCallback onSyncRemote;
@@ -541,13 +699,22 @@ class _LandingDrawer extends StatelessWidget {
           children: [
             _DrawerHeader(title: localizations.appTitle),
             const Divider(height: 8),
-            for (final tier in _secondaryTiers)
-              _DrawerActionTile(
-                icon: Icons.folder_outlined,
-                title: localizations.tierName(tier),
-                count: board.tasksForTier(tier).length,
-                onAction: () => onSelectTier(tier),
+            _DrawerLabelsHeader(onEditLabels: () => onOpenEditLabels(false)),
+            for (final label in board.labels)
+              _DrawerLabelTile(
+                key: ValueKey('drawer_label_tile_${label.id}'),
+                count: board.openTaskCountForLabel(label.id),
+                isSelected: activeLabelId == label.id,
+                label: label,
+                onTap: () =>
+                    onSelectLabel(activeLabelId == label.id ? null : label.id),
               ),
+            _DrawerActionTile(
+              tileKey: const ValueKey('drawer_create_label_tile'),
+              icon: Icons.add_rounded,
+              title: localizations.createNewLabel,
+              onAction: () => onOpenEditLabels(true),
+            ),
             const Divider(height: 8),
             _DrawerFooterSection(
               onOpenMarkdownPreview: onOpenMarkdownPreview,
@@ -565,9 +732,11 @@ class _LandingDrawer extends StatelessWidget {
 class _LandingScaffoldBody extends StatelessWidget {
   /// Creates a [_LandingScaffoldBody].
   const _LandingScaffoldBody({
+    required this.activeLabelId,
     required this.activeTier,
     required this.boardAsync,
     required this.errorMessage,
+    required this.evaluationTime,
     required this.isSearching,
     required this.isSyncing,
     required this.pageController,
@@ -584,6 +753,9 @@ class _LandingScaffoldBody extends StatelessWidget {
     required this.onToggleSearch,
   });
 
+  /// Currently selected label filter ID, or `null` when unfiltered.
+  final String? activeLabelId;
+
   /// Currently selected [TaskTier] pane.
   final TaskTier activeTier;
 
@@ -592,6 +764,9 @@ class _LandingScaffoldBody extends StatelessWidget {
 
   /// Optional synchronization error message.
   final String? errorMessage;
+
+  /// Reference evaluation time for active label context derivation.
+  final DateTime evaluationTime;
 
   /// Whether the inline search bar is active.
   final bool isSearching;
@@ -653,7 +828,9 @@ class _LandingScaffoldBody extends StatelessWidget {
           _SyncErrorBanner(message: activeError, onDismiss: onClearError),
         Expanded(
           child: _LandingContentSwitcher(
+            activeLabelId: activeLabelId,
             boardAsync: boardAsync,
+            evaluationTime: evaluationTime,
             pageController: pageController,
             searchQuery: searchQuery,
             onOpenSettings: onOpenSettings,
@@ -891,6 +1068,7 @@ class _TierScrollView extends StatelessWidget {
         return _TierTaskPill(
           key: ValueKey('tier_pill_${tier.name}_${task.id}'),
           task: task,
+          canDowngrade: tier == TaskTier.focus || tier == TaskTier.ready,
           isCompleted: isCompletedTier,
           ringColor: taskIndex.isEven ? _accentMagenta : _accentBlue,
         );
@@ -911,15 +1089,103 @@ class _TierScrollView extends StatelessWidget {
   }
 }
 
+/// Compact icon button rendered on the right side of [_TierTaskPillRow].
+class _TierTaskActionButton extends StatelessWidget {
+  /// Creates a [_TierTaskActionButton].
+  const _TierTaskActionButton({
+    required this.buttonKey,
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  /// Deterministic widget key for the icon button.
+  final Key buttonKey;
+
+  /// Icon displayed inside the button.
+  final IconData icon;
+
+  /// Callback invoked when the button is tapped, or `null` when disabled.
+  final VoidCallback? onPressed;
+
+  /// Localized tooltip message.
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Center(
+        child: IconButton(
+          key: buttonKey,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          tooltip: tooltip,
+          icon: Icon(icon, size: 20, color: _mutedLabelColor),
+          onPressed: onPressed,
+        ),
+      ),
+    );
+  }
+}
+
+/// Circular button at the leading edge of [_TierTaskPillRow] to mark a task as completed.
+class _TierTaskCompletionCircle extends StatelessWidget {
+  /// Creates a [_TierTaskCompletionCircle].
+  const _TierTaskCompletionCircle({
+    required this.buttonKey,
+    required this.isCompleted,
+    required this.ringColor,
+    required this.onComplete,
+  });
+
+  /// Deterministic widget key for the completion circle.
+  final Key buttonKey;
+
+  /// Whether the task is already completed.
+  final bool isCompleted;
+
+  /// Callback invoked when the circle is tapped, or `null` when completed.
+  final VoidCallback? onComplete;
+
+  /// Border and check icon color of the circular indicator.
+  final Color ringColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      key: buttonKey,
+      customBorder: const CircleBorder(),
+      onTap: onComplete,
+      child: Container(
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: ringColor, width: 2.2),
+        ),
+        child: isCompleted
+            ? Icon(Icons.check_rounded, size: 16, color: ringColor)
+            : null,
+      ),
+    );
+  }
+}
+
 /// Minimal pill card representing a single task entry across all 6 [TaskTier] panes.
 class _TierTaskPill extends ConsumerWidget {
   /// Creates a [_TierTaskPill].
   const _TierTaskPill({
     super.key,
+    required this.canDowngrade,
     required this.isCompleted,
     required this.ringColor,
     required this.task,
   });
+
+  /// Whether the task belongs to a downgradable tier (`Focus` or `Ready`).
+  final bool canDowngrade;
 
   /// Whether the task belongs to the completed archive tier.
   final bool isCompleted;
@@ -936,21 +1202,24 @@ class _TierTaskPill extends ConsumerWidget {
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
         color: _cardColor,
+        clipBehavior: Clip.antiAlias,
         borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: isCompleted
-              ? null
-              : () => ref
-                    .read(taskNotifierProvider.notifier)
-                    .completeTask(task.id),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-            child: _TierTaskPillRow(
-              isCompleted: isCompleted,
-              ringColor: ringColor,
-              title: task.title,
-            ),
+        child: IntrinsicHeight(
+          child: _TierTaskPillRow(
+            isCompleted: isCompleted,
+            ringColor: ringColor,
+            task: task,
+            onComplete: isCompleted
+                ? null
+                : () => ref
+                      .read(taskNotifierProvider.notifier)
+                      .completeTask(task.id),
+            onDowngrade: canDowngrade
+                ? () => ref
+                      .read(taskNotifierProvider.notifier)
+                      .downgradeTask(task.id)
+                : null,
+            onEdit: () => showTaskEditorDialog(context, initialTask: task),
           ),
         ),
       ),
@@ -958,50 +1227,119 @@ class _TierTaskPill extends ConsumerWidget {
   }
 }
 
-/// Row layout inside [_TierTaskPill] combining the circular ring indicator and task title.
-class _TierTaskPillRow extends StatelessWidget {
-  /// Creates a [_TierTaskPillRow].
-  const _TierTaskPillRow({
+/// Left-hand content area inside [_TierTaskPillRow] containing the completion circle and task title.
+class _TierTaskPillContent extends StatelessWidget {
+  /// Creates a [_TierTaskPillContent].
+  const _TierTaskPillContent({
     required this.isCompleted,
     required this.ringColor,
-    required this.title,
+    required this.task,
+    required this.onComplete,
   });
 
   /// Whether the task is completed.
   final bool isCompleted;
 
+  /// Callback invoked when the leading completion circle is pressed, or `null` when completed.
+  final VoidCallback? onComplete;
+
   /// Border color of the circular completion indicator.
   final Color ringColor;
 
-  /// Task title text.
-  final String title;
+  /// Task item displayed in this content section.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: ringColor, width: 2.2),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 4, 18),
+      child: Row(
+        children: [
+          _TierTaskCompletionCircle(
+            buttonKey: ValueKey('complete_task_button_${task.id}'),
+            isCompleted: isCompleted,
+            ringColor: ringColor,
+            onComplete: onComplete,
           ),
-          child: isCompleted
-              ? Icon(Icons.check_rounded, size: 16, color: ringColor)
-              : null,
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Text(
-            title,
-            style: TextStyle(
-              color: isCompleted ? _mutedLabelColor : Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              decoration: isCompleted ? TextDecoration.lineThrough : null,
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              task.title,
+              style: TextStyle(
+                color: isCompleted ? _mutedLabelColor : Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+                decoration: isCompleted ? TextDecoration.lineThrough : null,
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Row layout inside [_TierTaskPill] combining the task content area, downgrade arrow button, full-height vertical divider, and right-side edit button.
+class _TierTaskPillRow extends StatelessWidget {
+  /// Creates a [_TierTaskPillRow].
+  const _TierTaskPillRow({
+    required this.isCompleted,
+    required this.ringColor,
+    required this.task,
+    required this.onComplete,
+    required this.onDowngrade,
+    required this.onEdit,
+  });
+
+  /// Whether the task is completed.
+  final bool isCompleted;
+
+  /// Callback invoked when the leading completion circle is pressed, or `null` when completed.
+  final VoidCallback? onComplete;
+
+  /// Callback invoked when the downgrade button is pressed, or `null` when omitted.
+  final VoidCallback? onDowngrade;
+
+  /// Callback invoked when the edit button is pressed.
+  final VoidCallback onEdit;
+
+  /// Border color of the circular completion indicator.
+  final Color ringColor;
+
+  /// Task item displayed in this pill row.
+  final TaskItem task;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: _TierTaskPillContent(
+            isCompleted: isCompleted,
+            ringColor: ringColor,
+            task: task,
+            onComplete: onComplete,
+          ),
+        ),
+        if (onDowngrade != null)
+          _TierTaskActionButton(
+            buttonKey: ValueKey('downgrade_task_button_${task.id}'),
+            icon: Icons.arrow_downward_rounded,
+            tooltip: localizations.tooltipDowngradeTask,
+            onPressed: onDowngrade,
+          ),
+        Container(
+          key: ValueKey('edit_task_divider_${task.id}'),
+          width: 3,
+          color: _canvasColor,
+        ),
+        _TierTaskActionButton(
+          buttonKey: ValueKey('edit_task_button_${task.id}'),
+          icon: Icons.edit_outlined,
+          tooltip: localizations.tooltipEditTask,
+          onPressed: onEdit,
         ),
       ],
     );

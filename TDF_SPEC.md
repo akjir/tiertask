@@ -18,10 +18,10 @@ A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`l
 
 ### 1.2 Core Design Principles
 
-1. **Strict Root Block Enforcement:** Every top-level statement at nesting depth `0` in a TDF document MUST be a root block (`task` or `label`). Standalone directives at the root level are forbidden.
+1. **Mandatory Version Header & Strict Root Block Enforcement:** Every valid `.tdf` document MUST begin with the single-line version header `tdf 0.2.0` at nesting depth `0` before any root block, making it the only directive allowed at depth `0`. Following the version header, every top-level statement at nesting depth `0` MUST be a root block (`task` or `label`); all other standalone directives at the root level are forbidden.
 2. **No Empty Directives:** Optional directives that have no value (such as an unset `finished` or `queued` timestamp) MUST be omitted entirely from the block rather than written with empty arguments.
 3. **Single-Pass Linear Grammar:** TDF is designed to be tokenized and parsed in a single $O(N)$ linear pass without regular expressions or backtracking.
-4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
+4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (format version header, ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
 
 ## 2. Lexical Elements
 
@@ -93,6 +93,7 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 ### 2.8 Primitive Domain Value Types
 At the semantic validation layer, directive and header arguments map to the following primitive types:
+- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.2.0` for this specification).
 - **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Unlike block and directive identifiers (Section 2.6), an `<id>` argument may start with a digit (`0-9`) or hyphen (`-`). Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `it`) are equally valid when authored manually.
 - **Boolean (`<bool>`):** Exact case-sensitive bare word `true` or `false`.
 - **Weekday (`<weekday>`):** Exact case-sensitive lowercase bare word from the set `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
@@ -108,13 +109,13 @@ At the semantic validation layer, directive and header arguments map to the foll
 ## 3. Structural Grammar
 
 ### 3.1 Document Structure & Nesting Depth
-A TDF document represents a sequence of root-level **Blocks**.
+A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.2.0`) followed by a sequence of zero or more root-level **Blocks**.
 - **Nesting Depth Definition:** Nesting depth equals the number of currently open `{ ... }` blocks:
-  - Depth `0` (document root): Only root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
+  - Depth `0` (document root): Only the mandatory initial version header (`tdf 0.2.0`), root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
   - Depth `1` (inside a `task` or `label` block body): Block directives and nested sub-block headers (`subtasks`, `condition`) are permitted.
   - Depth `2` (inside a `subtasks` or `condition` sub-block body): Only sub-block directives (`step`, `day`, `time`, `location`) are permitted; no further nested blocks are allowed (`MAX_NESTING_DEPTH = 2`).
-- **Root-Level Directive Prohibition:** Any directive appearing at nesting depth `0` (outside of a `{ ... }` block) MUST be rejected as a syntax error (`UnexpectedRootDirective`).
-- An empty file (or a file containing only whitespace and comments) is a valid empty TDF document with zero blocks.
+- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.2.0` at nesting depth `0` before any root block (preceded only by optional blank lines and `#` comments). A file with no statements (empty or containing only whitespace and `#` comments) or whose first statement is not `tdf <version>` MUST be rejected with `MissingVersionHeader`. A file containing `tdf 0.2.0` and zero root blocks is a valid empty TDF document.
+- **Root-Level Directive Prohibition:** Aside from the initial `tdf 0.2.0` version header, any directive appearing at nesting depth `0` (outside of a `{ ... }` block), including a duplicate `tdf` directive later in the file, MUST be rejected as a syntax error (`UnexpectedRootDirective`).
 
 ### 3.2 Blocks
 A **Block** groups related directives and optional nested sub-blocks under a named context.
@@ -133,22 +134,24 @@ A **Block** groups related directives and optional nested sub-blocks under a nam
 - **Empty Blocks:** Because `task` requires `name` and `created`, `label` requires `name`, and `condition` / `subtasks` sub-blocks require at least one rule or step when present, a block containing zero statements between its opening `{` line and closing `}` line is rejected during semantic validation (`MissingRequiredDirective`).
 
 ### 3.3 Directives
-A **Directive** is a single-line key-value or key-tuple instruction inside a block.
+A **Directive** is a single-line key-value or key-tuple instruction.
 
 ```text
 <identifier> <argument> [<argument> ...]
 ```
 
-- **Block-Only Scope:** A directive MUST reside inside a block (nesting depth `1` or `2`).
-- **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
-- **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
+- **Scope:** Except for the mandatory initial `tdf 0.2.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
+- **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line inside a block without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
+- **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a block directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
 - **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `note`, `color`, `labels`, `blocked`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
 
 ### 3.4 Formal Grammar (EBNF)
 
 ```ebnf
-(* Document Root: Strictly Blocks, Comments, and Blank Lines *)
-document        = { empty-line | root-block } [ trailing-empty ] ;
+(* Document Root: Mandatory Version Header followed by Blocks, Comments, and Blank Lines *)
+document        = { empty-line } version-header { empty-line | root-block } [ trailing-empty ] ;
+
+version-header  = ws* "tdf" ws+ bare-word ws* [ comment ] newline ;
 
 root-block      = block ;
 
@@ -195,9 +198,25 @@ ws              = " " | "\t" ;
 newline         = "\n" | "\r\n" ;
 ```
 
-## 4. Domain Schema: Root Blocks, Sub-Blocks & Directives
+## 4. Domain Schema: Version Header, Root Blocks, Sub-Blocks & Directives
 
-At nesting depth `0`, TDF defines two root block types: `task` and `label`. Any other root block identifier MUST be rejected with an `UnknownBlockType` error.
+At nesting depth `0`, every TDF document MUST start with the `tdf` version header (Section 4.0), followed by zero or more root blocks of type `task` (Section 4.1) or `label` (Section 4.2). Any other root-level directive MUST be rejected with `UnexpectedRootDirective`, and any other root block identifier MUST be rejected with an `UnknownBlockType` error.
+
+### 4.0 The `tdf` Version Header
+
+Every `.tdf` document MUST begin with a single-line `tdf` version header at nesting depth `0` before any root block:
+
+```text
+tdf 0.2.0
+```
+
+- **First Statement Requirement:** `tdf 0.2.0` MUST be the first statement of every `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at nesting depth `0`.
+- **Version Argument:** Takes a single bare-word `<version>` argument formatted as `<MAJOR>.<MINOR>.<PATCH>` and equal to `0.2.0`.
+- **Validation Rules:**
+  - If the file contains no statements or its first statement is not `tdf <version>`, the parser MUST fail with `MissingVersionHeader`.
+  - If `<version>` is not `0.2.0`, is quoted, or is followed by extra arguments on the header line, the parser MUST fail with `UnsupportedVersion`.
+  - If a duplicate `tdf` directive appears anywhere later in the file at nesting depth `0`, the parser MUST fail with `UnexpectedRootDirective`.
+- **Serializer Output:** A conforming TDF serializer MUST always emit `tdf 0.2.0` as the first statement of every output document (including an empty board with zero `label` and `task` blocks).
 
 ### 4.1 The `task` Block (Tasks)
 
@@ -336,7 +355,7 @@ Task-level condition rules operate at the granularity of individual rule groups 
    - **Selective Per-Group Override or Inheritance:** Otherwise, each rule group $G \in \{\text{day}, \text{time}, \text{location}\}$ is resolved independently:
      - **Task Group Reset (`G any`):** If the `task` specifies `day any`, `time any`, or `location any` for group $G$, effective group $G$ is cleared to empty (`0` rules, unrestricted), ignoring the `label`'s rules for group $G$.
      - **Task Group Override (`G <args...>`):** If the `task` defines one or more rules for group $G$, the `task`'s rules for group $G$ replace only the `label`'s rules for group $G$.
-     - **Label Group Inheritance (No Task Rule for `G`):** If the `task` defines no rule or reset for group $G$, effective group $G$ inherits the rules defined for group $G$ on the `label` (or is empty if the `label` defines no rules for $G$).
+     - **Label Group Inheritance (No Task Rule for $G$):** If the `task` defines no rule or reset for group $G$, effective group $G$ inherits the rules defined for group $G$ on the `label` (or is empty if the `label` defines no rules for $G$).
    - Consequently, a task assigned to `label home` (`day sat sun`, `time 08:00 20:00`, `location ...`) that specifies `condition time 09:00 18:00` overrides only the `time` group (`09:00..18:00`) while still inheriting `day sat sun` and `location` from `home`. To also allow execution on weekdays while still requiring `home`'s GPS location, the task can specify `day any` alongside `time 09:00 18:00`.
 2. **Unlabeled Task (`labels` Omitted):**
    - If a `task` has no `labels` directive, it has a single effective condition context consisting exclusively of the task's own `day`, `time`, and `location` groups (any group omitted or set to `<type> any` is empty/unrestricted).
@@ -411,14 +430,15 @@ State transitions mutate the task directives (`queued`, `finished`) and header f
 ### 6.2 Scheduling a Task from `Someday`
 - Adds the `queued` directive set to the current local timestamp (`now`).
 
-### 6.3 Downgrading an Active Task
-- **Downgrade to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`) so the task moves to the end of the regular FIFO queue (if fewer than `8` other active tasks exist, the Section 5.5 slicing pipeline places the task into the highest open slot in `Focus` or `Ready`).
+### 6.3 Downgrading an Active Task (`Focus` and `Ready` Only)
+- **Allowed Source Tiers (`Focus` and `Ready` Only):** Only tasks currently derived in `Focus` (`Tier 1`) or `Ready` (`Tier 2`) can be downgraded. Tasks in `Planned` (`Tier 3`), `Blocked` (`Tier 4`), `Someday` (`Tier 5`), or `Completed` (`Tier 6`) CANNOT be downgraded (attempting to downgrade a task outside `Focus` and `Ready` is a no-op).
 - **Downgrade from `Focus` to `Ready`:**
   - **Fewer than `8` active tasks (`< 8`):** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`).
   - **At least `8` active tasks (`>= 8`):** To place the downgraded task deterministically at active slot `8` (index `7`, the last slot of `Ready`) without reordering blocks in the file:
     1. **Priority Alignment with Slot `8`:** Removes the `priority` header flag if the task currently at active slot `8` is a regular task, or retains `priority` if the task at active slot `8` carries `priority` (ensuring the downgraded task is compared within the same sorting group as slot `8`).
     2. **Timestamp Offset (`+00:00:01`):** Sets the downgraded task's `queued` timestamp to `1` second (`+00:00:01`, using `<HH:MM:SS>` precision) after the `queued` timestamp of the task currently at active slot `8`.
     3. **Collision Shift in `Planned` (Slot `9` Onward):** If the task at active slot `9` (the first task in `Planned`) belongs to the same `priority` group and has a `queued` timestamp less than or equal to the downgraded task's new `queued` timestamp (`slot_9.queued <= new_queued`), shifts `slot_9` (and any subsequent colliding tasks in `Planned` within the same group) forward so each has a `queued` timestamp at least `1` second (`+00:00:01`) after its predecessor, guaranteeing `slot_8.queued < new_queued < slot_9.queued`.
+- **Downgrade from `Ready` to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`) so the task moves to the end of the regular FIFO queue (if fewer than `8` other active tasks exist, the Section 5.5 slicing pipeline places the task into the highest open slot in `Focus` or `Ready`).
 
 ### 6.4 Completing a Task (From Any Open Tier)
 - Any open task—regardless of whether it is currently derived in `Focus`, `Ready`, `Planned`, `Blocked`, or `Someday`—can be completed directly by adding the `finished` directive set to the current local timestamp (`now`) (or automatically when all `step` directives in a `subtasks auto-finish` sub-block become `true`).
@@ -449,7 +469,9 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 
 A conforming TDF parser MUST report a structured error (including the 1-based line number) and MUST fail deterministically on any of the following inputs:
 
-- **Root Directive (`UnexpectedRootDirective`):** A directive (e.g., `name "Mow the lawn"`) appears at nesting depth `0` outside of any `{ ... }` block.
+- **Missing Version Header (`MissingVersionHeader`):** The file contains no statements (empty or only whitespace and `#` comments), or the first statement at nesting depth `0` is not `tdf <version>` (e.g., the file starts directly with `label home {` or `task t001 {`, or bare `tdf` without a version argument).
+- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies a `<version>` other than `0.2.0` (e.g., `tdf 0.1.0` or `tdf 1.0.0`), quotes the version token, or has extra arguments (e.g., `tdf 0.2.0 extra`).
+- **Root Directive (`UnexpectedRootDirective`):** Any root-level directive other than the initial `tdf` version header appears at nesting depth `0` outside of any `{ ... }` block (e.g., `name "Mow the lawn"` at root level, or a duplicate `tdf` directive later in the file).
 - **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (e.g., `queued` with no timestamp value).
 - **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" t001 {` or `"name" "Mow the lawn"`), a block/directive identifier starts with an invalid character (e.g., `123task {` or `-flag val`), or an `<id>` argument does not match `[a-zA-Z0-9_-]+`.
 - **Malformed Block Header or Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task t001{` or `condition{`), a required header `<id>` is missing (e.g., `task {` or `label {`), or an unknown/extra header argument is provided (e.g., `task t001 urgent {`, `label home extra {`, `subtasks urgent {`, or `condition arg {`).
@@ -475,6 +497,8 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 # ==========================================
 # TierTask Data Format (TDF) Example Document
 # ==========================================
+
+tdf 0.2.0
 
 label home {
     name "Home & Garden"

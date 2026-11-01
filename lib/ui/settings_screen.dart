@@ -172,7 +172,7 @@ class _LocalStorageSection extends StatelessWidget {
   }
 }
 
-/// Card for choosing whether the total open task count is shown on category and location cards.
+/// Card for choosing whether the total open task count is shown on label cards.
 class _OpenTaskCountSelectionCard extends StatelessWidget {
   /// Creates an [_OpenTaskCountSelectionCard].
   const _OpenTaskCountSelectionCard({

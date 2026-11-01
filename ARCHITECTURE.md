@@ -8,7 +8,7 @@
 | Layer | Path | Responsibility |
 | :--- | :--- | :--- |
 | Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, and `TaskTier` localization mappings. |
-| Models | `lib/models/` | Immutable domain data structures (`TaskTier`, `TaskItem`, `SubtaskItem`, `TaskCondition`, `TdfCategory`, `TdfLocation`, `TaskBoard`, `AppLanguage`, `AppThemeMode`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation and mutation pipeline. |
+| Models | `lib/models/` | Immutable domain data structures (`TaskTier`, `TaskItem`, `SubtaskItem`, `ConditionGroup`, `TaskCondition`, `TdfLabel`, `TdfColor`, `TaskBoard`, `AppLanguage`, `AppThemeMode`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation and mutation pipeline. |
 | Services | `lib/services/` | Stateless single-pass $O(N)$ TDF lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`, `TdfException`, `TdfErrorKind`). |
 | Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local `.tdf` file reads/writes (`dart:io` `File`), and encrypted settings persistence (`flutter_secure_storage`). |
 | Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating locale and theme resolution, domain mutations, and repository synchronization. |
@@ -57,14 +57,24 @@ tiertask/
 │   ├── services/
 │   │   └── tdf_service.dart
 │   └── ui/
+│       ├── edit_labels_screen.dart
 │       ├── home_screen.dart
 │       ├── settings_screen.dart
 │       └── widgets/
 │           ├── quick_add_bar.dart
+│           ├── task_editor_dialog.dart
 │           └── tier_page_indicator.dart
 └── test/
     ├── tiertask_domain_test.dart
-    └── widget_test.dart
+    └── ui/
+        ├── edit_labels_screen_test.dart
+        ├── home_screen_test.dart
+        ├── settings_screen_test.dart
+        ├── test_helpers.dart
+        └── widgets/
+            ├── quick_add_bar_test.dart
+            ├── task_editor_dialog_test.dart
+            └── tier_page_indicator_test.dart
 ```
 
 ## Root Files
@@ -93,9 +103,9 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/models/task_tier.dart` | Defines the `TaskTier` enum for the 6 derived tiers (`1` `focus`, `2` `ready`, `3` `planned`, `4` `blocked`, `5` `someday`, `6` `completed`) and WIP soft limits. |
-| `lib/models/tdf_metadata.dart` | Immutable `TaskCondition` (`DayTaskCondition`, `TimeWindowTaskCondition`), `TdfCategory`, `TdfLocation`, and `TdfColor` hex color utilities from `TDF_SPEC.md` Section 4. |
-| `lib/models/task_item.dart` | Immutable `TaskItem` and `SubtaskItem` value classes with TDF `<id>`, `priority` flag, `created` / `queued` / `finished` / `suspended` timestamps, `locations`, `categories`, `blocked` dependencies, `conditions`, `subtasks auto-finish`, and strict ISO-8601 date/time helpers. |
-| `lib/models/task_board.dart` | Immutable `TaskBoard` aggregate implementing the $O(N)$ dynamic 6-tier derivation pipeline (`TaskBoard.evaluate`), context-filtered evaluation (`TaskBoard.evaluateForContext`), auto-pull cascade, 30-day completed task pruning, `subtasks auto-finish` completion, category and location creation/deletion, and Section 6 mutations. |
+| `lib/models/tdf_metadata.dart` | Immutable `ConditionGroup` (`day`, `time`, `location`), `TaskCondition` (`DayTaskCondition`, `GlobalResetTaskCondition`, `GroupResetTaskCondition`, `LocationTaskCondition`, `TimeWindowTaskCondition`), `TdfLabel`, and `TdfColor` hex color utilities from `TDF_SPEC.md` Section 4. |
+| `lib/models/task_item.dart` | Immutable `TaskItem` and `SubtaskItem` value classes with TDF `<id>`, `priority` flag, `created` / `queued` / `finished` / `suspended` timestamps (with optional `:SS` precision), `labels`, `blocked` dependencies, `conditions`, `subtasks auto-finish`, and strict ISO-8601 date/time helpers. |
+| `lib/models/task_board.dart` | Immutable `TaskBoard` aggregate implementing the $O(N)$ dynamic 6-tier derivation pipeline (`TaskBoard.evaluate`), context-filtered evaluation (`TaskBoard.evaluateForContext`), group-level condition inheritance and overrides, auto-pull cascade, 30-day completed task pruning, `subtasks auto-finish` completion, label creation/renaming/deletion and open task counting (`openTaskCountForLabel`), and Section 6 mutations. |
 | `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model defaulting to `tiertask.tdf`. |
 
 ## Services
@@ -123,14 +133,16 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
-| `lib/ui/home_screen.dart` | Primary landing page screen displaying a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the top greeting, uppercase tier section heading, minimalist task pill cards (`_TierTaskPill`) or empty-state card (`_EmptyTierCard`), a bottom `TierPageIndicator`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a circular task-add button that hides and transforms into the inline bottom `QuickAddBar` when pressed, and a top-left navigation drawer for switching tiers, synchronization, TDF preview, and settings. |
+| `lib/ui/edit_labels_screen.dart` | Dedicated Google Keep style label management screen (`EditLabelsScreen`) opened from the navigation drawer's `Edit` button or `+ Create new label` entry, supporting new label creation, open task count badges (`Badge.count`) per label, inline label renaming, and label deletion. |
+| `lib/ui/home_screen.dart` | Primary landing page screen displaying a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the top greeting, uppercase tier section heading, minimalist task pill cards (`_TierTaskPill` with a leading completion circle, a downward arrow downgrade button on `Focus` and `Ready` tasks immediately to the left of a full-height 3px vertical gap matching the screen background, and a right-side edit button) or empty-state card (`_EmptyTierCard`), a bottom `TierPageIndicator`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a circular task-add button that hides and transforms into the inline bottom `QuickAddBar` when pressed, and a top-left navigation drawer (`_LandingDrawer`) featuring a Google Keep style `Labels` section (top `Edit` button, selectable label filter pills with open task count badges, and `+ Create new label` entry) alongside synchronization, TDF preview, and settings actions without tier navigation items. |
 | `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), open task count visibility (`Off` by default, `On`), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name, WebDAV endpoint parameters, and synchronization testing. |
-| `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, `Categories` and `Locations` icon buttons that expand multi-select menus upward above the bar, a placeholder `Advanced` icon button, and a `Cancel` icon button. |
+| `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, a `Labels` icon button that expands a multi-select menu upward above the bar, an `Advanced` icon button opening `TaskEditorDialog`, and a `Cancel` icon button. |
+| `lib/ui/widgets/task_editor_dialog.dart` | Shared modal dialog (`TaskEditorDialog`) used for both extended task creation (`QuickAddBar` `Advanced` button) and editing an existing task (`_TierTaskPill` edit button), enforcing non-empty and non-duplicate task names and editing notes, scheduling mode (`Priority` / `Someday`), labels, and subtasks (`auto-finish`). |
 | `lib/ui/widgets/tier_page_indicator.dart` | Bottom tier indicator (`TierPageIndicator`) positioned above `QuickAddBar` when open, rendering dots for inactive tiers and an icon for the active tier (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) over a transparent background, a desktop mouse-over icon in an intermediate color and borderless label without wave animation, desktop Left/Right arrow key navigation, and an interactive wave effect on hold and drag that enlarges the two adjacent neighbor dots (`1.5x` in the intermediate color) and jumps directly to the selected tier pane upon release. |
 
 ## Execution & Synchronization Flow
 
 1. **Startup, Configuration & Locale Resolution:** `main.dart` initializes `ProviderScope`. `WebDavConfigNotifier` loads persisted `StorageMode`, `.tdf` paths, WebDAV credentials, and `AppLanguage` settings via `SettingsRepository`. `appLocaleProvider` resolves the active `Locale`.
 2. **TDF Fetch (Local File or WebDAV):** `TaskNotifier` reads the raw `.tdf` document either from the configured local `.tdf` file (`LocalFileRepository.loadTdf`) or from the configured WebDAV endpoint via HTTP `GET` (`WebDavRepository.fetchTdf`). Missing files (`HTTP 404` or non-existent local file) initialize an empty board.
-3. **Single-Pass Parse & Dynamic 6-Tier Derivation:** `TdfService.parse` scans and validates all `location`, `category`, and `task` blocks in a single $O(N)$ pass and invokes `TaskBoard.evaluate` to derive `Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, and `Planned` per `TDF_SPEC.md` Section 5.
-4. **Mutation & Persistence:** Every user action (`addTask`, `completeTask`, `toggleSubtask`, `createCategory`, `deleteCategory`, `createLocation`, `deleteLocation`) produces a new immutable `TaskBoard`, updates UI state, serializes canonical `LF`-terminated `.tdf` output via `TdfService.serialize`, and persists the `.tdf` document to the local filesystem and/or WebDAV server.
+3. **Single-Pass Parse & Dynamic 6-Tier Derivation:** `TdfService.parse` validates the `tdf 0.2.0` header (while automatically migrating legacy `category` / `location` root blocks and `categories` / `locations` directives to unified `label` / `labels`), scans and validates all `label` and `task` blocks in a single $O(N)$ pass, and invokes `TaskBoard.evaluate` to derive `Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, and `Planned` per `TDF_SPEC.md` Section 5.
+4. **Mutation & Persistence:** Every user action (`addTask`, `updateTask`, `completeTask`, `downgradeTask`, `toggleSubtask`) produces a new immutable `TaskBoard`, updates UI state, serializes canonical `LF`-terminated `tdf 0.2.0` output via `TdfService.serialize`, and persists the `.tdf` document to the local filesystem and/or WebDAV server.

@@ -98,6 +98,33 @@ class AppLocalizationsEn extends AppLocalizations {
   String get advancedTaskTitle => 'Extended Task View';
 
   @override
+  String get editTaskTitle => 'Edit Task';
+
+  @override
+  String get tooltipDowngradeTask => 'Downgrade task';
+
+  @override
+  String get tooltipEditTask => 'Edit task';
+
+  @override
+  String get taskNameLabel => 'Task Name';
+
+  @override
+  String get taskNameErrorEmpty => 'Please enter a task name.';
+
+  @override
+  String get taskNameErrorDuplicate => 'A task with this name already exists.';
+
+  @override
+  String get taskNoteLabel => 'Note';
+
+  @override
+  String get taskNoteHint => 'Optional note or description...';
+
+  @override
+  String get subtasksAutoFinishLabel => 'Auto-finish';
+
+  @override
   String get subtasksSectionTitle => 'Subtasks';
 
   @override
@@ -163,7 +190,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get openTaskCountSectionDescription =>
-      'Show or hide the total number of open tasks on category and location cards.';
+      'Show or hide the total number of open tasks on label cards.';
 
   @override
   String get openTaskCountOff => 'Off';
@@ -354,10 +381,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sectionCompletedTasks => 'COMPLETED TASKS';
 
   @override
-  String get sectionCategories => 'CATEGORIES';
-
-  @override
-  String get sectionLocations => 'LOCATIONS';
+  String get sectionLabels => 'LABELS';
 
   @override
   String taskCountLabel(int count) {
@@ -374,29 +398,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get searchHint => 'Search focus tasks...';
 
   @override
-  String get drawerCategories => 'Categories';
+  String get drawerLabels => 'Labels';
 
   @override
-  String get drawerLocations => 'Locations';
-
-  @override
-  String get categoryNameHint => 'New category name...';
-
-  @override
-  String get locationNameHint => 'New location name...';
+  String get labelNameHint => 'New label name...';
 
   @override
   String get colorHexLabel => 'Hex Color';
 
   @override
-  String get emptyCategoriesHint => 'No categories created yet.';
+  String get emptyLabelsHint => 'No labels created yet.';
 
   @override
-  String get emptyLocationsHint => 'No locations created yet.';
+  String get tooltipDeleteLabel => 'Delete label';
 
   @override
-  String get tooltipDeleteCategory => 'Delete category';
+  String get actionEdit => 'Edit';
 
   @override
-  String get tooltipDeleteLocation => 'Delete location';
+  String get createNewLabel => 'Create new label';
+
+  @override
+  String get editLabelsTitle => 'Edit labels';
+
+  @override
+  String get tooltipRenameLabel => 'Rename label';
 }

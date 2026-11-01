@@ -21,6 +21,7 @@ import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_tier.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/task_providers.dart';
+import 'task_editor_dialog.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
 const Color _accentCyan = Color(0xFF00E5FF);
@@ -30,7 +31,7 @@ const Color _cardColor = Color(0xFF071A52);
 const Color _mutedLabelColor = Color(0xFF9BA8E5);
 const String _popupTapRegionGroupId = 'quick_add_popup_region';
 
-/// Inline bottom task creation bar with title input, Priority, Someday, upward Categories and Locations selectors, no-op Advanced, and Cancel actions.
+/// Inline bottom task creation bar with title input, Priority, Someday, upward Labels selector, Advanced dialog trigger, and Cancel actions.
 class QuickAddBar extends ConsumerStatefulWidget {
   /// Creates a [QuickAddBar] widget.
   const QuickAddBar({super.key, this.onCancel, this.onSubmitted});
@@ -132,24 +133,19 @@ class _QuickAddActionIconButton extends StatelessWidget {
 class _QuickAddBarRow extends StatelessWidget {
   /// Creates a [_QuickAddBarRow].
   const _QuickAddBarRow({
-    required this.activePopup,
     required this.controller,
     required this.effectiveTier,
-    required this.hasSelectedCategories,
-    required this.hasSelectedLocations,
+    required this.hasSelectedLabels,
     required this.hasTaskText,
+    required this.isLabelsPopupOpen,
     required this.mode,
     required this.onAdvanced,
     required this.onCancel,
     required this.onSubmit,
-    required this.onToggleCategoriesPopup,
-    required this.onToggleLocationsPopup,
+    required this.onToggleLabelsPopup,
     required this.onTogglePriority,
     required this.onToggleSomeday,
   });
-
-  /// Currently expanded upward popup menu.
-  final _QuickAddPopup activePopup;
 
   /// Text controller for the task title input.
   final TextEditingController controller;
@@ -157,19 +153,19 @@ class _QuickAddBarRow extends StatelessWidget {
   /// Target tier corresponding to [mode].
   final TaskTier effectiveTier;
 
-  /// Whether at least one category is selected.
-  final bool hasSelectedCategories;
-
-  /// Whether at least one location is selected.
-  final bool hasSelectedLocations;
+  /// Whether at least one label is selected.
+  final bool hasSelectedLabels;
 
   /// Whether the task title input contains non-whitespace text.
   final bool hasTaskText;
 
+  /// Whether the upward Labels popup menu is currently open.
+  final bool isLabelsPopupOpen;
+
   /// Active scheduling mode.
   final QuickAddMode mode;
 
-  /// No-op callback for the Advanced button.
+  /// Callback to open the extended task creation dialog.
   final VoidCallback onAdvanced;
 
   /// Callback invoked when the Cancel button is pressed.
@@ -178,11 +174,8 @@ class _QuickAddBarRow extends StatelessWidget {
   /// Callback invoked when the task is submitted.
   final VoidCallback onSubmit;
 
-  /// Callback to toggle the upward Categories popup menu.
-  final VoidCallback onToggleCategoriesPopup;
-
-  /// Callback to toggle the upward Locations popup menu.
-  final VoidCallback onToggleLocationsPopup;
+  /// Callback to toggle the upward Labels popup menu.
+  final VoidCallback onToggleLabelsPopup;
 
   /// Callback to toggle Priority mode.
   final VoidCallback onTogglePriority;
@@ -223,26 +216,12 @@ class _QuickAddBarRow extends StatelessWidget {
         TapRegion(
           groupId: _popupTapRegionGroupId,
           child: _QuickAddActionIconButton(
-            buttonKey: const ValueKey('quick_add_categories_button'),
+            buttonKey: const ValueKey('quick_add_labels_button'),
             icon: Icons.label_outline_rounded,
-            isActive:
-                activePopup == _QuickAddPopup.categories ||
-                hasSelectedCategories,
+            isActive: isLabelsPopupOpen || hasSelectedLabels,
             activeColor: _accentMagenta,
-            tooltip: localizations.drawerCategories,
-            onTap: onToggleCategoriesPopup,
-          ),
-        ),
-        TapRegion(
-          groupId: _popupTapRegionGroupId,
-          child: _QuickAddActionIconButton(
-            buttonKey: const ValueKey('quick_add_locations_button'),
-            icon: Icons.location_on_outlined,
-            isActive:
-                activePopup == _QuickAddPopup.locations || hasSelectedLocations,
-            activeColor: _accentCyan,
-            tooltip: localizations.drawerLocations,
-            onTap: onToggleLocationsPopup,
+            tooltip: localizations.drawerLabels,
+            onTap: onToggleLabelsPopup,
           ),
         ),
         _QuickAddActionIconButton(
@@ -268,11 +247,10 @@ class _QuickAddBarRow extends StatelessWidget {
 
 /// State for [QuickAddBar].
 class _QuickAddBarState extends ConsumerState<QuickAddBar> {
-  _QuickAddPopup _activePopup = _QuickAddPopup.none;
   final TextEditingController _controller = TextEditingController();
+  bool _isLabelsPopupOpen = false;
   QuickAddMode _mode = QuickAddMode.standard;
-  final Set<String> _selectedCategoryIds = <String>{};
-  final Set<String> _selectedLocationIds = <String>{};
+  final Set<String> _selectedLabelIds = <String>{};
 
   bool get _hasTaskText => _controller.text.trim().isNotEmpty;
 
@@ -291,16 +269,9 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
   @override
   Widget build(BuildContext context) {
-    final categories = ref.watch(
+    final labels = ref.watch(
       taskNotifierProvider.select(
-        (boardAsync) =>
-            boardAsync.asData?.value.categories ?? const <TdfCategory>[],
-      ),
-    );
-    final locations = ref.watch(
-      taskNotifierProvider.select(
-        (boardAsync) =>
-            boardAsync.asData?.value.locations ?? const <TdfLocation>[],
+        (boardAsync) => boardAsync.asData?.value.labels ?? const <TdfLabel>[],
       ),
     );
 
@@ -308,7 +279,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_activePopup == _QuickAddPopup.categories)
+        if (_isLabelsPopupOpen)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Align(
@@ -316,26 +287,10 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
               child: TapRegion(
                 groupId: _popupTapRegionGroupId,
                 onTapOutside: (_) => _dismissPopup(),
-                child: _UpwardCategoriesMenu(
-                  categories: categories,
-                  selectedCategoryIds: _selectedCategoryIds,
-                  onToggleCategory: _toggleCategory,
-                ),
-              ),
-            ),
-          ),
-        if (_activePopup == _QuickAddPopup.locations)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: TapRegion(
-                groupId: _popupTapRegionGroupId,
-                onTapOutside: (_) => _dismissPopup(),
-                child: _UpwardLocationsMenu(
-                  locations: locations,
-                  selectedLocationIds: _selectedLocationIds,
-                  onToggleLocation: _toggleLocation,
+                child: _UpwardLabelsMenu(
+                  labels: labels,
+                  selectedLabelIds: _selectedLabelIds,
+                  onToggleLabel: _toggleLabel,
                 ),
               ),
             ),
@@ -354,18 +309,16 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
               ),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               child: _QuickAddBarRow(
-                activePopup: _activePopup,
                 controller: _controller,
                 effectiveTier: _mode.targetTier,
-                hasSelectedCategories: _selectedCategoryIds.isNotEmpty,
-                hasSelectedLocations: _selectedLocationIds.isNotEmpty,
+                hasSelectedLabels: _selectedLabelIds.isNotEmpty,
                 hasTaskText: _hasTaskText,
+                isLabelsPopupOpen: _isLabelsPopupOpen,
                 mode: _mode,
-                onAdvanced: _handleAdvancedNoOp,
+                onAdvanced: _openAdvancedDialog,
                 onCancel: _cancel,
                 onSubmit: _submit,
-                onToggleCategoriesPopup: _toggleCategoriesPopup,
-                onToggleLocationsPopup: _toggleLocationsPopup,
+                onToggleLabelsPopup: _toggleLabelsPopup,
                 onTogglePriority: _togglePriority,
                 onToggleSomeday: _toggleSomeday,
               ),
@@ -380,33 +333,52 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   void _cancel() {
     _controller.clear();
     setState(() {
-      _activePopup = _QuickAddPopup.none;
-      _selectedCategoryIds.clear();
-      _selectedLocationIds.clear();
+      _isLabelsPopupOpen = false;
+      _selectedLabelIds.clear();
       _mode = QuickAddMode.standard;
     });
     widget.onCancel?.call();
   }
 
-  /// Closes any open upward category or location popup menu.
+  /// Closes the upward labels popup menu when open.
   void _dismissPopup() {
-    if (_activePopup == _QuickAddPopup.none) {
+    if (!_isLabelsPopupOpen) {
       return;
     }
     setState(() {
-      _activePopup = _QuickAddPopup.none;
+      _isLabelsPopupOpen = false;
     });
   }
-
-  /// Placeholder callback for the Advanced button.
-  void _handleAdvancedNoOp() {}
 
   /// Rebuilds the widget when the task title text changes.
   void _handleControllerChanged() {
     setState(() {});
   }
 
-  /// Submits the entered task title, priority/someday selection, locations, and categories.
+  /// Opens the shared [TaskEditorDialog] pre-filled with the current draft values.
+  Future<void> _openAdvancedDialog() async {
+    _dismissPopup();
+    await showTaskEditorDialog(
+      context,
+      initialTitle: _controller.text,
+      initialMode: _mode,
+      initialLabelIds: Set<String>.from(_selectedLabelIds),
+      onSubmitted: () {
+        if (!mounted) {
+          return;
+        }
+        _controller.clear();
+        setState(() {
+          _isLabelsPopupOpen = false;
+          _selectedLabelIds.clear();
+          _mode = QuickAddMode.standard;
+        });
+        widget.onSubmitted?.call();
+      },
+    );
+  }
+
+  /// Submits the entered task title, priority/someday selection, and labels.
   Future<void> _submit() async {
     final text = _controller.text.trim();
     if (text.isEmpty) {
@@ -415,22 +387,19 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
     final selectedMode = _mode;
     final board = ref.read(taskNotifierProvider).asData?.value;
-    final submittedCategoryIds = <String>[
+    if (board != null && board.hasDuplicateTaskTitle(text)) {
+      return;
+    }
+    final submittedLabelIds = <String>[
       if (board != null)
-        for (final category in board.categories)
-          if (_selectedCategoryIds.contains(category.id)) category.id,
-    ];
-    final submittedLocationIds = <String>[
-      if (board != null)
-        for (final location in board.locations)
-          if (_selectedLocationIds.contains(location.id)) location.id,
+        for (final label in board.labels)
+          if (_selectedLabelIds.contains(label.id)) label.id,
     ];
 
     _controller.clear();
     setState(() {
-      _activePopup = _QuickAddPopup.none;
-      _selectedCategoryIds.clear();
-      _selectedLocationIds.clear();
+      _isLabelsPopupOpen = false;
+      _selectedLabelIds.clear();
       _mode = QuickAddMode.standard;
     });
 
@@ -440,45 +409,24 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
           text,
           targetTier: selectedMode.targetTier,
           isPriority: selectedMode == QuickAddMode.priority,
-          categoryIds: submittedCategoryIds,
-          locationIds: submittedLocationIds,
+          labelIds: submittedLabelIds,
         );
     widget.onSubmitted?.call();
   }
 
-  /// Toggles the upward Categories selection menu.
-  void _toggleCategoriesPopup() {
+  /// Toggles selection of [labelId] for the task being created.
+  void _toggleLabel(String labelId) {
     setState(() {
-      _activePopup = _activePopup == _QuickAddPopup.categories
-          ? _QuickAddPopup.none
-          : _QuickAddPopup.categories;
-    });
-  }
-
-  /// Toggles selection of [categoryId] for the task being created.
-  void _toggleCategory(String categoryId) {
-    setState(() {
-      if (!_selectedCategoryIds.remove(categoryId)) {
-        _selectedCategoryIds.add(categoryId);
+      if (!_selectedLabelIds.remove(labelId)) {
+        _selectedLabelIds.add(labelId);
       }
     });
   }
 
-  /// Toggles selection of [locationId] for the task being created.
-  void _toggleLocation(String locationId) {
+  /// Toggles the upward Labels selection menu.
+  void _toggleLabelsPopup() {
     setState(() {
-      if (!_selectedLocationIds.remove(locationId)) {
-        _selectedLocationIds.add(locationId);
-      }
-    });
-  }
-
-  /// Toggles the upward Locations selection menu.
-  void _toggleLocationsPopup() {
-    setState(() {
-      _activePopup = _activePopup == _QuickAddPopup.locations
-          ? _QuickAddPopup.none
-          : _QuickAddPopup.locations;
+      _isLabelsPopupOpen = !_isLabelsPopupOpen;
     });
   }
 
@@ -501,10 +449,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   }
 }
 
-/// Active upward popup menu state inside [QuickAddBar].
-enum _QuickAddPopup { none, categories, locations }
-
-/// Single option row inside [_UpwardCategoriesMenu] or [_UpwardLocationsMenu].
+/// Single option row inside [_UpwardLabelsMenu].
 class _QuickAddPopupOptionTile extends StatelessWidget {
   /// Creates a [_QuickAddPopupOptionTile].
   const _QuickAddPopupOptionTile({
@@ -525,7 +470,7 @@ class _QuickAddPopupOptionTile extends StatelessWidget {
   /// Whether this option is currently selected.
   final bool isSelected;
 
-  /// Display name of the category or location.
+  /// Display name of the label.
   final String label;
 
   /// Callback invoked when this row is tapped.
@@ -637,30 +582,30 @@ class _QuickAddTextField extends StatelessWidget {
   }
 }
 
-/// Upward floating selection menu for choosing task categories.
-class _UpwardCategoriesMenu extends StatelessWidget {
-  /// Creates an [_UpwardCategoriesMenu].
-  const _UpwardCategoriesMenu({
-    required this.categories,
-    required this.selectedCategoryIds,
-    required this.onToggleCategory,
+/// Upward floating selection menu for choosing task labels.
+class _UpwardLabelsMenu extends StatelessWidget {
+  /// Creates an [_UpwardLabelsMenu].
+  const _UpwardLabelsMenu({
+    required this.labels,
+    required this.selectedLabelIds,
+    required this.onToggleLabel,
   });
 
-  /// Available categories on the board.
-  final List<TdfCategory> categories;
+  /// Available labels on the board.
+  final List<TdfLabel> labels;
 
-  /// Callback invoked when a category option is tapped.
-  final ValueChanged<String> onToggleCategory;
+  /// Callback invoked when a label option is tapped.
+  final ValueChanged<String> onToggleLabel;
 
-  /// Currently selected category IDs.
-  final Set<String> selectedCategoryIds;
+  /// Currently selected label IDs.
+  final Set<String> selectedLabelIds;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
 
     return Material(
-      key: const ValueKey('quick_add_categories_menu'),
+      key: const ValueKey('quick_add_labels_menu'),
       color: _cardColor,
       elevation: 12,
       clipBehavior: Clip.antiAlias,
@@ -672,14 +617,14 @@ class _UpwardCategoriesMenu extends StatelessWidget {
         constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
         child: Padding(
           padding: const EdgeInsets.all(6),
-          child: categories.isEmpty
+          child: labels.isEmpty
               ? Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 8,
                   ),
                   child: Text(
-                    localizations.emptyCategoriesHint,
+                    localizations.emptyLabelsHint,
                     style: const TextStyle(
                       color: _mutedLabelColor,
                       fontSize: 14,
@@ -689,92 +634,14 @@ class _UpwardCategoriesMenu extends StatelessWidget {
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    for (final category in categories)
+                    for (final label in labels)
                       _QuickAddPopupOptionTile(
-                        key: ValueKey('quick_add_category_${category.id}'),
+                        key: ValueKey('quick_add_label_${label.id}'),
                         icon: Icons.label_outline_rounded,
-                        label: category.name,
-                        isSelected: selectedCategoryIds.contains(category.id),
-                        accentColor: _resolveColor(
-                          category.color,
-                          _accentMagenta,
-                        ),
-                        onTap: () => onToggleCategory(category.id),
-                      ),
-                  ],
-                ),
-        ),
-      ),
-    );
-  }
-
-  /// Resolves a `#RRGGBB` color string or falls back to [fallback].
-  Color _resolveColor(String? rawHex, Color fallback) {
-    final parsed = TdfColor.tryParseArgb(rawHex);
-    return parsed != null ? Color(parsed) : fallback;
-  }
-}
-
-/// Upward floating selection menu for choosing task locations.
-class _UpwardLocationsMenu extends StatelessWidget {
-  /// Creates an [_UpwardLocationsMenu].
-  const _UpwardLocationsMenu({
-    required this.locations,
-    required this.selectedLocationIds,
-    required this.onToggleLocation,
-  });
-
-  /// Available locations on the board.
-  final List<TdfLocation> locations;
-
-  /// Callback invoked when a location option is tapped.
-  final ValueChanged<String> onToggleLocation;
-
-  /// Currently selected location IDs.
-  final Set<String> selectedLocationIds;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return Material(
-      key: const ValueKey('quick_add_locations_menu'),
-      color: _cardColor,
-      elevation: 12,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: _canvasColor, width: 1.2),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
-        child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: locations.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  child: Text(
-                    localizations.emptyLocationsHint,
-                    style: const TextStyle(
-                      color: _mutedLabelColor,
-                      fontSize: 14,
-                    ),
-                  ),
-                )
-              : Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final location in locations)
-                      _QuickAddPopupOptionTile(
-                        key: ValueKey('quick_add_location_${location.id}'),
-                        icon: Icons.location_on_outlined,
-                        label: location.name,
-                        isSelected: selectedLocationIds.contains(location.id),
-                        accentColor: _resolveColor(location.color, _accentCyan),
-                        onTap: () => onToggleLocation(location.id),
+                        label: label.name,
+                        isSelected: selectedLabelIds.contains(label.id),
+                        accentColor: _resolveColor(label.color, _accentMagenta),
+                        onTap: () => onToggleLabel(label.id),
                       ),
                   ],
                 ),

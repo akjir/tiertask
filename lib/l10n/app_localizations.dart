@@ -266,6 +266,60 @@ abstract class AppLocalizations {
   /// **'Extended Task View'**
   String get advancedTaskTitle;
 
+  /// Header title when editing an existing task in the extended task view.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit Task'**
+  String get editTaskTitle;
+
+  /// Tooltip for the downward arrow button that downgrades a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Downgrade task'**
+  String get tooltipDowngradeTask;
+
+  /// Tooltip for the edit button on a task card.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit task'**
+  String get tooltipEditTask;
+
+  /// Input label for the task name field in the extended task view.
+  ///
+  /// In en, this message translates to:
+  /// **'Task Name'**
+  String get taskNameLabel;
+
+  /// Validation error shown when the task name is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a task name.'**
+  String get taskNameErrorEmpty;
+
+  /// Validation error shown when another task already uses the same name.
+  ///
+  /// In en, this message translates to:
+  /// **'A task with this name already exists.'**
+  String get taskNameErrorDuplicate;
+
+  /// Input label for the optional task note field in the extended task view.
+  ///
+  /// In en, this message translates to:
+  /// **'Note'**
+  String get taskNoteLabel;
+
+  /// Placeholder hint for the optional task note input field.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional note or description...'**
+  String get taskNoteHint;
+
+  /// Toggle label for automatically completing a task when all subtasks are done.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-finish'**
+  String get subtasksAutoFinishLabel;
+
   /// Section heading for subtasks inside the extended task creation view.
   ///
   /// In en, this message translates to:
@@ -389,16 +443,16 @@ abstract class AppLocalizations {
   /// Helper description explaining the open task count visibility setting.
   ///
   /// In en, this message translates to:
-  /// **'Show or hide the total number of open tasks on category and location cards.'**
+  /// **'Show or hide the total number of open tasks on label cards.'**
   String get openTaskCountSectionDescription;
 
-  /// Option label to hide the total open task count on category and location cards.
+  /// Option label to hide the total open task count on label cards.
   ///
   /// In en, this message translates to:
   /// **'Off'**
   String get openTaskCountOff;
 
-  /// Option label to show the total open task count on category and location cards.
+  /// Option label to show the total open task count on label cards.
   ///
   /// In en, this message translates to:
   /// **'On'**
@@ -716,19 +770,13 @@ abstract class AppLocalizations {
   /// **'COMPLETED TASKS'**
   String get sectionCompletedTasks;
 
-  /// Uppercase section label above the category summary cards on the landing page.
+  /// Uppercase section label above the label chips or summary cards.
   ///
   /// In en, this message translates to:
-  /// **'CATEGORIES'**
-  String get sectionCategories;
+  /// **'LABELS'**
+  String get sectionLabels;
 
-  /// Uppercase section label above the location summary cards on the landing page.
-  ///
-  /// In en, this message translates to:
-  /// **'LOCATIONS'**
-  String get sectionLocations;
-
-  /// Total task counter label displayed at the top of category and location cards.
+  /// Total task counter label displayed at the top of label cards.
   ///
   /// In en, this message translates to:
   /// **'{count} tasks'**
@@ -752,29 +800,17 @@ abstract class AppLocalizations {
   /// **'Search focus tasks...'**
   String get searchHint;
 
-  /// Side panel menu item and sheet title for managing categories.
+  /// Button tooltip and sheet title for managing labels.
   ///
   /// In en, this message translates to:
-  /// **'Categories'**
-  String get drawerCategories;
+  /// **'Labels'**
+  String get drawerLabels;
 
-  /// Side panel menu item and sheet title for managing locations.
+  /// Placeholder hint inside the label name input field.
   ///
   /// In en, this message translates to:
-  /// **'Locations'**
-  String get drawerLocations;
-
-  /// Placeholder hint inside the category name input field.
-  ///
-  /// In en, this message translates to:
-  /// **'New category name...'**
-  String get categoryNameHint;
-
-  /// Placeholder hint inside the location name input field.
-  ///
-  /// In en, this message translates to:
-  /// **'New location name...'**
-  String get locationNameHint;
+  /// **'New label name...'**
+  String get labelNameHint;
 
   /// Input label for the direct hexadecimal color field.
   ///
@@ -782,29 +818,41 @@ abstract class AppLocalizations {
   /// **'Hex Color'**
   String get colorHexLabel;
 
-  /// Empty-state hint shown in the Categories panel when no categories exist.
+  /// Empty-state hint shown when no labels exist.
   ///
   /// In en, this message translates to:
-  /// **'No categories created yet.'**
-  String get emptyCategoriesHint;
+  /// **'No labels created yet.'**
+  String get emptyLabelsHint;
 
-  /// Empty-state hint shown in the Locations panel when no locations exist.
+  /// Tooltip for the button that deletes a label.
   ///
   /// In en, this message translates to:
-  /// **'No locations created yet.'**
-  String get emptyLocationsHint;
+  /// **'Delete label'**
+  String get tooltipDeleteLabel;
 
-  /// Tooltip for the button that deletes a category.
+  /// Button label to edit labels in the navigation drawer.
   ///
   /// In en, this message translates to:
-  /// **'Delete category'**
-  String get tooltipDeleteCategory;
+  /// **'Edit'**
+  String get actionEdit;
 
-  /// Tooltip for the button that deletes a location.
+  /// Action label and input hint for creating a new label.
   ///
   /// In en, this message translates to:
-  /// **'Delete location'**
-  String get tooltipDeleteLocation;
+  /// **'Create new label'**
+  String get createNewLabel;
+
+  /// Screen title for the label management screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit labels'**
+  String get editLabelsTitle;
+
+  /// Tooltip for the button that renames or saves a label.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename label'**
+  String get tooltipRenameLabel;
 }
 
 class _AppLocalizationsDelegate

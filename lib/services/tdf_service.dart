@@ -23,7 +23,10 @@ import '../models/tdf_metadata.dart';
 
 /// Mandatory lexical, structural, and semantic error categories defined in `TDF_SPEC.md` Section 8.
 enum TdfErrorKind {
-  /// A single-valued directive appears more than once in the same block.
+  /// A task's `blocked` dependency chain forms a cycle or self-dependency.
+  circularDependency,
+
+  /// A single-valued directive or sub-block appears more than once in the same block.
   duplicateDirective,
 
   /// Two blocks in the same namespace share an identical `<id>`.
@@ -34,6 +37,12 @@ enum TdfErrorKind {
 
   /// A boolean literal is neither `true` nor `false`.
   invalidBoolean,
+
+  /// A `color` argument is unquoted or fails `#RRGGBB` hexadecimal validation.
+  invalidColor,
+
+  /// A condition rule has an invalid weekday, equal time window, out-of-range GPS coordinate/radius, or invalid reset.
+  invalidCondition,
 
   /// A double-quoted string contains an unsupported backslash escape sequence.
   invalidEscapeSequence,
@@ -53,8 +62,11 @@ enum TdfErrorKind {
   /// A standalone directive identifier appears without arguments and without `{`.
   missingDirectiveArgument,
 
-  /// A required directive (`name` or `created`) is missing from a block.
+  /// A required directive (`name`, `created`, `step`, or condition rule) is missing from a block.
   missingRequiredDirective,
+
+  /// The document contains no statements or does not begin with `tdf <version>`.
+  missingVersionHeader,
 
   /// End-of-file was reached while one or more `{ ... }` blocks remained open.
   unclosedBlock,
@@ -65,7 +77,7 @@ enum TdfErrorKind {
   /// A directive appears at nesting depth `0` outside of any `{ ... }` block.
   unexpectedRootDirective,
 
-  /// An unexpected token, trailing token after a brace, or adjacent quote was encountered.
+  /// An unexpected token, control character, trailing token after a brace, or adjacent quote was encountered.
   unexpectedToken,
 
   /// A root or nested block identifier is not part of the TDF schema.
@@ -73,6 +85,12 @@ enum TdfErrorKind {
 
   /// A directive identifier is not valid for its enclosing block.
   unknownDirective,
+
+  /// A task's `labels` directive references an `<id>` that does not match any `label` block in the document.
+  unknownLabelReference,
+
+  /// The initial `tdf <version>` header specifies an unsupported or malformed version.
+  unsupportedVersion,
 
   /// A double-quoted or single-quoted string reached end-of-line or EOF before its closing quote.
   unterminatedString,
@@ -122,18 +140,25 @@ class TdfService {
   /// Maximum `{ ... }` block nesting depth (`MAX_NESTING_DEPTH`).
   static const int maxNestingDepth = 2;
 
+  /// Maximum character length of a `note` text value (`MAX_NOTE_LENGTH`).
+  static const int maxNoteLength = 2000;
+
   /// Maximum directives or sub-blocks inside a single block (`MAX_STMTS_PER_BLOCK`).
   static const int maxStmtsPerBlock = 512;
 
   /// Maximum character length of a `name` or `step` text value (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = 500;
 
+  /// Canonical TDF specification version string (`tdf 0.2.0`).
+  static const String supportedVersion = '0.2.0';
+
   /// Scans and parses [tdfContent] into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
-    String? activeCategoryId,
-    String? activeLocationId,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
     bool pruneExpiredCompleted = false,
   }) {
     _validateByteLimit(tdfContent);
@@ -161,6 +186,14 @@ class TdfService {
       offset = span.nextOffset;
     }
 
+    if (!state.hasSeenFirstStatement) {
+      throw const TdfException(
+        kind: TdfErrorKind.missingVersionHeader,
+        line: 1,
+        message: 'TDF document is missing required "tdf 0.2.0" version header.',
+      );
+    }
+
     if (state.blockStack.isNotEmpty) {
       throw TdfException(
         kind: TdfErrorKind.unclosedBlock,
@@ -169,25 +202,30 @@ class TdfService {
       );
     }
 
+    _validateAndResolveLabelReferences(state);
+    _validateDependencyCycles(state.taskEntries);
+
+    final tasks = <TaskItem>[for (final entry in state.taskEntries) entry.task];
+
     return TaskBoard.evaluate(
-      tasks: state.tasks,
+      tasks: tasks,
       evaluationTime: evaluationTime,
-      locations: state.locations,
-      categories: state.categories,
-      activeCategoryId: activeCategoryId,
-      activeLocationId: activeLocationId,
+      labels: state.labels,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
     );
   }
 
   /// Serializes [board] into a canonical `LF`-terminated (`.tdf`) document string.
   String serialize(TaskBoard board) {
-    final buffer = StringBuffer();
-    for (final location in board.locations) {
-      _writeLocationBlock(buffer, location);
+    if (board.labels.isEmpty && board.allTasks.isEmpty) {
+      return 'tdf $supportedVersion\n';
     }
-    for (final category in board.categories) {
-      _writeCategoryBlock(buffer, category);
+    final buffer = StringBuffer('tdf $supportedVersion\n\n');
+    for (final label in board.labels) {
+      _writeLabelBlock(buffer, label);
     }
     for (final task in board.allTasks) {
       _writeTaskBlock(buffer, task);
@@ -195,54 +233,103 @@ class TdfService {
     return buffer.toString();
   }
 
-  /// Applies a directive inside a `category` block.
-  static void _applyCategoryDirective(
-    _CategoryBuilder builder,
-    String directive,
-    List<_ScannedToken> args,
+  /// Adds [rule] to [builder] after verifying Section 4.3 reset conflict constraints.
+  static void _addConditionToTask(
+    _TaskBuilder builder,
+    TaskCondition rule,
     int lineNumber,
   ) {
-    switch (directive) {
-      case 'name':
-        if (builder.name != null) {
-          _throwDuplicateDirective(directive, lineNumber);
-        }
-        final value = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: true,
-        );
-        builder.name = value;
-      case 'color':
-        if (builder.color != null) {
-          _throwDuplicateDirective(directive, lineNumber);
-        }
-        builder.color = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: false,
-        );
-      case 'note':
-        if (builder.note != null) {
-          _throwDuplicateDirective(directive, lineNumber);
-        }
-        builder.note = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: false,
-        );
-      default:
+    if (rule is GlobalResetTaskCondition) {
+      if (builder.conditions.isNotEmpty) {
         throw TdfException(
-          kind: TdfErrorKind.unknownDirective,
+          kind: TdfErrorKind.invalidCondition,
           line: lineNumber,
-          message: 'Unknown directive "$directive" in category block.',
+          message:
+              'Task cannot combine "condition any" with other condition rules.',
         );
+      }
+      builder.conditions.add(rule);
+      return;
     }
+
+    final hasGlobalReset = builder.conditions.any(
+      (existing) => existing is GlobalResetTaskCondition,
+    );
+    if (hasGlobalReset) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidCondition,
+        line: lineNumber,
+        message:
+            'Task cannot combine "condition any" with other condition rules.',
+      );
+    }
+
+    final targetGroup = rule.group;
+    if (rule is GroupResetTaskCondition) {
+      final hasSameGroupRule = builder.conditions.any(
+        (existing) => existing.group == targetGroup,
+      );
+      if (hasSameGroupRule) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidCondition,
+          line: lineNumber,
+          message:
+              'Task cannot combine "${rule.targetGroup.name} any" with other "${rule.targetGroup.name}" rules.',
+        );
+      }
+    } else {
+      final hasGroupReset = builder.conditions.any(
+        (existing) =>
+            existing is GroupResetTaskCondition &&
+            existing.targetGroup == targetGroup,
+      );
+      if (hasGroupReset) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidCondition,
+          line: lineNumber,
+          message:
+              'Task cannot combine "${targetGroup?.name} any" with other "${targetGroup?.name}" rules.',
+        );
+      }
+    }
+
+    builder.conditions.add(rule);
   }
 
-  /// Applies a directive inside a `location` block.
-  static void _applyLocationDirective(
-    _LocationBuilder builder,
+  /// Applies a directive inside a `condition { ... }` sub-block.
+  static void _applyConditionBlockDirective(
+    _ConditionBlockBuilder builder,
+    String directive,
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    if (directive == 'any') {
+      throw TdfException(
+        kind: TdfErrorKind.invalidCondition,
+        line: lineNumber,
+        message:
+            'Global reset "any" is not allowed inside a condition sub-block.',
+      );
+    }
+    if (directive != 'day' && directive != 'time' && directive != 'location') {
+      throw TdfException(
+        kind: TdfErrorKind.unknownDirective,
+        line: lineNumber,
+        message: 'Unknown directive "$directive" in condition block.',
+      );
+    }
+    final rule = _parseConditionGroupRule(
+      directive,
+      args,
+      allowResets: builder.allowResets,
+      lineNumber: lineNumber,
+    );
+    builder.rules.add(_LineConditionRule(rule: rule, line: lineNumber));
+  }
+
+  /// Applies a directive inside a `label` (or legacy `category` / `location`) block.
+  static void _applyLabelDirective(
+    _LabelBuilder builder,
     String directive,
     List<_ScannedToken> args,
     int lineNumber,
@@ -252,39 +339,41 @@ class TdfService {
         if (builder.name != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.name = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: true,
-        );
+        builder.name = _requireNameOrStepArg(args, lineNumber);
       case 'color':
         if (builder.color != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.color = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: false,
-        );
+        builder.color = _requireColorArg(args, lineNumber);
       case 'note':
         if (builder.note != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.note = _requireSingleTextArg(
+        builder.note = _requireNoteArg(args, lineNumber);
+      case 'condition':
+        final rule = _parseInlineConditionArgs(
           args,
-          lineNumber,
-          enforceMaxLength: false,
+          allowResets: false,
+          lineNumber: lineNumber,
         );
+        builder.conditions.add(rule);
       case 'gps':
-        if (builder.hasGps) {
+        if (!builder.isLegacyLocation) {
+          throw TdfException(
+            kind: TdfErrorKind.unknownDirective,
+            line: lineNumber,
+            message: 'Unknown directive "gps" in label block.',
+          );
+        }
+        if (builder.hasLegacyGps) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        _parseGpsArgs(builder, args, lineNumber);
+        _parseLegacyGpsArgs(builder, args, lineNumber);
       default:
         throw TdfException(
           kind: TdfErrorKind.unknownDirective,
           line: lineNumber,
-          message: 'Unknown directive "$directive" in location block.',
+          message: 'Unknown directive "$directive" in label block.',
         );
     }
   }
@@ -320,6 +409,13 @@ class TdfService {
       );
     }
     final textValue = args[1].value;
+    if (textValue.isEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Step text must not be empty.',
+      );
+    }
     if (textValue.length > maxTextLength) {
       throw TdfException(
         kind: TdfErrorKind.limitExceeded,
@@ -344,20 +440,12 @@ class TdfService {
         if (builder.name != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.name = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: true,
-        );
+        builder.name = _requireNameOrStepArg(args, lineNumber);
       case 'note':
         if (builder.note != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.note = _requireSingleTextArg(
-          args,
-          lineNumber,
-          enforceMaxLength: false,
-        );
+        builder.note = _requireNoteArg(args, lineNumber);
       case 'created':
         if (builder.createdAt != null) {
           _throwDuplicateDirective(directive, lineNumber);
@@ -378,23 +466,37 @@ class TdfService {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.suspendedAt = _requireTimestampArgs(args, lineNumber);
-      case 'locations':
-        if (builder.locationIds != null) {
+      case 'labels':
+        if (builder.canonicalLabelIds != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.locationIds = _requireIdListArgs(args, lineNumber);
+        builder.canonicalLabelIds = _requireIdListArgs(args, lineNumber);
+        builder.labelsLine = lineNumber;
       case 'categories':
-        if (builder.categoryIds != null) {
+        if (builder.hasLegacyCategories) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.categoryIds = _requireIdListArgs(args, lineNumber);
+        builder.hasLegacyCategories = true;
+        builder.legacyLabelIds.addAll(_requireIdListArgs(args, lineNumber));
+      case 'locations':
+        if (builder.hasLegacyLocations) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.hasLegacyLocations = true;
+        builder.legacyLabelIds.addAll(_requireIdListArgs(args, lineNumber));
       case 'blocked':
         if (builder.blockedByTaskIds != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.blockedByTaskIds = _requireIdListArgs(args, lineNumber);
+        builder.blockedLine = lineNumber;
       case 'condition':
-        builder.conditions.add(_parseConditionArgs(args, lineNumber));
+        final rule = _parseInlineConditionArgs(
+          args,
+          allowResets: true,
+          lineNumber: lineNumber,
+        );
+        _addConditionToTask(builder, rule, lineNumber);
       default:
         throw TdfException(
           kind: TdfErrorKind.unknownDirective,
@@ -402,6 +504,40 @@ class TdfService {
           message: 'Unknown directive "$directive" in task block.',
         );
     }
+  }
+
+  /// Checks whether [taskId] participates in a dependency cycle using 3-color DFS.
+  static void _checkTaskCycle(
+    String taskId,
+    Map<String, _ParsedTaskEntry> taskById,
+    Map<String, int> visitState,
+    int fallbackLine,
+  ) {
+    final currentState = visitState[taskId] ?? 0;
+    if (currentState == 2) {
+      return;
+    }
+    final entry = taskById[taskId];
+    final reportLine = entry != null && entry.blockedLine > 0
+        ? entry.blockedLine
+        : fallbackLine;
+    if (currentState == 1) {
+      throw TdfException(
+        kind: TdfErrorKind.circularDependency,
+        line: reportLine,
+        message: 'Circular dependency detected involving task "$taskId".',
+      );
+    }
+    if (entry == null) {
+      visitState[taskId] = 2;
+      return;
+    }
+
+    visitState[taskId] = 1;
+    for (final blockerId in entry.task.blockedByTaskIds) {
+      _checkTaskCycle(blockerId, taskById, visitState, reportLine);
+    }
+    visitState[taskId] = 2;
   }
 
   /// Closes the currently active block on [state] and validates required directives.
@@ -416,18 +552,128 @@ class TdfService {
     final active = state.blockStack.removeLast();
     switch (active) {
       case final _TaskBuilder taskBuilder:
-        state.tasks.add(taskBuilder.build(lineNumber));
-      case final _LocationBuilder locationBuilder:
-        state.locations.add(locationBuilder.build(lineNumber));
-      case final _CategoryBuilder categoryBuilder:
-        state.categories.add(categoryBuilder.build(lineNumber));
+        state.taskEntries.add(taskBuilder.build(lineNumber));
+      case final _LabelBuilder labelBuilder:
+        state.labels.add(labelBuilder.build(lineNumber));
       case final _SubtasksBuilder subtasksBuilder:
+        if (subtasksBuilder.steps.isEmpty) {
+          throw TdfException(
+            kind: TdfErrorKind.missingRequiredDirective,
+            line: lineNumber,
+            message: 'Subtasks block requires at least one "step" directive.',
+          );
+        }
         final parent = state.blockStack.last;
         if (parent is _TaskBuilder) {
           parent.subtasksAutoFinish = subtasksBuilder.autoFinish;
           parent.subtasks = subtasksBuilder.steps;
         }
+      case final _ConditionBlockBuilder conditionBuilder:
+        if (conditionBuilder.rules.isEmpty) {
+          throw TdfException(
+            kind: TdfErrorKind.missingRequiredDirective,
+            line: lineNumber,
+            message: 'Condition block requires at least one condition rule.',
+          );
+        }
+        final parent = state.blockStack.last;
+        _mergeConditionBlockRules(parent, conditionBuilder.rules);
     }
+  }
+
+  /// Creates a nested block builder (`subtasks` inside `task`, or `condition` inside `task`/`label`).
+  static _BlockBuilder _createNestedBlockBuilder(
+    _BlockBuilder parent,
+    String blockName,
+    List<_ScannedToken> headerArgs,
+    int lineNumber,
+  ) {
+    if (blockName == 'condition') {
+      return _initConditionBlockBuilder(parent, headerArgs, lineNumber);
+    }
+    if (parent is! _TaskBuilder || blockName != 'subtasks') {
+      throw TdfException(
+        kind: TdfErrorKind.unknownBlockType,
+        line: lineNumber,
+        message: 'Unknown nested block type "$blockName".',
+      );
+    }
+    if (parent.hasSubtasksBlock) {
+      _throwDuplicateDirective('subtasks', lineNumber);
+    }
+    if (headerArgs.length > 1) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidBlockHeader,
+        line: lineNumber,
+        message: 'Subtasks block accepts at most one "auto-finish" flag.',
+      );
+    }
+    var autoFinish = false;
+    if (headerArgs.length == 1) {
+      final flag = headerArgs[0];
+      if (flag.kind != _TokenKind.bareWord || flag.value != 'auto-finish') {
+        throw TdfException(
+          kind: TdfErrorKind.invalidBlockHeader,
+          line: lineNumber,
+          message: 'Invalid subtasks header flag "${flag.value}".',
+        );
+      }
+      autoFinish = true;
+    }
+    parent.hasSubtasksBlock = true;
+    return _SubtasksBuilder(autoFinish: autoFinish);
+  }
+
+  /// Creates a root block builder (`label`, `task`, or legacy `category`/`location`) and registers its `<id>`.
+  static _BlockBuilder _createRootBlockBuilder(
+    _ParserState state,
+    String blockName,
+    List<_ScannedToken> headerArgs,
+    int lineNumber,
+  ) {
+    if (blockName != 'label' &&
+        blockName != 'task' &&
+        blockName != 'category' &&
+        blockName != 'location') {
+      throw TdfException(
+        kind: TdfErrorKind.unknownBlockType,
+        line: lineNumber,
+        message: 'Unknown root block type "$blockName".',
+      );
+    }
+    if (headerArgs.isEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidBlockHeader,
+        line: lineNumber,
+        message: 'Root block "$blockName" requires an <id> argument.',
+      );
+    }
+    final idToken = headerArgs[0];
+    if (idToken.kind != _TokenKind.bareWord ||
+        !_isValidEntityId(idToken.value)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidIdentifier,
+        line: lineNumber,
+        message: 'Invalid block identifier "${idToken.value}".',
+      );
+    }
+    if (blockName == 'task') {
+      return _initTaskBuilder(state, idToken.value, headerArgs, lineNumber);
+    }
+    if (headerArgs.length > 1) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidBlockHeader,
+        line: lineNumber,
+        message: 'Block "$blockName" accepts only a single <id> argument.',
+      );
+    }
+    if (!state.labelIds.add(idToken.value)) {
+      _throwDuplicateId(idToken.value, lineNumber);
+    }
+    return _LabelBuilder(
+      id: idToken.value,
+      isLegacyLocation: blockName == 'location',
+    );
   }
 
   /// Escapes a string value for canonical double-quoted TDF serialization.
@@ -454,7 +700,7 @@ class TdfService {
     return buffer.toString();
   }
 
-  /// Finds the end of the line starting at [startOffset] and validates line terminators.
+  /// Finds the end of the line starting at [startOffset] and validates line terminators and control chars.
   static _LineSpan _findLineSpan(
     String source,
     int startOffset,
@@ -463,13 +709,6 @@ class TdfService {
     var index = startOffset;
     while (index < source.length) {
       final unit = source.codeUnitAt(index);
-      if (unit == 0x00) {
-        throw TdfException(
-          kind: TdfErrorKind.unexpectedToken,
-          line: lineNumber,
-          message: 'Null byte is not permitted in a TDF document.',
-        );
-      }
       if (unit == 0x0A) {
         return _LineSpan(
           lineStart: startOffset,
@@ -492,6 +731,14 @@ class TdfService {
           nextOffset: index + 2,
         );
       }
+      if ((unit < 0x20 && unit != 0x09) || unit == 0x7F) {
+        throw TdfException(
+          kind: TdfErrorKind.unexpectedToken,
+          line: lineNumber,
+          message:
+              'ASCII control character is not permitted in a TDF document.',
+        );
+      }
       index++;
     }
     return _LineSpan(
@@ -499,6 +746,85 @@ class TdfService {
       lineEnd: source.length,
       nextOffset: source.length,
     );
+  }
+
+  /// Finds the first index of [kind] in [tokens], or `-1` if absent.
+  static int _findTokenKindIndex(List<_ScannedToken> tokens, _TokenKind kind) {
+    for (var i = 0; i < tokens.length; i++) {
+      if (tokens[i].kind == kind) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /// Validates and initializes a `_ConditionBlockBuilder` for `condition {`.
+  static _ConditionBlockBuilder _initConditionBlockBuilder(
+    _BlockBuilder parent,
+    List<_ScannedToken> headerArgs,
+    int lineNumber,
+  ) {
+    if (parent is! _TaskBuilder && parent is! _LabelBuilder) {
+      throw TdfException(
+        kind: TdfErrorKind.unknownBlockType,
+        line: lineNumber,
+        message:
+            'Condition sub-block is only allowed inside label or task blocks.',
+      );
+    }
+    if (headerArgs.isNotEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidBlockHeader,
+        line: lineNumber,
+        message: 'Condition block header does not accept arguments.',
+      );
+    }
+    if (parent is _TaskBuilder) {
+      if (parent.hasConditionBlock) {
+        _throwDuplicateDirective('condition', lineNumber);
+      }
+      parent.hasConditionBlock = true;
+      return _ConditionBlockBuilder(allowResets: true);
+    }
+    final labelParent = parent as _LabelBuilder;
+    if (labelParent.hasConditionBlock) {
+      _throwDuplicateDirective('condition', lineNumber);
+    }
+    labelParent.hasConditionBlock = true;
+    return _ConditionBlockBuilder(allowResets: false);
+  }
+
+  /// Validates and initializes a `_TaskBuilder` for `task <id> [priority]`.
+  static _TaskBuilder _initTaskBuilder(
+    _ParserState state,
+    String id,
+    List<_ScannedToken> headerArgs,
+    int lineNumber,
+  ) {
+    if (headerArgs.length > 2) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidBlockHeader,
+        line: lineNumber,
+        message: 'Task block header accepts <id> and optional "priority".',
+      );
+    }
+    var isPriority = false;
+    if (headerArgs.length == 2) {
+      final flagToken = headerArgs[1];
+      if (flagToken.kind != _TokenKind.bareWord ||
+          flagToken.value != 'priority') {
+        throw TdfException(
+          kind: TdfErrorKind.invalidBlockHeader,
+          line: lineNumber,
+          message: 'Unknown task header flag "${flagToken.value}".',
+        );
+      }
+      isPriority = true;
+    }
+    if (!state.taskIds.add(id)) {
+      _throwDuplicateId(id, lineNumber);
+    }
+    return _TaskBuilder(id: id, isPriority: isPriority);
   }
 
   /// Checks whether [codeUnit] is an ASCII alphanumeric, underscore, or hyphen (`[a-zA-Z0-9_-]`).
@@ -531,6 +857,48 @@ class TdfService {
         codeUnit == 0x3000;
   }
 
+  /// Checks whether [raw] matches `-?[0-9]+(\.[0-9]+)?` without using regular expressions.
+  static bool _isValidDecimalLiteral(String raw) {
+    if (raw.isEmpty) {
+      return false;
+    }
+    var index = 0;
+    if (raw.codeUnitAt(0) == 0x2D) {
+      if (raw.length == 1) {
+        return false;
+      }
+      index = 1;
+    }
+    var hasLeadingDigits = false;
+    while (index < raw.length) {
+      final unit = raw.codeUnitAt(index);
+      if (unit >= 0x30 && unit <= 0x39) {
+        hasLeadingDigits = true;
+        index++;
+      } else {
+        break;
+      }
+    }
+    if (!hasLeadingDigits) {
+      return false;
+    }
+    if (index == raw.length) {
+      return true;
+    }
+    if (raw.codeUnitAt(index) != 0x2E || index == raw.length - 1) {
+      return false;
+    }
+    index++;
+    while (index < raw.length) {
+      final unit = raw.codeUnitAt(index);
+      if (unit < 0x30 || unit > 0x39) {
+        return false;
+      }
+      index++;
+    }
+    return true;
+  }
+
   /// Validates that [value] matches `<id>` (`[a-zA-Z0-9_-]+`).
   static bool _isValidEntityId(String value) {
     if (value.isEmpty) {
@@ -557,12 +925,29 @@ class TdfService {
     return true;
   }
 
+  /// Merges validated [rules] from a `condition { ... }` sub-block into [parent].
+  static void _mergeConditionBlockRules(
+    _BlockBuilder parent,
+    List<_LineConditionRule> rules,
+  ) {
+    if (parent is _LabelBuilder) {
+      for (final entry in rules) {
+        parent.conditions.add(entry.rule);
+      }
+      return;
+    }
+    if (parent is _TaskBuilder) {
+      for (final entry in rules) {
+        _addConditionToTask(parent, entry.rule, entry.line);
+      }
+    }
+  }
+
   /// Opens a new root or nested block on [state] after checking Section 7 bounds.
   static void _openBlock(
     _ParserState state,
     String blockName,
     List<_ScannedToken> headerArgs,
-    bool closeImmediately,
     int lineNumber,
   ) {
     final nextDepth = state.blockStack.length + 1;
@@ -603,179 +988,105 @@ class TdfService {
           );
 
     state.blockStack.add(builder);
-    if (closeImmediately) {
-      _closeCurrentBlock(state, lineNumber);
-    }
   }
 
-  /// Creates a nested block builder (only `subtasks` inside `task` is allowed at depth 1).
-  static _BlockBuilder _createNestedBlockBuilder(
-    _BlockBuilder parent,
-    String blockName,
-    List<_ScannedToken> headerArgs,
-    int lineNumber,
+  /// Orders [conditions] into canonical `day`, `time`, and `location` groups per Section 3.4.
+  static List<TaskCondition> _orderConditionsForSerialization(
+    List<TaskCondition> conditions,
   ) {
-    if (parent is! _TaskBuilder || blockName != 'subtasks') {
+    final globalResets = <TaskCondition>[];
+    final dayRules = <TaskCondition>[];
+    final timeRules = <TaskCondition>[];
+    final locationRules = <TaskCondition>[];
+
+    for (final rule in conditions) {
+      switch (rule.group) {
+        case null:
+          globalResets.add(rule);
+        case ConditionGroup.day:
+          dayRules.add(rule);
+        case ConditionGroup.time:
+          timeRules.add(rule);
+        case ConditionGroup.location:
+          locationRules.add(rule);
+      }
+    }
+
+    return <TaskCondition>[
+      ...globalResets,
+      ...dayRules,
+      ...timeRules,
+      ...locationRules,
+    ];
+  }
+
+  /// Parses a group condition rule (`day`, `time`, or `location`).
+  static TaskCondition _parseConditionGroupRule(
+    String conditionType,
+    List<_ScannedToken> ruleArgs, {
+    required bool allowResets,
+    required int lineNumber,
+  }) {
+    if (ruleArgs.isEmpty) {
       throw TdfException(
-        kind: TdfErrorKind.unknownBlockType,
+        kind: TdfErrorKind.invalidCondition,
         line: lineNumber,
-        message: 'Unknown nested block type "$blockName".',
+        message: 'Condition "$conditionType" requires arguments.',
       );
     }
-    if (parent.hasSubtasksBlock) {
-      _throwDuplicateDirective('subtasks', lineNumber);
-    }
-    if (headerArgs.length > 1) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidBlockHeader,
-        line: lineNumber,
-        message: 'Subtasks block accepts at most one "auto-finish" flag.',
-      );
-    }
-    var autoFinish = false;
-    if (headerArgs.length == 1) {
-      final flag = headerArgs[0];
-      if (flag.kind != _TokenKind.bareWord || flag.value != 'auto-finish') {
+    if (ruleArgs.length == 1 &&
+        ruleArgs[0].kind == _TokenKind.bareWord &&
+        ruleArgs[0].value == 'any') {
+      if (!allowResets) {
         throw TdfException(
-          kind: TdfErrorKind.invalidBlockHeader,
+          kind: TdfErrorKind.invalidCondition,
           line: lineNumber,
-          message: 'Invalid subtasks header flag "${flag.value}".',
+          message:
+              'Condition reset "$conditionType any" is forbidden on labels.',
         );
       }
-      autoFinish = true;
-    }
-    parent.hasSubtasksBlock = true;
-    return _SubtasksBuilder(autoFinish: autoFinish);
-  }
-
-  /// Creates a root block builder (`task`, `location`, or `category`) and registers its `<id>`.
-  static _BlockBuilder _createRootBlockBuilder(
-    _ParserState state,
-    String blockName,
-    List<_ScannedToken> headerArgs,
-    int lineNumber,
-  ) {
-    if (blockName != 'task' &&
-        blockName != 'location' &&
-        blockName != 'category') {
-      throw TdfException(
-        kind: TdfErrorKind.unknownBlockType,
-        line: lineNumber,
-        message: 'Unknown root block type "$blockName".',
-      );
-    }
-    if (headerArgs.isEmpty) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidBlockHeader,
-        line: lineNumber,
-        message: 'Root block "$blockName" requires an <id> argument.',
-      );
-    }
-    final idToken = headerArgs[0];
-    if (idToken.kind != _TokenKind.bareWord ||
-        !_isValidEntityId(idToken.value)) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidIdentifier,
-        line: lineNumber,
-        message: 'Invalid block identifier "${idToken.value}".',
-      );
-    }
-    if (blockName == 'task') {
-      return _initTaskBuilder(state, idToken.value, headerArgs, lineNumber);
-    }
-    if (headerArgs.length > 1) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidBlockHeader,
-        line: lineNumber,
-        message: 'Block "$blockName" accepts only a single <id> argument.',
-      );
-    }
-    if (blockName == 'location') {
-      if (!state.locationIds.add(idToken.value)) {
-        _throwDuplicateId(idToken.value, lineNumber);
-      }
-      return _LocationBuilder(id: idToken.value);
-    }
-    if (!state.categoryIds.add(idToken.value)) {
-      _throwDuplicateId(idToken.value, lineNumber);
-    }
-    return _CategoryBuilder(id: idToken.value);
-  }
-
-  /// Validates and initializes a `_TaskBuilder` for `task <id> [priority]`.
-  static _TaskBuilder _initTaskBuilder(
-    _ParserState state,
-    String id,
-    List<_ScannedToken> headerArgs,
-    int lineNumber,
-  ) {
-    if (headerArgs.length > 2) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidBlockHeader,
-        line: lineNumber,
-        message: 'Task block header accepts <id> and optional "priority".',
-      );
-    }
-    var isPriority = false;
-    if (headerArgs.length == 2) {
-      final flagToken = headerArgs[1];
-      if (flagToken.kind != _TokenKind.bareWord ||
-          flagToken.value != 'priority') {
-        throw TdfException(
-          kind: TdfErrorKind.invalidBlockHeader,
+      return switch (conditionType) {
+        'day' => const GroupResetTaskCondition(targetGroup: ConditionGroup.day),
+        'time' => const GroupResetTaskCondition(
+          targetGroup: ConditionGroup.time,
+        ),
+        'location' => const GroupResetTaskCondition(
+          targetGroup: ConditionGroup.location,
+        ),
+        _ => throw TdfException(
+          kind: TdfErrorKind.unknownDirective,
           line: lineNumber,
-          message: 'Unknown task header flag "${flagToken.value}".',
-        );
-      }
-      isPriority = true;
+          message: 'Unknown condition type "$conditionType".',
+        ),
+      };
     }
-    if (!state.taskIds.add(id)) {
-      _throwDuplicateId(id, lineNumber);
-    }
-    return _TaskBuilder(id: id, isPriority: isPriority);
-  }
 
-  /// Parses `condition` arguments (`day ...` or `time <HH:MM> <HH:MM>`).
-  static TaskCondition _parseConditionArgs(
-    List<_ScannedToken> args,
-    int lineNumber,
-  ) {
-    if (args.length < 2 || args[0].kind != _TokenKind.bareWord) {
-      throw TdfException(
-        kind: TdfErrorKind.unexpectedToken,
+    return switch (conditionType) {
+      'day' => _parseDayRuleArgs(ruleArgs, lineNumber),
+      'time' => _parseTimeRuleArgs(ruleArgs, lineNumber),
+      'location' => _parseLocationRuleArgs(ruleArgs, lineNumber),
+      _ => throw TdfException(
+        kind: TdfErrorKind.unknownDirective,
         line: lineNumber,
-        message: 'Directive "condition" requires a type and arguments.',
-      );
-    }
-    final conditionType = args[0].value;
-    if (conditionType == 'day') {
-      return _parseDayCondition(args, lineNumber);
-    }
-    if (conditionType == 'time') {
-      return _parseTimeCondition(args, lineNumber);
-    }
-    throw TdfException(
-      kind: TdfErrorKind.unknownDirective,
-      line: lineNumber,
-      message: 'Unknown condition type "$conditionType".',
-    );
+        message: 'Unknown condition type "$conditionType".',
+      ),
+    };
   }
 
-  /// Parses `condition day <mon|tue|wed|thu|fri|sat|sun ...>`.
-  static DayTaskCondition _parseDayCondition(
-    List<_ScannedToken> args,
+  /// Parses `day <mon|tue|wed|thu|fri|sat|sun ...>` arguments.
+  static DayTaskCondition _parseDayRuleArgs(
+    List<_ScannedToken> ruleArgs,
     int lineNumber,
   ) {
     final weekdays = <int>[];
     final dayTokens = <String>[];
-    for (var i = 1; i < args.length; i++) {
-      final token = args[i];
+    for (final token in ruleArgs) {
       final weekday = token.kind == _TokenKind.bareWord
           ? DayTaskCondition.parseWeekdayToken(token.value)
           : null;
       if (weekday == null) {
         throw TdfException(
-          kind: TdfErrorKind.unexpectedToken,
+          kind: TdfErrorKind.invalidCondition,
           line: lineNumber,
           message: 'Invalid weekday token "${token.value}" in condition day.',
         );
@@ -786,9 +1097,41 @@ class TdfService {
     return DayTaskCondition(weekdays: weekdays, dayTokens: dayTokens);
   }
 
-  /// Parses `gps <lat> <lon> [<radius>]` arguments on a `location` block.
-  static void _parseGpsArgs(
-    _LocationBuilder builder,
+  /// Parses an inline `condition ...` directive on a `label` or `task` block.
+  static TaskCondition _parseInlineConditionArgs(
+    List<_ScannedToken> args, {
+    required bool allowResets,
+    required int lineNumber,
+  }) {
+    if (args.isEmpty || args[0].kind != _TokenKind.bareWord) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidCondition,
+        line: lineNumber,
+        message: 'Directive "condition" requires a condition type.',
+      );
+    }
+    final first = args[0].value;
+    if (first == 'any') {
+      if (!allowResets || args.length != 1) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidCondition,
+          line: lineNumber,
+          message: 'Invalid "condition any" directive.',
+        );
+      }
+      return const GlobalResetTaskCondition();
+    }
+    return _parseConditionGroupRule(
+      first,
+      args.sublist(1),
+      allowResets: allowResets,
+      lineNumber: lineNumber,
+    );
+  }
+
+  /// Parses legacy `gps <lat> <lon> [<radius>]` arguments on a legacy `location` block.
+  static void _parseLegacyGpsArgs(
+    _LabelBuilder builder,
     List<_ScannedToken> args,
     int lineNumber,
   ) {
@@ -801,31 +1144,59 @@ class TdfService {
     }
     final latitude = _requireNumberToken(args[0], lineNumber);
     final longitude = _requireNumberToken(args[1], lineNumber);
-    final radius = args.length == 3
+    final radiusMeters = args.length == 3
         ? _requireNumberToken(args[2], lineNumber)
-        : null;
-    builder.hasGps = true;
-    builder.latitude = latitude;
-    builder.longitude = longitude;
-    builder.radiusMeters = radius;
+        : 150.0;
+    _validateGpsBounds(latitude, longitude, radiusMeters, lineNumber);
+    builder.hasLegacyGps = true;
+    builder.conditions.add(
+      LocationTaskCondition(
+        latitude: latitude,
+        longitude: longitude,
+        radiusMeters: radiusMeters,
+      ),
+    );
   }
 
-  /// Parses `condition time <HH:MM> <HH:MM>`.
-  static TimeWindowTaskCondition _parseTimeCondition(
-    List<_ScannedToken> args,
+  /// Parses `location <lat> <lon> <radius>` arguments.
+  static LocationTaskCondition _parseLocationRuleArgs(
+    List<_ScannedToken> ruleArgs,
     int lineNumber,
   ) {
-    if (args.length != 3 ||
-        args[1].kind != _TokenKind.bareWord ||
-        args[2].kind != _TokenKind.bareWord) {
+    if (ruleArgs.length != 3) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidCondition,
+        line: lineNumber,
+        message: 'Condition "location" requires <lat>, <lon>, and <radius> arguments.',
+      );
+    }
+    final latitude = _requireNumberToken(ruleArgs[0], lineNumber);
+    final longitude = _requireNumberToken(ruleArgs[1], lineNumber);
+    final radiusMeters = _requireNumberToken(ruleArgs[2], lineNumber);
+    _validateGpsBounds(latitude, longitude, radiusMeters, lineNumber);
+    return LocationTaskCondition(
+      latitude: latitude,
+      longitude: longitude,
+      radiusMeters: radiusMeters,
+    );
+  }
+
+  /// Parses `time <start_HH:MM> <end_HH:MM>` arguments.
+  static TimeWindowTaskCondition _parseTimeRuleArgs(
+    List<_ScannedToken> ruleArgs,
+    int lineNumber,
+  ) {
+    if (ruleArgs.length != 2 ||
+        ruleArgs[0].kind != _TokenKind.bareWord ||
+        ruleArgs[1].kind != _TokenKind.bareWord) {
       throw TdfException(
         kind: TdfErrorKind.invalidTimestamp,
         line: lineNumber,
-        message: 'Directive "condition time" requires two <HH:MM> arguments.',
+        message: 'Condition "time" requires two <HH:MM> arguments.',
       );
     }
-    final startMinutes = TaskItem.tryParseTimeMinutes(args[1].value);
-    final endMinutes = TaskItem.tryParseTimeMinutes(args[2].value);
+    final startMinutes = TaskItem.tryParseTimeMinutes(ruleArgs[0].value);
+    final endMinutes = TaskItem.tryParseTimeMinutes(ruleArgs[1].value);
     if (startMinutes == null || endMinutes == null) {
       throw TdfException(
         kind: TdfErrorKind.invalidTimestamp,
@@ -833,64 +1204,19 @@ class TdfService {
         message: 'Invalid <HH:MM> time window in condition time.',
       );
     }
+    if (startMinutes == endMinutes) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidCondition,
+        line: lineNumber,
+        message: 'Condition "time" start and end times must not be identical.',
+      );
+    }
     return TimeWindowTaskCondition(
       startMinutes: startMinutes,
       endMinutes: endMinutes,
-      startToken: args[1].value,
-      endToken: args[2].value,
+      startToken: ruleArgs[0].value,
+      endToken: ruleArgs[1].value,
     );
-  }
-
-  /// Tokenizes and executes a single logical line `[lineStart, lineEnd)`.
-  static void _processLogicalLine(
-    String source,
-    int lineStart,
-    int lineEnd,
-    int lineNumber,
-    _ParserState state,
-  ) {
-    final tokens = _scanLineTokens(source, lineStart, lineEnd, lineNumber);
-    if (tokens.isEmpty) {
-      return;
-    }
-
-    if (tokens[0].kind == _TokenKind.closeBrace) {
-      if (tokens.length > 1) {
-        throw TdfException(
-          kind: TdfErrorKind.unexpectedToken,
-          line: lineNumber,
-          message: 'Trailing tokens after "}" are not permitted.',
-        );
-      }
-      _closeCurrentBlock(state, lineNumber);
-      return;
-    }
-
-    final firstToken = tokens[0];
-    if (firstToken.kind != _TokenKind.bareWord ||
-        !_isValidIdentifier(firstToken.value)) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidIdentifier,
-        line: lineNumber,
-        message: 'Invalid identifier "${firstToken.value}".',
-      );
-    }
-
-    final openBraceIndex = _findTokenKindIndex(tokens, _TokenKind.openBrace);
-    if (openBraceIndex != -1) {
-      _processBlockHeaderLine(state, tokens, openBraceIndex, lineNumber);
-      return;
-    }
-
-    if (_findTokenKindIndex(tokens, _TokenKind.closeBrace) != -1) {
-      throw TdfException(
-        kind: TdfErrorKind.unexpectedToken,
-        line: lineNumber,
-        message: 'Unexpected "}" on directive line.',
-      );
-    }
-
-    _processDirectiveLine(state, tokens, lineNumber);
   }
 
   /// Processes a line containing an opening brace `{` as a block header.
@@ -900,11 +1226,7 @@ class TdfService {
     int openBraceIndex,
     int lineNumber,
   ) {
-    var closeImmediately = false;
-    if (openBraceIndex == tokens.length - 2 &&
-        tokens.last.kind == _TokenKind.closeBrace) {
-      closeImmediately = true;
-    } else if (openBraceIndex != tokens.length - 1) {
+    if (openBraceIndex != tokens.length - 1) {
       throw TdfException(
         kind: TdfErrorKind.unexpectedToken,
         line: lineNumber,
@@ -932,13 +1254,7 @@ class TdfService {
       }
     }
 
-    _openBlock(
-      state,
-      tokens[0].value,
-      headerArgs,
-      closeImmediately,
-      lineNumber,
-    );
+    _openBlock(state, tokens[0].value, headerArgs, lineNumber);
   }
 
   /// Processes a directive line inside the currently open block.
@@ -986,6 +1302,8 @@ class TdfService {
     switch (activeBlock) {
       case final _TaskBuilder taskBuilder:
         _applyTaskDirective(taskBuilder, directiveName, args, lineNumber);
+      case final _LabelBuilder labelBuilder:
+        _applyLabelDirective(labelBuilder, directiveName, args, lineNumber);
       case final _SubtasksBuilder subtasksBuilder:
         _applySubtasksDirective(
           subtasksBuilder,
@@ -993,16 +1311,9 @@ class TdfService {
           args,
           lineNumber,
         );
-      case final _LocationBuilder locationBuilder:
-        _applyLocationDirective(
-          locationBuilder,
-          directiveName,
-          args,
-          lineNumber,
-        );
-      case final _CategoryBuilder categoryBuilder:
-        _applyCategoryDirective(
-          categoryBuilder,
+      case final _ConditionBlockBuilder conditionBuilder:
+        _applyConditionBlockDirective(
+          conditionBuilder,
           directiveName,
           args,
           lineNumber,
@@ -1010,14 +1321,129 @@ class TdfService {
     }
   }
 
-  /// Finds the first index of [kind] in [tokens], or `-1` if absent.
-  static int _findTokenKindIndex(List<_ScannedToken> tokens, _TokenKind kind) {
-    for (var i = 0; i < tokens.length; i++) {
-      if (tokens[i].kind == kind) {
-        return i;
+  /// Tokenizes and executes a single logical line `[lineStart, lineEnd)`.
+  static void _processLogicalLine(
+    String source,
+    int lineStart,
+    int lineEnd,
+    int lineNumber,
+    _ParserState state,
+  ) {
+    final tokens = _scanLineTokens(source, lineStart, lineEnd, lineNumber);
+    if (tokens.isEmpty) {
+      return;
+    }
+
+    if (!state.hasSeenFirstStatement) {
+      if (_processInitialStatement(state, tokens, lineNumber)) {
+        return;
       }
     }
-    return -1;
+
+    if (tokens[0].kind == _TokenKind.closeBrace) {
+      if (tokens.length > 1) {
+        throw TdfException(
+          kind: TdfErrorKind.unexpectedToken,
+          line: lineNumber,
+          message: 'Trailing tokens after "}" are not permitted.',
+        );
+      }
+      _closeCurrentBlock(state, lineNumber);
+      return;
+    }
+
+    final firstToken = tokens[0];
+    if (firstToken.kind != _TokenKind.bareWord ||
+        !_isValidIdentifier(firstToken.value)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidIdentifier,
+        line: lineNumber,
+        message: 'Invalid identifier "${firstToken.value}".',
+      );
+    }
+
+    final openBraceIndex = _findTokenKindIndex(tokens, _TokenKind.openBrace);
+    if (openBraceIndex != -1) {
+      _processBlockHeaderLine(state, tokens, openBraceIndex, lineNumber);
+      return;
+    }
+
+    if (_findTokenKindIndex(tokens, _TokenKind.closeBrace) != -1) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Unexpected "}" on directive line.',
+      );
+    }
+
+    _processDirectiveLine(state, tokens, lineNumber);
+  }
+
+  /// Validates the first non-empty statement (`tdf 0.2.0` or legacy `category`/`location` root block).
+  static bool _processInitialStatement(
+    _ParserState state,
+    List<_ScannedToken> tokens,
+    int lineNumber,
+  ) {
+    final firstToken = tokens[0];
+    if (firstToken.kind == _TokenKind.bareWord &&
+        firstToken.value == 'tdf' &&
+        _findTokenKindIndex(tokens, _TokenKind.openBrace) == -1 &&
+        _findTokenKindIndex(tokens, _TokenKind.closeBrace) == -1) {
+      if (tokens.length == 1) {
+        throw TdfException(
+          kind: TdfErrorKind.missingVersionHeader,
+          line: lineNumber,
+          message: 'Version header "tdf" requires a version argument.',
+        );
+      }
+      if (tokens.length != 2 ||
+          tokens[1].kind != _TokenKind.bareWord ||
+          tokens[1].value != supportedVersion) {
+        throw TdfException(
+          kind: TdfErrorKind.unsupportedVersion,
+          line: lineNumber,
+          message: 'Unsupported or malformed TDF version "${tokens[1].value}".',
+        );
+      }
+      state.hasSeenFirstStatement = true;
+      return true;
+    }
+
+    if (firstToken.kind == _TokenKind.bareWord &&
+        (firstToken.value == 'category' || firstToken.value == 'location') &&
+        _findTokenKindIndex(tokens, _TokenKind.openBrace) != -1) {
+      state.hasSeenFirstStatement = true;
+      return false;
+    }
+
+    throw TdfException(
+      kind: TdfErrorKind.missingVersionHeader,
+      line: lineNumber,
+      message:
+          'TDF document must start with "tdf $supportedVersion" version header.',
+    );
+  }
+
+  /// Validates that [args] contains a single quoted `#RRGGBB` hexadecimal color string.
+  static String _requireColorArg(List<_ScannedToken> args, int lineNumber) {
+    if (args.length != 1) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Directive "color" requires a single "#RRGGBB" argument.',
+      );
+    }
+    final token = args[0];
+    if (token.kind != _TokenKind.quotedString ||
+        !TdfColor.isStrictHexColor(token.value)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidColor,
+        line: lineNumber,
+        message: 'Invalid color literal "${token.value}".',
+      );
+    }
+    return token.value.toUpperCase();
   }
 
   /// Validates and extracts a list of entity `<id>` bare words.
@@ -1037,6 +1463,63 @@ class TdfService {
       ids.add(token.value);
     }
     return ids;
+  }
+
+  /// Validates that [args] contains a single non-empty text argument within [maxTextLength].
+  static String _requireNameOrStepArg(
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    if (args.length != 1) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Expected exactly 1 argument, found ${args.length}.',
+      );
+    }
+    final value = args[0].value;
+    if (value.isEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Text argument must not be empty.',
+      );
+    }
+    if (value.length > maxTextLength) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Text argument exceeds maximum length of $maxTextLength.',
+      );
+    }
+    return value;
+  }
+
+  /// Validates that [args] contains a single non-empty `note` argument (`1..maxNoteLength`).
+  static String _requireNoteArg(List<_ScannedToken> args, int lineNumber) {
+    if (args.length != 1) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Directive "note" requires a single text argument.',
+      );
+    }
+    final value = args[0].value;
+    if (value.isEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Directive "note" must not be empty.',
+      );
+    }
+    if (value.length > maxNoteLength) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Note exceeds maximum length of $maxNoteLength.',
+      );
+    }
+    return value;
   }
 
   /// Validates and parses a decimal `<number>` token (`-?[0-9]+(\.[0-9]+)?`).
@@ -1060,31 +1543,7 @@ class TdfService {
     return parsed;
   }
 
-  /// Validates that [args] contains a single text argument, enforcing [maxTextLength] when requested.
-  static String _requireSingleTextArg(
-    List<_ScannedToken> args,
-    int lineNumber, {
-    required bool enforceMaxLength,
-  }) {
-    if (args.length != 1) {
-      throw TdfException(
-        kind: TdfErrorKind.unexpectedToken,
-        line: lineNumber,
-        message: 'Expected exactly 1 argument, found ${args.length}.',
-      );
-    }
-    final value = args[0].value;
-    if (enforceMaxLength && value.length > maxTextLength) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Text argument exceeds maximum length of $maxTextLength.',
-      );
-    }
-    return value;
-  }
-
-  /// Validates and parses `<YYYY-MM-DD> [<HH:MM>]` timestamp arguments.
+  /// Validates and parses `<YYYY-MM-DD> [<HH:MM[:SS]>]` timestamp arguments.
   static DateTime _requireTimestampArgs(
     List<_ScannedToken> args,
     int lineNumber,
@@ -1096,7 +1555,7 @@ class TdfService {
       throw TdfException(
         kind: TdfErrorKind.invalidTimestamp,
         line: lineNumber,
-        message: 'Expected <YYYY-MM-DD> [<HH:MM>] timestamp arguments.',
+        message: 'Expected <YYYY-MM-DD> [<HH:MM[:SS]>] timestamp arguments.',
       );
     }
     final parsed = TaskItem.tryParseTdfTimestamp(
@@ -1111,114 +1570,6 @@ class TdfService {
       );
     }
     return parsed;
-  }
-
-  /// Checks whether [raw] matches `-?[0-9]+(\.[0-9]+)?` without using regular expressions.
-  static bool _isValidDecimalLiteral(String raw) {
-    if (raw.isEmpty) {
-      return false;
-    }
-    var index = 0;
-    if (raw.codeUnitAt(0) == 0x2D) {
-      if (raw.length == 1) {
-        return false;
-      }
-      index = 1;
-    }
-    var hasLeadingDigits = false;
-    while (index < raw.length) {
-      final unit = raw.codeUnitAt(index);
-      if (unit >= 0x30 && unit <= 0x39) {
-        hasLeadingDigits = true;
-        index++;
-      } else {
-        break;
-      }
-    }
-    if (!hasLeadingDigits) {
-      return false;
-    }
-    if (index == raw.length) {
-      return true;
-    }
-    if (raw.codeUnitAt(index) != 0x2E || index == raw.length - 1) {
-      return false;
-    }
-    index++;
-    while (index < raw.length) {
-      final unit = raw.codeUnitAt(index);
-      if (unit < 0x30 || unit > 0x39) {
-        return false;
-      }
-      index++;
-    }
-    return true;
-  }
-
-  /// Scans all tokens on `[lineStart, lineEnd)` in a single pass.
-  static List<_ScannedToken> _scanLineTokens(
-    String source,
-    int lineStart,
-    int lineEnd,
-    int lineNumber,
-  ) {
-    final tokens = <_ScannedToken>[];
-    var cursor = lineStart;
-
-    while (cursor < lineEnd) {
-      cursor = _skipHorizontalWhitespace(source, cursor, lineEnd);
-      if (cursor >= lineEnd || source.codeUnitAt(cursor) == 0x23) {
-        break;
-      }
-      if (tokens.length >= maxArgsPerStmt + 3) {
-        throw TdfException(
-          kind: TdfErrorKind.limitExceeded,
-          line: lineNumber,
-          message: 'Statement exceeds maximum of $maxArgsPerStmt arguments.',
-        );
-      }
-      cursor = _scanNextToken(source, cursor, lineEnd, lineNumber, tokens);
-    }
-
-    return tokens;
-  }
-
-  /// Scans a single token starting at [cursor] and appends it to [tokens].
-  static int _scanNextToken(
-    String source,
-    int cursor,
-    int lineEnd,
-    int lineNumber,
-    List<_ScannedToken> tokens,
-  ) {
-    final unit = source.codeUnitAt(cursor);
-    if (unit == 0x7B) {
-      tokens.add(const _ScannedToken(value: '{', kind: _TokenKind.openBrace));
-      return cursor + 1;
-    }
-    if (unit == 0x7D) {
-      tokens.add(const _ScannedToken(value: '}', kind: _TokenKind.closeBrace));
-      return cursor + 1;
-    }
-    if (unit == 0x22) {
-      return _scanDoubleQuotedToken(
-        source,
-        cursor,
-        lineEnd,
-        lineNumber,
-        tokens,
-      );
-    }
-    if (unit == 0x27) {
-      return _scanSingleQuotedToken(
-        source,
-        cursor,
-        lineEnd,
-        lineNumber,
-        tokens,
-      );
-    }
-    return _scanBareWordToken(source, cursor, lineEnd, lineNumber, tokens);
   }
 
   /// Scans an unquoted bare word token starting at [start].
@@ -1312,6 +1663,72 @@ class TdfService {
     );
   }
 
+  /// Scans all tokens on `[lineStart, lineEnd)` in a single pass.
+  static List<_ScannedToken> _scanLineTokens(
+    String source,
+    int lineStart,
+    int lineEnd,
+    int lineNumber,
+  ) {
+    final tokens = <_ScannedToken>[];
+    var cursor = lineStart;
+
+    while (cursor < lineEnd) {
+      cursor = _skipHorizontalWhitespace(source, cursor, lineEnd);
+      if (cursor >= lineEnd || source.codeUnitAt(cursor) == 0x23) {
+        break;
+      }
+      if (tokens.length >= maxArgsPerStmt + 3) {
+        throw TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: lineNumber,
+          message: 'Statement exceeds maximum of $maxArgsPerStmt arguments.',
+        );
+      }
+      cursor = _scanNextToken(source, cursor, lineEnd, lineNumber, tokens);
+    }
+
+    return tokens;
+  }
+
+  /// Scans a single token starting at [cursor] and appends it to [tokens].
+  static int _scanNextToken(
+    String source,
+    int cursor,
+    int lineEnd,
+    int lineNumber,
+    List<_ScannedToken> tokens,
+  ) {
+    final unit = source.codeUnitAt(cursor);
+    if (unit == 0x7B) {
+      tokens.add(const _ScannedToken(value: '{', kind: _TokenKind.openBrace));
+      return cursor + 1;
+    }
+    if (unit == 0x7D) {
+      tokens.add(const _ScannedToken(value: '}', kind: _TokenKind.closeBrace));
+      return cursor + 1;
+    }
+    if (unit == 0x22) {
+      return _scanDoubleQuotedToken(
+        source,
+        cursor,
+        lineEnd,
+        lineNumber,
+        tokens,
+      );
+    }
+    if (unit == 0x27) {
+      return _scanSingleQuotedToken(
+        source,
+        cursor,
+        lineEnd,
+        lineNumber,
+        tokens,
+      );
+    }
+    return _scanBareWordToken(source, cursor, lineEnd, lineNumber, tokens);
+  }
+
   /// Scans a single-quoted literal string token (`'...'`) starting at [start].
   static int _scanSingleQuotedToken(
     String source,
@@ -1390,6 +1807,13 @@ class TdfService {
     };
   }
 
+  /// Validates canonical `labels` references and synthesizes missing labels for legacy `categories`/`locations`.
+  static void _validateAndResolveLabelReferences(_ParserState state) {
+    for (final entry in state.taskEntries) {
+      _validateTaskLabelEntry(entry, state);
+    }
+  }
+
   /// Validates that [tdfContent] does not exceed [maxFileBytes].
   static void _validateByteLimit(String tdfContent) {
     if (tdfContent.length > maxFileBytes ||
@@ -1399,6 +1823,40 @@ class TdfService {
         line: 1,
         message:
             'TDF document exceeds maximum file size of $maxFileBytes bytes.',
+      );
+    }
+  }
+
+  /// Validates that the `blocked` task dependency graph is acyclic across [entries].
+  static void _validateDependencyCycles(List<_ParsedTaskEntry> entries) {
+    final taskById = <String, _ParsedTaskEntry>{
+      for (final entry in entries) entry.task.id: entry,
+    };
+    final visitState = <String, int>{};
+    for (final entry in entries) {
+      if (entry.task.blockedByTaskIds.isNotEmpty) {
+        _checkTaskCycle(entry.task.id, taskById, visitState, entry.blockedLine);
+      }
+    }
+  }
+
+  /// Validates WGS-84 coordinate and radius bounds (`lat` in `[-90, 90]`, `lon` in `[-180, 180]`, `radius > 0`).
+  static void _validateGpsBounds(
+    double latitude,
+    double longitude,
+    double radiusMeters,
+    int lineNumber,
+  ) {
+    if (latitude < -90.0 ||
+        latitude > 90.0 ||
+        longitude < -180.0 ||
+        longitude > 180.0 ||
+        radiusMeters <= 0.0) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidCondition,
+        line: lineNumber,
+        message:
+            'Invalid GPS coordinates or radius ($latitude, $longitude, $radiusMeters).',
       );
     }
   }
@@ -1431,60 +1889,74 @@ class TdfService {
     );
   }
 
-  /// Writes a canonical `category` block to [buffer].
-  static void _writeCategoryBlock(StringBuffer buffer, TdfCategory category) {
-    buffer.write('category ');
-    buffer.write(category.id);
-    buffer.write(' {\n    name ');
-    buffer.write(_escapeQuotedString(category.name));
-    buffer.write('\n');
-    if (category.color case final color?) {
-      buffer.write('    color ');
-      buffer.write(_escapeQuotedString(color));
-      buffer.write('\n');
-    }
-    if (category.note case final note?) {
-      buffer.write('    note ');
-      buffer.write(_escapeQuotedString(note));
-      buffer.write('\n');
-    }
-    buffer.write('}\n\n');
-  }
-
-  /// Writes a canonical `location` block to [buffer].
-  static void _writeLocationBlock(StringBuffer buffer, TdfLocation location) {
-    buffer.write('location ');
-    buffer.write(location.id);
-    buffer.write(' {\n    name ');
-    buffer.write(_escapeQuotedString(location.name));
-    buffer.write('\n');
-    if (location.color case final color?) {
-      buffer.write('    color ');
-      buffer.write(_escapeQuotedString(color));
-      buffer.write('\n');
-    }
-    if (location.note case final note?) {
-      buffer.write('    note ');
-      buffer.write(_escapeQuotedString(note));
-      buffer.write('\n');
-    }
-    if (location.latitude case final lat?) {
-      if (location.longitude case final lon?) {
-        buffer.write('    gps ');
-        buffer.write(lat);
-        buffer.write(' ');
-        buffer.write(lon);
-        if (location.radiusMeters case final radius?) {
-          buffer.write(' ');
-          buffer.write(radius);
-        }
-        buffer.write('\n');
+  /// Validates canonical `labels` and legacy `categories`/`locations` for a single [entry].
+  static void _validateTaskLabelEntry(
+    _ParsedTaskEntry entry,
+    _ParserState state,
+  ) {
+    for (final labelId in entry.canonicalLabelIds) {
+      if (!state.labelIds.contains(labelId)) {
+        throw TdfException(
+          kind: TdfErrorKind.unknownLabelReference,
+          line: entry.labelsLine,
+          message:
+              'Task "${entry.task.id}" references unknown label "$labelId".',
+        );
       }
     }
+    for (final legacyId in entry.legacyLabelIds) {
+      if (state.labelIds.add(legacyId)) {
+        state.labels.add(TdfLabel(id: legacyId, name: legacyId));
+      }
+    }
+  }
+
+  /// Writes canonical `condition` directive(s) or a `condition { ... }` sub-block to [buffer].
+  static void _writeConditions(
+    StringBuffer buffer,
+    List<TaskCondition> conditions,
+  ) {
+    if (conditions.isEmpty) {
+      return;
+    }
+    final ordered = _orderConditionsForSerialization(conditions);
+    if (ordered.length == 1) {
+      buffer.write('    condition ');
+      buffer.write(ordered.first.toTdfDirectiveArgs());
+      buffer.write('\n');
+      return;
+    }
+    buffer.write('    condition {\n');
+    for (final rule in ordered) {
+      buffer.write('        ');
+      buffer.write(rule.toTdfDirectiveArgs());
+      buffer.write('\n');
+    }
+    buffer.write('    }\n');
+  }
+
+  /// Writes a canonical `label` block to [buffer].
+  static void _writeLabelBlock(StringBuffer buffer, TdfLabel label) {
+    buffer.write('label ');
+    buffer.write(label.id);
+    buffer.write(' {\n    name ');
+    buffer.write(_escapeQuotedString(label.name));
+    buffer.write('\n');
+    if (label.color case final color?) {
+      buffer.write('    color ');
+      buffer.write(_escapeQuotedString(color));
+      buffer.write('\n');
+    }
+    if (label.note case final note?) {
+      buffer.write('    note ');
+      buffer.write(_escapeQuotedString(note));
+      buffer.write('\n');
+    }
+    _writeConditions(buffer, label.conditions);
     buffer.write('}\n\n');
   }
 
-  /// Writes a canonical `task` block (including optional `subtasks`) to [buffer].
+  /// Writes a canonical `task` block (including optional `condition` and `subtasks`) to [buffer].
   static void _writeTaskBlock(StringBuffer buffer, TaskItem task) {
     buffer.write('task ');
     buffer.write(task.id);
@@ -1512,14 +1984,9 @@ class TdfService {
       buffer.write(TaskItem.formatTdfTimestamp(completedAt));
       buffer.write('\n');
     }
-    if (task.locationIds.isNotEmpty) {
-      buffer.write('    locations ');
-      buffer.write(task.locationIds.join(' '));
-      buffer.write('\n');
-    }
-    if (task.categoryIds.isNotEmpty) {
-      buffer.write('    categories ');
-      buffer.write(task.categoryIds.join(' '));
+    if (task.labelIds.isNotEmpty) {
+      buffer.write('    labels ');
+      buffer.write(task.labelIds.join(' '));
       buffer.write('\n');
     }
     if (task.blockedByTaskIds.isNotEmpty) {
@@ -1532,11 +1999,7 @@ class TdfService {
       buffer.write(TaskItem.formatTdfTimestamp(suspendedAt));
       buffer.write('\n');
     }
-    for (final condition in task.conditions) {
-      buffer.write('    condition ');
-      buffer.write(condition.toTdfDirectiveArgs());
-      buffer.write('\n');
-    }
+    _writeConditions(buffer, task.conditions);
     if (task.subtasks.isNotEmpty || task.subtasksAutoFinish) {
       buffer.write('    subtasks');
       if (task.subtasksAutoFinish) {
@@ -1561,16 +2024,40 @@ sealed class _BlockBuilder {
   int statementCount = 0;
 }
 
-/// Mutable builder for a `category` block during single-pass parsing.
-final class _CategoryBuilder extends _BlockBuilder {
-  /// Creates a [_CategoryBuilder] for [id].
-  _CategoryBuilder({required this.id});
+/// Mutable builder for a `condition { ... }` sub-block during single-pass parsing.
+final class _ConditionBlockBuilder extends _BlockBuilder {
+  /// Creates a [_ConditionBlockBuilder].
+  _ConditionBlockBuilder({required this.allowResets});
 
-  /// Category `<id>`.
+  /// Whether `<type> any` reset directives are permitted in this sub-block.
+  final bool allowResets;
+
+  /// Accumulated condition rules and their source line numbers.
+  final List<_LineConditionRule> rules = <_LineConditionRule>[];
+}
+
+/// Mutable builder for a `label` (or legacy `category` / `location`) block during single-pass parsing.
+final class _LabelBuilder extends _BlockBuilder {
+  /// Creates a [_LabelBuilder] for [id].
+  _LabelBuilder({required this.id, required this.isLegacyLocation});
+
+  /// Accumulated `condition` rules in declaration order.
+  final List<TaskCondition> conditions = <TaskCondition>[];
+
+  /// Label `<id>`.
   final String id;
+
+  /// Whether this block was opened via a legacy `location <id> {` header.
+  final bool isLegacyLocation;
 
   /// Optional `color` value.
   String? color;
+
+  /// Whether a `condition { ... }` sub-block was already encountered.
+  bool hasConditionBlock = false;
+
+  /// Whether a legacy `gps` directive has been parsed.
+  bool hasLegacyGps = false;
 
   /// Required `name` value.
   String? name;
@@ -1578,18 +2065,37 @@ final class _CategoryBuilder extends _BlockBuilder {
   /// Optional `note` value.
   String? note;
 
-  /// Validates required directives and builds an immutable [TdfCategory].
-  TdfCategory build(int lineNumber) {
+  /// Validates required directives and builds an immutable [TdfLabel].
+  TdfLabel build(int lineNumber) {
     final resolvedName = name;
     if (resolvedName == null) {
       throw TdfException(
         kind: TdfErrorKind.missingRequiredDirective,
         line: lineNumber,
-        message: 'Category "$id" is missing required "name" directive.',
+        message: 'Label "$id" is missing required "name" directive.',
       );
     }
-    return TdfCategory(id: id, name: resolvedName, color: color, note: note);
+    return TdfLabel(
+      id: id,
+      name: resolvedName,
+      color: color,
+      note: note,
+      conditions: List<TaskCondition>.unmodifiable(conditions),
+    );
   }
+}
+
+/// Associates a parsed [TaskCondition] inside a `condition { ... }` sub-block with its 1-based line number.
+@immutable
+class _LineConditionRule {
+  /// Creates a [_LineConditionRule].
+  const _LineConditionRule({required this.rule, required this.line});
+
+  /// 1-based line number where the rule was declared.
+  final int line;
+
+  /// Parsed condition rule.
+  final TaskCondition rule;
 }
 
 /// Represents the start, end, and next offset of a single logical line.
@@ -1612,55 +2118,32 @@ class _LineSpan {
   final int nextOffset;
 }
 
-/// Mutable builder for a `location` block during single-pass parsing.
-final class _LocationBuilder extends _BlockBuilder {
-  /// Creates a [_LocationBuilder] for [id].
-  _LocationBuilder({required this.id});
+/// Pairs a built [TaskItem] with source line numbers and label reference lists for post-parse validation.
+@immutable
+class _ParsedTaskEntry {
+  /// Creates a [_ParsedTaskEntry].
+  const _ParsedTaskEntry({
+    required this.task,
+    required this.canonicalLabelIds,
+    required this.legacyLabelIds,
+    required this.labelsLine,
+    required this.blockedLine,
+  });
 
-  /// Location `<id>`.
-  final String id;
+  /// 1-based line number of the `blocked` directive, or `0` if absent.
+  final int blockedLine;
 
-  /// Optional `color` value.
-  String? color;
+  /// Label IDs declared via the canonical `labels` directive.
+  final List<String> canonicalLabelIds;
 
-  /// Whether a `gps` directive has been parsed.
-  bool hasGps = false;
+  /// 1-based line number of the `labels` directive, or `0` if absent.
+  final int labelsLine;
 
-  /// Optional latitude from `gps`.
-  double? latitude;
+  /// Label IDs declared via legacy `categories` or `locations` directives.
+  final List<String> legacyLabelIds;
 
-  /// Optional longitude from `gps`.
-  double? longitude;
-
-  /// Required `name` value.
-  String? name;
-
-  /// Optional `note` value.
-  String? note;
-
-  /// Optional radius in meters from `gps`.
-  double? radiusMeters;
-
-  /// Validates required directives and builds an immutable [TdfLocation].
-  TdfLocation build(int lineNumber) {
-    final resolvedName = name;
-    if (resolvedName == null) {
-      throw TdfException(
-        kind: TdfErrorKind.missingRequiredDirective,
-        line: lineNumber,
-        message: 'Location "$id" is missing required "name" directive.',
-      );
-    }
-    return TdfLocation(
-      id: id,
-      name: resolvedName,
-      color: color,
-      note: note,
-      latitude: latitude,
-      longitude: longitude,
-      radiusMeters: radiusMeters,
-    );
-  }
+  /// Built immutable task item.
+  final TaskItem task;
 }
 
 /// Accumulates root blocks, identifier sets, and the active nesting stack during parsing.
@@ -1668,23 +2151,20 @@ class _ParserState {
   /// Active block nesting stack (maximum depth [TdfService.maxNestingDepth]).
   final List<_BlockBuilder> blockStack = <_BlockBuilder>[];
 
-  /// Parsed `category` blocks in declaration order.
-  final List<TdfCategory> categories = <TdfCategory>[];
+  /// Set of seen `label` IDs to enforce uniqueness across `label` and legacy `category`/`location` blocks.
+  final Set<String> labelIds = <String>{};
 
-  /// Set of seen `category` IDs to enforce uniqueness.
-  final Set<String> categoryIds = <String>{};
+  /// Parsed `label` blocks in declaration order.
+  final List<TdfLabel> labels = <TdfLabel>[];
 
-  /// Set of seen `location` IDs to enforce uniqueness.
-  final Set<String> locationIds = <String>{};
-
-  /// Parsed `location` blocks in declaration order.
-  final List<TdfLocation> locations = <TdfLocation>[];
+  /// Parsed `task` entries in declaration order.
+  final List<_ParsedTaskEntry> taskEntries = <_ParsedTaskEntry>[];
 
   /// Set of seen `task` IDs to enforce uniqueness.
   final Set<String> taskIds = <String>{};
 
-  /// Parsed `task` blocks in declaration order.
-  final List<TaskItem> tasks = <TaskItem>[];
+  /// Whether the initial `tdf 0.2.0` header (or legacy root block) has been processed.
+  bool hasSeenFirstStatement = false;
 
   /// Total blocks opened across the document.
   int totalBlocks = 0;
@@ -1720,32 +2200,47 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Creates a [_TaskBuilder] for [id] and [isPriority].
   _TaskBuilder({required this.id, required this.isPriority});
 
+  /// Repeatable `condition` directives in declaration order.
+  final List<TaskCondition> conditions = <TaskCondition>[];
+
   /// Task `<id>`.
   final String id;
 
   /// Whether the `priority` flag was present in the block header.
   final bool isPriority;
 
+  /// Legacy `categories` and `locations` IDs in declaration order.
+  final List<String> legacyLabelIds = <String>[];
+
   /// Optional `blocked` task IDs.
   List<String>? blockedByTaskIds;
 
-  /// Optional `categories` IDs.
-  List<String>? categoryIds;
+  /// 1-based line number of the `blocked` directive.
+  int blockedLine = 0;
+
+  /// Optional canonical `labels` IDs.
+  List<String>? canonicalLabelIds;
 
   /// Optional `finished` timestamp.
   DateTime? completedAt;
 
-  /// Repeatable `condition` directives in declaration order.
-  final List<TaskCondition> conditions = <TaskCondition>[];
-
   /// Required `created` timestamp.
   DateTime? createdAt;
+
+  /// Whether a `condition { ... }` sub-block was already encountered.
+  bool hasConditionBlock = false;
+
+  /// Whether a legacy `categories` directive was already encountered.
+  bool hasLegacyCategories = false;
+
+  /// Whether a legacy `locations` directive was already encountered.
+  bool hasLegacyLocations = false;
 
   /// Whether a `subtasks` sub-block was already encountered.
   bool hasSubtasksBlock = false;
 
-  /// Optional `locations` IDs.
-  List<String>? locationIds;
+  /// 1-based line number of the `labels` directive.
+  int labelsLine = 0;
 
   /// Required `name` string.
   String? name;
@@ -1765,8 +2260,8 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Optional `suspended` timestamp.
   DateTime? suspendedAt;
 
-  /// Validates required directives (`name` and `created`) and builds an immutable [TaskItem].
-  TaskItem build(int lineNumber) {
+  /// Validates required directives (`name` and `created`) and builds a [_ParsedTaskEntry].
+  _ParsedTaskEntry build(int lineNumber) {
     final resolvedName = name;
     final resolvedCreated = createdAt;
     if (resolvedName == null || resolvedCreated == null) {
@@ -1777,7 +2272,21 @@ final class _TaskBuilder extends _BlockBuilder {
             'Task "$id" is missing required "name" or "created" directive.',
       );
     }
-    return TaskItem(
+
+    final mergedLabelIds = <String>[];
+    final canonical = canonicalLabelIds ?? const <String>[];
+    for (final labelId in canonical) {
+      if (!mergedLabelIds.contains(labelId)) {
+        mergedLabelIds.add(labelId);
+      }
+    }
+    for (final labelId in legacyLabelIds) {
+      if (!mergedLabelIds.contains(labelId)) {
+        mergedLabelIds.add(labelId);
+      }
+    }
+
+    final task = TaskItem(
       id: id,
       title: resolvedName,
       note: note,
@@ -1787,12 +2296,19 @@ final class _TaskBuilder extends _BlockBuilder {
       queuedAt: queuedAt,
       completedAt: completedAt,
       suspendedAt: suspendedAt,
-      locationIds: locationIds ?? const <String>[],
-      categoryIds: categoryIds ?? const <String>[],
+      labelIds: mergedLabelIds,
       blockedByTaskIds: blockedByTaskIds ?? const <String>[],
       conditions: conditions,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
+    );
+
+    return _ParsedTaskEntry(
+      task: task,
+      canonicalLabelIds: canonical,
+      legacyLabelIds: List<String>.unmodifiable(legacyLabelIds),
+      labelsLine: labelsLine,
+      blockedLine: blockedLine,
     );
   }
 }

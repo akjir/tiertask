@@ -13,22 +13,43 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
-/// Represents a dynamic activation condition (`condition` directive) on a TDF `task` block.
+/// Canonical condition rule groups defined in `TDF_SPEC.md` Section 4.3.
+enum ConditionGroup {
+  /// Weekday rule group (`day`).
+  day,
+
+  /// Daily time-window rule group (`time`).
+  time,
+
+  /// Geographic proximity rule group (`location`).
+  location,
+}
+
+/// Represents a dynamic activation condition (`condition` directive) on a TDF `label` or `task` block.
 @immutable
 sealed class TaskCondition {
   /// Creates a [TaskCondition].
   const TaskCondition();
 
-  /// Evaluates whether this condition is satisfied at [evaluationTime].
-  bool isSatisfiedAt(DateTime evaluationTime);
+  /// Rule group to which this condition belongs, or `null` for [GlobalResetTaskCondition].
+  ConditionGroup? get group;
+
+  /// Evaluates whether this condition is satisfied at [evaluationTime] and optional GPS coordinates.
+  bool isSatisfiedAt(
+    DateTime evaluationTime, {
+    double? currentLatitude,
+    double? currentLongitude,
+  });
 
   /// Formats the condition arguments as a canonical TDF directive suffix.
   String toTdfDirectiveArgs();
 }
 
-/// Weekday activation condition (`condition day <mon|tue|wed|thu|fri|sat|sun ...>`).
+/// Weekday activation condition (`day <mon|tue|wed|thu|fri|sat|sun ...>`).
 @immutable
 class DayTaskCondition extends TaskCondition {
   /// Creates a [DayTaskCondition] for the given [weekdays] (`1..7`) and [dayTokens].
@@ -45,7 +66,14 @@ class DayTaskCondition extends TaskCondition {
   final List<int> weekdays;
 
   @override
-  bool isSatisfiedAt(DateTime evaluationTime) {
+  ConditionGroup get group => ConditionGroup.day;
+
+  @override
+  bool isSatisfiedAt(
+    DateTime evaluationTime, {
+    double? currentLatitude,
+    double? currentLongitude,
+  }) {
     return weekdays.contains(evaluationTime.weekday);
   }
 
@@ -82,7 +110,177 @@ class DayTaskCondition extends TaskCondition {
   String toString() => 'condition ${toTdfDirectiveArgs()}';
 }
 
-/// Daily time-window activation condition (`condition time <HH:MM> <HH:MM>`).
+/// Global condition reset (`condition any`) on a TDF `task` block that clears all inherited label conditions.
+@immutable
+class GlobalResetTaskCondition extends TaskCondition {
+  /// Creates a const [GlobalResetTaskCondition].
+  const GlobalResetTaskCondition();
+
+  @override
+  ConditionGroup? get group => null;
+
+  @override
+  bool isSatisfiedAt(
+    DateTime evaluationTime, {
+    double? currentLatitude,
+    double? currentLongitude,
+  }) {
+    return true;
+  }
+
+  @override
+  String toTdfDirectiveArgs() => 'any';
+
+  @override
+  bool operator ==(Object other) => other is GlobalResetTaskCondition;
+
+  @override
+  int get hashCode => 0x474C4F42;
+
+  @override
+  String toString() => 'condition any';
+}
+
+/// Group-specific condition reset (`day any`, `time any`, or `location any`) on a TDF `task` block.
+@immutable
+class GroupResetTaskCondition extends TaskCondition {
+  /// Creates a [GroupResetTaskCondition] for [targetGroup].
+  const GroupResetTaskCondition({required this.targetGroup});
+
+  /// Condition group cleared by this reset directive.
+  final ConditionGroup targetGroup;
+
+  @override
+  ConditionGroup get group => targetGroup;
+
+  @override
+  bool isSatisfiedAt(
+    DateTime evaluationTime, {
+    double? currentLatitude,
+    double? currentLongitude,
+  }) {
+    return true;
+  }
+
+  @override
+  String toTdfDirectiveArgs() => '${targetGroup.name} any';
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is GroupResetTaskCondition && other.targetGroup == targetGroup;
+  }
+
+  @override
+  int get hashCode => targetGroup.hashCode;
+
+  @override
+  String toString() => 'condition ${toTdfDirectiveArgs()}';
+}
+
+/// Geographic proximity activation condition (`location <lat> <lon> <radius>`).
+@immutable
+class LocationTaskCondition extends TaskCondition {
+  /// Creates a [LocationTaskCondition] for [latitude], [longitude], and [radiusMeters].
+  const LocationTaskCondition({
+    required this.latitude,
+    required this.longitude,
+    required this.radiusMeters,
+  });
+
+  /// Mean Earth radius in meters used for Haversine distance evaluation (`TDF_SPEC.md` Section 4.3.1).
+  static const double earthRadiusMeters = 6371000.0;
+
+  /// Target WGS-84 latitude in decimal degrees (`-90.0..90.0`).
+  final double latitude;
+
+  /// Target WGS-84 longitude in decimal degrees (`-180.0..180.0`).
+  final double longitude;
+
+  /// Inclusive geofencing radius in meters (`> 0.0`).
+  final double radiusMeters;
+
+  @override
+  ConditionGroup get group => ConditionGroup.location;
+
+  /// Computes the great-circle Haversine distance in meters between two WGS-84 coordinates.
+  static double haversineDistanceMeters(
+    double lat1,
+    double lon1,
+    double lat2,
+    double lon2,
+  ) {
+    final phi1 = _degreesToRadians(lat1);
+    final phi2 = _degreesToRadians(lat2);
+    final deltaPhi = _degreesToRadians(lat2 - lat1);
+    final deltaLambda = _degreesToRadians(lon2 - lon1);
+
+    final sinHalfPhi = math.sin(deltaPhi / 2.0);
+    final sinHalfLambda = math.sin(deltaLambda / 2.0);
+    final a =
+        sinHalfPhi * sinHalfPhi +
+        math.cos(phi1) * math.cos(phi2) * sinHalfLambda * sinHalfLambda;
+    final clampedA = a < 0.0 ? 0.0 : (a > 1.0 ? 1.0 : a);
+    final c = 2.0 * math.atan2(math.sqrt(clampedA), math.sqrt(1.0 - clampedA));
+    return earthRadiusMeters * c;
+  }
+
+  @override
+  bool isSatisfiedAt(
+    DateTime evaluationTime, {
+    double? currentLatitude,
+    double? currentLongitude,
+  }) {
+    if (currentLatitude == null || currentLongitude == null) {
+      return true;
+    }
+    final distance = haversineDistanceMeters(
+      latitude,
+      longitude,
+      currentLatitude,
+      currentLongitude,
+    );
+    return distance <= radiusMeters;
+  }
+
+  @override
+  String toTdfDirectiveArgs() {
+    final latStr = _formatDecimal(latitude);
+    final lonStr = _formatDecimal(longitude);
+    final radiusStr = _formatDecimal(radiusMeters);
+    return 'location $latStr $lonStr $radiusStr';
+  }
+
+  /// Converts [degrees] to radians.
+  static double _degreesToRadians(double degrees) =>
+      degrees * (math.pi / 180.0);
+
+  /// Formats [value] without a trailing `.0` suffix when it represents an exact integer.
+  static String _formatDecimal(double value) {
+    final truncated = value.truncateToDouble();
+    if (value == truncated) {
+      return value.toInt().toString();
+    }
+    return value.toString();
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is LocationTaskCondition &&
+        other.latitude == latitude &&
+        other.longitude == longitude &&
+        other.radiusMeters == radiusMeters;
+  }
+
+  @override
+  int get hashCode => Object.hash(latitude, longitude, radiusMeters);
+
+  @override
+  String toString() => 'condition ${toTdfDirectiveArgs()}';
+}
+
+/// Daily time-window activation condition (`time <HH:MM> <HH:MM>`).
 @immutable
 class TimeWindowTaskCondition extends TaskCondition {
   /// Creates a [TimeWindowTaskCondition] for `[startMinutes, endMinutes]`.
@@ -106,7 +304,14 @@ class TimeWindowTaskCondition extends TaskCondition {
   final String startToken;
 
   @override
-  bool isSatisfiedAt(DateTime evaluationTime) {
+  ConditionGroup get group => ConditionGroup.time;
+
+  @override
+  bool isSatisfiedAt(
+    DateTime evaluationTime, {
+    double? currentLatitude,
+    double? currentLongitude,
+  }) {
     final currentMinutes = evaluationTime.hour * 60 + evaluationTime.minute;
     if (startMinutes <= endMinutes) {
       return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
@@ -135,62 +340,7 @@ class TimeWindowTaskCondition extends TaskCondition {
   String toString() => 'condition ${toTdfDirectiveArgs()}';
 }
 
-/// Immutable representation of a TDF `category` root block.
-@immutable
-class TdfCategory {
-  /// Creates a [TdfCategory] definition.
-  const TdfCategory({
-    required this.id,
-    required this.name,
-    this.color,
-    this.note,
-  });
-
-  /// Optional hexadecimal color code (`"#RRGGBB"`).
-  final String? color;
-
-  /// Unique category identifier (`<id>`).
-  final String id;
-
-  /// Human-readable display name of the category.
-  final String name;
-
-  /// Optional extended description.
-  final String? note;
-
-  /// Returns a copy of this category with updated fields.
-  TdfCategory copyWith({
-    String? id,
-    String? name,
-    String? color,
-    String? note,
-  }) {
-    return TdfCategory(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      color: color ?? this.color,
-      note: note ?? this.note,
-    );
-  }
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is TdfCategory &&
-        other.id == id &&
-        other.name == name &&
-        other.color == color &&
-        other.note == note;
-  }
-
-  @override
-  int get hashCode => Object.hash(id, name, color, note);
-
-  @override
-  String toString() => 'category $id ($name)';
-}
-
-/// Pure hexadecimal color validation and formatting helper for TDF `category` and `location` blocks.
+/// Pure hexadecimal color validation and formatting helper for TDF `label` blocks.
 @immutable
 class TdfColor {
   const TdfColor._();
@@ -199,6 +349,19 @@ class TdfColor {
   static String formatArgb(int argb) {
     final rgb = argb & 0xFFFFFF;
     return '#${rgb.toRadixString(16).toUpperCase().padLeft(6, '0')}';
+  }
+
+  /// Checks whether [rawHex] is a strict 7-character `#RRGGBB` hexadecimal color string (`#[0-9a-fA-F]{6}`).
+  static bool isStrictHexColor(String rawHex) {
+    if (rawHex.length != 7 || rawHex.codeUnitAt(0) != 0x23) {
+      return false;
+    }
+    for (var i = 1; i < 7; i++) {
+      if (!_isHexCodeUnit(rawHex.codeUnitAt(i))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Validates and normalizes [rawHex] (`#RRGGBB` or `RRGGBB`) to `#RRGGBB`, or `null` if invalid.
@@ -243,79 +406,67 @@ class TdfColor {
   }
 }
 
-/// Immutable representation of a TDF `location` root block.
+/// Immutable representation of a TDF `label` root block (`TDF_SPEC.md` Section 4.1).
 @immutable
-class TdfLocation {
-  /// Creates a [TdfLocation] definition.
-  const TdfLocation({
+class TdfLabel {
+  /// Creates a [TdfLabel] definition.
+  const TdfLabel({
     required this.id,
     required this.name,
     this.color,
     this.note,
-    this.latitude,
-    this.longitude,
-    this.radiusMeters,
+    this.conditions = const [],
   });
 
   /// Optional hexadecimal color code (`"#RRGGBB"`).
   final String? color;
 
-  /// Unique location identifier (`<id>`).
+  /// Default activation conditions inherited by tasks referencing this label.
+  final List<TaskCondition> conditions;
+
+  /// Unique label identifier (`<id>`).
   final String id;
 
-  /// Optional decimal latitude coordinate.
-  final double? latitude;
-
-  /// Optional decimal longitude coordinate.
-  final double? longitude;
-
-  /// Human-readable display name of the location.
+  /// Human-readable display name of the label.
   final String name;
 
-  /// Optional extended description.
+  /// Optional extended description (`1..2000` characters).
   final String? note;
 
-  /// Optional geofencing radius in meters.
-  final double? radiusMeters;
-
-  /// Returns a copy of this location with updated fields.
-  TdfLocation copyWith({
+  /// Returns a copy of this label with updated fields.
+  TdfLabel copyWith({
     String? id,
     String? name,
     String? color,
     String? note,
-    double? latitude,
-    double? longitude,
-    double? radiusMeters,
+    List<TaskCondition>? conditions,
   }) {
-    return TdfLocation(
+    return TdfLabel(
       id: id ?? this.id,
       name: name ?? this.name,
       color: color ?? this.color,
       note: note ?? this.note,
-      latitude: latitude ?? this.latitude,
-      longitude: longitude ?? this.longitude,
-      radiusMeters: radiusMeters ?? this.radiusMeters,
+      conditions: conditions != null
+          ? List<TaskCondition>.unmodifiable(conditions)
+          : this.conditions,
     );
   }
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is TdfLocation &&
+    return other is TdfLabel &&
         other.id == id &&
         other.name == name &&
         other.color == color &&
         other.note == note &&
-        other.latitude == latitude &&
-        other.longitude == longitude &&
-        other.radiusMeters == radiusMeters;
+        listEquals(other.conditions, conditions);
   }
 
   @override
   int get hashCode =>
-      Object.hash(id, name, color, note, latitude, longitude, radiusMeters);
+      Object.hash(id, name, color, note, Object.hashAll(conditions));
 
   @override
-  String toString() => 'location $id ($name)';
+  String toString() => 'label $id ($name)';
 }

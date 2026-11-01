@@ -66,16 +66,14 @@ class TaskItem {
     this.queuedAt,
     this.completedAt,
     this.suspendedAt,
-    List<String> locationIds = const [],
-    List<String> categoryIds = const [],
+    List<String> labelIds = const [],
     List<String> blockedByTaskIds = const [],
     List<TaskCondition> conditions = const [],
     this.subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
   }) : id = id ?? _nextId(),
        createdAt = createdAt ?? defaultCreatedAt,
-       locationIds = List<String>.unmodifiable(locationIds),
-       categoryIds = List<String>.unmodifiable(categoryIds),
+       labelIds = List<String>.unmodifiable(labelIds),
        blockedByTaskIds = List<String>.unmodifiable(blockedByTaskIds),
        conditions = List<TaskCondition>.unmodifiable(conditions),
        subtasks = List<SubtaskItem>.unmodifiable(subtasks);
@@ -90,9 +88,6 @@ class TaskItem {
 
   /// Prerequisite task IDs (`blocked` directive).
   final List<String> blockedByTaskIds;
-
-  /// Associated category IDs (`categories` directive).
-  final List<String> categoryIds;
 
   /// Completion timestamp (`finished` directive) when located in Tier 6 (`Completed`).
   final DateTime? completedAt;
@@ -112,8 +107,8 @@ class TaskItem {
   /// Whether the task carries the `priority` header flag.
   final bool isPriority;
 
-  /// Associated location IDs (`locations` directive).
-  final List<String> locationIds;
+  /// Associated label IDs (`labels` directive).
+  final List<String> labelIds;
 
   /// Optional extended description (`note` directive).
   final String? note;
@@ -144,8 +139,7 @@ class TaskItem {
     DateTime? queuedAt,
     DateTime? completedAt,
     DateTime? suspendedAt,
-    List<String>? locationIds,
-    List<String>? categoryIds,
+    List<String>? labelIds,
     List<String>? blockedByTaskIds,
     List<TaskCondition>? conditions,
     bool? subtasksAutoFinish,
@@ -165,8 +159,7 @@ class TaskItem {
       queuedAt: clearQueuedAt ? null : (queuedAt ?? this.queuedAt),
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
-      locationIds: locationIds ?? this.locationIds,
-      categoryIds: categoryIds ?? this.categoryIds,
+      labelIds: labelIds ?? this.labelIds,
       blockedByTaskIds: blockedByTaskIds ?? this.blockedByTaskIds,
       conditions: conditions ?? this.conditions,
       subtasksAutoFinish: subtasksAutoFinish ?? this.subtasksAutoFinish,
@@ -182,11 +175,15 @@ class TaskItem {
     return '$year-$month-$day';
   }
 
-  /// Formats [timestamp] as a canonical TDF timestamp (`YYYY-MM-DD HH:MM`).
+  /// Formats [timestamp] as a canonical TDF timestamp (`YYYY-MM-DD HH:MM` or `YYYY-MM-DD HH:MM:SS` when seconds are non-zero).
   static String formatTdfTimestamp(DateTime timestamp) {
     final datePart = formatIsoDate(timestamp);
     final hour = timestamp.hour.toString().padLeft(2, '0');
     final minute = timestamp.minute.toString().padLeft(2, '0');
+    if (timestamp.second != 0) {
+      final second = timestamp.second.toString().padLeft(2, '0');
+      return '$datePart $hour:$minute:$second';
+    }
     return '$datePart $hour:$minute';
   }
 
@@ -216,6 +213,7 @@ class TaskItem {
       completionDate.day,
       completionDate.hour,
       completionDate.minute,
+      completionDate.second,
     );
     return copyWith(isCompleted: true, completedAt: normalized);
   }
@@ -246,7 +244,7 @@ class TaskItem {
     return candidate;
   }
 
-  /// Parses a strict TDF `<timestamp>` (`<YYYY-MM-DD>` and optional `<HH:MM>`) into a UTC [DateTime].
+  /// Parses a strict TDF `<timestamp>` (`<YYYY-MM-DD>` and optional `<HH:MM[:SS]>`) into a UTC [DateTime].
   static DateTime? tryParseTdfTimestamp(String rawDate, [String? rawTime]) {
     final baseDate = tryParseIsoDate(rawDate);
     if (baseDate == null) {
@@ -255,19 +253,44 @@ class TaskItem {
     if (rawTime == null) {
       return baseDate;
     }
-    final minutesFromMidnight = tryParseTimeMinutes(rawTime);
-    if (minutesFromMidnight == null) {
-      return null;
+    if (rawTime.length == 5) {
+      final minutesFromMidnight = tryParseTimeMinutes(rawTime);
+      if (minutesFromMidnight == null) {
+        return null;
+      }
+      final hour = minutesFromMidnight ~/ 60;
+      final minute = minutesFromMidnight % 60;
+      return DateTime.utc(
+        baseDate.year,
+        baseDate.month,
+        baseDate.day,
+        hour,
+        minute,
+      );
     }
-    final hour = minutesFromMidnight ~/ 60;
-    final minute = minutesFromMidnight % 60;
-    return DateTime.utc(
-      baseDate.year,
-      baseDate.month,
-      baseDate.day,
-      hour,
-      minute,
-    );
+    if (rawTime.length == 8 &&
+        rawTime.codeUnitAt(2) == 0x3A &&
+        rawTime.codeUnitAt(5) == 0x3A) {
+      final minutesFromMidnight = tryParseTimeMinutes(rawTime.substring(0, 5));
+      final second = _parseFixedDigits(rawTime, 6, 8);
+      if (minutesFromMidnight == null ||
+          second == null ||
+          second < 0 ||
+          second > 59) {
+        return null;
+      }
+      final hour = minutesFromMidnight ~/ 60;
+      final minute = minutesFromMidnight % 60;
+      return DateTime.utc(
+        baseDate.year,
+        baseDate.month,
+        baseDate.day,
+        hour,
+        minute,
+        second,
+      );
+    }
+    return null;
   }
 
   /// Parses a strict 24-hour `<HH:MM>` token into minutes from `00:00` (`0..1439`), or `null` if invalid.
@@ -319,8 +342,7 @@ class TaskItem {
         other.completedAt == completedAt &&
         other.suspendedAt == suspendedAt &&
         other.subtasksAutoFinish == subtasksAutoFinish &&
-        listEquals(other.locationIds, locationIds) &&
-        listEquals(other.categoryIds, categoryIds) &&
+        listEquals(other.labelIds, labelIds) &&
         listEquals(other.blockedByTaskIds, blockedByTaskIds) &&
         listEquals(other.conditions, conditions) &&
         listEquals(other.subtasks, subtasks);
@@ -338,8 +360,7 @@ class TaskItem {
     completedAt,
     suspendedAt,
     subtasksAutoFinish,
-    Object.hashAll(locationIds),
-    Object.hashAll(categoryIds),
+    Object.hashAll(labelIds),
     Object.hashAll(blockedByTaskIds),
     Object.hashAll(conditions),
     Object.hashAll(subtasks),

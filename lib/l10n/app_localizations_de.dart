@@ -99,6 +99,34 @@ class AppLocalizationsDe extends AppLocalizations {
   String get advancedTaskTitle => 'Erweiterte Ansicht';
 
   @override
+  String get editTaskTitle => 'Aufgabe bearbeiten';
+
+  @override
+  String get tooltipDowngradeTask => 'Aufgabe herabstufen';
+
+  @override
+  String get tooltipEditTask => 'Aufgabe bearbeiten';
+
+  @override
+  String get taskNameLabel => 'Aufgabenname';
+
+  @override
+  String get taskNameErrorEmpty => 'Bitte einen Aufgabennamen eingeben.';
+
+  @override
+  String get taskNameErrorDuplicate =>
+      'Eine Aufgabe mit diesem Namen existiert bereits.';
+
+  @override
+  String get taskNoteLabel => 'Notiz';
+
+  @override
+  String get taskNoteHint => 'Optionale Notiz oder Beschreibung...';
+
+  @override
+  String get subtasksAutoFinishLabel => 'Automatisch abschließen';
+
+  @override
   String get subtasksSectionTitle => 'Unteraufgaben';
 
   @override
@@ -164,7 +192,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get openTaskCountSectionDescription =>
-      'Gesamtzahl der offenen Aufgaben auf Kategorie- und Orts-Karten ein- oder ausblenden.';
+      'Gesamtzahl der offenen Aufgaben auf Label-Karten ein- oder ausblenden.';
 
   @override
   String get openTaskCountOff => 'Aus';
@@ -362,10 +390,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get sectionCompletedTasks => 'ERLEDIGTE AUFGABEN';
 
   @override
-  String get sectionCategories => 'KATEGORIEN';
-
-  @override
-  String get sectionLocations => 'ORTE';
+  String get sectionLabels => 'LABELS';
 
   @override
   String taskCountLabel(int count) {
@@ -382,29 +407,29 @@ class AppLocalizationsDe extends AppLocalizations {
   String get searchHint => 'Fokusaufgaben durchsuchen...';
 
   @override
-  String get drawerCategories => 'Kategorien';
+  String get drawerLabels => 'Labels';
 
   @override
-  String get drawerLocations => 'Orte';
-
-  @override
-  String get categoryNameHint => 'Neuer Kategoriename...';
-
-  @override
-  String get locationNameHint => 'Neuer Ortsname...';
+  String get labelNameHint => 'Neuer Labelname...';
 
   @override
   String get colorHexLabel => 'Hex-Farbe';
 
   @override
-  String get emptyCategoriesHint => 'Noch keine Kategorien angelegt.';
+  String get emptyLabelsHint => 'Noch keine Labels angelegt.';
 
   @override
-  String get emptyLocationsHint => 'Noch keine Orte angelegt.';
+  String get tooltipDeleteLabel => 'Label löschen';
 
   @override
-  String get tooltipDeleteCategory => 'Kategorie löschen';
+  String get actionEdit => 'Bearbeiten';
 
   @override
-  String get tooltipDeleteLocation => 'Ort löschen';
+  String get createNewLabel => 'Neues Label erstellen';
+
+  @override
+  String get editLabelsTitle => 'Labels bearbeiten';
+
+  @override
+  String get tooltipRenameLabel => 'Label umbenennen';
 }

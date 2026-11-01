@@ -117,6 +117,42 @@
   "@advancedTaskTitle": {
     "description": "Header title for the extended task creation view."
   },
+  "editTaskTitle": "Edit Task",
+  "@editTaskTitle": {
+    "description": "Header title when editing an existing task in the extended task view."
+  },
+  "tooltipDowngradeTask": "Downgrade task",
+  "@tooltipDowngradeTask": {
+    "description": "Tooltip for the downward arrow button that downgrades a task."
+  },
+  "tooltipEditTask": "Edit task",
+  "@tooltipEditTask": {
+    "description": "Tooltip for the edit button on a task card."
+  },
+  "taskNameLabel": "Task Name",
+  "@taskNameLabel": {
+    "description": "Input label for the task name field in the extended task view."
+  },
+  "taskNameErrorEmpty": "Please enter a task name.",
+  "@taskNameErrorEmpty": {
+    "description": "Validation error shown when the task name is empty."
+  },
+  "taskNameErrorDuplicate": "A task with this name already exists.",
+  "@taskNameErrorDuplicate": {
+    "description": "Validation error shown when another task already uses the same name."
+  },
+  "taskNoteLabel": "Note",
+  "@taskNoteLabel": {
+    "description": "Input label for the optional task note field in the extended task view."
+  },
+  "taskNoteHint": "Optional note or description...",
+  "@taskNoteHint": {
+    "description": "Placeholder hint for the optional task note input field."
+  },
+  "subtasksAutoFinishLabel": "Auto-finish",
+  "@subtasksAutoFinishLabel": {
+    "description": "Toggle label for automatically completing a task when all subtasks are done."
+  },
   "subtasksSectionTitle": "Subtasks",
   "@subtasksSectionTitle": {
     "description": "Section heading for subtasks inside the extended task creation view."
@@ -202,17 +238,17 @@
   "@openTaskCountSectionTitle": {
     "description": "Section heading for open task count visibility selection in settings."
   },
-  "openTaskCountSectionDescription": "Show or hide the total number of open tasks on category and location cards.",
+  "openTaskCountSectionDescription": "Show or hide the total number of open tasks on label cards.",
   "@openTaskCountSectionDescription": {
     "description": "Helper description explaining the open task count visibility setting."
   },
   "openTaskCountOff": "Off",
   "@openTaskCountOff": {
-    "description": "Option label to hide the total open task count on category and location cards."
+    "description": "Option label to hide the total open task count on label cards."
   },
   "openTaskCountOn": "On",
   "@openTaskCountOn": {
-    "description": "Option label to show the total open task count on category and location cards."
+    "description": "Option label to show the total open task count on label cards."
   },
   "storageModeSectionTitle": "Storage Mode",
   "@storageModeSectionTitle": {
@@ -462,17 +498,13 @@
   "@sectionCompletedTasks": {
     "description": "Uppercase section label above the Completed tasks list on the Completed tier panel."
   },
-  "sectionCategories": "CATEGORIES",
-  "@sectionCategories": {
-    "description": "Uppercase section label above the category summary cards on the landing page."
-  },
-  "sectionLocations": "LOCATIONS",
-  "@sectionLocations": {
-    "description": "Uppercase section label above the location summary cards on the landing page."
+  "sectionLabels": "LABELS",
+  "@sectionLabels": {
+    "description": "Uppercase section label above the label chips or summary cards."
   },
   "taskCountLabel": "{count} tasks",
   "@taskCountLabel": {
-    "description": "Total task counter label displayed at the top of category and location cards.",
+    "description": "Total task counter label displayed at the top of label cards.",
     "placeholders": {
       "count": {
         "type": "int"
@@ -491,40 +523,40 @@
   "@searchHint": {
     "description": "Placeholder hint inside the landing page search field."
   },
-  "drawerCategories": "Categories",
-  "@drawerCategories": {
-    "description": "Side panel menu item and sheet title for managing categories."
+  "drawerLabels": "Labels",
+  "@drawerLabels": {
+    "description": "Button tooltip and sheet title for managing labels."
   },
-  "drawerLocations": "Locations",
-  "@drawerLocations": {
-    "description": "Side panel menu item and sheet title for managing locations."
-  },
-  "categoryNameHint": "New category name...",
-  "@categoryNameHint": {
-    "description": "Placeholder hint inside the category name input field."
-  },
-  "locationNameHint": "New location name...",
-  "@locationNameHint": {
-    "description": "Placeholder hint inside the location name input field."
+  "labelNameHint": "New label name...",
+  "@labelNameHint": {
+    "description": "Placeholder hint inside the label name input field."
   },
   "colorHexLabel": "Hex Color",
   "@colorHexLabel": {
     "description": "Input label for the direct hexadecimal color field."
   },
-  "emptyCategoriesHint": "No categories created yet.",
-  "@emptyCategoriesHint": {
-    "description": "Empty-state hint shown in the Categories panel when no categories exist."
+  "emptyLabelsHint": "No labels created yet.",
+  "@emptyLabelsHint": {
+    "description": "Empty-state hint shown when no labels exist."
   },
-  "emptyLocationsHint": "No locations created yet.",
-  "@emptyLocationsHint": {
-    "description": "Empty-state hint shown in the Locations panel when no locations exist."
+  "tooltipDeleteLabel": "Delete label",
+  "@tooltipDeleteLabel": {
+    "description": "Tooltip for the button that deletes a label."
   },
-  "tooltipDeleteCategory": "Delete category",
-  "@tooltipDeleteCategory": {
-    "description": "Tooltip for the button that deletes a category."
+  "actionEdit": "Edit",
+  "@actionEdit": {
+    "description": "Button label to edit labels in the navigation drawer."
   },
-  "tooltipDeleteLocation": "Delete location",
-  "@tooltipDeleteLocation": {
-    "description": "Tooltip for the button that deletes a location."
+  "createNewLabel": "Create new label",
+  "@createNewLabel": {
+    "description": "Action label and input hint for creating a new label."
+  },
+  "editLabelsTitle": "Edit labels",
+  "@editLabelsTitle": {
+    "description": "Screen title for the label management screen."
+  },
+  "tooltipRenameLabel": "Rename label",
+  "@tooltipRenameLabel": {
+    "description": "Tooltip for the button that renames or saves a label."
   }
 }

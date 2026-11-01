@@ -41,45 +41,41 @@ void main() {
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-# === Locations (Draft) ===
-location home {
-    name "Home"
-}
+tdf 0.2.0
 
-location work {
-    name "Work"
-    gps  50.9787 11.0328 150
-}
-
-# === Categories (Draft) ===
-category c_house {
-    name  "Household"
+# === Labels ===
+label home {
+    name  "Home"
     color "#4CAF50"
+    condition {
+        day sat sun
+        location 50.9787 11.0328 150
+    }
 }
 
-category c_it {
+label it {
     name  "IT & Servers"
     color "#2196F3"
+    condition time 09:00 18:00
 }
 
 # === Tasks ===
 
-# Prioritized task -> Lands at the top of Focus (in c_it)
+# Prioritized task -> Lands at the top of Focus (in it)
 task t001 priority {
-    name       "Verify server backup"
-    note       "Inspect logs under /var/log/backup"
-    created    2026-11-01 08:30
-    queued     2026-11-01 08:30
-    categories c_it
+    name      "Verify server backup"
+    note      "Inspect logs under /var/log/backup"
+    created   2026-11-01 08:30
+    queued    2026-11-01 08:30
+    labels    it
 }
 
 # Regular active task with subtasks -> Focus / Ready
 task t002 {
-    name       "Clean up study"
-    created    2026-11-01 09:00
-    queued     2026-11-01 09:15
-    locations  home
-    categories c_house
+    name      "Clean up study"
+    created   2026-11-01 09:00
+    queued    2026-11-01 09:15
+    labels    home
 
     subtasks auto-finish {
         step true  "Wipe desk"
@@ -88,67 +84,82 @@ task t002 {
     }
 }
 
-# Task in multiple categories with condition (weekends only)
+# Task with multiple labels and global condition reset (always active)
 task t003 {
-    name       "Clean dust from NAS drives"
-    created    2026-11-01 10:00
-    queued     2026-11-01 10:00
-    locations  home
-    categories c_house c_it
-    condition  day sat sun
+    name      "Clean dust from NAS drives"
+    created   2026-11-01 10:00
+    queued    2026-11-01 10:00
+    labels    home it
+    condition any
 }
 
 # Blocked task (waits for t001 and is suspended until Nov 5)
 task t004 {
-    name       "Apply firewall update"
-    created    2026-11-01 11:00
-    queued     2026-11-01 11:00
-    locations  work
-    categories c_it
-    blocked    t001
-    suspended  2026-11-05 08:00
+    name      "Apply firewall update"
+    created   2026-11-01 11:00
+    queued    2026-11-01 11:00
+    labels    it
+    blocked   t001
+    suspended 2026-11-05 08:00
 }
 
 # Task in "Someday" (no 'queued' directive present)
 task t005 {
-    name       "3D-print custom NAS enclosure"
-    created    2026-11-01 12:00
-    categories c_it
+    name      "3D-print custom NAS enclosure"
+    created   2026-11-01 12:00
+    labels    it
 }
 
 # Completed task ('finished' is set -> deleted after 30 days)
 task t006 {
-    name       "Mount winter tires"
-    created    2026-10-20 14:00
-    queued     2026-10-21 08:00
-    finished   2026-10-29 16:45
-    locations  home
+    name      "Mount winter tires"
+    created   2026-10-20 14:00
+    queued    2026-10-21 08:00
+    finished  2026-10-29 16:45
+    labels    home
 }
 ''';
 
       final board = tdfService.parse(canonicalTdf, evaluationTime: fixedDate);
 
       expect(
-        board.locations.map((location) => location.id),
-        equals(['home', 'work']),
-        reason: 'Locations must be parsed in declaration order',
+        board.labels.map((label) => label.id),
+        equals(['home', 'it']),
+        reason: 'Labels must be parsed in declaration order',
       );
-      expect(board.locations[1].latitude, equals(50.9787));
-      expect(board.locations[1].longitude, equals(11.0328));
-      expect(board.locations[1].radiusMeters, equals(150.0));
-
+      expect(board.labels[0].color, equals('#4CAF50'));
+      expect(board.labels[0].conditions.length, equals(2));
       expect(
-        board.categories.map((category) => category.id),
-        equals(['c_house', 'c_it']),
-        reason: 'Categories must be parsed in declaration order',
+        board.labels[0].conditions[0],
+        isA<DayTaskCondition>().having(
+          (condition) => condition.dayTokens,
+          'dayTokens',
+          equals(['sat', 'sun']),
+        ),
       );
-      expect(board.categories[0].color, equals('#4CAF50'));
-      expect(board.categories[1].color, equals('#2196F3'));
+      expect(
+        board.labels[0].conditions[1],
+        isA<LocationTaskCondition>()
+            .having((condition) => condition.latitude, 'latitude', 50.9787)
+            .having((condition) => condition.longitude, 'longitude', 11.0328)
+            .having(
+              (condition) => condition.radiusMeters,
+              'radiusMeters',
+              150.0,
+            ),
+      );
+      expect(board.labels[1].color, equals('#2196F3'));
+      expect(
+        board.labels[1].conditions.single,
+        isA<TimeWindowTaskCondition>()
+            .having((condition) => condition.startToken, 'startToken', '09:00')
+            .having((condition) => condition.endToken, 'endToken', '18:00'),
+      );
 
       expect(
         board.focus.map((task) => task.id),
         equals(['t001', 't002', 't003']),
-        reason: 't001 (priority), t002, and t003 (active on Sunday) must fill Focus',
+        reason: 't001 (priority in it at 12:00), t002 (active on Sunday in home), and t003 (condition any) must fill Focus',
       );
       expect(board.focus[0].isPriority, isTrue);
       expect(board.focus[0].note, equals('Inspect logs under /var/log/backup'));
@@ -156,6 +167,7 @@ task t006 {
       expect(board.focus[1].subtasks.length, equals(3));
       expect(board.focus[1].subtasks[0].isCompleted, isTrue);
       expect(board.focus[1].subtasks[1].isCompleted, isFalse);
+      expect(board.focus[2].conditions.single, isA<GlobalResetTaskCondition>());
 
       expect(board.ready, isEmpty);
       expect(board.planned, isEmpty);
@@ -181,6 +193,34 @@ task t006 {
         isFalse,
         reason: 'Canonical serialization must emit LF line terminators only',
       );
+      expect(
+        serialized,
+        contains(
+          'label home {\n'
+          '    name "Home"\n'
+          '    color "#4CAF50"\n'
+          '    condition {\n'
+          '        day sat sun\n'
+          '        location 50.9787 11.0328 150\n'
+          '    }\n'
+          '}',
+        ),
+        reason: 'Label with 2 conditions must serialize as a condition { ... } sub-block',
+      );
+      expect(
+        serialized,
+        contains(
+          'label it {\n'
+          '    name "IT & Servers"\n'
+          '    color "#2196F3"\n'
+          '    condition time 09:00 18:00\n'
+          '}',
+        ),
+        reason: 'Label with 1 condition must serialize as an inline condition directive',
+      );
+      expect(serialized, contains('labels home it'));
+      expect(serialized, contains('condition any'));
+
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
       expect(
         reparsed.focus.map((task) => task.id),
@@ -191,44 +231,94 @@ task t006 {
       expect(reparsed.completed.map((task) => task.id), equals(['t006']));
     });
 
-    test('supports bare words, double-quoted escapes, single-quoted raw strings, inline comments, CRLF, and empty blocks', () {
+    test('automatically migrates legacy category and location blocks and task categories/locations directives into canonical labels', () {
+      const legacyTdf = '''
+location home {
+    name "Home"
+}
+location work {
+    name "Work"
+    gps  50.9787 11.0328 150
+}
+category c_house {
+    name  "Household"
+    color "#4CAF50"
+}
+category c_it {
+    name  "IT & Servers"
+    color "#2196F3"
+}
+task t001 {
+    name       "Clean up study"
+    created    2026-11-01 09:00
+    queued     2026-11-01 09:15
+    locations  home work
+    categories c_house c_it
+}
+''';
+
+      final board = tdfService.parse(legacyTdf, evaluationTime: fixedDate);
       expect(
-        () => tdfService.parse('location empty_loc {}'),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.missingRequiredDirective,
-          ),
-        ),
-        reason: 'Empty location block without mandatory name must fail',
+        board.labels.map((label) => label.id),
+        equals(['home', 'work', 'c_house', 'c_it']),
+        reason: 'Legacy location and category blocks must migrate to TdfLabel in declaration order',
+      );
+      expect(
+        board.labels[1].conditions.single,
+        isA<LocationTaskCondition>()
+            .having((condition) => condition.latitude, 'latitude', 50.9787)
+            .having((condition) => condition.longitude, 'longitude', 11.0328)
+            .having(
+              (condition) => condition.radiusMeters,
+              'radiusMeters',
+              150.0,
+            ),
+        reason: 'Legacy gps directive on location block must migrate to LocationTaskCondition on TdfLabel',
+      );
+      expect(
+        board.focus.single.labelIds,
+        equals(['home', 'work', 'c_house', 'c_it']),
+        reason: 'Legacy locations and categories task directives must merge into labelIds',
       );
 
-      const validInlineSubtasks =
-          'category c_dev { # comment\r\n'
+      final serialized = tdfService.serialize(board);
+      expect(serialized, contains('label home {'));
+      expect(serialized, contains('label work {'));
+      expect(serialized, contains('condition location 50.9787 11.0328 150'));
+      expect(serialized, contains('label c_house {'));
+      expect(serialized, contains('labels home work c_house c_it'));
+      expect(serialized, isNot(contains('category ')));
+      expect(serialized, isNot(contains('location work')));
+      expect(serialized, isNot(contains('categories ')));
+      expect(serialized, isNot(contains('locations ')));
+    });
+
+    test('supports bare words, double-quoted escapes, single-quoted raw strings, inline comments, CRLF, and optional seconds in timestamps', () {
+      const validDocument =
+          'tdf 0.2.0 # version comment\r\n'
+          'label c_dev { # comment\r\n'
           '  name \'Raw "quote" and \\\\backslash\'\r\n'
           '  note "Line1\\nLine2\\tTabbed\\rReturn\\\\Slash\\"Quote"\r\n'
           '}#comment\r\n'
           'task taxes2026 {#comment\r\n'
           '  name "File taxes #2026"#comment\r\n'
           '  created 2026-11-01#inline_date_comment\r\n'
-          '  queued 2026-11-01 08:00\r\n'
-          '  categories c_dev#inline_id_comment\r\n'
-          '  subtasks {}\r\n'
+          '  queued 2026-11-01 08:00:05\r\n'
+          '  labels c_dev#inline_id_comment\r\n'
+          '  subtasks {\r\n'
+          '    step false "Collect receipts"\r\n'
+          '  }\r\n'
           '}';
 
-      final board = tdfService.parse(
-        validInlineSubtasks,
-        evaluationTime: fixedDate,
-      );
-      expect(board.categories.single.id, equals('c_dev'));
+      final board = tdfService.parse(validDocument, evaluationTime: fixedDate);
+      expect(board.labels.single.id, equals('c_dev'));
       expect(
-        board.categories.single.name,
+        board.labels.single.name,
         equals('Raw "quote" and \\\\backslash'),
         reason: 'Single-quoted strings must preserve backslashes and quotes',
       );
       expect(
-        board.categories.single.note,
+        board.labels.single.note,
         equals('Line1\nLine2\tTabbed\rReturn\\Slash"Quote'),
         reason: 'Double-quoted strings must unescape \\n, \\t, \\r, \\\\, \\"',
       );
@@ -237,43 +327,67 @@ task t006 {
       expect(
         board.focus.single.createdAt,
         equals(DateTime.utc(2026, 11, 1, 0, 0)),
-        reason: 'Date-only timestamp must default time component to 00:00',
+        reason: 'Date-only timestamp must default time component to 00:00:00',
+      );
+      expect(
+        board.focus.single.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 8, 0, 5)),
+        reason: 'Timestamp with :SS must preserve seconds precision',
       );
 
       final serialized = tdfService.serialize(board);
+      expect(
+        serialized,
+        contains('created 2026-11-01 00:00\n'),
+        reason: 'Zero seconds must omit :SS in canonical serialization',
+      );
+      expect(
+        serialized,
+        contains('queued 2026-11-01 08:00:05\n'),
+        reason: 'Non-zero seconds must emit :SS in canonical serialization',
+      );
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
       expect(
-        reparsed.categories.single.note,
+        reparsed.labels.single.note,
         equals('Line1\nLine2\tTabbed\rReturn\\Slash"Quote'),
+      );
+      expect(
+        reparsed.focus.single.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 8, 0, 5)),
       );
     });
 
-    test(
-      'accepts empty or comment-only documents as valid empty TaskBoard',
-      () {
-        expect(tdfService.parse('').focus, isEmpty);
-        expect(
-          tdfService.parse('   \t  \n# only comment\r\n  # another').focus,
-          isEmpty,
-        );
-      },
-    );
+    test('accepts tdf 0.2.0 with zero blocks as valid empty TaskBoard and serializes empty board with tdf 0.2.0', () {
+      expect(tdfService.parse('tdf 0.2.0\n').focus, isEmpty);
+      expect(
+        tdfService
+            .parse('   \t  \n# only comment\r\ntdf 0.2.0  # version\n')
+            .focus,
+        isEmpty,
+      );
+      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.2.0\n'));
+    });
   });
 
-  group('TDF Section 5 Dynamic 6-Tier Derivation & Context Filtering', () {
-    test('evaluates blocking conditions (blocked, suspended, condition day/time) and context filters', () {
+  group('TDF Section 4.3 & Section 5 Dynamic 6-Tier Derivation, Condition Inheritance & Context Filtering', () {
+    test('evaluates blocking conditions, group-level label condition inheritance, task overrides, group resets, global resets, Haversine GPS, and cohesive per-label OR logic', () {
       const tdfWithConditions = '''
-location home {
-    name "Home"
-}
-location office {
+tdf 0.2.0
+
+label office {
     name "Office"
+    condition {
+        day mon tue wed thu fri
+        time 09:00 17:00
+        location 50.9787 11.0328 150
+    }
 }
-category c_work {
-    name "Work"
-}
-category c_home {
-    name "Home"
+label weekend_home {
+    name "Weekend Home"
+    condition {
+        day sat sun
+        time 10:00 20:00
+    }
 }
 
 task prereq_open {
@@ -310,81 +424,142 @@ task suspended_future {
     suspended 2026-11-02 09:00
 }
 
-task suspended_past {
-    name "Suspension already expired"
+task multi_label_or {
+    name "Multi-label task (office OR weekend_home)"
     created 2026-11-01 08:15
     queued 2026-11-01 08:15
-    suspended 2026-11-01 10:00
+    labels office weekend_home
 }
 
-task cond_weekday_only {
-    name "Monday only task"
+task override_day {
+    name "Office task overridden to Sunday"
     created 2026-11-01 08:20
     queued 2026-11-01 08:20
-    condition day mon
+    labels office
+    condition day sun
 }
 
-task cond_sunday_window {
-    name "Sunday daytime task"
+task reset_day {
+    name "Office task with day reset"
     created 2026-11-01 08:25
     queued 2026-11-01 08:25
-    condition day sun
-    condition time 09:00 17:00
-    locations home
-    categories c_home
+    labels office
+    condition day any
 }
 
-task cond_outside_window {
-    name "Sunday late night task"
+task reset_global {
+    name "Office task with global condition any"
     created 2026-11-01 08:30
     queued 2026-11-01 08:30
-    condition day sun
-    condition time 20:00 22:00
+    labels office
+    condition any
+}
+
+task office_strict {
+    name "Strict office task"
+    created 2026-11-01 08:35
+    queued 2026-11-01 08:35
+    labels office
 }
 ''';
 
       final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
-      final board = tdfService.parse(
+      final boardAtNoon = tdfService.parse(
         tdfWithConditions,
         evaluationTime: sundayNoon,
       );
 
       expect(
-        board.blocked.map((task) => task.id),
-        equals([
-          'wait_on_open',
-          'suspended_future',
-          'cond_weekday_only',
-          'cond_outside_window',
-        ]),
-        reason: 'Tasks with unfinished prereqs, future suspension, or unmet day/time conditions must be Blocked',
+        boardAtNoon.blocked.map((task) => task.id),
+        equals(['wait_on_open', 'suspended_future', 'office_strict']),
+        reason: 'Tasks with unfinished prereqs, future suspension, or unmet inherited weekday condition must be Blocked',
       );
       expect(
-        board.focus.map((task) => task.id),
-        equals(['prereq_open', 'wait_on_done', 'suspended_past']),
-        reason: 'First 3 unblocked scheduled tasks must fill Focus',
+        boardAtNoon.focus.map((task) => task.id),
+        equals(['prereq_open', 'wait_on_done', 'multi_label_or']),
       );
       expect(
-        board.ready.map((task) => task.id),
-        equals(['cond_sunday_window']),
-        reason: '4th unblocked scheduled task must land in Ready',
+        boardAtNoon.ready.map((task) => task.id),
+        equals(['override_day', 'reset_day', 'reset_global']),
+        reason: 'override_day (day sun), reset_day (day any), and reset_global (condition any) must all be active on Sunday noon',
       );
 
-      final filteredHome = tdfService.parse(
+      final sunday930 = DateTime.utc(2026, 11, 1, 9, 30);
+      final boardAt930 = tdfService.parse(
         tdfWithConditions,
-        evaluationTime: sundayNoon,
-        activeCategoryId: 'c_home',
-        activeLocationId: 'home',
+        evaluationTime: sunday930,
       );
       expect(
-        filteredHome.focus.map((task) => task.id),
-        equals(['cond_sunday_window']),
-        reason: 'Context filter for category c_home and location home must select matching task',
+        boardAt930.blocked.map((task) => task.id),
+        contains('multi_label_or'),
+        reason: 'At Sunday 09:30, office fails day (mon..fri) and weekend_home fails time (10:00..20:00); per-label evaluation must not mix groups across labels',
+      );
+      expect(
+        boardAt930.focus.followedBy(boardAt930.ready).map((task) => task.id),
+        containsAll(['override_day', 'reset_day', 'reset_global']),
+        reason: 'At Sunday 09:30, office time (09:00..17:00) is satisfied when day is overridden or reset',
+      );
+
+      final sundayLate = DateTime.utc(2026, 11, 1, 22, 0);
+      final boardAtLate = tdfService.parse(
+        tdfWithConditions,
+        evaluationTime: sundayLate,
+      );
+      expect(
+        boardAtLate.blocked.map((task) => task.id),
+        containsAll(['override_day', 'reset_day']),
+        reason: 'At Sunday 22:00, inherited office time (09:00..17:00) fails for override_day and reset_day',
+      );
+      expect(
+        boardAtLate.focus.followedBy(boardAtLate.ready).map((task) => task.id),
+        contains('reset_global'),
+        reason: 'condition any must ignore all inherited label conditions even at 22:00',
+      );
+
+      final farGpsBoard = boardAtNoon.evaluateForContext(
+        evaluationTime: sundayNoon,
+        currentLatitude: 52.5200,
+        currentLongitude: 13.4050,
+      );
+      expect(
+        farGpsBoard.blocked.map((task) => task.id),
+        containsAll(['override_day', 'reset_day']),
+        reason: 'When device GPS coordinates are outside the 150m radius of office, inherited location condition must block the task',
+      );
+      expect(
+        farGpsBoard.focus.followedBy(farGpsBoard.ready).map((task) => task.id),
+        containsAll(['multi_label_or', 'reset_global']),
+        reason: 'multi_label_or (via weekend_home without GPS) and reset_global (via condition any) must remain active when away from office',
+      );
+
+      final nearGpsBoard = boardAtNoon.evaluateForContext(
+        evaluationTime: sundayNoon,
+        currentLatitude: 50.9788,
+        currentLongitude: 11.0329,
+      );
+      expect(
+        nearGpsBoard.focus
+            .followedBy(nearGpsBoard.ready)
+            .map((task) => task.id),
+        containsAll(['override_day', 'reset_day']),
+        reason: 'When device GPS coordinates are within the 150m radius of office, inherited location condition must be satisfied',
+      );
+
+      final filteredWeekendHome = boardAtNoon.evaluateForContext(
+        activeLabelId: 'weekend_home',
+        evaluationTime: sundayNoon,
+      );
+      expect(
+        filteredWeekendHome.allTasks.map((task) => task.id),
+        equals(['multi_label_or']),
+        reason: 'Section 5.1 label pre-filtering must restrict all 6 tiers to tasks referencing activeLabelId',
       );
     });
 
     test('sorts priority tasks ahead of regular FIFO tasks and preserves declaration order on ties', () {
       const sortingTdf = '''
+tdf 0.2.0
+
 task reg1 {
     name "Regular 1 (09:00)"
     created 2026-11-01 09:00
@@ -526,6 +701,8 @@ task prio2 priority {
 
     test('completes enclosing task automatically when subtasks has auto-finish and all steps become true', () {
       const autoFinishTdf = '''
+tdf 0.2.0
+
 task t_auto {
     name "Auto-finish task"
     created 2026-11-01 09:00
@@ -568,7 +745,7 @@ task t_manual {
       );
     });
 
-    test('completes active task, unblocks dependent tasks, prunes >30d completed tasks (29, 30, 31 day bounds), and restores tasks', () {
+    test('completes active task, unblocks dependent tasks, prunes >30d completed tasks (29, 30, 31 day bounds), schedules Someday tasks (Section 6.2), and restores tasks (Section 6.5)', () {
       final board = TaskBoard(
         focus: [
           TaskItem(id: 'f1', title: 'Finish spec'),
@@ -584,6 +761,7 @@ task t_manual {
             blockedByTaskIds: const ['f1'],
           ),
         ],
+        someday: [TaskItem(id: 's1', title: 'Someday Idea')],
         completed: [
           TaskItem(
             id: 'e_keep_29',
@@ -624,9 +802,49 @@ task t_manual {
         reason:
             '29 and 30 day old tasks must be kept while 31 day old is pruned',
       );
+
+      final afterSchedule = afterComplete.scheduleTask(
+        's1',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterSchedule.someday,
+        isEmpty,
+        reason: 'scheduleTask must remove task from Someday',
+      );
+      expect(
+        afterSchedule.ready.map((task) => task.id),
+        equals(['dep1', 's1']),
+        reason: 'Scheduled Someday task must enter the active queue',
+      );
+
+      final restoredToSomeday = afterSchedule.restoreTask(
+        'f1',
+        targetTier: TaskTier.someday,
+        currentDate: fixedDate,
+      );
+      expect(
+        restoredToSomeday.someday.map((task) => task.id),
+        equals(['f1']),
+        reason: 'Restoring to Someday must clear finished and queued and strip priority',
+      );
+      expect(restoredToSomeday.someday.single.queuedAt, isNull);
+      expect(restoredToSomeday.someday.single.isPriority, isFalse);
+
+      final restoredToFocus = afterSchedule.restoreTask(
+        'f1',
+        targetTier: TaskTier.focus,
+        currentDate: fixedDate,
+      );
+      expect(
+        restoredToFocus.focus.first.id,
+        equals('f1'),
+        reason: 'Restoring to Focus must set priority and place task at the top of Focus',
+      );
+      expect(restoredToFocus.focus.first.isPriority, isTrue);
     });
 
-    test('executes Section 6.4 Minor Downgrade (Focus -> End of Ready) and Section 6.3 Full Downgrade (Ready -> Planned)', () {
+    test('executes Section 6.3 Focus-to-Ready (< 8 and >= 8 active tasks, priority alignment, +00:00:01 offset, collision shift) and Downgrade to Planned', () {
       final board = TaskBoard(
         focus: [
           TaskItem(id: 'f1', title: 'Focus 1 (Downgrade Me)', isPriority: true),
@@ -648,32 +866,224 @@ task t_manual {
       );
       expect(
         downgraded.ready.map((task) => task.title),
-        equals(['Ready 2', 'Focus 1 (Downgrade Me)', 'Planned 1']),
+        equals(['Ready 2', 'Planned 1', 'Focus 1 (Downgrade Me)']),
       );
       expect(
         downgraded.findTask('f1')?.isPriority,
         isFalse,
-        reason: 'Downgrading must strip the priority flag per Section 6.4',
+        reason: 'Downgrading with < 8 active tasks must strip the priority flag per Section 6.3',
+      );
+      expect(
+        downgraded.findTask('f1')?.queuedAt,
+        equals(fixedDate),
+        reason: 'Downgrading from Focus with < 8 active tasks must set queued to now per Section 6.3',
       );
       expect(downgraded.planned, isEmpty);
 
+      final downgradedReadyUnder8 = downgraded.downgradeTask(
+        'b2',
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(
+        downgradedReadyUnder8.ready.map((task) => task.id),
+        equals(['g1', 'f1', 'b2']),
+        reason: 'Downgrading Ready task when < 8 other active tasks exist must place it into the highest open Ready slot at the end of the regular queue',
+      );
+      expect(downgradedReadyUnder8.planned, isEmpty);
+
+      final slot8Time = DateTime.utc(2026, 11, 1, 9, 0, 0);
+      final collidingSlot9Time = DateTime.utc(2026, 11, 1, 9, 0, 1);
       final fullBoard = TaskBoard(
         focus: [
-          TaskItem(id: 'f1', title: 'F1'),
-          TaskItem(id: 'f2', title: 'F2'),
-          TaskItem(id: 'f3', title: 'F3'),
+          TaskItem(
+            id: 'f1',
+            title: 'F1',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
+          ),
+          TaskItem(
+            id: 'f2',
+            title: 'F2',
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 5),
+          ),
+          TaskItem(
+            id: 'f3',
+            title: 'F3',
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 10),
+          ),
         ],
         ready: [
-          TaskItem(id: 'r1', title: 'R1 (Downgrade to Planned)'),
-          TaskItem(id: 'r2', title: 'R2'),
-          TaskItem(id: 'r3', title: 'R3'),
-          TaskItem(id: 'r4', title: 'R4'),
-          TaskItem(id: 'r5', title: 'R5'),
+          TaskItem(
+            id: 'r1',
+            title: 'R1',
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 15),
+          ),
+          TaskItem(
+            id: 'r2',
+            title: 'R2',
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 20),
+          ),
+          TaskItem(
+            id: 'r3',
+            title: 'R3',
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 25),
+          ),
+          TaskItem(
+            id: 'r4',
+            title: 'R4',
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 30),
+          ),
+          TaskItem(id: 'r5', title: 'R5 (Slot 8)', queuedAt: slot8Time),
         ],
         planned: [
-          TaskItem(id: 'p1', title: 'P1 (Advance to Ready)'),
-          TaskItem(id: 'p2', title: 'P2'),
+          TaskItem(
+            id: 'p1',
+            title: 'P1 (Colliding Slot 9)',
+            queuedAt: collidingSlot9Time,
+          ),
+          TaskItem(
+            id: 'p2',
+            title: 'P2',
+            queuedAt: DateTime.utc(2026, 11, 1, 9, 5),
+          ),
         ],
+      );
+
+      final afterFocusDowngradeOnFullBoard = fullBoard.downgradeTask(
+        'f1',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterFocusDowngradeOnFullBoard.focus.map((task) => task.id),
+        equals(['f2', 'f3', 'r1']),
+        reason: 'r1 at slot 4 must advance into Focus slot 3',
+      );
+      expect(
+        afterFocusDowngradeOnFullBoard.ready.map((task) => task.id),
+        equals(['r2', 'r3', 'r4', 'r5', 'f1']),
+        reason: 'Downgraded Focus task f1 must land at the end of Ready (slot 8) ahead of Planned tasks',
+      );
+      expect(
+        afterFocusDowngradeOnFullBoard.findTask('f1')?.isPriority,
+        isFalse,
+        reason: 'Downgraded Focus task must remove priority when slot 8 is a regular task',
+      );
+      expect(
+        afterFocusDowngradeOnFullBoard.findTask('f1')?.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 0, 1)),
+        reason: 'Downgraded Focus task must receive slot_8.queued + 1 second (+00:00:01)',
+      );
+      expect(
+        afterFocusDowngradeOnFullBoard.findTask('p1')?.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 0, 2)),
+        reason: 'Colliding Planned task p1 at slot 9 must be shifted forward by +00:00:01 so f1 stays in Ready',
+      );
+
+      final allPriorityBoard = TaskBoard(
+        focus: [
+          TaskItem(
+            id: 'pf1',
+            title: 'PF1',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
+          ),
+          TaskItem(
+            id: 'pf2',
+            title: 'PF2',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 5),
+          ),
+          TaskItem(
+            id: 'pf3',
+            title: 'PF3',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 10),
+          ),
+        ],
+        ready: [
+          TaskItem(
+            id: 'pr1',
+            title: 'PR1',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 15),
+          ),
+          TaskItem(
+            id: 'pr2',
+            title: 'PR2',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 20),
+          ),
+          TaskItem(
+            id: 'pr3',
+            title: 'PR3',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 25),
+          ),
+          TaskItem(
+            id: 'pr4',
+            title: 'PR4',
+            isPriority: true,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 30),
+          ),
+          TaskItem(
+            id: 'pr5',
+            title: 'PR5 (Priority Slot 8)',
+            isPriority: true,
+            queuedAt: slot8Time,
+          ),
+        ],
+        planned: [
+          TaskItem(
+            id: 'pp1',
+            title: 'PP1 (Priority Slot 9)',
+            isPriority: true,
+            queuedAt: collidingSlot9Time,
+          ),
+          TaskItem(
+            id: 'reg_p2',
+            title: 'Regular Planned Task',
+            isPriority: false,
+            queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
+          ),
+        ],
+      );
+
+      final afterPriorityFocusDowngrade = allPriorityBoard.downgradeTask(
+        'pf1',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterPriorityFocusDowngrade.findTask('pf1')?.isPriority,
+        isTrue,
+        reason: 'When slot 8 carries priority, downgraded Focus task must retain priority per Section 6.3 Step 1',
+      );
+      expect(
+        afterPriorityFocusDowngrade.findTask('pf1')?.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 0, 1)),
+        reason: 'Downgraded priority Focus task must receive slot_8.queued + 00:00:01',
+      );
+      expect(
+        afterPriorityFocusDowngrade.findTask('pp1')?.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 0, 2)),
+        reason: 'Colliding priority task pp1 at slot 9 must be shifted to 09:00:02 per Section 6.3 Step 3',
+      );
+      expect(
+        afterPriorityFocusDowngrade.findTask('reg_p2')?.queuedAt,
+        equals(DateTime.utc(2026, 11, 1, 8, 0)),
+        reason: 'Non-priority task in Planned belongs to a different sorting group and must not be shifted',
+      );
+      final reparsedPriorityDowngrade = tdfService.parse(
+        tdfService.serialize(afterPriorityFocusDowngrade),
+        evaluationTime: fixedDate,
+      );
+      expect(
+        reparsedPriorityDowngrade.ready.map((task) => task.id),
+        equals(['pr2', 'pr3', 'pr4', 'pr5', 'pf1']),
+        reason: 'Reparsed TDF document must keep pf1 at Ready slot 8 ahead of pp1 in Planned',
+      );
+      expect(
+        reparsedPriorityDowngrade.planned.map((task) => task.id),
+        equals(['pp1', 'reg_p2']),
       );
 
       final afterReadyDowngrade = fullBoard.downgradeTask(
@@ -689,6 +1099,21 @@ task t_manual {
         afterReadyDowngrade.planned.map((task) => task.id),
         equals(['p2', 'r1']),
         reason: 'Downgraded Ready task must sort to the end of Planned',
+      );
+      expect(
+        afterReadyDowngrade.findTask('r1')?.queuedAt,
+        equals(fixedDate),
+        reason: 'Downgrading Ready to Planned must set queued to now per Section 6.3',
+      );
+
+      final afterPlannedDowngrade = afterReadyDowngrade.downgradeTask(
+        'p2',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterPlannedDowngrade,
+        equals(afterReadyDowngrade),
+        reason: 'Downgrading a Planned task must be a no-op because only Focus and Ready can be downgraded',
       );
     });
 
@@ -717,11 +1142,124 @@ task t_manual {
         );
       },
     );
+
+    test('rejects empty and duplicate task titles in addTask and updateTask while updating all task fields and re-evaluating tiers', () {
+      var board = TaskBoard(
+        labels: const [
+          TdfLabel(id: 'c_it', name: 'IT'),
+          TdfLabel(id: 'c_ops', name: 'Ops'),
+          TdfLabel(id: 'home', name: 'Home'),
+          TdfLabel(id: 'office', name: 'Office'),
+        ],
+      );
+
+      board = board.addTask(
+        'Deploy cluster',
+        note: 'Initial note',
+        labelIds: const ['c_it', 'office'],
+        currentDate: fixedDate,
+        id: 't001',
+      );
+      board = board.addTask(
+        'Audit firewall',
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+        id: 't002',
+      );
+
+      expect(
+        board.hasDuplicateTaskTitle('  deploy cluster  '),
+        isTrue,
+        reason: 'hasDuplicateTaskTitle must detect case-insensitive duplicate titles',
+      );
+      expect(
+        board.hasDuplicateTaskTitle('Deploy cluster', excludingTaskId: 't001'),
+        isFalse,
+        reason: 'hasDuplicateTaskTitle must ignore the task matching excludingTaskId',
+      );
+
+      final afterDuplicateAdd = board.addTask(
+        'DEPLOY CLUSTER',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterDuplicateAdd.allTasks.length,
+        equals(2),
+        reason: 'addTask must reject duplicate task titles',
+      );
+
+      final afterEmptyUpdate = board.updateTask(
+        't001',
+        title: '   ',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterEmptyUpdate.findTask('t001')?.title,
+        equals('Deploy cluster'),
+        reason: 'updateTask must reject empty task titles',
+      );
+
+      final afterDuplicateUpdate = board.updateTask(
+        't001',
+        title: 'audit firewall',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterDuplicateUpdate.findTask('t001')?.title,
+        equals('Deploy cluster'),
+        reason: 'updateTask must reject renaming a task to another existing task title',
+      );
+
+      final updatedSomeday = board.updateTask(
+        't001',
+        title: 'Deploy K8s cluster',
+        note: 'Updated runbook',
+        targetTier: TaskTier.someday,
+        isPriority: false,
+        labelIds: const ['c_ops', 'home'],
+        subtasksAutoFinish: true,
+        subtasks: const [
+          SubtaskItem(title: 'Prepare nodes', isCompleted: true),
+          SubtaskItem(title: 'Bootstrap control plane', isCompleted: false),
+        ],
+        currentDate: fixedDate,
+      );
+
+      expect(
+        updatedSomeday.someday.map((task) => task.id),
+        equals(['t001']),
+        reason: 'Updating targetTier to Someday must move the task to Someday',
+      );
+      final editedTask = updatedSomeday.findTask('t001')!;
+      expect(editedTask.title, equals('Deploy K8s cluster'));
+      expect(editedTask.note, equals('Updated runbook'));
+      expect(editedTask.labelIds, equals(['c_ops', 'home']));
+      expect(editedTask.subtasksAutoFinish, isTrue);
+      expect(editedTask.subtasks.length, equals(2));
+
+      final promotedPriority = updatedSomeday.updateTask(
+        't001',
+        title: 'Deploy K8s cluster',
+        note: '',
+        targetTier: TaskTier.focus,
+        isPriority: true,
+        currentDate: fixedDate,
+      );
+      expect(
+        promotedPriority.focus.first.id,
+        equals('t001'),
+        reason: 'Promoting edited task to Priority must place it at the top of Focus even when keeping its own title',
+      );
+      expect(
+        promotedPriority.focus.first.note,
+        isNull,
+        reason: 'Updating note with empty string must clear the note',
+      );
+    });
   });
 
   group('TDF Section 7 Resource Bounds & Section 8 Error Conditions', () {
     test('rejects all mandatory syntax and schema error conditions in Section 8', () {
-      void expectTdfError(
+      void expectRawTdfError(
         String input,
         TdfErrorKind expectedKind, {
         int? expectedLine,
@@ -741,6 +1279,60 @@ task t_manual {
         );
       }
 
+      void expectTdfError(
+        String bodyWithoutHeader,
+        TdfErrorKind expectedKind, {
+        int? expectedLine,
+      }) {
+        expectRawTdfError(
+          'tdf 0.2.0\n$bodyWithoutHeader',
+          expectedKind,
+          expectedLine: expectedLine == null ? null : expectedLine + 1,
+        );
+      }
+
+      expectRawTdfError('', TdfErrorKind.missingVersionHeader, expectedLine: 1);
+      expectRawTdfError(
+        '# comment only\n',
+        TdfErrorKind.missingVersionHeader,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'tdf\n',
+        TdfErrorKind.missingVersionHeader,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'label home {\n  name "Home"\n}',
+        TdfErrorKind.missingVersionHeader,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'task t001 {\n  name "T"\n  created 2026-11-01\n}',
+        TdfErrorKind.missingVersionHeader,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'tdf 0.1.0\n',
+        TdfErrorKind.unsupportedVersion,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'tdf "0.2.0"\n',
+        TdfErrorKind.unsupportedVersion,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'tdf 0.2.0 extra\n',
+        TdfErrorKind.unsupportedVersion,
+        expectedLine: 1,
+      );
+
+      expectTdfError(
+        'tdf 0.2.0',
+        TdfErrorKind.unexpectedRootDirective,
+        expectedLine: 1,
+      );
       expectTdfError(
         'name "Root Directive"',
         TdfErrorKind.unexpectedRootDirective,
@@ -787,9 +1379,29 @@ task t_manual {
         expectedLine: 1,
       );
       expectTdfError(
+        'label empty_lbl {}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {}\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
         'task t001 {\n  name "Test"\n  created 2026-11-01\n} trailing',
         TdfErrorKind.unexpectedToken,
         expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Control\x07Char"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        '# comment with control char \x7F\n',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 1,
       );
       expectTdfError(
         'task t001 {\n  name "Test"\n  created 2026-11-01',
@@ -827,6 +1439,11 @@ task t_manual {
         expectedLine: 1,
       );
       expectTdfError(
+        'label l1 {\n  name "L1"\n  subtasks {\n    step false "Bad"\n  }\n}',
+        TdfErrorKind.unknownBlockType,
+        expectedLine: 3,
+      );
+      expectTdfError(
         'task t001 {\n  name "Test"\n  created 2026-11-01\n  unknown_dir 123\n}',
         TdfErrorKind.unknownDirective,
         expectedLine: 4,
@@ -836,14 +1453,48 @@ task t_manual {
         TdfErrorKind.missingRequiredDirective,
       );
       expectTdfError(
+        'task t001 {\n  name "Empty subtasks"\n  created 2026-11-01\n  subtasks {\n  }\n}',
+        TdfErrorKind.missingRequiredDirective,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'label l1 {\n  name "Empty condition block"\n  condition {\n  }\n}',
+        TdfErrorKind.missingRequiredDirective,
+        expectedLine: 4,
+      );
+      expectTdfError(
         'task t001 {\n  name "First"\n  name "Second"\n  created 2026-11-01\n}',
         TdfErrorKind.duplicateDirective,
         expectedLine: 3,
       );
       expectTdfError(
+        'label l1 {\n  name "Dup condition blocks"\n  condition {\n    day mon\n  }\n  condition {\n    time 09:00 17:00\n  }\n}',
+        TdfErrorKind.duplicateDirective,
+        expectedLine: 6,
+      );
+      expectTdfError(
         'task t001 {\n  name "First"\n  created 2026-11-01\n}\ntask t001 {\n  name "Dup"\n  created 2026-11-01\n}',
         TdfErrorKind.duplicateIdentifier,
         expectedLine: 5,
+      );
+      expectTdfError(
+        'label l1 {\n  name "First"\n}\nlabel l1 {\n  name "Dup"\n}',
+        TdfErrorKind.duplicateIdentifier,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Unknown label"\n  created 2026-11-01\n  labels missing_lbl\n}',
+        TdfErrorKind.unknownLabelReference,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Self blocked"\n  created 2026-11-01\n  blocked t001\n}',
+        TdfErrorKind.circularDependency,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Cycle A"\n  created 2026-11-01\n  blocked t002\n}\n'
+        'task t002 {\n  name "Cycle B"\n  created 2026-11-01\n  blocked t001\n}',
+        TdfErrorKind.circularDependency,
       );
       expectTdfError(
         'task t001 {\n  name "Bad leap day"\n  created 2026-02-29\n}',
@@ -856,14 +1507,79 @@ task t_manual {
         expectedLine: 3,
       );
       expectTdfError(
+        'task t001 {\n  name "Bad seconds"\n  created 2026-11-01 12:00:60\n}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 3,
+      );
+      expectTdfError(
         'task t001 {\n  name "Bad step bool"\n  created 2026-11-01\n  subtasks {\n    step yes "Sub"\n  }\n}',
         TdfErrorKind.invalidBoolean,
         expectedLine: 5,
       );
       expectTdfError(
-        'location work {\n  name "Work"\n  gps not_a_number 11.0\n}',
+        'label work {\n  name "Work"\n  condition location not_a_number 11.0 150\n}',
         TdfErrorKind.invalidNumber,
         expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Work"\n  color 4CAF50\n}',
+        TdfErrorKind.invalidColor,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Work"\n  color "#GGGGGG"\n}',
+        TdfErrorKind.invalidColor,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Work"\n  color "#12345"\n}',
+        TdfErrorKind.invalidColor,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Bad day"\n  created 2026-11-01\n  condition day funday\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Equal time window"\n  created 2026-11-01\n  condition time 09:00 09:00\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'label work {\n  name "Bad lat"\n  condition location 95.0 11.0 150\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Bad lon"\n  condition location 50.0 -185.0 150\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Bad radius"\n  condition location 50.0 11.0 0\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Label reset forbidden"\n  condition any\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label work {\n  name "Label group reset forbidden"\n  condition day any\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Global reset mixed"\n  created 2026-11-01\n  condition any\n  condition day mon\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Group reset mixed"\n  created 2026-11-01\n  condition day any\n  condition day mon\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 5,
       );
     });
 
@@ -871,7 +1587,7 @@ task t_manual {
       final overText = 'a' * (TdfService.maxTextLength + 1);
       expect(
         () => tdfService.parse(
-          'task t001 {\n  name "$overText"\n  created 2026-11-01\n}',
+          'tdf 0.2.0\ntask t001 {\n  name "$overText"\n  created 2026-11-01\n}',
         ),
         throwsA(
           isA<TdfException>().having(
@@ -883,13 +1599,29 @@ task t_manual {
         reason: 'name exceeding MAX_TEXT_LENGTH (500) must throw LimitExceeded',
       );
 
+      final overNote = 'n' * (TdfService.maxNoteLength + 1);
+      expect(
+        () => tdfService.parse(
+          'tdf 0.2.0\ntask t001 {\n  name "Valid"\n  note "$overNote"\n  created 2026-11-01\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason:
+            'note exceeding MAX_NOTE_LENGTH (2000) must throw LimitExceeded',
+      );
+
       final tooManyArgs = List.generate(
         TdfService.maxArgsPerStmt + 1,
         (index) => 'c$index',
       ).join(' ');
       expect(
         () => tdfService.parse(
-          'task t001 {\n  name "Test"\n  created 2026-11-01\n  categories $tooManyArgs\n}',
+          'tdf 0.2.0\ntask t001 {\n  name "Test"\n  created 2026-11-01\n  labels $tooManyArgs\n}',
         ),
         throwsA(
           isA<TdfException>().having(
@@ -903,7 +1635,7 @@ task t_manual {
 
       expect(
         () => tdfService.parse(
-          'task t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n    nested {\n    }\n  }\n}',
+          'tdf 0.2.0\ntask t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n    nested {\n    }\n  }\n}',
         ),
         throwsA(
           isA<TdfException>().having(
@@ -916,7 +1648,7 @@ task t_manual {
       );
 
       final tooManyStmtsBuffer = StringBuffer(
-        'task t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n',
+        'tdf 0.2.0\ntask t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n',
       );
       for (var i = 0; i <= TdfService.maxStmtsPerBlock; i++) {
         tooManyStmtsBuffer.writeln('    step false "Step $i"');
@@ -1008,6 +1740,8 @@ task t_manual {
 
     setUp(() async {
       remoteTdfStore = '''
+tdf 0.2.0
+
 task f1 {
     name "Remote Focus 1"
     created 2026-11-01 08:00
@@ -1109,6 +1843,7 @@ task b1 {
       expect(updatedBoard.completed.first.title, equals('Remote Focus 1'));
 
       expect(putCount, greaterThanOrEqualTo(1));
+      expect(remoteTdfStore, contains('tdf 0.2.0'));
       expect(remoteTdfStore, contains('task f1 {'));
       expect(remoteTdfStore, contains('finished 2026-11-01 12:00'));
     });
@@ -1138,6 +1873,11 @@ task b1 {
       ];
 
       expect(enMessageKeys, contains('sectionReadyTasks'));
+      expect(enMessageKeys, contains('sectionLabels'));
+      expect(enMessageKeys, contains('drawerLabels'));
+      expect(enMessageKeys, contains('emptyLabelsHint'));
+      expect(enMessageKeys, isNot(contains('sectionCategories')));
+      expect(enMessageKeys, isNot(contains('sectionLocations')));
       expect(enMessageKeys, isNot(contains('moveTaskTitle')));
       expect(enMessageKeys, isNot(contains('menuMoveTo')));
       expect(deMessageKeys, equals(enMessageKeys));
@@ -1238,7 +1978,7 @@ task b1 {
       );
 
       const sampleTdf =
-          'task t001 {\n  name "Local Task"\n  created 2026-11-01 08:00\n  queued 2026-11-01 08:00\n}\n';
+          'tdf 0.2.0\ntask t001 {\n  name "Local Task"\n  created 2026-11-01 08:00\n  queued 2026-11-01 08:00\n}\n';
       await repository.saveTdf(sampleTdf);
       final loaded = await repository.loadTdf();
       expect(loaded, contains('name "Local Task"'));
@@ -1324,6 +2064,7 @@ task b1 {
         reason: 'Local mode must persist local_only.tdf on disk',
       );
       final savedDiskContent = await localFile.readAsString();
+      expect(savedDiskContent, contains('tdf 0.2.0'));
       expect(savedDiskContent, contains('name "Persistent Local Task"'));
       expect(savedDiskContent, contains('step false "First step"'));
       expect(remotePutCount, equals(0));
@@ -1389,172 +2130,161 @@ task b1 {
     });
   });
 
-  group(
-    'Locations & Categories Creation, Color Parsing, and Multi-Assignment',
-    () {
-      test('normalizes hex colors, parses/serializes location colors, and rejects duplicate location color directives', () {
-        expect(
-          TdfColor.normalizeHex('#4caf50'),
-          equals('#4CAF50'),
-          reason:
-              'Hex string with leading # must normalize to uppercase #RRGGBB',
-        );
-        expect(
-          TdfColor.normalizeHex('  2196f3 '),
-          equals('#2196F3'),
-          reason:
-              'Hex string without # must prepend # and normalize to uppercase',
-        );
-        expect(
-          TdfColor.normalizeHex('#GGGGGG'),
-          isNull,
-          reason: 'Non-hex characters must be rejected',
-        );
-        expect(
-          TdfColor.normalizeHex('#12345'),
-          isNull,
-          reason: '5-character hex string must be rejected',
-        );
-        expect(
-          TdfColor.tryParseArgb('eb06ff'),
-          equals(0xFFEB06FF),
-          reason: 'Valid 6-digit hex must parse to opaque 32-bit ARGB int',
-        );
-        expect(
-          TdfColor.formatArgb(0xFF00E5FF),
-          equals('#00E5FF'),
-          reason: '32-bit ARGB int must format to canonical #RRGGBB',
-        );
+  group('Labels Creation, Color Parsing, and Multi-Assignment', () {
+    test('normalizes hex colors, parses/serializes label colors, and rejects duplicate label color directives', () {
+      expect(
+        TdfColor.normalizeHex('#4caf50'),
+        equals('#4CAF50'),
+        reason: 'Hex string with leading # must normalize to uppercase #RRGGBB',
+      );
+      expect(
+        TdfColor.normalizeHex('  2196f3 '),
+        equals('#2196F3'),
+        reason:
+            'Hex string without # must prepend # and normalize to uppercase',
+      );
+      expect(
+        TdfColor.normalizeHex('#GGGGGG'),
+        isNull,
+        reason: 'Non-hex characters must be rejected',
+      );
+      expect(
+        TdfColor.normalizeHex('#12345'),
+        isNull,
+        reason: '5-character hex string must be rejected',
+      );
+      expect(
+        TdfColor.tryParseArgb('eb06ff'),
+        equals(0xFFEB06FF),
+        reason: 'Valid 6-digit hex must parse to opaque 32-bit ARGB int',
+      );
+      expect(
+        TdfColor.formatArgb(0xFF00E5FF),
+        equals('#00E5FF'),
+        reason: '32-bit ARGB int must format to canonical #RRGGBB',
+      );
 
-        const locationWithColorTdf = '''
-location office {
+      const labelWithColorTdf = '''
+tdf 0.2.0
+
+label office {
     name  "Main Office"
     color "#FF9100"
     note  "Downtown"
 }
 ''';
-        final parsed = tdfService.parse(
-          locationWithColorTdf,
+      final parsed = tdfService.parse(
+        labelWithColorTdf,
+        evaluationTime: fixedDate,
+      );
+      expect(parsed.labels.single.id, equals('office'));
+      expect(parsed.labels.single.name, equals('Main Office'));
+      expect(
+        parsed.labels.single.color,
+        equals('#FF9100'),
+        reason: 'Label block must parse optional color directive',
+      );
+
+      final serialized = tdfService.serialize(parsed);
+      expect(
+        serialized,
+        contains('color "#FF9100"'),
+        reason: 'Serializer must emit color directive for label block',
+      );
+
+      expect(
+        () => tdfService.parse(
+          'tdf 0.2.0\nlabel home {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
           evaluationTime: fixedDate,
-        );
-        expect(parsed.locations.single.id, equals('office'));
-        expect(parsed.locations.single.name, equals('Main Office'));
-        expect(
-          parsed.locations.single.color,
-          equals('#FF9100'),
-          reason: 'Location block must parse optional color directive',
-        );
-
-        final serialized = tdfService.serialize(parsed);
-        expect(
-          serialized,
-          contains('color "#FF9100"'),
-          reason: 'Serializer must emit color directive for location block',
-        );
-
-        expect(
-          () => tdfService.parse(
-            'location home {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
-            evaluationTime: fixedDate,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.duplicateDirective,
           ),
-          throwsA(
-            isA<TdfException>().having(
-              (error) => error.kind,
-              'kind',
-              TdfErrorKind.duplicateDirective,
-            ),
-          ),
-          reason: 'Duplicate color directive in location block must fail',
-        );
-      });
+        ),
+        reason: 'Duplicate color directive in label block must fail',
+      );
+    });
 
-      test('adds and deletes categories and locations on TaskBoard and assigns multiple locations and categories to tasks', () {
-        var board = TaskBoard.empty();
-        board = board.addCategory('IT & Servers', color: '2196f3');
-        board = board.addCategory('IT & Servers', color: '#4CAF50');
-        board = board.addCategory('   ', color: '#000000');
-        board = board.addLocation('Home Office', color: 'ff9100');
-        board = board.addLocation('Client Site', color: '#00E5FF');
+    test('adds and deletes labels on TaskBoard and assigns multiple labels to tasks', () {
+      var board = TaskBoard.empty();
+      board = board.addLabel('IT & Servers', color: '2196f3');
+      board = board.addLabel('IT & Servers', color: '#4CAF50');
+      board = board.addLabel('   ', color: '#000000');
+      board = board.addLabel('Home Office', color: 'ff9100');
 
-        expect(
-          board.categories.map((category) => category.id),
-          equals(['c_it_servers', 'c_it_servers_2']),
-          reason:
-              'Duplicate category names must generate distinct TDF identifiers',
-        );
-        expect(
-          board.categories.first.color,
-          equals('#2196F3'),
-          reason: 'Category color must be normalized to #RRGGBB',
-        );
-        expect(
-          board.locations.map((location) => location.id),
-          equals(['l_home_office', 'l_client_site']),
-          reason: 'Location names must generate valid TDF identifiers',
-        );
-        expect(
-          board.locations.first.color,
-          equals('#FF9100'),
-          reason: 'Location color must be normalized to #RRGGBB',
-        );
+      expect(
+        board.labels.map((label) => label.id),
+        equals(['l_it_servers', 'l_it_servers_2', 'l_home_office']),
+        reason: 'Duplicate label names must generate distinct TDF identifiers',
+      );
+      expect(
+        board.labels.first.color,
+        equals('#2196F3'),
+        reason: 'Label color must be normalized to #RRGGBB',
+      );
 
-        board = board.addTask(
-          'Configure VPN router',
-          currentDate: fixedDate,
-          categoryIds: const ['c_it_servers', 'c_it_servers_2'],
-          locationIds: const ['l_home_office', 'l_client_site'],
-        );
+      board = board.addTask(
+        'Configure VPN router',
+        currentDate: fixedDate,
+        labelIds: const ['l_it_servers', 'l_home_office'],
+      );
 
-        expect(
-          board.focus.single.categoryIds,
-          equals(['c_it_servers', 'c_it_servers_2']),
-          reason: 'Task must store multiple selected category IDs',
-        );
-        expect(
-          board.focus.single.locationIds,
-          equals(['l_home_office', 'l_client_site']),
-          reason: 'Task must store multiple selected location IDs',
-        );
+      expect(
+        board.focus.single.labelIds,
+        equals(['l_it_servers', 'l_home_office']),
+        reason: 'Task must store multiple selected label IDs',
+      );
 
-        board = board.deleteCategory('c_it_servers');
-        expect(
-          board.categories.map((category) => category.id),
-          equals(['c_it_servers_2']),
-          reason: 'Deleting a category must remove it from board.categories',
-        );
-        expect(
-          board.focus.single.categoryIds,
-          equals(['c_it_servers_2']),
-          reason:
-              'Deleting a category must strip its ID from referencing tasks',
-        );
+      board = board.deleteLabel('l_it_servers');
+      expect(
+        board.labels.map((label) => label.id),
+        equals(['l_it_servers_2', 'l_home_office']),
+        reason: 'Deleting a label must remove it from board.labels',
+      );
+      expect(
+        board.focus.single.labelIds,
+        equals(['l_home_office']),
+        reason: 'Deleting a label must strip its ID from referencing tasks',
+      );
 
-        board = board.deleteLocation('l_home_office');
-        expect(
-          board.locations.map((location) => location.id),
-          equals(['l_client_site']),
-          reason: 'Deleting a location must remove it from board.locations',
-        );
-        expect(
-          board.focus.single.locationIds,
-          equals(['l_client_site']),
-          reason:
-              'Deleting a location must strip its ID from referencing tasks',
-        );
-      });
+      expect(
+        board.openTaskCountForLabel('l_home_office'),
+        equals(1),
+        reason:
+            'openTaskCountForLabel must count open tasks referencing the label',
+      );
+      expect(
+        board.openTaskCountForLabel('l_it_servers_2'),
+        equals(0),
+        reason: 'openTaskCountForLabel must return 0 when no open tasks reference the label',
+      );
 
-      test('evaluateForContext derives top 3 Focus tasks for a category while preserving all other filters', () {
-        const multiCategoryTdf = '''
-location home {
-    name "Home"
-}
-location office {
-    name "Office"
-}
-category c_house {
+      board = board.renameLabel('l_home_office', '  Remote Work  ');
+      expect(
+        board.labels.map((label) => label.name),
+        equals(['IT & Servers', 'Remote Work']),
+        reason: 'renameLabel must update the trimmed display name of the matching label',
+      );
+
+      board = board.renameLabel('l_home_office', '   ');
+      expect(
+        board.labels.map((label) => label.name),
+        equals(['IT & Servers', 'Remote Work']),
+        reason: 'renameLabel must ignore empty or whitespace-only names',
+      );
+    });
+
+    test('evaluateForContext derives top 3 Focus tasks for an active label while preserving all other filters', () {
+      const multiLabelTdf = '''
+tdf 0.2.0
+
+label c_house {
     name "Household"
 }
-category c_it {
+label c_it {
     name "IT"
 }
 
@@ -1562,116 +2292,102 @@ task house_prio priority {
     name "Urgent roof repair"
     created 2026-11-01 11:00
     queued 2026-11-01 11:00
-    categories c_house
+    labels c_house
 }
 task house_regular {
     name "Mow lawn"
     created 2026-11-01 07:30
     queued 2026-11-01 07:30
-    categories c_house
+    labels c_house
 }
 task it_first {
     name "Patch database"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
-    categories c_it
-    locations office
+    labels c_it
 }
 task it_second {
     name "Rotate TLS certificates"
     created 2026-11-01 08:30
     queued 2026-11-01 08:30
-    categories c_it
+    labels c_it
 }
 task it_prio priority {
     name "Restore production cluster"
     created 2026-11-01 09:30
     queued 2026-11-01 09:30
-    categories c_it
-    locations office
+    labels c_it
 }
 task it_fourth {
     name "Audit SSH keys"
     created 2026-11-01 10:00
     queued 2026-11-01 10:00
-    categories c_it
+    labels c_it
 }
 task it_blocked_prereq {
     name "Deploy app after lawn"
     created 2026-11-01 08:05
     queued 2026-11-01 08:05
-    categories c_it
+    labels c_it
     blocked house_regular
 }
 task it_suspended {
     name "Deferred hardware upgrade"
     created 2026-11-01 08:10
     queued 2026-11-01 08:10
-    categories c_it
+    labels c_it
     suspended 2026-11-05 09:00
 }
 task it_wrong_day {
     name "Monday maintenance window"
     created 2026-11-01 08:15
     queued 2026-11-01 08:15
-    categories c_it
+    labels c_it
     condition day mon
 }
 task it_someday {
     name "Evaluate Rust kernel module"
     created 2026-11-01 08:20
-    categories c_it
+    labels c_it
 }
 task it_completed {
     name "Decommission old switch"
     created 2026-10-25 08:00
     queued 2026-10-25 08:00
     finished 2026-10-26 10:00
-    categories c_it
+    labels c_it
 }
 ''';
 
-        final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
-        final globalBoard = tdfService.parse(
-          multiCategoryTdf,
-          evaluationTime: sundayNoon,
-        );
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final globalBoard = tdfService.parse(
+        multiLabelTdf,
+        evaluationTime: sundayNoon,
+      );
 
-        expect(
-          globalBoard.focus.map((task) => task.id),
-          equals(['it_prio', 'house_prio', 'house_regular']),
-          reason: 'Global Focus must contain top 3 tasks across all categories',
-        );
+      expect(
+        globalBoard.focus.map((task) => task.id),
+        equals(['it_prio', 'house_prio', 'house_regular']),
+        reason: 'Global Focus must contain top 3 tasks across all labels',
+      );
 
-        final itBoard = globalBoard.evaluateForContext(
-          activeCategoryId: 'c_it',
-          evaluationTime: sundayNoon,
-        );
+      final itBoard = globalBoard.evaluateForContext(
+        activeLabelId: 'c_it',
+        evaluationTime: sundayNoon,
+      );
 
-        expect(
-          itBoard.focus.map((task) => task.id),
-          equals(['it_prio', 'it_first', 'it_second']),
-          reason: 'Category c_it Focus must contain top 3 unblocked scheduled c_it tasks in priority then FIFO order',
-        );
-        expect(
-          itBoard.ready.map((task) => task.id),
-          equals(['it_fourth']),
-          reason: '4th active c_it task must overflow into Ready when Focus has 3 tasks',
-        );
-
-        final itHomeBoard = globalBoard.evaluateForContext(
-          activeCategoryId: 'c_it',
-          activeLocationId: 'home',
-          evaluationTime: sundayNoon,
-        );
-        expect(
-          itHomeBoard.focus.map((task) => task.id),
-          equals(['it_second', 'it_fourth']),
-          reason: 'Combining category c_it and location home must keep location-independent tasks and exclude office-only tasks',
-        );
-      });
-    },
-  );
+      expect(
+        itBoard.focus.map((task) => task.id),
+        equals(['it_prio', 'it_first', 'it_second']),
+        reason: 'Label c_it Focus must contain top 3 unblocked scheduled c_it tasks in priority then FIFO order',
+      );
+      expect(
+        itBoard.ready.map((task) => task.id),
+        equals(['it_fourth']),
+        reason: '4th active c_it task must overflow into Ready when Focus has 3 tasks',
+      );
+    });
+  });
 }
 
 /// Verifies that [arbMap] defines an `@<key>` metadata map with a non-empty description.

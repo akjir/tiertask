@@ -177,28 +177,44 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return _fetchAndNormalizeBoard(config);
   }
 
+  /// Adds a new TDF `label` block with [name] and optional `#RRGGBB` [color] and persists to storage.
+  Future<void> addLabel(
+    String name, {
+    String? color,
+    String? id,
+    String? note,
+  }) async {
+    final updated = _currentBoard.addLabel(
+      name,
+      color: color,
+      id: id,
+      note: note,
+    );
+    await _commitMutation(updated);
+  }
+
   /// Adds a new task to [targetTier] (defaulting to [TaskTier.planned]), runs the
   /// Auto-Pull Cascade, and persists to the active `.tdf` storage backend.
   Future<void> addTask(
     String title, {
+    String? note,
     TaskTier targetTier = TaskTier.planned,
     bool isPriority = false,
     bool subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
-    List<String> locationIds = const [],
-    List<String> categoryIds = const [],
+    List<String> labelIds = const [],
     DateTime? currentDate,
     String? id,
   }) async {
     final now = currentDate ?? ref.read(clockProvider)();
     final updated = _currentBoard.addTask(
       title,
+      note: note,
       targetTier: targetTier,
       isPriority: isPriority,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
-      locationIds: locationIds,
-      categoryIds: categoryIds,
+      labelIds: labelIds,
       currentDate: now,
       id: id,
     );
@@ -210,6 +226,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<void> completeTask(String taskId, {DateTime? currentDate}) async {
     final now = currentDate ?? ref.read(clockProvider)();
     final updated = _currentBoard.completeTask(taskId, currentDate: now);
+    await _commitMutation(updated);
+  }
+
+  /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
+  Future<void> deleteLabel(String labelId) async {
+    final updated = _currentBoard.deleteLabel(labelId);
+    await _commitMutation(updated);
+  }
+
+  /// Downgrades an active task per `TDF_SPEC.md` Section 6.3 and persists to storage.
+  Future<void> downgradeTask(String taskId, {DateTime? currentDate}) async {
+    final now = currentDate ?? ref.read(clockProvider)();
+    final updated = _currentBoard.downgradeTask(taskId, currentDate: now);
     await _commitMutation(updated);
   }
 
@@ -230,6 +259,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     } on Object catch (error) {
       ref.read(syncStateProvider.notifier).setError(error.toString());
     }
+  }
+
+  /// Updates the display [name] of the label with [labelId] and persists to storage.
+  Future<void> renameLabel(String labelId, String name) async {
+    final updated = _currentBoard.renameLabel(labelId, name);
+    await _commitMutation(updated);
   }
 
   /// Reloads the `.tdf` file from the configured local or WebDAV storage backend.
@@ -294,6 +329,33 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
+  /// Updates an existing task with [taskId] and persists the updated board to storage.
+  Future<void> updateTask(
+    String taskId, {
+    required String title,
+    String? note,
+    TaskTier? targetTier,
+    bool? isPriority,
+    bool? subtasksAutoFinish,
+    List<SubtaskItem>? subtasks,
+    List<String>? labelIds,
+    DateTime? currentDate,
+  }) async {
+    final now = currentDate ?? ref.read(clockProvider)();
+    final updated = _currentBoard.updateTask(
+      taskId,
+      title: title,
+      note: note,
+      targetTier: targetTier,
+      isPriority: isPriority,
+      subtasksAutoFinish: subtasksAutoFinish,
+      subtasks: subtasks,
+      labelIds: labelIds,
+      currentDate: now,
+    );
+    await _commitMutation(updated);
+  }
+
   /// Updates the in-memory board state and persists the serialized `.tdf` document.
   Future<void> _commitMutation(TaskBoard updatedBoard) async {
     state = AsyncData(updatedBoard);
@@ -302,16 +364,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Loads the `.tdf` file from the active backend, normalizes the board, and writes back if changed.
   Future<TaskBoard> _fetchAndNormalizeBoard(WebDavConfig config) async {
-    final tdfService = ref.read(tdfServiceProvider);
     final now = ref.read(clockProvider)();
 
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
       final rawTdf = await _loadRawTdfForSync(config);
-      final parsedBoard = tdfService.parse(rawTdf, evaluationTime: now);
-      final normalizedBoard = parsedBoard
-          .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now);
+      final normalizedBoard = _resolveBoardFromTdf(rawTdf, now);
       final normalizedTdf = _serializeTdf(normalizedBoard);
 
       await _persistNormalizedTdf(config, rawTdf, normalizedTdf);
