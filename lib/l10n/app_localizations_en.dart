@@ -423,4 +423,104 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipRenameLabel => 'Rename label';
+
+  @override
+  String get taskSuspendedLabel => 'Suspended';
+
+  @override
+  String get taskSuspendedUntilLabel => 'Suspended until (optional)';
+
+  @override
+  String get taskSuspendedUntilHint =>
+      'YYYY-MM-DD [HH:MM] (empty = indefinite)';
+
+  @override
+  String get taskSuspendedErrorInvalid =>
+      'Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).';
+
+  @override
+  String get taskSuspendedDisablesConditionsHint =>
+      'Suspended is active: evaluation of all other conditions is disabled and this task appears under Blocked.';
+
+  @override
+  String get sectionBlockedByTasks => 'PREREQUISITE TASKS (BLOCKED BY)';
+
+  @override
+  String get sectionTaskConditions => 'ACTIVATION CONDITIONS';
+
+  @override
+  String get conditionGlobalAnyLabel => 'Any (ignore label conditions)';
+
+  @override
+  String get conditionDayGroupTitle => 'Weekdays';
+
+  @override
+  String get conditionDayAnyLabel => 'Any day';
+
+  @override
+  String get weekdayMon => 'Mon';
+
+  @override
+  String get weekdayTue => 'Tue';
+
+  @override
+  String get weekdayWed => 'Wed';
+
+  @override
+  String get weekdayThu => 'Thu';
+
+  @override
+  String get weekdayFri => 'Fri';
+
+  @override
+  String get weekdaySat => 'Sat';
+
+  @override
+  String get weekdaySun => 'Sun';
+
+  @override
+  String get conditionTimeGroupTitle => 'Time Windows';
+
+  @override
+  String get conditionTimeAnyLabel => 'Any time';
+
+  @override
+  String get conditionTimeStartHint => 'Start (HH:MM)';
+
+  @override
+  String get conditionTimeEndHint => 'End (HH:MM)';
+
+  @override
+  String get conditionTimeErrorInvalid => 'Enter valid 24-hour times (HH:MM).';
+
+  @override
+  String get tooltipAddTimeCondition => 'Add time window';
+
+  @override
+  String get tooltipRemoveTimeCondition => 'Remove time window';
+
+  @override
+  String get conditionLocationGroupTitle => 'Locations (GPS)';
+
+  @override
+  String get conditionLocationAnyLabel => 'Any location';
+
+  @override
+  String get conditionLocationLatHint => 'Latitude';
+
+  @override
+  String get conditionLocationLonHint => 'Longitude';
+
+  @override
+  String get conditionLocationRadiusHint => 'Radius (m/km)';
+
+  @override
+  String get conditionLocationErrorInvalid =>
+      'Enter valid latitude, longitude, and radius (e.g. 200m or 1.5km).';
+
+  @override
+  String get tooltipAddLocationCondition => 'Add location rule';
+
+  @override
+  String get tooltipRemoveLocationCondition => 'Remove location rule';
 }

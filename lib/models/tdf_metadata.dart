@@ -59,6 +59,17 @@ class DayTaskCondition extends TaskCondition {
   }) : weekdays = List<int>.unmodifiable(weekdays),
        dayTokens = List<String>.unmodifiable(dayTokens);
 
+  /// Canonical lowercase weekday tokens in Monday-to-Sunday order.
+  static const List<String> canonicalTokens = <String>[
+    'mon',
+    'tue',
+    'wed',
+    'thu',
+    'fri',
+    'sat',
+    'sun',
+  ];
+
   /// Canonical lowercase weekday tokens (`mon` through `sun`) in declaration order.
   final List<String> dayTokens;
 
@@ -67,6 +78,23 @@ class DayTaskCondition extends TaskCondition {
 
   @override
   ConditionGroup get group => ConditionGroup.day;
+
+  /// Builds a canonicalized [DayTaskCondition] from ISO-8601 [weekdays] (`1..7`).
+  static DayTaskCondition fromWeekdays(Iterable<int> weekdays) {
+    final weekdaySet = <int>{...weekdays};
+    final orderedWeekdays = <int>[];
+    final orderedTokens = <String>[];
+    for (var weekday = 1; weekday <= 7; weekday++) {
+      if (weekdaySet.contains(weekday)) {
+        orderedWeekdays.add(weekday);
+        orderedTokens.add(canonicalTokens[weekday - 1]);
+      }
+    }
+    return DayTaskCondition(
+      weekdays: orderedWeekdays,
+      dayTokens: orderedTokens,
+    );
+  }
 
   @override
   bool isSatisfiedAt(
@@ -93,6 +121,35 @@ class DayTaskCondition extends TaskCondition {
 
   @override
   String toTdfDirectiveArgs() => 'day ${dayTokens.join(' ')}';
+
+  /// Builds a canonicalized [DayTaskCondition] from [tokens], or returns `null` if empty or invalid.
+  static DayTaskCondition? tryFromTokens(Iterable<String> tokens) {
+    final tokenSet = <String>{};
+    for (final rawToken in tokens) {
+      final normalized = rawToken.trim();
+      if (parseWeekdayToken(normalized) == null) {
+        return null;
+      }
+      tokenSet.add(normalized);
+    }
+    if (tokenSet.isEmpty) {
+      return null;
+    }
+    final orderedTokens = <String>[];
+    final orderedWeekdays = <int>[];
+    for (final canonical in canonicalTokens) {
+      if (tokenSet.contains(canonical)) {
+        if (parseWeekdayToken(canonical) case final weekday?) {
+          orderedTokens.add(canonical);
+          orderedWeekdays.add(weekday);
+        }
+      }
+    }
+    return DayTaskCondition(
+      weekdays: orderedWeekdays,
+      dayTokens: orderedTokens,
+    );
+  }
 
   @override
   bool operator ==(Object other) {
@@ -251,6 +308,32 @@ class LocationTaskCondition extends TaskCondition {
     return 'location $latStr $lonStr $radiusStr';
   }
 
+  /// Parses and validates [rawLatitude], [rawLongitude], and [rawRadius] into a [LocationTaskCondition].
+  static LocationTaskCondition? tryParse(
+    String rawLatitude,
+    String rawLongitude,
+    String rawRadius,
+  ) {
+    final latitude = _tryParseDecimal(rawLatitude.trim());
+    final longitude = _tryParseDecimal(rawLongitude.trim());
+    final radius = _tryParseDecimal(rawRadius.trim());
+    if (latitude == null || longitude == null || radius == null) {
+      return null;
+    }
+    if (latitude < -90.0 ||
+        latitude > 90.0 ||
+        longitude < -180.0 ||
+        longitude > 180.0 ||
+        radius <= 0.0) {
+      return null;
+    }
+    return LocationTaskCondition(
+      latitude: latitude,
+      longitude: longitude,
+      radiusMeters: radius,
+    );
+  }
+
   /// Converts [degrees] to radians.
   static double _degreesToRadians(double degrees) =>
       degrees * (math.pi / 180.0);
@@ -262,6 +345,51 @@ class LocationTaskCondition extends TaskCondition {
       return value.toInt().toString();
     }
     return value.toString();
+  }
+
+  /// Parses a strict ASCII decimal literal (`-?[0-9]+(\.[0-9]+)?`) without regular expressions.
+  static double? _tryParseDecimal(String raw) {
+    if (raw.isEmpty) {
+      return null;
+    }
+    var index = 0;
+    if (raw.codeUnitAt(0) == 0x2D) {
+      if (raw.length == 1) {
+        return null;
+      }
+      index = 1;
+    }
+    var hasLeadingDigits = false;
+    while (index < raw.length) {
+      final unit = raw.codeUnitAt(index);
+      if (unit >= 0x30 && unit <= 0x39) {
+        hasLeadingDigits = true;
+        index++;
+      } else {
+        break;
+      }
+    }
+    if (!hasLeadingDigits) {
+      return null;
+    }
+    if (index < raw.length) {
+      if (raw.codeUnitAt(index) != 0x2E || index == raw.length - 1) {
+        return null;
+      }
+      index++;
+      while (index < raw.length) {
+        final unit = raw.codeUnitAt(index);
+        if (unit < 0x30 || unit > 0x39) {
+          return null;
+        }
+        index++;
+      }
+    }
+    final parsed = double.tryParse(raw);
+    if (parsed == null || parsed.isNaN || parsed.isInfinite) {
+      return null;
+    }
+    return parsed;
   }
 
   @override
@@ -321,6 +449,53 @@ class TimeWindowTaskCondition extends TaskCondition {
 
   @override
   String toTdfDirectiveArgs() => 'time $startToken $endToken';
+
+  /// Parses and validates [rawStart] and [rawEnd] (`HH:MM` with `start != end`) into a [TimeWindowTaskCondition].
+  static TimeWindowTaskCondition? tryParse(String rawStart, String rawEnd) {
+    final startToken = rawStart.trim();
+    final endToken = rawEnd.trim();
+    final startMinutes = _tryParseTimeMinutes(startToken);
+    final endMinutes = _tryParseTimeMinutes(endToken);
+    if (startMinutes == null ||
+        endMinutes == null ||
+        startMinutes == endMinutes) {
+      return null;
+    }
+    return TimeWindowTaskCondition(
+      startMinutes: startMinutes,
+      endMinutes: endMinutes,
+      startToken: startToken,
+      endToken: endToken,
+    );
+  }
+
+  /// Parses a two-digit ASCII number at `input[start..start+2]`, or `null` if non-digit.
+  static int? _parseTwoDigits(String input, int start) {
+    final tens = input.codeUnitAt(start) - 0x30;
+    final ones = input.codeUnitAt(start + 1) - 0x30;
+    if (tens < 0 || tens > 9 || ones < 0 || ones > 9) {
+      return null;
+    }
+    return tens * 10 + ones;
+  }
+
+  /// Parses a strict 24-hour `HH:MM` string into minutes from `00:00`, or `null` if invalid.
+  static int? _tryParseTimeMinutes(String rawTime) {
+    if (rawTime.length != 5 || rawTime.codeUnitAt(2) != 0x3A) {
+      return null;
+    }
+    final hour = _parseTwoDigits(rawTime, 0);
+    final minute = _parseTwoDigits(rawTime, 3);
+    if (hour == null ||
+        minute == null ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59) {
+      return null;
+    }
+    return hour * 60 + minute;
+  }
 
   @override
   bool operator ==(Object other) {

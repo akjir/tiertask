@@ -201,6 +201,9 @@ class TaskBoard {
     String? id,
     String? note,
     List<String> labelIds = const [],
+    DateTime? suspendedAt,
+    List<String> blockedByTaskIds = const [],
+    List<TaskCondition> conditions = const [],
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty || hasDuplicateTaskTitle(trimmed)) {
@@ -219,9 +222,17 @@ class TaskBoard {
         cleanSubtasks.isNotEmpty &&
         cleanSubtasks.every((step) => step.isCompleted);
     final isDone = targetTier == TaskTier.completed || autoCompleted;
-    final isSomeday = targetTier == TaskTier.someday && !isDone;
     final isBlocked = targetTier == TaskTier.blocked && !isDone;
+    final effectiveSuspendedAt = isDone
+        ? null
+        : (suspendedAt ?? (isBlocked ? TaskItem.defaultSuspendedAt : null));
+    final isActivelySuspended =
+        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(now);
+    final isSomeday =
+        targetTier == TaskTier.someday && !isDone && !isActivelySuspended;
     final taskId = id ?? _generateUniqueTaskId();
+    final cleanBlockedBy = _sanitizeBlockedByForTask(taskId, blockedByTaskIds);
+    final cleanConditions = _sanitizeTaskConditions(conditions);
 
     final newTask = TaskItem(
       id: taskId,
@@ -232,8 +243,10 @@ class TaskBoard {
       createdAt: now,
       queuedAt: isSomeday ? null : now,
       completedAt: isDone ? now : null,
-      suspendedAt: isBlocked ? TaskItem.defaultSuspendedAt : null,
+      suspendedAt: effectiveSuspendedAt,
+      blockedByTaskIds: cleanBlockedBy,
       labelIds: labelIds,
+      conditions: cleanConditions,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: cleanSubtasks,
     );
@@ -636,6 +649,10 @@ class TaskBoard {
     bool? subtasksAutoFinish,
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
+    DateTime? suspendedAt,
+    bool clearSuspendedAt = false,
+    List<String>? blockedByTaskIds,
+    List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) {
     final trimmed = title.trim();
@@ -649,6 +666,12 @@ class TaskBoard {
     }
 
     final now = currentDate ?? DateTime.now().toUtc();
+    final sanitizedBlockedBy = blockedByTaskIds != null
+        ? _sanitizeBlockedByForTask(taskId, blockedByTaskIds)
+        : null;
+    final sanitizedConditions = conditions != null
+        ? _sanitizeTaskConditions(conditions)
+        : null;
     final updatedTask = _buildUpdatedTask(
       existing: existing,
       title: trimmed,
@@ -658,6 +681,10 @@ class TaskBoard {
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
       labelIds: labelIds,
+      suspendedAt: suspendedAt,
+      clearSuspendedAt: clearSuspendedAt,
+      blockedByTaskIds: sanitizedBlockedBy,
+      conditions: sanitizedConditions,
       now: now,
     );
     final updatedTasks = <TaskItem>[
@@ -669,6 +696,27 @@ class TaskBoard {
       evaluationTime: now,
       labels: labels,
       pruneExpiredCompleted: true,
+    );
+  }
+
+  /// Returns whether adding [candidateBlockerId] as a prerequisite (`blocked`) of [taskId]
+  /// would create a self-dependency or circular dependency in the task graph.
+  bool wouldCreateDependencyCycle(String taskId, String candidateBlockerId) {
+    final trimmedTaskId = taskId.trim();
+    final trimmedBlockerId = candidateBlockerId.trim();
+    if (trimmedTaskId.isEmpty || trimmedBlockerId.isEmpty) {
+      return false;
+    }
+    if (trimmedTaskId == trimmedBlockerId) {
+      return true;
+    }
+    final taskMap = <String, TaskItem>{
+      for (final task in allTasks) task.id: task,
+    };
+    return _isReachableInDependencyGraph(
+      startTaskId: trimmedBlockerId,
+      targetTaskId: trimmedTaskId,
+      taskMap: taskMap,
     );
   }
 
@@ -728,6 +776,10 @@ class TaskBoard {
     required bool? subtasksAutoFinish,
     required List<SubtaskItem>? subtasks,
     required List<String>? labelIds,
+    required DateTime? suspendedAt,
+    required bool clearSuspendedAt,
+    required List<String>? blockedByTaskIds,
+    required List<TaskCondition>? conditions,
     required DateTime now,
   }) {
     final wasCompleted = existing.isCompleted || existing.completedAt != null;
@@ -747,11 +799,20 @@ class TaskBoard {
         targetTier == TaskTier.completed ||
         autoCompleted ||
         (targetTier == null && wasCompleted);
+    final isBlocked = !isDone && targetTier == TaskTier.blocked;
+    final effectiveSuspendedAt = isDone || clearSuspendedAt
+        ? null
+        : (suspendedAt ??
+              (isBlocked
+                  ? (existing.suspendedAt ?? TaskItem.defaultSuspendedAt)
+                  : existing.suspendedAt));
+    final isActivelySuspended =
+        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(now);
     final isSomeday =
         !isDone &&
+        !isActivelySuspended &&
         (targetTier == TaskTier.someday ||
             (targetTier == null && existing.queuedAt == null));
-    final isBlocked = !isDone && targetTier == TaskTier.blocked;
     final preservedPriority = isRestoringCompleted
         ? (isPriority ?? false)
         : (isPriority ?? existing.isPriority);
@@ -776,10 +837,11 @@ class TaskBoard {
       isPriority: effectivePriority,
       queuedAt: effectiveQueuedAt,
       clearQueuedAt: isSomeday,
-      suspendedAt: isBlocked
-          ? (existing.suspendedAt ?? TaskItem.defaultSuspendedAt)
-          : existing.suspendedAt,
+      suspendedAt: effectiveSuspendedAt,
+      clearSuspendedAt: effectiveSuspendedAt == null,
+      blockedByTaskIds: blockedByTaskIds,
       labelIds: labelIds,
+      conditions: conditions,
       subtasksAutoFinish: effectiveAutoFinish,
       subtasks: cleanSubtasks,
     );
@@ -856,6 +918,12 @@ class TaskBoard {
       if (!pruneExpiredCompleted || _isWithinRetention(task, normalizedNow)) {
         completedList.add(task.copyWith(isCompleted: true));
       }
+      return;
+    }
+
+    if (task.suspendedAt case final suspendedUntil?
+        when suspendedUntil.isAfter(now)) {
+      blockedList.add(task);
       return;
     }
 
@@ -1126,6 +1194,20 @@ class TaskBoard {
     return false;
   }
 
+  /// Checks whether [conditions] contains a [GroupResetTaskCondition] for [group].
+  static bool _hasGroupReset(
+    List<TaskCondition> conditions,
+    ConditionGroup group,
+  ) {
+    for (final condition in conditions) {
+      if (condition is GroupResetTaskCondition &&
+          condition.targetGroup == group) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Checks whether [taskRules] defines at least one override or reset for [group].
   static bool _hasTaskRuleForGroup(
     List<TaskCondition> taskRules,
@@ -1139,7 +1221,36 @@ class TaskBoard {
     return false;
   }
 
+  /// Returns whether [targetTaskId] is reachable from [startTaskId] via `blockedByTaskIds` edges.
+  static bool _isReachableInDependencyGraph({
+    required String startTaskId,
+    required String targetTaskId,
+    required Map<String, TaskItem> taskMap,
+  }) {
+    final visited = <String>{};
+    final frontier = <String>[startTaskId];
+    var cursor = 0;
+    while (cursor < frontier.length) {
+      final currentId = frontier[cursor];
+      cursor++;
+      if (currentId == targetTaskId) {
+        return true;
+      }
+      if (!visited.add(currentId)) {
+        continue;
+      }
+      final currentTask = taskMap[currentId];
+      if (currentTask != null) {
+        frontier.addAll(currentTask.blockedByTaskIds);
+      }
+    }
+    return false;
+  }
+
   /// Evaluates whether [task] is blocked at [evaluationTime] per `TDF_SPEC.md` Section 5.3.
+  ///
+  /// An active `suspended` timestamp (`suspended > evaluationTime`) short-circuits
+  /// immediately and disables evaluation of all other prerequisite and condition rules.
   static bool _isTaskBlocked({
     required TaskItem task,
     required Set<String> unfinishedIds,
@@ -1149,13 +1260,12 @@ class TaskBoard {
     required double? currentLatitude,
     required double? currentLongitude,
   }) {
+    if (task.suspendedAt case final suspendedUntil?
+        when suspendedUntil.isAfter(evaluationTime)) {
+      return true;
+    }
     for (final prerequisiteId in task.blockedByTaskIds) {
       if (unfinishedIds.contains(prerequisiteId)) {
-        return true;
-      }
-    }
-    if (task.suspendedAt case final suspendedUntil?) {
-      if (suspendedUntil.isAfter(evaluationTime)) {
         return true;
       }
     }
@@ -1379,6 +1489,86 @@ class TaskBoard {
       return latestRegular.add(const Duration(seconds: 1));
     }
     return now;
+  }
+
+  /// Deduplicates and filters [candidateBlockedBy] for [taskId], rejecting self-dependencies
+  /// and circular dependencies against the current board graph.
+  List<String> _sanitizeBlockedByForTask(
+    String taskId,
+    List<String> candidateBlockedBy,
+  ) {
+    if (candidateBlockedBy.isEmpty) {
+      return const [];
+    }
+    final sanitized = <String>[];
+    for (final rawBlockerId in candidateBlockedBy) {
+      final blockerId = rawBlockerId.trim();
+      if (blockerId.isEmpty ||
+          sanitized.contains(blockerId) ||
+          wouldCreateDependencyCycle(taskId, blockerId)) {
+        continue;
+      }
+      sanitized.add(blockerId);
+    }
+    return List<String>.unmodifiable(sanitized);
+  }
+
+  /// Deduplicates and canonicalizes [conditions] while enforcing `TDF_SPEC.md` Section 4.3 reset rules:
+  /// - `condition any` supersedes all other task condition directives.
+  /// - `day any`, `time any`, and `location any` supersede specific rules in their respective group.
+  static List<TaskCondition> _sanitizeTaskConditions(
+    List<TaskCondition> conditions,
+  ) {
+    if (conditions.isEmpty) {
+      return const [];
+    }
+    if (_hasGlobalReset(conditions)) {
+      return const [GlobalResetTaskCondition()];
+    }
+    final hasDayReset = _hasGroupReset(conditions, ConditionGroup.day);
+    final hasTimeReset = _hasGroupReset(conditions, ConditionGroup.time);
+    final hasLocationReset = _hasGroupReset(
+      conditions,
+      ConditionGroup.location,
+    );
+    final mergedDays = <int>{};
+    final timeRules = <TimeWindowTaskCondition>[];
+    final locationRules = <LocationTaskCondition>[];
+
+    for (final condition in conditions) {
+      switch (condition) {
+        case GlobalResetTaskCondition():
+        case GroupResetTaskCondition():
+          break;
+        case DayTaskCondition(:final weekdays):
+          if (!hasDayReset) {
+            mergedDays.addAll(weekdays);
+          }
+        case TimeWindowTaskCondition():
+          if (!hasTimeReset && !timeRules.contains(condition)) {
+            timeRules.add(condition);
+          }
+        case LocationTaskCondition():
+          if (!hasLocationReset && !locationRules.contains(condition)) {
+            locationRules.add(condition);
+          }
+      }
+    }
+
+    return List<TaskCondition>.unmodifiable([
+      if (hasDayReset)
+        const GroupResetTaskCondition(targetGroup: ConditionGroup.day)
+      else if (mergedDays.isNotEmpty)
+        DayTaskCondition.fromWeekdays(mergedDays),
+      if (hasTimeReset)
+        const GroupResetTaskCondition(targetGroup: ConditionGroup.time)
+      else
+        ...timeRules,
+      if (hasLocationReset)
+        const GroupResetTaskCondition(targetGroup: ConditionGroup.location)
+      else
+        ...locationRules,
+    ]);
   }
 
   /// Shifts colliding tasks in [plannedList] belonging to [isPriorityGroup] forward by `+00:00:01` per Section 6.3 Step 3.

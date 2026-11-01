@@ -293,6 +293,34 @@ class TaskItem {
     return null;
   }
 
+  /// Parses a single-line TDF `<timestamp>` string (`<YYYY-MM-DD> [<HH:MM[:SS]>]`) into a UTC [DateTime].
+  static DateTime? tryParseTdfTimestampInput(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    var separatorStart = -1;
+    for (var i = 0; i < trimmed.length; i++) {
+      final unit = trimmed.codeUnitAt(i);
+      if (unit == 0x20 || unit == 0x09) {
+        separatorStart = i;
+        break;
+      }
+    }
+    if (separatorStart == -1) {
+      return tryParseTdfTimestamp(trimmed);
+    }
+    final datePart = trimmed.substring(0, separatorStart);
+    final remainder = trimmed.substring(separatorStart).trimLeft();
+    for (var i = 0; i < remainder.length; i++) {
+      final unit = remainder.codeUnitAt(i);
+      if (unit == 0x20 || unit == 0x09) {
+        return null;
+      }
+    }
+    return tryParseTdfTimestamp(datePart, remainder);
+  }
+
   /// Parses a strict 24-hour `<HH:MM>` token into minutes from `00:00` (`0..1439`), or `null` if invalid.
   static int? tryParseTimeMinutes(String rawTime) {
     if (rawTime.length != 5 || rawTime.codeUnitAt(2) != 0x3A) {

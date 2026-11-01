@@ -21,6 +21,7 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
+import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
@@ -203,6 +204,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
     List<String> labelIds = const [],
+    DateTime? suspendedAt,
+    List<String> blockedByTaskIds = const [],
+    List<TaskCondition> conditions = const [],
     DateTime? currentDate,
     String? id,
   }) async {
@@ -215,6 +219,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
       labelIds: labelIds,
+      suspendedAt: suspendedAt,
+      blockedByTaskIds: blockedByTaskIds,
+      conditions: conditions,
       currentDate: now,
       id: id,
     );
@@ -355,6 +362,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool? subtasksAutoFinish,
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
+    DateTime? suspendedAt,
+    bool clearSuspendedAt = false,
+    List<String>? blockedByTaskIds,
+    List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) async {
     final now = currentDate ?? ref.read(clockProvider)();
@@ -367,6 +378,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
       labelIds: labelIds,
+      suspendedAt: suspendedAt,
+      clearSuspendedAt: clearSuspendedAt,
+      blockedByTaskIds: blockedByTaskIds,
+      conditions: conditions,
       currentDate: now,
     );
     await _commitMutation(updated);

@@ -853,6 +853,198 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Rename label'**
   String get tooltipRenameLabel;
+
+  /// Toggle chip label for marking a task as suspended in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended'**
+  String get taskSuspendedLabel;
+
+  /// Input field label for an optional suspension timestamp in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended until (optional)'**
+  String get taskSuspendedUntilLabel;
+
+  /// Placeholder hint inside the suspended-until timestamp field.
+  ///
+  /// In en, this message translates to:
+  /// **'YYYY-MM-DD [HH:MM] (empty = indefinite)'**
+  String get taskSuspendedUntilHint;
+
+  /// Validation error shown when the suspended-until timestamp is malformed.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).'**
+  String get taskSuspendedErrorInvalid;
+
+  /// Informational banner shown when a task is suspended and condition evaluation is disabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended is active: evaluation of all other conditions is disabled and this task appears under Blocked.'**
+  String get taskSuspendedDisablesConditionsHint;
+
+  /// Uppercase section label above the prerequisite tasks selector in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'PREREQUISITE TASKS (BLOCKED BY)'**
+  String get sectionBlockedByTasks;
+
+  /// Uppercase section label above the activation conditions section in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'ACTIVATION CONDITIONS'**
+  String get sectionTaskConditions;
+
+  /// Toggle chip label for the global condition any reset directive.
+  ///
+  /// In en, this message translates to:
+  /// **'Any (ignore label conditions)'**
+  String get conditionGlobalAnyLabel;
+
+  /// Title for the weekday condition group in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Weekdays'**
+  String get conditionDayGroupTitle;
+
+  /// Toggle chip label for the day any group reset directive.
+  ///
+  /// In en, this message translates to:
+  /// **'Any day'**
+  String get conditionDayAnyLabel;
+
+  /// Short label for Monday.
+  ///
+  /// In en, this message translates to:
+  /// **'Mon'**
+  String get weekdayMon;
+
+  /// Short label for Tuesday.
+  ///
+  /// In en, this message translates to:
+  /// **'Tue'**
+  String get weekdayTue;
+
+  /// Short label for Wednesday.
+  ///
+  /// In en, this message translates to:
+  /// **'Wed'**
+  String get weekdayWed;
+
+  /// Short label for Thursday.
+  ///
+  /// In en, this message translates to:
+  /// **'Thu'**
+  String get weekdayThu;
+
+  /// Short label for Friday.
+  ///
+  /// In en, this message translates to:
+  /// **'Fri'**
+  String get weekdayFri;
+
+  /// Short label for Saturday.
+  ///
+  /// In en, this message translates to:
+  /// **'Sat'**
+  String get weekdaySat;
+
+  /// Short label for Sunday.
+  ///
+  /// In en, this message translates to:
+  /// **'Sun'**
+  String get weekdaySun;
+
+  /// Title for the time window condition group in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Time Windows'**
+  String get conditionTimeGroupTitle;
+
+  /// Toggle chip label for the time any group reset directive.
+  ///
+  /// In en, this message translates to:
+  /// **'Any time'**
+  String get conditionTimeAnyLabel;
+
+  /// Input hint for the start of a time window condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Start (HH:MM)'**
+  String get conditionTimeStartHint;
+
+  /// Input hint for the end of a time window condition.
+  ///
+  /// In en, this message translates to:
+  /// **'End (HH:MM)'**
+  String get conditionTimeEndHint;
+
+  /// Validation error shown when a time window input is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter valid 24-hour times (HH:MM).'**
+  String get conditionTimeErrorInvalid;
+
+  /// Tooltip for the button that adds a time window condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Add time window'**
+  String get tooltipAddTimeCondition;
+
+  /// Tooltip for the button that removes a time window condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove time window'**
+  String get tooltipRemoveTimeCondition;
+
+  /// Title for the GPS location condition group in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Locations (GPS)'**
+  String get conditionLocationGroupTitle;
+
+  /// Toggle chip label for the location any group reset directive.
+  ///
+  /// In en, this message translates to:
+  /// **'Any location'**
+  String get conditionLocationAnyLabel;
+
+  /// Input hint for latitude in a GPS location condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Latitude'**
+  String get conditionLocationLatHint;
+
+  /// Input hint for longitude in a GPS location condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Longitude'**
+  String get conditionLocationLonHint;
+
+  /// Input hint for radius in a GPS location condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Radius (m/km)'**
+  String get conditionLocationRadiusHint;
+
+  /// Validation error shown when a GPS location condition input is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter valid latitude, longitude, and radius (e.g. 200m or 1.5km).'**
+  String get conditionLocationErrorInvalid;
+
+  /// Tooltip for the button that adds a GPS location condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Add location rule'**
+  String get tooltipAddLocationCondition;
+
+  /// Tooltip for the button that removes a GPS location condition.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove location rule'**
+  String get tooltipRemoveLocationCondition;
 }
 
 class _AppLocalizationsDelegate

@@ -432,4 +432,105 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get tooltipRenameLabel => 'Label umbenennen';
+
+  @override
+  String get taskSuspendedLabel => 'Zurückgestellt';
+
+  @override
+  String get taskSuspendedUntilLabel => 'Zurückgestellt bis (optional)';
+
+  @override
+  String get taskSuspendedUntilHint => 'JJJJ-MM-TT [HH:MM] (leer = unbegrenzt)';
+
+  @override
+  String get taskSuspendedErrorInvalid =>
+      'Bitte einen gültigen Zeitstempel eingeben (JJJJ-MM-TT oder JJJJ-MM-TT HH:MM).';
+
+  @override
+  String get taskSuspendedDisablesConditionsHint =>
+      'Zurückgestellt ist aktiv: Die Auswertung aller anderen Bedingungen ist deaktiviert und diese Aufgabe erscheint unter Blockiert.';
+
+  @override
+  String get sectionBlockedByTasks => 'VORAUSSETZUNGEN (BLOCKIERT DURCH)';
+
+  @override
+  String get sectionTaskConditions => 'AKTIVIERUNGSBEDINGUNGEN';
+
+  @override
+  String get conditionGlobalAnyLabel =>
+      'Beliebig (Label-Bedingungen ignorieren)';
+
+  @override
+  String get conditionDayGroupTitle => 'Wochentage';
+
+  @override
+  String get conditionDayAnyLabel => 'Jeder Tag';
+
+  @override
+  String get weekdayMon => 'Mo';
+
+  @override
+  String get weekdayTue => 'Di';
+
+  @override
+  String get weekdayWed => 'Mi';
+
+  @override
+  String get weekdayThu => 'Do';
+
+  @override
+  String get weekdayFri => 'Fr';
+
+  @override
+  String get weekdaySat => 'Sa';
+
+  @override
+  String get weekdaySun => 'So';
+
+  @override
+  String get conditionTimeGroupTitle => 'Zeitfenster';
+
+  @override
+  String get conditionTimeAnyLabel => 'Jede Uhrzeit';
+
+  @override
+  String get conditionTimeStartHint => 'Start (HH:MM)';
+
+  @override
+  String get conditionTimeEndHint => 'Ende (HH:MM)';
+
+  @override
+  String get conditionTimeErrorInvalid =>
+      'Bitte gültige 24-Stunden-Zeiten eingeben (HH:MM).';
+
+  @override
+  String get tooltipAddTimeCondition => 'Zeitfenster hinzufügen';
+
+  @override
+  String get tooltipRemoveTimeCondition => 'Zeitfenster entfernen';
+
+  @override
+  String get conditionLocationGroupTitle => 'Standorte (GPS)';
+
+  @override
+  String get conditionLocationAnyLabel => 'Jeder Standort';
+
+  @override
+  String get conditionLocationLatHint => 'Breitengrad';
+
+  @override
+  String get conditionLocationLonHint => 'Längengrad';
+
+  @override
+  String get conditionLocationRadiusHint => 'Radius (m/km)';
+
+  @override
+  String get conditionLocationErrorInvalid =>
+      'Bitte gültigen Breitengrad, Längengrad und Radius eingeben (z. B. 200m oder 1.5km).';
+
+  @override
+  String get tooltipAddLocationCondition => 'Standortregel hinzufügen';
+
+  @override
+  String get tooltipRemoveLocationCondition => 'Standortregel entfernen';
 }

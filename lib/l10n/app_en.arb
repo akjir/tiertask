@@ -558,5 +558,133 @@
   "tooltipRenameLabel": "Rename label",
   "@tooltipRenameLabel": {
     "description": "Tooltip for the button that renames or saves a label."
+  },
+  "taskSuspendedLabel": "Suspended",
+  "@taskSuspendedLabel": {
+    "description": "Toggle chip label for marking a task as suspended in the task editor."
+  },
+  "taskSuspendedUntilLabel": "Suspended until (optional)",
+  "@taskSuspendedUntilLabel": {
+    "description": "Input field label for an optional suspension timestamp in the task editor."
+  },
+  "taskSuspendedUntilHint": "YYYY-MM-DD [HH:MM] (empty = indefinite)",
+  "@taskSuspendedUntilHint": {
+    "description": "Placeholder hint inside the suspended-until timestamp field."
+  },
+  "taskSuspendedErrorInvalid": "Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).",
+  "@taskSuspendedErrorInvalid": {
+    "description": "Validation error shown when the suspended-until timestamp is malformed."
+  },
+  "taskSuspendedDisablesConditionsHint": "Suspended is active: evaluation of all other conditions is disabled and this task appears under Blocked.",
+  "@taskSuspendedDisablesConditionsHint": {
+    "description": "Informational banner shown when a task is suspended and condition evaluation is disabled."
+  },
+  "sectionBlockedByTasks": "PREREQUISITE TASKS (BLOCKED BY)",
+  "@sectionBlockedByTasks": {
+    "description": "Uppercase section label above the prerequisite tasks selector in the task editor."
+  },
+  "sectionTaskConditions": "ACTIVATION CONDITIONS",
+  "@sectionTaskConditions": {
+    "description": "Uppercase section label above the activation conditions section in the task editor."
+  },
+  "conditionGlobalAnyLabel": "Any (ignore label conditions)",
+  "@conditionGlobalAnyLabel": {
+    "description": "Toggle chip label for the global condition any reset directive."
+  },
+  "conditionDayGroupTitle": "Weekdays",
+  "@conditionDayGroupTitle": {
+    "description": "Title for the weekday condition group in the task editor."
+  },
+  "conditionDayAnyLabel": "Any day",
+  "@conditionDayAnyLabel": {
+    "description": "Toggle chip label for the day any group reset directive."
+  },
+  "weekdayMon": "Mon",
+  "@weekdayMon": {
+    "description": "Short label for Monday."
+  },
+  "weekdayTue": "Tue",
+  "@weekdayTue": {
+    "description": "Short label for Tuesday."
+  },
+  "weekdayWed": "Wed",
+  "@weekdayWed": {
+    "description": "Short label for Wednesday."
+  },
+  "weekdayThu": "Thu",
+  "@weekdayThu": {
+    "description": "Short label for Thursday."
+  },
+  "weekdayFri": "Fri",
+  "@weekdayFri": {
+    "description": "Short label for Friday."
+  },
+  "weekdaySat": "Sat",
+  "@weekdaySat": {
+    "description": "Short label for Saturday."
+  },
+  "weekdaySun": "Sun",
+  "@weekdaySun": {
+    "description": "Short label for Sunday."
+  },
+  "conditionTimeGroupTitle": "Time Windows",
+  "@conditionTimeGroupTitle": {
+    "description": "Title for the time window condition group in the task editor."
+  },
+  "conditionTimeAnyLabel": "Any time",
+  "@conditionTimeAnyLabel": {
+    "description": "Toggle chip label for the time any group reset directive."
+  },
+  "conditionTimeStartHint": "Start (HH:MM)",
+  "@conditionTimeStartHint": {
+    "description": "Input hint for the start of a time window condition."
+  },
+  "conditionTimeEndHint": "End (HH:MM)",
+  "@conditionTimeEndHint": {
+    "description": "Input hint for the end of a time window condition."
+  },
+  "conditionTimeErrorInvalid": "Enter valid 24-hour times (HH:MM).",
+  "@conditionTimeErrorInvalid": {
+    "description": "Validation error shown when a time window input is invalid."
+  },
+  "tooltipAddTimeCondition": "Add time window",
+  "@tooltipAddTimeCondition": {
+    "description": "Tooltip for the button that adds a time window condition."
+  },
+  "tooltipRemoveTimeCondition": "Remove time window",
+  "@tooltipRemoveTimeCondition": {
+    "description": "Tooltip for the button that removes a time window condition."
+  },
+  "conditionLocationGroupTitle": "Locations (GPS)",
+  "@conditionLocationGroupTitle": {
+    "description": "Title for the GPS location condition group in the task editor."
+  },
+  "conditionLocationAnyLabel": "Any location",
+  "@conditionLocationAnyLabel": {
+    "description": "Toggle chip label for the location any group reset directive."
+  },
+  "conditionLocationLatHint": "Latitude",
+  "@conditionLocationLatHint": {
+    "description": "Input hint for latitude in a GPS location condition."
+  },
+  "conditionLocationLonHint": "Longitude",
+  "@conditionLocationLonHint": {
+    "description": "Input hint for longitude in a GPS location condition."
+  },
+  "conditionLocationRadiusHint": "Radius (m/km)",
+  "@conditionLocationRadiusHint": {
+    "description": "Input hint for radius in a GPS location condition."
+  },
+  "conditionLocationErrorInvalid": "Enter valid latitude, longitude, and radius (e.g. 200m or 1.5km).",
+  "@conditionLocationErrorInvalid": {
+    "description": "Validation error shown when a GPS location condition input is invalid."
+  },
+  "tooltipAddLocationCondition": "Add location rule",
+  "@tooltipAddLocationCondition": {
+    "description": "Tooltip for the button that adds a GPS location condition."
+  },
+  "tooltipRemoveLocationCondition": "Remove location rule",
+  "@tooltipRemoveLocationCondition": {
+    "description": "Tooltip for the button that removes a GPS location condition."
   }
 }

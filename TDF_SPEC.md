@@ -247,7 +247,7 @@ task <id> [priority] {
 | `note` | No | `0..1` | `"<text>"` | Optional extended description or note (`1..MAX_NOTE_LENGTH` characters). **When omitted**, the task has no extended note. |
 | `labels` | No | `0..1` | `<id1> [<id2> ...]` | One or more space-separated `label` `<id>`s assigned to the task. Every referenced `<id>` MUST match a declared `label` block in the document (`UnknownLabelReference`). **When present**, associates the task with the referenced labels for context filtering and group-level condition inheritance. **When omitted**, the task has no label assignment. |
 | `blocked` | No | `0..1` | `<task_id1> [<task_id2> ...]` | One or more space-separated `<id>`s of prerequisite tasks. **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive (non-existent, pruned, or already completed task IDs do not block the task). Dependency references MUST NOT form a direct or indirect cycle (`CircularDependency`). **When omitted**, no task-dependency block applies. |
-| `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local deferral / snooze timestamp. **When present**, the task is classified as `Blocked` while the timestamp lies strictly in the future relative to the local evaluation timestamp. **When omitted**, no time-deferral block applies. |
+| `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local deferral / snooze timestamp. **When present**, while the timestamp lies strictly in the future relative to the local evaluation timestamp (`suspended > now`), the task is classified immediately as `Blocked` (`Tier 4`) and evaluation of all other conditions (`blocked` prerequisites and `condition` rules) is disabled. **When omitted** (or `<= now`), no time-deferral block applies. |
 | `condition` | No | `0..N` | `<type> <args...>`, `<type> any`, `any`, or `{ ... }` | Task-level activation condition(s) (`day`, `time`, `location`, group resets `day any`, `time any`, `location any`, or global reset `condition any`) written either as an inline directive or a `condition { ... }` sub-block (see Section 4.3). **When present**, `condition any` disables all inherited `label` conditions, whereas a group-specific rule (`day`, `time`, or `location`) or group reset (`<type> any`) overrides only that specific rule group from assigned labels while preserving all other inherited label condition groups and keeping the task's `labels` assignment intact. |
 
 #### 4.1.3 Sub-Block `subtasks` (Checklists)
@@ -397,13 +397,13 @@ When evaluating a `.tdf` document against a local reference timestamp (`now`), o
 - **Garbage Collection (30-Day Retention Pruning):** Tasks whose `finished` timestamp lies strictly more than $30$ days in the past in local time relative to the evaluation timestamp (`now`) are removed when persisting the document.
 
 ### 5.3 Tier 5 — `Someday`
-- **Selection Rule:** All retained open tasks (`finished` is absent) that do NOT possess a `queued` directive.
+- **Selection Rule:** All retained open tasks (`finished` is absent) that do NOT possess a `queued` directive and do NOT have an active future `suspended` timestamp (`suspended > now`).
 - **Behavior:** These tasks form the unscheduled backlog and do not participate in the active pull cycle.
 
 ### 5.4 Tier 4 — `Blocked`
-- **Selection Rule:** All retained scheduled open tasks (`queued` is present and `finished` is absent) for which **at least one** of the following blocking conditions holds at the local evaluation timestamp (`now`):
-  1. **Unfinished Prerequisite (`blocked`):** At least one task ID referenced in the task's `blocked` directive exists anywhere in the document (regardless of the active `label` filter) and does not have a `finished` directive.
-  2. **Future Deferral (`suspended`):** The task's `suspended` timestamp lies strictly in the future in local time (`suspended > now`).
+- **Selection Rule:** All retained open tasks (`finished` is absent) that either have an active future `suspended` timestamp (`suspended > now`) or are scheduled (`queued` is present) and satisfy at least one of the following blocking conditions at the local evaluation timestamp (`now`), evaluated in this exact short-circuit order:
+  1. **Future Deferral (`suspended` — Short-Circuit):** The task's `suspended` timestamp lies strictly in the future in local time (`suspended > now`). While `suspended > now`, evaluation of all other conditions (`blocked` prerequisites and `condition` rules on the task or its assigned `labels`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`).
+  2. **Unfinished Prerequisite (`blocked`):** At least one task ID referenced in the task's `blocked` directive exists anywhere in the document (regardless of the active `label` filter) and does not have a `finished` directive.
   3. **Unmet Condition (`condition` — `day` -> `time` -> `location` Short-Circuit):** Each candidate condition context (determined per Section 4.3.3: the task's own context if unlabeled, the active `label`'s effective context when filtered, or each assigned `label`'s independent effective context with `OR` across labels in global view) is evaluated by group in the order `day`, `time`, `location` (Section 4.3.4). If no candidate context has all three of its effective groups satisfied, the task is classified as `Blocked`.
 - **Auto-Pull Cascade Behavior:** Any task derived as `Blocked` is skipped during the auto-pull cascade into `Focus` (limit `3`) and `Ready` (limit `5`), allowing the next unblocked task in queue order to advance automatically.
 
@@ -451,6 +451,11 @@ State transitions mutate the task directives (`queued`, `finished`) and header f
   - **Restore to `Someday`:** Removes the `priority` header flag if present and omits `queued`.
   - **Restore to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`).
   - **Restore to `Focus`:** Adds the `priority` header flag to the `task` block and sets `queued` to the current local timestamp (`now`).
+
+### 6.6 Setting Task Deferral (`suspended`), Prerequisites (`blocked`), and Activation Conditions (`condition`)
+- **Setting `suspended`:** Sets the `suspended` directive on an open task to a future timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date) and ensures `queued` is set. While `suspended > now`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive and re-evaluates the task's remaining conditions.
+- **Setting `blocked`:** Sets or updates the space-separated prerequisite `<id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle).
+- **Setting `condition`:** Sets or updates task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or the global reset (`condition any`).
 
 ## 7. Conformance & Resource Bounds
 

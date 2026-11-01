@@ -1509,6 +1509,175 @@ task t_manual {
         reason: 'Updating note with empty string must clear the note',
       );
     });
+
+    test('sets and updates suspended, blocked prerequisites with cycle prevention, and task condition rules while suspended short-circuits condition evaluation into Blocked', () {
+      expect(
+        TaskItem.tryParseTdfTimestampInput('  2026-11-05  '),
+        equals(DateTime.utc(2026, 11, 5)),
+        reason: 'Date-only input must parse to UTC midnight',
+      );
+      expect(
+        TaskItem.tryParseTdfTimestampInput('2026-11-05 09:30'),
+        equals(DateTime.utc(2026, 11, 5, 9, 30)),
+        reason: 'Date and HH:MM input must parse accurately',
+      );
+      expect(
+        TaskItem.tryParseTdfTimestampInput('2026-11-05 09:30:45'),
+        equals(DateTime.utc(2026, 11, 5, 9, 30, 45)),
+        reason: 'Date and HH:MM:SS input must parse accurately',
+      );
+      expect(
+        TaskItem.tryParseTdfTimestampInput('2026-11-05 09:30 extra'),
+        isNull,
+        reason: 'Timestamp input with extra tokens must be rejected',
+      );
+      expect(
+        DayTaskCondition.tryFromTokens(['sun', 'mon', 'mon']),
+        equals(
+          DayTaskCondition(
+            weekdays: const [DateTime.monday, DateTime.sunday],
+            dayTokens: const ['mon', 'sun'],
+          ),
+        ),
+        reason: 'DayTaskCondition.tryFromTokens must canonicalize and deduplicate weekday tokens',
+      );
+      expect(
+        TimeWindowTaskCondition.tryParse('08:00', '17:30'),
+        equals(
+          const TimeWindowTaskCondition(
+            startMinutes: 480,
+            endMinutes: 1050,
+            startToken: '08:00',
+            endToken: '17:30',
+          ),
+        ),
+      );
+      expect(
+        TimeWindowTaskCondition.tryParse('09:00', '09:00'),
+        isNull,
+        reason: 'Identical start and end times must be rejected',
+      );
+      expect(
+        LocationTaskCondition.tryParse('50.9787', '11.0328', '150'),
+        equals(
+          const LocationTaskCondition(
+            latitude: 50.9787,
+            longitude: 11.0328,
+            radiusMeters: 150.0,
+          ),
+        ),
+      );
+      expect(
+        LocationTaskCondition.tryParse('95.0', '11.0328', '150'),
+        isNull,
+        reason: 'Out-of-range latitude must be rejected',
+      );
+
+      var board = TaskBoard(
+        labels: [
+          TdfLabel(
+            id: 'office',
+            name: 'Office',
+            conditions: [
+              DayTaskCondition(
+                weekdays: const [DateTime.monday],
+                dayTokens: const ['mon'],
+              ),
+            ],
+          ),
+        ],
+      );
+
+      final futureSuspend = DateTime.utc(2026, 11, 5, 9, 0);
+      board = board.addTask(
+        'Suspended Task With Satisfied Condition Any',
+        targetTier: TaskTier.someday,
+        suspendedAt: futureSuspend,
+        labelIds: const ['office'],
+        conditions: const [GlobalResetTaskCondition()],
+        currentDate: fixedDate,
+        id: 't_susp',
+      );
+
+      expect(
+        board.blocked.map((task) => task.id),
+        equals(['t_susp']),
+        reason: 'Setting suspended in the future must disable evaluation of all other conditions (even condition any or Someday mode) and place the task under Blocked',
+      );
+      expect(
+        board.someday,
+        isEmpty,
+        reason: 'Suspended task must appear in Blocked rather than Someday',
+      );
+      expect(board.findTask('t_susp')?.suspendedAt, equals(futureSuspend));
+
+      board = board.updateTask(
+        't_susp',
+        title: 'Suspended Task With Satisfied Condition Any',
+        clearSuspendedAt: true,
+        currentDate: fixedDate,
+      );
+      expect(
+        board.focus.map((task) => task.id),
+        equals(['t_susp']),
+        reason: 'Clearing suspendedAt must re-enable condition evaluation so condition any places the task in Focus',
+      );
+
+      board = board.addTask(
+        'Dependent Task',
+        blockedByTaskIds: const ['t_susp', 't_dependent'],
+        conditions: [
+          const GroupResetTaskCondition(targetGroup: ConditionGroup.day),
+          const TimeWindowTaskCondition(
+            startMinutes: 480,
+            endMinutes: 1080,
+            startToken: '08:00',
+            endToken: '18:00',
+          ),
+          const LocationTaskCondition(
+            latitude: 50.9787,
+            longitude: 11.0328,
+            radiusMeters: 200.0,
+          ),
+        ],
+        labelIds: const ['office'],
+        currentDate: fixedDate,
+        id: 't_dependent',
+      );
+
+      expect(
+        board.blocked.map((task) => task.id),
+        equals(['t_dependent']),
+        reason: 'Task with open prerequisite t_susp must be placed in Blocked',
+      );
+      expect(
+        board.findTask('t_dependent')?.blockedByTaskIds,
+        equals(['t_susp']),
+        reason: 'Self-dependency on t_dependent must be stripped automatically',
+      );
+      expect(
+        board.wouldCreateDependencyCycle('t_susp', 't_dependent'),
+        isTrue,
+        reason:
+            'Adding t_dependent as a prerequisite of t_susp would form a cycle',
+      );
+
+      board = board.updateTask(
+        't_susp',
+        title: 'Suspended Task With Satisfied Condition Any',
+        blockedByTaskIds: const ['t_dependent'],
+        currentDate: fixedDate,
+      );
+      expect(
+        board.findTask('t_susp')?.blockedByTaskIds,
+        isEmpty,
+        reason: 'updateTask must reject circular dependency references',
+      );
+
+      final serialized = tdfService.serialize(board);
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(reparsed.blocked.map((task) => task.id), equals(['t_dependent']));
+    });
   });
 
   group('TDF Section 7 Resource Bounds & Section 8 Error Conditions', () {
