@@ -38,6 +38,7 @@ class SecureSettingsRepository implements SettingsRepository {
   static const String _keyLocalFilePath = 't2_local_file_path';
   static const String _keyPassword = 't2_webdav_password';
   static const String _keyServerUrl = 't2_webdav_server_url';
+  static const String _keyShowOpenTaskCount = 't2_show_open_task_count';
   static const String _keyStorageMode = 't2_storage_mode';
   static const String _keyThemeMode = 't2_theme_mode';
   static const String _keyUsername = 't2_webdav_username';
@@ -56,6 +57,9 @@ class SecureSettingsRepository implements SettingsRepository {
       final rawStorageMode = await _storage.read(key: _keyStorageMode);
       final rawLanguage = await _storage.read(key: _keyLanguage);
       final rawThemeMode = await _storage.read(key: _keyThemeMode);
+      final rawShowOpenTaskCount = await _storage.read(
+        key: _keyShowOpenTaskCount,
+      );
 
       return WebDavConfig(
         serverUrl: serverUrl,
@@ -70,6 +74,7 @@ class SecureSettingsRepository implements SettingsRepository {
             : StorageMode.fromCode(rawStorageMode),
         language: AppLanguage.fromCode(rawLanguage),
         themeMode: AppThemeMode.fromCode(rawThemeMode),
+        showOpenTaskCount: rawShowOpenTaskCount?.trim().toLowerCase() == 'true',
       );
     } on Object {
       return const WebDavConfig();
@@ -96,6 +101,10 @@ class SecureSettingsRepository implements SettingsRepository {
     await _storage.write(key: _keyStorageMode, value: config.storageMode.code);
     await _storage.write(key: _keyLanguage, value: config.language.code);
     await _storage.write(key: _keyThemeMode, value: config.themeMode.code);
+    await _storage.write(
+      key: _keyShowOpenTaskCount,
+      value: config.showOpenTaskCount.toString(),
+    );
   }
 }
 

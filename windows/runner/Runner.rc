@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "de.akjir" "\0"
-            VALUE "FileDescription", "tiertask" "\0"
+            VALUE "FileDescription", "TierTask" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "tiertask" "\0"
+            VALUE "InternalName", "TierTask" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 de.akjir. All rights reserved." "\0"
             VALUE "OriginalFilename", "tiertask.exe" "\0"
-            VALUE "ProductName", "tiertask" "\0"
+            VALUE "ProductName", "TierTask" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

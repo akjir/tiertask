@@ -32,6 +32,7 @@ class TierTaskApp extends ConsumerWidget {
     final appThemeMode = ref.watch(appThemeModeProvider);
 
     return MaterialApp(
+      title: 'TierTask',
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       debugShowCheckedModeBanner: false,
       locale: locale,

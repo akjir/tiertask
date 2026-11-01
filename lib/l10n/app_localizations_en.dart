@@ -108,9 +108,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get actionRetry => 'Retry';
 
   @override
-  String defaultTierChipLabel(String heading) {
-    return '$heading (Default)';
-  }
+  String get quickAddPriority => 'Priority';
+
+  @override
+  String get quickAddAdvanced => 'Advanced';
+
+  @override
+  String get advancedTaskTitle => 'Extended Task View';
+
+  @override
+  String get subtasksSectionTitle => 'Subtasks';
+
+  @override
+  String get subtaskInputHint => 'Add subtask...';
+
+  @override
+  String get tooltipAddSubtask => 'Add subtask';
+
+  @override
+  String get tooltipRemoveSubtask => 'Remove subtask';
 
   @override
   String quickAddHint(String heading) {
@@ -206,6 +222,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get themeDark => 'Dark';
+
+  @override
+  String get openTaskCountSectionTitle => 'Open Task Count';
+
+  @override
+  String get openTaskCountSectionDescription =>
+      'Show or hide the total number of open tasks on category and location cards.';
+
+  @override
+  String get openTaskCountOff => 'Off';
+
+  @override
+  String get openTaskCountOn => 'On';
 
   @override
   String get storageModeSectionTitle => 'Storage Mode';
@@ -369,4 +398,42 @@ class AppLocalizationsEn extends AppLocalizations {
   String errorSaveLocalFileFailed(String details) {
     return 'Failed to write local Markdown file ($details).';
   }
+
+  @override
+  String get landingGreeting => 'What\'s up!';
+
+  @override
+  String get sectionFocusTasks => 'FOCUS TASKS';
+
+  @override
+  String get sectionCategories => 'CATEGORIES';
+
+  @override
+  String get sectionLocations => 'LOCATIONS';
+
+  @override
+  String taskCountLabel(int count) {
+    return '$count tasks';
+  }
+
+  @override
+  String get categoryBusiness => 'Business';
+
+  @override
+  String get categoryPersonal => 'Personal';
+
+  @override
+  String get locationHome => 'Home';
+
+  @override
+  String get locationOffice => 'Office';
+
+  @override
+  String get tooltipMenu => 'Open menu';
+
+  @override
+  String get tooltipSearch => 'Search tasks';
+
+  @override
+  String get searchHint => 'Search focus tasks...';
 }

@@ -119,7 +119,7 @@ enum StorageMode {
   }
 }
 
-/// Immutable configuration for local file storage, WebDAV synchronization, language, and theme.
+/// Immutable configuration for local file storage, WebDAV synchronization, language, theme, and task count visibility.
 @immutable
 class WebDavConfig {
   /// Creates a [WebDavConfig] instance.
@@ -132,6 +132,7 @@ class WebDavConfig {
     StorageMode? storageMode,
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
+    this.showOpenTaskCount = false,
   }) : storageMode =
            storageMode ??
            (serverUrl != '' && username != '' && password != ''
@@ -163,6 +164,9 @@ class WebDavConfig {
 
   /// Selected color theme preference (`system`, `light`, or `dark`).
   final AppThemeMode themeMode;
+
+  /// Whether to display the total open task count on category and location cards.
+  final bool showOpenTaskCount;
 
   /// Whether at least one storage backend required by [storageMode] is ready for I/O.
   bool get hasActiveStorage {
@@ -202,6 +206,7 @@ class WebDavConfig {
     StorageMode? storageMode,
     AppLanguage? language,
     AppThemeMode? themeMode,
+    bool? showOpenTaskCount,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -212,6 +217,7 @@ class WebDavConfig {
       storageMode: storageMode ?? this.storageMode,
       language: language ?? this.language,
       themeMode: themeMode ?? this.themeMode,
+      showOpenTaskCount: showOpenTaskCount ?? this.showOpenTaskCount,
     );
   }
 
@@ -275,7 +281,8 @@ class WebDavConfig {
         other.localFilePath == localFilePath &&
         other.storageMode == storageMode &&
         other.language == language &&
-        other.themeMode == themeMode;
+        other.themeMode == themeMode &&
+        other.showOpenTaskCount == showOpenTaskCount;
   }
 
   @override
@@ -288,5 +295,6 @@ class WebDavConfig {
     storageMode,
     language,
     themeMode,
+    showOpenTaskCount,
   );
 }

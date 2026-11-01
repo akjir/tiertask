@@ -71,6 +71,8 @@ class TaskBoard {
   TaskBoard addTask(
     String title, {
     TaskTier targetTier = TaskTier.planned,
+    bool isPriority = false,
+    List<SubtaskItem> subtasks = const [],
     DateTime? currentDate,
     String? id,
   }) {
@@ -80,12 +82,34 @@ class TaskBoard {
     }
 
     final now = currentDate ?? DateTime.now();
-    final isDoneTier = targetTier == TaskTier.completed;
+    final effectiveTier = isPriority && targetTier == TaskTier.planned
+        ? TaskTier.focus
+        : targetTier;
+    final isDoneTier = effectiveTier == TaskTier.completed;
+    final cleanSubtasks = [
+      for (final subtask in subtasks)
+        if (subtask.title.trim().isNotEmpty)
+          SubtaskItem(
+            title: subtask.title.trim(),
+            isCompleted: subtask.isCompleted,
+          ),
+    ];
     final newTask = isDoneTier
-        ? TaskItem(id: id, title: trimmed).toCompleted(now)
-        : TaskItem(id: id, title: trimmed, isCompleted: false);
+        ? TaskItem(
+            id: id,
+            title: trimmed,
+            isPriority: isPriority,
+            subtasks: cleanSubtasks,
+          ).toCompleted(now)
+        : TaskItem(
+            id: id,
+            title: trimmed,
+            isCompleted: false,
+            isPriority: isPriority,
+            subtasks: cleanSubtasks,
+          );
 
-    final updated = _appendTaskToTier(newTask, targetTier);
+    final updated = _appendTaskToTier(newTask, effectiveTier);
     return updated.pruneCompletedTasks(currentDate: now).applyAutoPull();
   }
 

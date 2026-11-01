@@ -400,6 +400,51 @@ void main() {
       expect(afterAdd.ready, isEmpty);
       expect(afterAdd.planned, isEmpty);
     });
+
+    test('adds priority task directly to Focus and preserves subtasks across board and Markdown round-trip', () {
+      final board = TaskBoard(
+        focus: [
+          TaskItem(id: 'f1', title: 'F1'),
+          TaskItem(id: 'f2', title: 'F2'),
+          TaskItem(id: 'f3', title: 'F3'),
+        ],
+      );
+
+      final updated = board.addTask(
+        'Urgent Hotfix',
+        targetTier: TaskTier.focus,
+        isPriority: true,
+        subtasks: const [
+          SubtaskItem(title: 'Patch vulnerability'),
+          SubtaskItem(title: 'Verify regression tests', isCompleted: true),
+        ],
+        currentDate: fixedDate,
+      );
+
+      expect(updated.focus.length, equals(4));
+      final added = updated.focus.last;
+      expect(added.title, equals('Urgent Hotfix'));
+      expect(added.isPriority, isTrue);
+      expect(added.subtasks.length, equals(2));
+      expect(added.subtasks[0].title, equals('Patch vulnerability'));
+      expect(added.subtasks[0].isCompleted, isFalse);
+      expect(added.subtasks[1].title, equals('Verify regression tests'));
+      expect(added.subtasks[1].isCompleted, isTrue);
+
+      final serialized = markdownService.serialize(updated);
+      expect(serialized, contains('- [ ] Urgent Hotfix'));
+      expect(serialized, contains('  - [ ] Patch vulnerability'));
+      expect(serialized, contains('  - [x] Verify regression tests'));
+
+      final reparsed = markdownService.parse(serialized);
+      expect(reparsed.focus.last.title, equals('Urgent Hotfix'));
+      expect(
+        reparsed.focus.last.subtasks.map((subtask) => subtask.title),
+        equals(['Patch vulnerability', 'Verify regression tests']),
+      );
+      expect(reparsed.focus.last.subtasks[0].isCompleted, isFalse);
+      expect(reparsed.focus.last.subtasks[1].isCompleted, isTrue);
+    });
   });
 
   group('Completing, Pruning (30-Day GC) & Restoring Tasks', () {
@@ -715,6 +760,76 @@ void main() {
         _expectArbKeyMetadata(enDecoded, key);
       }
     });
+
+    test('Linux, Windows, and Android platform runners and manifests display TierTask as the taskbar and window title', () {
+      final linuxRunner = File('linux/runner/my_application.cc')
+          .readAsStringSync();
+      expect(
+        linuxRunner,
+        contains('gtk_header_bar_set_title(header_bar, "TierTask");'),
+        reason: 'Linux GTK header bar title must be TierTask',
+      );
+      expect(
+        linuxRunner,
+        contains('gtk_window_set_title(window, "TierTask");'),
+        reason: 'Linux GTK window title must be TierTask',
+      );
+      expect(
+        linuxRunner,
+        contains('g_set_application_name("TierTask");'),
+        reason:
+            'Linux GLib application name must be TierTask for taskbar display',
+      );
+      expect(
+        linuxRunner,
+        isNot(contains('"tiertask"')),
+        reason: 'Linux runner must not use lowercase tiertask for window or header titles',
+      );
+
+      final windowsMain = File('windows/runner/main.cpp').readAsStringSync();
+      expect(
+        windowsMain,
+        contains('window.Create(L"TierTask", origin, size)'),
+        reason: 'Windows Win32 window title must be TierTask',
+      );
+      expect(
+        windowsMain,
+        isNot(contains('L"tiertask"')),
+        reason:
+            'Windows main.cpp must not use lowercase tiertask as window title',
+      );
+
+      final windowsResource = File('windows/runner/Runner.rc')
+          .readAsStringSync();
+      expect(
+        windowsResource,
+        contains('VALUE "FileDescription", "TierTask" "\\0"'),
+        reason: 'Windows Runner.rc FileDescription must be TierTask for taskbar and Task Manager',
+      );
+      expect(
+        windowsResource,
+        contains('VALUE "InternalName", "TierTask" "\\0"'),
+        reason: 'Windows Runner.rc InternalName must be TierTask',
+      );
+      expect(
+        windowsResource,
+        contains('VALUE "ProductName", "TierTask" "\\0"'),
+        reason: 'Windows Runner.rc ProductName must be TierTask',
+      );
+
+      final androidManifest = File('android/app/src/main/AndroidManifest.xml')
+          .readAsStringSync();
+      expect(
+        androidManifest,
+        contains('android:label="TierTask"'),
+        reason: 'Android manifest label must be TierTask',
+      );
+      expect(
+        androidManifest,
+        isNot(contains('android:label="tiertask"')),
+        reason: 'Android manifest must not use lowercase tiertask as label',
+      );
+    });
   });
 
   group('AppThemeMode, StorageMode & WebDavConfig Resolution', () {
@@ -788,6 +903,16 @@ void main() {
         defaultConfig.localFilePath,
         equals('tiertask.md'),
         reason: 'Default localFilePath must be tiertask.md',
+      );
+      expect(
+        defaultConfig.showOpenTaskCount,
+        isFalse,
+        reason: 'Default showOpenTaskCount must be false (off)',
+      );
+      expect(
+        defaultConfig.copyWith(showOpenTaskCount: true).showOpenTaskCount,
+        isTrue,
+        reason: 'copyWith(showOpenTaskCount: true) must enable task counts',
       );
       expect(
         defaultConfig.isConfigured,

@@ -91,9 +91,9 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/models/task_tier.dart` | Defines the `TaskTier` enum for the 6 numbered tiers (`1` `focus`, `2` `ready`, `3` `planned`, `4` `blocked`, `5` `someday`, `6` `completed`), soft limits, `# [n]` formatting, and label-independent tier-number parsing. |
-| `lib/models/task_item.dart` | Immutable `TaskItem` value class with completion state, UTC `YYYY-MM-DD` date normalization, and Markdown line serialization. |
+| `lib/models/task_item.dart` | Immutable `TaskItem` and `SubtaskItem` value classes with priority flag, ordered subtasks, completion state, UTC `YYYY-MM-DD` date normalization, and Markdown line serialization. |
 | `lib/models/task_board.dart` | Immutable `TaskBoard` aggregate enforcing the auto-pull cascade (`Tier 3 -> Tier 2 -> Tier 1`), 30-day completed task pruning in Tier `6`, and anti-ping-pong downgrades. |
-| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model. |
+| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model (including `showOpenTaskCount`, defaulting to `false`). |
 
 ## Services
 
@@ -120,9 +120,9 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
-| `lib/ui/home_screen.dart` | Primary board screen displaying `Focus`, `Ready`, and tabbed/expandable secondary tiers (`Planned`, `Blocked`, `Someday`, and `Completed`). |
-| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), storage mode (`Local`, `WebDAV`, `Both`), local file name, WebDAV endpoint parameters, and synchronization testing. |
-| `lib/ui/widgets/quick_add_bar.dart` | Bottom input bar for creating tasks with optional target tier selection (`1` through `5`, defaulting to Tier `3`). |
+| `lib/ui/home_screen.dart` | Primary landing page screen displaying the greeting, minimalist `Focus` task pills, horizontal `Categories` and `Locations` summary cards with solid colored accent bars and optional open task counts, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), and a top-left navigation drawer for secondary tiers (`Ready`, `Planned`, `Blocked`, `Someday`, `Completed`), synchronization, Markdown preview, and settings. |
+| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), open task count visibility (`Off` by default, `On`), storage mode (`Local`, `WebDAV`, `Both`), local file name, WebDAV endpoint parameters, and synchronization testing. |
+| `lib/ui/widgets/quick_add_bar.dart` | Task creation bar (`QuickAddBar`) with a title input field, mutually exclusive `Priority` and `Someday` toggle buttons, an `Advanced` button opening the extended subtask editor view, and an `Add` button enabled only when input text is present. |
 | `lib/ui/widgets/restore_task_sheet.dart` | Modal bottom sheet for selecting the destination active tier (`1` through `5`) when restoring or moving a task. |
 | `lib/ui/widgets/task_tile.dart` | Individual task card providing completion, downgrade, quick-block, title editing, move, and delete actions. |
 

@@ -284,11 +284,47 @@ abstract class AppLocalizations {
   /// **'Retry'**
   String get actionRetry;
 
-  /// Chip label indicating the default target tier in the quick-add bar.
+  /// Toggle button label for marking a new task as priority in the quick-add bar.
   ///
   /// In en, this message translates to:
-  /// **'{heading} (Default)'**
-  String defaultTierChipLabel(String heading);
+  /// **'Priority'**
+  String get quickAddPriority;
+
+  /// Button label in the quick-add bar to open the extended task view.
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced'**
+  String get quickAddAdvanced;
+
+  /// Header title for the extended task creation view.
+  ///
+  /// In en, this message translates to:
+  /// **'Extended Task View'**
+  String get advancedTaskTitle;
+
+  /// Section heading for subtasks inside the extended task creation view.
+  ///
+  /// In en, this message translates to:
+  /// **'Subtasks'**
+  String get subtasksSectionTitle;
+
+  /// Placeholder hint inside the subtask input field.
+  ///
+  /// In en, this message translates to:
+  /// **'Add subtask...'**
+  String get subtaskInputHint;
+
+  /// Tooltip for the button that adds a subtask to the task being created.
+  ///
+  /// In en, this message translates to:
+  /// **'Add subtask'**
+  String get tooltipAddSubtask;
+
+  /// Tooltip for the button that removes a subtask from the list.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove subtask'**
+  String get tooltipRemoveSubtask;
 
   /// Placeholder hint inside the quick-add text field for the selected tier.
   ///
@@ -463,6 +499,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Dark'**
   String get themeDark;
+
+  /// Section heading for open task count visibility selection in settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Task Count'**
+  String get openTaskCountSectionTitle;
+
+  /// Helper description explaining the open task count visibility setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Show or hide the total number of open tasks on category and location cards.'**
+  String get openTaskCountSectionDescription;
+
+  /// Option label to hide the total open task count on category and location cards.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get openTaskCountOff;
+
+  /// Option label to show the total open task count on category and location cards.
+  ///
+  /// In en, this message translates to:
+  /// **'On'**
+  String get openTaskCountOn;
 
   /// Section heading for storage mode selection in settings.
   ///
@@ -733,6 +793,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Failed to write local Markdown file ({details}).'**
   String errorSaveLocalFileFailed(String details);
+
+  /// Greeting header shown at the top of the landing page.
+  ///
+  /// In en, this message translates to:
+  /// **'What\'s up!'**
+  String get landingGreeting;
+
+  /// Uppercase section label above the Focus tasks list on the landing page.
+  ///
+  /// In en, this message translates to:
+  /// **'FOCUS TASKS'**
+  String get sectionFocusTasks;
+
+  /// Uppercase section label above the category summary cards on the landing page.
+  ///
+  /// In en, this message translates to:
+  /// **'CATEGORIES'**
+  String get sectionCategories;
+
+  /// Uppercase section label above the location summary cards on the landing page.
+  ///
+  /// In en, this message translates to:
+  /// **'LOCATIONS'**
+  String get sectionLocations;
+
+  /// Total task counter label displayed at the top of category and location cards.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} tasks'**
+  String taskCountLabel(int count);
+
+  /// Display name for the draft Business category card.
+  ///
+  /// In en, this message translates to:
+  /// **'Business'**
+  String get categoryBusiness;
+
+  /// Display name for the draft Personal category card.
+  ///
+  /// In en, this message translates to:
+  /// **'Personal'**
+  String get categoryPersonal;
+
+  /// Display name for the draft Home location card.
+  ///
+  /// In en, this message translates to:
+  /// **'Home'**
+  String get locationHome;
+
+  /// Display name for the draft Office location card.
+  ///
+  /// In en, this message translates to:
+  /// **'Office'**
+  String get locationOffice;
+
+  /// Tooltip for the top-left navigation menu button.
+  ///
+  /// In en, this message translates to:
+  /// **'Open menu'**
+  String get tooltipMenu;
+
+  /// Tooltip for the top-right search button.
+  ///
+  /// In en, this message translates to:
+  /// **'Search tasks'**
+  String get tooltipSearch;
+
+  /// Placeholder hint inside the landing page search field.
+  ///
+  /// In en, this message translates to:
+  /// **'Search focus tasks...'**
+  String get searchHint;
 }
 
 class _AppLocalizationsDelegate

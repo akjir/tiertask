@@ -172,6 +172,52 @@ class _LocalStorageSection extends StatelessWidget {
   }
 }
 
+/// Card for choosing whether the total open task count is shown on category and location cards.
+class _OpenTaskCountSelectionCard extends StatelessWidget {
+  /// Creates an [_OpenTaskCountSelectionCard].
+  const _OpenTaskCountSelectionCard({
+    required this.showOpenTaskCount,
+    required this.onShowOpenTaskCountChanged,
+  });
+
+  /// Callback invoked when the user toggles open task count visibility.
+  final ValueChanged<bool> onShowOpenTaskCountChanged;
+
+  /// Whether the open task count is currently shown.
+  final bool showOpenTaskCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return _SettingsSectionCard(
+      icon: Icons.numbers_rounded,
+      title: localizations.openTaskCountSectionTitle,
+      description: localizations.openTaskCountSectionDescription,
+      child: SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<bool>(
+          segments: [
+            ButtonSegment(
+              value: false,
+              label: Text(localizations.openTaskCountOff),
+            ),
+            ButtonSegment(
+              value: true,
+              label: Text(localizations.openTaskCountOn),
+            ),
+          ],
+          selected: {showOpenTaskCount},
+          onSelectionChanged: (selection) {
+            if (selection.isNotEmpty) {
+              onShowOpenTaskCountChanged(selection.first);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
 /// Monospace preview box displaying a resolved local file path or WebDAV endpoint URI.
 class _ResolvedPathPreview extends StatelessWidget {
   /// Creates a [_ResolvedPathPreview].
@@ -335,20 +381,25 @@ class _SettingsFormFields extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, and storage mode preference cards on [SettingsScreen].
+/// Groups the language, theme, open task count, and storage mode preference cards on [SettingsScreen].
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
     required this.selectedLanguage,
     required this.selectedThemeMode,
+    required this.showOpenTaskCount,
     required this.selectedStorageMode,
     required this.onLanguageChanged,
     required this.onThemeModeChanged,
+    required this.onShowOpenTaskCountChanged,
     required this.onStorageModeChanged,
   });
 
   /// Callback when [AppLanguage] changes.
   final ValueChanged<AppLanguage> onLanguageChanged;
+
+  /// Callback when open task count visibility changes.
+  final ValueChanged<bool> onShowOpenTaskCountChanged;
 
   /// Callback when [StorageMode] changes.
   final ValueChanged<StorageMode> onStorageModeChanged;
@@ -365,6 +416,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
   /// Currently selected theme mode.
   final AppThemeMode selectedThemeMode;
 
+  /// Whether the open task count is shown on category and location cards.
+  final bool showOpenTaskCount;
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -378,6 +432,11 @@ class _SettingsPreferenceCards extends StatelessWidget {
         _ThemeSelectionCard(
           selectedThemeMode: selectedThemeMode,
           onThemeModeChanged: onThemeModeChanged,
+        ),
+        const SizedBox(height: 16),
+        _OpenTaskCountSelectionCard(
+          showOpenTaskCount: showOpenTaskCount,
+          onShowOpenTaskCountChanged: onShowOpenTaskCountChanged,
         ),
         const SizedBox(height: 16),
         _StorageModeSelectionCard(
@@ -406,6 +465,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   AppLanguage _selectedLanguage = AppLanguage.system;
   StorageMode _selectedStorageMode = StorageMode.local;
   AppThemeMode _selectedThemeMode = AppThemeMode.system;
+  bool _showOpenTaskCount = false;
   String? _statusBannerMessage;
   _StatusBannerTone _statusTone = _StatusBannerTone.success;
 
@@ -453,9 +513,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _SettingsPreferenceCards(
                 selectedLanguage: _selectedLanguage,
                 selectedThemeMode: _selectedThemeMode,
+                showOpenTaskCount: _showOpenTaskCount,
                 selectedStorageMode: _selectedStorageMode,
                 onLanguageChanged: _handleLanguageChanged,
                 onThemeModeChanged: _handleThemeModeChanged,
+                onShowOpenTaskCountChanged: _handleShowOpenTaskCountChanged,
                 onStorageModeChanged: _handleStorageModeChanged,
               ),
               if (_selectedStorageMode.usesLocal) ...[
@@ -527,6 +589,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       storageMode: _selectedStorageMode,
       language: _selectedLanguage,
       themeMode: _selectedThemeMode,
+      showOpenTaskCount: _showOpenTaskCount,
     );
   }
 
@@ -580,6 +643,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(webDavConfigProvider.notifier).updateLanguage(newLanguage);
   }
 
+  /// Updates [_showOpenTaskCount] and persists the preference immediately.
+  Future<void> _handleShowOpenTaskCountChanged(bool showOpenTaskCount) async {
+    setState(() {
+      _showOpenTaskCount = showOpenTaskCount;
+      _clearStatusBanner();
+    });
+    await ref
+        .read(webDavConfigProvider.notifier)
+        .updateShowOpenTaskCount(showOpenTaskCount);
+  }
+
   /// Removes the status banner from the widget tree once its fade-out animation finishes.
   void _handleStatusBannerFadeEnd() {
     if (!mounted || _isBannerVisible) {
@@ -613,6 +687,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   void _populateFieldsIfNeeded(WebDavConfig config) {
     _selectedLanguage = config.language;
     _selectedThemeMode = config.themeMode;
+    _showOpenTaskCount = config.showOpenTaskCount;
     _selectedStorageMode = config.storageMode;
     if (_initialized) {
       return;

@@ -110,9 +110,25 @@ class AppLocalizationsDe extends AppLocalizations {
   String get actionRetry => 'Erneut versuchen';
 
   @override
-  String defaultTierChipLabel(String heading) {
-    return '$heading (Standard)';
-  }
+  String get quickAddPriority => 'Priorität';
+
+  @override
+  String get quickAddAdvanced => 'Erweitert';
+
+  @override
+  String get advancedTaskTitle => 'Erweiterte Ansicht';
+
+  @override
+  String get subtasksSectionTitle => 'Unteraufgaben';
+
+  @override
+  String get subtaskInputHint => 'Unteraufgabe hinzufügen...';
+
+  @override
+  String get tooltipAddSubtask => 'Unteraufgabe hinzufügen';
+
+  @override
+  String get tooltipRemoveSubtask => 'Unteraufgabe entfernen';
 
   @override
   String quickAddHint(String heading) {
@@ -208,6 +224,19 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get themeDark => 'Dunkel';
+
+  @override
+  String get openTaskCountSectionTitle => 'Gesamtzahl offener Aufgaben';
+
+  @override
+  String get openTaskCountSectionDescription =>
+      'Gesamtzahl der offenen Aufgaben auf Kategorie- und Orts-Karten ein- oder ausblenden.';
+
+  @override
+  String get openTaskCountOff => 'Aus';
+
+  @override
+  String get openTaskCountOn => 'An';
 
   @override
   String get storageModeSectionTitle => 'Speichermodus';
@@ -376,4 +405,42 @@ class AppLocalizationsDe extends AppLocalizations {
   String errorSaveLocalFileFailed(String details) {
     return 'Fehler beim Schreiben der lokalen Markdown-Datei ($details).';
   }
+
+  @override
+  String get landingGreeting => 'Was steht an!';
+
+  @override
+  String get sectionFocusTasks => 'FOKUSAUFGABEN';
+
+  @override
+  String get sectionCategories => 'KATEGORIEN';
+
+  @override
+  String get sectionLocations => 'ORTE';
+
+  @override
+  String taskCountLabel(int count) {
+    return '$count Aufgaben';
+  }
+
+  @override
+  String get categoryBusiness => 'Geschäftlich';
+
+  @override
+  String get categoryPersonal => 'Privat';
+
+  @override
+  String get locationHome => 'Zuhause';
+
+  @override
+  String get locationOffice => 'Büro';
+
+  @override
+  String get tooltipMenu => 'Menü öffnen';
+
+  @override
+  String get tooltipSearch => 'Aufgaben suchen';
+
+  @override
+  String get searchHint => 'Fokusaufgaben durchsuchen...';
 }

@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/tier_localization_extension.dart';
 import '../models/task_board.dart';
+import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/webdav_config.dart';
 import '../repositories/local_file_repository.dart';
@@ -182,6 +183,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<void> addTask(
     String title, {
     TaskTier targetTier = TaskTier.planned,
+    bool isPriority = false,
+    List<SubtaskItem> subtasks = const [],
     DateTime? currentDate,
     String? id,
   }) async {
@@ -189,6 +192,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final updated = _currentBoard.addTask(
       title,
       targetTier: targetTier,
+      isPriority: isPriority,
+      subtasks: subtasks,
       currentDate: now,
       id: id,
     );
@@ -473,6 +478,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   Future<void> updateLanguage(AppLanguage language) async {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(language: language);
+    await updateConfig(updated);
+  }
+
+  /// Updates only the [showOpenTaskCount] preference and persists it immediately.
+  Future<void> updateShowOpenTaskCount(bool showOpenTaskCount) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(showOpenTaskCount: showOpenTaskCount);
     await updateConfig(updated);
   }
 

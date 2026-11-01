@@ -39,54 +39,15 @@ class MarkdownService {
   /// Matches sections strictly by their tier number (`[1]` through `[6]` or `(1)` through `(6)`),
   /// ignores the trailing heading label text, and initializes any missing tiers as empty lists.
   TaskBoard parse(String markdown) {
-    final focusTasks = <TaskItem>[];
-    final readyTasks = <TaskItem>[];
-    final plannedTasks = <TaskItem>[];
-    final blockedTasks = <TaskItem>[];
-    final somedayTasks = <TaskItem>[];
-    final completedTasks = <TaskItem>[];
-
+    final buckets = _TierBuckets();
     TaskTier? currentTier;
     final lines = markdown.split('\n');
 
     for (final rawLine in lines) {
-      final line = rawLine.trim();
-      if (line.isEmpty) {
-        continue;
-      }
-
-      if (line.startsWith('#')) {
-        final headingText = line.replaceFirst(_headingPrefixPattern, '').trim();
-        currentTier = TaskTier.fromHeading(headingText);
-        continue;
-      }
-
-      if (currentTier == null || !line.startsWith('-')) {
-        continue;
-      }
-
-      if (_parseTaskLine(line, currentTier) case final parsedTask?) {
-        _appendToBucket(
-          currentTier,
-          parsedTask,
-          focusTasks: focusTasks,
-          readyTasks: readyTasks,
-          plannedTasks: plannedTasks,
-          blockedTasks: blockedTasks,
-          somedayTasks: somedayTasks,
-          completedTasks: completedTasks,
-        );
-      }
+      currentTier = _processMarkdownLine(rawLine, currentTier, buckets);
     }
 
-    return TaskBoard(
-      focus: focusTasks,
-      ready: readyTasks,
-      planned: plannedTasks,
-      blocked: blockedTasks,
-      someday: somedayTasks,
-      completed: completedTasks,
-    );
+    return buckets.toBoard();
   }
 
   /// Serializes an immutable [TaskBoard] into the canonical 6-section Markdown format (`1` to `6`).
@@ -113,31 +74,13 @@ class MarkdownService {
     return buffer.toString();
   }
 
-  /// Appends [task] to the list matching [tier].
-  void _appendToBucket(
-    TaskTier tier,
-    TaskItem task, {
-    required List<TaskItem> focusTasks,
-    required List<TaskItem> readyTasks,
-    required List<TaskItem> plannedTasks,
-    required List<TaskItem> blockedTasks,
-    required List<TaskItem> somedayTasks,
-    required List<TaskItem> completedTasks,
-  }) {
-    switch (tier) {
-      case TaskTier.focus:
-        focusTasks.add(task);
-      case TaskTier.ready:
-        readyTasks.add(task);
-      case TaskTier.planned:
-        plannedTasks.add(task);
-      case TaskTier.blocked:
-        blockedTasks.add(task);
-      case TaskTier.someday:
-        somedayTasks.add(task);
-      case TaskTier.completed:
-        completedTasks.add(task);
+  /// Parses an indented Markdown line into a [SubtaskItem], or `null` if invalid.
+  SubtaskItem? _parseSubtaskLine(String line) {
+    final parsed = _parseTaskLine(line, TaskTier.planned);
+    if (parsed == null) {
+      return null;
     }
+    return SubtaskItem(title: parsed.title, isCompleted: parsed.isCompleted);
   }
 
   /// Parses a single Markdown task line under [tier] into a [TaskItem].
@@ -181,6 +124,47 @@ class MarkdownService {
     return null;
   }
 
+  /// Processes a single [rawLine] during Markdown parsing and returns the active [TaskTier].
+  TaskTier? _processMarkdownLine(
+    String rawLine,
+    TaskTier? currentTier,
+    _TierBuckets buckets,
+  ) {
+    final line = rawLine.trim();
+    if (line.isEmpty) {
+      return currentTier;
+    }
+
+    if (line.startsWith('#')) {
+      final headingText = line.replaceFirst(_headingPrefixPattern, '').trim();
+      return TaskTier.fromHeading(headingText);
+    }
+
+    if (currentTier == null || !line.startsWith('-')) {
+      return currentTier;
+    }
+
+    final isIndented = rawLine.startsWith('  ') || rawLine.startsWith('\t');
+    if (isIndented && buckets.hasTasksIn(currentTier)) {
+      if (_parseSubtaskLine(line) case final subtask?) {
+        buckets.appendSubtask(currentTier, subtask);
+      }
+      return currentTier;
+    }
+
+    if (_parseTaskLine(line, currentTier) case final parsedTask?) {
+      buckets.appendTask(currentTier, parsedTask);
+    }
+    return currentTier;
+  }
+
+  /// Writes all [subtasks] of a task to [buffer].
+  static void _writeSubtasks(StringBuffer buffer, List<SubtaskItem> subtasks) {
+    for (final subtask in subtasks) {
+      buffer.writeln(subtask.toMarkdownLine());
+    }
+  }
+
   /// Writes all [tasks] for [tier] to [buffer].
   static void _writeTierTasks(
     StringBuffer buffer,
@@ -190,6 +174,64 @@ class MarkdownService {
     final isCompletedTier = tier == TaskTier.completed;
     for (final task in tasks) {
       buffer.writeln(task.toMarkdownLine(inCompleted: isCompletedTier));
+      _writeSubtasks(buffer, task.subtasks);
     }
+  }
+}
+
+/// Mutable accumulator lists used while parsing a Markdown document into a [TaskBoard].
+class _TierBuckets {
+  /// Creates empty [_TierBuckets].
+  _TierBuckets();
+
+  final List<TaskItem> _blocked = <TaskItem>[];
+  final List<TaskItem> _completed = <TaskItem>[];
+  final List<TaskItem> _focus = <TaskItem>[];
+  final List<TaskItem> _planned = <TaskItem>[];
+  final List<TaskItem> _ready = <TaskItem>[];
+  final List<TaskItem> _someday = <TaskItem>[];
+
+  /// Appends [subtask] to the most recently added task in [tier].
+  void appendSubtask(TaskTier tier, SubtaskItem subtask) {
+    final list = _listForTier(tier);
+    if (list.isEmpty) {
+      return;
+    }
+    final lastTask = list.last;
+    list[list.length - 1] = lastTask.copyWith(
+      subtasks: [...lastTask.subtasks, subtask],
+    );
+  }
+
+  /// Appends [task] to [tier].
+  void appendTask(TaskTier tier, TaskItem task) {
+    _listForTier(tier).add(task);
+  }
+
+  /// Returns whether [tier] already contains at least one parsed task.
+  bool hasTasksIn(TaskTier tier) => _listForTier(tier).isNotEmpty;
+
+  /// Builds an immutable [TaskBoard] from the accumulated tier lists.
+  TaskBoard toBoard() {
+    return TaskBoard(
+      focus: _focus,
+      ready: _ready,
+      planned: _planned,
+      blocked: _blocked,
+      someday: _someday,
+      completed: _completed,
+    );
+  }
+
+  /// Returns the mutable list for [tier].
+  List<TaskItem> _listForTier(TaskTier tier) {
+    return switch (tier) {
+      TaskTier.focus => _focus,
+      TaskTier.ready => _ready,
+      TaskTier.planned => _planned,
+      TaskTier.blocked => _blocked,
+      TaskTier.someday => _someday,
+      TaskTier.completed => _completed,
+    };
   }
 }

@@ -129,14 +129,33 @@
   "@actionRetry": {
     "description": "Button label to retry a failed synchronization operation."
   },
-  "defaultTierChipLabel": "{heading} (Default)",
-  "@defaultTierChipLabel": {
-    "description": "Chip label indicating the default target tier in the quick-add bar.",
-    "placeholders": {
-      "heading": {
-        "type": "String"
-      }
-    }
+  "quickAddPriority": "Priority",
+  "@quickAddPriority": {
+    "description": "Toggle button label for marking a new task as priority in the quick-add bar."
+  },
+  "quickAddAdvanced": "Advanced",
+  "@quickAddAdvanced": {
+    "description": "Button label in the quick-add bar to open the extended task view."
+  },
+  "advancedTaskTitle": "Extended Task View",
+  "@advancedTaskTitle": {
+    "description": "Header title for the extended task creation view."
+  },
+  "subtasksSectionTitle": "Subtasks",
+  "@subtasksSectionTitle": {
+    "description": "Section heading for subtasks inside the extended task creation view."
+  },
+  "subtaskInputHint": "Add subtask...",
+  "@subtaskInputHint": {
+    "description": "Placeholder hint inside the subtask input field."
+  },
+  "tooltipAddSubtask": "Add subtask",
+  "@tooltipAddSubtask": {
+    "description": "Tooltip for the button that adds a subtask to the task being created."
+  },
+  "tooltipRemoveSubtask": "Remove subtask",
+  "@tooltipRemoveSubtask": {
+    "description": "Tooltip for the button that removes a subtask from the list."
   },
   "quickAddHint": "Add new task to {heading}...",
   "@quickAddHint": {
@@ -268,6 +287,22 @@
   "themeDark": "Dark",
   "@themeDark": {
     "description": "Option label for the dark color theme."
+  },
+  "openTaskCountSectionTitle": "Open Task Count",
+  "@openTaskCountSectionTitle": {
+    "description": "Section heading for open task count visibility selection in settings."
+  },
+  "openTaskCountSectionDescription": "Show or hide the total number of open tasks on category and location cards.",
+  "@openTaskCountSectionDescription": {
+    "description": "Helper description explaining the open task count visibility setting."
+  },
+  "openTaskCountOff": "Off",
+  "@openTaskCountOff": {
+    "description": "Option label to hide the total open task count on category and location cards."
+  },
+  "openTaskCountOn": "On",
+  "@openTaskCountOn": {
+    "description": "Option label to show the total open task count on category and location cards."
   },
   "storageModeSectionTitle": "Storage Mode",
   "@storageModeSectionTitle": {
@@ -488,5 +523,58 @@
         "type": "String"
       }
     }
+  },
+  "landingGreeting": "What's up!",
+  "@landingGreeting": {
+    "description": "Greeting header shown at the top of the landing page."
+  },
+  "sectionFocusTasks": "FOCUS TASKS",
+  "@sectionFocusTasks": {
+    "description": "Uppercase section label above the Focus tasks list on the landing page."
+  },
+  "sectionCategories": "CATEGORIES",
+  "@sectionCategories": {
+    "description": "Uppercase section label above the category summary cards on the landing page."
+  },
+  "sectionLocations": "LOCATIONS",
+  "@sectionLocations": {
+    "description": "Uppercase section label above the location summary cards on the landing page."
+  },
+  "taskCountLabel": "{count} tasks",
+  "@taskCountLabel": {
+    "description": "Total task counter label displayed at the top of category and location cards.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "categoryBusiness": "Business",
+  "@categoryBusiness": {
+    "description": "Display name for the draft Business category card."
+  },
+  "categoryPersonal": "Personal",
+  "@categoryPersonal": {
+    "description": "Display name for the draft Personal category card."
+  },
+  "locationHome": "Home",
+  "@locationHome": {
+    "description": "Display name for the draft Home location card."
+  },
+  "locationOffice": "Office",
+  "@locationOffice": {
+    "description": "Display name for the draft Office location card."
+  },
+  "tooltipMenu": "Open menu",
+  "@tooltipMenu": {
+    "description": "Tooltip for the top-left navigation menu button."
+  },
+  "tooltipSearch": "Search tasks",
+  "@tooltipSearch": {
+    "description": "Tooltip for the top-right search button."
+  },
+  "searchHint": "Search focus tasks...",
+  "@searchHint": {
+    "description": "Placeholder hint inside the landing page search field."
   }
 }
