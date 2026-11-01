@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [Unreleased]
 
 ### Added
+- Added `BottomNavBar` and `UpwardTierSelectionMenu` (`lib/ui/widgets/bottom_nav_bar.dart`) on `HomeScreen` featuring highlighted active navigation icons, a first button for the `Focus` overview, a second button opening an upward tier selection menu for `Ready`, `Planned`, `Blocked` (including `suspended` tasks), `Someday`, and `Completed`, and a right-aligned circular `+` button.
 - Added `CategoryScreen` (`lib/ui/category_screen.dart`) and `TaskBoard.evaluateForContext` so tapping a category card on `HomeScreen` opens a dedicated page displaying the 3 derived `Focus` tasks for that category while keeping all scheduling, blocking, condition, and search filters active.
 - Added `Categories` and `Locations` management panels (`ContextManagementSheet`) in the side navigation drawer to create, view, and delete categories and locations, with accent color selection via an interactive HSV color wheel (`ColorWheelPicker`) or direct `#RRGGBB` hex input, optional `color "<#RRGGBB>"` persistence on `.tdf` `location` blocks, and multi-select category and location `FilterChip` selectors in `QuickAddBar`.
 - Added single-pass $O(N)$ TierTask Data Format (`.tdf`) lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`) implementing [`TDF_SPEC.md`](TDF_SPEC.md) with all Section 7 resource bounds and Section 8 `TdfErrorKind` diagnostics.

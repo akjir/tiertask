@@ -61,6 +61,7 @@ tiertask/
 │       ├── home_screen.dart
 │       ├── settings_screen.dart
 │       └── widgets/
+│           ├── bottom_nav_bar.dart
 │           ├── color_wheel_picker.dart
 │           ├── context_management_sheet.dart
 │           ├── quick_add_bar.dart
@@ -128,8 +129,9 @@ tiertask/
 | :--- | :--- |
 | `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
 | `lib/ui/category_screen.dart` | Category task view (`CategoryScreen`) opened by tapping a category card on `HomeScreen`, displaying the 3 derived `Focus` tasks filtered to that category while preserving all active blocking, condition, scheduling, and search filters. |
-| `lib/ui/home_screen.dart` | Primary landing page screen displaying the greeting, minimalist `Focus` task pills, dynamic `Categories` and `Locations` summary carousels (hidden when no categories or locations exist in the `.tdf` board) with solid colored accent bars, optional open task counts, and category navigation to `CategoryScreen`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), and a top-left navigation drawer for secondary tiers (`Ready`, `Planned`, `Blocked`, `Someday`, `Completed`), `Categories` and `Locations` management panels, synchronization, TDF preview, and settings. |
+| `lib/ui/home_screen.dart` | Primary landing page screen displaying the greeting, minimalist `Focus` task pills, dynamic `Categories` and `Locations` summary carousels (hidden when no categories or locations exist in the `.tdf` board) with solid colored accent bars, optional open task counts, and category navigation to `CategoryScreen`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a bottom navigation bar (`BottomNavBar`) with highlighted active icon buttons, a `Focus` overview button, an upward secondary-tier selector (`UpwardTierSelectionMenu` for `Ready`, `Planned`, `Blocked` including `suspended`, `Someday`, and `Completed`), and a circular task-add button, plus a top-left navigation drawer for secondary tiers, `Categories` and `Locations` management panels, synchronization, TDF preview, and settings. |
 | `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), open task count visibility (`Off` by default, `On`), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name, WebDAV endpoint parameters, and synchronization testing. |
+| `lib/ui/widgets/bottom_nav_bar.dart` | Bottom navigation bar (`BottomNavBar`) with highlighted active navigation icons, `Focus` overview button, upward tier selection button (`UpwardTierSelectionMenu`), and right-aligned task creation button. |
 | `lib/ui/widgets/color_wheel_picker.dart` | Interactive HSV color wheel widget (`ColorWheelPicker`) rendered via a dependency-free `CustomPainter` for selecting category and location accent colors. |
 | `lib/ui/widgets/context_management_sheet.dart` | Modal panel (`ContextManagementSheet`) opened from the navigation drawer to create, view, and delete `Categories` or `Locations` with color selection via `ColorWheelPicker` or direct `#RRGGBB` hex input. |
 | `lib/ui/widgets/quick_add_bar.dart` | Task creation bar (`QuickAddBar`) with a title input field, mutually exclusive `Priority` and `Someday` toggle buttons, multi-select `FilterChip` selectors for `Categories` and `Locations`, an `Advanced` button opening the extended subtask editor view, and an `Add` button enabled only when input text is present. |

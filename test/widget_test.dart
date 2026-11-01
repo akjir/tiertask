@@ -1795,4 +1795,299 @@ task b_done {
       );
     },
   );
+
+  testWidgets(
+    'Bottom button bar highlights active icon without dot indicator and opens upward selection for Ready, Planned, Blocked (including suspended), Someday, and Completed',
+    (WidgetTester tester) async {
+      const bottomBarTdf = '''
+task f1 {
+  name "Focus Task 1"
+  created 2026-11-01 07:00
+  queued 2026-11-01 07:00
+}
+task f2 {
+  name "Focus Task 2"
+  created 2026-11-01 07:05
+  queued 2026-11-01 07:05
+}
+task f3 {
+  name "Focus Task 3"
+  created 2026-11-01 07:10
+  queued 2026-11-01 07:10
+}
+task r1 {
+  name "Ready Task 1"
+  created 2026-11-01 07:15
+  queued 2026-11-01 07:15
+}
+task r2 {
+  name "Ready Task 2"
+  created 2026-11-01 07:20
+  queued 2026-11-01 07:20
+}
+task r3 {
+  name "Ready Task 3"
+  created 2026-11-01 07:25
+  queued 2026-11-01 07:25
+}
+task r4 {
+  name "Ready Task 4"
+  created 2026-11-01 07:30
+  queued 2026-11-01 07:30
+}
+task r5 {
+  name "Ready Task 5"
+  created 2026-11-01 07:35
+  queued 2026-11-01 07:35
+}
+task p1 {
+  name "Planned Backlog Task"
+  created 2026-11-01 07:40
+  queued 2026-11-01 07:40
+}
+task blk_dep {
+  name "Blocked Prerequisite Task"
+  created 2026-11-01 07:45
+  queued 2026-11-01 07:45
+  blocked f1
+}
+task blk_susp {
+  name "Suspended Deferred Task"
+  created 2026-11-01 07:50
+  queued 2026-11-01 07:50
+  suspended 2026-11-05 09:00
+}
+task smd1 {
+  name "Someday Idea Task"
+  created 2026-11-01 08:00
+}
+task cmp1 {
+  name "Completed Archive Task"
+  created 2026-10-28 08:00
+  queued 2026-10-28 08:00
+  finished 2026-10-29 10:00
+}
+''';
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => _FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: bottomBarTdf,
+              ),
+            ),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 1, 12, 0),
+            ),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final bottomBarFinder = find.byKey(const ValueKey('bottom_nav_bar'));
+      final focusButtonFinder = find.byKey(
+        const ValueKey('bottom_nav_focus_button'),
+      );
+      final tiersButtonFinder = find.byKey(
+        const ValueKey('bottom_nav_tiers_button'),
+      );
+      final indicatorDotFinder = find.byKey(
+        const ValueKey('bottom_nav_indicator_dot'),
+      );
+      final upwardMenuFinder = find.byKey(const ValueKey('upward_tier_menu'));
+
+      expect(
+        bottomBarFinder,
+        findsOneWidget,
+        reason: 'Bottom navigation bar must render on the landing page',
+      );
+      expect(
+        focusButtonFinder,
+        findsOneWidget,
+        reason:
+            'First button in the bottom bar must be the Focus overview button',
+      );
+      expect(
+        tiersButtonFinder,
+        findsOneWidget,
+        reason: 'Second button in the bottom bar must be the upward tier selector button',
+      );
+      expect(
+        indicatorDotFinder,
+        findsNothing,
+        reason: 'Bottom bar must not render a dot indicator',
+      );
+      expect(
+        upwardMenuFinder,
+        findsNothing,
+        reason: 'Upward tier selection menu must be closed initially',
+      );
+
+      final focusIconFinder = find.descendant(
+        of: focusButtonFinder,
+        matching: find.byType(Icon),
+      );
+      final tiersIconFinder = find.descendant(
+        of: tiersButtonFinder,
+        matching: find.byType(Icon),
+      );
+      expect(
+        tester.widget<Icon>(focusIconFinder).color,
+        equals(const Color(0xFF2196F3)),
+        reason: 'Focus button icon must be highlighted initially',
+      );
+      expect(
+        tester.widget<Icon>(tiersIconFinder).color,
+        equals(const Color(0xFF9BA8E5)),
+        reason: 'Secondary tiers button icon must be inactive initially',
+      );
+
+      await tester.tap(tiersButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        upwardMenuFinder,
+        findsOneWidget,
+        reason: 'Tapping the second button must open the upward tier selection menu',
+      );
+      final menuBottomDy = tester.getBottomLeft(upwardMenuFinder).dy;
+      final barTopDy = tester.getTopLeft(bottomBarFinder).dy;
+      expect(
+        menuBottomDy <= barTopDy + 4.0,
+        isTrue,
+        reason:
+            'Tier selection menu must open upward above the bottom button bar',
+      );
+
+      expect(
+        find.byKey(const ValueKey('upward_tier_option_ready')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('upward_tier_option_planned')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('upward_tier_option_blocked')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('upward_tier_option_someday')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('upward_tier_option_completed')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('upward_tier_option_ready')));
+      await tester.pumpAndSettle();
+
+      expect(
+        upwardMenuFinder,
+        findsNothing,
+        reason: 'Selecting Ready must close the upward menu',
+      );
+      expect(
+        find.text('Ready Task 1'),
+        findsOneWidget,
+        reason: 'Selecting Ready must display Ready tasks',
+      );
+      expect(
+        tester.widget<Icon>(focusIconFinder).color,
+        equals(const Color(0xFF9BA8E5)),
+        reason: 'Focus button icon must be inactive when Ready is selected',
+      );
+      expect(
+        tester.widget<Icon>(tiersIconFinder).color,
+        equals(const Color(0xFF2196F3)),
+        reason: 'Secondary tiers button icon must be highlighted when Ready is selected',
+      );
+
+      await tester.tap(tiersButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('upward_tier_option_planned')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Planned Backlog Task'),
+        findsOneWidget,
+        reason: 'Selecting Planned must display Planned tasks',
+      );
+
+      await tester.tap(tiersButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('upward_tier_option_blocked')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Blocked Prerequisite Task'),
+        findsOneWidget,
+        reason: 'Selecting Blocked must display tasks blocked by prerequisites',
+      );
+      expect(
+        find.text('Suspended Deferred Task'),
+        findsOneWidget,
+        reason: 'Selecting Blocked must also display suspended tasks',
+      );
+
+      await tester.tap(tiersButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('upward_tier_option_someday')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Someday Idea Task'),
+        findsOneWidget,
+        reason: 'Selecting Someday must display Someday tasks',
+      );
+
+      await tester.tap(tiersButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('upward_tier_option_completed')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Completed Archive Task'),
+        findsOneWidget,
+        reason: 'Selecting Completed must display Completed tasks',
+      );
+
+      await tester.tap(focusButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text("What's up!"),
+        findsOneWidget,
+        reason: 'Tapping the first button must return to the Focus overview',
+      );
+      expect(
+        find.text('Focus Task 1'),
+        findsOneWidget,
+        reason: 'Focus overview must display Focus tasks again',
+      );
+      expect(
+        tester.widget<Icon>(focusIconFinder).color,
+        equals(const Color(0xFF2196F3)),
+        reason: 'Focus button icon must be highlighted again when Focus overview is active',
+      );
+      expect(
+        tester.widget<Icon>(tiersIconFinder).color,
+        equals(const Color(0xFF9BA8E5)),
+        reason: 'Secondary tiers button icon must be inactive when Focus overview is active',
+      );
+    },
+  );
 }

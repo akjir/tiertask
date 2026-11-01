@@ -25,6 +25,7 @@ import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
 import 'category_screen.dart';
 import 'settings_screen.dart';
+import 'widgets/bottom_nav_bar.dart';
 import 'widgets/context_management_sheet.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_tile.dart';
@@ -533,7 +534,12 @@ class _FocusTasksSection extends StatelessWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   bool _isSearching = false;
+  bool _isTierMenuOpen = false;
   String _searchQuery = '';
+  TaskTier _selectedTier = TaskTier.focus;
+
+  /// Active bottom navigation button index (`0` for Focus, `1` for secondary tiers).
+  int get _activeBottomNavIndex => _selectedTier == TaskTier.focus ? 0 : 1;
 
   @override
   void dispose() {
@@ -564,32 +570,41 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         onOpenContextSheet: (kind) => _showContextSheet(context, kind),
         onOpenMarkdownPreview: () => _showMarkdownPreviewDialog(context),
         onOpenSettings: () => _openSettings(context),
-        onOpenTierSheet: (tier) => _showTierSheet(context, tier),
+        onOpenTierSheet: _selectSecondaryTier,
         onSyncRemote: () =>
             ref.read(taskNotifierProvider.notifier).syncFromRemote(),
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: _accentMagenta,
-        foregroundColor: Colors.white,
-        shape: const CircleBorder(),
-        onPressed: () => _showQuickAddSheet(context),
-        child: const Icon(Icons.add_rounded, size: 28),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: BottomNavBar(
+          activeButtonIndex: _activeBottomNavIndex,
+          isTierMenuOpen: _isTierMenuOpen,
+          selectedTier: _selectedTier,
+          onSelectFocus: _selectFocusOverview,
+          onToggleTierMenu: _toggleTierMenu,
+          onQuickAdd: () => _showQuickAddSheet(context),
+        ),
       ),
       body: SafeArea(
+        bottom: false,
         child: _LandingScaffoldBody(
           boardAsync: boardAsync,
           errorMessage: syncState.errorMessage,
           isSearching: _isSearching,
           isSyncing: syncState.isSyncing,
+          isTierMenuOpen: _isTierMenuOpen,
           searchController: _searchController,
           searchQuery: _searchQuery,
+          selectedTier: _selectedTier,
           showOpenTaskCount: showOpenTaskCount,
           showSyncAction: showSyncAction,
           onClearError: () => ref.read(syncStateProvider.notifier).clearError(),
+          onDismissTierMenu: _dismissTierMenu,
           onOpenSettings: () => _openSettings(context),
           onRetry: () =>
               ref.read(taskNotifierProvider.notifier).syncFromRemote(),
           onSearchChanged: _updateSearchQuery,
+          onSelectTier: _selectSecondaryTier,
           onSyncRemote: () =>
               ref.read(taskNotifierProvider.notifier).syncFromRemote(),
           onToggleSearch: _toggleSearch,
@@ -598,10 +613,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// Closes the upward secondary-tier selection menu.
+  void _dismissTierMenu() {
+    if (!_isTierMenuOpen) {
+      return;
+    }
+    setState(() {
+      _isTierMenuOpen = false;
+    });
+  }
+
   /// Pushes [SettingsScreen] onto the navigation stack.
   void _openSettings(BuildContext context) {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  }
+
+  /// Switches the landing view back to the `Focus` overview (`TaskTier.focus`).
+  void _selectFocusOverview() {
+    setState(() {
+      _selectedTier = TaskTier.focus;
+      _isTierMenuOpen = false;
+    });
+  }
+
+  /// Switches the landing view to the selected secondary [tier] and closes the upward menu.
+  void _selectSecondaryTier(TaskTier tier) {
+    setState(() {
+      _selectedTier = tier;
+      _isTierMenuOpen = false;
+    });
   }
 
   /// Opens a modal bottom sheet for managing categories or locations ([kind]).
@@ -659,16 +700,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// Opens a modal bottom sheet displaying all tasks in [tier].
-  void _showTierSheet(BuildContext context, TaskTier tier) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _TierDetailSheet(tier: tier),
-    );
-  }
-
   /// Toggles the top-right search bar and resets the query when closing.
   void _toggleSearch() {
     setState(() {
@@ -680,6 +711,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
+  /// Toggles the upward secondary-tier selection menu.
+  void _toggleTierMenu() {
+    setState(() {
+      _isTierMenuOpen = !_isTierMenuOpen;
+    });
+  }
+
   /// Updates the active search filter query.
   void _updateSearchQuery(String value) {
     setState(() {
@@ -688,12 +726,95 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Switches between loading, error, and the main landing page scroll view.
+/// Stack inside [_LandingScaffoldBody] layering the content switcher and upward tier selection menu.
+class _LandingBodyStack extends StatelessWidget {
+  /// Creates a [_LandingBodyStack].
+  const _LandingBodyStack({
+    required this.boardAsync,
+    required this.isTierMenuOpen,
+    required this.searchQuery,
+    required this.selectedTier,
+    required this.showOpenTaskCount,
+    required this.onDismissTierMenu,
+    required this.onOpenSettings,
+    required this.onRetry,
+    required this.onSelectTier,
+  });
+
+  /// Asynchronous board state.
+  final AsyncValue<TaskBoard> boardAsync;
+
+  /// Whether the upward secondary-tier selection menu is open.
+  final bool isTierMenuOpen;
+
+  /// Callback to dismiss the upward tier selection menu.
+  final VoidCallback onDismissTierMenu;
+
+  /// Callback to open settings.
+  final VoidCallback onOpenSettings;
+
+  /// Callback to retry remote synchronization.
+  final VoidCallback onRetry;
+
+  /// Callback invoked when a secondary [TaskTier] is selected.
+  final ValueChanged<TaskTier> onSelectTier;
+
+  /// Active search query string.
+  final String searchQuery;
+
+  /// Currently selected [TaskTier] view.
+  final TaskTier selectedTier;
+
+  /// Whether to render the total open task count on category and location cards.
+  final bool showOpenTaskCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: _LandingContentSwitcher(
+            boardAsync: boardAsync,
+            searchQuery: searchQuery,
+            selectedTier: selectedTier,
+            showOpenTaskCount: showOpenTaskCount,
+            onOpenSettings: onOpenSettings,
+            onRetry: onRetry,
+          ),
+        ),
+        if (isTierMenuOpen) ...[
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onDismissTierMenu,
+              child: const ColoredBox(color: Colors.transparent),
+            ),
+          ),
+          Positioned(
+            bottom: 8,
+            left: 24,
+            right: 24,
+            child: Center(
+              child: UpwardTierSelectionMenu(
+                board: boardAsync.asData?.value ?? TaskBoard.empty(),
+                selectedTier: selectedTier,
+                onSelectTier: onSelectTier,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Switches between loading, error, Focus overview, and secondary tier views.
 class _LandingContentSwitcher extends StatelessWidget {
   /// Creates a [_LandingContentSwitcher].
   const _LandingContentSwitcher({
     required this.boardAsync,
     required this.searchQuery,
+    required this.selectedTier,
     required this.showOpenTaskCount,
     required this.onOpenSettings,
     required this.onRetry,
@@ -711,6 +832,9 @@ class _LandingContentSwitcher extends StatelessWidget {
   /// Current search filter query.
   final String searchQuery;
 
+  /// Currently selected [TaskTier] view.
+  final TaskTier selectedTier;
+
   /// Whether to render the total open task count on category and location cards.
   final bool showOpenTaskCount;
 
@@ -724,11 +848,17 @@ class _LandingContentSwitcher extends StatelessWidget {
         onRetry: onRetry,
         onOpenSettings: onOpenSettings,
       ),
-      data: (board) => _LandingScrollView(
-        board: board,
-        searchQuery: searchQuery,
-        showOpenTaskCount: showOpenTaskCount,
-      ),
+      data: (board) => selectedTier == TaskTier.focus
+          ? _LandingScrollView(
+              board: board,
+              searchQuery: searchQuery,
+              showOpenTaskCount: showOpenTaskCount,
+            )
+          : _SecondaryTierView(
+              board: board,
+              searchQuery: searchQuery,
+              tier: selectedTier,
+            ),
     );
   }
 }
@@ -817,7 +947,7 @@ class _LandingDrawer extends StatelessWidget {
   }
 }
 
-/// Column layout inside [HomeScreen] combining the top bar, error banner, and content switcher.
+/// Column layout inside [HomeScreen] combining the top bar, error banner, content switcher, and upward tier menu.
 class _LandingScaffoldBody extends StatelessWidget {
   /// Creates a [_LandingScaffoldBody].
   const _LandingScaffoldBody({
@@ -825,14 +955,18 @@ class _LandingScaffoldBody extends StatelessWidget {
     required this.errorMessage,
     required this.isSearching,
     required this.isSyncing,
+    required this.isTierMenuOpen,
     required this.searchController,
     required this.searchQuery,
+    required this.selectedTier,
     required this.showOpenTaskCount,
     required this.showSyncAction,
     required this.onClearError,
+    required this.onDismissTierMenu,
     required this.onOpenSettings,
     required this.onRetry,
     required this.onSearchChanged,
+    required this.onSelectTier,
     required this.onSyncRemote,
     required this.onToggleSearch,
   });
@@ -849,8 +983,14 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Whether a synchronization request is in progress.
   final bool isSyncing;
 
+  /// Whether the upward secondary-tier selection menu is open.
+  final bool isTierMenuOpen;
+
   /// Callback to dismiss the error banner.
   final VoidCallback onClearError;
+
+  /// Callback to dismiss the upward tier selection menu.
+  final VoidCallback onDismissTierMenu;
 
   /// Callback to open settings.
   final VoidCallback onOpenSettings;
@@ -860,6 +1000,9 @@ class _LandingScaffoldBody extends StatelessWidget {
 
   /// Callback invoked when the search query changes.
   final ValueChanged<String> onSearchChanged;
+
+  /// Callback invoked when a secondary [TaskTier] is selected from the upward menu.
+  final ValueChanged<TaskTier> onSelectTier;
 
   /// Callback to trigger WebDAV synchronization from the top bar.
   final VoidCallback onSyncRemote;
@@ -872,6 +1015,9 @@ class _LandingScaffoldBody extends StatelessWidget {
 
   /// Active search query string.
   final String searchQuery;
+
+  /// Currently active [TaskTier] view.
+  final TaskTier selectedTier;
 
   /// Whether to render the total open task count on category and location cards.
   final bool showOpenTaskCount;
@@ -896,12 +1042,16 @@ class _LandingScaffoldBody extends StatelessWidget {
         if (activeError != null)
           _SyncErrorBanner(message: activeError, onDismiss: onClearError),
         Expanded(
-          child: _LandingContentSwitcher(
+          child: _LandingBodyStack(
             boardAsync: boardAsync,
+            isTierMenuOpen: isTierMenuOpen,
             searchQuery: searchQuery,
+            selectedTier: selectedTier,
             showOpenTaskCount: showOpenTaskCount,
+            onDismissTierMenu: onDismissTierMenu,
             onOpenSettings: onOpenSettings,
             onRetry: onRetry,
+            onSelectTier: onSelectTier,
           ),
         ),
       ],
@@ -939,37 +1089,40 @@ class _LandingScrollView extends StatelessWidget {
     );
     final locations = _buildLocationCards(board.locations, openTasks);
 
-    return ListView(
+    return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
-      children: [
-        Text(
-          localizations.landingGreeting,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
-            letterSpacing: -0.5,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            localizations.landingGreeting,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              letterSpacing: -0.5,
+            ),
           ),
-        ),
-        const SizedBox(height: 28),
-        _FocusTasksSection(tasks: filteredFocus),
-        if (categories.isNotEmpty) ...[
           const SizedBox(height: 28),
-          _ContextCardCarousel(
-            sectionTitle: localizations.sectionCategories,
-            items: categories,
-            showOpenTaskCount: showOpenTaskCount,
-          ),
+          _FocusTasksSection(tasks: filteredFocus),
+          if (categories.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            _ContextCardCarousel(
+              sectionTitle: localizations.sectionCategories,
+              items: categories,
+              showOpenTaskCount: showOpenTaskCount,
+            ),
+          ],
+          if (locations.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            _ContextCardCarousel(
+              sectionTitle: localizations.sectionLocations,
+              items: locations,
+              showOpenTaskCount: showOpenTaskCount,
+            ),
+          ],
         ],
-        if (locations.isNotEmpty) ...[
-          const SizedBox(height: 28),
-          _ContextCardCarousel(
-            sectionTitle: localizations.sectionLocations,
-            items: locations,
-            showOpenTaskCount: showOpenTaskCount,
-          ),
-        ],
-      ],
+      ),
     );
   }
 
@@ -1191,6 +1344,98 @@ class _LandingTopBar extends StatelessWidget {
   }
 }
 
+/// Task list or empty-state message inside [_SecondaryTierView].
+class _SecondaryTierTaskList extends StatelessWidget {
+  /// Creates a [_SecondaryTierTaskList].
+  const _SecondaryTierTaskList({required this.tier, required this.tasks});
+
+  /// Tier being displayed.
+  final TaskTier tier;
+
+  /// Tasks belonging to [tier].
+  final List<TaskItem> tasks;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    if (tasks.isEmpty) {
+      return _EmptyFocusCard(message: localizations.tierEmptyHint(tier));
+    }
+    return Expanded(
+      child: ListView.builder(
+        itemCount: tasks.length,
+        itemBuilder: (context, index) => TaskTile(
+          key: ValueKey('tier_${tier.name}_${tasks[index].id}'),
+          task: tasks[index],
+          tier: tier,
+        ),
+      ),
+    );
+  }
+}
+
+/// Main content view displaying the tasks of a selected secondary [TaskTier].
+class _SecondaryTierView extends StatelessWidget {
+  /// Creates a [_SecondaryTierView].
+  const _SecondaryTierView({
+    required this.board,
+    required this.searchQuery,
+    required this.tier,
+  });
+
+  /// Current task board snapshot.
+  final TaskBoard board;
+
+  /// Active search query string for filtering tasks.
+  final String searchQuery;
+
+  /// Secondary [TaskTier] being displayed.
+  final TaskTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tasks = _filterTasks(board.tasksForTier(tier), searchQuery);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            localizations.tierName(tier),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            localizations.tierDescription(tier),
+            style: const TextStyle(color: _mutedLabelColor, fontSize: 14),
+          ),
+          const SizedBox(height: 20),
+          _SecondaryTierTaskList(tier: tier, tasks: tasks),
+        ],
+      ),
+    );
+  }
+
+  /// Filters [tasks] by a case-insensitive substring match against [query].
+  List<TaskItem> _filterTasks(List<TaskItem> tasks, String query) {
+    final trimmed = query.trim().toLowerCase();
+    if (trimmed.isEmpty) {
+      return tasks;
+    }
+    return [
+      for (final task in tasks)
+        if (task.title.toLowerCase().contains(trimmed)) task,
+    ];
+  }
+}
+
 /// Full-width solid colored line rendered at the bottom of a category or location card.
 class _SolidAccentBar extends StatelessWidget {
   /// Creates a [_SolidAccentBar].
@@ -1268,88 +1513,6 @@ class _SyncErrorBanner extends StatelessWidget {
               onPressed: onDismiss,
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Modal sheet displaying the tasks of a single secondary [TaskTier] selected from the menu.
-class _TierDetailSheet extends ConsumerWidget {
-  /// Creates a [_TierDetailSheet].
-  const _TierDetailSheet({required this.tier});
-
-  /// Tier displayed inside this sheet.
-  final TaskTier tier;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final board =
-        ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
-    final tasks = board.tasksForTier(tier);
-    final localizations = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                localizations.tierName(tier),
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                localizations.tierDescription(tier),
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 12),
-              _TierSheetTaskList(tier: tier, tasks: tasks),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Task list or empty-state message inside [_TierDetailSheet].
-class _TierSheetTaskList extends StatelessWidget {
-  /// Creates a [_TierSheetTaskList].
-  const _TierSheetTaskList({required this.tier, required this.tasks});
-
-  /// Tier being displayed.
-  final TaskTier tier;
-
-  /// Tasks belonging to [tier].
-  final List<TaskItem> tasks;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    if (tasks.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        child: Text(localizations.tierEmptyHint(tier)),
-      );
-    }
-    return Flexible(
-      child: ListView.builder(
-        shrinkWrap: true,
-        itemCount: tasks.length,
-        itemBuilder: (context, index) => TaskTile(
-          key: ValueKey('sheet_${tier.name}_${tasks[index].id}'),
-          task: tasks[index],
-          tier: tier,
         ),
       ),
     );
