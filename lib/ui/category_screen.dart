@@ -373,8 +373,9 @@ class _CategoryScaffoldBody extends StatelessWidget {
 
 /// State for [CategoryScreen].
 class _CategoryScreenState extends ConsumerState<CategoryScreen> {
-  late final TextEditingController _searchController;
+  bool _isQuickAddOpen = false;
   late bool _isSearching;
+  late final TextEditingController _searchController;
   late String _searchQuery;
 
   @override
@@ -405,13 +406,27 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
 
     return Scaffold(
       backgroundColor: _canvasColor,
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: _accentMagenta,
-        foregroundColor: Colors.white,
-        shape: const CircleBorder(),
-        onPressed: () => _showQuickAddSheet(context),
-        child: const Icon(Icons.add_rounded, size: 28),
-      ),
+      floatingActionButton: _isQuickAddOpen
+          ? null
+          : FloatingActionButton(
+              backgroundColor: _accentMagenta,
+              foregroundColor: Colors.white,
+              shape: const CircleBorder(),
+              onPressed: _openQuickAdd,
+              child: const Icon(Icons.add_rounded, size: 28),
+            ),
+      bottomNavigationBar: _isQuickAddOpen
+          ? Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              child: QuickAddBar(
+                initialCategoryIds: {widget.category.id},
+                onCancel: _closeQuickAdd,
+                onSubmitted: _closeQuickAdd,
+              ),
+            )
+          : null,
       body: SafeArea(
         child: _CategoryScaffoldBody(
           accentColor: widget.accentColor,
@@ -436,22 +451,21 @@ class _CategoryScreenState extends ConsumerState<CategoryScreen> {
     );
   }
 
-  /// Opens a modal bottom sheet containing [QuickAddBar] pre-selecting [CategoryScreen.category].
-  void _showQuickAddSheet(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: _cardColor,
-      isScrollControlled: true,
-      builder: (sheetContext) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
-        ),
-        child: QuickAddBar(
-          initialCategoryIds: {widget.category.id},
-          onSubmitted: () => Navigator.of(sheetContext).pop(),
-        ),
-      ),
-    );
+  /// Closes the inline [QuickAddBar] and restores the add button.
+  void _closeQuickAdd() {
+    if (!_isQuickAddOpen) {
+      return;
+    }
+    setState(() {
+      _isQuickAddOpen = false;
+    });
+  }
+
+  /// Opens the inline [QuickAddBar] pre-selecting [CategoryScreen.category].
+  void _openQuickAdd() {
+    setState(() {
+      _isQuickAddOpen = true;
+    });
   }
 
   /// Toggles the top-right search bar and resets the query when closing.

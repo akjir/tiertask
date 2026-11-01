@@ -169,13 +169,48 @@ void main() {
         reason: 'Greeting must appear above Focus tasks',
       );
 
+      expect(
+        find.byKey(const ValueKey('bottom_nav_bar')),
+        findsNothing,
+        reason: 'Persistent bottom navigation bar must not be rendered',
+      );
+      expect(
+        find.byKey(const ValueKey('quick_add_bar')),
+        findsNothing,
+        reason: 'QuickAddBar must be hidden until the add button is pressed',
+      );
+
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'Daily meeting with team');
-      await tester.tap(find.text('Add'));
+      expect(
+        find.byType(FloatingActionButton),
+        findsNothing,
+        reason: 'Add button must disappear when QuickAddBar opens',
+      );
+      expect(
+        find.byKey(const ValueKey('quick_add_bar')),
+        findsOneWidget,
+        reason: 'Clicking the add button must show QuickAddBar at the bottom',
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('quick_add_input')),
+        'Daily meeting with team',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pumpAndSettle();
 
+      expect(
+        find.byKey(const ValueKey('quick_add_bar')),
+        findsNothing,
+        reason: 'Submitting a task must close QuickAddBar',
+      );
+      expect(
+        find.byType(FloatingActionButton),
+        findsOneWidget,
+        reason: 'Closing QuickAddBar must restore the add button',
+      );
       expect(
         find.text('Daily meeting with team'),
         findsOneWidget,
@@ -941,7 +976,7 @@ task t004 {
   );
 
   testWidgets(
-    'QuickAddBar renders input field, mutually exclusive Priority and Someday toggles, Advanced button, and enables Add only when text is entered',
+    'Clicking the add button replaces it with the inline QuickAddBar containing input, Priority, Someday, Categories, Locations, no-op Advanced, and Cancel buttons',
     (WidgetTester tester) async {
       final container = ProviderContainer(
         overrides: [
@@ -963,9 +998,32 @@ task t004 {
       );
       await tester.pumpAndSettle();
 
+      expect(
+        find.byKey(const ValueKey('bottom_nav_bar')),
+        findsNothing,
+        reason: 'Old bottom navigation bar must be removed',
+      );
+      expect(
+        find.byType(FloatingActionButton),
+        findsOneWidget,
+        reason: 'Only the circular add button must be visible initially',
+      );
+      expect(
+        find.byKey(const ValueKey('quick_add_bar')),
+        findsNothing,
+        reason: 'QuickAddBar must be hidden initially',
+      );
+
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
+      expect(
+        find.byType(FloatingActionButton),
+        findsNothing,
+        reason: 'Add button must disappear when clicked',
+      );
+
+      final barFinder = find.byKey(const ValueKey('quick_add_bar'));
       final inputFinder = find.byKey(const ValueKey('quick_add_input'));
       final priorityFinder = find.byKey(
         const ValueKey('quick_add_priority_button'),
@@ -973,179 +1031,147 @@ task t004 {
       final somedayFinder = find.byKey(
         const ValueKey('quick_add_someday_button'),
       );
+      final categoriesFinder = find.byKey(
+        const ValueKey('quick_add_categories_button'),
+      );
+      final locationsFinder = find.byKey(
+        const ValueKey('quick_add_locations_button'),
+      );
       final advancedFinder = find.byKey(
         const ValueKey('quick_add_advanced_button'),
       );
-      final submitFinder = find.byKey(
-        const ValueKey('quick_add_submit_button'),
+      final cancelFinder = find.byKey(
+        const ValueKey('quick_add_cancel_button'),
       );
 
+      expect(barFinder, findsOneWidget);
+      expect(inputFinder, findsOneWidget);
+      expect(priorityFinder, findsOneWidget);
+      expect(somedayFinder, findsOneWidget);
+      expect(categoriesFinder, findsOneWidget);
+      expect(locationsFinder, findsOneWidget);
+      expect(advancedFinder, findsOneWidget);
+      expect(cancelFinder, findsOneWidget);
+
+      final inputDx = tester.getTopLeft(inputFinder).dx;
+      final priorityDx = tester.getTopLeft(priorityFinder).dx;
+      final somedayDx = tester.getTopLeft(somedayFinder).dx;
+      final categoriesDx = tester.getTopLeft(categoriesFinder).dx;
+      final locationsDx = tester.getTopLeft(locationsFinder).dx;
+      final advancedDx = tester.getTopLeft(advancedFinder).dx;
+      final cancelDx = tester.getTopLeft(cancelFinder).dx;
+
       expect(
-        inputFinder,
-        findsOneWidget,
-        reason: 'QuickAddBar must render the task input field',
-      );
-      expect(
-        priorityFinder,
-        findsOneWidget,
-        reason: 'QuickAddBar must render the Priority toggle button',
-      );
-      expect(
-        somedayFinder,
-        findsOneWidget,
-        reason: 'QuickAddBar must render the Someday toggle button',
-      );
-      expect(
-        advancedFinder,
-        findsOneWidget,
-        reason: 'QuickAddBar must render the Advanced button',
-      );
-      expect(
-        submitFinder,
-        findsOneWidget,
-        reason: 'QuickAddBar must render the Add submit button',
-      );
-      expect(
-        find.widgetWithText(ChoiceChip, 'Ready'),
-        findsNothing,
-        reason: 'Old Ready tier chip must not appear in QuickAddBar',
-      );
-      expect(
-        find.widgetWithText(ChoiceChip, 'Blocked'),
-        findsNothing,
-        reason: 'Old Blocked tier chip must not appear in QuickAddBar',
+        inputDx < priorityDx &&
+            priorityDx < somedayDx &&
+            somedayDx < categoriesDx &&
+            categoriesDx < locationsDx &&
+            locationsDx < advancedDx &&
+            advancedDx < cancelDx,
+        isTrue,
+        reason: 'QuickAddBar items must be ordered left-to-right: input, priority, someday, categories, locations, advanced, cancel',
       );
 
-      FilledButton submitButton = tester.widget<FilledButton>(submitFinder);
-      expect(
-        submitButton.onPressed,
-        isNull,
-        reason: 'Add button must be disabled when input field is empty',
+      final priorityIconFinder = find.descendant(
+        of: priorityFinder,
+        matching: find.byType(Icon),
       );
-
-      await tester.enterText(inputFinder, '   ');
-      await tester.pump();
-      submitButton = tester.widget<FilledButton>(submitFinder);
-      expect(
-        submitButton.onPressed,
-        isNull,
-        reason: 'Add button must remain disabled when input is whitespace only',
-      );
-
-      ChoiceChip priorityChip = tester.widget<ChoiceChip>(priorityFinder);
-      ChoiceChip somedayChip = tester.widget<ChoiceChip>(somedayFinder);
-      expect(priorityChip.selected, isFalse);
-      expect(somedayChip.selected, isFalse);
-      expect(
-        priorityChip.backgroundColor,
-        equals(const Color(0xFF344FA1)),
-        reason: 'Priority chip unselected background must match landing page canvas color',
+      final somedayIconFinder = find.descendant(
+        of: somedayFinder,
+        matching: find.byType(Icon),
       );
       expect(
-        priorityChip.selectedColor,
-        equals(const Color(0xFFEB06FF)),
-        reason: 'Priority chip selected color must match landing page magenta accent',
-      );
-      expect(
-        somedayChip.backgroundColor,
-        equals(const Color(0xFF344FA1)),
-        reason: 'Someday chip unselected background must match landing page canvas color',
-      );
-      expect(
-        somedayChip.selectedColor,
-        equals(const Color(0xFF2196F3)),
-        reason:
-            'Someday chip selected color must match landing page blue accent',
-      );
-
-      final inputField = tester.widget<TextField>(inputFinder);
-      expect(
-        inputField.decoration?.fillColor,
-        equals(const Color(0xFF344FA1)),
-        reason: 'Task input fill color must match landing page canvas color',
-      );
-      expect(
-        inputField.style?.color,
-        equals(Colors.white),
-        reason: 'Task input text color must be white on dark navy background',
-      );
-      expect(
-        inputField.decoration?.hintStyle?.color,
+        tester.widget<Icon>(priorityIconFinder).color,
         equals(const Color(0xFF9BA8E5)),
-        reason:
-            'Task input hint color must match landing page muted label color',
+        reason: 'Priority icon must be muted when unselected',
+      );
+      expect(
+        tester.widget<Icon>(somedayIconFinder).color,
+        equals(const Color(0xFF9BA8E5)),
+        reason: 'Someday icon must be muted when unselected',
       );
 
       await tester.tap(priorityFinder);
       await tester.pump();
-      priorityChip = tester.widget<ChoiceChip>(priorityFinder);
-      somedayChip = tester.widget<ChoiceChip>(somedayFinder);
       expect(
-        priorityChip.selected,
-        isTrue,
-        reason: 'Tapping Priority must enable Priority',
+        tester.widget<Icon>(priorityIconFinder).color,
+        equals(const Color(0xFFEB06FF)),
+        reason: 'Tapping Priority must highlight the Priority button',
       );
       expect(
-        somedayChip.selected,
-        isFalse,
-        reason: 'Someday must remain off when Priority is enabled',
+        tester.widget<Icon>(somedayIconFinder).color,
+        equals(const Color(0xFF9BA8E5)),
+        reason: 'Someday must remain unselected when Priority is active',
       );
 
       await tester.tap(somedayFinder);
       await tester.pump();
-      priorityChip = tester.widget<ChoiceChip>(priorityFinder);
-      somedayChip = tester.widget<ChoiceChip>(somedayFinder);
       expect(
-        somedayChip.selected,
-        isTrue,
-        reason: 'Tapping Someday must enable Someday',
+        tester.widget<Icon>(somedayIconFinder).color,
+        equals(const Color(0xFF2196F3)),
+        reason: 'Tapping Someday must highlight the Someday button',
       );
       expect(
-        priorityChip.selected,
-        isFalse,
-        reason: 'Enabling Someday must automatically disable Priority',
+        tester.widget<Icon>(priorityIconFinder).color,
+        equals(const Color(0xFF9BA8E5)),
+        reason: 'Enabling Someday must automatically turn off Priority',
       );
 
-      await tester.tap(priorityFinder);
-      await tester.pump();
-      priorityChip = tester.widget<ChoiceChip>(priorityFinder);
-      somedayChip = tester.widget<ChoiceChip>(somedayFinder);
+      await tester.tap(advancedFinder);
+      await tester.pumpAndSettle();
       expect(
-        priorityChip.selected,
-        isTrue,
-        reason: 'Tapping Priority while Someday is active must enable Priority',
+        find.text('Extended Task View'),
+        findsNothing,
+        reason: 'Advanced button must be a no-op and not open an extended view',
       );
       expect(
-        somedayChip.selected,
-        isFalse,
-        reason: 'Enabling Priority must automatically disable Someday',
+        barFinder,
+        findsOneWidget,
+        reason: 'QuickAddBar must remain open after tapping Advanced',
       );
 
-      await tester.tap(priorityFinder);
+      await tester.enterText(inputFinder, 'Draft to cancel');
       await tester.pump();
-      priorityChip = tester.widget<ChoiceChip>(priorityFinder);
-      somedayChip = tester.widget<ChoiceChip>(somedayFinder);
+      await tester.tap(cancelFinder);
+      await tester.pumpAndSettle();
+
       expect(
-        priorityChip.selected,
-        isFalse,
-        reason: 'Tapping active Priority must toggle it off',
+        barFinder,
+        findsNothing,
+        reason: 'Tapping Cancel must close QuickAddBar',
       );
-      expect(somedayChip.selected, isFalse);
+      expect(
+        find.byType(FloatingActionButton),
+        findsOneWidget,
+        reason: 'Tapping Cancel must restore the add button',
+      );
+      expect(
+        container.read(taskNotifierProvider).value!.focus,
+        isEmpty,
+        reason: 'Cancelling must not add a task',
+      );
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
 
       await tester.tap(somedayFinder);
       await tester.pump();
       await tester.enterText(inputFinder, 'Future idea');
       await tester.pump();
 
-      submitButton = tester.widget<FilledButton>(submitFinder);
-      expect(
-        submitButton.onPressed,
-        isNotNull,
-        reason: 'Add button must be enabled when non-empty text is entered',
-      );
-
-      await tester.tap(submitFinder);
+      await tester.tap(find.byKey(const ValueKey('quick_add_submit_button')));
       await tester.pumpAndSettle();
+
+      expect(
+        barFinder,
+        findsNothing,
+        reason: 'Submitting a task must close QuickAddBar',
+      );
+      expect(
+        find.byType(FloatingActionButton),
+        findsOneWidget,
+        reason: 'Submitting a task must restore the add button',
+      );
 
       final boardAfterSomeday = container.read(taskNotifierProvider).value!;
       expect(
@@ -1154,122 +1180,6 @@ task t004 {
         reason: 'Submitting with Someday active must add task to Someday tier',
       );
       expect(boardAfterSomeday.focus, isEmpty);
-    },
-  );
-
-  testWidgets(
-    'QuickAddBar Advanced button opens extended view where subtasks can be defined, removed, and saved',
-    (WidgetTester tester) async {
-      final container = ProviderContainer(
-        overrides: [
-          settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(
-              const WebDavConfig(language: AppLanguage.english),
-            ),
-          ),
-          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
-        ],
-      );
-      addTearDown(container.dispose);
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const TierTaskApp(),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byType(FloatingActionButton));
-      await tester.pumpAndSettle();
-
-      final inputFinder = find.byKey(const ValueKey('quick_add_input'));
-      await tester.enterText(inputFinder, 'Deploy release');
-      await tester.tap(find.byKey(const ValueKey('quick_add_priority_button')));
-      await tester.pump();
-
-      await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Extended Task View'),
-        findsOneWidget,
-        reason: 'Tapping Advanced must open the extended task creation view',
-      );
-      expect(
-        find.text('Subtasks'),
-        findsOneWidget,
-        reason: 'Extended view must display the Subtasks section',
-      );
-
-      final subtaskInputFinder = find.byKey(
-        const ValueKey('quick_add_subtask_input'),
-      );
-      final subtaskAddFinder = find.byKey(
-        const ValueKey('quick_add_subtask_add_button'),
-      );
-      expect(subtaskInputFinder, findsOneWidget);
-      expect(subtaskAddFinder, findsOneWidget);
-
-      final subtaskField = tester.widget<TextField>(subtaskInputFinder);
-      expect(
-        subtaskField.decoration?.fillColor,
-        equals(const Color(0xFF344FA1)),
-        reason: 'Subtask input fill color must match landing page canvas color',
-      );
-      expect(
-        subtaskField.style?.color,
-        equals(Colors.white),
-        reason:
-            'Subtask input text color must be white on dark navy background',
-      );
-
-      await tester.enterText(subtaskInputFinder, 'Run test suite');
-      await tester.pump();
-      await tester.tap(subtaskAddFinder);
-      await tester.pump();
-
-      await tester.enterText(subtaskInputFinder, 'Draft temporary notes');
-      await tester.pump();
-      await tester.tap(subtaskAddFinder);
-      await tester.pump();
-
-      await tester.enterText(subtaskInputFinder, 'Tag git release');
-      await tester.pump();
-      await tester.tap(subtaskAddFinder);
-      await tester.pump();
-
-      expect(find.text('Run test suite'), findsOneWidget);
-      expect(find.text('Draft temporary notes'), findsOneWidget);
-      expect(find.text('Tag git release'), findsOneWidget);
-
-      await tester.tap(
-        find.byKey(const ValueKey('quick_add_remove_subtask_1')),
-      );
-      await tester.pump();
-      expect(
-        find.text('Draft temporary notes'),
-        findsNothing,
-        reason: 'Removing a subtask in extended view must delete it from list',
-      );
-
-      await tester.tap(find.byKey(const ValueKey('quick_add_submit_button')));
-      await tester.pumpAndSettle();
-
-      final board = container.read(taskNotifierProvider).value!;
-      expect(board.focus.length, equals(1));
-      final createdTask = board.focus.first;
-      expect(createdTask.title, equals('Deploy release'));
-      expect(
-        createdTask.isPriority,
-        isTrue,
-        reason: 'Task created with Priority enabled must set isPriority true',
-      );
-      expect(
-        createdTask.subtasks.map((subtask) => subtask.title),
-        equals(['Run test suite', 'Tag git release']),
-        reason: 'Created task must store the defined subtasks in order',
-      );
     },
   );
 
@@ -1451,7 +1361,7 @@ task t004 {
   );
 
   testWidgets(
-    'QuickAddBar allows selecting multiple locations and multiple categories when creating a task',
+    'QuickAddBar Categories and Locations buttons expand upward menus to select multiple categories and locations',
     (WidgetTester tester) async {
       const seededContextsTdf = '''
 location home {
@@ -1504,34 +1414,144 @@ category c_hr {
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
-      final catItChip = find.byKey(const ValueKey('quick_add_category_c_it'));
-      final catOpsChip = find.byKey(const ValueKey('quick_add_category_c_ops'));
-      final catHrChip = find.byKey(const ValueKey('quick_add_category_c_hr'));
-      final locHomeChip = find.byKey(const ValueKey('quick_add_location_home'));
-      final locOfficeChip = find.byKey(
-        const ValueKey('quick_add_location_office'),
+      final barFinder = find.byKey(const ValueKey('quick_add_bar'));
+      final categoriesButton = find.byKey(
+        const ValueKey('quick_add_categories_button'),
+      );
+      final locationsButton = find.byKey(
+        const ValueKey('quick_add_locations_button'),
+      );
+      final categoriesMenu = find.byKey(
+        const ValueKey('quick_add_categories_menu'),
+      );
+      final locationsMenu = find.byKey(
+        const ValueKey('quick_add_locations_menu'),
       );
 
-      expect(catItChip, findsOneWidget);
-      expect(catOpsChip, findsOneWidget);
-      expect(catHrChip, findsOneWidget);
-      expect(locHomeChip, findsOneWidget);
-      expect(locOfficeChip, findsOneWidget);
+      expect(
+        categoriesMenu,
+        findsNothing,
+        reason: 'Categories upward menu must be closed initially',
+      );
+      expect(
+        locationsMenu,
+        findsNothing,
+        reason: 'Locations upward menu must be closed initially',
+      );
 
-      await tester.tap(catItChip);
+      await tester.tap(categoriesButton);
+      await tester.pumpAndSettle();
+
+      expect(
+        categoriesMenu,
+        findsOneWidget,
+        reason:
+            'Tapping Categories button must expand the categories menu upward',
+      );
+      expect(
+        locationsMenu,
+        findsNothing,
+        reason: 'Locations menu must remain closed when Categories is open',
+      );
+      expect(
+        tester.getBottomLeft(categoriesMenu).dy <=
+            tester.getTopLeft(barFinder).dy + 4.0,
+        isTrue,
+        reason: 'Categories menu must expand upward above QuickAddBar',
+      );
+      expect(
+        tester.widget<Material>(categoriesMenu).clipBehavior,
+        equals(Clip.antiAlias),
+        reason: 'Categories menu Material must clip ink highlights to its rounded border',
+      );
+
+      final catItOption = find.byKey(const ValueKey('quick_add_category_c_it'));
+      final catOpsOption = find.byKey(
+        const ValueKey('quick_add_category_c_ops'),
+      );
+      final catHrOption = find.byKey(const ValueKey('quick_add_category_c_hr'));
+      expect(catItOption, findsOneWidget);
+      expect(catOpsOption, findsOneWidget);
+      expect(catHrOption, findsOneWidget);
+
+      final catItInkWell = tester.widget<InkWell>(
+        find.descendant(of: catItOption, matching: find.byType(InkWell)),
+      );
+      expect(
+        catItInkWell.borderRadius,
+        isNotNull,
+        reason: 'Category option InkWell must define a borderRadius so press/focus highlight does not overlap rounded corners',
+      );
+
+      await tester.tap(catItOption);
       await tester.pump();
-      await tester.tap(catOpsChip);
-      await tester.pump();
-      await tester.tap(locHomeChip);
-      await tester.pump();
-      await tester.tap(locOfficeChip);
+      await tester.tap(catOpsOption);
       await tester.pump();
 
-      expect(tester.widget<FilterChip>(catItChip).selected, isTrue);
-      expect(tester.widget<FilterChip>(catOpsChip).selected, isTrue);
-      expect(tester.widget<FilterChip>(catHrChip).selected, isFalse);
-      expect(tester.widget<FilterChip>(locHomeChip).selected, isTrue);
-      expect(tester.widget<FilterChip>(locOfficeChip).selected, isTrue);
+      await tester.tap(find.text("What's up!"));
+      await tester.pumpAndSettle();
+      expect(
+        categoriesMenu,
+        findsNothing,
+        reason: 'Tapping outside the Categories menu must close it',
+      );
+
+      await tester.tap(locationsButton);
+      await tester.pumpAndSettle();
+
+      expect(
+        categoriesMenu,
+        findsNothing,
+        reason: 'Opening Locations menu must keep Categories menu closed',
+      );
+      expect(
+        locationsMenu,
+        findsOneWidget,
+        reason:
+            'Tapping Locations button must expand the locations menu upward',
+      );
+      expect(
+        tester.getBottomLeft(locationsMenu).dy <=
+            tester.getTopLeft(barFinder).dy + 4.0,
+        isTrue,
+        reason: 'Locations menu must expand upward above QuickAddBar',
+      );
+      expect(
+        tester.widget<Material>(locationsMenu).clipBehavior,
+        equals(Clip.antiAlias),
+        reason: 'Locations menu Material must clip ink highlights to its rounded border',
+      );
+
+      final locHomeOption = find.byKey(
+        const ValueKey('quick_add_location_home'),
+      );
+      final locOfficeOption = find.byKey(
+        const ValueKey('quick_add_location_office'),
+      );
+      expect(locHomeOption, findsOneWidget);
+      expect(locOfficeOption, findsOneWidget);
+
+      final locHomeInkWell = tester.widget<InkWell>(
+        find.descendant(of: locHomeOption, matching: find.byType(InkWell)),
+      );
+      expect(
+        locHomeInkWell.borderRadius,
+        isNotNull,
+        reason: 'Location option InkWell must define a borderRadius so press/focus highlight does not overlap rounded corners',
+      );
+
+      await tester.tap(locHomeOption);
+      await tester.pump();
+      await tester.tap(locOfficeOption);
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('quick_add_input')));
+      await tester.pumpAndSettle();
+      expect(
+        locationsMenu,
+        findsNothing,
+        reason: 'Tapping outside the Locations menu must close it',
+      );
 
       await tester.enterText(
         find.byKey(const ValueKey('quick_add_input')),
@@ -1797,9 +1817,9 @@ task b_done {
   );
 
   testWidgets(
-    'Bottom button bar highlights active icon without dot indicator and opens upward selection for Ready, Planned, Blocked (including suspended), Someday, and Completed',
+    'Navigation drawer opens secondary tier sheets for Ready, Planned, Blocked (including suspended), Someday, and Completed without a bottom navigation bar',
     (WidgetTester tester) async {
-      const bottomBarTdf = '''
+      const secondaryTiersTdf = '''
 task f1 {
   name "Focus Task 1"
   created 2026-11-01 07:00
@@ -1880,7 +1900,7 @@ task cmp1 {
             localFileRepositoryProvider.overrideWith(
               (ref) => _FakeLocalFileRepository(
                 config: const WebDavConfig(language: AppLanguage.english),
-                initialTdf: bottomBarTdf,
+                initialTdf: secondaryTiersTdf,
               ),
             ),
             clockProvider.overrideWithValue(
@@ -1892,201 +1912,32 @@ task cmp1 {
       );
       await tester.pumpAndSettle();
 
-      final bottomBarFinder = find.byKey(const ValueKey('bottom_nav_bar'));
-      final focusButtonFinder = find.byKey(
-        const ValueKey('bottom_nav_focus_button'),
-      );
-      final tiersButtonFinder = find.byKey(
-        const ValueKey('bottom_nav_tiers_button'),
-      );
-      final indicatorDotFinder = find.byKey(
-        const ValueKey('bottom_nav_indicator_dot'),
-      );
-      final upwardMenuFinder = find.byKey(const ValueKey('upward_tier_menu'));
-
       expect(
-        bottomBarFinder,
-        findsOneWidget,
-        reason: 'Bottom navigation bar must render on the landing page',
-      );
-      expect(
-        focusButtonFinder,
-        findsOneWidget,
-        reason:
-            'First button in the bottom bar must be the Focus overview button',
-      );
-      expect(
-        tiersButtonFinder,
-        findsOneWidget,
-        reason: 'Second button in the bottom bar must be the upward tier selector button',
-      );
-      expect(
-        indicatorDotFinder,
+        find.byKey(const ValueKey('bottom_nav_bar')),
         findsNothing,
-        reason: 'Bottom bar must not render a dot indicator',
+        reason: 'Bottom navigation bar must be removed',
       );
       expect(
-        upwardMenuFinder,
-        findsNothing,
-        reason: 'Upward tier selection menu must be closed initially',
+        find.byType(FloatingActionButton),
+        findsOneWidget,
+        reason: 'Only the add button must be displayed at the bottom',
       );
 
-      final focusIconFinder = find.descendant(
-        of: focusButtonFinder,
-        matching: find.byType(Icon),
-      );
-      final tiersIconFinder = find.descendant(
-        of: tiersButtonFinder,
-        matching: find.byType(Icon),
-      );
-      expect(
-        tester.widget<Icon>(focusIconFinder).color,
-        equals(const Color(0xFF2196F3)),
-        reason: 'Focus button icon must be highlighted initially',
-      );
-      expect(
-        tester.widget<Icon>(tiersIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
-        reason: 'Secondary tiers button icon must be inactive initially',
-      );
-
-      await tester.tap(tiersButtonFinder);
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Blocked'));
       await tester.pumpAndSettle();
 
-      expect(
-        upwardMenuFinder,
-        findsOneWidget,
-        reason: 'Tapping the second button must open the upward tier selection menu',
-      );
-      final menuBottomDy = tester.getBottomLeft(upwardMenuFinder).dy;
-      final barTopDy = tester.getTopLeft(bottomBarFinder).dy;
-      expect(
-        menuBottomDy <= barTopDy + 4.0,
-        isTrue,
-        reason:
-            'Tier selection menu must open upward above the bottom button bar',
-      );
-
-      expect(
-        find.byKey(const ValueKey('upward_tier_option_ready')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('upward_tier_option_planned')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('upward_tier_option_blocked')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('upward_tier_option_someday')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('upward_tier_option_completed')),
-        findsOneWidget,
-      );
-
-      await tester.tap(find.byKey(const ValueKey('upward_tier_option_ready')));
-      await tester.pumpAndSettle();
-
-      expect(
-        upwardMenuFinder,
-        findsNothing,
-        reason: 'Selecting Ready must close the upward menu',
-      );
-      expect(
-        find.text('Ready Task 1'),
-        findsOneWidget,
-        reason: 'Selecting Ready must display Ready tasks',
-      );
-      expect(
-        tester.widget<Icon>(focusIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
-        reason: 'Focus button icon must be inactive when Ready is selected',
-      );
-      expect(
-        tester.widget<Icon>(tiersIconFinder).color,
-        equals(const Color(0xFF2196F3)),
-        reason: 'Secondary tiers button icon must be highlighted when Ready is selected',
-      );
-
-      await tester.tap(tiersButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('upward_tier_option_planned')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Planned Backlog Task'),
-        findsOneWidget,
-        reason: 'Selecting Planned must display Planned tasks',
-      );
-
-      await tester.tap(tiersButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('upward_tier_option_blocked')),
-      );
-      await tester.pumpAndSettle();
       expect(
         find.text('Blocked Prerequisite Task'),
         findsOneWidget,
-        reason: 'Selecting Blocked must display tasks blocked by prerequisites',
+        reason:
+            'Blocked tier sheet must display tasks blocked by prerequisites',
       );
       expect(
         find.text('Suspended Deferred Task'),
         findsOneWidget,
-        reason: 'Selecting Blocked must also display suspended tasks',
-      );
-
-      await tester.tap(tiersButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('upward_tier_option_someday')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Someday Idea Task'),
-        findsOneWidget,
-        reason: 'Selecting Someday must display Someday tasks',
-      );
-
-      await tester.tap(tiersButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('upward_tier_option_completed')),
-      );
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Completed Archive Task'),
-        findsOneWidget,
-        reason: 'Selecting Completed must display Completed tasks',
-      );
-
-      await tester.tap(focusButtonFinder);
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text("What's up!"),
-        findsOneWidget,
-        reason: 'Tapping the first button must return to the Focus overview',
-      );
-      expect(
-        find.text('Focus Task 1'),
-        findsOneWidget,
-        reason: 'Focus overview must display Focus tasks again',
-      );
-      expect(
-        tester.widget<Icon>(focusIconFinder).color,
-        equals(const Color(0xFF2196F3)),
-        reason: 'Focus button icon must be highlighted again when Focus overview is active',
-      );
-      expect(
-        tester.widget<Icon>(tiersIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
-        reason: 'Secondary tiers button icon must be inactive when Focus overview is active',
+        reason: 'Blocked tier sheet must also display suspended tasks',
       );
     },
   );
