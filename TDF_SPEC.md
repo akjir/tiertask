@@ -71,7 +71,7 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 #### A. Bare Word (Unquoted Token)
 - A contiguous sequence of one or more valid UTF-8 characters excluding horizontal whitespace (`' '`, `'\t'`), newlines (`\r`, `\n`), and reserved punctuation (`{`, `}`, '#', `"`, `'`).
-- Bare words are used for single-word values without spaces, including entity IDs (`t001`, `taxes2026`, `haushalt`, `it`), header flags (`priority`, `auto-finish`), condition rule keywords (`day`, `time`, `location`, `any`), weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), boolean literals (`true`, `false`), numbers (`50.9787`, `11.0328`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:00`).
+- Bare words are used for single-word values without spaces, including entity IDs (`t001`, `taxes2026`, `home`, `it`), header flags (`priority`, `auto-finish`), condition rule keywords (`day`, `time`, `location`, `any`), weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), boolean literals (`true`, `false`), numbers (`50.9787`, `11.0328`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:00`).
 
 #### B. Double-Quoted String (`"..."`)
 - Begins and ends with `"` (`U+0022`).
@@ -93,7 +93,7 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 ### 2.8 Primitive Domain Value Types
 At the semantic validation layer, directive and header arguments map to the following primitive types:
-- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `haushalt`, `it`) are equally valid when authored manually.
+- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `it`) are equally valid when authored manually.
 - **Boolean (`<bool>`):** Exact case-sensitive bare word `true` or `false`.
 - **Weekday (`<weekday>`):** Exact case-sensitive lowercase bare word from the set `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
 - **Time of Day (`<time>`):** 24-hour minute-precision time written as `<HH:MM>` (e.g., `08:00`, `18:00`), where `HH` is `00..23` and `MM` is `00..59`.
@@ -122,7 +122,7 @@ A **Block** groups related directives and optional nested sub-blocks under a nam
 ```
 
 - **Block Header:** Consists of an Identifier, followed by one or more whitespace-separated Arguments (or zero arguments for parameterless sub-blocks such as `subtasks {` and `condition {`), followed by the opening brace `{`.
-- **Opening Brace Placement:** The opening brace `{` MUST appear on the same line as the block Identifier and its arguments, separated from the preceding token by at least one horizontal whitespace character (e.g., `task t001 {`, `task t001 priority {`, `label haushalt {`, `subtasks auto-finish {`, or `condition {`).
+- **Opening Brace Placement:** The opening brace `{` MUST appear on the same line as the block Identifier and its arguments, separated from the preceding token by at least one horizontal whitespace character (e.g., `task t001 {`, `task t001 priority {`, `label home {`, `subtasks auto-finish {`, or `condition {`).
 - **After Opening Brace:** Only optional horizontal whitespace and an optional `#` comment may follow `{` before the line terminator (`\n` or `\r\n`), except for an empty inline block `{}`.
 - **Block Body:** Contains zero or more statements (Directives or nested Blocks), each on its own logical line.
 - **Closing Brace Placement:** A non-empty block is closed by `}` on its own logical line (preceded only by optional horizontal whitespace and followed only by optional horizontal whitespace, an optional `#` comment, and a newline or `EOF`).
@@ -258,7 +258,7 @@ label <id> {
 
 | Directive / Sub-Block | Required | Multiplicity | Format / Arguments | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `name` | Yes | `1` | `"<text>"` | Human-readable display name of the label (e.g., `"Haushalt"`). |
+| `name` | Yes | `1` | `"<text>"` | Human-readable display name of the label (e.g., `"Home & Garden"`). |
 | `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the label. |
 | `note` | No | `0..1` | `"<text>"` | Optional description of the label. |
 | `condition` | No | `0..N` | `<type> <args...>` or `{ ... }` | Optional activation conditions (`day`, `time`, `location`) inherited by tasks carrying this label (see Section 4.3). |
@@ -431,8 +431,8 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-label haushalt {
-    name "Haushalt"
+label home {
+    name "Home & Garden"
 
     condition {
         location 50.9787 11.0328 150
@@ -453,38 +453,38 @@ label it {
 }
 
 # Prioritized task inheriting location (50.9787 11.0328 150) and day (sat sun)
-# from 'haushalt', while overriding 'time' to 09:00..18:00:
+# from 'home', while overriding 'time' to 09:00..18:00:
 task t001 priority {
-    name      "Rasen mähen"
-    note      "Vorher Benzin prüfen"
+    name      "Mow the lawn"
+    note      "Check fuel level before starting"
     created   2026-11-01 19:30
     queued    2026-11-01 19:30
-    labels    haushalt
+    labels    home
     blocked   t002
     suspended 2026-11-05
     condition time 09:00 18:00
 
     subtasks auto-finish {
-        step false "Rasenmäher aus dem Schuppen holen"
-        step true  "Grasfangkorb leeren"
+        step false "Get lawnmower from the shed"
+        step true  "Empty grass catcher bag"
     }
 }
 
-# Prerequisite task in 'haushalt' that clears the inherited GPS location rule:
+# Prerequisite task in 'home' that clears the inherited GPS location rule:
 task t002 {
-    name      "Rasenmäher-Ersatzmesser online bestellen"
+    name      "Order replacement lawnmower blades online"
     created   2026-11-01 18:00
     queued    2026-11-01 18:00
-    labels    haushalt
+    labels    home
     condition location any
 }
 
 # Task assigned to multiple labels with multiple condition rules:
 task t003 {
-    name    "NAS-Festplatten entstauben"
+    name    "Clean dust filters on home NAS server"
     created 2026-11-01 10:00
     queued  2026-11-01 10:00
-    labels  haushalt it
+    labels  home it
 
     condition {
         day  sat
@@ -494,17 +494,17 @@ task t003 {
 
 # Task in "Someday" (no 'queued' directive present)
 task t004 {
-    name    "3D-gedrucktes NAS-Gehäuse entwerfen"
+    name    "Design 3D-printed enclosure for backup NAS"
     created 2026-11-01 12:00
     labels  it
 }
 
 # Completed task ('finished' is set -> deleted after 30 days)
 task t005 {
-    name     "Winterreifen montieren"
+    name     "Mount winter tires"
     created  2026-10-20 14:00
     queued   2026-10-21 08:00
     finished 2026-10-29 16:45
-    labels   haushalt
+    labels   home
 }
 ```
