@@ -74,6 +74,11 @@ task t002 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text("What's up!"),
+        findsOneWidget,
+        reason: 'Landing page must display default greeting when no label is selected',
+      );
+      expect(
         find.text('Prepare quarterly report'),
         findsOneWidget,
         reason: 'Focus task must render on the landing page',
@@ -154,6 +159,16 @@ task t002 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text("What's up!"),
+        findsNothing,
+        reason: 'Selecting a label must replace the default greeting with the label name',
+      );
+      expect(
+        find.text('Business'),
+        findsOneWidget,
+        reason: 'Selected label name must be displayed at the top instead of the default greeting',
+      );
+      expect(
         find.text('Prepare quarterly report'),
         findsOneWidget,
         reason: 'Selecting Business label in drawer must show Business tasks',
@@ -169,6 +184,17 @@ task t002 {
       await tester.tap(businessTileFinder);
       await tester.pumpAndSettle();
 
+      expect(
+        find.text("What's up!"),
+        findsOneWidget,
+        reason: 'Clearing the selected label filter must restore the default greeting',
+      );
+      expect(
+        find.text('Business'),
+        findsNothing,
+        reason:
+            'Cleared label name must no longer be displayed as the top header',
+      );
       expect(
         find.text('Water garden plants'),
         findsOneWidget,

@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added Linux, Android, and Windows platform support for the 6-tier task board.
 
 ### Changed
+- Changed `_TierPaneHeader` on `HomeScreen` (`lib/ui/home_screen.dart`) to display the selected label's name instead of the default greeting (`What's up!` / `Was steht an!`) whenever a label filter is active.
 - Changed `TdfService.parse`, domain models (`TdfLabel`, `TaskItem.labelIds`, `TaskBoard.labels`), Riverpod providers (`TaskNotifier`), UI widgets (`QuickAddBar`, `TaskEditorDialog`), and localization bundles (`app_en.arb`, `app_de.arb`) to unify `category` and `location` into `label` and automatically migrate legacy `category` / `location` (`gps`) blocks and `categories` / `locations` directives to `tdf 0.2.0` `label` / `labels` on parse and save.
 - Changed task pill cards (`_TierTaskPill`) so only the leading completion circle and the right-side edit button are clickable (rather than the entire task card), and added a full-height 3px vertical gap matching the screen background before the edit button.
 - Changed all 6 tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) on `HomeScreen` to share the same layout and visual styling as the `Focus` landing screen, displaying the top greeting (`What's up!` / `Was steht an!`), uppercase tier section heading, minimalist task pill cards (`_TierTaskPill`), and empty-state card (`_EmptyTierCard`), with left drawer tier items navigating directly to the corresponding `PageView` panel.

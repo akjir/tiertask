@@ -390,7 +390,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final boardAsync = ref.watch(taskNotifierProvider);
     final board = boardAsync.asData?.value ?? TaskBoard.empty();
-    final effectiveLabelId = _resolveEffectiveLabelId(board);
+    final activeLabel = _resolveActiveLabel(board);
     final evaluationTime = ref.watch(clockProvider)();
     final syncState = ref.watch(syncStateProvider);
     final showSyncAction = ref.watch(
@@ -403,7 +403,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     return Scaffold(
       backgroundColor: _canvasColor,
       drawer: _LandingDrawer(
-        activeLabelId: effectiveLabelId,
+        activeLabelId: activeLabel?.id,
         board: board,
         onOpenEditLabels: (autofocusCreate) =>
             _openEditLabels(context, autofocusCreate: autofocusCreate),
@@ -435,7 +435,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           : null,
       body: SafeArea(
         child: _LandingScaffoldBody(
-          activeLabelId: effectiveLabelId,
+          activeLabel: activeLabel,
           activeTier: _activeTier,
           boardAsync: boardAsync,
           errorMessage: syncState.errorMessage,
@@ -504,15 +504,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
 
-  /// Returns [_activeLabelId] when it still exists in [board.labels], or `null` otherwise.
-  String? _resolveEffectiveLabelId(TaskBoard board) {
+  /// Returns the selected [TdfLabel] when [_activeLabelId] still exists in [board.labels], or `null` otherwise.
+  TdfLabel? _resolveActiveLabel(TaskBoard board) {
     final currentId = _activeLabelId;
     if (currentId == null) {
       return null;
     }
     for (final label in board.labels) {
       if (label.id == currentId) {
-        return currentId;
+        return label;
       }
     }
     return null;
@@ -588,7 +588,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 class _LandingContentSwitcher extends StatelessWidget {
   /// Creates a [_LandingContentSwitcher].
   const _LandingContentSwitcher({
-    required this.activeLabelId,
+    required this.activeLabel,
     required this.boardAsync,
     required this.evaluationTime,
     required this.pageController,
@@ -598,8 +598,8 @@ class _LandingContentSwitcher extends StatelessWidget {
     required this.onRetry,
   });
 
-  /// Optional active label filter ID.
-  final String? activeLabelId;
+  /// Currently selected label filter, or `null` when unfiltered.
+  final TdfLabel? activeLabel;
 
   /// Asynchronous board state.
   final AsyncValue<TaskBoard> boardAsync;
@@ -633,9 +633,10 @@ class _LandingContentSwitcher extends StatelessWidget {
         onOpenSettings: onOpenSettings,
       ),
       data: (board) {
-        final effectiveBoard = activeLabelId != null
+        final label = activeLabel;
+        final effectiveBoard = label != null
             ? board.evaluateForContext(
-                activeLabelId: activeLabelId,
+                activeLabelId: label.id,
                 evaluationTime: evaluationTime,
               )
             : board;
@@ -644,6 +645,7 @@ class _LandingContentSwitcher extends StatelessWidget {
           itemCount: TaskTier.values.length,
           onPageChanged: onPageChanged,
           itemBuilder: (context, index) => _TierScrollView(
+            activeLabelName: label?.name,
             board: effectiveBoard,
             searchQuery: searchQuery,
             tier: TaskTier.values[index],
@@ -732,7 +734,7 @@ class _LandingDrawer extends StatelessWidget {
 class _LandingScaffoldBody extends StatelessWidget {
   /// Creates a [_LandingScaffoldBody].
   const _LandingScaffoldBody({
-    required this.activeLabelId,
+    required this.activeLabel,
     required this.activeTier,
     required this.boardAsync,
     required this.errorMessage,
@@ -753,8 +755,8 @@ class _LandingScaffoldBody extends StatelessWidget {
     required this.onToggleSearch,
   });
 
-  /// Currently selected label filter ID, or `null` when unfiltered.
-  final String? activeLabelId;
+  /// Currently selected label filter, or `null` when unfiltered.
+  final TdfLabel? activeLabel;
 
   /// Currently selected [TaskTier] pane.
   final TaskTier activeTier;
@@ -828,7 +830,7 @@ class _LandingScaffoldBody extends StatelessWidget {
           _SyncErrorBanner(message: activeError, onDismiss: onClearError),
         Expanded(
           child: _LandingContentSwitcher(
-            activeLabelId: activeLabelId,
+            activeLabel: activeLabel,
             boardAsync: boardAsync,
             evaluationTime: evaluationTime,
             pageController: pageController,
@@ -998,10 +1000,13 @@ class _SyncErrorBanner extends StatelessWidget {
   }
 }
 
-/// Header block inside [_TierScrollView] displaying the greeting and uppercase tier section label.
+/// Header block inside [_TierScrollView] displaying the active label name or greeting and uppercase tier section label.
 class _TierPaneHeader extends StatelessWidget {
   /// Creates a [_TierPaneHeader].
-  const _TierPaneHeader({required this.tier});
+  const _TierPaneHeader({required this.activeLabelName, required this.tier});
+
+  /// Active label display name when a label filter is selected, or `null` for the default greeting.
+  final String? activeLabelName;
 
   /// Active [TaskTier] pane.
   final TaskTier tier;
@@ -1013,7 +1018,7 @@ class _TierPaneHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          localizations.landingGreeting,
+          activeLabelName ?? localizations.landingGreeting,
           style: const TextStyle(
             color: Colors.white,
             fontSize: 32,
@@ -1029,14 +1034,18 @@ class _TierPaneHeader extends StatelessWidget {
   }
 }
 
-/// Scrollable tier pane body rendering the greeting, uppercase section label, and minimalist task pills.
+/// Scrollable tier pane body rendering the active label name or greeting, uppercase section label, and minimalist task pills.
 class _TierScrollView extends StatelessWidget {
   /// Creates a [_TierScrollView].
   const _TierScrollView({
+    required this.activeLabelName,
     required this.board,
     required this.searchQuery,
     required this.tier,
   });
+
+  /// Active label display name when a label filter is selected, or `null` when unfiltered.
+  final String? activeLabelName;
 
   /// Current task board snapshot.
   final TaskBoard board;
@@ -1058,7 +1067,7 @@ class _TierScrollView extends StatelessWidget {
       itemCount: tasks.isEmpty ? 2 : tasks.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) {
-          return _TierPaneHeader(tier: tier);
+          return _TierPaneHeader(activeLabelName: activeLabelName, tier: tier);
         }
         if (tasks.isEmpty) {
           return _EmptyTierCard(message: localizations.tierEmptyHint(tier));
