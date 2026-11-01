@@ -37,7 +37,7 @@ class TaskItem {
   /// Whether the task is marked as completed (`[x]`).
   final bool isCompleted;
 
-  /// Completion date (`YYYY-MM-DD`) when located in `# Erledigt`.
+  /// Completion date (`YYYY-MM-DD`) when located in Tier 6 (`# [6] Completed`).
   final DateTime? completedAt;
 
   /// Returns a copy of this task with the provided fields updated.
@@ -90,9 +90,9 @@ class TaskItem {
   }
 
   /// Serializes this task into a single Markdown list item line.
-  String toMarkdownLine({required bool inErledigt}) {
+  String toMarkdownLine({required bool inCompleted}) {
     final cleanTitle = title.trim();
-    if (inErledigt || isCompleted) {
+    if (inCompleted || isCompleted) {
       if (completedAt case final completionDate?) {
         return '- [x] ${formatIsoDate(completionDate)} $cleanTitle';
       }
@@ -163,5 +163,5 @@ class TaskItem {
   );
 
   @override
-  String toString() => toMarkdownLine(inErledigt: isCompleted);
+  String toString() => toMarkdownLine(inCompleted: isCompleted);
 }

@@ -1,0 +1,166 @@
+{
+  "@@locale": "en",
+  "appTitle": "TierTask (T2)",
+  "tier1Name": "Focus",
+  "tier2Name": "Ready",
+  "tier3Name": "Planned",
+  "tier4Name": "Blocked",
+  "tier5Name": "Someday",
+  "tier6Name": "Completed",
+  "tier1Description": "Active top priority (Soft limit: 3)",
+  "tier2Description": "Ready for Focus (Soft limit: 5)",
+  "tier3Description": "Active backlog (automatically pulls into Ready)",
+  "tier4Description": "Waiting on external events or third parties",
+  "tier5Description": "Idea storage without automatic pull",
+  "tier6Description": "Completed tasks (30-day retention)",
+  "tabFocusAndReady": "[1] Focus & [2] Ready",
+  "emptyFocusHint": "No tasks in # [1] Focus. Tasks from # [2] Ready or # [3] Planned automatically move up here.",
+  "emptyReadyHint": "No tasks in # [2] Ready.",
+  "emptyPlannedHint": "No tasks in active backlog (# [3] Planned).",
+  "emptyBlockedHint": "No blocked tasks (# [4] Blocked).",
+  "emptySomedayHint": "No ideas stored in # [5] Someday.",
+  "emptyCompletedHint": "No completed tasks from the last 30 days.",
+  "emptySectionEntries": "No entries in {heading}.",
+  "@emptySectionEntries": {
+    "placeholders": {
+      "heading": {
+        "type": "String"
+      }
+    }
+  },
+  "tooltipSyncWebDav": "Synchronize with WebDAV",
+  "tooltipMarkdownPreview": "Show Markdown preview",
+  "tooltipSettings": "Settings",
+  "markdownPreviewTitle": "Raw Markdown (Single Source of Truth)",
+  "actionClose": "Close",
+  "unconfiguredBannerText": "Local mode active. Configure WebDAV for synchronization.",
+  "actionConfigure": "Configure",
+  "syncErrorTitle": "WebDAV Synchronization Error",
+  "actionSettings": "Settings",
+  "actionRetry": "Retry",
+  "defaultTierChipLabel": "{heading} (Default)",
+  "@defaultTierChipLabel": {
+    "placeholders": {
+      "heading": {
+        "type": "String"
+      }
+    }
+  },
+  "quickAddHint": "Add new task to {heading}...",
+  "@quickAddHint": {
+    "placeholders": {
+      "heading": {
+        "type": "String"
+      }
+    }
+  },
+  "actionAdd": "Add",
+  "restoreTaskTitle": "Restore Task",
+  "moveTaskTitle": "Move Task",
+  "selectTargetTierSubtitle": "\"{taskTitle}\" - Select target tier:",
+  "@selectTargetTierSubtitle": {
+    "placeholders": {
+      "taskTitle": {
+        "type": "String"
+      }
+    }
+  },
+  "completedOnDate": "Completed on {date}",
+  "@completedOnDate": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "tooltipDowngradeToReady": "Downgrade to # [2] Ready",
+  "tooltipDowngradeToPlanned": "Downgrade to # [3] Planned",
+  "tooltipBlockTask": "Move immediately to # [4] Blocked",
+  "tooltipPromoteToPlanned": "Queue in # [3] Planned",
+  "tooltipMoreActions": "More actions",
+  "menuMoveTo": "Move to...",
+  "menuEditText": "Edit text",
+  "menuDelete": "Delete",
+  "editTaskDialogTitle": "Edit Task",
+  "editTaskFieldLabel": "Task text",
+  "actionCancel": "Cancel",
+  "actionSave": "Save",
+  "settingsTitle": "Settings",
+  "languageSectionTitle": "Language",
+  "languageSectionDescription": "Select the display language. System uses German on German systems and English otherwise.",
+  "languageSystem": "System",
+  "languageEnglish": "English",
+  "languageGerman": "Deutsch",
+  "webdavSectionTitle": "WebDAV Synchronization (Single Source of Truth)",
+  "webdavSectionDescription": "TierTask stores all tasks in a single Markdown file (tiertask.md) on your WebDAV server. Use an application password when supported by your server.",
+  "serverUrlLabel": "WebDAV Server URL",
+  "serverUrlErrorEmpty": "Please enter a server URL.",
+  "usernameLabel": "Username",
+  "usernameErrorEmpty": "Please enter a username.",
+  "passwordLabel": "App Password / Password",
+  "tooltipShowPassword": "Show password",
+  "tooltipHidePassword": "Hide password",
+  "passwordErrorEmpty": "Please enter a password or app password.",
+  "filePathLabel": "Markdown File Name / Path",
+  "filePathHint": "tiertask.md or t2.md",
+  "resolvedEndpointLabel": "Resolved WebDAV Endpoint (GET / PUT):",
+  "credentialsSavedBanner": "Settings saved locally.",
+  "connectionSuccessBanner": "Connection succeeded. Markdown file synchronized with WebDAV.",
+  "actionTestConnectionAndSync": "Test Connection / Sync Now",
+  "errorWebDavNotConfigured": "Please configure WebDAV in Settings first.",
+  "errorInvalidServerUrl": "Invalid WebDAV server URL.",
+  "errorAuthFailedLoad": "Authentication failed. Please check username and app password.",
+  "errorLoadMarkdownFailed": "Failed to load Markdown file from server.",
+  "errorNetworkUnreachable": "Network error: Server unreachable ({details}).",
+  "@errorNetworkUnreachable": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorTimeoutLoad": "Connection to WebDAV server timed out.",
+  "errorTlsLoad": "TLS/SSL connection error: {details}",
+  "@errorTlsLoad": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorUnexpectedLoad": "Unexpected WebDAV error while loading: {details}",
+  "@errorUnexpectedLoad": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorAuthFailedSave": "Authentication failed while saving. Please check app password.",
+  "errorSaveMarkdownFailed": "Failed to save Markdown file on server.",
+  "errorNetworkSave": "Network error while saving ({details}).",
+  "@errorNetworkSave": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorTimeoutSave": "Timed out while saving to WebDAV server.",
+  "errorTlsSave": "TLS/SSL error while saving: {details}",
+  "@errorTlsSave": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorUnexpectedSave": "Unexpected WebDAV error while saving: {details}",
+  "@errorUnexpectedSave": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  }
+}

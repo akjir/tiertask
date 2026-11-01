@@ -17,7 +17,7 @@ import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 
-/// Dependency-free, line-by-line Markdown parser and serializer for TierTask (`tiertask.md` / `t2.md`).
+/// Dependency-free, line-by-line Markdown parser and serializer for TierTask (`tiertask.md`).
 class MarkdownService {
   /// Creates a stateless [MarkdownService].
   const MarkdownService();
@@ -36,15 +36,15 @@ class MarkdownService {
 
   /// Parses a raw Markdown string into an immutable [TaskBoard] instance.
   ///
-  /// Preserves task order within each of the 6 German H1 sections and gracefully
-  /// handles empty sections, CRLF line endings, or trailing whitespace.
+  /// Matches sections strictly by their tier number (`[1]` through `[6]` or `(1)` through `(6)`),
+  /// ignores the trailing heading label text, and initializes any missing tiers as empty lists.
   TaskBoard parse(String markdown) {
-    final fokusTasks = <TaskItem>[];
-    final bereitTasks = <TaskItem>[];
-    final irgendwannTasks = <TaskItem>[];
-    final blockiertTasks = <TaskItem>[];
-    final geplantTasks = <TaskItem>[];
-    final erledigtTasks = <TaskItem>[];
+    final focusTasks = <TaskItem>[];
+    final readyTasks = <TaskItem>[];
+    final plannedTasks = <TaskItem>[];
+    final blockedTasks = <TaskItem>[];
+    final somedayTasks = <TaskItem>[];
+    final completedTasks = <TaskItem>[];
 
     TaskTier? currentTier;
     final lines = markdown.split('\n');
@@ -69,41 +69,41 @@ class MarkdownService {
         _appendToBucket(
           currentTier,
           parsedTask,
-          fokusTasks: fokusTasks,
-          bereitTasks: bereitTasks,
-          irgendwannTasks: irgendwannTasks,
-          blockiertTasks: blockiertTasks,
-          geplantTasks: geplantTasks,
-          erledigtTasks: erledigtTasks,
+          focusTasks: focusTasks,
+          readyTasks: readyTasks,
+          plannedTasks: plannedTasks,
+          blockedTasks: blockedTasks,
+          somedayTasks: somedayTasks,
+          completedTasks: completedTasks,
         );
       }
     }
 
     return TaskBoard(
-      fokus: fokusTasks,
-      bereit: bereitTasks,
-      irgendwann: irgendwannTasks,
-      blockiert: blockiertTasks,
-      geplant: geplantTasks,
-      erledigt: erledigtTasks,
+      focus: focusTasks,
+      ready: readyTasks,
+      planned: plannedTasks,
+      blocked: blockedTasks,
+      someday: somedayTasks,
+      completed: completedTasks,
     );
   }
 
-  /// Serializes an immutable [TaskBoard] into the canonical 6-section Markdown format.
-  String serialize(TaskBoard board) {
+  /// Serializes an immutable [TaskBoard] into the canonical 6-section Markdown format (`1` to `6`).
+  ///
+  /// Uses [tierLabelBuilder] when provided to localize the heading labels (`# [1] Focus` / `# [1] Fokus`),
+  /// and guarantees that all 6 tiers are written even if absent in the original file.
+  String serialize(
+    TaskBoard board, {
+    String Function(TaskTier tier)? tierLabelBuilder,
+  }) {
     final buffer = StringBuffer();
     const tiers = TaskTier.values;
 
     for (var i = 0; i < tiers.length; i++) {
       final tier = tiers[i];
-      buffer.writeln(tier.markdownHeading);
-
-      final tasks = board.tasksForTier(tier);
-      for (final task in tasks) {
-        buffer.writeln(
-          task.toMarkdownLine(inErledigt: tier == TaskTier.erledigt),
-        );
-      }
+      buffer.writeln(tier.formatHeading(tierLabelBuilder?.call(tier)));
+      _writeTierTasks(buffer, board.tasksForTier(tier), tier);
 
       if (i < tiers.length - 1) {
         buffer.writeln();
@@ -117,26 +117,26 @@ class MarkdownService {
   void _appendToBucket(
     TaskTier tier,
     TaskItem task, {
-    required List<TaskItem> fokusTasks,
-    required List<TaskItem> bereitTasks,
-    required List<TaskItem> irgendwannTasks,
-    required List<TaskItem> blockiertTasks,
-    required List<TaskItem> geplantTasks,
-    required List<TaskItem> erledigtTasks,
+    required List<TaskItem> focusTasks,
+    required List<TaskItem> readyTasks,
+    required List<TaskItem> plannedTasks,
+    required List<TaskItem> blockedTasks,
+    required List<TaskItem> somedayTasks,
+    required List<TaskItem> completedTasks,
   }) {
     switch (tier) {
-      case TaskTier.fokus:
-        fokusTasks.add(task);
-      case TaskTier.bereit:
-        bereitTasks.add(task);
-      case TaskTier.irgendwann:
-        irgendwannTasks.add(task);
-      case TaskTier.blockiert:
-        blockiertTasks.add(task);
-      case TaskTier.geplant:
-        geplantTasks.add(task);
-      case TaskTier.erledigt:
-        erledigtTasks.add(task);
+      case TaskTier.focus:
+        focusTasks.add(task);
+      case TaskTier.ready:
+        readyTasks.add(task);
+      case TaskTier.planned:
+        plannedTasks.add(task);
+      case TaskTier.blocked:
+        blockedTasks.add(task);
+      case TaskTier.someday:
+        somedayTasks.add(task);
+      case TaskTier.completed:
+        completedTasks.add(task);
     }
   }
 
@@ -169,15 +169,27 @@ class MarkdownService {
       if (rawTitle == null) return null;
       final title = rawTitle.trim();
       if (title.isEmpty) return null;
-      return TaskItem(title: title, isCompleted: tier == TaskTier.erledigt);
+      return TaskItem(title: title, isCompleted: tier == TaskTier.completed);
     }
 
     if (line.startsWith('- ')) {
       final title = line.substring(2).trim();
       if (title.isEmpty) return null;
-      return TaskItem(title: title, isCompleted: tier == TaskTier.erledigt);
+      return TaskItem(title: title, isCompleted: tier == TaskTier.completed);
     }
 
     return null;
+  }
+
+  /// Writes all [tasks] for [tier] to [buffer].
+  static void _writeTierTasks(
+    StringBuffer buffer,
+    List<TaskItem> tasks,
+    TaskTier tier,
+  ) {
+    final isCompletedTier = tier == TaskTier.completed;
+    for (final task in tasks) {
+      buffer.writeln(task.toMarkdownLine(inCompleted: isCompletedTier));
+    }
   }
 }

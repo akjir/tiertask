@@ -1,13 +1,30 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
 import '../../providers/task_providers.dart';
 import 'restore_task_sheet.dart';
 
-/// Material 3 task card / list tile with tier-appropriate quick actions.
+/// Material 3 task card with tier-specific quick actions and overflow menu.
 class TaskTile extends ConsumerWidget {
+  /// Creates a [TaskTile] for [task] inside [tier].
   const TaskTile({
     super.key,
     required this.task,
@@ -15,16 +32,20 @@ class TaskTile extends ConsumerWidget {
     this.isProminent = false,
   });
 
-  final TaskItem task;
-  final TaskTier tier;
+  /// Whether to render the card with prominent Tier 1 (`# [1] Focus`) styling.
   final bool isProminent;
+
+  /// Task item displayed by this tile.
+  final TaskItem task;
+
+  /// Tier containing [task].
+  final TaskTier tier;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
+    final colorScheme = Theme.of(context).colorScheme;
     final notifier = ref.read(taskNotifierProvider.notifier);
-    final isDone = tier == TaskTier.erledigt;
+    final isDone = tier == TaskTier.completed;
 
     return Card(
       elevation: isProminent ? 2 : 0,
@@ -49,182 +70,293 @@ class TaskTile extends ConsumerWidget {
           children: [
             Checkbox(
               value: isDone,
-              onChanged: (_) async {
-                if (isDone) {
-                  final targetTier = await showRestoreTaskSheet(
-                    context,
-                    task: task,
-                  );
-                  if (targetTier != null) {
-                    await notifier.restoreTask(task.id, targetTier);
-                  }
-                } else {
-                  await notifier.completeTask(task.id);
-                }
-              },
+              onChanged: (_) => _toggleCompletion(context, notifier, isDone),
             ),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    task.title,
-                    style:
-                        (isProminent
-                                ? theme.textTheme.titleMedium
-                                : theme.textTheme.bodyLarge)
-                            ?.copyWith(
-                              fontWeight: isProminent
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                              decoration: isDone
-                                  ? TextDecoration.lineThrough
-                                  : null,
-                              color: isDone
-                                  ? colorScheme.onSurfaceVariant
-                                  : colorScheme.onSurface,
-                            ),
-                  ),
-                  if (isDone && task.completedAt != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        'Erledigt am ${TaskItem.formatIsoDate(task.completedAt!)}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                ],
+              child: _TaskTitleColumn(
+                task: task,
+                isDone: isDone,
+                isProminent: isProminent,
               ),
             ),
-            // Direct Downgrade & Quick-Block actions for # Fokus and # Bereit
-            if (tier == TaskTier.fokus || tier == TaskTier.bereit) ...[
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: tier == TaskTier.fokus
-                    ? 'Herabstufen nach # Bereit'
-                    : 'Herabstufen nach # Geplant',
-                icon: const Icon(Icons.arrow_downward_rounded, size: 20),
-                onPressed: () => notifier.downgradeTask(task.id),
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: 'Sofort nach # Blockiert verschieben',
-                icon: Icon(
-                  Icons.block_rounded,
-                  size: 20,
-                  color: colorScheme.error,
-                ),
-                onPressed: () => notifier.blockTask(task.id),
-              ),
-            ],
-            // Quick promote action for static tiers (# Blockiert / # Irgendwann)
-            if (tier == TaskTier.blockiert || tier == TaskTier.irgendwann)
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                tooltip: 'In # Geplant einreihen',
-                icon: const Icon(Icons.arrow_upward_rounded, size: 20),
-                onPressed: () => notifier.moveTask(task.id, TaskTier.geplant),
-              ),
-            PopupMenuButton<_TaskMenuAction>(
-              tooltip: 'Weitere Aktionen',
-              icon: const Icon(Icons.more_vert_rounded, size: 20),
-              onSelected: (action) async {
-                switch (action) {
-                  case _TaskMenuAction.move:
-                    final selectedTier = await showRestoreTaskSheet(
-                      context,
-                      task: task,
-                      title: 'Aufgabe verschieben',
-                      subtitle: 'Zielkategorie auswählen:',
-                    );
-                    if (selectedTier != null) {
-                      await notifier.moveTask(task.id, selectedTier);
-                    }
-                    break;
-                  case _TaskMenuAction.edit:
-                    await _showEditDialog(context, notifier, task);
-                    break;
-                  case _TaskMenuAction.delete:
-                    await notifier.deleteTask(task.id);
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: _TaskMenuAction.move,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.swap_vert_rounded),
-                    title: Text('Verschieben nach…'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: _TaskMenuAction.edit,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.edit_outlined),
-                    title: Text('Text bearbeiten'),
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: _TaskMenuAction.delete,
-                  child: ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.delete_outline_rounded),
-                    title: Text('Löschen'),
-                  ),
-                ),
-              ],
-            ),
+            _TaskQuickActions(task: task, tier: tier, notifier: notifier),
+            _TaskOverflowMenu(task: task, notifier: notifier),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _showEditDialog(
+  /// Toggles completion or prompts for a restore destination tier.
+  Future<void> _toggleCompletion(
     BuildContext context,
     TaskNotifier notifier,
-    TaskItem task,
+    bool isDone,
   ) async {
-    final controller = TextEditingController(text: task.title);
-    final updatedTitle = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Aufgabe bearbeiten'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Aufgabentext',
-            border: OutlineInputBorder(),
-          ),
-          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Abbrechen'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('Speichern'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-
-    if (updatedTitle != null && updatedTitle.trim().isNotEmpty) {
-      await notifier.editTaskTitle(task.id, updatedTitle);
+    if (!isDone) {
+      await notifier.completeTask(task.id);
+      return;
+    }
+    final targetTier = await showRestoreTaskSheet(context, task: task);
+    if (targetTier != null) {
+      await notifier.restoreTask(task.id, targetTier);
     }
   }
 }
 
+/// Dialog for editing a task's title text.
+class _EditTaskDialog extends StatefulWidget {
+  /// Creates an [_EditTaskDialog] initialized with [initialTitle].
+  const _EditTaskDialog({required this.initialTitle});
+
+  /// Initial task title text.
+  final String initialTitle;
+
+  @override
+  State<_EditTaskDialog> createState() => _EditTaskDialogState();
+}
+
+/// State for [_EditTaskDialog].
+class _EditTaskDialogState extends State<_EditTaskDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialTitle);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(localizations.editTaskDialogTitle),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          labelText: localizations.editTaskFieldLabel,
+          border: const OutlineInputBorder(),
+        ),
+        onSubmitted: (value) => Navigator.of(context).pop(value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(localizations.actionCancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: Text(localizations.actionSave),
+        ),
+      ],
+    );
+  }
+}
+
+/// Overflow popup menu for moving, editing, or deleting a task.
+class _TaskOverflowMenu extends StatelessWidget {
+  /// Creates a [_TaskOverflowMenu].
+  const _TaskOverflowMenu({required this.task, required this.notifier});
+
+  /// Task controller notifier.
+  final TaskNotifier notifier;
+
+  /// Target task item.
+  final TaskItem task;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return PopupMenuButton<_TaskMenuAction>(
+      tooltip: localizations.tooltipMoreActions,
+      icon: const Icon(Icons.more_vert_rounded, size: 20),
+      onSelected: (action) => _handleMenuAction(context, action),
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: _TaskMenuAction.move,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.swap_vert_rounded),
+            title: Text(localizations.menuMoveTo),
+          ),
+        ),
+        PopupMenuItem(
+          value: _TaskMenuAction.edit,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.edit_outlined),
+            title: Text(localizations.menuEditText),
+          ),
+        ),
+        PopupMenuItem(
+          value: _TaskMenuAction.delete,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.delete_outline_rounded),
+            title: Text(localizations.menuDelete),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Dispatches the selected [_TaskMenuAction].
+  Future<void> _handleMenuAction(
+    BuildContext context,
+    _TaskMenuAction action,
+  ) async {
+    switch (action) {
+      case _TaskMenuAction.move:
+        final localizations = AppLocalizations.of(context);
+        final selectedTier = await showRestoreTaskSheet(
+          context,
+          task: task,
+          title: localizations.moveTaskTitle,
+        );
+        if (selectedTier != null) {
+          await notifier.moveTask(task.id, selectedTier);
+        }
+      case _TaskMenuAction.edit:
+        final updatedTitle = await showDialog<String>(
+          context: context,
+          builder: (_) => _EditTaskDialog(initialTitle: task.title),
+        );
+        if (updatedTitle != null && updatedTitle.trim().isNotEmpty) {
+          await notifier.editTaskTitle(task.id, updatedTitle);
+        }
+      case _TaskMenuAction.delete:
+        await notifier.deleteTask(task.id);
+    }
+  }
+}
+
+/// Inline action buttons for downgrading, blocking, or promoting a task.
+class _TaskQuickActions extends StatelessWidget {
+  /// Creates [_TaskQuickActions].
+  const _TaskQuickActions({
+    required this.task,
+    required this.tier,
+    required this.notifier,
+  });
+
+  /// Task controller notifier.
+  final TaskNotifier notifier;
+
+  /// Target task item.
+  final TaskItem task;
+
+  /// Tier containing [task].
+  final TaskTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (tier == TaskTier.focus || tier == TaskTier.ready) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: tier == TaskTier.focus
+                ? localizations.tooltipDowngradeToReady
+                : localizations.tooltipDowngradeToPlanned,
+            icon: const Icon(Icons.arrow_downward_rounded, size: 20),
+            onPressed: () => notifier.downgradeTask(task.id),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: localizations.tooltipBlockTask,
+            icon: Icon(Icons.block_rounded, size: 20, color: colorScheme.error),
+            onPressed: () => notifier.blockTask(task.id),
+          ),
+        ],
+      );
+    }
+
+    if (tier == TaskTier.blocked || tier == TaskTier.someday) {
+      return IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: localizations.tooltipPromoteToPlanned,
+        icon: const Icon(Icons.arrow_upward_rounded, size: 20),
+        onPressed: () => notifier.moveTask(task.id, TaskTier.planned),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+/// Displays the task title and optional completion date subtitle.
+class _TaskTitleColumn extends StatelessWidget {
+  /// Creates a [_TaskTitleColumn].
+  const _TaskTitleColumn({
+    required this.task,
+    required this.isDone,
+    required this.isProminent,
+  });
+
+  /// Whether the task is in the completed tier.
+  final bool isDone;
+
+  /// Whether prominent styling is active.
+  final bool isProminent;
+
+  /// Task item to display.
+  final TaskItem task;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final localizations = AppLocalizations.of(context);
+    final completedDate = task.completedAt;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          task.title,
+          style:
+              (isProminent
+                      ? theme.textTheme.titleMedium
+                      : theme.textTheme.bodyLarge)
+                  ?.copyWith(
+                    fontWeight: isProminent ? FontWeight.w600 : FontWeight.w500,
+                    decoration: isDone ? TextDecoration.lineThrough : null,
+                    color: isDone
+                        ? colorScheme.onSurfaceVariant
+                        : colorScheme.onSurface,
+                  ),
+        ),
+        if (isDone && completedDate != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              localizations.completedOnDate(
+                TaskItem.formatIsoDate(completedDate),
+              ),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Actions available in [_TaskOverflowMenu].
 enum _TaskMenuAction { move, edit, delete }

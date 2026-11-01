@@ -1,21 +1,40 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'l10n/app_localizations.dart';
+import 'providers/task_providers.dart';
 import 'ui/home_screen.dart';
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const ProviderScope(child: TierTaskApp()));
-}
-
-class TierTaskApp extends StatelessWidget {
+/// Root Material 3 application widget for TierTask.
+class TierTaskApp extends ConsumerWidget {
+  /// Creates the root [TierTaskApp] widget.
   const TierTaskApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locale = ref.watch(appLocaleProvider);
+
     return MaterialApp(
-      title: 'TierTask (T2)',
+      onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       debugShowCheckedModeBanner: false,
+      locale: locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       themeMode: ThemeMode.system,
       theme: ThemeData(
         useMaterial3: true,
@@ -30,4 +49,10 @@ class TierTaskApp extends StatelessWidget {
       home: const HomeScreen(),
     );
   }
+}
+
+/// Entry point for the TierTask application.
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const ProviderScope(child: TierTaskApp()));
 }

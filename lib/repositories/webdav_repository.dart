@@ -1,14 +1,35 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
+import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 
-/// Custom exception thrown when WebDAV HTTP operations fail.
+/// Custom domain exception thrown when WebDAV HTTP operations fail.
 class WebDavException implements Exception {
+  /// Creates a [WebDavException] with a localized [message] and optional [statusCode].
   const WebDavException(this.message, {this.statusCode});
 
+  /// Human-readable error message.
   final String message;
+
+  /// Optional HTTP status code returned by the WebDAV server.
   final int? statusCode;
 
   @override
@@ -16,18 +37,22 @@ class WebDavException implements Exception {
       statusCode != null ? '$message (HTTP $statusCode)' : message;
 }
 
-/// Native WebDAV client repository using `HttpClient` from `dart:io` and
-/// Basic Authentication (`base64Encode(utf8.encode('$username:$password'))`).
+/// Native WebDAV client repository using [HttpClient] from `dart:io` and Basic Authentication.
 class WebDavRepository {
+  /// Creates a [WebDavRepository] for [config].
   WebDavRepository({
     required this.config,
     HttpClient Function()? clientFactory,
     this.timeout = const Duration(seconds: 15),
   }) : _clientFactory = clientFactory ?? HttpClient.new;
 
+  /// Active WebDAV connection and language configuration.
   final WebDavConfig config;
-  final HttpClient Function() _clientFactory;
+
+  /// Timeout applied to connection, request, and response operations.
   final Duration timeout;
+
+  final HttpClient Function() _clientFactory;
 
   /// Builds the HTTP Basic Authentication header value.
   String get _basicAuthHeader {
@@ -37,25 +62,21 @@ class WebDavRepository {
     return 'Basic $token';
   }
 
-  Uri _requireUri() {
-    if (!config.isConfigured) {
-      throw const WebDavException(
-        'WebDAV ist noch nicht konfiguriert. Bitte Nextcloud-Zugangsdaten in den Einstellungen hinterlegen.',
-      );
-    }
-    final uri = config.resolveEndpointUri();
-    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
-      throw const WebDavException('Ungültige Nextcloud-Server-URL.');
-    }
-    return uri;
+  /// Resolves the active [AppLocalizations] instance for error messages.
+  AppLocalizations get _localizations {
+    final locale = config.language.resolveLocale(
+      PlatformDispatcher.instance.locale,
+    );
+    return lookupAppLocalizations(locale);
   }
 
-  /// Fetches the remote Markdown file (`tiertask.md` / `t2.md`) via HTTP GET.
+  /// Fetches the remote Markdown file (`tiertask.md`) via HTTP GET.
   ///
-  /// If the remote file does not exist yet (`HTTP 404`), returns an empty string
-  /// so a fresh board can be initialized and created on first save.
+  /// Returns an empty string when the remote file does not exist (`HTTP 404`)
+  /// so a new 6-tier board can be initialized on first save.
   Future<String> fetchMarkdown() async {
-    final uri = _requireUri();
+    final localizations = _localizations;
+    final uri = _requireUri(localizations);
     final client = _clientFactory();
     client.connectionTimeout = timeout;
 
@@ -78,41 +99,41 @@ class WebDavRepository {
         return body;
       }
       if (status == HttpStatus.notFound) {
-        // File does not exist on server yet; return empty content to initialize.
         return '';
       }
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
         throw WebDavException(
-          'Authentifizierung fehlgeschlagen. Bitte Benutzername und App-Passwort prüfen.',
+          localizations.errorAuthFailedLoad,
           statusCode: status,
         );
       }
       throw WebDavException(
-        'Fehler beim Laden der Markdown-Datei vom Server.',
+        localizations.errorLoadMarkdownFailed,
         statusCode: status,
       );
     } on WebDavException {
       rethrow;
-    } on SocketException catch (e) {
+    } on SocketException catch (error) {
       throw WebDavException(
-        'Netzwerkfehler: Server nicht erreichbar (${e.message}).',
+        localizations.errorNetworkUnreachable(error.message),
       );
     } on TimeoutException {
-      throw const WebDavException(
-        'Zeitüberschreitung bei der Verbindung zum Nextcloud-Server.',
+      throw WebDavException(localizations.errorTimeoutLoad);
+    } on HandshakeException catch (error) {
+      throw WebDavException(localizations.errorTlsLoad(error.message));
+    } on Object catch (error) {
+      throw WebDavException(
+        localizations.errorUnexpectedLoad(error.toString()),
       );
-    } on HandshakeException catch (e) {
-      throw WebDavException('TLS/SSL-Verbindungsfehler: ${e.message}');
-    } catch (e) {
-      throw WebDavException('Unerwarteter WebDAV-Fehler beim Laden: $e');
     } finally {
       client.close(force: false);
     }
   }
 
-  /// Overwrites the remote Markdown file on the Nextcloud server via HTTP PUT.
+  /// Overwrites the remote Markdown file on the WebDAV server via HTTP PUT.
   Future<void> saveMarkdown(String markdownContent) async {
-    final uri = _requireUri();
+    final localizations = _localizations;
+    final uri = _requireUri(localizations);
     final client = _clientFactory();
     client.connectionTimeout = timeout;
 
@@ -129,7 +150,6 @@ class WebDavRepository {
       request.add(bytes);
 
       final response = await request.close().timeout(timeout);
-      // Drain response stream to free socket resources
       await response.drain<void>().timeout(timeout);
 
       final status = response.statusCode;
@@ -138,28 +158,40 @@ class WebDavRepository {
       }
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
         throw WebDavException(
-          'Authentifizierung beim Speichern fehlgeschlagen. Bitte App-Passwort prüfen.',
+          localizations.errorAuthFailedSave,
           statusCode: status,
         );
       }
       throw WebDavException(
-        'Fehler beim Speichern der Markdown-Datei auf dem Server.',
+        localizations.errorSaveMarkdownFailed,
         statusCode: status,
       );
     } on WebDavException {
       rethrow;
-    } on SocketException catch (e) {
-      throw WebDavException('Netzwerkfehler beim Speichern (${e.message}).');
+    } on SocketException catch (error) {
+      throw WebDavException(localizations.errorNetworkSave(error.message));
     } on TimeoutException {
-      throw const WebDavException(
-        'Zeitüberschreitung beim Speichern auf Nextcloud.',
+      throw WebDavException(localizations.errorTimeoutSave);
+    } on HandshakeException catch (error) {
+      throw WebDavException(localizations.errorTlsSave(error.message));
+    } on Object catch (error) {
+      throw WebDavException(
+        localizations.errorUnexpectedSave(error.toString()),
       );
-    } on HandshakeException catch (e) {
-      throw WebDavException('TLS/SSL-Fehler beim Speichern: ${e.message}');
-    } catch (e) {
-      throw WebDavException('Unerwarteter WebDAV-Fehler beim Speichern: $e');
     } finally {
       client.close(force: false);
     }
+  }
+
+  /// Validates and returns the resolved WebDAV [Uri] or throws a [WebDavException].
+  Uri _requireUri(AppLocalizations localizations) {
+    if (!config.isConfigured) {
+      throw WebDavException(localizations.errorWebDavNotConfigured);
+    }
+    final uri = config.resolveEndpointUri();
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      throw WebDavException(localizations.errorInvalidServerUrl);
+    }
+    return uri;
   }
 }

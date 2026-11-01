@@ -1,23 +1,44 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/webdav_config.dart';
 
-/// Repository for persisting Nextcloud WebDAV credentials securely on the device.
+/// Repository contract for persisting WebDAV credentials and language settings.
 abstract class SettingsRepository {
+  /// Loads the persisted [WebDavConfig].
   Future<WebDavConfig> loadConfig();
+
+  /// Saves [config] to persistent storage.
   Future<void> saveConfig(WebDavConfig config);
 }
 
+/// Encrypted settings repository backed by [FlutterSecureStorage].
 class SecureSettingsRepository implements SettingsRepository {
+  /// Creates a [SecureSettingsRepository] with an optional [storage] instance.
   SecureSettingsRepository({FlutterSecureStorage? storage})
     : _storage = storage ?? const FlutterSecureStorage();
 
-  final FlutterSecureStorage _storage;
-
+  static const String _keyFilePath = 't2_webdav_file_path';
+  static const String _keyLanguage = 't2_app_language';
+  static const String _keyPassword = 't2_webdav_password';
   static const String _keyServerUrl = 't2_webdav_server_url';
   static const String _keyUsername = 't2_webdav_username';
-  static const String _keyPassword = 't2_webdav_password';
-  static const String _keyFilePath = 't2_webdav_file_path';
+
+  final FlutterSecureStorage _storage;
 
   @override
   Future<WebDavConfig> loadConfig() async {
@@ -26,13 +47,15 @@ class SecureSettingsRepository implements SettingsRepository {
       final username = await _storage.read(key: _keyUsername) ?? '';
       final password = await _storage.read(key: _keyPassword) ?? '';
       final filePath = await _storage.read(key: _keyFilePath) ?? 'tiertask.md';
+      final rawLanguage = await _storage.read(key: _keyLanguage);
       return WebDavConfig(
         serverUrl: serverUrl,
         username: username,
         password: password,
         filePath: filePath.trim().isEmpty ? 'tiertask.md' : filePath,
+        language: AppLanguage.fromCode(rawLanguage),
       );
-    } catch (_) {
+    } on Object {
       return const WebDavConfig();
     }
   }
@@ -48,11 +71,13 @@ class SecureSettingsRepository implements SettingsRepository {
           ? 'tiertask.md'
           : config.filePath.trim(),
     );
+    await _storage.write(key: _keyLanguage, value: config.language.code);
   }
 }
 
-/// In-memory implementation for unit and widget tests.
+/// In-memory [SettingsRepository] implementation for unit and widget tests.
 class InMemorySettingsRepository implements SettingsRepository {
+  /// Creates an [InMemorySettingsRepository] initialized with [_config].
   InMemorySettingsRepository([this._config = const WebDavConfig()]);
 
   WebDavConfig _config;

@@ -1,141 +1,67 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/app_localizations.dart';
+import '../l10n/tier_localization_extension.dart';
 import '../models/task_board.dart';
+import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../providers/task_providers.dart';
 import 'settings_screen.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_tile.dart';
 
-/// Main Material 3 screen for TierTask (T2).
+/// Primary Material 3 board screen for TierTask across Linux, Android, and Windows.
 class HomeScreen extends ConsumerWidget {
+  /// Creates a [HomeScreen] widget.
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final boardAsync = ref.watch(taskNotifierProvider);
-    final configAsync = ref.watch(webDavConfigProvider);
+    final isConfigured = ref.watch(
+      webDavConfigProvider.select(
+        (configAsync) => configAsync.asData?.value.isConfigured ?? false,
+      ),
+    );
     final syncState = ref.watch(syncStateProvider);
-    final isConfigured = configAsync.asData?.value.isConfigured ?? false;
+    final errorMessage = syncState.errorMessage;
 
     return DefaultTabController(
       length: 5,
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text(
-            'TierTask (T2)',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          actions: [
-            if (syncState.isSyncing)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Center(
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              )
-            else
-              IconButton(
-                tooltip: 'Mit Nextcloud WebDAV synchronisieren',
-                icon: const Icon(Icons.sync_rounded),
-                onPressed: () {
-                  ref.read(taskNotifierProvider.notifier).syncFromRemote();
-                },
-              ),
-            IconButton(
-              tooltip: 'Markdown-Vorschau anzeigen',
-              icon: const Icon(Icons.code_rounded),
-              onPressed: () => _showMarkdownPreviewDialog(context, ref),
-            ),
-            IconButton(
-              tooltip: 'WebDAV Einstellungen',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const SettingsScreen(),
-                  ),
-                );
-              },
-            ),
-          ],
-          bottom: const TabBar(
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: 'Fokus & Bereit'),
-              Tab(text: '# Geplant'),
-              Tab(text: '# Blockiert'),
-              Tab(text: '# Irgendwann'),
-              Tab(text: '# Erledigt'),
-            ],
-          ),
-        ),
+        appBar: _buildAppBar(context, ref, syncState.isSyncing),
         body: Column(
           children: [
             if (!isConfigured)
-              _UnconfiguredBanner(
-                onConfigure: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const SettingsScreen(),
-                    ),
-                  );
-                },
-              ),
-            if (syncState.errorMessage != null)
+              _UnconfiguredBanner(onConfigure: () => _openSettings(context)),
+            if (errorMessage != null)
               _SyncErrorBanner(
-                message: syncState.errorMessage!,
+                message: errorMessage,
                 onDismiss: () =>
                     ref.read(syncStateProvider.notifier).clearError(),
               ),
             Expanded(
-              child: boardAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => _ErrorStateView(
-                  error: error.toString(),
-                  onRetry: () =>
-                      ref.read(taskNotifierProvider.notifier).syncFromRemote(),
-                  onOpenSettings: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const SettingsScreen(),
-                      ),
-                    );
-                  },
-                ),
-                data: (board) => TabBarView(
-                  children: [
-                    _MainBoardTab(board: board),
-                    _SingleTierListView(
-                      board: board,
-                      tier: TaskTier.geplant,
-                      emptyHint:
-                          'Keine Aufgaben im aktiven Backlog (# Geplant).',
-                    ),
-                    _SingleTierListView(
-                      board: board,
-                      tier: TaskTier.blockiert,
-                      emptyHint: 'Keine blockierten Aufgaben (# Blockiert).',
-                    ),
-                    _SingleTierListView(
-                      board: board,
-                      tier: TaskTier.irgendwann,
-                      emptyHint: 'Keine Ideen in # Irgendwann gespeichert.',
-                    ),
-                    _SingleTierListView(
-                      board: board,
-                      tier: TaskTier.erledigt,
-                      emptyHint:
-                          'Keine erledigten Aufgaben der letzten 30 Tage.',
-                    ),
-                  ],
-                ),
+              child: _BoardContentView(
+                boardAsync: boardAsync,
+                onOpenSettings: () => _openSettings(context),
+                onRetry: () =>
+                    ref.read(taskNotifierProvider.notifier).syncFromRemote(),
               ),
             ),
             const QuickAddBar(),
@@ -145,15 +71,81 @@ class HomeScreen extends ConsumerWidget {
     );
   }
 
+  /// Builds the localized [AppBar] with sync, Markdown preview, settings, and tier tabs.
+  PreferredSizeWidget _buildAppBar(
+    BuildContext context,
+    WidgetRef ref,
+    bool isSyncing,
+  ) {
+    final localizations = AppLocalizations.of(context);
+    return AppBar(
+      title: Text(
+        localizations.appTitle,
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
+      actions: [
+        if (isSyncing)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 12),
+            child: Center(
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          )
+        else
+          IconButton(
+            tooltip: localizations.tooltipSyncWebDav,
+            icon: const Icon(Icons.sync_rounded),
+            onPressed: () =>
+                ref.read(taskNotifierProvider.notifier).syncFromRemote(),
+          ),
+        IconButton(
+          tooltip: localizations.tooltipMarkdownPreview,
+          icon: const Icon(Icons.code_rounded),
+          onPressed: () => _showMarkdownPreviewDialog(context, ref),
+        ),
+        IconButton(
+          tooltip: localizations.tooltipSettings,
+          icon: const Icon(Icons.settings_outlined),
+          onPressed: () => _openSettings(context),
+        ),
+      ],
+      bottom: TabBar(
+        isScrollable: true,
+        tabAlignment: TabAlignment.start,
+        tabs: [
+          Tab(text: localizations.tabFocusAndReady),
+          Tab(text: localizations.tierMarkdownHeading(TaskTier.planned)),
+          Tab(text: localizations.tierMarkdownHeading(TaskTier.blocked)),
+          Tab(text: localizations.tierMarkdownHeading(TaskTier.someday)),
+          Tab(text: localizations.tierMarkdownHeading(TaskTier.completed)),
+        ],
+      ),
+    );
+  }
+
+  /// Pushes [SettingsScreen] onto the navigation stack.
+  void _openSettings(BuildContext context) {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+  }
+
+  /// Displays a dialog containing the serialized Markdown representation of the board.
   void _showMarkdownPreviewDialog(BuildContext context, WidgetRef ref) {
     final board =
         ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
-    final markdown = ref.read(markdownServiceProvider).serialize(board);
+    final localizations = AppLocalizations.of(context);
+    final markdown = ref
+        .read(markdownServiceProvider)
+        .serialize(board, tierLabelBuilder: localizations.tierName);
 
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Raw Markdown (Single Source of Truth)'),
+        title: Text(localizations.markdownPreviewTitle),
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
@@ -166,7 +158,7 @@ class HomeScreen extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Schließen'),
+            child: Text(localizations.actionClose),
           ),
         ],
       ),
@@ -174,195 +166,119 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _MainBoardTab extends StatelessWidget {
-  const _MainBoardTab({required this.board});
-
-  final TaskBoard board;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      children: [
-        // Hero Section: # Fokus (Soft WIP Limit: 3)
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: colorScheme.primaryContainer.withValues(alpha: 0.25),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: colorScheme.primary.withValues(alpha: 0.4),
-              width: 1.5,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _SectionHeader(
-                tier: TaskTier.fokus,
-                count: board.fokus.length,
-                softLimit: TaskBoard.fokusSoftLimit,
-                icon: Icons.bolt_rounded,
-                accentColor: colorScheme.primary,
-              ),
-              const SizedBox(height: 8),
-              if (board.fokus.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  child: Text(
-                    'Keine Aufgaben im Fokus. Neue Aufgaben aus # Bereit oder # Geplant rücken automatisch hierher nach.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                )
-              else
-                for (final task in board.fokus)
-                  TaskTile(
-                    key: ValueKey('fokus_${task.id}'),
-                    task: task,
-                    tier: TaskTier.fokus,
-                    isProminent: true,
-                  ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        // Quick Access Section: # Bereit (Soft WIP Limit: 5)
-        _SectionHeader(
-          tier: TaskTier.bereit,
-          count: board.bereit.length,
-          softLimit: TaskBoard.bereitSoftLimit,
-          icon: Icons.playlist_play_rounded,
-          accentColor: colorScheme.secondary,
-        ),
-        const SizedBox(height: 6),
-        if (board.bereit.isEmpty)
-          Card(
-            elevation: 0,
-            color: colorScheme.surfaceContainerLow,
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Text(
-                'Keine Aufgaben in # Bereit.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          )
-        else
-          for (final task in board.bereit)
-            TaskTile(
-              key: ValueKey('bereit_${task.id}'),
-              task: task,
-              tier: TaskTier.bereit,
-            ),
-        const SizedBox(height: 20),
-
-        // Expandable Secondary Sections on the Main View
-        _ExpandableTierSection(
-          tier: TaskTier.geplant,
-          tasks: board.geplant,
-          icon: Icons.list_alt_rounded,
-          initiallyExpanded: board.geplant.isNotEmpty,
-        ),
-        const SizedBox(height: 8),
-        _ExpandableTierSection(
-          tier: TaskTier.blockiert,
-          tasks: board.blockiert,
-          icon: Icons.block_rounded,
-          initiallyExpanded: board.blockiert.isNotEmpty,
-        ),
-        const SizedBox(height: 8),
-        _ExpandableTierSection(
-          tier: TaskTier.irgendwann,
-          tasks: board.irgendwann,
-          icon: Icons.lightbulb_outline_rounded,
-        ),
-        const SizedBox(height: 8),
-        _ExpandableTierSection(
-          tier: TaskTier.erledigt,
-          tasks: board.erledigt,
-          icon: Icons.check_circle_outline_rounded,
-        ),
-      ],
-    );
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({
-    required this.tier,
-    required this.count,
-    required this.softLimit,
-    required this.icon,
-    required this.accentColor,
+/// Switches between loading, error, and tabbed board content views.
+class _BoardContentView extends StatelessWidget {
+  /// Creates a [_BoardContentView].
+  const _BoardContentView({
+    required this.boardAsync,
+    required this.onRetry,
+    required this.onOpenSettings,
   });
 
-  final TaskTier tier;
-  final int count;
-  final int? softLimit;
-  final IconData icon;
-  final Color accentColor;
+  /// Asynchronous board state.
+  final AsyncValue<TaskBoard> boardAsync;
+
+  /// Callback to open settings.
+  final VoidCallback onOpenSettings;
+
+  /// Callback to retry remote synchronization.
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final isOverSoftLimit = softLimit != null && count > softLimit!;
-
-    return Row(
-      children: [
-        Icon(icon, color: accentColor),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '# ${tier.heading}',
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                tier.description,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: isOverSoftLimit
-                ? colorScheme.tertiaryContainer
-                : colorScheme.secondaryContainer,
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Text(
-            softLimit != null ? '$count / $softLimit' : '$count',
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: isOverSoftLimit
-                  ? colorScheme.onTertiaryContainer
-                  : colorScheme.onSecondaryContainer,
-            ),
-          ),
-        ),
-      ],
+    return boardAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => _ErrorStateView(
+        error: error.toString(),
+        onRetry: onRetry,
+        onOpenSettings: onOpenSettings,
+      ),
+      data: (board) => TabBarView(
+        children: [
+          _MainBoardTab(board: board),
+          _SingleTierListView(board: board, tier: TaskTier.planned),
+          _SingleTierListView(board: board, tier: TaskTier.blocked),
+          _SingleTierListView(board: board, tier: TaskTier.someday),
+          _SingleTierListView(board: board, tier: TaskTier.completed),
+        ],
+      ),
     );
   }
 }
 
+/// Full-screen error state view when initial WebDAV synchronization fails.
+class _ErrorStateView extends StatelessWidget {
+  /// Creates an [_ErrorStateView].
+  const _ErrorStateView({
+    required this.error,
+    required this.onRetry,
+    required this.onOpenSettings,
+  });
+
+  /// Error description string.
+  final String error;
+
+  /// Callback to open settings.
+  final VoidCallback onOpenSettings;
+
+  /// Callback to retry synchronization.
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final localizations = AppLocalizations.of(context);
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_rounded,
+              size: 48,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              localizations.syncErrorTitle,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              error,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: onOpenSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: Text(localizations.actionSettings),
+                ),
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(localizations.actionRetry),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Collapsible card section for secondary tiers (`3` through `6`) on the main board tab.
 class _ExpandableTierSection extends StatelessWidget {
+  /// Creates an [_ExpandableTierSection].
   const _ExpandableTierSection({
     required this.tier,
     required this.tasks,
@@ -370,15 +286,24 @@ class _ExpandableTierSection extends StatelessWidget {
     this.initiallyExpanded = false,
   });
 
-  final TaskTier tier;
-  final List<dynamic> tasks;
+  /// Leading icon for the tier header.
   final IconData icon;
+
+  /// Whether the expansion tile starts expanded.
   final bool initiallyExpanded;
+
+  /// Tasks belonging to [tier].
+  final List<TaskItem> tasks;
+
+  /// Tier represented by this section.
+  final TaskTier tier;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final localizations = AppLocalizations.of(context);
+    final heading = localizations.tierMarkdownHeading(tier);
 
     return Card(
       elevation: 0,
@@ -395,13 +320,13 @@ class _ExpandableTierSection extends StatelessWidget {
         collapsedShape: const Border(),
         leading: Icon(icon),
         title: Text(
-          '# ${tier.heading}',
+          heading,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w600,
           ),
         ),
         subtitle: Text(
-          tier.description,
+          localizations.tierDescription(tier),
           style: theme.textTheme.bodySmall?.copyWith(
             color: colorScheme.onSurfaceVariant,
           ),
@@ -417,7 +342,7 @@ class _ExpandableTierSection extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
-                'Keine Einträge in # ${tier.heading}.',
+                localizations.emptySectionEntries(heading),
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -436,100 +361,311 @@ class _ExpandableTierSection extends StatelessWidget {
   }
 }
 
-class _SingleTierListView extends StatelessWidget {
-  const _SingleTierListView({
-    required this.board,
-    required this.tier,
-    required this.emptyHint,
-  });
+/// Highlighted container displaying Tier 1 (`# [1] Focus`) tasks.
+class _FocusHeroSection extends StatelessWidget {
+  /// Creates a [_FocusHeroSection].
+  const _FocusHeroSection({required this.tasks});
 
-  final TaskBoard board;
-  final TaskTier tier;
-  final String emptyHint;
+  /// Tasks currently in Tier 1 (`focus`).
+  final List<TaskItem> tasks;
 
   @override
   Widget build(BuildContext context) {
-    final tasks = board.tasksForTier(tier);
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final localizations = AppLocalizations.of(context);
 
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.primary.withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _SectionHeader(
+            tier: TaskTier.focus,
+            count: tasks.length,
+            softLimit: TaskBoard.focusSoftLimit,
+            icon: Icons.bolt_rounded,
+            accentColor: colorScheme.primary,
+          ),
+          const SizedBox(height: 8),
+          if (tasks.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                localizations.emptyFocusHint,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            )
+          else
+            for (final task in tasks)
+              TaskTile(
+                key: ValueKey('focus_${task.id}'),
+                task: task,
+                tier: TaskTier.focus,
+                isProminent: true,
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Primary board tab showing Tier 1 (`Focus`), Tier 2 (`Ready`), and expandable Tiers `3`–`6`.
+class _MainBoardTab extends StatelessWidget {
+  /// Creates a [_MainBoardTab] for [board].
+  const _MainBoardTab({required this.board});
+
+  /// Current task board snapshot.
+  final TaskBoard board;
+
+  @override
+  Widget build(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
-        _SectionHeader(
-          tier: tier,
-          count: tasks.length,
-          softLimit: tier.softLimit,
-          icon: Icons.folder_open_rounded,
-          accentColor: colorScheme.primary,
+        _FocusHeroSection(tasks: board.focus),
+        const SizedBox(height: 20),
+        _ReadySection(tasks: board.ready),
+        const SizedBox(height: 20),
+        _ExpandableTierSection(
+          tier: TaskTier.planned,
+          tasks: board.planned,
+          icon: Icons.list_alt_rounded,
+          initiallyExpanded: board.planned.isNotEmpty,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
+        _ExpandableTierSection(
+          tier: TaskTier.blocked,
+          tasks: board.blocked,
+          icon: Icons.block_rounded,
+          initiallyExpanded: board.blocked.isNotEmpty,
+        ),
+        const SizedBox(height: 8),
+        _ExpandableTierSection(
+          tier: TaskTier.someday,
+          tasks: board.someday,
+          icon: Icons.lightbulb_outline_rounded,
+        ),
+        const SizedBox(height: 8),
+        _ExpandableTierSection(
+          tier: TaskTier.completed,
+          tasks: board.completed,
+          icon: Icons.check_circle_outline_rounded,
+        ),
+      ],
+    );
+  }
+}
+
+/// Section displaying Tier 2 (`# [2] Ready`) tasks on the main board tab.
+class _ReadySection extends StatelessWidget {
+  /// Creates a [_ReadySection].
+  const _ReadySection({required this.tasks});
+
+  /// Tasks currently in Tier 2 (`ready`).
+  final List<TaskItem> tasks;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final localizations = AppLocalizations.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          tier: TaskTier.ready,
+          count: tasks.length,
+          softLimit: TaskBoard.readySoftLimit,
+          icon: Icons.playlist_play_rounded,
+          accentColor: colorScheme.secondary,
+        ),
+        const SizedBox(height: 6),
         if (tasks.isEmpty)
-          Center(
+          Card(
+            elevation: 0,
+            color: colorScheme.surfaceContainerLow,
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 48),
+              padding: const EdgeInsets.all(14),
               child: Text(
-                emptyHint,
-                style: theme.textTheme.bodyLarge?.copyWith(
+                localizations.emptyReadyHint,
+                style: theme.textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
-                textAlign: TextAlign.center,
               ),
             ),
           )
         else
           for (final task in tasks)
             TaskTile(
-              key: ValueKey('tab_${tier.name}_${task.id}'),
+              key: ValueKey('ready_${task.id}'),
               task: task,
-              tier: tier,
+              tier: TaskTier.ready,
             ),
       ],
     );
   }
 }
 
-class _UnconfiguredBanner extends StatelessWidget {
-  const _UnconfiguredBanner({required this.onConfigure});
+/// Section header displaying the localized `# [n]` heading, description, and WIP counter pill.
+class _SectionHeader extends StatelessWidget {
+  /// Creates a [_SectionHeader].
+  const _SectionHeader({
+    required this.tier,
+    required this.count,
+    required this.softLimit,
+    required this.icon,
+    required this.accentColor,
+  });
 
-  final VoidCallback onConfigure;
+  /// Icon accent color.
+  final Color accentColor;
+
+  /// Number of tasks currently in [tier].
+  final int count;
+
+  /// Leading section icon.
+  final IconData icon;
+
+  /// Optional soft WIP limit for [tier].
+  final int? softLimit;
+
+  /// Target tier displayed by this header.
+  final TaskTier tier;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Material(
-      color: colorScheme.secondaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          children: [
-            Icon(
-              Icons.cloud_off_rounded,
-              size: 20,
-              color: colorScheme.onSecondaryContainer,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Lokaler Modus aktiv. Konfiguriere Nextcloud WebDAV für die Synchronisation.',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: colorScheme.onSecondaryContainer,
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final localizations = AppLocalizations.of(context);
+    final limit = softLimit;
+    final isOverSoftLimit = limit != null && count > limit;
+
+    return Row(
+      children: [
+        Icon(icon, color: accentColor),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                localizations.tierMarkdownHeading(tier),
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-            ),
-            TextButton(onPressed: onConfigure, child: const Text('Einrichten')),
-          ],
+              Text(
+                localizations.tierDescription(tier),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isOverSoftLimit
+                ? colorScheme.tertiaryContainer
+                : colorScheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            limit != null ? '$count / $limit' : '$count',
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: isOverSoftLimit
+                  ? colorScheme.onTertiaryContainer
+                  : colorScheme.onSecondaryContainer,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
 
+/// Dedicated list view for a single secondary tier tab (`3` through `6`).
+class _SingleTierListView extends StatelessWidget {
+  /// Creates a [_SingleTierListView] for [tier].
+  const _SingleTierListView({required this.board, required this.tier});
+
+  /// Current task board.
+  final TaskBoard board;
+
+  /// Tier displayed on this tab.
+  final TaskTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = board.tasksForTier(tier);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final localizations = AppLocalizations.of(context);
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      itemCount: tasks.isEmpty ? 2 : tasks.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _SectionHeader(
+              tier: tier,
+              count: tasks.length,
+              softLimit: tier.softLimit,
+              icon: Icons.folder_open_rounded,
+              accentColor: colorScheme.primary,
+            ),
+          );
+        }
+        if (tasks.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 48),
+              child: Text(
+                localizations.tierEmptyHint(tier),
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
+        }
+        final task = tasks[index - 1];
+        return TaskTile(
+          key: ValueKey('tab_${tier.name}_${task.id}'),
+          task: task,
+          tier: tier,
+        );
+      },
+    );
+  }
+}
+
+/// Dismissible error banner shown when a background WebDAV sync operation fails.
 class _SyncErrorBanner extends StatelessWidget {
+  /// Creates a [_SyncErrorBanner].
   const _SyncErrorBanner({required this.message, required this.onDismiss});
 
+  /// Error message to display.
   final String message;
+
+  /// Callback invoked when the dismiss icon is pressed.
   final VoidCallback onDismiss;
 
   @override
@@ -572,59 +708,43 @@ class _SyncErrorBanner extends StatelessWidget {
   }
 }
 
-class _ErrorStateView extends StatelessWidget {
-  const _ErrorStateView({
-    required this.error,
-    required this.onRetry,
-    required this.onOpenSettings,
-  });
+/// Banner shown when WebDAV synchronization has not yet been configured.
+class _UnconfiguredBanner extends StatelessWidget {
+  /// Creates an [_UnconfiguredBanner].
+  const _UnconfiguredBanner({required this.onConfigure});
 
-  final String error;
-  final VoidCallback onRetry;
-  final VoidCallback onOpenSettings;
+  /// Callback to navigate to [SettingsScreen].
+  final VoidCallback onConfigure;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
+    final colorScheme = Theme.of(context).colorScheme;
+    final localizations = AppLocalizations.of(context);
+
+    return Material(
+      color: colorScheme.secondaryContainer,
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
           children: [
             Icon(
               Icons.cloud_off_rounded,
-              size: 48,
-              color: theme.colorScheme.error,
+              size: 20,
+              color: colorScheme.onSecondaryContainer,
             ),
-            const SizedBox(height: 12),
-            Text(
-              'WebDAV Synchronisationsfehler',
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.bold,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                localizations.unconfiguredBannerText,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: colorScheme.onSecondaryContainer,
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              error,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: onOpenSettings,
-                  icon: const Icon(Icons.settings_outlined),
-                  label: const Text('Einstellungen'),
-                ),
-                FilledButton.icon(
-                  onPressed: onRetry,
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Erneut versuchen'),
-                ),
-              ],
+            TextButton(
+              onPressed: onConfigure,
+              child: Text(localizations.actionConfigure),
             ),
           ],
         ),
