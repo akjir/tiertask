@@ -10,8 +10,6 @@
 `TierTask` stores objective task facts (`task`, `subtasks`, `location`, `category`) in one `.tdf` document and derives operational tiers automatically:
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
-* **English & German Localization:** Supports English (`en`, default fallback) and German (`de`) via external Flutter ARB language files (`lib/l10n/app_en.arb`, `lib/l10n/app_de.arb`), selectable in Settings (`System`, `English`, or `Deutsch`).
-* **Theme Modes & Card Options:** Supports `System` (default), `Light`, and `Dark` Material 3 color themes, and an `Open Task Count` toggle (`Off` by default, `On`) to show or hide total open task counts on category and location cards.
 * **Dynamic $O(N)$ 6-Tier Derivation:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (`blocked`, future `suspended`, or unmet `condition`), and slices active tasks by `priority` and ascending `queued` FIFO timestamp into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
 * **Anti-Ping-Pong Downgrade & Auto-Finish Checklists:** Updates `queued` timestamps and strips `priority` when downgrading tasks, and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.
 * **30-Day Completed Task Pruning:** Removes `Completed` tasks whose `finished` timestamp is strictly older than `30` days (UTC) on save.
@@ -51,8 +49,7 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 1. Launch `TierTask` and open the settings screen via the menu drawer.
 2. Select the display language (`System`, `English`, or `Deutsch`) and color theme (`System`, `Light`, or `Dark`).
 3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local TDF file name (default `tiertask.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and remote file path `tiertask.tdf`).
-4. Open `Categories` or `Locations` in the side navigation drawer to create and view categories and locations, choosing their accent color via the interactive color wheel or direct `#RRGGBB` hex input. Tapping a category card on the landing page opens a dedicated category screen showing the 3 `Focus` tasks derived for that category while keeping all other filters active.
-5. Add tasks via the floating action button (`QuickAddBar`) using the input field, mutually exclusive `Priority` and `Someday` toggles, multi-select `Categories` and `Locations` chips, or the `Advanced` view to define subtasks; changes persist immediately to the configured `.tdf` file.
+4. Add tasks via the floating action button (`QuickAddBar`) using the input field, mutually exclusive `Priority` and `Someday` toggles, or multi-select `Categories` and `Locations` menus; changes persist immediately to the configured `.tdf` file.
 
 ## Tier System & TDF Format
 

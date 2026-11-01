@@ -33,15 +33,7 @@ const String _popupTapRegionGroupId = 'quick_add_popup_region';
 /// Inline bottom task creation bar with title input, Priority, Someday, upward Categories and Locations selectors, no-op Advanced, and Cancel actions.
 class QuickAddBar extends ConsumerStatefulWidget {
   /// Creates a [QuickAddBar] widget.
-  const QuickAddBar({
-    super.key,
-    this.initialCategoryIds = const <String>{},
-    this.onCancel,
-    this.onSubmitted,
-  });
-
-  /// Category IDs pre-selected when opening the quick-add bar from a category screen.
-  final Set<String> initialCategoryIds;
+  const QuickAddBar({super.key, this.onCancel, this.onSubmitted});
 
   /// Optional callback invoked when the cancel button is pressed.
   final VoidCallback? onCancel;
@@ -287,7 +279,6 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   @override
   void initState() {
     super.initState();
-    _selectedCategoryIds.addAll(widget.initialCategoryIds);
     _controller.addListener(_handleControllerChanged);
   }
 
@@ -390,9 +381,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
     _controller.clear();
     setState(() {
       _activePopup = _QuickAddPopup.none;
-      _selectedCategoryIds
-        ..clear()
-        ..addAll(widget.initialCategoryIds);
+      _selectedCategoryIds.clear();
       _selectedLocationIds.clear();
       _mode = QuickAddMode.standard;
     });
@@ -440,9 +429,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
     _controller.clear();
     setState(() {
       _activePopup = _QuickAddPopup.none;
-      _selectedCategoryIds
-        ..clear()
-        ..addAll(widget.initialCategoryIds);
+      _selectedCategoryIds.clear();
       _selectedLocationIds.clear();
       _mode = QuickAddMode.standard;
     });

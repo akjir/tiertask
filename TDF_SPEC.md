@@ -1,31 +1,27 @@
 # TierTask Data Format (TDF) Specification
 
-**Version:** 0.1.0-draft
-**Status:** Draft Specification
+**Version:** 0.2.0
+**Status:** Specification
 **File Extension:** `.tdf`
 **Character Encoding:** UTF-8
 
-> [!NOTE]
-> **Draft Status Notice:**
-> This document is an initial specification draft. While the lexical grammar, structural block syntax, core `task` and `subtasks` schema, dynamic tier derivation pipeline, and state mutation rules are normatively specified, the domain semantics for **`location`**, **`category`**, and **`condition`** remain under active design and are marked as **Draft / Work in Progress**.
-
 ## 1. Overview, Architecture & Design Goals
 
-The TierTask Data Format (`TDF`) is a deterministic, line-oriented, block-based plain-text data format for representing tasks, checklists, dependencies, contexts, and scheduling states. It combines human readability in standard text editors with structured `{ ... }` blocks and single-line directives.
+The TierTask Data Format (`TDF`) is a deterministic, line-oriented, block-based plain-text data format for representing tasks, checklists, dependencies, label contexts, activation conditions, and scheduling states. It combines human readability in standard text editors with structured `{ ... }` blocks and single-line directives.
 
 ### 1.1 Core Philosophy: Data vs. View Separation
 
-A `.tdf` document stores exclusively objective facts: tasks (`task`), timestamps (`created`, `queued`, `finished`, `suspended`), dependencies (`blocked`), checklists (`subtasks`), locations (`location`), and categories (`category`).
+A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `suspended`), dependencies (`blocked`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
 
 1. **No Explicit Tier Storage:** Unlike positional list formats, a `.tdf` document does NOT store an explicit tier assignment (`[1]` through `[6]`) on any task.
-2. **Dynamic Derivation ($O(N)$ Pipeline):** The six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed`) are derived deterministically from the stored task attributes via a single-pass $O(N)$ filtering, sorting, and slicing pipeline (see Section 5).
+2. **Dynamic Derivation ($O(N)$ Pipeline):** The six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed`) are derived deterministically from the stored task and label attributes via a single-pass $O(N)$ filtering, sorting, and slicing pipeline (see Section 5).
 
 ### 1.2 Core Design Principles
 
-1. **Strict Root Block Enforcement:** Every top-level statement at nesting depth `0` in a TDF document MUST be a block (`task`, `location`, or `category`). Standalone directives at the root level are forbidden.
+1. **Strict Root Block Enforcement:** Every top-level statement at nesting depth `0` in a TDF document MUST be a root block (`task` or `label`). Standalone directives at the root level are forbidden.
 2. **No Empty Directives:** Optional directives that have no value (such as an unset `finished` or `queued` timestamp) MUST be omitted entirely from the block rather than written with empty arguments.
 3. **Single-Pass Linear Grammar:** TDF is designed to be tokenized and parsed in a single $O(N)$ linear pass without regular expressions or backtracking.
-4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (ISO-8601 timestamps, boolean literals, geographic coordinates, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
+4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
 
 ## 2. Lexical Elements
 
@@ -74,12 +70,12 @@ An **Identifier** is the first token of a block header or directive.
 An **Argument** represents a parameter passed to a block header or a directive. An argument can be written in one of three lexical forms:
 
 #### A. Bare Word (Unquoted Token)
-- A contiguous sequence of one or more valid UTF-8 characters excluding horizontal whitespace (`' '`, `'\t'`), newlines (`\r`, `\n`), and reserved punctuation (`{`, `}`, `#`, `"`, `'`).
-- Bare words are used for single-word values without spaces, including entity IDs (`t001`, `taxes2026`, `home`, `c_it`), header flags (`priority`, `auto-finish`), boolean literals (`true`, `false`), numbers (`50.9787`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:30`).
+- A contiguous sequence of one or more valid UTF-8 characters excluding horizontal whitespace (`' '`, `'\t'`), newlines (`\r`, `\n`), and reserved punctuation (`{`, `}`, '#', `"`, `'`).
+- Bare words are used for single-word values without spaces, including entity IDs (`t001`, `taxes2026`, `haushalt`, `it`), header flags (`priority`, `auto-finish`), condition rule keywords (`day`, `time`, `location`, `any`), weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), boolean literals (`true`, `false`), numbers (`50.9787`, `11.0328`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:00`).
 
 #### B. Double-Quoted String (`"..."`)
 - Begins and ends with `"` (`U+0022`).
-- Used for text containing spaces or special characters, such as task titles (`name`), descriptions (`note`), and hexadecimal color codes (`"#4CAF50"`).
+- Used for text containing spaces or special characters, such as task and label titles (`name`), descriptions (`note`), and hexadecimal color codes (`"#4CAF50"`).
 - May contain horizontal whitespace, `#`, `{`, `}`, and `'`.
 - **Single-line constraint:** Unescaped raw newlines (`\r` or `\n`) inside a double-quoted string are forbidden and MUST trigger an `UnterminatedString` error.
 - **Escape sequences:** Backslash (`\`, `U+005C`) escapes the immediately following character:
@@ -97,19 +93,22 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 ### 2.8 Primitive Domain Value Types
 At the semantic validation layer, directive and header arguments map to the following primitive types:
-- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `c_house`) are equally valid when authored manually.
+- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `haushalt`, `it`) are equally valid when authored manually.
 - **Boolean (`<bool>`):** Exact case-sensitive bare word `true` or `false`.
+- **Weekday (`<weekday>`):** Exact case-sensitive lowercase bare word from the set `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
+- **Time of Day (`<time>`):** 24-hour minute-precision time written as `<HH:MM>` (e.g., `08:00`, `18:00`), where `HH` is `00..23` and `MM` is `00..59`.
 - **Timestamp (`<timestamp>`):** ISO-8601 date with optional 24-hour minute-precision time, written as either:
   - One bare-word token: `<YYYY-MM-DD>` (e.g., `2026-11-01`).
-  - Two whitespace-separated bare-word tokens: `<YYYY-MM-DD> <HH:MM>` (e.g., `2026-11-01 08:30`), where `MM` is `01..12`, `DD` is valid for the calendar month/year, `HH` is `00..23`, and `MM` (minute) is `00..59`.
+  - Two whitespace-separated bare-word tokens: `<YYYY-MM-DD> <HH:MM>` (e.g., `2026-11-01 19:30`), where `MM` is `01..12`, `DD` is valid for the calendar month/year, `HH` is `00..23`, and `MM` (minute) is `00..59`.
   - When `<HH:MM>` is omitted on a date-only timestamp, chronological ordering and comparison treat the time component as `00:00`.
-- **Floating-Point / Numeric (`<number>`):** Standard ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`) used for geographic latitude, longitude, and radius values.
+- **Floating-Point / Numeric (`<number>`):** Standard ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`) used for geographic latitude (`-90.0` to `90.0`), longitude (`-180.0` to `180.0`), and radius values in meters (`> 0`).
+- **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`.
 
 ## 3. Structural Grammar
 
 ### 3.1 Document Structure (Mandatory Root Blocks)
 A TDF document represents a sequence of root-level **Blocks**.
-- At the root level (nesting depth `0`), ONLY **Blocks** (`task`, `location`, `category`), blank lines, and `#` comments are permitted.
+- At the root level (nesting depth `0`), ONLY **Blocks** (`task`, `label`), blank lines, and `#` comments are permitted.
 - **Root-Level Directive Prohibition:** Any directive appearing at nesting depth `0` (outside of a `{ ... }` block) MUST be rejected as a syntax error (`UnexpectedRootDirective`).
 - An empty file (or a file containing only whitespace and comments) is a valid empty TDF document with zero blocks.
 
@@ -122,12 +121,12 @@ A **Block** groups related directives and optional nested sub-blocks under a nam
 }
 ```
 
-- **Block Header:** Consists of an Identifier, followed by one or more whitespace-separated Arguments (or zero arguments for parameterless sub-blocks such as `subtasks {`), followed by the opening brace `{`.
-- **Opening Brace Placement:** The opening brace `{` MUST appear on the same line as the block Identifier and its arguments, separated from the preceding token by at least one horizontal whitespace character (e.g., `task t001 {`, `task t001 priority {`, or `subtasks {`).
+- **Block Header:** Consists of an Identifier, followed by one or more whitespace-separated Arguments (or zero arguments for parameterless sub-blocks such as `subtasks {` and `condition {`), followed by the opening brace `{`.
+- **Opening Brace Placement:** The opening brace `{` MUST appear on the same line as the block Identifier and its arguments, separated from the preceding token by at least one horizontal whitespace character (e.g., `task t001 {`, `task t001 priority {`, `label haushalt {`, `subtasks auto-finish {`, or `condition {`).
 - **After Opening Brace:** Only optional horizontal whitespace and an optional `#` comment may follow `{` before the line terminator (`\n` or `\r\n`), except for an empty inline block `{}`.
 - **Block Body:** Contains zero or more statements (Directives or nested Blocks), each on its own logical line.
 - **Closing Brace Placement:** A non-empty block is closed by `}` on its own logical line (preceded only by optional horizontal whitespace and followed only by optional horizontal whitespace, an optional `#` comment, and a newline or `EOF`).
-- **Empty Blocks:** A block may be empty (if it requires no mandatory directives), written either across multiple lines or inline as `<identifier> [<argument> ...] {}`.
+- **Empty Blocks:** A root block may be empty ONLY if it requires no mandatory directives; because `task` requires `name` and `created`, `label` requires `name`, and `condition` / `subtasks` sub-blocks require at least one rule or step when present, empty blocks are rejected during semantic validation (`MissingRequiredDirective`).
 
 ### 3.3 Directives
 A **Directive** is a single-line key-value or key-tuple instruction inside a block.
@@ -139,7 +138,7 @@ A **Directive** is a single-line key-value or key-tuple instruction inside a blo
 - **Block-Only Scope:** A directive MUST reside inside a block (nesting depth $\ge 1$).
 - **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
 - **Termination:** A directive is terminated by a newline (`LF` or `CRLF`) or `EOF` (if preceding a closing brace). Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
-- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Directives designated as repeatable (such as `condition` inside `task` or `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `note`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
+- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `note`, `color`, `labels`, `blocked`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
 
 ### 3.4 Formal Grammar (EBNF)
 
@@ -191,7 +190,7 @@ newline         = "\n" | "\r\n" ;
 
 ## 4. Domain Schema: Root Blocks, Sub-Blocks & Directives
 
-At nesting depth `0`, TDF defines three root block types: `task`, `location`, and `category`. Any other root block identifier MUST be rejected with an `UnknownBlockType` error.
+At nesting depth `0`, TDF defines two root block types: `task` and `label`. Any other root block identifier MUST be rejected with an `UnknownBlockType` error.
 
 ### 4.1 The `task` Block (Tasks)
 
@@ -219,11 +218,10 @@ task <id> [priority] {
 | `queued` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM>]` | Timestamp governing ascending FIFO ordering in the active cycle. **When omitted** (and `finished` is omitted), the task is classified as `Someday` and excluded from the active cycle. |
 | `finished` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM>]` | Completion timestamp. **When present**, the task is classified as `Completed` and subject to garbage collection once older than $30$ days. **When omitted**, the task is open. |
 | `note` | No | `0..1` | `"<text>"` | Optional extended description or note. **When omitted**, the task has no extended note. |
-| `locations` | No | `0..1` | `<id1> [<id2> ...]` | *(Draft)* One or more `location` IDs. **When omitted**, the task is location-independent and matches every location context. |
-| `categories` | No | `0..1` | `<id1> [<id2> ...]` | *(Draft)* One or more `category` IDs associated with the task. **When omitted**, the task has no category assignment. |
+| `labels` | No | `0..1` | `<id1> [<id2> ...]` | One or more space-separated `label` IDs assigned to the task. **When present**, associates the task with the referenced labels for context filtering and condition inheritance. **When omitted**, the task has no label assignment. |
 | `blocked` | No | `0..1` | `<task_id1> [<task_id2> ...]` | IDs of prerequisite tasks. **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive. **When omitted**, no task-dependency block applies. |
 | `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM>]` | Deferral / snooze timestamp. **When present**, the task is classified as `Blocked` while the timestamp lies strictly in the future. **When omitted**, no time-deferral block applies. |
-| `condition` | No | `0..N` | `<type> <arg1> [<arg2> ...]` | *(Draft)* Dynamic activation condition. Multiple `condition` directives are combined with logical `AND`. **When omitted**, no dynamic condition restricts the task. |
+| `condition` | No | `0..N` | `<type> <args...>` or `{ ... }` | Task-level activation condition(s) (`day`, `time`, `location`) written either as an inline directive or a `condition { ... }` sub-block (see Section 4.3). Evaluated before inherited `label` conditions. |
 
 #### 4.1.3 Sub-Block `subtasks` (Checklists)
 
@@ -238,85 +236,124 @@ subtasks [auto-finish] {
 - `auto-finish` (**Optional Header Flag**):
   - **When present:** As soon as all contained `step` directives have the value `true`, the enclosing `task` automatically transitions to completed (`finished` is set to the current timestamp).
   - **When omitted:** Completing all `step` directives does not automatically set `finished` on the enclosing `task`.
-- `step <bool> "<text>"` (**Repeatable Directive**): Defines a single checklist step where `false` indicates open and `true` indicates completed. The top-to-bottom declaration order of `step` directives is preserved.
+- `step <bool> "<text>"` (**Repeatable Directive**): Defines a single checklist step where `false` indicates open and `true` indicates completed. The top-to-bottom declaration order of `step` directives is preserved. A `subtasks` block MUST contain at least one `step` directive.
 
-#### 4.1.4 Options for `condition` (Draft / Work in Progress)
+### 4.2 The `label` Block (Labels & Context Profiles)
 
-> [!NOTE]
-> The `condition` directive is currently a draft specification and is not yet finalized.
-
-To keep the grammar flat, dynamic conditions are written as single-line key-tuple directives:
-- `condition day <mon|tue|wed|thu|fri|sat|sun ...>`: The task is active only on the specified weekdays (e.g., `condition day sat sun`).
-- `condition time <HH:MM> <HH:MM>`: The task is active only within the daily time window between the start and end times (e.g., `condition time 08:00 17:00`).
-
-### 4.2 The `location` Block (Locations — Draft / Work in Progress)
-
-> [!NOTE]
-> The `location` block and its geofencing / filtering semantics are currently in draft status and not yet finalized.
-
-Defines a named location at nesting depth `0` that tasks can reference via the `locations` directive.
+Defines a named label (work context and reusable condition profile) at nesting depth `0` that tasks can reference via the `labels` directive.
 
 ```text
-location <id> {
+label <id> {
     name  "<display_name>"
     color "<hex_color_code>"
     note  "<optional_description>"
-    gps   <latitude> <longitude> [<radius_in_meters>]
+
+    condition {
+        location <lat> <lon> <radius>
+        day      <d1> [<d2> ...]
+        time     <HH:MM> <HH:MM>
+    }
 }
 ```
 
-| Directive | Required | Multiplicity | Format / Arguments | Description |
+| Directive / Sub-Block | Required | Multiplicity | Format / Arguments | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `name` | Yes | `1` | `"<text>"` | Human-readable display name of the location (e.g., `"Work"`). |
-| `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the location. |
-| `note` | No | `0..1` | `"<text>"` | Optional description of the location. |
-| `gps` | No | `0..1` | `<lat> <lon> [<radius>]` | Optional decimal coordinates and optional radius in meters for geofencing or automatic location selection. |
+| `name` | Yes | `1` | `"<text>"` | Human-readable display name of the label (e.g., `"Haushalt"`). |
+| `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the label. |
+| `note` | No | `0..1` | `"<text>"` | Optional description of the label. |
+| `condition` | No | `0..N` | `<type> <args...>` or `{ ... }` | Optional activation conditions (`day`, `time`, `location`) inherited by tasks carrying this label (see Section 4.3). |
 
-### 4.3 The `category` Block (Categories — Draft / Work in Progress)
+### 4.3 Activation Conditions (`condition`)
 
-> [!NOTE]
-> The `category` block and its context-filtering semantics are currently in draft status and not yet finalized.
+#### 4.3.1 Scope & Syntactic Forms (Block Form vs. Single-Line Shorthand)
+Activation conditions can be defined inside both `label` blocks and `task` blocks at nesting depth `1`. Two syntactic representations are supported and map to the exact same internal condition model:
 
-Defines a named category (work context) at nesting depth `0` by which tasks can be filtered.
+1. **Block Form (`condition { ... }` — Multiple or Grouped Conditions):**
+   A parameterless `condition { ... }` sub-block groups one or more condition rules (`day`, `time`, `location`) without repeating the `condition` keyword on each line:
+   ```text
+   condition {
+       location 50.9787 11.0328 150
+       day      sat sun
+       time     08:00 20:00
+   }
+   ```
+   A `condition { ... }` block MUST contain at least one rule directive and MUST NOT contain nested sub-blocks.
+2. **Single-Line Shorthand (`condition <type> <args...>` — Inline Directive):**
+   For a single condition rule (or repeatable inline declarations), the inline directive `condition <type> <args...>` is equally valid:
+   ```text
+   condition time 09:00 18:00
+   ```
+3. **Canonical Serialization:**
+   - When a `label` or `task` has `0` condition rules, no `condition` directive or sub-block is emitted.
+   - When a `label` or `task` has exactly `1` condition rule, a canonical serializer MUST emit the single-line shorthand `condition <type> <args...>`.
+   - When a `label` or `task` has `2` or more condition rules, a canonical serializer MUST emit a single `condition { ... }` sub-block with rules ordered by type as `location`, `day`, `time` (preserving relative declaration order within the same type).
 
-```text
-category <id> {
-    name  "<display_name>"
-    color "<hex_color_code>"
-    note  "<optional_description>"
-}
-```
+#### 4.3.2 Built-In Condition Rule Types
 
-| Directive | Required | Multiplicity | Format / Arguments | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `name` | Yes | `1` | `"<text>"` | Human-readable display name of the category (e.g., `"Household"`). |
-| `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the category. |
-| `note` | No | `0..1` | `"<text>"` | Optional description of the category. |
+Inside a `condition { ... }` sub-block (or following the `condition` keyword in single-line shorthand), exactly three rule types are permitted:
+
+| Rule Type | Block Syntax | Inline Shorthand Syntax | Arguments & Domain Rules |
+| :--- | :--- | :--- | :--- |
+| `day` | `day <d1> [<d2> ...]` | `condition day <d1> [<d2> ...]` | One or more weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), or the single override keyword `any` (on `task` only). Allowed weekdays are combined with logical `OR`. |
+| `time` | `time <start> <end>` | `condition time <start> <end>` | Two 24-hour `<HH:MM>` time tokens (`00:00` to `23:59`, `start != end`), or the single override keyword `any` (on `task` only). Defines an inclusive daily active time window. |
+| `location` | `location <lat> <lon> <radius>` | `condition location <lat> <lon> <radius>` | Three decimal numbers (`<lat>` in `[-90.0, 90.0]`, `<lon>` in `[-180.0, 180.0]`, `<radius>` $> 0$ in meters), or the single override keyword `any` (on `task` only). |
+
+Detailed rule semantics:
+1. **Weekday Rule (`day`):**
+   - Evaluates to `true` if the current calendar weekday at the evaluation timestamp matches at least one listed `<weekday>` token.
+   - If multiple `day` lines appear in the same block, their weekday sets are merged into a single union (logical `OR`).
+2. **Time Window Rule (`time`):**
+   - **Same-Day Window (`start < end`):** Evaluates to `true` when `start <= current_time <= end` (inclusive boundaries, e.g., `time 08:00 20:00`).
+   - **Overnight Window (`start > end`):** Spans midnight and evaluates to `true` when `current_time >= start || current_time <= end` (e.g., `time 22:00 06:00`).
+   - **Disjoint Windows on the Same Day:** Multiple `time` rules within the same scope (e.g., `time 08:00 12:00` and `time 14:00 18:00`) are combined with logical `OR`, evaluating to `true` if the current time falls within at least one window.
+3. **GPS Location Rule (`location`):**
+   - Specifies a circular geofence centered at `(<lat>, <lon>)` in WGS-84 decimal degrees with a radius of `<radius>` meters.
+   - Evaluates to `true` when the great-circle Haversine distance (using mean Earth radius $R = 6\,371\,000\text{ m}$) between the device's current GPS coordinates and `(<lat>, <lon>)` is less than or equal to `<radius>` ($\text{distance} \le \text{radius}$).
+   - Multiple `location` rules within the same scope are combined with logical `OR`, evaluating to `true` if the device is within the radius of at least one specified location.
+   - If the evaluation environment does not provide current GPS coordinates (e.g., desktop platform without GPS hardware or disabled location sensor), `location` rules evaluate to `true` (unrestricted).
+
+#### 4.3.3 Intra-Type Logical `OR` & Inter-Type Logical `AND`
+Within an effective condition set:
+- **Intra-Type Evaluation (`OR`):** Multiple rules of the same condition type (`day`, `time`, or `location`) are combined with logical `OR`.
+- **Inter-Type Evaluation (`AND`):** Different active condition types (`day`, `time`, and `location`) are combined with logical `AND`. All present condition types must evaluate to `true` simultaneously for the condition set to be satisfied:
+  $$\text{isSatisfied} = (\bigvee \text{day}) \land (\bigvee \text{time}) \land (\bigvee \text{location})$$
+
+#### 4.3.4 Evaluation Order (`task` First, Then `label`), Inheritance & Short-Circuit Termination
+1. **Valid Scope (`task` and `label`):**
+   - Both `condition { ... }` sub-blocks and inline `condition <type> <args...>` directives are valid inside individual `task` blocks as well as `label` blocks.
+2. **Strict Evaluation Precedence (`task` First, Then `label`):**
+   - Condition evaluation for a task ALWAYS begins with the conditions defined directly on the `task` block and proceeds afterward to the conditions inherited from its `label` block(s).
+   - If a `task` defines one or more rules of a given condition type $T \in \{\text{day}, \text{time}, \text{location}\}$, the task-level rules for type $T$ override and replace all label-level rules of type $T$ for that task. Condition types not defined on the `task` are inherited from the assigned `label` (or merged per type via logical `OR` across assigned labels in the unfiltered global view).
+   - If a `task` specifies `<type> any` (e.g., `condition location any`), the inherited label constraint for `<type>` is cleared so that `<type>` is unrestricted on that task.
+3. **Sequential Short-Circuit Evaluation:**
+   - The effective condition rules are evaluated sequentially one after another: first the `task`-level condition types (in declaration order), followed by the remaining non-overridden `label`-level condition types (in declaration order).
+   - **Immediate Rejection on First Failure:** As soon as a single evaluated condition type is not satisfied (`false`), evaluation stops immediately without checking subsequent conditions. The task is excluded from active selection (`Focus`, `Ready`, `Planned`) and classified as `Blocked` (`Tier 4`).
 
 ## 5. Dynamic Computation of the 6 Tiers (Evaluation Pipeline)
 
-When evaluating a `.tdf` document against a reference timestamp and optional context filters (`category` and `location`), the six tiers are derived deterministically in a single $O(N)$ pipeline across all `task` blocks:
+When evaluating a `.tdf` document against a reference timestamp, optional device GPS coordinates, and an optional active `label` context filter, the six tiers are derived deterministically in a single $O(N)$ pipeline across all `task` blocks:
 
 ### 5.1 Tier 6 — `Completed`
-- **Selection Rule:** All tasks that possess a `finished` directive.
+- **Selection Rule:** All tasks that possess a `finished` directive (matching the active `label` filter if one is selected).
 - **Garbage Collection (30-Day Retention Pruning):** Tasks whose `finished` timestamp lies strictly more than $30$ days ($> 30$ days) in the past relative to the evaluation timestamp are removed when persisting the document.
 
 ### 5.2 Tier 5 — `Someday`
-- **Selection Rule:** All open tasks (`finished` is absent) that do NOT possess a `queued` directive.
+- **Selection Rule:** All open tasks (`finished` is absent) that do NOT possess a `queued` directive (matching the active `label` filter if one is selected).
 - **Behavior:** These tasks form the unscheduled backlog and do not participate in the active pull cycle.
 
 ### 5.3 Tier 4 — `Blocked`
-- **Selection Rule:** All scheduled open tasks (`queued` is present and `finished` is absent) for which **at least one** of the following blocking conditions holds at the evaluation timestamp:
+- **Selection Rule:** All scheduled open tasks (`queued` is present and `finished` is absent, matching the active `label` filter if one is selected) for which **at least one** of the following blocking conditions holds at the evaluation timestamp:
   1. **Unfinished Prerequisite (`blocked`):** At least one task ID referenced in the task's `blocked` directive exists in the document and does not have a `finished` directive.
   2. **Future Deferral (`suspended`):** The task's `suspended` timestamp lies strictly in the future.
-  3. **Unmet Condition (`condition`, Draft):** At least one `condition` directive on the task is not satisfied at the evaluation timestamp.
+  3. **Unmet Condition (`condition` — Sequential `task` -> `label` Short-Circuit):** Conditions are evaluated sequentially one by one, starting with the `task`'s own `condition` rules and followed by non-overridden `label` `condition` rules (Section 4.3.4). As soon as the first condition is not met (`false`), evaluation short-circuits and the task is excluded from active selection.
+- **Auto-Pull Cascade Behavior:** Any task derived as `Blocked` is skipped during the auto-pull cascade into `Focus` (limit `3`) and `Ready` (limit `5`), allowing the next unblocked task in queue order to advance automatically.
 
 ### 5.4 Active Pull Cycle (`Focus`, `Ready`, `Planned`)
 All remaining scheduled, unblocked, open tasks (`queued` is present, `finished` is absent, and none of the Section 5.3 blocking criteria apply) enter the active cycle pipeline:
 
-1. **Step 1 — Context Filtering (Draft):**
-   - From the remaining active tasks, select those matching the active `category` and `location` context filters.
-   - Tasks without a `locations` directive are location-independent and match every location filter.
+1. **Step 1 — Label Context Filtering:**
+   - When an active `label` context filter is selected, retain only tasks whose `labels` directive contains the active label ID.
+   - When no `label` context filter is selected (global view), all remaining unblocked active tasks proceed to Step 2.
 2. **Step 2 — Deterministic Sorting:**
    - **Primary Group (`priority` Flag Present):** Tasks carrying the `priority` header flag are placed ahead of regular tasks and sorted among themselves in ascending chronological order by their `queued` timestamp.
    - **Secondary Group (`priority` Flag Omitted — Regular FIFO):** Regular tasks follow in ascending chronological order by their `queued` timestamp (oldest timestamp first = FIFO).
@@ -331,7 +368,7 @@ All remaining scheduled, unblocked, open tasks (`queued` is present, `finished` 
 State transitions mutate the task directives and header flags in the `.tdf` document rather than moving tasks between static tier sections:
 
 ### 6.1 Creating a New Task
-- **For `Planned` (Default):** Sets both `created` and `queued` to the current timestamp (`now`). If `Focus` or `Ready` has open capacity (< 3 or < 5 tasks), the slicing pipeline (Section 5.4) places the task into the corresponding higher tier automatically.
+- **For `Planned` (Default):** Sets both `created` and `queued` to the current timestamp (`now`). If `Focus` or `Ready` has open capacity (< 3 or < 5 tasks) and all effective conditions are satisfied, the slicing pipeline (Section 5.4) places the task into the corresponding higher tier automatically.
 - **For `Someday`:** Sets `created` to the current timestamp (`now`) and omits `queued`.
 - **For Immediate `Focus` / High Priority:** Sets `created` and `queued` to `now` and adds the `priority` flag to the `task` block header.
 
@@ -358,8 +395,8 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 | :--- | :--- | :--- |
 | `MAX_FILE_BYTES` | `1_048_576` (1 MiB) | Maximum input size in bytes before rejecting the document. |
 | `MAX_LINE_COUNT` | `16_384` | Maximum logical lines per `.tdf` document. |
-| `MAX_NESTING_DEPTH` | `2` | Maximum `{ ... }` block nesting depth (`1` for root blocks, `2` for `subtasks`). |
-| `MAX_BLOCKS_PER_DOC` | `4_096` | Maximum total blocks (`task`, `location`, `category`, `subtasks`) per document. |
+| `MAX_NESTING_DEPTH` | `2` | Maximum `{ ... }` block nesting depth (`1` for root blocks `task` and `label`, `2` for sub-blocks `subtasks` and `condition`). |
+| `MAX_BLOCKS_PER_DOC` | `4_096` | Maximum total blocks (`task`, `label`, `subtasks`, `condition`) per document. |
 | `MAX_STMTS_PER_BLOCK` | `512` | Maximum directives or sub-blocks inside a single block. |
 | `MAX_ARGS_PER_STMT` | `64` | Maximum arguments allowed on a single block header or directive. |
 | `MAX_TEXT_LENGTH` | `500` | Maximum character length of a `name` or `step` text value. |
@@ -371,7 +408,7 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 - **Root Directive (`UnexpectedRootDirective`):** A directive (e.g., `name "Test"`) appears at nesting depth `0` outside of any `{ ... }` block.
 - **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (e.g., `queued` with no timestamp value).
 - **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" t001 {` or `"name" "Test"`) or starts with an invalid character (e.g., `123task {` or `-flag val`).
-- **Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task t001{` or `subtasks{`).
+- **Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task t001{` or `condition{`).
 - **Trailing Tokens After Brace (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` (except `}`) or after `}`.
 - **Unclosed Block (`UnclosedBlock`):** `EOF` is reached while nesting depth $> 0$.
 - **Unmatched Closing Brace (`UnexpectedClosingBrace`):** `}` is encountered at nesting depth `0`.
@@ -379,12 +416,12 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 - **Adjacent Quoted Token (`UnexpectedToken`):** A quote opens or closes in the middle of a token without separating whitespace (e.g., `foo"bar"` or `"foo"bar`).
 - **Invalid Escape (`InvalidEscapeSequence`):** A `"` string contains an unknown escape sequence (e.g., `\a`, `\x`, `\0`).
 - **Schema Validation Errors:**
-  - `UnknownBlockType`: Root block is not `task`, `location`, or `category`, or nested block inside `task` is not `subtasks`.
-  - `UnknownDirective`: A directive name is not valid for its enclosing block.
-  - `MissingRequiredDirective`: A required directive (`name` or `created` in `task`, `name` in `location` or `category`) is missing.
-  - `DuplicateDirective`: A single-valued directive appears more than once in the same block.
-  - `DuplicateIdentifier`: Two blocks in the same namespace share an identical `<id>`.
-  - `InvalidTimestamp` / `InvalidBoolean` / `InvalidNumber`: A directive argument fails semantic format validation.
+  - `UnknownBlockType`: Root block is not `task` or `label`; nested block inside `task` is not `subtasks` or `condition`; nested block inside `label` is not `condition`; or a block appears inside `subtasks` or `condition`.
+  - `UnknownDirective`: A directive name is not valid for its enclosing block (`task`, `label`, `subtasks`, or `condition`), or a `condition` rule type is not `day`, `time`, or `location`.
+  - `MissingRequiredDirective`: A required directive (`name` or `created` in `task`; `name` in `label`) is missing, or a `subtasks` or `condition` sub-block contains zero directives.
+  - `DuplicateDirective`: A single-valued directive (`name`, `created`, `queued`, `finished`, `note`, `color`, `labels`, `blocked`, `suspended`) appears more than once in the same block, or more than one `subtasks` sub-block appears in a `task`.
+  - `DuplicateIdentifier`: Two root blocks in the same namespace (`task` or `label`) share an identical `<id>`.
+  - `InvalidTimestamp` / `InvalidBoolean` / `InvalidNumber` / `InvalidCondition`: A directive argument fails semantic validation (invalid ISO-8601 date/time, invalid `<HH:MM>` time window or identical start and end times `start == end`, unknown weekday token, latitude outside `[-90.0, 90.0]`, longitude outside `[-180.0, 180.0]`, radius $\le 0$, or `any` used inside a `label` condition).
 - **Limit Exceeded (`LimitExceeded`):** Any resource bound defined in Section 7 is exceeded.
 
 ## 9. Canonical Complete Example (`tiertask.tdf`)
@@ -394,87 +431,80 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-# === Locations (Draft) ===
-location home {
-    name "Home"
-}
+label haushalt {
+    name "Haushalt"
 
-location work {
-    name "Work"
-    gps  50.9787 11.0328 150
-}
-
-# === Categories (Draft) ===
-category c_house {
-    name  "Household"
-    color "#4CAF50"
-}
-
-category c_it {
-    name  "IT & Servers"
-    color "#2196F3"
-}
-
-# === Tasks ===
-
-# Prioritized task -> Lands at the top of Focus (in c_it)
-task t001 priority {
-    name       "Verify server backup"
-    note       "Inspect logs under /var/log/backup"
-    created    2026-11-01 08:30
-    queued     2026-11-01 08:30
-    categories c_it
-}
-
-# Regular active task with subtasks -> Focus / Ready
-task t002 {
-    name       "Clean up study"
-    created    2026-11-01 09:00
-    queued     2026-11-01 09:15
-    locations  home
-    categories c_house
-
-    subtasks auto-finish {
-        step true  "Wipe desk"
-        step false "Organize cables"
-        step false "Empty trash bin"
+    condition {
+        location 50.9787 11.0328 150
+        day      sat sun
+        time     08:00 20:00
     }
 }
 
-# Task in multiple categories with condition (weekends only)
-task t003 {
-    name       "Clean dust from NAS drives"
-    created    2026-11-01 10:00
-    queued     2026-11-01 10:00
-    locations  home
-    categories c_house c_it
-    condition  day sat sun
+label it {
+    name  "IT & Servers"
+    color "#2196F3"
+
+    condition {
+        day  mon tue wed thu fri
+        time 08:00 12:00
+        time 14:00 18:00
+    }
 }
 
-# Blocked task (waits for t001 and is suspended until Nov 5)
-task t004 {
-    name       "Apply firewall update"
-    created    2026-11-01 11:00
-    queued     2026-11-01 11:00
-    locations  work
-    categories c_it
-    blocked    t001
-    suspended  2026-11-05 08:00
+# Prioritized task inheriting location (50.9787 11.0328 150) and day (sat sun)
+# from 'haushalt', while overriding 'time' to 09:00..18:00:
+task t001 priority {
+    name      "Rasen mähen"
+    note      "Vorher Benzin prüfen"
+    created   2026-11-01 19:30
+    queued    2026-11-01 19:30
+    labels    haushalt
+    blocked   t002
+    suspended 2026-11-05
+    condition time 09:00 18:00
+
+    subtasks auto-finish {
+        step false "Rasenmäher aus dem Schuppen holen"
+        step true  "Grasfangkorb leeren"
+    }
+}
+
+# Prerequisite task in 'haushalt' that clears the inherited GPS location rule:
+task t002 {
+    name      "Rasenmäher-Ersatzmesser online bestellen"
+    created   2026-11-01 18:00
+    queued    2026-11-01 18:00
+    labels    haushalt
+    condition location any
+}
+
+# Task assigned to multiple labels with multiple condition rules:
+task t003 {
+    name    "NAS-Festplatten entstauben"
+    created 2026-11-01 10:00
+    queued  2026-11-01 10:00
+    labels  haushalt it
+
+    condition {
+        day  sat
+        time 10:00 16:00
+    }
 }
 
 # Task in "Someday" (no 'queued' directive present)
-task t005 {
-    name       "3D-print custom NAS enclosure"
-    created    2026-11-01 12:00
-    categories c_it
+task t004 {
+    name    "3D-gedrucktes NAS-Gehäuse entwerfen"
+    created 2026-11-01 12:00
+    labels  it
 }
 
 # Completed task ('finished' is set -> deleted after 30 days)
-task t006 {
-    name       "Mount winter tires"
-    created    2026-10-20 14:00
-    queued     2026-10-21 08:00
-    finished   2026-10-29 16:45
-    locations  home
+task t005 {
+    name     "Winterreifen montieren"
+    created  2026-10-20 14:00
+    queued   2026-10-21 08:00
+    finished 2026-10-29 16:45
+    labels   haushalt
 }
 ```

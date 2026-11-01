@@ -21,18 +21,14 @@ import '../l10n/tier_localization_extension.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
-import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
-import 'category_screen.dart';
 import 'settings_screen.dart';
-import 'widgets/context_management_sheet.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_tile.dart';
+import 'widgets/tier_page_indicator.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
-const Color _accentCyan = Color(0xFF00E5FF);
 const Color _accentMagenta = Color(0xFFEB06FF);
-const Color _accentOrange = Color(0xFFFF9100);
 const Color _canvasColor = Color(0xFF344FA1);
 const Color _cardColor = Color(0xFF071A52);
 const Color _mutedLabelColor = Color(0xFF9BA8E5);
@@ -46,179 +42,10 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-/// Horizontal scrollable section displaying [_ContextCardData] summary cards.
-class _ContextCardCarousel extends StatelessWidget {
-  /// Creates a [_ContextCardCarousel].
-  const _ContextCardCarousel({
-    required this.items,
-    required this.sectionTitle,
-    required this.showOpenTaskCount,
-  });
-
-  /// Cards to render in the horizontal list.
-  final List<_ContextCardData> items;
-
-  /// Uppercase section heading above the carousel.
-  final String sectionTitle;
-
-  /// Whether to render the total open task count on each card.
-  final bool showOpenTaskCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _LandingSectionLabel(title: sectionTitle),
-        const SizedBox(height: 12),
-        SizedBox(
-          height: 116,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: items.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 14),
-            itemBuilder: (context, index) => _ContextSummaryCard(
-              item: items[index],
-              showOpenTaskCount: showOpenTaskCount,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Immutable display model for a category or location card on the landing page.
-@immutable
-class _ContextCardData {
-  /// Creates a [_ContextCardData] instance.
-  const _ContextCardData({
-    required this.id,
-    required this.name,
-    required this.taskCount,
-    required this.accentColor,
-    this.onTap,
-  });
-
-  /// Color of the solid bottom accent bar.
-  final Color accentColor;
-
-  /// Deterministic identifier used for widget keys.
-  final String id;
-
-  /// Display name of the category or location.
-  final String name;
-
-  /// Optional callback invoked when the card is tapped.
-  final VoidCallback? onTap;
-
-  /// Total number of tasks associated with this context.
-  final int taskCount;
-}
-
-/// Dark-navy card displaying optional total task count, context name, and a solid colored line.
-class _ContextSummaryCard extends StatelessWidget {
-  /// Creates a [_ContextSummaryCard].
-  const _ContextSummaryCard({
-    required this.item,
-    required this.showOpenTaskCount,
-  });
-
-  /// Card data to render.
-  final _ContextCardData item;
-
-  /// Whether to display the total open task count label at the top of the card.
-  final bool showOpenTaskCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 190,
-      decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          key: ValueKey('card_${item.id}'),
-          borderRadius: BorderRadius.circular(20),
-          onTap: item.onTap,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-            child: _ContextSummaryCardColumn(
-              item: item,
-              showOpenTaskCount: showOpenTaskCount,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Inner column layout for [_ContextSummaryCard].
-class _ContextSummaryCardColumn extends StatelessWidget {
-  /// Creates a [_ContextSummaryCardColumn].
-  const _ContextSummaryCardColumn({
-    required this.item,
-    required this.showOpenTaskCount,
-  });
-
-  /// Card data to render.
-  final _ContextCardData item;
-
-  /// Whether to display the total open task count label at the top of the card.
-  final bool showOpenTaskCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        if (showOpenTaskCount)
-          Text(
-            localizations.taskCountLabel(item.taskCount),
-            style: const TextStyle(
-              color: _mutedLabelColor,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        Text(
-          item.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        _SolidAccentBar(
-          barKey: ValueKey('accent_bar_${item.id}'),
-          color: item.accentColor,
-        ),
-      ],
-    );
-  }
-}
-
 /// Action tile inside [_LandingDrawer] that closes the drawer before invoking [onAction].
 class _DrawerActionTile extends StatelessWidget {
   /// Creates a [_DrawerActionTile].
   const _DrawerActionTile({
-    super.key,
     required this.icon,
     required this.title,
     required this.onAction,
@@ -531,13 +358,16 @@ class _FocusTasksSection extends StatelessWidget {
 
 /// State for [HomeScreen].
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  final TextEditingController _searchController = TextEditingController();
+  TaskTier _activeTier = TaskTier.focus;
   bool _isQuickAddOpen = false;
   bool _isSearching = false;
+  final PageController _pageController = PageController();
+  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
   @override
   void dispose() {
+    _pageController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -546,11 +376,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final boardAsync = ref.watch(taskNotifierProvider);
     final syncState = ref.watch(syncStateProvider);
-    final showOpenTaskCount = ref.watch(
-      webDavConfigProvider.select(
-        (configAsync) => configAsync.asData?.value.showOpenTaskCount ?? false,
-      ),
-    );
     final showSyncAction = ref.watch(
       webDavConfigProvider.select(
         (configAsync) =>
@@ -562,7 +387,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       backgroundColor: _canvasColor,
       drawer: _LandingDrawer(
         board: boardAsync.asData?.value ?? TaskBoard.empty(),
-        onOpenContextSheet: (kind) => _showContextSheet(context, kind),
         onOpenMarkdownPreview: () => _showMarkdownPreviewDialog(context),
         onOpenSettings: () => _openSettings(context),
         onOpenTierSheet: (tier) => _showTierSheet(context, tier),
@@ -591,19 +415,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           : null,
       body: SafeArea(
         child: _LandingScaffoldBody(
+          activeTier: _activeTier,
           boardAsync: boardAsync,
           errorMessage: syncState.errorMessage,
           isSearching: _isSearching,
           isSyncing: syncState.isSyncing,
+          pageController: _pageController,
           searchController: _searchController,
           searchQuery: _searchQuery,
-          showOpenTaskCount: showOpenTaskCount,
           showSyncAction: showSyncAction,
           onClearError: () => ref.read(syncStateProvider.notifier).clearError(),
           onOpenSettings: () => _openSettings(context),
+          onPageChanged: _handlePageChanged,
           onRetry: () =>
               ref.read(taskNotifierProvider.notifier).syncFromRemote(),
           onSearchChanged: _updateSearchQuery,
+          onSelectTier: _selectTierPane,
           onSyncRemote: () =>
               ref.read(taskNotifierProvider.notifier).syncFromRemote(),
           onToggleSearch: _toggleSearch,
@@ -622,6 +449,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
+  /// Synchronizes [_activeTier] when the user swipes between tier pages.
+  void _handlePageChanged(int index) {
+    final tier = TaskTier.values[index];
+    if (_activeTier == tier) {
+      return;
+    }
+    setState(() {
+      _activeTier = tier;
+    });
+  }
+
   /// Opens the inline [QuickAddBar] in place of the add button.
   void _openQuickAdd() {
     setState(() {
@@ -635,14 +473,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
 
-  /// Opens a modal bottom sheet for managing categories or locations ([kind]).
-  void _showContextSheet(BuildContext context, ContextPanelKind kind) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => ContextManagementSheet(kind: kind),
-    );
+  /// Jumps directly to the [PageView] pane for [tier].
+  void _selectTierPane(TaskTier tier) {
+    setState(() {
+      _activeTier = tier;
+    });
+    if (_pageController.hasClients) {
+      _pageController.jumpToPage(tier.index);
+    }
   }
 
   /// Displays a dialog containing the serialized `.tdf` representation of the board.
@@ -704,14 +542,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Switches between loading, error, and the main landing page scroll view.
+/// Switches between loading, error, and the horizontal 6-tier [PageView].
 class _LandingContentSwitcher extends StatelessWidget {
   /// Creates a [_LandingContentSwitcher].
   const _LandingContentSwitcher({
     required this.boardAsync,
+    required this.pageController,
     required this.searchQuery,
-    required this.showOpenTaskCount,
     required this.onOpenSettings,
+    required this.onPageChanged,
     required this.onRetry,
   });
 
@@ -721,14 +560,17 @@ class _LandingContentSwitcher extends StatelessWidget {
   /// Callback to open settings.
   final VoidCallback onOpenSettings;
 
+  /// Callback invoked when the active [PageView] page index changes.
+  final ValueChanged<int> onPageChanged;
+
   /// Callback to retry remote synchronization.
   final VoidCallback onRetry;
 
+  /// Controller managing the horizontal tier panes.
+  final PageController pageController;
+
   /// Current search filter query.
   final String searchQuery;
-
-  /// Whether to render the total open task count on category and location cards.
-  final bool showOpenTaskCount;
 
   @override
   Widget build(BuildContext context) {
@@ -740,21 +582,31 @@ class _LandingContentSwitcher extends StatelessWidget {
         onRetry: onRetry,
         onOpenSettings: onOpenSettings,
       ),
-      data: (board) => _LandingScrollView(
-        board: board,
-        searchQuery: searchQuery,
-        showOpenTaskCount: showOpenTaskCount,
+      data: (board) => PageView.builder(
+        controller: pageController,
+        itemCount: TaskTier.values.length,
+        onPageChanged: onPageChanged,
+        itemBuilder: (context, index) {
+          final tier = TaskTier.values[index];
+          if (tier == TaskTier.focus) {
+            return _LandingScrollView(board: board, searchQuery: searchQuery);
+          }
+          return _SecondaryTierPane(
+            board: board,
+            searchQuery: searchQuery,
+            tier: tier,
+          );
+        },
       ),
     );
   }
 }
 
-/// Left-side navigation drawer containing secondary tiers, categories, locations, sync, preview, and settings.
+/// Left-side navigation drawer containing secondary tiers, sync, preview, and settings.
 class _LandingDrawer extends StatelessWidget {
   /// Creates a [_LandingDrawer].
   const _LandingDrawer({
     required this.board,
-    required this.onOpenContextSheet,
     required this.onOpenMarkdownPreview,
     required this.onOpenSettings,
     required this.onOpenTierSheet,
@@ -771,9 +623,6 @@ class _LandingDrawer extends StatelessWidget {
 
   /// Current task board snapshot.
   final TaskBoard board;
-
-  /// Callback to open the Categories or Locations management sheet.
-  final ValueChanged<ContextPanelKind> onOpenContextSheet;
 
   /// Callback to open the raw Markdown preview dialog.
   final VoidCallback onOpenMarkdownPreview;
@@ -806,21 +655,6 @@ class _LandingDrawer extends StatelessWidget {
                 onAction: () => onOpenTierSheet(tier),
               ),
             const Divider(height: 8),
-            _DrawerActionTile(
-              key: const ValueKey('drawer_categories_tile'),
-              icon: Icons.label_outline_rounded,
-              title: localizations.drawerCategories,
-              count: board.categories.length,
-              onAction: () => onOpenContextSheet(ContextPanelKind.categories),
-            ),
-            _DrawerActionTile(
-              key: const ValueKey('drawer_locations_tile'),
-              icon: Icons.location_on_outlined,
-              title: localizations.drawerLocations,
-              count: board.locations.length,
-              onAction: () => onOpenContextSheet(ContextPanelKind.locations),
-            ),
-            const Divider(height: 8),
             _DrawerFooterSection(
               onOpenMarkdownPreview: onOpenMarkdownPreview,
               onOpenSettings: onOpenSettings,
@@ -833,25 +667,31 @@ class _LandingDrawer extends StatelessWidget {
   }
 }
 
-/// Column layout inside [HomeScreen] combining the top bar, error banner, and content switcher.
+/// Column layout inside [HomeScreen] combining the top bar, error banner, content switcher, and bottom tier indicator.
 class _LandingScaffoldBody extends StatelessWidget {
   /// Creates a [_LandingScaffoldBody].
   const _LandingScaffoldBody({
+    required this.activeTier,
     required this.boardAsync,
     required this.errorMessage,
     required this.isSearching,
     required this.isSyncing,
+    required this.pageController,
     required this.searchController,
     required this.searchQuery,
-    required this.showOpenTaskCount,
     required this.showSyncAction,
     required this.onClearError,
     required this.onOpenSettings,
+    required this.onPageChanged,
     required this.onRetry,
     required this.onSearchChanged,
+    required this.onSelectTier,
     required this.onSyncRemote,
     required this.onToggleSearch,
   });
+
+  /// Currently selected [TaskTier] pane.
+  final TaskTier activeTier;
 
   /// Asynchronous board state.
   final AsyncValue<TaskBoard> boardAsync;
@@ -871,11 +711,17 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Callback to open settings.
   final VoidCallback onOpenSettings;
 
+  /// Callback invoked when the active [PageView] page index changes.
+  final ValueChanged<int> onPageChanged;
+
   /// Callback to retry synchronization.
   final VoidCallback onRetry;
 
   /// Callback invoked when the search query changes.
   final ValueChanged<String> onSearchChanged;
+
+  /// Callback invoked when a tier is selected in [TierPageIndicator].
+  final ValueChanged<TaskTier> onSelectTier;
 
   /// Callback to trigger WebDAV synchronization from the top bar.
   final VoidCallback onSyncRemote;
@@ -883,14 +729,14 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Callback to toggle the search bar.
   final VoidCallback onToggleSearch;
 
+  /// Controller for the horizontal tier [PageView].
+  final PageController pageController;
+
   /// Text controller for the search input.
   final TextEditingController searchController;
 
   /// Active search query string.
   final String searchQuery;
-
-  /// Whether to render the total open task count on category and location cards.
-  final bool showOpenTaskCount;
 
   /// Whether the top bar should display the WebDAV sync action next to search.
   final bool showSyncAction;
@@ -914,25 +760,23 @@ class _LandingScaffoldBody extends StatelessWidget {
         Expanded(
           child: _LandingContentSwitcher(
             boardAsync: boardAsync,
+            pageController: pageController,
             searchQuery: searchQuery,
-            showOpenTaskCount: showOpenTaskCount,
             onOpenSettings: onOpenSettings,
+            onPageChanged: onPageChanged,
             onRetry: onRetry,
           ),
         ),
+        TierPageIndicator(activeTier: activeTier, onTierSelected: onSelectTier),
       ],
     );
   }
 }
 
-/// Scrollable landing page body ordering greeting, Focus tasks, categories, and locations.
+/// Scrollable landing page body ordering greeting and Focus tasks.
 class _LandingScrollView extends StatelessWidget {
   /// Creates a [_LandingScrollView].
-  const _LandingScrollView({
-    required this.board,
-    required this.searchQuery,
-    required this.showOpenTaskCount,
-  });
+  const _LandingScrollView({required this.board, required this.searchQuery});
 
   /// Current task board snapshot.
   final TaskBoard board;
@@ -940,20 +784,10 @@ class _LandingScrollView extends StatelessWidget {
   /// Active search query string for filtering Focus tasks.
   final String searchQuery;
 
-  /// Whether to render the total open task count on category and location cards.
-  final bool showOpenTaskCount;
-
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final filteredFocus = _filterFocusTasks(board.focus, searchQuery);
-    final openTasks = _collectOpenTasks(board);
-    final categories = _buildCategoryCards(
-      context,
-      board.categories,
-      openTasks,
-    );
-    final locations = _buildLocationCards(board.locations, openTasks);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
@@ -971,96 +805,9 @@ class _LandingScrollView extends StatelessWidget {
           ),
           const SizedBox(height: 28),
           _FocusTasksSection(tasks: filteredFocus),
-          if (categories.isNotEmpty) ...[
-            const SizedBox(height: 28),
-            _ContextCardCarousel(
-              sectionTitle: localizations.sectionCategories,
-              items: categories,
-              showOpenTaskCount: showOpenTaskCount,
-            ),
-          ],
-          if (locations.isNotEmpty) ...[
-            const SizedBox(height: 28),
-            _ContextCardCarousel(
-              sectionTitle: localizations.sectionLocations,
-              items: locations,
-              showOpenTaskCount: showOpenTaskCount,
-            ),
-          ],
         ],
       ),
     );
-  }
-
-  /// Builds category summary cards from [categories] and counts matching [openTasks].
-  List<_ContextCardData> _buildCategoryCards(
-    BuildContext context,
-    List<TdfCategory> categories,
-    List<TaskItem> openTasks,
-  ) {
-    return [
-      for (var i = 0; i < categories.length; i++)
-        _ContextCardData(
-          id: 'category_${categories[i].id}',
-          name: categories[i].name,
-          taskCount: _countCategoryTasks(openTasks, categories[i].id),
-          accentColor: _resolveCategoryColor(categories[i].color, i),
-          onTap: () => _openCategoryScreen(
-            context,
-            categories[i],
-            _resolveCategoryColor(categories[i].color, i),
-          ),
-        ),
-    ];
-  }
-
-  /// Builds location summary cards from [locations] and counts matching [openTasks].
-  List<_ContextCardData> _buildLocationCards(
-    List<TdfLocation> locations,
-    List<TaskItem> openTasks,
-  ) {
-    return [
-      for (var i = 0; i < locations.length; i++)
-        _ContextCardData(
-          id: 'location_${locations[i].id}',
-          name: locations[i].name,
-          taskCount: _countLocationTasks(openTasks, locations[i].id),
-          accentColor: _resolveLocationColor(locations[i].color, i),
-        ),
-    ];
-  }
-
-  /// Returns all open (uncompleted) tasks across active and backlog tiers on [board].
-  List<TaskItem> _collectOpenTasks(TaskBoard board) {
-    return [
-      ...board.focus,
-      ...board.ready,
-      ...board.planned,
-      ...board.blocked,
-      ...board.someday,
-    ];
-  }
-
-  /// Counts how many tasks in [openTasks] reference [categoryId].
-  int _countCategoryTasks(List<TaskItem> openTasks, String categoryId) {
-    var count = 0;
-    for (final task in openTasks) {
-      if (task.categoryIds.contains(categoryId)) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  /// Counts how many tasks in [openTasks] reference [locationId].
-  int _countLocationTasks(List<TaskItem> openTasks, String locationId) {
-    var count = 0;
-    for (final task in openTasks) {
-      if (task.locationIds.contains(locationId)) {
-        count++;
-      }
-    }
-    return count;
   }
 
   /// Filters [tasks] by a case-insensitive substring match against [query].
@@ -1073,37 +820,6 @@ class _LandingScrollView extends StatelessWidget {
       for (final task in tasks)
         if (task.title.toLowerCase().contains(trimmed)) task,
     ];
-  }
-
-  /// Pushes [CategoryScreen] for [category] onto the navigation stack.
-  void _openCategoryScreen(
-    BuildContext context,
-    TdfCategory category,
-    Color accentColor,
-  ) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => CategoryScreen(
-          category: category,
-          accentColor: accentColor,
-          initialSearchQuery: searchQuery,
-        ),
-      ),
-    );
-  }
-
-  /// Parses a `#RRGGBB` hex color string or falls back to the default category accent palette.
-  Color _resolveCategoryColor(String? rawHexColor, int index) {
-    final fallback = index.isEven ? _accentMagenta : _accentBlue;
-    final parsedArgb = TdfColor.tryParseArgb(rawHexColor);
-    return parsedArgb != null ? Color(parsedArgb) : fallback;
-  }
-
-  /// Parses a `#RRGGBB` hex color string or falls back to the default location accent palette.
-  Color _resolveLocationColor(String? rawHexColor, int index) {
-    final fallback = index.isEven ? _accentCyan : _accentOrange;
-    final parsedArgb = TdfColor.tryParseArgb(rawHexColor);
-    return parsedArgb != null ? Color(parsedArgb) : fallback;
   }
 }
 
@@ -1210,31 +926,96 @@ class _LandingTopBar extends StatelessWidget {
   }
 }
 
-/// Full-width solid colored line rendered at the bottom of a category or location card.
-class _SolidAccentBar extends StatelessWidget {
-  /// Creates a [_SolidAccentBar].
-  const _SolidAccentBar({required this.barKey, required this.color});
+/// Full-screen pane displaying the tasks of a secondary [TaskTier] (`Ready` through `Completed`).
+class _SecondaryTierPane extends StatelessWidget {
+  /// Creates a [_SecondaryTierPane].
+  const _SecondaryTierPane({
+    required this.board,
+    required this.searchQuery,
+    required this.tier,
+  });
 
-  /// Deterministic widget key for the colored bar.
-  final Key barKey;
+  /// Current task board snapshot.
+  final TaskBoard board;
 
-  /// Solid bar color defined for the category or location.
-  final Color color;
+  /// Active search filter query.
+  final String searchQuery;
+
+  /// Secondary [TaskTier] displayed on this pane.
+  final TaskTier tier;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      key: barKey,
-      height: 4,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(2),
-        boxShadow: [
-          BoxShadow(
-            color: color.withValues(alpha: 0.55),
-            blurRadius: 6,
-            offset: const Offset(0, 1),
+    final localizations = AppLocalizations.of(context);
+    final tasks = _filterTasks(board.tasksForTier(tier), searchQuery);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SecondaryTierPaneHeader(tier: tier),
+        if (tasks.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _EmptyFocusCard(message: localizations.tierEmptyHint(tier)),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 96),
+              itemCount: tasks.length,
+              itemBuilder: (context, index) => TaskTile(
+                key: ValueKey('tier_pane_${tier.name}_${tasks[index].id}'),
+                task: tasks[index],
+                tier: tier,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Filters [tasks] by a case-insensitive substring match against [query].
+  List<TaskItem> _filterTasks(List<TaskItem> tasks, String query) {
+    final trimmed = query.trim().toLowerCase();
+    if (trimmed.isEmpty) {
+      return tasks;
+    }
+    return [
+      for (final task in tasks)
+        if (task.title.toLowerCase().contains(trimmed)) task,
+    ];
+  }
+}
+
+/// Title and description header inside [_SecondaryTierPane].
+class _SecondaryTierPaneHeader extends StatelessWidget {
+  /// Creates a [_SecondaryTierPaneHeader].
+  const _SecondaryTierPaneHeader({required this.tier});
+
+  /// Active [TaskTier] pane.
+  final TaskTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            localizations.tierName(tier),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            localizations.tierDescription(tier),
+            style: const TextStyle(color: _mutedLabelColor, fontSize: 14),
           ),
         ],
       ),

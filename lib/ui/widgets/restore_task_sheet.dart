@@ -19,6 +19,7 @@ import '../../l10n/app_localizations.dart';
 import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
+import 'tier_page_indicator.dart';
 
 /// Modal bottom sheet body for selecting a target active tier (`1` through `5`).
 class _RestoreTaskSheetBody extends StatelessWidget {
@@ -79,7 +80,7 @@ class _TierOptionTile extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     return ListTile(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      leading: Icon(_iconForTier(tier)),
+      leading: Icon(TierPageIndicator.iconForTier(tier)),
       title: Text(
         localizations.tierName(tier),
         style: const TextStyle(fontWeight: FontWeight.w600),
@@ -105,16 +106,4 @@ Future<TaskTier?> showRestoreTaskSheet(
     isScrollControlled: true,
     builder: (_) => _RestoreTaskSheetBody(task: task, title: effectiveTitle),
   );
-}
-
-/// Returns the Material icon associated with [tier].
-IconData _iconForTier(TaskTier tier) {
-  return switch (tier) {
-    TaskTier.focus => Icons.bolt_rounded,
-    TaskTier.ready => Icons.playlist_play_rounded,
-    TaskTier.planned => Icons.list_alt_rounded,
-    TaskTier.blocked => Icons.block_rounded,
-    TaskTier.someday => Icons.lightbulb_outline_rounded,
-    TaskTier.completed => Icons.check_circle_outline_rounded,
-  };
 }

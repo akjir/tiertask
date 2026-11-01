@@ -57,15 +57,13 @@ tiertask/
 │   ├── services/
 │   │   └── tdf_service.dart
 │   └── ui/
-│       ├── category_screen.dart
 │       ├── home_screen.dart
 │       ├── settings_screen.dart
 │       └── widgets/
-│           ├── color_wheel_picker.dart
-│           ├── context_management_sheet.dart
 │           ├── quick_add_bar.dart
 │           ├── restore_task_sheet.dart
-│           └── task_tile.dart
+│           ├── task_tile.dart
+│           └── tier_page_indicator.dart
 └── test/
     ├── tiertask_domain_test.dart
     └── widget_test.dart
@@ -127,14 +125,12 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
-| `lib/ui/category_screen.dart` | Category task view (`CategoryScreen`) opened by tapping a category card on `HomeScreen`, displaying the 3 derived `Focus` tasks filtered to that category while preserving all active blocking, condition, scheduling, and search filters, with a circular task-add button that transforms into `QuickAddBar` when pressed. |
-| `lib/ui/home_screen.dart` | Primary landing page screen displaying the greeting, minimalist `Focus` task pills, dynamic `Categories` and `Locations` summary carousels (hidden when no categories or locations exist in the `.tdf` board) with solid colored accent bars, optional open task counts, and category navigation to `CategoryScreen`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a circular task-add button that hides and transforms into the inline bottom `QuickAddBar` when pressed, and a top-left navigation drawer for secondary tiers, `Categories` and `Locations` management panels, synchronization, TDF preview, and settings. |
+| `lib/ui/home_screen.dart` | Primary landing page screen displaying the greeting, minimalist `Focus` task pills, horizontal 6-tier `PageView` sliding (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with a bottom `TierPageIndicator`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a circular task-add button that hides and transforms into the inline bottom `QuickAddBar` when pressed, and a top-left navigation drawer for secondary tiers, synchronization, TDF preview, and settings. |
 | `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), open task count visibility (`Off` by default, `On`), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name, WebDAV endpoint parameters, and synchronization testing. |
-| `lib/ui/widgets/color_wheel_picker.dart` | Interactive HSV color wheel widget (`ColorWheelPicker`) rendered via a dependency-free `CustomPainter` for selecting category and location accent colors. |
-| `lib/ui/widgets/context_management_sheet.dart` | Modal panel (`ContextManagementSheet`) opened from the navigation drawer to create, view, and delete `Categories` or `Locations` with color selection via `ColorWheelPicker` or direct `#RRGGBB` hex input. |
 | `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, `Categories` and `Locations` icon buttons that expand multi-select menus upward above the bar, a placeholder `Advanced` icon button, and a `Cancel` icon button. |
 | `lib/ui/widgets/restore_task_sheet.dart` | Modal bottom sheet for selecting the destination active tier (`1` through `5`) when restoring or moving a task. |
 | `lib/ui/widgets/task_tile.dart` | Individual task card providing completion, downgrade, quick-block, title editing, move, and delete actions. |
+| `lib/ui/widgets/tier_page_indicator.dart` | Bottom tier indicator (`TierPageIndicator`) positioned above `QuickAddBar` when open, rendering dots for inactive tiers and an icon for the active tier (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) over a transparent background, a desktop mouse-over icon in an intermediate color and borderless label without wave animation, desktop Left/Right arrow key navigation, and an interactive wave effect on hold and drag that enlarges the two adjacent neighbor dots (`1.5x` in the intermediate color) and jumps directly to the selected tier pane upon release. |
 
 ## Execution & Synchronization Flow
 
