@@ -22,7 +22,7 @@ description: >-
    - Eliminate avoidable loop/build allocations (compile `RegExp` as `static final`, use `StringBuffer` for serialization, use `ListView.builder` for dynamic task lists), check `max*` resource bounds before scanning or allocating the $(N+1)$-th element (`P-BOUND-ALLOC`), and dispose all controllers, streams, and `HttpClient` instances (`P-DISPOSE-RESOURCES`).
 5. **License, Documentation & Dead-Code Gate (`P-LICENSE-HEADER`, `P-FN-DOCS`, `P-NO-DEAD-CODE`, `P-NO-IGNORE`):** Verify license headers, `///` docs, zero `// ignore:` directives, and delete all orphaned functions, fields, enum variants, providers, imports, and obsolete tests.
 6. **Format, Analyze & Test:** Run `dart format lib test`, `flutter analyze --fatal-infos --fatal-warnings`, and `flutter test` after every modification.
-7. **Sync Docs & Changelog:** Follow **`update-documentation`** (`README.md`, `ARCHITECTURE.md`, `AGENTS.md`) and **`changelog-updater`** (`CHANGELOG.md`).
+7. **Sync Spec, Docs & Changelog:** Follow **`tdf-spec-workflow`** whenever `TDF_SPEC.md` or TDF parsing/evaluation rules change, **`update-documentation`** (`README.md`, `ARCHITECTURE.md`, `AGENTS.md`), and **`changelog-updater`** (`CHANGELOG.md`).
 
 ## 2. Testing Standards (`flutter test`)
 - **Coverage & Assertions:** Write unit and widget tests for every feature, parser routine, state transition, repository method, widget interaction, or bug fix. Use semantic matchers (`contains()`, `equals()`, `isA<T>()`, `throwsA(isA<DomainException>())`) over brittle exact-string checks, and include concise `reason:` strings in `expect(..., reason: '...')` for loops, table-driven cases, and state transitions.

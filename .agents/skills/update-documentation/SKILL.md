@@ -10,6 +10,7 @@ description: >-
 * **`README.md` (Project Entry Point):** Keep under 130 lines. Do NOT copy detailed per-file class inventories or internal test matrices into `README.md`. Update `README.md` ONLY when top-level features, supported platforms (`Linux`, `Android`, `Windows`), tier definitions, Markdown format rules, system requirements, build/run steps, or repository document links change.
 * **`ARCHITECTURE.md` (Architecture & File Structure):** Single Source of Truth for the architectural layers (`models`, `services`, `repositories`, `providers`, `ui`), directory tree, file responsibilities, and local file / WebDAV synchronization flow.
 * **`AGENTS.md` (AI Engineering & TDD Rules):** Single Source of Truth for TDD workflow (`P-TDD-FIRST`), language rules (`P-LANG-RULES`), deterministic `.dart` file layout, static analysis rules, and mandatory `M-*` test categories.
+* **`TDF_SPEC.md` (Standalone TDF Format Specification):** Language- and project-independent specification of the `.tdf` file format, grammar, directive semantics, dynamic tier evaluation pipeline, and state mutations. Never add project-specific implementation paths or rule IDs into `TDF_SPEC.md` (see **`tdf-spec-workflow`**).
 
 ## 2. `README.md` Structure (<130 Lines)
 Omit a Table of Contents. Maintain this exact section order:
