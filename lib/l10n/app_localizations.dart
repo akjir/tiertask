@@ -140,42 +140,6 @@ abstract class AppLocalizations {
   /// **'Completed'**
   String get tier6Name;
 
-  /// Subtitle description for tier 1 (Focus).
-  ///
-  /// In en, this message translates to:
-  /// **'Active top priority (Soft limit: 3)'**
-  String get tier1Description;
-
-  /// Subtitle description for tier 2 (Ready).
-  ///
-  /// In en, this message translates to:
-  /// **'Ready for Focus (Soft limit: 5)'**
-  String get tier2Description;
-
-  /// Subtitle description for tier 3 (Planned).
-  ///
-  /// In en, this message translates to:
-  /// **'Active backlog (automatically pulls into Ready)'**
-  String get tier3Description;
-
-  /// Subtitle description for tier 4 (Blocked).
-  ///
-  /// In en, this message translates to:
-  /// **'Waiting on external events or third parties'**
-  String get tier4Description;
-
-  /// Subtitle description for tier 5 (Someday).
-  ///
-  /// In en, this message translates to:
-  /// **'Idea storage without automatic pull'**
-  String get tier5Description;
-
-  /// Subtitle description for tier 6 (Completed).
-  ///
-  /// In en, this message translates to:
-  /// **'Completed tasks (30-day retention)'**
-  String get tier6Description;
-
   /// Tab label for the combined Focus and Ready view.
   ///
   /// In en, this message translates to:
@@ -337,90 +301,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add'**
   String get actionAdd;
-
-  /// Bottom sheet title when restoring a completed task to an active tier.
-  ///
-  /// In en, this message translates to:
-  /// **'Restore Task'**
-  String get restoreTaskTitle;
-
-  /// Bottom sheet title when moving an active task to another tier.
-  ///
-  /// In en, this message translates to:
-  /// **'Move Task'**
-  String get moveTaskTitle;
-
-  /// Subtitle in the move or restore sheet prompting selection of a target tier.
-  ///
-  /// In en, this message translates to:
-  /// **'\"{taskTitle}\" - Select target tier:'**
-  String selectTargetTierSubtitle(String taskTitle);
-
-  /// Subtitle displaying the ISO completion date of a completed task.
-  ///
-  /// In en, this message translates to:
-  /// **'Completed on {date}'**
-  String completedOnDate(String date);
-
-  /// Tooltip for downgrading a task from Focus to Ready.
-  ///
-  /// In en, this message translates to:
-  /// **'Downgrade to Ready'**
-  String get tooltipDowngradeToReady;
-
-  /// Tooltip for downgrading a task from Ready to Planned.
-  ///
-  /// In en, this message translates to:
-  /// **'Downgrade to Planned'**
-  String get tooltipDowngradeToPlanned;
-
-  /// Tooltip for moving a task directly to the Blocked tier.
-  ///
-  /// In en, this message translates to:
-  /// **'Move immediately to Blocked'**
-  String get tooltipBlockTask;
-
-  /// Tooltip for promoting a task into the Planned tier.
-  ///
-  /// In en, this message translates to:
-  /// **'Queue in Planned'**
-  String get tooltipPromoteToPlanned;
-
-  /// Tooltip for the task overflow action menu button.
-  ///
-  /// In en, this message translates to:
-  /// **'More actions'**
-  String get tooltipMoreActions;
-
-  /// Menu item label to move a task to another tier.
-  ///
-  /// In en, this message translates to:
-  /// **'Move to...'**
-  String get menuMoveTo;
-
-  /// Menu item label to edit a task title.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit text'**
-  String get menuEditText;
-
-  /// Menu item label to delete a task.
-  ///
-  /// In en, this message translates to:
-  /// **'Delete'**
-  String get menuDelete;
-
-  /// Dialog title for editing an existing task.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit Task'**
-  String get editTaskDialogTitle;
-
-  /// Input field label for the task title in the edit dialog.
-  ///
-  /// In en, this message translates to:
-  /// **'Task text'**
-  String get editTaskFieldLabel;
 
   /// Button label to cancel an action or dialog.
   ///
@@ -805,6 +685,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'FOCUS TASKS'**
   String get sectionFocusTasks;
+
+  /// Uppercase section label above the Ready tasks list on the Ready tier panel.
+  ///
+  /// In en, this message translates to:
+  /// **'READY TASKS'**
+  String get sectionReadyTasks;
+
+  /// Uppercase section label above the Planned tasks list on the Planned tier panel.
+  ///
+  /// In en, this message translates to:
+  /// **'PLANNED TASKS'**
+  String get sectionPlannedTasks;
+
+  /// Uppercase section label above the Blocked tasks list on the Blocked tier panel.
+  ///
+  /// In en, this message translates to:
+  /// **'BLOCKED TASKS'**
+  String get sectionBlockedTasks;
+
+  /// Uppercase section label above the Someday tasks list on the Someday tier panel.
+  ///
+  /// In en, this message translates to:
+  /// **'SOMEDAY TASKS'**
+  String get sectionSomedayTasks;
+
+  /// Uppercase section label above the Completed tasks list on the Completed tier panel.
+  ///
+  /// In en, this message translates to:
+  /// **'COMPLETED TASKS'**
+  String get sectionCompletedTasks;
 
   /// Uppercase section label above the category summary cards on the landing page.
   ///

@@ -624,16 +624,6 @@ task t_manual {
         reason:
             '29 and 30 day old tasks must be kept while 31 day old is pruned',
       );
-
-      final restored = afterComplete.restoreTask(
-        'f1',
-        TaskTier.someday,
-        currentDate: fixedDate,
-      );
-      expect(restored.someday.map((task) => task.id), equals(['f1']));
-      expect(restored.someday.first.isCompleted, isFalse);
-      expect(restored.someday.first.completedAt, isNull);
-      expect(restored.someday.first.queuedAt, isNull);
     });
 
     test('executes Section 6.4 Minor Downgrade (Focus -> End of Ready) and Section 6.3 Full Downgrade (Ready -> Planned)', () {
@@ -1147,7 +1137,9 @@ task b1 {
           if (!key.startsWith('@')) key,
       ];
 
-      expect(enMessageKeys, contains('moveTaskTitle'));
+      expect(enMessageKeys, contains('sectionReadyTasks'));
+      expect(enMessageKeys, isNot(contains('moveTaskTitle')));
+      expect(enMessageKeys, isNot(contains('menuMoveTo')));
       expect(deMessageKeys, equals(enMessageKeys));
 
       for (final key in enMessageKeys) {

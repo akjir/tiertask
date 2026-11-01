@@ -436,20 +436,6 @@ class TaskBoard {
     );
   }
 
-  /// Permanently deletes a task and runs the Auto-Pull Cascade if an active slot opened.
-  TaskBoard deleteTask(String taskId, {DateTime? currentDate}) {
-    final now = currentDate ?? DateTime.now().toUtc();
-    final tier = findTierOfTask(taskId);
-    if (tier == null) {
-      return this;
-    }
-
-    return _removeTaskFromTier(
-      taskId,
-      tier,
-    ).pruneCompletedTasks(currentDate: now).applyAutoPull(currentDate: now);
-  }
-
   /// Downgrades a task one active tier down per `TDF_SPEC.md` Section 6.3 and Section 6.4,
   /// stripping the `priority` flag and updating `queued` to prevent ping-pong bounce.
   TaskBoard downgradeTask(String taskId, {DateTime? currentDate}) {
@@ -471,35 +457,6 @@ class TaskBoard {
       return _downgradeFromReady(demoted, now);
     }
     return this;
-  }
-
-  /// Updates the title (`name` directive) of an existing task.
-  TaskBoard editTaskTitle(String taskId, String newTitle) {
-    final trimmed = newTitle.trim();
-    if (trimmed.isEmpty) {
-      return this;
-    }
-    final tier = findTierOfTask(taskId);
-    if (tier == null) {
-      return this;
-    }
-
-    return switch (tier) {
-      TaskTier.focus => copyWith(focus: _renameInList(focus, taskId, trimmed)),
-      TaskTier.ready => copyWith(ready: _renameInList(ready, taskId, trimmed)),
-      TaskTier.planned => copyWith(
-        planned: _renameInList(planned, taskId, trimmed),
-      ),
-      TaskTier.blocked => copyWith(
-        blocked: _renameInList(blocked, taskId, trimmed),
-      ),
-      TaskTier.someday => copyWith(
-        someday: _renameInList(someday, taskId, trimmed),
-      ),
-      TaskTier.completed => copyWith(
-        completed: _renameInList(completed, taskId, trimmed),
-      ),
-    };
   }
 
   /// Derives a filtered [TaskBoard] considering only active tasks matching
@@ -540,53 +497,6 @@ class TaskBoard {
     return null;
   }
 
-  /// Moves a task to [targetTier] per `TDF_SPEC.md` Section 6 mutations.
-  TaskBoard moveTask(
-    String taskId,
-    TaskTier targetTier, {
-    DateTime? currentDate,
-  }) {
-    final now = currentDate ?? DateTime.now().toUtc();
-    final sourceTier = findTierOfTask(taskId);
-    if (sourceTier == null || sourceTier == targetTier) {
-      return this;
-    }
-    if (targetTier == TaskTier.completed) {
-      return completeTask(taskId, currentDate: now);
-    }
-    if (targetTier == TaskTier.blocked) {
-      return blockTask(taskId, currentDate: now);
-    }
-    if (sourceTier == TaskTier.completed) {
-      return restoreTask(taskId, targetTier, currentDate: now);
-    }
-    if ((sourceTier == TaskTier.focus && targetTier == TaskTier.ready) ||
-        (sourceTier == TaskTier.ready && targetTier == TaskTier.planned)) {
-      return downgradeTask(taskId, currentDate: now);
-    }
-
-    final task = findTask(taskId);
-    if (task == null) {
-      return this;
-    }
-    final updatedTask = _prepareTaskForTargetTier(task, targetTier, now);
-
-    if (sourceTier == TaskTier.focus && targetTier == TaskTier.planned) {
-      final afterRemovalAndPull = _removeTaskFromTier(
-        taskId,
-        TaskTier.focus,
-      ).applyAutoPull(currentDate: now);
-      return afterRemovalAndPull
-          ._appendTaskToTier(updatedTask, TaskTier.planned)
-          .pruneCompletedTasks(currentDate: now);
-    }
-
-    return _removeTaskFromTier(taskId, sourceTier)
-        ._appendTaskToTier(updatedTask, targetTier)
-        .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now);
-  }
-
   /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (UTC) per `TDF_SPEC.md` Section 5.1.
   TaskBoard pruneCompletedTasks({DateTime? currentDate}) {
     final now = currentDate ?? DateTime.now().toUtc();
@@ -598,34 +508,6 @@ class TaskBoard {
     ];
 
     return copyWith(completed: retained);
-  }
-
-  /// Restores a completed task from Tier 6 (`Completed`) into [targetTier],
-  /// removing `finished` and updating TDF scheduling attributes.
-  TaskBoard restoreTask(
-    String taskId,
-    TaskTier targetTier, {
-    DateTime? currentDate,
-  }) {
-    if (targetTier == TaskTier.completed) {
-      return this;
-    }
-    final sourceTier = findTierOfTask(taskId);
-    if (sourceTier != TaskTier.completed) {
-      return this;
-    }
-    final task = findTask(taskId);
-    if (task == null) {
-      return this;
-    }
-
-    final now = currentDate ?? DateTime.now().toUtc();
-    final restoredTask = _prepareTaskForTargetTier(task, targetTier, now);
-
-    return _removeTaskFromTier(taskId, TaskTier.completed)
-        ._appendTaskToTier(restoredTask, targetTier)
-        .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now);
   }
 
   /// Returns the task list for a given [tier].
@@ -677,18 +559,6 @@ class TaskBoard {
       return replacedBoard.completeTask(taskId, currentDate: now);
     }
     return replacedBoard;
-  }
-
-  /// Appends [task] to [tier] (prepending when [tier] is [TaskTier.completed]).
-  TaskBoard _appendTaskToTier(TaskItem task, TaskTier tier) {
-    return switch (tier) {
-      TaskTier.focus => copyWith(focus: [...focus, task]),
-      TaskTier.ready => copyWith(ready: [...ready, task]),
-      TaskTier.planned => copyWith(planned: [...planned, task]),
-      TaskTier.blocked => copyWith(blocked: [...blocked, task]),
-      TaskTier.someday => copyWith(someday: [...someday, task]),
-      TaskTier.completed => copyWith(completed: [task, ...completed]),
-    };
   }
 
   /// Executes the two-stage pull cascade across mutable queue lists in linear order.
@@ -1075,39 +945,6 @@ class TaskBoard {
     );
   }
 
-  /// Updates [task]'s TDF attributes when moving or restoring into [targetTier].
-  static TaskItem _prepareTaskForTargetTier(
-    TaskItem task,
-    TaskTier targetTier,
-    DateTime now,
-  ) {
-    return switch (targetTier) {
-      TaskTier.focus => task.toActive(
-        queuedAt: now,
-        isPriority: task.isPriority,
-        clearBlocking: true,
-      ),
-      TaskTier.ready || TaskTier.planned => task.toActive(
-        queuedAt: now,
-        isPriority: false,
-        clearBlocking: true,
-      ),
-      TaskTier.blocked => task.copyWith(
-        isCompleted: false,
-        clearCompletedAt: true,
-        isPriority: false,
-        queuedAt: task.queuedAt ?? now,
-        suspendedAt: TaskItem.defaultSuspendedAt,
-      ),
-      TaskTier.someday => task.toActive(
-        clearQueuedAt: true,
-        isPriority: false,
-        clearBlocking: true,
-      ),
-      TaskTier.completed => task.toCompleted(now),
-    };
-  }
-
   /// Removes the task with [taskId] from [tier].
   TaskBoard _removeTaskFromTier(String taskId, TaskTier tier) {
     return switch (tier) {
@@ -1149,18 +986,6 @@ class TaskBoard {
           if (id != locationId) id,
       ],
     );
-  }
-
-  /// Returns a new list with the task matching [taskId] renamed to [newTitle].
-  static List<TaskItem> _renameInList(
-    List<TaskItem> list,
-    String taskId,
-    String newTitle,
-  ) {
-    return [
-      for (final item in list)
-        item.id == taskId ? item.copyWith(title: newTitle) : item,
-    ];
   }
 
   /// Replaces the task with `updatedTask.id` inside [tier].

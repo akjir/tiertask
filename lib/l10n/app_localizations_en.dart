@@ -31,25 +31,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tier6Name => 'Completed';
 
   @override
-  String get tier1Description => 'Active top priority (Soft limit: 3)';
-
-  @override
-  String get tier2Description => 'Ready for Focus (Soft limit: 5)';
-
-  @override
-  String get tier3Description =>
-      'Active backlog (automatically pulls into Ready)';
-
-  @override
-  String get tier4Description => 'Waiting on external events or third parties';
-
-  @override
-  String get tier5Description => 'Idea storage without automatic pull';
-
-  @override
-  String get tier6Description => 'Completed tasks (30-day retention)';
-
-  @override
   String get tabFocusAndReady => 'Focus & Ready';
 
   @override
@@ -135,52 +116,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get actionAdd => 'Add';
-
-  @override
-  String get restoreTaskTitle => 'Restore Task';
-
-  @override
-  String get moveTaskTitle => 'Move Task';
-
-  @override
-  String selectTargetTierSubtitle(String taskTitle) {
-    return '\"$taskTitle\" - Select target tier:';
-  }
-
-  @override
-  String completedOnDate(String date) {
-    return 'Completed on $date';
-  }
-
-  @override
-  String get tooltipDowngradeToReady => 'Downgrade to Ready';
-
-  @override
-  String get tooltipDowngradeToPlanned => 'Downgrade to Planned';
-
-  @override
-  String get tooltipBlockTask => 'Move immediately to Blocked';
-
-  @override
-  String get tooltipPromoteToPlanned => 'Queue in Planned';
-
-  @override
-  String get tooltipMoreActions => 'More actions';
-
-  @override
-  String get menuMoveTo => 'Move to...';
-
-  @override
-  String get menuEditText => 'Edit text';
-
-  @override
-  String get menuDelete => 'Delete';
-
-  @override
-  String get editTaskDialogTitle => 'Edit Task';
-
-  @override
-  String get editTaskFieldLabel => 'Task text';
 
   @override
   String get actionCancel => 'Cancel';
@@ -402,6 +337,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get sectionFocusTasks => 'FOCUS TASKS';
+
+  @override
+  String get sectionReadyTasks => 'READY TASKS';
+
+  @override
+  String get sectionPlannedTasks => 'PLANNED TASKS';
+
+  @override
+  String get sectionBlockedTasks => 'BLOCKED TASKS';
+
+  @override
+  String get sectionSomedayTasks => 'SOMEDAY TASKS';
+
+  @override
+  String get sectionCompletedTasks => 'COMPLETED TASKS';
 
   @override
   String get sectionCategories => 'CATEGORIES';

@@ -28,30 +28,6 @@
   "@tier6Name": {
     "description": "Display name for tier 6 (Completed)."
   },
-  "tier1Description": "Active top priority (Soft limit: 3)",
-  "@tier1Description": {
-    "description": "Subtitle description for tier 1 (Focus)."
-  },
-  "tier2Description": "Ready for Focus (Soft limit: 5)",
-  "@tier2Description": {
-    "description": "Subtitle description for tier 2 (Ready)."
-  },
-  "tier3Description": "Active backlog (automatically pulls into Ready)",
-  "@tier3Description": {
-    "description": "Subtitle description for tier 3 (Planned)."
-  },
-  "tier4Description": "Waiting on external events or third parties",
-  "@tier4Description": {
-    "description": "Subtitle description for tier 4 (Blocked)."
-  },
-  "tier5Description": "Idea storage without automatic pull",
-  "@tier5Description": {
-    "description": "Subtitle description for tier 5 (Someday)."
-  },
-  "tier6Description": "Completed tasks (30-day retention)",
-  "@tier6Description": {
-    "description": "Subtitle description for tier 6 (Completed)."
-  },
   "tabFocusAndReady": "Focus & Ready",
   "@tabFocusAndReady": {
     "description": "Tab label for the combined Focus and Ready view."
@@ -169,72 +145,6 @@
   "actionAdd": "Add",
   "@actionAdd": {
     "description": "Button label to add a new task."
-  },
-  "restoreTaskTitle": "Restore Task",
-  "@restoreTaskTitle": {
-    "description": "Bottom sheet title when restoring a completed task to an active tier."
-  },
-  "moveTaskTitle": "Move Task",
-  "@moveTaskTitle": {
-    "description": "Bottom sheet title when moving an active task to another tier."
-  },
-  "selectTargetTierSubtitle": "\"{taskTitle}\" - Select target tier:",
-  "@selectTargetTierSubtitle": {
-    "description": "Subtitle in the move or restore sheet prompting selection of a target tier.",
-    "placeholders": {
-      "taskTitle": {
-        "type": "String"
-      }
-    }
-  },
-  "completedOnDate": "Completed on {date}",
-  "@completedOnDate": {
-    "description": "Subtitle displaying the ISO completion date of a completed task.",
-    "placeholders": {
-      "date": {
-        "type": "String"
-      }
-    }
-  },
-  "tooltipDowngradeToReady": "Downgrade to Ready",
-  "@tooltipDowngradeToReady": {
-    "description": "Tooltip for downgrading a task from Focus to Ready."
-  },
-  "tooltipDowngradeToPlanned": "Downgrade to Planned",
-  "@tooltipDowngradeToPlanned": {
-    "description": "Tooltip for downgrading a task from Ready to Planned."
-  },
-  "tooltipBlockTask": "Move immediately to Blocked",
-  "@tooltipBlockTask": {
-    "description": "Tooltip for moving a task directly to the Blocked tier."
-  },
-  "tooltipPromoteToPlanned": "Queue in Planned",
-  "@tooltipPromoteToPlanned": {
-    "description": "Tooltip for promoting a task into the Planned tier."
-  },
-  "tooltipMoreActions": "More actions",
-  "@tooltipMoreActions": {
-    "description": "Tooltip for the task overflow action menu button."
-  },
-  "menuMoveTo": "Move to...",
-  "@menuMoveTo": {
-    "description": "Menu item label to move a task to another tier."
-  },
-  "menuEditText": "Edit text",
-  "@menuEditText": {
-    "description": "Menu item label to edit a task title."
-  },
-  "menuDelete": "Delete",
-  "@menuDelete": {
-    "description": "Menu item label to delete a task."
-  },
-  "editTaskDialogTitle": "Edit Task",
-  "@editTaskDialogTitle": {
-    "description": "Dialog title for editing an existing task."
-  },
-  "editTaskFieldLabel": "Task text",
-  "@editTaskFieldLabel": {
-    "description": "Input field label for the task title in the edit dialog."
   },
   "actionCancel": "Cancel",
   "@actionCancel": {
@@ -531,6 +441,26 @@
   "sectionFocusTasks": "FOCUS TASKS",
   "@sectionFocusTasks": {
     "description": "Uppercase section label above the Focus tasks list on the landing page."
+  },
+  "sectionReadyTasks": "READY TASKS",
+  "@sectionReadyTasks": {
+    "description": "Uppercase section label above the Ready tasks list on the Ready tier panel."
+  },
+  "sectionPlannedTasks": "PLANNED TASKS",
+  "@sectionPlannedTasks": {
+    "description": "Uppercase section label above the Planned tasks list on the Planned tier panel."
+  },
+  "sectionBlockedTasks": "BLOCKED TASKS",
+  "@sectionBlockedTasks": {
+    "description": "Uppercase section label above the Blocked tasks list on the Blocked tier panel."
+  },
+  "sectionSomedayTasks": "SOMEDAY TASKS",
+  "@sectionSomedayTasks": {
+    "description": "Uppercase section label above the Someday tasks list on the Someday tier panel."
+  },
+  "sectionCompletedTasks": "COMPLETED TASKS",
+  "@sectionCompletedTasks": {
+    "description": "Uppercase section label above the Completed tasks list on the Completed tier panel."
   },
   "sectionCategories": "CATEGORIES",
   "@sectionCategories": {

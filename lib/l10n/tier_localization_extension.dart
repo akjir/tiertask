@@ -17,20 +17,8 @@ import '../models/task_tier.dart';
 import 'app_localizations.dart';
 
 /// Maps [TaskTier] values (`1` through `6`) to localized display names,
-/// descriptions, and empty-state hints from [AppLocalizations].
+/// uppercase section headings, and empty-state hints from [AppLocalizations].
 extension TierLocalizationExtension on AppLocalizations {
-  /// Returns the localized description for [tier].
-  String tierDescription(TaskTier tier) {
-    return switch (tier) {
-      TaskTier.focus => tier1Description,
-      TaskTier.ready => tier2Description,
-      TaskTier.planned => tier3Description,
-      TaskTier.blocked => tier4Description,
-      TaskTier.someday => tier5Description,
-      TaskTier.completed => tier6Description,
-    };
-  }
-
   /// Returns the localized empty-state hint for [tier] on single-tier tabs.
   String tierEmptyHint(TaskTier tier) {
     return switch (tier) {
@@ -52,6 +40,18 @@ extension TierLocalizationExtension on AppLocalizations {
       TaskTier.blocked => tier4Name,
       TaskTier.someday => tier5Name,
       TaskTier.completed => tier6Name,
+    };
+  }
+
+  /// Returns the localized uppercase section heading for [tier].
+  String tierSectionTitle(TaskTier tier) {
+    return switch (tier) {
+      TaskTier.focus => sectionFocusTasks,
+      TaskTier.ready => sectionReadyTasks,
+      TaskTier.planned => sectionPlannedTasks,
+      TaskTier.blocked => sectionBlockedTasks,
+      TaskTier.someday => sectionSomedayTasks,
+      TaskTier.completed => sectionCompletedTasks,
     };
   }
 }

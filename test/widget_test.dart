@@ -1493,15 +1493,46 @@ task cmp1 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text("What's up!"),
+        findsOneWidget,
+        reason: 'Blocked tier panel must display the greeting like the Focus screen',
+      );
+      expect(
+        find.text('BLOCKED TASKS'),
+        findsOneWidget,
+        reason: 'Blocked tier panel must display the uppercase section heading',
+      );
+      expect(
         find.text('Blocked Prerequisite Task'),
         findsOneWidget,
         reason:
-            'Blocked tier sheet must display tasks blocked by prerequisites',
+            'Blocked tier panel must display tasks blocked by prerequisites',
       );
       expect(
         find.text('Suspended Deferred Task'),
         findsOneWidget,
-        reason: 'Blocked tier sheet must also display suspended tasks',
+        reason: 'Blocked tier panel must also display suspended tasks',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_indicator_icon_blocked')),
+        findsOneWidget,
+        reason:
+            'Selecting Blocked from the drawer must jump to the Blocked pane',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_blocked_blk_dep')),
+        findsOneWidget,
+        reason: 'Blocked task must render as a dark-blue pill card matching Focus screen',
+      );
+      expect(
+        find.byIcon(Icons.more_vert_rounded),
+        findsNothing,
+        reason: 'Task entries must not render the legacy overflow menu or Move to button',
+      );
+      expect(
+        find.byType(Checkbox),
+        findsNothing,
+        reason: 'Task entries must not render the legacy Checkbox widget',
       );
     },
   );
@@ -1701,9 +1732,36 @@ task cmp1 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text("What's up!"),
+        findsOneWidget,
+        reason: 'Ready pane must display the top greeting matching the Focus screen',
+      );
+      expect(
+        find.text('READY TASKS'),
+        findsOneWidget,
+        reason: 'Ready pane must display the uppercase section label matching the Focus screen',
+      );
+      expect(
         find.text('Ready Pane Task'),
         findsOneWidget,
         reason: 'Sliding right-to-left from Focus must display Ready tier pane',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_ready_r1')),
+        findsOneWidget,
+        reason:
+            'Ready task must render as a pill card matching the Focus screen',
+      );
+      expect(
+        find.byIcon(Icons.more_vert_rounded),
+        findsNothing,
+        reason: 'Ready task pill must not display the legacy overflow menu',
+      );
+      expect(
+        find.byIcon(Icons.arrow_downward_rounded),
+        findsNothing,
+        reason:
+            'Ready task pill must not display the legacy downgrade icon button',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_ready')),
@@ -1720,9 +1778,20 @@ task cmp1 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text('PLANNED TASKS'),
+        findsOneWidget,
+        reason: 'Planned pane must display the uppercase section label matching the Focus screen',
+      );
+      expect(
         find.text('Planned Pane Task'),
         findsOneWidget,
         reason: 'Sliding again must display Planned tier pane',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_planned_p1')),
+        findsOneWidget,
+        reason:
+            'Planned task must render as a pill card matching the Focus screen',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_planned')),
@@ -1734,6 +1803,11 @@ task cmp1 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text('BLOCKED TASKS'),
+        findsOneWidget,
+        reason: 'Blocked pane must display the uppercase section label matching the Focus screen',
+      );
+      expect(
         find.text('Blocked Pane Task'),
         findsOneWidget,
         reason: 'Sliding to Blocked pane must show blocked tasks',
@@ -1742,6 +1816,17 @@ task cmp1 {
         find.text('Suspended Pane Task'),
         findsOneWidget,
         reason: 'Blocked pane must also show suspended tasks',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_blocked_blk1')),
+        findsOneWidget,
+        reason:
+            'Blocked task must render as a pill card matching the Focus screen',
+      );
+      expect(
+        find.byIcon(Icons.arrow_upward_rounded),
+        findsNothing,
+        reason: 'Blocked task pill must not display the legacy promote arrow button',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_blocked')),
@@ -1884,9 +1969,24 @@ task cmp1 {
         reason: 'Releasing the indicator must hide the wave label',
       );
       expect(
+        find.text('COMPLETED TASKS'),
+        findsOneWidget,
+        reason: 'Completed pane must display the uppercase section label matching the Focus screen',
+      );
+      expect(
         find.text('Completed Pane Task'),
         findsOneWidget,
         reason: 'Releasing the indicator on Completed must jump directly to the Completed pane',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_completed_cmp1')),
+        findsOneWidget,
+        reason: 'Completed task must render as a pill card matching the Focus screen',
+      );
+      expect(
+        find.byIcon(Icons.more_vert_rounded),
+        findsNothing,
+        reason: 'Completed task pill must not render the legacy overflow menu or Move to button',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_completed')),
@@ -1946,9 +2046,20 @@ task cmp1 {
       await tester.pumpAndSettle();
 
       expect(
+        find.text('SOMEDAY TASKS'),
+        findsOneWidget,
+        reason: 'Someday pane must display the uppercase section label matching the Focus screen',
+      );
+      expect(
         find.text('Someday Pane Task'),
         findsOneWidget,
         reason: 'Clicking a tier indicator item on desktop must jump to that tier pane',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_someday_smd1')),
+        findsOneWidget,
+        reason:
+            'Someday task must render as a pill card matching the Focus screen',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_someday')),

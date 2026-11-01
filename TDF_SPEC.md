@@ -27,7 +27,7 @@ A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`l
 
 ### 2.1 Character Encoding
 - A TDF document MUST be a valid UTF-8 byte sequence.
-- Invalid UTF-8 byte sequences and null bytes (`U+0000`) MUST be rejected before or during scanning.
+- Invalid UTF-8 byte sequences, null bytes (`U+0000`), and ASCII control characters (`U+0001`–`U+001F` and `U+007F`, except horizontal tab `U+0009`, line feed `U+000A`, and carriage return `U+000D` as specified below) MUST be rejected before or during scanning (`UnexpectedToken`).
 - A conforming scanner MUST respect UTF-8 character boundaries at all times.
 
 ### 2.2 Whitespace
@@ -35,14 +35,14 @@ Horizontal whitespace separates tokens within a single line and is otherwise ins
 - **Allowed horizontal whitespace characters:**
   - ASCII Space (`U+0020`, `' '`)
   - ASCII Horizontal Tab (`U+0009`, `'\t'`)
-- Other Unicode whitespace characters outside of quoted strings MUST be rejected as invalid characters.
+- Other Unicode whitespace characters outside of quoted strings MUST be rejected (`UnexpectedToken`).
 
 ### 2.3 Newlines (Line Terminators)
 TDF is a line-oriented format. Directives and block headers are terminated by a newline.
 - **Allowed newline sequences:**
   - Line Feed (`LF`, `U+000A`, `"\n"`)
   - Carriage Return + Line Feed (`CRLF`, `U+000D U+000A`, `"\r\n"`)
-- A standalone Carriage Return (`CR`, `U+000D`) not followed by `LF` outside of a double-quoted escape sequence is invalid.
+- A standalone Carriage Return (`CR`, `U+000D`) not followed by `LF` outside of a double-quoted escape sequence MUST be rejected (`UnexpectedToken`).
 - Canonical serialization MUST emit `LF` (`"\n"`) line terminators.
 - Empty lines (lines containing only optional horizontal whitespace and an optional `#` comment) are ignored anywhere in the document.
 
@@ -70,7 +70,7 @@ An **Identifier** is the first token of a block header or directive.
 An **Argument** represents a parameter passed to a block header or a directive. An argument can be written in one of three lexical forms:
 
 #### A. Bare Word (Unquoted Token)
-- A contiguous sequence of one or more valid UTF-8 characters excluding horizontal whitespace (`' '`, `'\t'`), newlines (`\r`, `\n`), and reserved punctuation (`{`, `}`, '#', `"`, `'`).
+- A contiguous sequence of one or more valid UTF-8 characters excluding horizontal whitespace (`' '`, `'\t'`), newlines (`\r`, `\n`), ASCII control characters (`U+0000`–`U+001F`, `U+007F`), non-ASCII Unicode whitespace, and reserved punctuation (`{`, `}`, `#`, `"`, `'`).
 - Bare words are used for single-word values without spaces, including entity IDs (`t001`, `taxes2026`, `home`, `it`), header flags (`priority`, `auto-finish`), condition rule keywords (`day`, `time`, `location`, `any`), weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), boolean literals (`true`, `false`), numbers (`50.9787`, `11.0328`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:00`).
 
 #### B. Double-Quoted String (`"..."`)
@@ -93,7 +93,7 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 ### 2.8 Primitive Domain Value Types
 At the semantic validation layer, directive and header arguments map to the following primitive types:
-- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `it`) are equally valid when authored manually.
+- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Unlike block and directive identifiers (Section 2.6), an `<id>` argument may start with a digit (`0-9`) or hyphen (`-`). Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `it`) are equally valid when authored manually.
 - **Boolean (`<bool>`):** Exact case-sensitive bare word `true` or `false`.
 - **Weekday (`<weekday>`):** Exact case-sensitive lowercase bare word from the set `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
 - **Time of Day (`<time>`):** 24-hour minute-precision time written as `<HH:MM>` (e.g., `08:00`, `18:00`), where `HH` is `00..23` and `MM` is `00..59`.
@@ -102,13 +102,16 @@ At the semantic validation layer, directive and header arguments map to the foll
   - Two whitespace-separated bare-word tokens: `<YYYY-MM-DD> <HH:MM>` (e.g., `2026-11-01 19:30`), where `MM` is `01..12`, `DD` is valid for the calendar month/year, `HH` is `00..23`, and `MM` (minute) is `00..59`.
   - When `<HH:MM>` is omitted on a date-only timestamp, chronological ordering and comparison treat the time component as `00:00`.
 - **Floating-Point / Numeric (`<number>`):** Standard ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`) used for geographic latitude (`-90.0` to `90.0`), longitude (`-180.0` to `180.0`), and radius values in meters (`> 0`).
-- **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`.
+- **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` (or single-quoted `'#RRGGBB'`; canonical serialization emits double-quoted `"#RRGGBB"`) where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`. Because `#` outside quotes starts a comment (Section 2.4), `<color>` values MUST be quoted.
 
 ## 3. Structural Grammar
 
-### 3.1 Document Structure (Mandatory Root Blocks)
+### 3.1 Document Structure & Nesting Depth
 A TDF document represents a sequence of root-level **Blocks**.
-- At the root level (nesting depth `0`), ONLY **Blocks** (`task`, `label`), blank lines, and `#` comments are permitted.
+- **Nesting Depth Definition:** Nesting depth equals the number of currently open `{ ... }` blocks:
+  - Depth `0` (document root): Only root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
+  - Depth `1` (inside a `task` or `label` block body): Block directives and nested sub-block headers (`subtasks`, `condition`) are permitted.
+  - Depth `2` (inside a `subtasks` or `condition` sub-block body): Only sub-block directives (`step`, `day`, `time`, `location`) are permitted; no further nested blocks are allowed (`MAX_NESTING_DEPTH = 2`).
 - **Root-Level Directive Prohibition:** Any directive appearing at nesting depth `0` (outside of a `{ ... }` block) MUST be rejected as a syntax error (`UnexpectedRootDirective`).
 - An empty file (or a file containing only whitespace and comments) is a valid empty TDF document with zero blocks.
 
@@ -135,32 +138,32 @@ A **Directive** is a single-line key-value or key-tuple instruction inside a blo
 <identifier> <argument> [<argument> ...]
 ```
 
-- **Block-Only Scope:** A directive MUST reside inside a block (nesting depth $\ge 1$).
+- **Block-Only Scope:** A directive MUST reside inside a block (nesting depth `1` or `2`).
 - **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
-- **Termination:** A directive is terminated by a newline (`LF` or `CRLF`) or `EOF` (if preceding a closing brace). Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
+- **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
 - **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `note`, `color`, `labels`, `blocked`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
 
 ### 3.4 Formal Grammar (EBNF)
 
 ```ebnf
 (* Document Root: Strictly Blocks, Comments, and Blank Lines *)
-document        = { empty-line | root-block } ;
+document        = { empty-line | root-block } [ trailing-empty ] ;
 
 root-block      = block ;
 
 (* Blocks *)
 block           = ws* identifier { ws+ argument } ws+ "{" ws* [ comment ] newline
                   { block-item }
-                  ws* "}" ( [ ws* [ comment ] newline ] | ws* [ comment ] eof )
+                  ws* "}" ws* [ comment ] ( newline | eof )
                 | ws* identifier { ws+ argument } ws+ "{" ws* "}"
-                  ( [ ws* [ comment ] newline ] | ws* [ comment ] eof ) ;
+                  ws* [ comment ] ( newline | eof ) ;
 
 block-item      = empty-line
                 | block
                 | directive ;
 
-(* Directives: Must contain at least one argument *)
-directive       = ws* identifier { ws+ argument }+ ws* [ comment ] ( newline | eof ) ;
+(* Directives: Must contain at least one argument and end with a newline *)
+directive       = ws* identifier { ws+ argument }+ ws* [ comment ] newline ;
 
 (* Tokens *)
 identifier      = id-start { id-continue } ;
@@ -172,18 +175,23 @@ argument        = quoted-string
                 | bare-word ;
 
 bare-word       = bare-char { bare-char } ;
-bare-char       = ? any UTF-8 char except ' ', '\t', '\r', '\n', '{', '}', '#', '"', '\'' ? ;
+bare-char       = ? any UTF-8 char except ASCII control chars (U+0000..U+001F, U+007F),
+                    whitespace, '{', '}', '#', '"', '\'' ? ;
 
 quoted-string   = '"' { quoted-char | escape-seq } '"' ;
-quoted-char     = ? any UTF-8 char except '"', '\\', '\r', '\n' ? ;
+quoted-char     = ? any UTF-8 char except '"', '\\', '\r', '\n', and ASCII control chars
+                    (U+0000..U+001F except '\t', U+007F) ? ;
 escape-seq      = "\\" ( '"' | "\\" | "n" | "r" | "t" ) ;
 
 single-string   = "'" { single-char } "'" ;
-single-char     = ? any UTF-8 char except '\'', '\r', '\n' ? ;
+single-char     = ? any UTF-8 char except '\'', '\r', '\n', and ASCII control chars
+                    (U+0000..U+001F except '\t', U+007F) ? ;
 
 (* Whitespace & Comments *)
 empty-line      = ws* [ comment ] newline ;
-comment         = "#" { ? any UTF-8 char except '\r', '\n' ? } ;
+trailing-empty  = ws* [ comment ] eof ;
+comment         = "#" { ? any UTF-8 char except '\r', '\n', and ASCII control chars
+                          (U+0000..U+001F except '\t', U+007F) ? } ;
 ws              = " " | "\t" ;
 newline         = "\n" | "\r\n" ;
 ```

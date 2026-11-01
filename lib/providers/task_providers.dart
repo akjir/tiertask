@@ -205,68 +205,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
-  /// Applies the Auto-Pull Cascade on the current board and persists to storage.
-  Future<void> applyAutoPull() async {
-    final now = ref.read(clockProvider)();
-    final updated = _currentBoard.applyAutoPull(currentDate: now);
-    await _commitMutation(updated);
-  }
-
-  /// Moves an active task immediately to Tier 4 ([TaskTier.blocked]), triggers the
-  /// Auto-Pull Cascade, and persists to storage.
-  Future<void> blockTask(String taskId, {DateTime? currentDate}) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.blockTask(taskId, currentDate: now);
-    await _commitMutation(updated);
-  }
-
   /// Marks an active task as done in Tier 6 ([TaskTier.completed]), prunes expired tasks,
   /// triggers the Auto-Pull Cascade, and persists to storage.
   Future<void> completeTask(String taskId, {DateTime? currentDate}) async {
     final now = currentDate ?? ref.read(clockProvider)();
     final updated = _currentBoard.completeTask(taskId, currentDate: now);
-    await _commitMutation(updated);
-  }
-
-  /// Permanently deletes a task, runs the Auto-Pull Cascade, and persists to storage.
-  Future<void> deleteTask(String taskId, {DateTime? currentDate}) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.deleteTask(taskId, currentDate: now);
-    await _commitMutation(updated);
-  }
-
-  /// Downgrades a task one active tier down using anti-ping-pong order and saves to storage.
-  Future<void> downgradeTask(String taskId, {DateTime? currentDate}) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.downgradeTask(taskId, currentDate: now);
-    await _commitMutation(updated);
-  }
-
-  /// Updates the title of an existing task and saves to storage.
-  Future<void> editTaskTitle(String taskId, String newTitle) async {
-    final updated = _currentBoard.editTaskTitle(taskId, newTitle);
-    await _commitMutation(updated);
-  }
-
-  /// Moves a task to [targetTier] and saves to storage.
-  Future<void> moveTask(
-    String taskId,
-    TaskTier targetTier, {
-    DateTime? currentDate,
-  }) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.moveTask(
-      taskId,
-      targetTier,
-      currentDate: now,
-    );
-    await _commitMutation(updated);
-  }
-
-  /// Prunes tasks in Tier 6 ([TaskTier.completed]) older than 30 days and persists to storage.
-  Future<void> pruneCompletedTasks({DateTime? currentDate}) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.pruneCompletedTasks(currentDate: now);
     await _commitMutation(updated);
   }
 
@@ -287,21 +230,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     } on Object catch (error) {
       ref.read(syncStateProvider.notifier).setError(error.toString());
     }
-  }
-
-  /// Restores a completed task from Tier 6 ([TaskTier.completed]) to [targetTier] and saves to storage.
-  Future<void> restoreTask(
-    String taskId,
-    TaskTier targetTier, {
-    DateTime? currentDate,
-  }) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.restoreTask(
-      taskId,
-      targetTier,
-      currentDate: now,
-    );
-    await _commitMutation(updated);
   }
 
   /// Reloads the `.tdf` file from the configured local or WebDAV storage backend.

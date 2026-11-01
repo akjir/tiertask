@@ -61,8 +61,6 @@ tiertask/
 │       ├── settings_screen.dart
 │       └── widgets/
 │           ├── quick_add_bar.dart
-│           ├── restore_task_sheet.dart
-│           ├── task_tile.dart
 │           └── tier_page_indicator.dart
 └── test/
     ├── tiertask_domain_test.dart
@@ -86,9 +84,9 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/l10n/app_en.arb` | External English (`en`, default fallback) translation bundle for all UI labels, tier headings/descriptions, and error messages. |
-| `lib/l10n/app_de.arb` | External German (`de`) translation bundle for all UI labels, tier headings/descriptions, and error messages. |
-| `lib/l10n/tier_localization_extension.dart` | Extension on `AppLocalizations` mapping `TaskTier` (`1`–`6`) to localized tier names, descriptions, and empty-state hints. |
+| `lib/l10n/app_en.arb` | External English (`en`, default fallback) translation bundle for all UI labels, tier headings, and error messages. |
+| `lib/l10n/app_de.arb` | External German (`de`) translation bundle for all UI labels, tier headings, and error messages. |
+| `lib/l10n/tier_localization_extension.dart` | Extension on `AppLocalizations` mapping `TaskTier` (`1`–`6`) to localized tier names, uppercase section headings, and empty-state hints. |
 
 ## Domain Models
 
@@ -125,11 +123,9 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
-| `lib/ui/home_screen.dart` | Primary landing page screen displaying the greeting, minimalist `Focus` task pills, horizontal 6-tier `PageView` sliding (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with a bottom `TierPageIndicator`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a circular task-add button that hides and transforms into the inline bottom `QuickAddBar` when pressed, and a top-left navigation drawer for secondary tiers, synchronization, TDF preview, and settings. |
+| `lib/ui/home_screen.dart` | Primary landing page screen displaying a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the top greeting, uppercase tier section heading, minimalist task pill cards (`_TierTaskPill`) or empty-state card (`_EmptyTierCard`), a bottom `TierPageIndicator`, top-right search and conditional WebDAV sync (`WebDAV` / `Both` mode), a circular task-add button that hides and transforms into the inline bottom `QuickAddBar` when pressed, and a top-left navigation drawer for switching tiers, synchronization, TDF preview, and settings. |
 | `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), open task count visibility (`Off` by default, `On`), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name, WebDAV endpoint parameters, and synchronization testing. |
 | `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, `Categories` and `Locations` icon buttons that expand multi-select menus upward above the bar, a placeholder `Advanced` icon button, and a `Cancel` icon button. |
-| `lib/ui/widgets/restore_task_sheet.dart` | Modal bottom sheet for selecting the destination active tier (`1` through `5`) when restoring or moving a task. |
-| `lib/ui/widgets/task_tile.dart` | Individual task card providing completion, downgrade, quick-block, title editing, move, and delete actions. |
 | `lib/ui/widgets/tier_page_indicator.dart` | Bottom tier indicator (`TierPageIndicator`) positioned above `QuickAddBar` when open, rendering dots for inactive tiers and an icon for the active tier (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) over a transparent background, a desktop mouse-over icon in an intermediate color and borderless label without wave animation, desktop Left/Right arrow key navigation, and an interactive wave effect on hold and drag that enlarges the two adjacent neighbor dots (`1.5x` in the intermediate color) and jumps directly to the selected tier pane upon release. |
 
 ## Execution & Synchronization Flow
@@ -137,4 +133,4 @@ tiertask/
 1. **Startup, Configuration & Locale Resolution:** `main.dart` initializes `ProviderScope`. `WebDavConfigNotifier` loads persisted `StorageMode`, `.tdf` paths, WebDAV credentials, and `AppLanguage` settings via `SettingsRepository`. `appLocaleProvider` resolves the active `Locale`.
 2. **TDF Fetch (Local File or WebDAV):** `TaskNotifier` reads the raw `.tdf` document either from the configured local `.tdf` file (`LocalFileRepository.loadTdf`) or from the configured WebDAV endpoint via HTTP `GET` (`WebDavRepository.fetchTdf`). Missing files (`HTTP 404` or non-existent local file) initialize an empty board.
 3. **Single-Pass Parse & Dynamic 6-Tier Derivation:** `TdfService.parse` scans and validates all `location`, `category`, and `task` blocks in a single $O(N)$ pass and invokes `TaskBoard.evaluate` to derive `Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, and `Planned` per `TDF_SPEC.md` Section 5.
-4. **Mutation & Persistence:** Every user action (`addTask`, `completeTask`, `toggleSubtask`, `restoreTask`, `downgradeTask`, `blockTask`, `moveTask`, `editTaskTitle`, `deleteTask`) produces a new immutable `TaskBoard`, updates UI state, serializes canonical `LF`-terminated `.tdf` output via `TdfService.serialize`, and persists the `.tdf` document to the local filesystem and/or WebDAV server.
+4. **Mutation & Persistence:** Every user action (`addTask`, `completeTask`, `toggleSubtask`, `createCategory`, `deleteCategory`, `createLocation`, `deleteLocation`) produces a new immutable `TaskBoard`, updates UI state, serializes canonical `LF`-terminated `.tdf` output via `TdfService.serialize`, and persists the `.tdf` document to the local filesystem and/or WebDAV server.

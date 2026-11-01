@@ -24,7 +24,6 @@ import '../models/task_tier.dart';
 import '../providers/task_providers.dart';
 import 'settings_screen.dart';
 import 'widgets/quick_add_bar.dart';
-import 'widgets/task_tile.dart';
 import 'widgets/tier_page_indicator.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
@@ -148,10 +147,10 @@ class _DrawerHeader extends StatelessWidget {
   }
 }
 
-/// Placeholder card shown when the Focus tasks list is empty.
-class _EmptyFocusCard extends StatelessWidget {
-  /// Creates an [_EmptyFocusCard].
-  const _EmptyFocusCard({required this.message});
+/// Placeholder card shown when a tier's task list is empty.
+class _EmptyTierCard extends StatelessWidget {
+  /// Creates an [_EmptyTierCard].
+  const _EmptyTierCard({required this.message});
 
   /// Empty-state message text.
   final String message;
@@ -169,6 +168,41 @@ class _EmptyFocusCard extends StatelessWidget {
         message,
         style: const TextStyle(color: _mutedLabelColor, fontSize: 15),
       ),
+    );
+  }
+}
+
+/// Action buttons row inside [_ErrorStateView].
+class _ErrorActionButtons extends StatelessWidget {
+  /// Creates [_ErrorActionButtons].
+  const _ErrorActionButtons({
+    required this.onOpenSettings,
+    required this.onRetry,
+  });
+
+  /// Callback to open settings.
+  final VoidCallback onOpenSettings;
+
+  /// Callback to retry synchronization.
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Wrap(
+      spacing: 12,
+      children: [
+        OutlinedButton.icon(
+          onPressed: onOpenSettings,
+          icon: const Icon(Icons.settings_outlined),
+          label: Text(localizations.actionSettings),
+        ),
+        FilledButton.icon(
+          onPressed: onRetry,
+          icon: const Icon(Icons.refresh_rounded),
+          label: Text(localizations.actionRetry),
+        ),
+      ],
     );
   }
 }
@@ -232,130 +266,6 @@ class _ErrorStateView extends StatelessWidget {
   }
 }
 
-/// Action buttons row inside [_ErrorStateView].
-class _ErrorActionButtons extends StatelessWidget {
-  /// Creates [_ErrorActionButtons].
-  const _ErrorActionButtons({
-    required this.onOpenSettings,
-    required this.onRetry,
-  });
-
-  /// Callback to open settings.
-  final VoidCallback onOpenSettings;
-
-  /// Callback to retry synchronization.
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Wrap(
-      spacing: 12,
-      children: [
-        OutlinedButton.icon(
-          onPressed: onOpenSettings,
-          icon: const Icon(Icons.settings_outlined),
-          label: Text(localizations.actionSettings),
-        ),
-        FilledButton.icon(
-          onPressed: onRetry,
-          icon: const Icon(Icons.refresh_rounded),
-          label: Text(localizations.actionRetry),
-        ),
-      ],
-    );
-  }
-}
-
-/// Minimal pill card representing a single Tier 1 (`Focus`) task on the landing page.
-class _FocusTaskPill extends ConsumerWidget {
-  /// Creates a [_FocusTaskPill].
-  const _FocusTaskPill({
-    super.key,
-    required this.task,
-    required this.ringColor,
-  });
-
-  /// Border color of the circular completion indicator.
-  final Color ringColor;
-
-  /// Focus task item to display.
-  final TaskItem task;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () =>
-              ref.read(taskNotifierProvider.notifier).completeTask(task.id),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-            child: Row(
-              children: [
-                Container(
-                  width: 24,
-                  height: 24,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: ringColor, width: 2.2),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Text(
-                    task.title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Section displaying only the Tier 1 (`Focus`) tasks in minimalist pill cards.
-class _FocusTasksSection extends StatelessWidget {
-  /// Creates a [_FocusTasksSection].
-  const _FocusTasksSection({required this.tasks});
-
-  /// Filtered Focus tasks to render.
-  final List<TaskItem> tasks;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _LandingSectionLabel(title: localizations.sectionFocusTasks),
-        const SizedBox(height: 12),
-        if (tasks.isEmpty)
-          _EmptyFocusCard(message: localizations.emptyFocusHint)
-        else
-          for (var i = 0; i < tasks.length; i++)
-            _FocusTaskPill(
-              key: ValueKey('focus_pill_${tasks[i].id}'),
-              task: tasks[i],
-              ringColor: i.isEven ? _accentMagenta : _accentBlue,
-            ),
-      ],
-    );
-  }
-}
-
 /// State for [HomeScreen].
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   TaskTier _activeTier = TaskTier.focus;
@@ -389,7 +299,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         board: boardAsync.asData?.value ?? TaskBoard.empty(),
         onOpenMarkdownPreview: () => _showMarkdownPreviewDialog(context),
         onOpenSettings: () => _openSettings(context),
-        onOpenTierSheet: (tier) => _showTierSheet(context, tier),
+        onSelectTier: _selectTierPane,
         onSyncRemote: () =>
             ref.read(taskNotifierProvider.notifier).syncFromRemote(),
       ),
@@ -513,16 +423,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// Opens a modal bottom sheet displaying the tasks of the selected secondary [tier].
-  void _showTierSheet(BuildContext context, TaskTier tier) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _TierDetailSheet(tier: tier),
-    );
-  }
-
   /// Toggles the top-right search bar and resets the query when closing.
   void _toggleSearch() {
     setState(() {
@@ -586,17 +486,11 @@ class _LandingContentSwitcher extends StatelessWidget {
         controller: pageController,
         itemCount: TaskTier.values.length,
         onPageChanged: onPageChanged,
-        itemBuilder: (context, index) {
-          final tier = TaskTier.values[index];
-          if (tier == TaskTier.focus) {
-            return _LandingScrollView(board: board, searchQuery: searchQuery);
-          }
-          return _SecondaryTierPane(
-            board: board,
-            searchQuery: searchQuery,
-            tier: tier,
-          );
-        },
+        itemBuilder: (context, index) => _TierScrollView(
+          board: board,
+          searchQuery: searchQuery,
+          tier: TaskTier.values[index],
+        ),
       ),
     );
   }
@@ -609,7 +503,7 @@ class _LandingDrawer extends StatelessWidget {
     required this.board,
     required this.onOpenMarkdownPreview,
     required this.onOpenSettings,
-    required this.onOpenTierSheet,
+    required this.onSelectTier,
     required this.onSyncRemote,
   });
 
@@ -624,14 +518,14 @@ class _LandingDrawer extends StatelessWidget {
   /// Current task board snapshot.
   final TaskBoard board;
 
-  /// Callback to open the raw Markdown preview dialog.
+  /// Callback to open the raw TDF preview dialog.
   final VoidCallback onOpenMarkdownPreview;
 
   /// Callback to navigate to [SettingsScreen].
   final VoidCallback onOpenSettings;
 
-  /// Callback to open the task sheet for a specific [TaskTier].
-  final ValueChanged<TaskTier> onOpenTierSheet;
+  /// Callback to jump to a specific [TaskTier] pane.
+  final ValueChanged<TaskTier> onSelectTier;
 
   /// Callback to trigger remote synchronization.
   final VoidCallback onSyncRemote;
@@ -652,7 +546,7 @@ class _LandingDrawer extends StatelessWidget {
                 icon: Icons.folder_outlined,
                 title: localizations.tierName(tier),
                 count: board.tasksForTier(tier).length,
-                onAction: () => onOpenTierSheet(tier),
+                onAction: () => onSelectTier(tier),
               ),
             const Divider(height: 8),
             _DrawerFooterSection(
@@ -773,57 +667,7 @@ class _LandingScaffoldBody extends StatelessWidget {
   }
 }
 
-/// Scrollable landing page body ordering greeting and Focus tasks.
-class _LandingScrollView extends StatelessWidget {
-  /// Creates a [_LandingScrollView].
-  const _LandingScrollView({required this.board, required this.searchQuery});
-
-  /// Current task board snapshot.
-  final TaskBoard board;
-
-  /// Active search query string for filtering Focus tasks.
-  final String searchQuery;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final filteredFocus = _filterFocusTasks(board.focus, searchQuery);
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            localizations.landingGreeting,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 28),
-          _FocusTasksSection(tasks: filteredFocus),
-        ],
-      ),
-    );
-  }
-
-  /// Filters [tasks] by a case-insensitive substring match against [query].
-  List<TaskItem> _filterFocusTasks(List<TaskItem> tasks, String query) {
-    final trimmed = query.trim().toLowerCase();
-    if (trimmed.isEmpty) {
-      return tasks;
-    }
-    return [
-      for (final task in tasks)
-        if (task.title.toLowerCase().contains(trimmed)) task,
-    ];
-  }
-}
-
-/// Uppercase muted section heading label on the landing page.
+/// Uppercase muted section heading label on the tier panes.
 class _LandingSectionLabel extends StatelessWidget {
   /// Creates a [_LandingSectionLabel].
   const _LandingSectionLabel({required this.title});
@@ -926,103 +770,6 @@ class _LandingTopBar extends StatelessWidget {
   }
 }
 
-/// Full-screen pane displaying the tasks of a secondary [TaskTier] (`Ready` through `Completed`).
-class _SecondaryTierPane extends StatelessWidget {
-  /// Creates a [_SecondaryTierPane].
-  const _SecondaryTierPane({
-    required this.board,
-    required this.searchQuery,
-    required this.tier,
-  });
-
-  /// Current task board snapshot.
-  final TaskBoard board;
-
-  /// Active search filter query.
-  final String searchQuery;
-
-  /// Secondary [TaskTier] displayed on this pane.
-  final TaskTier tier;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tasks = _filterTasks(board.tasksForTier(tier), searchQuery);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SecondaryTierPaneHeader(tier: tier),
-        if (tasks.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: _EmptyFocusCard(message: localizations.tierEmptyHint(tier)),
-          )
-        else
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 96),
-              itemCount: tasks.length,
-              itemBuilder: (context, index) => TaskTile(
-                key: ValueKey('tier_pane_${tier.name}_${tasks[index].id}'),
-                task: tasks[index],
-                tier: tier,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// Filters [tasks] by a case-insensitive substring match against [query].
-  List<TaskItem> _filterTasks(List<TaskItem> tasks, String query) {
-    final trimmed = query.trim().toLowerCase();
-    if (trimmed.isEmpty) {
-      return tasks;
-    }
-    return [
-      for (final task in tasks)
-        if (task.title.toLowerCase().contains(trimmed)) task,
-    ];
-  }
-}
-
-/// Title and description header inside [_SecondaryTierPane].
-class _SecondaryTierPaneHeader extends StatelessWidget {
-  /// Creates a [_SecondaryTierPaneHeader].
-  const _SecondaryTierPaneHeader({required this.tier});
-
-  /// Active [TaskTier] pane.
-  final TaskTier tier;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            localizations.tierName(tier),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 32,
-              fontWeight: FontWeight.bold,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            localizations.tierDescription(tier),
-            style: const TextStyle(color: _mutedLabelColor, fontSize: 14),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Dismissible error banner shown when a background WebDAV sync operation fails.
 class _SyncErrorBanner extends StatelessWidget {
   /// Creates a [_SyncErrorBanner].
@@ -1074,47 +821,136 @@ class _SyncErrorBanner extends StatelessWidget {
   }
 }
 
-/// Modal sheet displaying the tasks of a single secondary [TaskTier] selected from the menu.
-class _TierDetailSheet extends ConsumerWidget {
-  /// Creates a [_TierDetailSheet].
-  const _TierDetailSheet({required this.tier});
+/// Header block inside [_TierScrollView] displaying the greeting and uppercase tier section label.
+class _TierPaneHeader extends StatelessWidget {
+  /// Creates a [_TierPaneHeader].
+  const _TierPaneHeader({required this.tier});
 
-  /// Tier displayed inside this sheet.
+  /// Active [TaskTier] pane.
   final TaskTier tier;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final board =
-        ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
-    final tasks = board.tasksForTier(tier);
+  Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          localizations.landingGreeting,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+            letterSpacing: -0.5,
+          ),
         ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                localizations.tierName(tier),
-                style: theme.textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                localizations.tierDescription(tier),
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 12),
-              _TierSheetTaskList(tier: tier, tasks: tasks),
-            ],
+        const SizedBox(height: 28),
+        _LandingSectionLabel(title: localizations.tierSectionTitle(tier)),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
+/// Scrollable tier pane body rendering the greeting, uppercase section label, and minimalist task pills.
+class _TierScrollView extends StatelessWidget {
+  /// Creates a [_TierScrollView].
+  const _TierScrollView({
+    required this.board,
+    required this.searchQuery,
+    required this.tier,
+  });
+
+  /// Current task board snapshot.
+  final TaskBoard board;
+
+  /// Active search query string for filtering tasks.
+  final String searchQuery;
+
+  /// [TaskTier] displayed on this pane.
+  final TaskTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tasks = _filterTasks(board.tasksForTier(tier), searchQuery);
+    final isCompletedTier = tier == TaskTier.completed;
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
+      itemCount: tasks.isEmpty ? 2 : tasks.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return _TierPaneHeader(tier: tier);
+        }
+        if (tasks.isEmpty) {
+          return _EmptyTierCard(message: localizations.tierEmptyHint(tier));
+        }
+        final taskIndex = index - 1;
+        final task = tasks[taskIndex];
+        return _TierTaskPill(
+          key: ValueKey('tier_pill_${tier.name}_${task.id}'),
+          task: task,
+          isCompleted: isCompletedTier,
+          ringColor: taskIndex.isEven ? _accentMagenta : _accentBlue,
+        );
+      },
+    );
+  }
+
+  /// Filters [tasks] by a case-insensitive substring match against [query].
+  List<TaskItem> _filterTasks(List<TaskItem> tasks, String query) {
+    final trimmed = query.trim().toLowerCase();
+    if (trimmed.isEmpty) {
+      return tasks;
+    }
+    return [
+      for (final task in tasks)
+        if (task.title.toLowerCase().contains(trimmed)) task,
+    ];
+  }
+}
+
+/// Minimal pill card representing a single task entry across all 6 [TaskTier] panes.
+class _TierTaskPill extends ConsumerWidget {
+  /// Creates a [_TierTaskPill].
+  const _TierTaskPill({
+    super.key,
+    required this.isCompleted,
+    required this.ringColor,
+    required this.task,
+  });
+
+  /// Whether the task belongs to the completed archive tier.
+  final bool isCompleted;
+
+  /// Border color of the circular completion indicator.
+  final Color ringColor;
+
+  /// Task item to display.
+  final TaskItem task;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: isCompleted
+              ? null
+              : () => ref
+                    .read(taskNotifierProvider.notifier)
+                    .completeTask(task.id),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            child: _TierTaskPillRow(
+              isCompleted: isCompleted,
+              ringColor: ringColor,
+              title: task.title,
+            ),
           ),
         ),
       ),
@@ -1122,36 +958,52 @@ class _TierDetailSheet extends ConsumerWidget {
   }
 }
 
-/// Task list or empty-state message inside [_TierDetailSheet].
-class _TierSheetTaskList extends StatelessWidget {
-  /// Creates a [_TierSheetTaskList].
-  const _TierSheetTaskList({required this.tier, required this.tasks});
+/// Row layout inside [_TierTaskPill] combining the circular ring indicator and task title.
+class _TierTaskPillRow extends StatelessWidget {
+  /// Creates a [_TierTaskPillRow].
+  const _TierTaskPillRow({
+    required this.isCompleted,
+    required this.ringColor,
+    required this.title,
+  });
 
-  /// Tier being displayed.
-  final TaskTier tier;
+  /// Whether the task is completed.
+  final bool isCompleted;
 
-  /// Tasks belonging to [tier].
-  final List<TaskItem> tasks;
+  /// Border color of the circular completion indicator.
+  final Color ringColor;
+
+  /// Task title text.
+  final String title;
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    if (tasks.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        child: Text(localizations.tierEmptyHint(tier)),
-      );
-    }
-    return Flexible(
-      child: ListView.builder(
-        shrinkWrap: true,
-        itemCount: tasks.length,
-        itemBuilder: (context, index) => TaskTile(
-          key: ValueKey('sheet_${tier.name}_${tasks[index].id}'),
-          task: tasks[index],
-          tier: tier,
+    return Row(
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: ringColor, width: 2.2),
+          ),
+          child: isCompleted
+              ? Icon(Icons.check_rounded, size: 16, color: ringColor)
+              : null,
         ),
-      ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Text(
+            title,
+            style: TextStyle(
+              color: isCompleted ? _mutedLabelColor : Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              decoration: isCompleted ? TextDecoration.lineThrough : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

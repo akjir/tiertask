@@ -31,26 +31,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tier6Name => 'Erledigt';
 
   @override
-  String get tier1Description => 'Aktive Top-Priorität (Soft-Limit: 3)';
-
-  @override
-  String get tier2Description => 'Startklar für Fokus (Soft-Limit: 5)';
-
-  @override
-  String get tier3Description =>
-      'Aktives Backlog (rückt automatisch in Bereit nach)';
-
-  @override
-  String get tier4Description => 'Wartet auf externe Ereignisse oder Dritte';
-
-  @override
-  String get tier5Description => 'Ideenspeicher ohne automatisches Nachrücken';
-
-  @override
-  String get tier6Description =>
-      'Abgeschlossene Aufgaben (30 Tage Aufbewahrung)';
-
-  @override
   String get tabFocusAndReady => 'Fokus & Bereit';
 
   @override
@@ -137,52 +117,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get actionAdd => 'Hinzufügen';
-
-  @override
-  String get restoreTaskTitle => 'Aufgabe wiederherstellen';
-
-  @override
-  String get moveTaskTitle => 'Aufgabe verschieben';
-
-  @override
-  String selectTargetTierSubtitle(String taskTitle) {
-    return '\"$taskTitle\" - Zielkategorie auswählen:';
-  }
-
-  @override
-  String completedOnDate(String date) {
-    return 'Erledigt am $date';
-  }
-
-  @override
-  String get tooltipDowngradeToReady => 'Herabstufen nach Bereit';
-
-  @override
-  String get tooltipDowngradeToPlanned => 'Herabstufen nach Geplant';
-
-  @override
-  String get tooltipBlockTask => 'Sofort nach Blockiert verschieben';
-
-  @override
-  String get tooltipPromoteToPlanned => 'In Geplant einreihen';
-
-  @override
-  String get tooltipMoreActions => 'Weitere Aktionen';
-
-  @override
-  String get menuMoveTo => 'Verschieben nach...';
-
-  @override
-  String get menuEditText => 'Text bearbeiten';
-
-  @override
-  String get menuDelete => 'Löschen';
-
-  @override
-  String get editTaskDialogTitle => 'Aufgabe bearbeiten';
-
-  @override
-  String get editTaskFieldLabel => 'Aufgabentext';
 
   @override
   String get actionCancel => 'Abbrechen';
@@ -411,6 +345,21 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get sectionFocusTasks => 'FOKUSAUFGABEN';
+
+  @override
+  String get sectionReadyTasks => 'BEREITE AUFGABEN';
+
+  @override
+  String get sectionPlannedTasks => 'GEPLANTE AUFGABEN';
+
+  @override
+  String get sectionBlockedTasks => 'BLOCKIERTE AUFGABEN';
+
+  @override
+  String get sectionSomedayTasks => 'IRGENDWANN-AUFGABEN';
+
+  @override
+  String get sectionCompletedTasks => 'ERLEDIGTE AUFGABEN';
 
   @override
   String get sectionCategories => 'KATEGORIEN';
