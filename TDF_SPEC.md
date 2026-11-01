@@ -392,7 +392,8 @@ When evaluating a `.tdf` document against a local reference timestamp (`now`), o
 - **When no `label` context filter is selected (global view):** All `task` blocks in the document enter the tier classification steps.
 
 ### 5.2 Tier 6 — `Completed`
-- **Selection Rule:** All retained tasks that possess a `finished` directive.
+- **Selection Rule:** All retained tasks (after Section 5.1 `labels` pre-filtering when an active `label` filter is selected) that possess a `finished` directive.
+- **No Blocking or Condition Evaluation:** Aside from Section 5.1 `labels` membership filtering, activation conditions (`condition` rules on the task or on its assigned `labels`), prerequisite dependencies (`blocked`), and deferral timestamps (`suspended`) are NOT evaluated for completed tasks. Any retained task matching the active `label` filter that possesses a `finished` directive is classified unconditionally into `Completed` (`Tier 6`) even when its `condition`, `blocked`, or `suspended` rules are unmet at `now`.
 - **Garbage Collection (30-Day Retention Pruning):** Tasks whose `finished` timestamp lies strictly more than $30$ days in the past in local time relative to the evaluation timestamp (`now`) are removed when persisting the document.
 
 ### 5.3 Tier 5 — `Someday`
@@ -430,8 +431,8 @@ State transitions mutate the task directives (`queued`, `finished`) and header f
 ### 6.2 Scheduling a Task from `Someday`
 - Adds the `queued` directive set to the current local timestamp (`now`).
 
-### 6.3 Downgrading an Active Task (`Focus` and `Ready` Only)
-- **Allowed Source Tiers (`Focus` and `Ready` Only):** Only tasks currently derived in `Focus` (`Tier 1`) or `Ready` (`Tier 2`) can be downgraded. Tasks in `Planned` (`Tier 3`), `Blocked` (`Tier 4`), `Someday` (`Tier 5`), or `Completed` (`Tier 6`) CANNOT be downgraded (attempting to downgrade a task outside `Focus` and `Ready` is a no-op).
+### 6.3 Downgrading an Active Task (`Focus`, `Ready`, and `Planned`)
+- **Allowed Source Tiers (`Focus`, `Ready`, and `Planned` Only):** Only tasks currently derived in `Focus` (`Tier 1`), `Ready` (`Tier 2`), or `Planned` (`Tier 3`) can be downgraded. Tasks in `Blocked` (`Tier 4`), `Someday` (`Tier 5`), or `Completed` (`Tier 6`) CANNOT be downgraded (attempting to downgrade a task outside `Focus`, `Ready`, and `Planned` is a no-op).
 - **Downgrade from `Focus` to `Ready`:**
   - **Fewer than `8` active tasks (`< 8`):** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`).
   - **At least `8` active tasks (`>= 8`):** To place the downgraded task deterministically at active slot `8` (index `7`, the last slot of `Ready`) without reordering blocks in the file:
@@ -439,6 +440,7 @@ State transitions mutate the task directives (`queued`, `finished`) and header f
     2. **Timestamp Offset (`+00:00:01`):** Sets the downgraded task's `queued` timestamp to `1` second (`+00:00:01`, using `<HH:MM:SS>` precision) after the `queued` timestamp of the task currently at active slot `8`.
     3. **Collision Shift in `Planned` (Slot `9` Onward):** If the task at active slot `9` (the first task in `Planned`) belongs to the same `priority` group and has a `queued` timestamp less than or equal to the downgraded task's new `queued` timestamp (`slot_9.queued <= new_queued`), shifts `slot_9` (and any subsequent colliding tasks in `Planned` within the same group) forward so each has a `queued` timestamp at least `1` second (`+00:00:01`) after its predecessor, guaranteeing `slot_8.queued < new_queued < slot_9.queued`.
 - **Downgrade from `Ready` to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`) so the task moves to the end of the regular FIFO queue (if fewer than `8` other active tasks exist, the Section 5.5 slicing pipeline places the task into the highest open slot in `Focus` or `Ready`).
+- **Downgrade from `Planned` to `Someday`:** Removes the `priority` header flag if present and omits the `queued` directive so the task leaves the active pull cycle and is classified as `Someday` (`Tier 5`).
 
 ### 6.4 Completing a Task (From Any Open Tier)
 - Any open task—regardless of whether it is currently derived in `Focus`, `Ready`, `Planned`, `Blocked`, or `Someday`—can be completed directly by adding the `finished` directive set to the current local timestamp (`now`) (or automatically when all `step` directives in a `subtasks auto-finish` sub-block become `true`).

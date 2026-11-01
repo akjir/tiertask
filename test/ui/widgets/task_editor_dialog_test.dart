@@ -57,6 +57,7 @@ task t001 {
   }
 }
 ''';
+      final fixedNow = DateTime.utc(2026, 11, 1, 12, 0);
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(
@@ -70,9 +71,7 @@ task t001 {
               initialTdf: seededTdf,
             ),
           ),
-          clockProvider.overrideWithValue(
-            () => DateTime.utc(2026, 11, 1, 12, 0),
-          ),
+          clockProvider.overrideWithValue(() => fixedNow),
         ],
       );
       addTearDown(container.dispose);
@@ -372,6 +371,116 @@ task t001 {
         equals(['Rotate SSH Keys']),
         reason: 'Tapping the front completion circle must check off the task into Completed',
       );
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_completed')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(ValueKey('tier_pill_completed_$rotateTaskId')),
+        findsOneWidget,
+        reason:
+            'Completed task pill must be rendered in the Completed tier pane',
+      );
+
+      await tester.tap(
+        find.byKey(ValueKey('complete_task_button_$rotateTaskId')),
+      );
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.completed,
+        isEmpty,
+        reason: 'Tapping the completion circle on a completed task must restore it out of Completed',
+      );
+      expect(
+        board.focus.map((task) => task.id),
+        equals([rotateTaskId]),
+        reason: 'Restored Planned task must cascade into open Focus slot',
+      );
+      expect(
+        board.focus.single.isPriority,
+        isFalse,
+        reason: 'Restoring to Planned via completion circle must strip the priority flag per Section 6.5',
+      );
+      expect(
+        board.focus.single.queuedAt,
+        equals(fixedNow),
+        reason: 'Restoring to Planned via completion circle must set queued to now per Section 6.5',
+      );
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .completeTask(
+            rotateTaskId,
+            currentDate: fixedNow.add(const Duration(minutes: 10)),
+          );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(ValueKey('edit_task_button_$rotateTaskId')));
+      await tester.pumpAndSettle();
+
+      expect(
+        dialogFinder,
+        findsOneWidget,
+        reason:
+            'Tapping edit on a completed task pill must open TaskEditorDialog',
+      );
+      final priorityChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_priority_button')),
+      );
+      final somedayChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_someday_button')),
+      );
+      expect(
+        priorityChip.selected,
+        isFalse,
+        reason: 'Editing a completed task must default to Planned (Priority unselected) per Section 6.5',
+      );
+      expect(
+        somedayChip.selected,
+        isFalse,
+        reason: 'Editing a completed task must default to Planned (Someday unselected) per Section 6.5',
+      );
+
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.completed,
+        isEmpty,
+        reason: 'Saving a completed task in TaskEditorDialog with default mode must restore it to Planned',
+      );
+      expect(board.focus.single.id, equals(rotateTaskId));
+      expect(board.focus.single.isPriority, isFalse);
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .completeTask(
+            rotateTaskId,
+            currentDate: fixedNow.add(const Duration(minutes: 20)),
+          );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(ValueKey('edit_task_button_$rotateTaskId')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_priority_button')),
+      );
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.completed,
+        isEmpty,
+        reason: 'Saving a completed task with Priority selected must restore it to Focus',
+      );
+      expect(board.focus.single.id, equals(rotateTaskId));
+      expect(board.focus.single.isPriority, isTrue);
     },
   );
 }

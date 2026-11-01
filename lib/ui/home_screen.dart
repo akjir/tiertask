@@ -1077,7 +1077,10 @@ class _TierScrollView extends StatelessWidget {
         return _TierTaskPill(
           key: ValueKey('tier_pill_${tier.name}_${task.id}'),
           task: task,
-          canDowngrade: tier == TaskTier.focus || tier == TaskTier.ready,
+          canDowngrade:
+              tier == TaskTier.focus ||
+              tier == TaskTier.ready ||
+              tier == TaskTier.planned,
           isCompleted: isCompletedTier,
           ringColor: taskIndex.isEven ? _accentMagenta : _accentBlue,
         );
@@ -1139,7 +1142,7 @@ class _TierTaskActionButton extends StatelessWidget {
   }
 }
 
-/// Circular button at the leading edge of [_TierTaskPillRow] to mark a task as completed.
+/// Circular button at the leading edge of [_TierTaskPillRow] to complete or restore a task.
 class _TierTaskCompletionCircle extends StatelessWidget {
   /// Creates a [_TierTaskCompletionCircle].
   const _TierTaskCompletionCircle({
@@ -1155,8 +1158,8 @@ class _TierTaskCompletionCircle extends StatelessWidget {
   /// Whether the task is already completed.
   final bool isCompleted;
 
-  /// Callback invoked when the circle is tapped, or `null` when completed.
-  final VoidCallback? onComplete;
+  /// Callback invoked when the circle is tapped.
+  final VoidCallback onComplete;
 
   /// Border and check icon color of the circular indicator.
   final Color ringColor;
@@ -1193,7 +1196,7 @@ class _TierTaskPill extends ConsumerWidget {
     required this.task,
   });
 
-  /// Whether the task belongs to a downgradable tier (`Focus` or `Ready`).
+  /// Whether the task belongs to a downgradable tier (`Focus`, `Ready`, or `Planned`).
   final bool canDowngrade;
 
   /// Whether the task belongs to the completed archive tier.
@@ -1218,11 +1221,9 @@ class _TierTaskPill extends ConsumerWidget {
             isCompleted: isCompleted,
             ringColor: ringColor,
             task: task,
-            onComplete: isCompleted
-                ? null
-                : () => ref
-                      .read(taskNotifierProvider.notifier)
-                      .completeTask(task.id),
+            onComplete: () => isCompleted
+                ? ref.read(taskNotifierProvider.notifier).restoreTask(task.id)
+                : ref.read(taskNotifierProvider.notifier).completeTask(task.id),
             onDowngrade: canDowngrade
                 ? () => ref
                       .read(taskNotifierProvider.notifier)
@@ -1249,8 +1250,8 @@ class _TierTaskPillContent extends StatelessWidget {
   /// Whether the task is completed.
   final bool isCompleted;
 
-  /// Callback invoked when the leading completion circle is pressed, or `null` when completed.
-  final VoidCallback? onComplete;
+  /// Callback invoked when the leading completion circle is pressed.
+  final VoidCallback onComplete;
 
   /// Border color of the circular completion indicator.
   final Color ringColor;
@@ -1303,8 +1304,8 @@ class _TierTaskPillRow extends StatelessWidget {
   /// Whether the task is completed.
   final bool isCompleted;
 
-  /// Callback invoked when the leading completion circle is pressed, or `null` when completed.
-  final VoidCallback? onComplete;
+  /// Callback invoked when the leading completion circle is pressed.
+  final VoidCallback onComplete;
 
   /// Callback invoked when the downgrade button is pressed, or `null` when omitted.
   final VoidCallback? onDowngrade;

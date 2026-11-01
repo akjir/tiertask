@@ -458,7 +458,7 @@ task cmp1 {
   );
 
   testWidgets(
-    'Clicking the downward arrow button next to the right-side gap downgrades tasks from Focus to Ready and from Ready to Planned per TDF_SPEC.md Section 6.3',
+    'Clicking the downward arrow button next to the right-side gap downgrades tasks from Focus to Ready, from Ready to Planned, and from Planned to Someday per TDF_SPEC.md Section 6.3',
     (WidgetTester tester) async {
       const seededTdf = '''
 tdf 0.2.0
@@ -581,6 +581,51 @@ task p1 {
         board.planned.map((task) => task.id),
         equals(['r2']),
         reason: 'Downgraded Ready task r2 must move to the end of Planned',
+      );
+
+      await tester.drag(find.byType(PageView), const Offset(-500, 0));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('downgrade_task_button_r2')),
+        findsOneWidget,
+        reason: 'Planned task pill must display the downward arrow downgrade button',
+      );
+      await tester.tap(find.byKey(const ValueKey('downgrade_task_button_r2')));
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.planned,
+        isEmpty,
+        reason: 'Downgrading r2 from Planned must remove it from Planned',
+      );
+      expect(
+        board.someday.map((task) => task.id),
+        equals(['r2']),
+        reason:
+            'Downgraded Planned task r2 must move to Someday per Section 6.3',
+      );
+      expect(
+        board.findTask('r2')?.queuedAt,
+        isNull,
+        reason: 'Downgraded Planned task r2 must omit queued per Section 6.3',
+      );
+      expect(
+        board.findTask('r2')?.isPriority,
+        isFalse,
+        reason:
+            'Downgraded Planned task r2 must remove priority per Section 6.3',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_someday')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('downgrade_task_button_r2')),
+        findsNothing,
+        reason: 'Someday task pill must not display a downgrade button',
       );
     },
   );

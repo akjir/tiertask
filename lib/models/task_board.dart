@@ -391,7 +391,7 @@ class TaskBoard {
     );
   }
 
-  /// Downgrades a task in `Focus` (to `Ready`) or `Ready` (to `Planned`) per `TDF_SPEC.md` Section 6.3.
+  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
   TaskBoard downgradeTask(String taskId, {DateTime? currentDate}) {
     final now = currentDate ?? DateTime.now().toUtc();
     final sourceTier = findTierOfTask(taskId);
@@ -408,6 +408,9 @@ class TaskBoard {
     }
     if (sourceTier == TaskTier.ready) {
       return _downgradeToPlanned(task, now);
+    }
+    if (sourceTier == TaskTier.planned) {
+      return _downgradeToSomeday(task, now);
     }
     return this;
   }
@@ -510,9 +513,13 @@ class TaskBoard {
     TaskTier targetTier = TaskTier.planned,
     DateTime? currentDate,
   }) {
+    if (targetTier == TaskTier.completed) {
+      return this;
+    }
     final now = currentDate ?? DateTime.now().toUtc();
     final existing = findTask(taskId);
-    if (existing == null) {
+    if (existing == null ||
+        (!existing.isCompleted && existing.completedAt == null)) {
       return this;
     }
 
@@ -723,28 +730,38 @@ class TaskBoard {
     required List<String>? labelIds,
     required DateTime now,
   }) {
+    final wasCompleted = existing.isCompleted || existing.completedAt != null;
+    final isRestoringCompleted =
+        wasCompleted && targetTier != null && targetTier != TaskTier.completed;
     final effectiveAutoFinish =
         subtasksAutoFinish ?? existing.subtasksAutoFinish;
     final cleanSubtasks = subtasks != null
         ? _cleanSubtasks(subtasks)
         : existing.subtasks;
     final autoCompleted =
+        !isRestoringCompleted &&
         effectiveAutoFinish &&
         cleanSubtasks.isNotEmpty &&
         cleanSubtasks.every((step) => step.isCompleted);
     final isDone =
         targetTier == TaskTier.completed ||
         autoCompleted ||
-        (targetTier == null && existing.isCompleted);
+        (targetTier == null && wasCompleted);
     final isSomeday =
         !isDone &&
         (targetTier == TaskTier.someday ||
             (targetTier == null && existing.queuedAt == null));
     final isBlocked = !isDone && targetTier == TaskTier.blocked;
+    final preservedPriority = isRestoringCompleted
+        ? (isPriority ?? false)
+        : (isPriority ?? existing.isPriority);
     final effectivePriority =
         !isSomeday &&
         !isBlocked &&
-        ((isPriority ?? existing.isPriority) || targetTier == TaskTier.focus);
+        (preservedPriority || targetTier == TaskTier.focus);
+    final effectiveQueuedAt = isSomeday
+        ? null
+        : (isRestoringCompleted ? now : (existing.queuedAt ?? now));
     final trimmedNote = note?.trim();
 
     return existing.copyWith(
@@ -757,7 +774,7 @@ class TaskBoard {
       completedAt: isDone ? (existing.completedAt ?? now) : null,
       clearCompletedAt: !isDone,
       isPriority: effectivePriority,
-      queuedAt: isSomeday ? null : (existing.queuedAt ?? now),
+      queuedAt: effectiveQueuedAt,
       clearQueuedAt: isSomeday,
       suspendedAt: isBlocked
           ? (existing.suspendedAt ?? TaskItem.defaultSuspendedAt)
@@ -983,6 +1000,20 @@ class TaskBoard {
       focus: nextFocus,
       ready: nextReady,
       planned: nextPlanned,
+    ).pruneCompletedTasks(currentDate: now);
+  }
+
+  /// Downgrades [task] from Tier 3 (`Planned`) to Tier 5 (`Someday`) per `TDF_SPEC.md` Section 6.3.
+  TaskBoard _downgradeToSomeday(TaskItem task, DateTime now) {
+    final nextPlanned = _filterOutList(planned, task.id);
+    final downgradedTask = task.toActive(
+      clearQueuedAt: true,
+      isPriority: false,
+    );
+
+    return copyWith(
+      planned: nextPlanned,
+      someday: [...someday, downgradedTask],
     ).pruneCompletedTasks(currentDate: now);
   }
 

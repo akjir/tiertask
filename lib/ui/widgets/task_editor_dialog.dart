@@ -534,10 +534,13 @@ class _TaskEditorDialogState extends ConsumerState<TaskEditorDialog> {
 
   /// Derives the initial [QuickAddMode] for an existing [task].
   static QuickAddMode _resolveInitialMode(TaskItem task) {
+    if (task.isCompleted || task.completedAt != null) {
+      return QuickAddMode.standard;
+    }
     if (task.isPriority) {
       return QuickAddMode.priority;
     }
-    if (task.queuedAt == null && !task.isCompleted) {
+    if (task.queuedAt == null) {
       return QuickAddMode.someday;
     }
     return QuickAddMode.standard;

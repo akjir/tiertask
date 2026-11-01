@@ -556,6 +556,117 @@ task office_strict {
       );
     });
 
+    test('does not evaluate conditions, prerequisites, or suspension for completed tasks in Section 5.2 and evaluates them upon restoration', () {
+      const completedWithUnmetConditionsTdf = '''
+tdf 0.2.0
+
+label office {
+    name "Office"
+    condition {
+        day mon tue wed thu fri
+        time 09:00 17:00
+        location 50.9787 11.0328 150
+    }
+}
+
+task open_prereq {
+    name "Open prerequisite"
+    created 2026-11-01 08:00
+    queued 2026-11-01 08:00
+}
+
+task done_with_unmet_conditions priority {
+    name "Completed with unmet conditions, prereq, and suspension"
+    created 2026-10-25 08:00
+    queued 2026-10-25 08:00
+    finished 2026-11-01 09:00
+    suspended 2026-11-05 09:00
+    blocked open_prereq
+    labels office
+    condition {
+        day wed
+        time 14:00 15:00
+        location 48.1351 11.5820 100
+    }
+}
+''';
+
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final board = tdfService.parse(
+        completedWithUnmetConditionsTdf,
+        evaluationTime: sundayNoon,
+        currentLatitude: 52.5200,
+        currentLongitude: 13.4050,
+      );
+
+      expect(
+        board.completed.map((task) => task.id),
+        equals(['done_with_unmet_conditions']),
+        reason: 'Completed task with unmet day/time/location conditions, unfinished blocked prerequisite, and future suspended timestamp must remain in Completed (Section 5.2)',
+      );
+      expect(
+        board.blocked,
+        isEmpty,
+        reason: 'Conditions of completed tasks must not be evaluated or place them into Blocked',
+      );
+
+      final filteredOffice = board.evaluateForContext(
+        activeLabelId: 'office',
+        evaluationTime: sundayNoon,
+        currentLatitude: 52.5200,
+        currentLongitude: 13.4050,
+      );
+      expect(
+        filteredOffice.completed.map((task) => task.id),
+        equals(['done_with_unmet_conditions']),
+        reason: 'Label-filtered view must include completed task matching activeLabelId without evaluating its unmet label conditions',
+      );
+      expect(filteredOffice.blocked, isEmpty);
+
+      final filteredOtherLabel = board.evaluateForContext(
+        activeLabelId: 'home',
+        evaluationTime: sundayNoon,
+      );
+      expect(
+        filteredOtherLabel.completed,
+        isEmpty,
+        reason: 'Section 5.1 active label pre-filtering must still filter Completed tasks by label membership',
+      );
+
+      final restoredTime = DateTime.utc(2026, 11, 1, 16, 0);
+      final restoredBoard = board.restoreTask(
+        'done_with_unmet_conditions',
+        targetTier: TaskTier.planned,
+        currentDate: restoredTime,
+      );
+      expect(
+        restoredBoard.completed,
+        isEmpty,
+        reason: 'Restored task must leave Completed',
+      );
+      expect(
+        restoredBoard.blocked.map((task) => task.id),
+        equals(['done_with_unmet_conditions']),
+        reason: 'Once restored to an open scheduled state, the task conditions must be evaluated again and classify it as Blocked when unmet',
+      );
+      final restoredTask = restoredBoard.findTask(
+        'done_with_unmet_conditions',
+      )!;
+      expect(restoredTask.isCompleted, isFalse);
+      expect(restoredTask.completedAt, isNull);
+      expect(
+        restoredTask.isPriority,
+        isFalse,
+        reason:
+            'Restoring to Planned must strip the priority flag per Section 6.5',
+      );
+      expect(
+        restoredTask.queuedAt,
+        equals(restoredTime),
+        reason: 'Restoring to Planned must set queued to now per Section 6.5',
+      );
+    });
+
     test('sorts priority tasks ahead of regular FIFO tasks and preserves declaration order on ties', () {
       const sortingTdf = '''
 tdf 0.2.0
@@ -842,9 +953,104 @@ task t_manual {
         reason: 'Restoring to Focus must set priority and place task at the top of Focus',
       );
       expect(restoredToFocus.focus.first.isPriority, isTrue);
+
+      final noopRestoreOnOpen = afterSchedule.restoreTask(
+        's1',
+        targetTier: TaskTier.planned,
+        currentDate: fixedDate,
+      );
+      expect(
+        noopRestoreOnOpen,
+        same(afterSchedule),
+        reason: 'Calling restoreTask on a non-completed task must be a no-op',
+      );
+
+      final completedPriorityAutoFinish = TaskBoard(
+        completed: [
+          TaskItem(
+            id: 'done_prio',
+            title: 'Completed Priority Auto-Finish',
+            isPriority: true,
+            isCompleted: true,
+            createdAt: DateTime.utc(2026, 10, 20, 8, 0),
+            queuedAt: DateTime.utc(2026, 10, 20, 8, 0),
+            completedAt: DateTime.utc(2026, 10, 25, 10, 0),
+            subtasksAutoFinish: true,
+            subtasks: const [SubtaskItem(title: 'Step 1', isCompleted: true)],
+          ),
+        ],
+      );
+      final restoreTime = DateTime.utc(2026, 11, 1, 14, 30);
+
+      final updatedToPlanned = completedPriorityAutoFinish.updateTask(
+        'done_prio',
+        title: 'Completed Priority Auto-Finish',
+        targetTier: TaskTier.planned,
+        currentDate: restoreTime,
+      );
+      expect(
+        updatedToPlanned.completed,
+        isEmpty,
+        reason: 'Restoring a completed task via updateTask (even with subtasks auto-finish all true) must remove it from Completed',
+      );
+      final plannedRestored = updatedToPlanned.findTask('done_prio')!;
+      expect(plannedRestored.isCompleted, isFalse);
+      expect(plannedRestored.completedAt, isNull);
+      expect(
+        plannedRestored.isPriority,
+        isFalse,
+        reason: 'Restoring to Planned via updateTask must remove priority per Section 6.5',
+      );
+      expect(
+        plannedRestored.queuedAt,
+        equals(restoreTime),
+        reason: 'Restoring to Planned via updateTask must replace the old queued timestamp with now per Section 6.5',
+      );
+
+      final updatedToFocus = completedPriorityAutoFinish.updateTask(
+        'done_prio',
+        title: 'Completed Priority Auto-Finish',
+        targetTier: TaskTier.focus,
+        isPriority: true,
+        currentDate: restoreTime,
+      );
+      final focusRestored = updatedToFocus.findTask('done_prio')!;
+      expect(focusRestored.isCompleted, isFalse);
+      expect(focusRestored.completedAt, isNull);
+      expect(
+        focusRestored.isPriority,
+        isTrue,
+        reason: 'Restoring to Focus via updateTask must set priority per Section 6.5',
+      );
+      expect(
+        focusRestored.queuedAt,
+        equals(restoreTime),
+        reason: 'Restoring to Focus via updateTask must replace the old queued timestamp with now per Section 6.5',
+      );
+
+      final updatedToSomeday = completedPriorityAutoFinish.updateTask(
+        'done_prio',
+        title: 'Completed Priority Auto-Finish',
+        targetTier: TaskTier.someday,
+        isPriority: false,
+        currentDate: restoreTime,
+      );
+      final somedayRestored = updatedToSomeday.findTask('done_prio')!;
+      expect(somedayRestored.isCompleted, isFalse);
+      expect(somedayRestored.completedAt, isNull);
+      expect(
+        somedayRestored.isPriority,
+        isFalse,
+        reason: 'Restoring to Someday via updateTask must remove priority per Section 6.5',
+      );
+      expect(
+        somedayRestored.queuedAt,
+        isNull,
+        reason: 'Restoring to Someday via updateTask must omit queued per Section 6.5',
+      );
     });
 
-    test('executes Section 6.3 Focus-to-Ready (< 8 and >= 8 active tasks, priority alignment, +00:00:01 offset, collision shift) and Downgrade to Planned', () {
+    test('executes Section 6.3 Focus-to-Ready (< 8 and >= 8 active tasks, priority alignment, +00:00:01 offset, collision shift), Ready-to-Planned, and Planned-to-Someday downgrades', () {
       final board = TaskBoard(
         focus: [
           TaskItem(id: 'f1', title: 'Focus 1 (Downgrade Me)', isPriority: true),
@@ -1111,9 +1317,57 @@ task t_manual {
         currentDate: fixedDate,
       );
       expect(
-        afterPlannedDowngrade,
-        equals(afterReadyDowngrade),
-        reason: 'Downgrading a Planned task must be a no-op because only Focus and Ready can be downgraded',
+        afterPlannedDowngrade.planned.map((task) => task.id),
+        equals(['r1']),
+        reason: 'Downgraded Planned task p2 must leave Planned',
+      );
+      expect(
+        afterPlannedDowngrade.someday.map((task) => task.id),
+        equals(['p2']),
+        reason: 'Downgrading a Planned task must move it to Someday per Section 6.3',
+      );
+      expect(
+        afterPlannedDowngrade.findTask('p2')?.queuedAt,
+        isNull,
+        reason: 'Downgrading from Planned to Someday must omit queued per Section 6.3',
+      );
+      expect(
+        afterPlannedDowngrade.findTask('p2')?.isPriority,
+        isFalse,
+        reason: 'Downgrading from Planned to Someday must remove priority per Section 6.3',
+      );
+
+      final afterPriorityPlannedDowngrade = afterPriorityFocusDowngrade
+          .downgradeTask('pp1', currentDate: fixedDate);
+      expect(
+        afterPriorityPlannedDowngrade.planned.map((task) => task.id),
+        equals(['reg_p2']),
+        reason: 'Downgraded priority Planned task pp1 must leave Planned',
+      );
+      expect(
+        afterPriorityPlannedDowngrade.someday.map((task) => task.id),
+        equals(['pp1']),
+        reason: 'Downgraded priority Planned task pp1 must move to Someday',
+      );
+      expect(
+        afterPriorityPlannedDowngrade.findTask('pp1')?.isPriority,
+        isFalse,
+        reason: 'Downgrading a priority Planned task to Someday must remove the priority flag per Section 6.3',
+      );
+      expect(
+        afterPriorityPlannedDowngrade.findTask('pp1')?.queuedAt,
+        isNull,
+        reason: 'Downgrading a priority Planned task to Someday must omit queued per Section 6.3',
+      );
+
+      final afterSomedayNoop = afterPlannedDowngrade.downgradeTask(
+        'p2',
+        currentDate: fixedDate,
+      );
+      expect(
+        afterSomedayNoop,
+        equals(afterPlannedDowngrade),
+        reason: 'Downgrading a Someday task must be a no-op per Section 6.3',
       );
     });
 

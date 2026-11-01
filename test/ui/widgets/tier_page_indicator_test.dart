@@ -287,13 +287,13 @@ task cmp1 {
       );
       expect(
         find.byKey(const ValueKey('downgrade_task_button_p1')),
-        findsNothing,
-        reason: 'Planned task pill must not display a downgrade arrow button',
+        findsOneWidget,
+        reason: 'Planned task pill must display the downgrade arrow button to the left of the gap',
       );
       expect(
         find.byIcon(Icons.arrow_downward_rounded),
-        findsNothing,
-        reason: 'Planned pane must not render any downgrade arrow icons',
+        findsOneWidget,
+        reason: 'Planned pane must render the downgrade arrow icon for Planned tasks',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_planned')),

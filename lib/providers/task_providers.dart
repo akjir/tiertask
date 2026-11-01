@@ -267,6 +267,22 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
+  /// Restores a completed task to [targetTier] (defaulting to [TaskTier.planned]) per
+  /// `TDF_SPEC.md` Section 6.5 and persists to storage.
+  Future<void> restoreTask(
+    String taskId, {
+    TaskTier targetTier = TaskTier.planned,
+    DateTime? currentDate,
+  }) async {
+    final now = currentDate ?? ref.read(clockProvider)();
+    final updated = _currentBoard.restoreTask(
+      taskId,
+      targetTier: targetTier,
+      currentDate: now,
+    );
+    await _commitMutation(updated);
+  }
+
   /// Reloads the `.tdf` file from the configured local or WebDAV storage backend.
   Future<void> syncFromRemote() async {
     final config = await ref.read(webDavConfigProvider.future);
