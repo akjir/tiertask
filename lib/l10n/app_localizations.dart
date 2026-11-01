@@ -230,10 +230,10 @@ abstract class AppLocalizations {
   /// **'Synchronize with WebDAV'**
   String get tooltipSyncWebDav;
 
-  /// Tooltip for the raw Markdown preview button in the app bar.
+  /// Tooltip for the raw TDF preview button in the app bar.
   ///
   /// In en, this message translates to:
-  /// **'Show Markdown preview'**
+  /// **'Show TDF preview'**
   String get tooltipMarkdownPreview;
 
   /// Tooltip for the settings button in the app bar.
@@ -242,10 +242,10 @@ abstract class AppLocalizations {
   /// **'Settings'**
   String get tooltipSettings;
 
-  /// Dialog title for the raw Markdown preview dialog.
+  /// Dialog title for the raw TDF preview dialog.
   ///
   /// In en, this message translates to:
-  /// **'Raw Markdown (Single Source of Truth)'**
+  /// **'Raw TDF (Single Source of Truth)'**
   String get markdownPreviewTitle;
 
   /// Button label to close a dialog.
@@ -533,49 +533,49 @@ abstract class AppLocalizations {
   /// Helper description explaining the storage mode options.
   ///
   /// In en, this message translates to:
-  /// **'Select whether tasks are stored in a local Markdown file, on a WebDAV server, or in both locations.'**
+  /// **'Select whether tasks are stored in a local TDF file, on a WebDAV server, or in both locations.'**
   String get storageModeSectionDescription;
 
-  /// Option label for local-only Markdown file storage.
+  /// Option label for local-only TDF file storage.
   ///
   /// In en, this message translates to:
   /// **'Local'**
   String get storageModeLocal;
 
-  /// Option label for WebDAV-only Markdown synchronization.
+  /// Option label for WebDAV-only TDF synchronization.
   ///
   /// In en, this message translates to:
   /// **'WebDAV'**
   String get storageModeWebDav;
 
-  /// Option label for combined local and WebDAV Markdown storage.
+  /// Option label for combined local and WebDAV TDF storage.
   ///
   /// In en, this message translates to:
   /// **'Both'**
   String get storageModeBoth;
 
-  /// Section heading for local Markdown file settings.
+  /// Section heading for local TDF file settings.
   ///
   /// In en, this message translates to:
-  /// **'Local Markdown File'**
+  /// **'Local TDF File'**
   String get localSectionTitle;
 
-  /// Helper description explaining local Markdown file persistence.
+  /// Helper description explaining local TDF file persistence.
   ///
   /// In en, this message translates to:
-  /// **'Stores all tasks in a local Markdown file on this device.'**
+  /// **'Stores all tasks in a local TDF file on this device.'**
   String get localSectionDescription;
 
-  /// Input label for the local Markdown file name or path field.
+  /// Input label for the local TDF file name or path field.
   ///
   /// In en, this message translates to:
-  /// **'Local Markdown File Name'**
+  /// **'Local TDF File Name'**
   String get localFilePathLabel;
 
-  /// Placeholder hint for the local Markdown file name field.
+  /// Placeholder hint for the local TDF file name field.
   ///
   /// In en, this message translates to:
-  /// **'tiertask.md or t2.md'**
+  /// **'tiertask.tdf or t2.tdf'**
   String get localFilePathHint;
 
   /// Validation error shown when the local file name field is empty.
@@ -584,7 +584,7 @@ abstract class AppLocalizations {
   /// **'Please enter a local file name.'**
   String get localFilePathErrorEmpty;
 
-  /// Label above the resolved local Markdown file path preview.
+  /// Label above the resolved local TDF file path preview.
   ///
   /// In en, this message translates to:
   /// **'Resolved Local File Path:'**
@@ -596,10 +596,10 @@ abstract class AppLocalizations {
   /// **'WebDAV Synchronization (Single Source of Truth)'**
   String get webdavSectionTitle;
 
-  /// Helper description explaining WebDAV Markdown synchronization.
+  /// Helper description explaining WebDAV TDF synchronization.
   ///
   /// In en, this message translates to:
-  /// **'TierTask stores all tasks in a single Markdown file (tiertask.md) on your WebDAV server. Use an application password when supported by your server.'**
+  /// **'TierTask stores all tasks in a single TDF file (tiertask.tdf) on your WebDAV server. Use an application password when supported by your server.'**
   String get webdavSectionDescription;
 
   /// Input label for the WebDAV server URL field.
@@ -650,16 +650,16 @@ abstract class AppLocalizations {
   /// **'Please enter a password or app password.'**
   String get passwordErrorEmpty;
 
-  /// Input label for the remote Markdown file name or path field.
+  /// Input label for the remote TDF file name or path field.
   ///
   /// In en, this message translates to:
-  /// **'Markdown File Name / Path'**
+  /// **'TDF File Name / Path'**
   String get filePathLabel;
 
-  /// Placeholder hint for the remote Markdown file name field.
+  /// Placeholder hint for the remote TDF file name field.
   ///
   /// In en, this message translates to:
-  /// **'tiertask.md or t2.md'**
+  /// **'tiertask.tdf or t2.tdf'**
   String get filePathHint;
 
   /// Label above the resolved full WebDAV URL preview.
@@ -677,7 +677,7 @@ abstract class AppLocalizations {
   /// Status message shown when WebDAV connection and synchronization succeed.
   ///
   /// In en, this message translates to:
-  /// **'Connection succeeded. Markdown file synchronized with WebDAV.'**
+  /// **'Connection succeeded. TDF file synchronized with WebDAV.'**
   String get connectionSuccessBanner;
 
   /// Button label to test the WebDAV connection and synchronize immediately.
@@ -704,10 +704,10 @@ abstract class AppLocalizations {
   /// **'Authentication failed. Please check username and app password.'**
   String get errorAuthFailedLoad;
 
-  /// Error message shown when loading the Markdown file fails with a non-success status.
+  /// Error message shown when loading the TDF file fails with a non-success status.
   ///
   /// In en, this message translates to:
-  /// **'Failed to load Markdown file from server.'**
+  /// **'Failed to load TDF file from server.'**
   String get errorLoadMarkdownFailed;
 
   /// Error message shown when the WebDAV server cannot be reached over the network.
@@ -740,10 +740,10 @@ abstract class AppLocalizations {
   /// **'Authentication failed while saving. Please check app password.'**
   String get errorAuthFailedSave;
 
-  /// Error message shown when saving the Markdown file fails with a non-success status.
+  /// Error message shown when saving the TDF file fails with a non-success status.
   ///
   /// In en, this message translates to:
-  /// **'Failed to save Markdown file on server.'**
+  /// **'Failed to save TDF file on server.'**
   String get errorSaveMarkdownFailed;
 
   /// Error message shown when a network error occurs while saving to WebDAV.
@@ -770,28 +770,28 @@ abstract class AppLocalizations {
   /// **'Unexpected WebDAV error while saving: {details}'**
   String errorUnexpectedSave(String details);
 
-  /// Error message shown when the configured local Markdown file path is invalid.
+  /// Error message shown when the configured local TDF file path is invalid.
   ///
   /// In en, this message translates to:
-  /// **'Invalid local Markdown file name or path.'**
+  /// **'Invalid local TDF file name or path.'**
   String get errorInvalidLocalFilePath;
 
-  /// Error message shown when a Markdown file exceeds maxFileBytes.
+  /// Error message shown when a TDF file exceeds maxFileBytes.
   ///
   /// In en, this message translates to:
-  /// **'Markdown file exceeds the maximum allowed size.'**
+  /// **'TDF file exceeds the maximum allowed size.'**
   String get errorLocalFileTooLarge;
 
-  /// Error message shown when reading the local Markdown file fails.
+  /// Error message shown when reading the local TDF file fails.
   ///
   /// In en, this message translates to:
-  /// **'Failed to read local Markdown file ({details}).'**
+  /// **'Failed to read local TDF file ({details}).'**
   String errorLoadLocalFileFailed(String details);
 
-  /// Error message shown when writing the local Markdown file fails.
+  /// Error message shown when writing the local TDF file fails.
   ///
   /// In en, this message translates to:
-  /// **'Failed to write local Markdown file ({details}).'**
+  /// **'Failed to write local TDF file ({details}).'**
   String errorSaveLocalFileFailed(String details);
 
   /// Greeting header shown at the top of the landing page.

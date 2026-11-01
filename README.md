@@ -3,21 +3,20 @@
 > [!IMPORTANT]
 > **Disclaimer:** `TierTask` is strictly a private, personal project developed for individual use. It is provided without any warranty, official support, or maintenance guarantees.
 
-`TierTask` is a Flutter task manager for Linux, Android, and Windows that organizes tasks across six numbered priority and status tiers (`[1]` to `[6]`) using a deterministic pull-system backed by a single local or WebDAV-synchronized Markdown file (`tiertask.md`).
+`TierTask` is a Flutter task manager for Linux, Android, and Windows that dynamically derives six priority and status tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single local or WebDAV-synchronized `.tdf` file (`tiertask.tdf`) in the block-based TierTask Data Format ([`TDF_SPEC.md`](TDF_SPEC.md)).
 
 ## Overview
 
-`TierTask` stores the entire task board in one plain-text Markdown file and enforces work-in-progress (WIP) limits automatically:
+`TierTask` stores objective task facts (`task`, `subtasks`, `location`, `category`) in one `.tdf` document and derives operational tiers automatically:
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
 * **English & German Localization:** Supports English (`en`, default fallback) and German (`de`) via external Flutter ARB language files (`lib/l10n/app_en.arb`, `lib/l10n/app_de.arb`), selectable in Settings (`System`, `English`, or `Deutsch`).
 * **Theme Modes & Card Options:** Supports `System` (default), `Light`, and `Dark` Material 3 color themes, and an `Open Task Count` toggle (`Off` by default, `On`) to show or hide total open task counts on category and location cards.
-* **Six Numbered Tiers (`[1]`–`[6]`):** `# [1] Focus`, `# [2] Ready`, `# [3] Planned`, `# [4] Blocked`, `# [5] Someday`, and `# [6] Completed`. The parser matches strictly by tier number (`[1]`–`[6]`), ignores the label text, and creates any missing tiers automatically.
-* **Deterministic Auto-Pull Cascade:** Automatically refills Tier `1` (soft limit `3`) from Tier `2` and Tier `2` (soft limit `5`) from Tier `3` without force-demoting manually overfilled tiers.
-* **Anti-Ping-Pong Downgrade:** Pulls replacement tasks upward before appending a downgraded task to the lower tier.
-* **30-Day Completed Task Pruning:** Stamps completed tasks with `- [x] YYYY-MM-DD` in Tier `6` and removes entries older than `30` days (UTC).
-* **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only Markdown persistence (`LocalFileRepository` with configurable local file name `localFilePath`, defaulting to `tiertask.md`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
-* **Encrypted Configuration Persistence:** Stores storage mode, local and remote file names, WebDAV credentials, language, and theme settings via `flutter_secure_storage`.
+* **Dynamic $O(N)$ 6-Tier Derivation:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (`blocked`, future `suspended`, or unmet `condition`), and slices active tasks by `priority` and ascending `queued` FIFO timestamp into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
+* **Anti-Ping-Pong Downgrade & Auto-Finish Checklists:** Updates `queued` timestamps and strips `priority` when downgrading tasks, and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.
+* **30-Day Completed Task Pruning:** Removes `Completed` tasks whose `finished` timestamp is strictly older than `30` days (UTC) on save.
+* **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only `.tdf` persistence (`LocalFileRepository` defaulting to `tiertask.tdf`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
+* **Encrypted Configuration Persistence:** Stores storage mode, local and remote `.tdf` file names, WebDAV credentials, language, and theme settings via `flutter_secure_storage`.
 
 ## Requirements
 
@@ -27,7 +26,7 @@
 | Dart SDK | `^3.13.7` |
 | Target Platforms | Linux (`x64`), Android (`arm64-v8a` / `x86_64`), Windows (`x64`) |
 | Supported Languages | English (`en`, default) and German (`de`) via external `.arb` files |
-| Storage Backend | Local filesystem `.md` file or any HTTP/HTTPS WebDAV server |
+| Storage Backend | Local filesystem `.tdf` file or any HTTP/HTTPS WebDAV server |
 
 ## Installation & Build
 
@@ -49,48 +48,45 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 
 ## Quick Start
 
-1. Launch `TierTask` and open the settings screen via the toolbar icon.
+1. Launch `TierTask` and open the settings screen via the menu drawer.
 2. Select the display language (`System`, `English`, or `Deutsch`) and color theme (`System`, `Light`, or `Dark`).
-3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local Markdown file name (default `tiertask.md`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and remote file path `tiertask.md`).
-4. Activate connection test and synchronization to load an existing Markdown file or initialize a new 6-tier `tiertask.md` file.
-5. Add tasks via the task creation bar (`QuickAddBar`) using the input field, mutually exclusive `Priority` (`# [1] Focus`) and `Someday` (`# [5] Someday`) toggles, or the `Advanced` view to define subtasks; new tasks without `Priority` or `Someday` enter `# [3] Planned` by default and cascade into `# [2] Ready` or `# [1] Focus` when slots are open.
+3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local TDF file name (default `tiertask.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and remote file path `tiertask.tdf`).
+4. Add tasks via the floating action button (`QuickAddBar`) using the input field, mutually exclusive `Priority` and `Someday` toggles, or the `Advanced` view to define subtasks; changes persist immediately to the configured `.tdf` file.
 
-## Tier System & Markdown Format
+## Tier System & TDF Format
 
-`MarkdownService` identifies sections strictly by their tier number (`1` to `6`), ignores any trailing heading name (`# [1] Focus`, `# [1] Fokus`, or `# (1) Custom`), and automatically creates missing tiers on save:
+See [`TDF_SPEC.md`](TDF_SPEC.md) for the complete grammar and evaluation pipeline:
 
-| Tier | English Heading (`en`) | German Heading (`de`) | Soft Limit | Auto-Pull Behavior |
+| Tier | English (`en`) | German (`de`) | Soft Limit | Derivation Rule |
 | :--- | :--- | :--- | :--- | :--- |
-| `1` | `# [1] Focus` | `# [1] Fokus` | `3` | Pulls top tasks from Tier `2` while `< 3` |
-| `2` | `# [2] Ready` | `# [2] Bereit` | `5` | Pulls top tasks from Tier `3` while `< 5` |
-| `3` | `# [3] Planned` | `# [3] Geplant` | None | Active backlog feeding Tier `2` |
-| `4` | `# [4] Blocked` | `# [4] Blockiert` | None | Static tier; excluded from automatic pull |
-| `5` | `# [5] Someday` | `# [5] Irgendwann` | None | Static tier; excluded from automatic pull |
-| `6` | `# [6] Completed` | `# [6] Erledigt` | None | Static archive; prunes tasks `> 30` days old |
+| `1` | `Focus` | `Fokus` | `3` | Active sorted tasks at positions `1..3` (`priority` first, then `queued` FIFO) |
+| `2` | `Ready` | `Bereit` | `5` | Active sorted tasks at positions `4..8` |
+| `3` | `Planned` | `Geplant` | None | Active sorted tasks from position `9` onward |
+| `4` | `Blocked` | `Blockiert` | None | Open scheduled tasks with unfinished `blocked` IDs, future `suspended`, or unmet `condition` |
+| `5` | `Someday` | `Irgendwann` | None | Open tasks without a `queued` directive |
+| `6` | `Completed` | `Erledigt` | None | Tasks with a `finished` directive (pruned after `30` days) |
 
-Canonical `tiertask.md` format (English default):
+Canonical `tiertask.tdf` example:
 
-```markdown
-# [1] Focus
-- [ ] Prepare release notes
+```text
+task t001 priority {
+    name    "Verify server backup"
+    created 2026-11-01 08:30
+    queued  2026-11-01 08:30
+}
 
-# [2] Ready
-- [ ] Verify WebDAV synchronization
-
-# [3] Planned
-- [ ] Update package dependencies
-
-# [4] Blocked
-- [ ] Await server certificate renewal
-
-# [5] Someday
-- [ ] Evaluate keyboard shortcuts
-
-# [6] Completed
-- [x] 2026-11-01 Initialize project structure
+task t002 {
+    name    "Clean up study"
+    created 2026-11-01 09:00
+    queued  2026-11-01 09:15
+    subtasks auto-finish {
+        step true  "Wipe desk"
+        step false "Organize cables"
+    }
+}
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the layer design and [CHANGELOG.md](CHANGELOG.md) for release history.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the layer design, [TDF_SPEC.md](TDF_SPEC.md) for the format specification, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Development
 

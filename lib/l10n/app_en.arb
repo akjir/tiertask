@@ -93,17 +93,17 @@
   "@tooltipSyncWebDav": {
     "description": "Tooltip for the WebDAV synchronization button in the app bar."
   },
-  "tooltipMarkdownPreview": "Show Markdown preview",
+  "tooltipMarkdownPreview": "Show TDF preview",
   "@tooltipMarkdownPreview": {
-    "description": "Tooltip for the raw Markdown preview button in the app bar."
+    "description": "Tooltip for the raw TDF preview button in the app bar."
   },
   "tooltipSettings": "Settings",
   "@tooltipSettings": {
     "description": "Tooltip for the settings button in the app bar."
   },
-  "markdownPreviewTitle": "Raw Markdown (Single Source of Truth)",
+  "markdownPreviewTitle": "Raw TDF (Single Source of Truth)",
   "@markdownPreviewTitle": {
-    "description": "Dialog title for the raw Markdown preview dialog."
+    "description": "Dialog title for the raw TDF preview dialog."
   },
   "actionClose": "Close",
   "@actionClose": {
@@ -308,37 +308,37 @@
   "@storageModeSectionTitle": {
     "description": "Section heading for storage mode selection in settings."
   },
-  "storageModeSectionDescription": "Select whether tasks are stored in a local Markdown file, on a WebDAV server, or in both locations.",
+  "storageModeSectionDescription": "Select whether tasks are stored in a local TDF file, on a WebDAV server, or in both locations.",
   "@storageModeSectionDescription": {
     "description": "Helper description explaining the storage mode options."
   },
   "storageModeLocal": "Local",
   "@storageModeLocal": {
-    "description": "Option label for local-only Markdown file storage."
+    "description": "Option label for local-only TDF file storage."
   },
   "storageModeWebDav": "WebDAV",
   "@storageModeWebDav": {
-    "description": "Option label for WebDAV-only Markdown synchronization."
+    "description": "Option label for WebDAV-only TDF synchronization."
   },
   "storageModeBoth": "Both",
   "@storageModeBoth": {
-    "description": "Option label for combined local and WebDAV Markdown storage."
+    "description": "Option label for combined local and WebDAV TDF storage."
   },
-  "localSectionTitle": "Local Markdown File",
+  "localSectionTitle": "Local TDF File",
   "@localSectionTitle": {
-    "description": "Section heading for local Markdown file settings."
+    "description": "Section heading for local TDF file settings."
   },
-  "localSectionDescription": "Stores all tasks in a local Markdown file on this device.",
+  "localSectionDescription": "Stores all tasks in a local TDF file on this device.",
   "@localSectionDescription": {
-    "description": "Helper description explaining local Markdown file persistence."
+    "description": "Helper description explaining local TDF file persistence."
   },
-  "localFilePathLabel": "Local Markdown File Name",
+  "localFilePathLabel": "Local TDF File Name",
   "@localFilePathLabel": {
-    "description": "Input label for the local Markdown file name or path field."
+    "description": "Input label for the local TDF file name or path field."
   },
-  "localFilePathHint": "tiertask.md or t2.md",
+  "localFilePathHint": "tiertask.tdf or t2.tdf",
   "@localFilePathHint": {
-    "description": "Placeholder hint for the local Markdown file name field."
+    "description": "Placeholder hint for the local TDF file name field."
   },
   "localFilePathErrorEmpty": "Please enter a local file name.",
   "@localFilePathErrorEmpty": {
@@ -346,15 +346,15 @@
   },
   "resolvedLocalPathLabel": "Resolved Local File Path:",
   "@resolvedLocalPathLabel": {
-    "description": "Label above the resolved local Markdown file path preview."
+    "description": "Label above the resolved local TDF file path preview."
   },
   "webdavSectionTitle": "WebDAV Synchronization (Single Source of Truth)",
   "@webdavSectionTitle": {
     "description": "Section heading for WebDAV synchronization settings."
   },
-  "webdavSectionDescription": "TierTask stores all tasks in a single Markdown file (tiertask.md) on your WebDAV server. Use an application password when supported by your server.",
+  "webdavSectionDescription": "TierTask stores all tasks in a single TDF file (tiertask.tdf) on your WebDAV server. Use an application password when supported by your server.",
   "@webdavSectionDescription": {
-    "description": "Helper description explaining WebDAV Markdown synchronization."
+    "description": "Helper description explaining WebDAV TDF synchronization."
   },
   "serverUrlLabel": "WebDAV Server URL",
   "@serverUrlLabel": {
@@ -388,13 +388,13 @@
   "@passwordErrorEmpty": {
     "description": "Validation error shown when the WebDAV password is empty."
   },
-  "filePathLabel": "Markdown File Name / Path",
+  "filePathLabel": "TDF File Name / Path",
   "@filePathLabel": {
-    "description": "Input label for the remote Markdown file name or path field."
+    "description": "Input label for the remote TDF file name or path field."
   },
-  "filePathHint": "tiertask.md or t2.md",
+  "filePathHint": "tiertask.tdf or t2.tdf",
   "@filePathHint": {
-    "description": "Placeholder hint for the remote Markdown file name field."
+    "description": "Placeholder hint for the remote TDF file name field."
   },
   "resolvedEndpointLabel": "Resolved WebDAV Endpoint (GET / PUT):",
   "@resolvedEndpointLabel": {
@@ -404,7 +404,7 @@
   "@credentialsSavedBanner": {
     "description": "Status message shown when settings are saved locally."
   },
-  "connectionSuccessBanner": "Connection succeeded. Markdown file synchronized with WebDAV.",
+  "connectionSuccessBanner": "Connection succeeded. TDF file synchronized with WebDAV.",
   "@connectionSuccessBanner": {
     "description": "Status message shown when WebDAV connection and synchronization succeed."
   },
@@ -424,9 +424,9 @@
   "@errorAuthFailedLoad": {
     "description": "Error message shown when HTTP 401/403 occurs while loading from WebDAV."
   },
-  "errorLoadMarkdownFailed": "Failed to load Markdown file from server.",
+  "errorLoadMarkdownFailed": "Failed to load TDF file from server.",
   "@errorLoadMarkdownFailed": {
-    "description": "Error message shown when loading the Markdown file fails with a non-success status."
+    "description": "Error message shown when loading the TDF file fails with a non-success status."
   },
   "errorNetworkUnreachable": "Network error: Server unreachable ({details}).",
   "@errorNetworkUnreachable": {
@@ -463,9 +463,9 @@
   "@errorAuthFailedSave": {
     "description": "Error message shown when HTTP 401/403 occurs while saving to WebDAV."
   },
-  "errorSaveMarkdownFailed": "Failed to save Markdown file on server.",
+  "errorSaveMarkdownFailed": "Failed to save TDF file on server.",
   "@errorSaveMarkdownFailed": {
-    "description": "Error message shown when saving the Markdown file fails with a non-success status."
+    "description": "Error message shown when saving the TDF file fails with a non-success status."
   },
   "errorNetworkSave": "Network error while saving ({details}).",
   "@errorNetworkSave": {
@@ -498,26 +498,26 @@
       }
     }
   },
-  "errorInvalidLocalFilePath": "Invalid local Markdown file name or path.",
+  "errorInvalidLocalFilePath": "Invalid local TDF file name or path.",
   "@errorInvalidLocalFilePath": {
-    "description": "Error message shown when the configured local Markdown file path is invalid."
+    "description": "Error message shown when the configured local TDF file path is invalid."
   },
-  "errorLocalFileTooLarge": "Markdown file exceeds the maximum allowed size.",
+  "errorLocalFileTooLarge": "TDF file exceeds the maximum allowed size.",
   "@errorLocalFileTooLarge": {
-    "description": "Error message shown when a Markdown file exceeds maxFileBytes."
+    "description": "Error message shown when a TDF file exceeds maxFileBytes."
   },
-  "errorLoadLocalFileFailed": "Failed to read local Markdown file ({details}).",
+  "errorLoadLocalFileFailed": "Failed to read local TDF file ({details}).",
   "@errorLoadLocalFileFailed": {
-    "description": "Error message shown when reading the local Markdown file fails.",
+    "description": "Error message shown when reading the local TDF file fails.",
     "placeholders": {
       "details": {
         "type": "String"
       }
     }
   },
-  "errorSaveLocalFileFailed": "Failed to write local Markdown file ({details}).",
+  "errorSaveLocalFileFailed": "Failed to write local TDF file ({details}).",
   "@errorSaveLocalFileFailed": {
-    "description": "Error message shown when writing the local Markdown file fails.",
+    "description": "Error message shown when writing the local TDF file fails.",
     "placeholders": {
       "details": {
         "type": "String"

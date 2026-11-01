@@ -20,7 +20,7 @@ import 'dart:ui';
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 
-/// Custom domain exception thrown when local Markdown file operations fail.
+/// Custom domain exception thrown when local TDF file operations fail.
 class LocalFileException implements Exception {
   /// Creates a [LocalFileException] with a localized [message] and optional [cause].
   const LocalFileException(this.message, {this.cause});
@@ -35,7 +35,7 @@ class LocalFileException implements Exception {
   String toString() => message;
 }
 
-/// Repository for reading and writing the task board Markdown file on the local filesystem.
+/// Repository for reading and writing the task board `.tdf` file on the local filesystem.
 class LocalFileRepository {
   /// Creates a [LocalFileRepository] for [config].
   LocalFileRepository({
@@ -45,7 +45,7 @@ class LocalFileRepository {
     this.maxFileBytes = defaultMaxFileBytes,
   });
 
-  /// Default maximum allowed Markdown file size in bytes (1 MiB).
+  /// Default maximum allowed TDF file size in bytes (1 MiB).
   static const int defaultMaxFileBytes = 1048576;
 
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
@@ -77,8 +77,8 @@ class LocalFileRepository {
       inMemoryStore != null &&
       Platform.environment.containsKey('FLUTTER_TEST');
 
-  /// Reads the local Markdown file and returns its contents, or an empty string if the file does not exist.
-  Future<String> loadMarkdown() async {
+  /// Reads the local `.tdf` file and returns its contents, or an empty string if the file does not exist.
+  Future<String> loadTdf() async {
     final localizations = _localizations;
     final filePath = resolveFilePath();
 
@@ -145,17 +145,17 @@ class LocalFileRepository {
     return '$defaultBase$separator$joinedSegments';
   }
 
-  /// Writes [markdownContent] to the configured local Markdown file.
-  Future<void> saveMarkdown(String markdownContent) async {
+  /// Writes [tdfContent] to the configured local `.tdf` file.
+  Future<void> saveTdf(String tdfContent) async {
     final localizations = _localizations;
     final filePath = resolveFilePath();
-    final bytes = utf8.encode(markdownContent);
+    final bytes = utf8.encode(tdfContent);
     if (bytes.length > maxFileBytes) {
       throw LocalFileException(localizations.errorLocalFileTooLarge);
     }
 
     if (_useInMemoryFallback) {
-      inMemoryStore?[filePath] = markdownContent;
+      inMemoryStore?[filePath] = tdfContent;
       return;
     }
 

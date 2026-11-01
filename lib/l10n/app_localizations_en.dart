@@ -80,13 +80,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipSyncWebDav => 'Synchronize with WebDAV';
 
   @override
-  String get tooltipMarkdownPreview => 'Show Markdown preview';
+  String get tooltipMarkdownPreview => 'Show TDF preview';
 
   @override
   String get tooltipSettings => 'Settings';
 
   @override
-  String get markdownPreviewTitle => 'Raw Markdown (Single Source of Truth)';
+  String get markdownPreviewTitle => 'Raw TDF (Single Source of Truth)';
 
   @override
   String get actionClose => 'Close';
@@ -241,7 +241,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get storageModeSectionDescription =>
-      'Select whether tasks are stored in a local Markdown file, on a WebDAV server, or in both locations.';
+      'Select whether tasks are stored in a local TDF file, on a WebDAV server, or in both locations.';
 
   @override
   String get storageModeLocal => 'Local';
@@ -253,17 +253,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get storageModeBoth => 'Both';
 
   @override
-  String get localSectionTitle => 'Local Markdown File';
+  String get localSectionTitle => 'Local TDF File';
 
   @override
   String get localSectionDescription =>
-      'Stores all tasks in a local Markdown file on this device.';
+      'Stores all tasks in a local TDF file on this device.';
 
   @override
-  String get localFilePathLabel => 'Local Markdown File Name';
+  String get localFilePathLabel => 'Local TDF File Name';
 
   @override
-  String get localFilePathHint => 'tiertask.md or t2.md';
+  String get localFilePathHint => 'tiertask.tdf or t2.tdf';
 
   @override
   String get localFilePathErrorEmpty => 'Please enter a local file name.';
@@ -277,7 +277,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get webdavSectionDescription =>
-      'TierTask stores all tasks in a single Markdown file (tiertask.md) on your WebDAV server. Use an application password when supported by your server.';
+      'TierTask stores all tasks in a single TDF file (tiertask.tdf) on your WebDAV server. Use an application password when supported by your server.';
 
   @override
   String get serverUrlLabel => 'WebDAV Server URL';
@@ -304,10 +304,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get passwordErrorEmpty => 'Please enter a password or app password.';
 
   @override
-  String get filePathLabel => 'Markdown File Name / Path';
+  String get filePathLabel => 'TDF File Name / Path';
 
   @override
-  String get filePathHint => 'tiertask.md or t2.md';
+  String get filePathHint => 'tiertask.tdf or t2.tdf';
 
   @override
   String get resolvedEndpointLabel => 'Resolved WebDAV Endpoint (GET / PUT):';
@@ -317,7 +317,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get connectionSuccessBanner =>
-      'Connection succeeded. Markdown file synchronized with WebDAV.';
+      'Connection succeeded. TDF file synchronized with WebDAV.';
 
   @override
   String get actionTestConnectionAndSync => 'Test Connection / Sync Now';
@@ -334,8 +334,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Authentication failed. Please check username and app password.';
 
   @override
-  String get errorLoadMarkdownFailed =>
-      'Failed to load Markdown file from server.';
+  String get errorLoadMarkdownFailed => 'Failed to load TDF file from server.';
 
   @override
   String errorNetworkUnreachable(String details) {
@@ -360,8 +359,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Authentication failed while saving. Please check app password.';
 
   @override
-  String get errorSaveMarkdownFailed =>
-      'Failed to save Markdown file on server.';
+  String get errorSaveMarkdownFailed => 'Failed to save TDF file on server.';
 
   @override
   String errorNetworkSave(String details) {
@@ -383,20 +381,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorInvalidLocalFilePath =>
-      'Invalid local Markdown file name or path.';
+      'Invalid local TDF file name or path.';
 
   @override
   String get errorLocalFileTooLarge =>
-      'Markdown file exceeds the maximum allowed size.';
+      'TDF file exceeds the maximum allowed size.';
 
   @override
   String errorLoadLocalFileFailed(String details) {
-    return 'Failed to read local Markdown file ($details).';
+    return 'Failed to read local TDF file ($details).';
   }
 
   @override
   String errorSaveLocalFileFailed(String details) {
-    return 'Failed to write local Markdown file ($details).';
+    return 'Failed to write local TDF file ($details).';
   }
 
   @override

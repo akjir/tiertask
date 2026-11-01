@@ -18,7 +18,6 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
-import '../l10n/tier_localization_extension.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
@@ -26,7 +25,7 @@ import '../models/webdav_config.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../repositories/webdav_repository.dart';
-import '../services/markdown_service.dart';
+import '../services/tdf_service.dart';
 
 /// Provides the effective [Locale] (`en` or `de`) based on [webDavConfigProvider] and OS locale.
 final appLocaleProvider = Provider<Locale>((ref) {
@@ -64,11 +63,6 @@ final localStorageDirectoryPathProvider = Provider<String?>((ref) {
   return null;
 });
 
-/// Provides the stateless [MarkdownService] parser and serializer.
-final markdownServiceProvider = Provider<MarkdownService>((ref) {
-  return const MarkdownService();
-});
-
 /// Provides the [SettingsRepository] for loading and saving application settings.
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return SecureSettingsRepository();
@@ -83,6 +77,11 @@ final syncStateProvider = NotifierProvider<SyncStateNotifier, SyncState>(
 final taskNotifierProvider = AsyncNotifierProvider<TaskNotifier, TaskBoard>(
   TaskNotifier.new,
 );
+
+/// Provides the stateless [TdfService] scanner, parser, and serializer.
+final tdfServiceProvider = Provider<TdfService>((ref) {
+  return const TdfService();
+});
 
 /// Provides the persisted [WebDavConfig] state.
 final webDavConfigProvider =
@@ -178,12 +177,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return _fetchAndNormalizeBoard(config);
   }
 
-  /// Adds a new task to [targetTier] (defaulting to `# [3] Planned`), runs the
-  /// Auto-Pull Cascade, and persists to the active storage backend.
+  /// Adds a new task to [targetTier] (defaulting to [TaskTier.planned]), runs the
+  /// Auto-Pull Cascade, and persists to the active `.tdf` storage backend.
   Future<void> addTask(
     String title, {
     TaskTier targetTier = TaskTier.planned,
     bool isPriority = false,
+    bool subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
     DateTime? currentDate,
     String? id,
@@ -193,6 +193,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       title,
       targetTier: targetTier,
       isPriority: isPriority,
+      subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,
       currentDate: now,
       id: id,
@@ -202,11 +203,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Applies the Auto-Pull Cascade on the current board and persists to storage.
   Future<void> applyAutoPull() async {
-    final updated = _currentBoard.applyAutoPull();
+    final now = ref.read(clockProvider)();
+    final updated = _currentBoard.applyAutoPull(currentDate: now);
     await _commitMutation(updated);
   }
 
-  /// Moves an active task immediately to Tier 4 (`# [4] Blocked`), triggers the
+  /// Moves an active task immediately to Tier 4 ([TaskTier.blocked]), triggers the
   /// Auto-Pull Cascade, and persists to storage.
   Future<void> blockTask(String taskId, {DateTime? currentDate}) async {
     final now = currentDate ?? ref.read(clockProvider)();
@@ -214,7 +216,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
-  /// Marks an active task as done in Tier 6 (`# [6] Completed`), prunes expired tasks,
+  /// Marks an active task as done in Tier 6 ([TaskTier.completed]), prunes expired tasks,
   /// triggers the Auto-Pull Cascade, and persists to storage.
   Future<void> completeTask(String taskId, {DateTime? currentDate}) async {
     final now = currentDate ?? ref.read(clockProvider)();
@@ -257,21 +259,23 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
-  /// Prunes tasks in Tier 6 (`# [6] Completed`) older than 30 days and persists to storage.
+  /// Prunes tasks in Tier 6 ([TaskTier.completed]) older than 30 days and persists to storage.
   Future<void> pruneCompletedTasks({DateTime? currentDate}) async {
     final now = currentDate ?? ref.read(clockProvider)();
     final updated = _currentBoard.pruneCompletedTasks(currentDate: now);
     await _commitMutation(updated);
   }
 
-  /// Persists the current in-memory [board] state to the configured local and/or WebDAV storage.
+  /// Persists the current in-memory [board] state to the configured local and/or WebDAV `.tdf` storage.
   Future<void> pushToRemote(TaskBoard board) async {
-    final config = ref.read(webDavConfigProvider).asData?.value;
-    if (config == null || !config.hasActiveStorage) {
+    final WebDavConfig config =
+        ref.read(webDavConfigProvider).asData?.value ??
+        await ref.read(webDavConfigProvider.future);
+    if (!config.hasActiveStorage) {
       return;
     }
 
-    final serialized = _serializeLocalized(board);
+    final serialized = _serializeTdf(board);
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
       await _writeBoardToConfiguredTargets(config, serialized);
@@ -281,7 +285,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Restores a completed task from Tier 6 (`# [6] Completed`) to [targetTier] and saves to storage.
+  /// Restores a completed task from Tier 6 ([TaskTier.completed]) to [targetTier] and saves to storage.
   Future<void> restoreTask(
     String taskId,
     TaskTier targetTier, {
@@ -296,7 +300,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
-  /// Reloads the Markdown file from the configured local or WebDAV storage backend.
+  /// Reloads the `.tdf` file from the configured local or WebDAV storage backend.
   Future<void> syncFromRemote() async {
     final config = await ref.read(webDavConfigProvider.future);
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
@@ -317,7 +321,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     state = await AsyncValue.guard(() => _fetchAndNormalizeBoard(config));
   }
 
-  /// Tests storage access using [config], fetches or initializes the Markdown file, and updates the board.
+  /// Tests storage access using [config], fetches or initializes the `.tdf` file, and updates the board.
   Future<void> testConnectionAndSync(WebDavConfig config) async {
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
     if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
@@ -331,9 +335,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
-      final rawMarkdown = await _loadRawMarkdownForSync(config);
-      final board = _resolveBoardFromMarkdown(rawMarkdown, now);
-      final serialized = _serializeLocalized(board);
+      final rawTdf = await _loadRawTdfForSync(config);
+      final board = _resolveBoardFromTdf(rawTdf, now);
+      final serialized = _serializeTdf(board);
       await _writeBoardToRequiredTargets(config, serialized);
       state = AsyncData(board);
       ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
@@ -343,27 +347,42 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Updates the in-memory board state and persists the serialized Markdown.
+  /// Toggles the subtask step at [stepIndex] on [taskId] and persists to storage.
+  Future<void> toggleSubtask(
+    String taskId,
+    int stepIndex, {
+    DateTime? currentDate,
+  }) async {
+    final now = currentDate ?? ref.read(clockProvider)();
+    final updated = _currentBoard.toggleSubtask(
+      taskId,
+      stepIndex,
+      currentDate: now,
+    );
+    await _commitMutation(updated);
+  }
+
+  /// Updates the in-memory board state and persists the serialized `.tdf` document.
   Future<void> _commitMutation(TaskBoard updatedBoard) async {
     state = AsyncData(updatedBoard);
     await pushToRemote(updatedBoard);
   }
 
-  /// Loads the Markdown file from the active backend, normalizes the board, and writes back if changed.
+  /// Loads the `.tdf` file from the active backend, normalizes the board, and writes back if changed.
   Future<TaskBoard> _fetchAndNormalizeBoard(WebDavConfig config) async {
-    final markdownService = ref.read(markdownServiceProvider);
+    final tdfService = ref.read(tdfServiceProvider);
     final now = ref.read(clockProvider)();
 
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
-      final rawMarkdown = await _loadRawMarkdownForSync(config);
-      final parsedBoard = markdownService.parse(rawMarkdown);
+      final rawTdf = await _loadRawTdfForSync(config);
+      final parsedBoard = tdfService.parse(rawTdf, evaluationTime: now);
       final normalizedBoard = parsedBoard
           .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull();
-      final normalizedMarkdown = _serializeLocalized(normalizedBoard);
+          .applyAutoPull(currentDate: now);
+      final normalizedTdf = _serializeTdf(normalizedBoard);
 
-      await _persistNormalizedMarkdown(config, rawMarkdown, normalizedMarkdown);
+      await _persistNormalizedTdf(config, rawTdf, normalizedTdf);
       ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
       return normalizedBoard;
     } on Object catch (error) {
@@ -372,64 +391,64 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Loads raw Markdown text according to [config.storageMode].
-  Future<String> _loadRawMarkdownForSync(WebDavConfig config) async {
+  /// Loads raw `.tdf` text according to [config.storageMode].
+  Future<String> _loadRawTdfForSync(WebDavConfig config) async {
     return switch (config.storageMode) {
-      StorageMode.local => ref.read(localFileRepositoryProvider).loadMarkdown(),
-      StorageMode.webdav => ref.read(webDavRepositoryProvider).fetchMarkdown(),
-      StorageMode.both => _loadRawMarkdownInBothMode(config),
+      StorageMode.local => ref.read(localFileRepositoryProvider).loadTdf(),
+      StorageMode.webdav => ref.read(webDavRepositoryProvider).fetchTdf(),
+      StorageMode.both => _loadRawTdfInBothMode(config),
     };
   }
 
-  /// Loads raw Markdown in [StorageMode.both], preferring remote content and falling back to local content.
-  Future<String> _loadRawMarkdownInBothMode(WebDavConfig config) async {
+  /// Loads raw `.tdf` in [StorageMode.both], preferring remote content and falling back to local content.
+  Future<String> _loadRawTdfInBothMode(WebDavConfig config) async {
     if (config.isWebDavConfigured) {
-      final remote = await ref.read(webDavRepositoryProvider).fetchMarkdown();
+      final remote = await ref.read(webDavRepositoryProvider).fetchTdf();
       if (remote.trim().isNotEmpty) {
         return remote;
       }
     }
     if (config.isLocalConfigured) {
-      return ref.read(localFileRepositoryProvider).loadMarkdown();
+      return ref.read(localFileRepositoryProvider).loadTdf();
     }
     return '';
   }
 
-  /// Writes back [normalizedMarkdown] when normalization modified [rawMarkdown] or when syncing both backends.
-  Future<void> _persistNormalizedMarkdown(
+  /// Writes back [normalizedTdf] when normalization modified [rawTdf] or when syncing both backends.
+  Future<void> _persistNormalizedTdf(
     WebDavConfig config,
-    String rawMarkdown,
-    String normalizedMarkdown,
+    String rawTdf,
+    String normalizedTdf,
   ) async {
-    final hasContent = rawMarkdown.trim().isNotEmpty;
+    final hasContent = rawTdf.trim().isNotEmpty;
     if (!hasContent) {
       return;
     }
-    final isChanged = rawMarkdown.trim() != normalizedMarkdown.trim();
+    final isChanged = rawTdf.trim() != normalizedTdf.trim();
     if (config.storageMode == StorageMode.both || isChanged) {
-      await _writeBoardToConfiguredTargets(config, normalizedMarkdown);
+      await _writeBoardToConfiguredTargets(config, normalizedTdf);
     }
   }
 
-  /// Parses [rawMarkdown] or normalizes the existing board when [rawMarkdown] is empty.
-  TaskBoard _resolveBoardFromMarkdown(String rawMarkdown, DateTime now) {
-    if (rawMarkdown.trim().isEmpty) {
+  /// Parses [rawTdf] or normalizes the existing board when [rawTdf] is empty.
+  TaskBoard _resolveBoardFromTdf(String rawTdf, DateTime now) {
+    if (rawTdf.trim().isEmpty) {
       final currentBoard = state.asData?.value ?? TaskBoard.empty();
-      return currentBoard.pruneCompletedTasks(currentDate: now).applyAutoPull();
+      return currentBoard
+          .pruneCompletedTasks(currentDate: now)
+          .applyAutoPull(currentDate: now);
     }
-    final parsed = ref.read(markdownServiceProvider).parse(rawMarkdown);
-    return parsed.pruneCompletedTasks(currentDate: now).applyAutoPull();
+    final parsed = ref
+        .read(tdfServiceProvider)
+        .parse(rawTdf, evaluationTime: now);
+    return parsed
+        .pruneCompletedTasks(currentDate: now)
+        .applyAutoPull(currentDate: now);
   }
 
-  /// Serializes [board] using the active locale's tier labels.
-  String _serializeLocalized(TaskBoard board) {
-    final markdownService = ref.read(markdownServiceProvider);
-    final locale = ref.read(appLocaleProvider);
-    final localizations = lookupAppLocalizations(locale);
-    return markdownService.serialize(
-      board,
-      tierLabelBuilder: localizations.tierName,
-    );
+  /// Serializes [board] into canonical `.tdf` text.
+  String _serializeTdf(TaskBoard board) {
+    return ref.read(tdfServiceProvider).serialize(board);
   }
 
   /// Writes [serialized] to all configured targets enabled by [config.storageMode].
@@ -438,10 +457,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String serialized,
   ) async {
     if (config.storageMode.usesLocal && config.isLocalConfigured) {
-      await ref.read(localFileRepositoryProvider).saveMarkdown(serialized);
+      await ref.read(localFileRepositoryProvider).saveTdf(serialized);
     }
     if (config.storageMode.usesWebDav && config.isWebDavConfigured) {
-      await ref.read(webDavRepositoryProvider).saveMarkdown(serialized);
+      await ref.read(webDavRepositoryProvider).saveTdf(serialized);
     }
   }
 
@@ -451,10 +470,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String serialized,
   ) async {
     if (config.storageMode.usesLocal) {
-      await ref.read(localFileRepositoryProvider).saveMarkdown(serialized);
+      await ref.read(localFileRepositoryProvider).saveTdf(serialized);
     }
     if (config.storageMode.usesWebDav) {
-      await ref.read(webDavRepositoryProvider).saveMarkdown(serialized);
+      await ref.read(webDavRepositoryProvider).saveTdf(serialized);
     }
   }
 }

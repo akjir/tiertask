@@ -487,14 +487,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
 
-  /// Displays a dialog containing the serialized Markdown representation of the board.
+  /// Displays a dialog containing the serialized `.tdf` representation of the board.
   void _showMarkdownPreviewDialog(BuildContext context) {
     final board =
         ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
-    final markdown = ref
-        .read(markdownServiceProvider)
-        .serialize(board, tierLabelBuilder: localizations.tierName);
+    final tdfText = ref.read(tdfServiceProvider).serialize(board);
 
     showDialog<void>(
       context: context,
@@ -504,7 +502,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           width: double.maxFinite,
           child: SingleChildScrollView(
             child: SelectableText(
-              markdown,
+              tdfText,
               style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
             ),
           ),

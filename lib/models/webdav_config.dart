@@ -86,15 +86,15 @@ enum AppThemeMode {
   }
 }
 
-/// Supported Markdown persistence and synchronization modes in TierTask.
+/// Supported TDF persistence and synchronization modes in TierTask.
 enum StorageMode {
-  /// Persists the Markdown file only on the local filesystem.
+  /// Persists the `.tdf` file only on the local filesystem.
   local(code: 'local'),
 
-  /// Synchronizes the Markdown file only with a remote WebDAV server.
+  /// Synchronizes the `.tdf` file only with a remote WebDAV server.
   webdav(code: 'webdav'),
 
-  /// Persists the Markdown file locally and synchronizes it with a WebDAV server.
+  /// Persists the `.tdf` file locally and synchronizes it with a WebDAV server.
   both(code: 'both');
 
   /// Creates a [StorageMode] option.
@@ -103,7 +103,7 @@ enum StorageMode {
   /// Storage identifier persisted in settings (`'local'`, `'webdav'`, or `'both'`).
   final String code;
 
-  /// Whether local Markdown file persistence is enabled in this mode.
+  /// Whether local `.tdf` file persistence is enabled in this mode.
   bool get usesLocal => this == StorageMode.local || this == StorageMode.both;
 
   /// Whether remote WebDAV synchronization is enabled in this mode.
@@ -119,7 +119,7 @@ enum StorageMode {
   }
 }
 
-/// Immutable configuration for local file storage, WebDAV synchronization, language, theme, and task count visibility.
+/// Immutable configuration for local TDF file storage, WebDAV synchronization, language, theme, and task count visibility.
 @immutable
 class WebDavConfig {
   /// Creates a [WebDavConfig] instance.
@@ -127,8 +127,8 @@ class WebDavConfig {
     this.serverUrl = '',
     this.username = '',
     this.password = '',
-    this.filePath = 'tiertask.md',
-    this.localFilePath = 'tiertask.md',
+    this.filePath = 'tiertask.tdf',
+    this.localFilePath = 'tiertask.tdf',
     StorageMode? storageMode,
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
@@ -150,10 +150,10 @@ class WebDavConfig {
   /// WebDAV password or application password.
   final String password;
 
-  /// Remote Markdown file name or relative path on the WebDAV server.
+  /// Remote `.tdf` file name or relative path on the WebDAV server.
   final String filePath;
 
-  /// Local Markdown file name or path on the device filesystem.
+  /// Local `.tdf` file name or path on the device filesystem.
   final String localFilePath;
 
   /// Active persistence mode (`local`, `webdav`, or `both`).
@@ -186,7 +186,7 @@ class WebDavConfig {
     };
   }
 
-  /// Whether the local Markdown file name or path is non-empty.
+  /// Whether the local `.tdf` file name or path is non-empty.
   bool get isLocalConfigured => localFilePath.trim().isNotEmpty;
 
   /// Whether all required WebDAV connection fields are populated.
@@ -221,7 +221,7 @@ class WebDavConfig {
     );
   }
 
-  /// Resolves the full WebDAV endpoint [Uri] for the target Markdown file.
+  /// Resolves the full WebDAV endpoint [Uri] for the target `.tdf` file.
   Uri? resolveEndpointUri() {
     var rawUrl = serverUrl.trim();
     if (rawUrl.isEmpty) {
@@ -242,7 +242,7 @@ class WebDavConfig {
     }
 
     final cleanFile = filePath.trim().isEmpty
-        ? 'tiertask.md'
+        ? 'tiertask.tdf'
         : filePath.trim().replaceFirst(_leadingSlashesPattern, '');
 
     final encodedFileSegments = cleanFile
@@ -252,7 +252,7 @@ class WebDavConfig {
         .join('/');
 
     final String fullUrl;
-    if (rawUrl.toLowerCase().endsWith('.md')) {
+    if (rawUrl.toLowerCase().endsWith('.tdf')) {
       fullUrl = rawUrl;
     } else if (rawUrl.contains('/remote.php/dav/files/') ||
         rawUrl.contains('/remote.php/webdav')) {

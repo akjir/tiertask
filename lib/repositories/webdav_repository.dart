@@ -70,11 +70,11 @@ class WebDavRepository {
     return lookupAppLocalizations(locale);
   }
 
-  /// Fetches the remote Markdown file (`tiertask.md`) via HTTP GET.
+  /// Fetches the remote TDF file (`tiertask.tdf`) via HTTP GET.
   ///
   /// Returns an empty string when the remote file does not exist (`HTTP 404`)
   /// so a new 6-tier board can be initialized on first save.
-  Future<String> fetchMarkdown() async {
+  Future<String> fetchTdf() async {
     final localizations = _localizations;
     final uri = _requireUri(localizations);
     final client = _clientFactory();
@@ -83,10 +83,7 @@ class WebDavRepository {
     try {
       final request = await client.getUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
-      request.headers.set(
-        HttpHeaders.acceptHeader,
-        'text/markdown, text/plain, */*',
-      );
+      request.headers.set(HttpHeaders.acceptHeader, 'text/plain, */*');
 
       final response = await request.close().timeout(timeout);
       final status = response.statusCode;
@@ -130,8 +127,8 @@ class WebDavRepository {
     }
   }
 
-  /// Overwrites the remote Markdown file on the WebDAV server via HTTP PUT.
-  Future<void> saveMarkdown(String markdownContent) async {
+  /// Overwrites the remote TDF file on the WebDAV server via HTTP PUT.
+  Future<void> saveTdf(String tdfContent) async {
     final localizations = _localizations;
     final uri = _requireUri(localizations);
     final client = _clientFactory();
@@ -142,10 +139,10 @@ class WebDavRepository {
       request.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
       request.headers.set(
         HttpHeaders.contentTypeHeader,
-        'text/markdown; charset=utf-8',
+        'text/plain; charset=utf-8',
       );
 
-      final bytes = utf8.encode(markdownContent);
+      final bytes = utf8.encode(tdfContent);
       request.contentLength = bytes.length;
       request.add(bytes);
 

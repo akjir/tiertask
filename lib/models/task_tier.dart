@@ -42,7 +42,7 @@ enum TaskTier {
     isStatic: false,
   ),
 
-  /// Tier 4: Static tier for tasks blocked by external events.
+  /// Tier 4: Static tier for tasks blocked by prerequisites, deferral, or conditions.
   blocked(
     number: 4,
     defaultLabel: 'Blocked',
@@ -51,7 +51,7 @@ enum TaskTier {
     isStatic: true,
   ),
 
-  /// Tier 5: Static tier for future ideas excluded from auto-pull.
+  /// Tier 5: Static tier for unscheduled ideas without a `queued` timestamp.
   someday(
     number: 5,
     defaultLabel: 'Someday',
@@ -87,18 +87,8 @@ enum TaskTier {
     TaskTier.someday,
   ];
 
-  static final RegExp _tierHeadingPattern = RegExp(
-    r'^[\[\(]([1-6])[\]\)](\s+.*)?$',
-  );
-
-  /// Numeric tier identifier (`1` through `6`).
-  final int number;
-
   /// Default English label for this tier.
   final String defaultLabel;
-
-  /// Soft WIP limit (`3` for Focus, `5` for Ready, `null` for others).
-  final int? softLimit;
 
   /// Whether this tier automatically pulls tasks from lower active tiers.
   final bool isAutoPullTarget;
@@ -106,32 +96,11 @@ enum TaskTier {
   /// Whether this tier is static (excluded from automatic pull operations).
   final bool isStatic;
 
-  /// Formats the Markdown H1 heading (`# [<number>] <label>`) using [label] or [defaultLabel].
-  String formatHeading([String? label]) {
-    final effectiveLabel = (label == null || label.trim().isEmpty)
-        ? defaultLabel
-        : label.trim();
-    return '# [$number] $effectiveLabel';
-  }
+  /// Numeric tier identifier (`1` through `6`).
+  final int number;
 
-  /// Resolves a [TaskTier] from a raw H1 heading text (after `#`) by matching
-  /// the leading `[1]`–`[6]` or `(1)`–`(6)` tier number and ignoring any label text.
-  static TaskTier? fromHeading(String rawHeading) {
-    final cleaned = rawHeading.trim();
-    final match = _tierHeadingPattern.firstMatch(cleaned);
-    if (match == null) {
-      return null;
-    }
-    final rawNumber = match.group(1);
-    if (rawNumber == null) {
-      return null;
-    }
-    final parsedNumber = int.tryParse(rawNumber);
-    if (parsedNumber == null) {
-      return null;
-    }
-    return fromNumber(parsedNumber);
-  }
+  /// Soft WIP limit (`3` for Focus, `5` for Ready, `null` for others).
+  final int? softLimit;
 
   /// Resolves a [TaskTier] from its numeric identifier (`1` through `6`).
   static TaskTier? fromNumber(int number) {

@@ -15,22 +15,26 @@
 
 import 'package:flutter/foundation.dart';
 
-/// Immutable representation of a single subtask step belonging to a [TaskItem].
+import 'tdf_metadata.dart';
+
+/// Immutable representation of a single subtask step (`step <bool> "<text>"`) belonging to a [TaskItem].
 @immutable
 class SubtaskItem {
   /// Creates a [SubtaskItem] with [title] and optional [isCompleted] state.
   const SubtaskItem({required this.title, this.isCompleted = false});
 
-  /// Whether the subtask step is marked as completed (`[x]`).
+  /// Whether the subtask step is marked as completed (`true`).
   final bool isCompleted;
 
   /// Plain-text subtask description.
   final String title;
 
-  /// Serializes this subtask into an indented Markdown checklist line.
-  String toMarkdownLine() {
-    final cleanTitle = title.trim();
-    return isCompleted ? '  - [x] $cleanTitle' : '  - [ ] $cleanTitle';
+  /// Returns a copy of this subtask with updated fields.
+  SubtaskItem copyWith({String? title, bool? isCompleted}) {
+    return SubtaskItem(
+      title: title ?? this.title,
+      isCompleted: isCompleted ?? this.isCompleted,
+    );
   }
 
   @override
@@ -45,59 +49,127 @@ class SubtaskItem {
   int get hashCode => Object.hash(title, isCompleted);
 
   @override
-  String toString() => toMarkdownLine();
+  String toString() => 'step $isCompleted "$title"';
 }
 
-/// Immutable representation of a single task item in TierTask.
+/// Immutable representation of a single TDF `task` block in TierTask.
 @immutable
 class TaskItem {
-  /// Creates a [TaskItem] with optional [id], [isPriority], [subtasks], and [completedAt].
+  /// Creates a [TaskItem] with TDF attributes and unmodifiable collection views.
   TaskItem({
     String? id,
     required this.title,
+    this.note,
     this.isCompleted = false,
     this.isPriority = false,
+    DateTime? createdAt,
+    this.queuedAt,
     this.completedAt,
+    this.suspendedAt,
+    List<String> locationIds = const [],
+    List<String> categoryIds = const [],
+    List<String> blockedByTaskIds = const [],
+    List<TaskCondition> conditions = const [],
+    this.subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
   }) : id = id ?? _nextId(),
+       createdAt = createdAt ?? defaultCreatedAt,
+       locationIds = List<String>.unmodifiable(locationIds),
+       categoryIds = List<String>.unmodifiable(categoryIds),
+       blockedByTaskIds = List<String>.unmodifiable(blockedByTaskIds),
+       conditions = List<TaskCondition>.unmodifiable(conditions),
        subtasks = List<SubtaskItem>.unmodifiable(subtasks);
+
+  /// Fallback UTC creation timestamp when none is provided explicitly.
+  static final DateTime defaultCreatedAt = DateTime.utc(2026, 11, 1, 8, 0);
+
+  /// Far-future UTC deferral timestamp used when a task is manually blocked without a specific date.
+  static final DateTime defaultSuspendedAt = DateTime.utc(9999, 12, 31, 23, 59);
 
   static int _idCounter = 0;
 
-  /// Completion date (`YYYY-MM-DD`) when located in Tier 6 (`# [6] Completed`).
+  /// Prerequisite task IDs (`blocked` directive).
+  final List<String> blockedByTaskIds;
+
+  /// Associated category IDs (`categories` directive).
+  final List<String> categoryIds;
+
+  /// Completion timestamp (`finished` directive) when located in Tier 6 (`Completed`).
   final DateTime? completedAt;
 
-  /// Internal runtime identifier (never persisted to the Markdown file).
+  /// Dynamic activation conditions (`condition` directives).
+  final List<TaskCondition> conditions;
+
+  /// Creation timestamp (`created` directive).
+  final DateTime createdAt;
+
+  /// Unique TDF task entity identifier (`<id>`).
   final String id;
 
-  /// Whether the task is marked as completed (`[x]`).
+  /// Whether the task is completed (`finished` is present).
   final bool isCompleted;
 
-  /// Whether the task was created with high priority.
+  /// Whether the task carries the `priority` header flag.
   final bool isPriority;
 
-  /// Ordered checklist subtasks belonging to this task.
+  /// Associated location IDs (`locations` directive).
+  final List<String> locationIds;
+
+  /// Optional extended description (`note` directive).
+  final String? note;
+
+  /// Active pull-cycle queue timestamp (`queued` directive), or `null` when in `Someday`.
+  final DateTime? queuedAt;
+
+  /// Ordered checklist steps (`subtasks` sub-block).
   final List<SubtaskItem> subtasks;
 
-  /// Plain-text task description.
+  /// Whether the `subtasks` sub-block carries the `auto-finish` header flag.
+  final bool subtasksAutoFinish;
+
+  /// Optional deferral timestamp (`suspended` directive).
+  final DateTime? suspendedAt;
+
+  /// Human-readable task title (`name` directive).
   final String title;
 
   /// Returns a copy of this task with the provided fields updated.
   TaskItem copyWith({
     String? id,
     String? title,
+    String? note,
     bool? isCompleted,
     bool? isPriority,
+    DateTime? createdAt,
+    DateTime? queuedAt,
     DateTime? completedAt,
+    DateTime? suspendedAt,
+    List<String>? locationIds,
+    List<String>? categoryIds,
+    List<String>? blockedByTaskIds,
+    List<TaskCondition>? conditions,
+    bool? subtasksAutoFinish,
     List<SubtaskItem>? subtasks,
+    bool clearNote = false,
+    bool clearQueuedAt = false,
     bool clearCompletedAt = false,
+    bool clearSuspendedAt = false,
   }) {
     return TaskItem(
       id: id ?? this.id,
       title: title ?? this.title,
+      note: clearNote ? null : (note ?? this.note),
       isCompleted: isCompleted ?? this.isCompleted,
       isPriority: isPriority ?? this.isPriority,
+      createdAt: createdAt ?? this.createdAt,
+      queuedAt: clearQueuedAt ? null : (queuedAt ?? this.queuedAt),
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
+      suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
+      locationIds: locationIds ?? this.locationIds,
+      categoryIds: categoryIds ?? this.categoryIds,
+      blockedByTaskIds: blockedByTaskIds ?? this.blockedByTaskIds,
+      conditions: conditions ?? this.conditions,
+      subtasksAutoFinish: subtasksAutoFinish ?? this.subtasksAutoFinish,
       subtasks: subtasks ?? this.subtasks,
     );
   }
@@ -110,45 +182,42 @@ class TaskItem {
     return '$year-$month-$day';
   }
 
-  /// Creates an active (incomplete) task with no completion timestamp.
-  TaskItem toActive() {
-    return TaskItem(
-      id: id,
-      title: title,
+  /// Formats [timestamp] as a canonical TDF timestamp (`YYYY-MM-DD HH:MM`).
+  static String formatTdfTimestamp(DateTime timestamp) {
+    final datePart = formatIsoDate(timestamp);
+    final hour = timestamp.hour.toString().padLeft(2, '0');
+    final minute = timestamp.minute.toString().padLeft(2, '0');
+    return '$datePart $hour:$minute';
+  }
+
+  /// Creates an open (incomplete) task with no `finished` timestamp.
+  TaskItem toActive({
+    DateTime? queuedAt,
+    bool clearQueuedAt = false,
+    bool? isPriority,
+    bool clearBlocking = false,
+  }) {
+    return copyWith(
       isCompleted: false,
+      clearCompletedAt: true,
+      queuedAt: queuedAt,
+      clearQueuedAt: clearQueuedAt,
       isPriority: isPriority,
-      completedAt: null,
-      subtasks: subtasks,
+      clearSuspendedAt: clearBlocking,
+      blockedByTaskIds: clearBlocking ? const [] : null,
     );
   }
 
-  /// Creates a completed task stamped with [completionDate] (normalized to UTC date).
+  /// Creates a completed task stamped with [completionDate] (`finished` directive).
   TaskItem toCompleted(DateTime completionDate) {
     final normalized = DateTime.utc(
       completionDate.year,
       completionDate.month,
       completionDate.day,
+      completionDate.hour,
+      completionDate.minute,
     );
-    return TaskItem(
-      id: id,
-      title: title,
-      isCompleted: true,
-      isPriority: isPriority,
-      completedAt: normalized,
-      subtasks: subtasks,
-    );
-  }
-
-  /// Serializes this task into a single Markdown list item line.
-  String toMarkdownLine({required bool inCompleted}) {
-    final cleanTitle = title.trim();
-    if (inCompleted || isCompleted) {
-      if (completedAt case final completionDate?) {
-        return '- [x] ${formatIsoDate(completionDate)} $cleanTitle';
-      }
-      return '- [x] $cleanTitle';
-    }
-    return '- [ ] $cleanTitle';
+    return copyWith(isCompleted: true, completedAt: normalized);
   }
 
   /// Parses a strict ISO-8601 date string (`YYYY-MM-DD`) into a UTC [DateTime],
@@ -159,9 +228,9 @@ class TaskItem {
         rawDate.codeUnitAt(7) != 0x2D) {
       return null;
     }
-    final year = int.tryParse(rawDate.substring(0, 4));
-    final month = int.tryParse(rawDate.substring(5, 7));
-    final day = int.tryParse(rawDate.substring(8, 10));
+    final year = _parseFixedDigits(rawDate, 0, 4);
+    final month = _parseFixedDigits(rawDate, 5, 7);
+    final day = _parseFixedDigits(rawDate, 8, 10);
     if (year == null || month == null || day == null) {
       return null;
     }
@@ -177,19 +246,63 @@ class TaskItem {
     return candidate;
   }
 
-  /// Generates a unique runtime task identifier.
-  static String _nextId() {
-    _idCounter++;
-    return 'task_${DateTime.now().microsecondsSinceEpoch}_$_idCounter';
+  /// Parses a strict TDF `<timestamp>` (`<YYYY-MM-DD>` and optional `<HH:MM>`) into a UTC [DateTime].
+  static DateTime? tryParseTdfTimestamp(String rawDate, [String? rawTime]) {
+    final baseDate = tryParseIsoDate(rawDate);
+    if (baseDate == null) {
+      return null;
+    }
+    if (rawTime == null) {
+      return baseDate;
+    }
+    final minutesFromMidnight = tryParseTimeMinutes(rawTime);
+    if (minutesFromMidnight == null) {
+      return null;
+    }
+    final hour = minutesFromMidnight ~/ 60;
+    final minute = minutesFromMidnight % 60;
+    return DateTime.utc(
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
+      hour,
+      minute,
+    );
   }
 
-  /// Compares two optional dates by UTC calendar year, month, and day.
-  static bool _sameDate(DateTime? first, DateTime? second) {
-    if (first == null && second == null) return true;
-    if (first == null || second == null) return false;
-    return first.year == second.year &&
-        first.month == second.month &&
-        first.day == second.day;
+  /// Parses a strict 24-hour `<HH:MM>` token into minutes from `00:00` (`0..1439`), or `null` if invalid.
+  static int? tryParseTimeMinutes(String rawTime) {
+    if (rawTime.length != 5 || rawTime.codeUnitAt(2) != 0x3A) {
+      return null;
+    }
+    final hour = _parseFixedDigits(rawTime, 0, 2);
+    final minute = _parseFixedDigits(rawTime, 3, 5);
+    if (hour == null || minute == null) {
+      return null;
+    }
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+    return hour * 60 + minute;
+  }
+
+  /// Generates a sequential TDF-compatible identifier (`t001`, `t002`, ...).
+  static String _nextId() {
+    _idCounter++;
+    return 't${_idCounter.toString().padLeft(3, '0')}';
+  }
+
+  /// Parses an unsigned ASCII integer from `input[start..end]`, or `null` if any char is non-digit.
+  static int? _parseFixedDigits(String input, int start, int end) {
+    var result = 0;
+    for (var i = start; i < end; i++) {
+      final unit = input.codeUnitAt(i);
+      if (unit < 0x30 || unit > 0x39) {
+        return null;
+      }
+      result = result * 10 + (unit - 0x30);
+    }
+    return result;
   }
 
   @override
@@ -198,9 +311,18 @@ class TaskItem {
     return other is TaskItem &&
         other.id == id &&
         other.title == title &&
+        other.note == note &&
         other.isCompleted == isCompleted &&
         other.isPriority == isPriority &&
-        _sameDate(other.completedAt, completedAt) &&
+        other.createdAt == createdAt &&
+        other.queuedAt == queuedAt &&
+        other.completedAt == completedAt &&
+        other.suspendedAt == suspendedAt &&
+        other.subtasksAutoFinish == subtasksAutoFinish &&
+        listEquals(other.locationIds, locationIds) &&
+        listEquals(other.categoryIds, categoryIds) &&
+        listEquals(other.blockedByTaskIds, blockedByTaskIds) &&
+        listEquals(other.conditions, conditions) &&
         listEquals(other.subtasks, subtasks);
   }
 
@@ -208,14 +330,21 @@ class TaskItem {
   int get hashCode => Object.hash(
     id,
     title,
+    note,
     isCompleted,
     isPriority,
-    completedAt?.year,
-    completedAt?.month,
-    completedAt?.day,
+    createdAt,
+    queuedAt,
+    completedAt,
+    suspendedAt,
+    subtasksAutoFinish,
+    Object.hashAll(locationIds),
+    Object.hashAll(categoryIds),
+    Object.hashAll(blockedByTaskIds),
+    Object.hashAll(conditions),
     Object.hashAll(subtasks),
   );
 
   @override
-  String toString() => toMarkdownLine(inCompleted: isCompleted);
+  String toString() => 'task $id "$title"';
 }

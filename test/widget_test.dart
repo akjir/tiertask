@@ -32,7 +32,7 @@ class _FakeWebDavRepository extends WebDavRepository {
   final bool Function() shouldFail;
 
   @override
-  Future<String> fetchMarkdown() async {
+  Future<String> fetchTdf() async {
     if (shouldFail()) {
       throw const WebDavException(
         'Authentication failed. Please check username and app password.',
@@ -43,7 +43,7 @@ class _FakeWebDavRepository extends WebDavRepository {
   }
 
   @override
-  Future<void> saveMarkdown(String markdownContent) async {
+  Future<void> saveTdf(String tdfContent) async {
     if (shouldFail()) {
       throw const WebDavException(
         'Authentication failed while saving. Please check app password.',
@@ -525,14 +525,14 @@ void main() {
       expect(find.text('Local'), findsOneWidget);
       expect(find.text('WebDAV'), findsOneWidget);
       expect(find.text('Both'), findsOneWidget);
-      expect(find.text('Local Markdown File Name'), findsOneWidget);
+      expect(find.text('Local TDF File Name'), findsOneWidget);
 
       await tester.ensureVisible(find.text('Both'));
       await tester.tap(find.text('Both'));
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Local Markdown File Name'),
+        find.text('Local TDF File Name'),
         findsOneWidget,
         reason: 'Both mode must show local file name field',
       );
@@ -552,8 +552,8 @@ void main() {
         reason: 'Local-only mode must hide WebDAV server URL field',
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Local Markdown File Name'),
-        'custom_local_tasks.md',
+        find.widgetWithText(TextFormField, 'Local TDF File Name'),
+        'custom_local_tasks.tdf',
       );
       await tester.ensureVisible(find.text('Save'));
       await tester.tap(find.text('Save'));
@@ -575,7 +575,7 @@ void main() {
       final savedConfig = await settingsRepository.loadConfig();
       expect(
         savedConfig.localFilePath,
-        equals('custom_local_tasks.md'),
+        equals('custom_local_tasks.tdf'),
         reason:
             'Saving settings in Local mode must persist custom localFilePath',
       );
@@ -639,9 +639,7 @@ void main() {
         reason: 'Saving in Local mode must display credentialsSavedBanner',
       );
       expect(
-        find.text(
-          'Connection succeeded. Markdown file synchronized with WebDAV.',
-        ),
+        find.text('Connection succeeded. TDF file synchronized with WebDAV.'),
         findsNothing,
         reason: 'Local mode must never display WebDAV connectionSuccessBanner',
       );
@@ -685,9 +683,7 @@ void main() {
         reason: 'Empty password must trigger validation error',
       );
       expect(
-        find.text(
-          'Connection succeeded. Markdown file synchronized with WebDAV.',
-        ),
+        find.text('Connection succeeded. TDF file synchronized with WebDAV.'),
         findsNothing,
         reason: 'Connection success banner must never appear when WebDAV fields are empty or invalid',
       );
@@ -719,7 +715,7 @@ void main() {
           serverUrl: 'https://cloud.example.com/remote.php/dav/files/alice/',
           username: 'alice',
           password: 'secret-app-password',
-          filePath: 'tiertask.md',
+          filePath: 'tiertask.tdf',
         ),
       );
 
@@ -779,7 +775,7 @@ void main() {
       await tester.pumpAndSettle();
 
       const successText =
-          'Connection succeeded. Markdown file synchronized with WebDAV.';
+          'Connection succeeded. TDF file synchronized with WebDAV.';
       expect(
         find.text(successText),
         findsOneWidget,

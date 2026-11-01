@@ -51,9 +51,9 @@ class SecureSettingsRepository implements SettingsRepository {
       final serverUrl = await _storage.read(key: _keyServerUrl) ?? '';
       final username = await _storage.read(key: _keyUsername) ?? '';
       final password = await _storage.read(key: _keyPassword) ?? '';
-      final filePath = await _storage.read(key: _keyFilePath) ?? 'tiertask.md';
+      final filePath = await _storage.read(key: _keyFilePath) ?? 'tiertask.tdf';
       final localFilePath =
-          await _storage.read(key: _keyLocalFilePath) ?? 'tiertask.md';
+          await _storage.read(key: _keyLocalFilePath) ?? 'tiertask.tdf';
       final rawStorageMode = await _storage.read(key: _keyStorageMode);
       final rawLanguage = await _storage.read(key: _keyLanguage);
       final rawThemeMode = await _storage.read(key: _keyThemeMode);
@@ -65,10 +65,8 @@ class SecureSettingsRepository implements SettingsRepository {
         serverUrl: serverUrl,
         username: username,
         password: password,
-        filePath: filePath.trim().isEmpty ? 'tiertask.md' : filePath,
-        localFilePath: localFilePath.trim().isEmpty
-            ? 'tiertask.md'
-            : localFilePath,
+        filePath: _normalizeTdfFilePath(filePath),
+        localFilePath: _normalizeTdfFilePath(localFilePath),
         storageMode: rawStorageMode == null
             ? null
             : StorageMode.fromCode(rawStorageMode),
@@ -88,15 +86,11 @@ class SecureSettingsRepository implements SettingsRepository {
     await _storage.write(key: _keyPassword, value: config.password);
     await _storage.write(
       key: _keyFilePath,
-      value: config.filePath.trim().isEmpty
-          ? 'tiertask.md'
-          : config.filePath.trim(),
+      value: _normalizeTdfFilePath(config.filePath),
     );
     await _storage.write(
       key: _keyLocalFilePath,
-      value: config.localFilePath.trim().isEmpty
-          ? 'tiertask.md'
-          : config.localFilePath.trim(),
+      value: _normalizeTdfFilePath(config.localFilePath),
     );
     await _storage.write(key: _keyStorageMode, value: config.storageMode.code);
     await _storage.write(key: _keyLanguage, value: config.language.code);
@@ -105,6 +99,18 @@ class SecureSettingsRepository implements SettingsRepository {
       key: _keyShowOpenTaskCount,
       value: config.showOpenTaskCount.toString(),
     );
+  }
+
+  /// Normalizes a stored file path, defaulting empty or legacy `.md` presets to `.tdf`.
+  static String _normalizeTdfFilePath(String rawPath) {
+    final trimmed = rawPath.trim();
+    if (trimmed.isEmpty || trimmed == 'tiertask.md') {
+      return 'tiertask.tdf';
+    }
+    if (trimmed == 't2.md') {
+      return 't2.tdf';
+    }
+    return trimmed;
   }
 }
 

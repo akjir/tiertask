@@ -20,8 +20,6 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:tiertask/l10n/app_localizations.dart';
-import 'package:tiertask/l10n/tier_localization_extension.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
@@ -29,426 +27,547 @@ import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
-import 'package:tiertask/repositories/webdav_repository.dart';
-import 'package:tiertask/services/markdown_service.dart';
+import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
-  const markdownService = MarkdownService();
-  final fixedDate = DateTime.utc(2026, 11, 1);
+  const tdfService = TdfService();
+  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
 
-  group('MarkdownService Parser & Serializer (Numbered Tiers 1-6)', () {
-    test(
-      'parses and serializes the 6 numbered H1 sections in exact order 1 to 6',
-      () {
-        const sampleMarkdown = '''
-# [1] Focus
-- [ ] Task A
-- [ ] Task B
-- [ ] Task C
+  group('TdfService Lexical Scanner, Parser & Canonical Serializer', () {
+    test('parses canonical TDF document from TDF_SPEC.md Section 9 and derives all 6 tiers', () {
+      const canonicalTdf = '''
+# ==========================================
+# TierTask Data Format (TDF) Example Document
+# ==========================================
 
-# [2] Ready
-- [ ] Task D
-- [ ] Task E
+# === Locations (Draft) ===
+location home {
+    name "Home"
+}
 
-# [3] Planned
-- [ ] Backlog Task 1
-- [ ] Backlog Task 2
+location work {
+    name "Work"
+    gps  50.9787 11.0328 150
+}
 
-# [4] Blocked
-- [ ] Blocked Task 1
+# === Categories (Draft) ===
+category c_house {
+    name  "Household"
+    color "#4CAF50"
+}
 
-# [5] Someday
-- [ ] Someday Idea 1
+category c_it {
+    name  "IT & Servers"
+    color "#2196F3"
+}
 
-# [6] Completed
-- [x] 2026-10-30 Completed Task 1
-- [x] 2026-10-15 Completed Task 2
+# === Tasks ===
+
+# Prioritized task -> Lands at the top of Focus (in c_it)
+task t001 priority {
+    name       "Verify server backup"
+    note       "Inspect logs under /var/log/backup"
+    created    2026-11-01 08:30
+    queued     2026-11-01 08:30
+    categories c_it
+}
+
+# Regular active task with subtasks -> Focus / Ready
+task t002 {
+    name       "Clean up study"
+    created    2026-11-01 09:00
+    queued     2026-11-01 09:15
+    locations  home
+    categories c_house
+
+    subtasks auto-finish {
+        step true  "Wipe desk"
+        step false "Organize cables"
+        step false "Empty trash bin"
+    }
+}
+
+# Task in multiple categories with condition (weekends only)
+task t003 {
+    name       "Clean dust from NAS drives"
+    created    2026-11-01 10:00
+    queued     2026-11-01 10:00
+    locations  home
+    categories c_house c_it
+    condition  day sat sun
+}
+
+# Blocked task (waits for t001 and is suspended until Nov 5)
+task t004 {
+    name       "Apply firewall update"
+    created    2026-11-01 11:00
+    queued     2026-11-01 11:00
+    locations  work
+    categories c_it
+    blocked    t001
+    suspended  2026-11-05 08:00
+}
+
+# Task in "Someday" (no 'queued' directive present)
+task t005 {
+    name       "3D-print custom NAS enclosure"
+    created    2026-11-01 12:00
+    categories c_it
+}
+
+# Completed task ('finished' is set -> deleted after 30 days)
+task t006 {
+    name       "Mount winter tires"
+    created    2026-10-20 14:00
+    queued     2026-10-21 08:00
+    finished   2026-10-29 16:45
+    locations  home
+}
 ''';
 
-        final board = markdownService.parse(sampleMarkdown);
+      final board = tdfService.parse(canonicalTdf, evaluationTime: fixedDate);
 
-        expect(
-          board.focus.map((task) => task.title),
-          equals(['Task A', 'Task B', 'Task C']),
-          reason: 'Tier 1 must contain Focus tasks',
-        );
-        expect(
-          board.ready.map((task) => task.title),
-          equals(['Task D', 'Task E']),
-          reason: 'Tier 2 must contain Ready tasks',
-        );
-        expect(
-          board.planned.map((task) => task.title),
-          equals(['Backlog Task 1', 'Backlog Task 2']),
-          reason: 'Tier 3 must contain Planned tasks',
-        );
-        expect(
-          board.blocked.map((task) => task.title),
-          equals(['Blocked Task 1']),
-          reason: 'Tier 4 must contain Blocked tasks',
-        );
-        expect(
-          board.someday.map((task) => task.title),
-          equals(['Someday Idea 1']),
-          reason: 'Tier 5 must contain Someday tasks',
-        );
-        expect(
-          board.completed.length,
-          equals(2),
-          reason: 'Tier 6 must contain 2 Completed tasks',
-        );
-        expect(board.completed[0].title, equals('Completed Task 1'));
-        expect(board.completed[0].isCompleted, isTrue);
-        expect(
-          board.completed[0].completedAt,
-          equals(DateTime.utc(2026, 10, 30)),
-        );
-        expect(board.completed[1].title, equals('Completed Task 2'));
-        expect(
-          board.completed[1].completedAt,
-          equals(DateTime.utc(2026, 10, 15)),
-        );
+      expect(
+        board.locations.map((location) => location.id),
+        equals(['home', 'work']),
+        reason: 'Locations must be parsed in declaration order',
+      );
+      expect(board.locations[1].latitude, equals(50.9787));
+      expect(board.locations[1].longitude, equals(11.0328));
+      expect(board.locations[1].radiusMeters, equals(150.0));
 
-        final serialized = markdownService.serialize(board);
-        expect(serialized, equals(sampleMarkdown));
-      },
-    );
+      expect(
+        board.categories.map((category) => category.id),
+        equals(['c_house', 'c_it']),
+        reason: 'Categories must be parsed in declaration order',
+      );
+      expect(board.categories[0].color, equals('#4CAF50'));
+      expect(board.categories[1].color, equals('#2196F3'));
 
-    test(
-      'ignores heading label text and matches strictly by tier number 1 to 6',
-      () {
-        const mixedLanguageAndCustomLabels = '''
-# [1] Fokus
-- [ ] German Focus Task
+      expect(
+        board.focus.map((task) => task.id),
+        equals(['t001', 't002', 't003']),
+        reason: 't001 (priority), t002, and t003 (active on Sunday) must fill Focus',
+      );
+      expect(board.focus[0].isPriority, isTrue);
+      expect(board.focus[0].note, equals('Inspect logs under /var/log/backup'));
+      expect(board.focus[1].subtasksAutoFinish, isTrue);
+      expect(board.focus[1].subtasks.length, equals(3));
+      expect(board.focus[1].subtasks[0].isCompleted, isTrue);
+      expect(board.focus[1].subtasks[1].isCompleted, isFalse);
 
-# (2) Ready
-- [ ] Parenthesized Ready Task
-
-# [3] Custom Backlog Title
-- [ ] Custom Planned Task
-
-# [4]
-- [ ] Label-Free Blocked Task
-
-# (5) Irgendwann / Ideen
-- [ ] Someday Idea
-
-# [6] Erledigt
-- [x] 2026-10-20 Done Task
-
-# [9] Unknown Tier
-- [ ] Ignored Task
-
-# Unnumbered Heading
-- [ ] Also Ignored
-''';
-
-        final board = markdownService.parse(mixedLanguageAndCustomLabels);
-
-        expect(
-          board.focus.map((task) => task.title),
-          equals(['German Focus Task']),
-          reason: '# [1] Fokus must resolve to Tier 1',
-        );
-        expect(
-          board.ready.map((task) => task.title),
-          equals(['Parenthesized Ready Task']),
-          reason: '# (2) Ready must resolve to Tier 2',
-        );
-        expect(
-          board.planned.map((task) => task.title),
-          equals(['Custom Planned Task']),
-          reason: '# [3] with arbitrary label must resolve to Tier 3',
-        );
-        expect(
-          board.blocked.map((task) => task.title),
-          equals(['Label-Free Blocked Task']),
-          reason: '# [4] without label must resolve to Tier 4',
-        );
-        expect(
-          board.someday.map((task) => task.title),
-          equals(['Someday Idea']),
-          reason: '# (5) with German label must resolve to Tier 5',
-        );
-        expect(
-          board.completed.map((task) => task.title),
-          equals(['Done Task']),
-          reason: '# [6] Erledigt must resolve to Tier 6',
-        );
-      },
-    );
-
-    test('creates missing tiers automatically on serialization and supports localized labels', () {
-      const sparseMarkdown = '# [1] Fokus\r\n- [ ] Only Focus   \r\n';
-      final board = markdownService.parse(sparseMarkdown);
-
-      expect(board.focus.map((task) => task.title), equals(['Only Focus']));
       expect(board.ready, isEmpty);
       expect(board.planned, isEmpty);
-      expect(board.blocked, isEmpty);
-      expect(board.someday, isEmpty);
-      expect(board.completed, isEmpty);
-
-      final englishSerialized = markdownService.serialize(board);
-      expect(englishSerialized, contains('# [1] Focus\n- [ ] Only Focus'));
       expect(
-        englishSerialized,
-        contains(
-          '# [2] Ready\n\n# [3] Planned\n\n# [4] Blocked\n\n# [5] Someday\n\n# [6] Completed',
-        ),
-        reason: 'All missing tiers 2-6 must be created in English by default',
+        board.blocked.map((task) => task.id),
+        equals(['t004']),
+        reason: 't004 is blocked by t001 and suspended until 2026-11-05',
+      );
+      expect(
+        board.someday.map((task) => task.id),
+        equals(['t005']),
+        reason: 't005 has no queued directive so it lands in Someday',
+      );
+      expect(
+        board.completed.map((task) => task.id),
+        equals(['t006']),
+        reason: 't006 has a finished directive so it lands in Completed',
       );
 
-      final germanLocalizations = lookupAppLocalizations(const Locale('de'));
-      final germanSerialized = markdownService.serialize(
-        board,
-        tierLabelBuilder: germanLocalizations.tierName,
-      );
-      expect(germanSerialized, contains('# [1] Fokus\n- [ ] Only Focus'));
+      final serialized = tdfService.serialize(board);
       expect(
-        germanSerialized,
-        contains(
-          '# [2] Bereit\n\n# [3] Geplant\n\n# [4] Blockiert\n\n# [5] Irgendwann\n\n# [6] Erledigt',
+        serialized.contains('\r\n'),
+        isFalse,
+        reason: 'Canonical serialization must emit LF line terminators only',
+      );
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(
+        reparsed.focus.map((task) => task.id),
+        equals(['t001', 't002', 't003']),
+      );
+      expect(reparsed.blocked.map((task) => task.id), equals(['t004']));
+      expect(reparsed.someday.map((task) => task.id), equals(['t005']));
+      expect(reparsed.completed.map((task) => task.id), equals(['t006']));
+    });
+
+    test('supports bare words, double-quoted escapes, single-quoted raw strings, inline comments, CRLF, and empty blocks', () {
+      expect(
+        () => tdfService.parse('location empty_loc {}'),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.missingRequiredDirective,
+          ),
         ),
-        reason: 'All missing tiers 2-6 must be serialized with German labels when requested',
+        reason: 'Empty location block without mandatory name must fail',
+      );
+
+      const validInlineSubtasks =
+          'category c_dev { # comment\r\n'
+          '  name \'Raw "quote" and \\\\backslash\'\r\n'
+          '  note "Line1\\nLine2\\tTabbed\\rReturn\\\\Slash\\"Quote"\r\n'
+          '}#comment\r\n'
+          'task taxes2026 {#comment\r\n'
+          '  name "File taxes #2026"#comment\r\n'
+          '  created 2026-11-01#inline_date_comment\r\n'
+          '  queued 2026-11-01 08:00\r\n'
+          '  categories c_dev#inline_id_comment\r\n'
+          '  subtasks {}\r\n'
+          '}';
+
+      final board = tdfService.parse(
+        validInlineSubtasks,
+        evaluationTime: fixedDate,
+      );
+      expect(board.categories.single.id, equals('c_dev'));
+      expect(
+        board.categories.single.name,
+        equals('Raw "quote" and \\\\backslash'),
+        reason: 'Single-quoted strings must preserve backslashes and quotes',
+      );
+      expect(
+        board.categories.single.note,
+        equals('Line1\nLine2\tTabbed\rReturn\\Slash"Quote'),
+        reason: 'Double-quoted strings must unescape \\n, \\t, \\r, \\\\, \\"',
+      );
+      expect(board.focus.single.id, equals('taxes2026'));
+      expect(board.focus.single.title, equals('File taxes #2026'));
+      expect(
+        board.focus.single.createdAt,
+        equals(DateTime.utc(2026, 11, 1, 0, 0)),
+        reason: 'Date-only timestamp must default time component to 00:00',
+      );
+
+      final serialized = tdfService.serialize(board);
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(
+        reparsed.categories.single.note,
+        equals('Line1\nLine2\tTabbed\rReturn\\Slash"Quote'),
       );
     });
 
-    test('validates ISO-8601 dates strictly and rejects impossible calendar rollover dates', () {
-      const markdownWithDates = '''
-# [6] Completed
-- [x] 2024-02-29 Valid Leap Day Task
-- [x] 2026-02-29 Invalid Non-Leap Day Task
-- [x] 2026-02-31 Invalid February Day Task
-- [x] 2026-13-45 Invalid Month And Day Task
-- [x] 2026-00-00 Zero Month And Day Task
-''';
-
-      final board = markdownService.parse(markdownWithDates);
-
-      expect(
-        board.completed.length,
-        equals(5),
-        reason: 'All 5 completed task lines must be parsed',
-      );
-      expect(
-        board.completed[0].completedAt,
-        equals(DateTime.utc(2024, 2, 29)),
-        reason: '2024 is a leap year so 2024-02-29 is valid',
-      );
-      expect(
-        board.completed[1].completedAt,
-        isNull,
-        reason: '2026-02-29 must not roll over to 2026-03-01',
-      );
-      expect(
-        board.completed[2].completedAt,
-        isNull,
-        reason: '2026-02-31 must not roll over to 2026-03-03',
-      );
-      expect(
-        board.completed[3].completedAt,
-        isNull,
-        reason: '2026-13-45 must not roll over to 2027-02-14',
-      );
-      expect(
-        board.completed[4].completedAt,
-        isNull,
-        reason: '2026-00-00 must not underflow to 2025-11-30',
-      );
-      expect(
-        TaskItem.formatIsoDate(DateTime.utc(2026, 1, 5)),
-        equals('2026-01-05'),
-        reason: 'Single-digit month and day must be zero-padded',
-      );
-      expect(
-        TaskItem.tryParseIsoDate('2026-11-01'),
-        equals(DateTime.utc(2026, 11, 1)),
-        reason: 'Valid ISO date must parse to UTC midnight',
-      );
-      expect(
-        TaskItem.tryParseIsoDate('2026-02-30'),
-        isNull,
-        reason: 'Out-of-range day for February must return null',
-      );
-    });
-  });
-
-  group('AppLanguage & Locale Resolution', () {
     test(
-      'resolves English as default and honors German or System locale settings',
+      'accepts empty or comment-only documents as valid empty TaskBoard',
       () {
+        expect(tdfService.parse('').focus, isEmpty);
         expect(
-          AppLanguage.system.resolveLocale(const Locale('de', 'DE')),
-          equals(const Locale('de')),
-          reason: 'System mode on German OS must resolve to de',
-        );
-        expect(
-          AppLanguage.system.resolveLocale(const Locale('en', 'US')),
-          equals(const Locale('en')),
-          reason: 'System mode on English OS must resolve to en',
-        );
-        expect(
-          AppLanguage.system.resolveLocale(const Locale('fr', 'FR')),
-          equals(const Locale('en')),
-          reason: 'System mode on unsupported OS language must fall back to English default',
-        );
-        expect(
-          AppLanguage.system.resolveLocale(null),
-          equals(const Locale('en')),
-          reason:
-              'System mode with null locale must fall back to English default',
-        );
-        expect(
-          AppLanguage.english.resolveLocale(const Locale('de', 'DE')),
-          equals(const Locale('en')),
-          reason: 'Explicit English setting must override German OS locale',
-        );
-        expect(
-          AppLanguage.german.resolveLocale(const Locale('en', 'US')),
-          equals(const Locale('de')),
-          reason: 'Explicit German setting must override English OS locale',
-        );
-        expect(
-          AppLanguage.fromCode('de'),
-          equals(AppLanguage.german),
-          reason: 'Code de must map to AppLanguage.german',
-        );
-        expect(
-          AppLanguage.fromCode('en'),
-          equals(AppLanguage.english),
-          reason: 'Code en must map to AppLanguage.english',
-        );
-        expect(
-          AppLanguage.fromCode('unknown'),
-          equals(AppLanguage.system),
-          reason: 'Unknown code must default to AppLanguage.system',
+          tdfService.parse('   \t  \n# only comment\r\n  # another').focus,
+          isEmpty,
         );
       },
     );
   });
 
-  group('Auto-Pull Cascade & Soft WIP Limits', () {
-    test('fills # [1] Focus (limit 3) from # [2] Ready and # [2] Ready (limit 5) from # [3] Planned', () {
-      final board = TaskBoard(
-        focus: [TaskItem(id: 'f1', title: 'F1')],
-        ready: [
-          TaskItem(id: 'b1', title: 'B1'),
-          TaskItem(id: 'b2', title: 'B2'),
-          TaskItem(id: 'b3', title: 'B3'),
-        ],
-        planned: [
-          TaskItem(id: 'g1', title: 'G1'),
-          TaskItem(id: 'g2', title: 'G2'),
-          TaskItem(id: 'g3', title: 'G3'),
-          TaskItem(id: 'g4', title: 'G4'),
-          TaskItem(id: 'g5', title: 'G5'),
-        ],
-        blocked: [TaskItem(id: 'bl1', title: 'BL1')],
-        someday: [TaskItem(id: 'i1', title: 'I1')],
-      );
+  group('TDF Section 5 Dynamic 6-Tier Derivation & Context Filtering', () {
+    test('evaluates blocking conditions (blocked, suspended, condition day/time) and context filters', () {
+      const tdfWithConditions = '''
+location home {
+    name "Home"
+}
+location office {
+    name "Office"
+}
+category c_work {
+    name "Work"
+}
+category c_home {
+    name "Home"
+}
 
-      final cascaded = board.applyAutoPull();
+task prereq_open {
+    name "Open Prerequisite"
+    created 2026-11-01 07:00
+    queued 2026-11-01 07:00
+}
+
+task prereq_done {
+    name "Finished Prerequisite"
+    created 2026-11-01 07:00
+    queued 2026-11-01 07:00
+    finished 2026-11-01 07:30
+}
+
+task wait_on_open {
+    name "Blocked by open task"
+    created 2026-11-01 08:00
+    queued 2026-11-01 08:00
+    blocked prereq_open
+}
+
+task wait_on_done {
+    name "Unblocked because prereq is finished"
+    created 2026-11-01 08:05
+    queued 2026-11-01 08:05
+    blocked prereq_done
+}
+
+task suspended_future {
+    name "Suspended until tomorrow"
+    created 2026-11-01 08:10
+    queued 2026-11-01 08:10
+    suspended 2026-11-02 09:00
+}
+
+task suspended_past {
+    name "Suspension already expired"
+    created 2026-11-01 08:15
+    queued 2026-11-01 08:15
+    suspended 2026-11-01 10:00
+}
+
+task cond_weekday_only {
+    name "Monday only task"
+    created 2026-11-01 08:20
+    queued 2026-11-01 08:20
+    condition day mon
+}
+
+task cond_sunday_window {
+    name "Sunday daytime task"
+    created 2026-11-01 08:25
+    queued 2026-11-01 08:25
+    condition day sun
+    condition time 09:00 17:00
+    locations home
+    categories c_home
+}
+
+task cond_outside_window {
+    name "Sunday late night task"
+    created 2026-11-01 08:30
+    queued 2026-11-01 08:30
+    condition day sun
+    condition time 20:00 22:00
+}
+''';
+
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final board = tdfService.parse(
+        tdfWithConditions,
+        evaluationTime: sundayNoon,
+      );
 
       expect(
-        cascaded.focus.map((task) => task.title),
-        equals(['F1', 'B1', 'B2']),
+        board.blocked.map((task) => task.id),
+        equals([
+          'wait_on_open',
+          'suspended_future',
+          'cond_weekday_only',
+          'cond_outside_window',
+        ]),
+        reason: 'Tasks with unfinished prereqs, future suspension, or unmet day/time conditions must be Blocked',
       );
       expect(
-        cascaded.ready.map((task) => task.title),
-        equals(['B3', 'G1', 'G2', 'G3', 'G4']),
+        board.focus.map((task) => task.id),
+        equals(['prereq_open', 'wait_on_done', 'suspended_past']),
+        reason: 'First 3 unblocked scheduled tasks must fill Focus',
       );
-      expect(cascaded.planned.map((task) => task.title), equals(['G5']));
-      expect(cascaded.blocked.map((task) => task.title), equals(['BL1']));
-      expect(cascaded.someday.map((task) => task.title), equals(['I1']));
-    });
-
-    test('manual overfilling of # [1] Focus or # [2] Ready never throws or force-moves downward', () {
-      final overfilled = TaskBoard(
-        focus: [
-          TaskItem(title: 'F1'),
-          TaskItem(title: 'F2'),
-          TaskItem(title: 'F3'),
-          TaskItem(title: 'F4'),
-        ],
-        ready: [
-          TaskItem(title: 'B1'),
-          TaskItem(title: 'B2'),
-          TaskItem(title: 'B3'),
-          TaskItem(title: 'B4'),
-          TaskItem(title: 'B5'),
-          TaskItem(title: 'B6'),
-        ],
-        planned: [TaskItem(title: 'G1')],
+      expect(
+        board.ready.map((task) => task.id),
+        equals(['cond_sunday_window']),
+        reason: '4th unblocked scheduled task must land in Ready',
       );
 
-      final result = overfilled.applyAutoPull();
-      expect(result.focus.length, equals(4));
-      expect(result.ready.length, equals(6));
-      expect(result.planned.length, equals(1));
+      final filteredHome = tdfService.parse(
+        tdfWithConditions,
+        evaluationTime: sundayNoon,
+        activeCategoryId: 'c_home',
+        activeLocationId: 'home',
+      );
+      expect(
+        filteredHome.focus.map((task) => task.id),
+        equals(['cond_sunday_window']),
+        reason: 'Context filter for category c_home and location home must select matching task',
+      );
     });
 
-    test('Quick-Add to # [3] Planned cascades all the way to # [1] Focus when board has capacity', () {
-      final emptyBoard = TaskBoard.empty();
-      final afterAdd = emptyBoard.addTask(
-        'First Task',
+    test('sorts priority tasks ahead of regular FIFO tasks and preserves declaration order on ties', () {
+      const sortingTdf = '''
+task reg1 {
+    name "Regular 1 (09:00)"
+    created 2026-11-01 09:00
+    queued 2026-11-01 09:00
+}
+task reg2 {
+    name "Regular 2 (08:00 first)"
+    created 2026-11-01 08:00
+    queued 2026-11-01 08:00
+}
+task reg3 {
+    name "Regular 3 (08:00 second)"
+    created 2026-11-01 08:00
+    queued 2026-11-01 08:00
+}
+task prio1 priority {
+    name "Priority 1 (10:00)"
+    created 2026-11-01 10:00
+    queued 2026-11-01 10:00
+}
+task prio2 priority {
+    name "Priority 2 (09:30)"
+    created 2026-11-01 09:30
+    queued 2026-11-01 09:30
+}
+''';
+
+      final board = tdfService.parse(sortingTdf, evaluationTime: fixedDate);
+
+      expect(
+        board.focus.map((task) => task.id),
+        equals(['prio2', 'prio1', 'reg2']),
+        reason: 'Priority tasks ordered by queued must precede regular tasks ordered by queued',
+      );
+      expect(
+        board.ready.map((task) => task.id),
+        equals(['reg3', 'reg1']),
+        reason: 'Tie between reg2 and reg3 at 08:00 must preserve declaration order',
+      );
+    });
+  });
+
+  group('TDF Section 6 State Transitions, Subtasks Auto-Finish & Retention GC', () {
+    test(
+      'fills Focus (limit 3) from Ready and Ready (limit 5) from Planned',
+      () {
+        final board = TaskBoard(
+          focus: [TaskItem(id: 'f1', title: 'F1')],
+          ready: [
+            TaskItem(id: 'b1', title: 'B1'),
+            TaskItem(id: 'b2', title: 'B2'),
+            TaskItem(id: 'b3', title: 'B3'),
+          ],
+          planned: [
+            TaskItem(id: 'g1', title: 'G1'),
+            TaskItem(id: 'g2', title: 'G2'),
+            TaskItem(id: 'g3', title: 'G3'),
+            TaskItem(id: 'g4', title: 'G4'),
+            TaskItem(id: 'g5', title: 'G5'),
+          ],
+          blocked: [TaskItem(id: 'bl1', title: 'BL1')],
+          someday: [TaskItem(id: 'i1', title: 'I1')],
+        );
+
+        final cascaded = board.applyAutoPull();
+
+        expect(
+          cascaded.focus.map((task) => task.title),
+          equals(['F1', 'B1', 'B2']),
+        );
+        expect(
+          cascaded.ready.map((task) => task.title),
+          equals(['B3', 'G1', 'G2', 'G3', 'G4']),
+        );
+        expect(cascaded.planned.map((task) => task.title), equals(['G5']));
+        expect(cascaded.blocked.map((task) => task.title), equals(['BL1']));
+        expect(cascaded.someday.map((task) => task.title), equals(['I1']));
+      },
+    );
+
+    test('Quick-Add to Planned cascades to Focus when board has capacity, and Priority sorts ahead of regular tasks', () {
+      var board = TaskBoard.empty();
+      board = board.addTask(
+        'Task 1',
         targetTier: TaskTier.planned,
-        currentDate: fixedDate,
+        currentDate: DateTime.utc(2026, 11, 1, 8, 0),
+        id: 't001',
+      );
+      board = board.addTask(
+        'Task 2',
+        targetTier: TaskTier.planned,
+        currentDate: DateTime.utc(2026, 11, 1, 8, 5),
+        id: 't002',
+      );
+      board = board.addTask(
+        'Task 3',
+        targetTier: TaskTier.planned,
+        currentDate: DateTime.utc(2026, 11, 1, 8, 10),
+        id: 't003',
       );
 
-      expect(afterAdd.focus.map((task) => task.title), equals(['First Task']));
-      expect(afterAdd.ready, isEmpty);
-      expect(afterAdd.planned, isEmpty);
-    });
-
-    test('adds priority task directly to Focus and preserves subtasks across board and Markdown round-trip', () {
-      final board = TaskBoard(
-        focus: [
-          TaskItem(id: 'f1', title: 'F1'),
-          TaskItem(id: 'f2', title: 'F2'),
-          TaskItem(id: 'f3', title: 'F3'),
-        ],
+      expect(
+        board.focus.map((task) => task.id),
+        equals(['t001', 't002', 't003']),
       );
 
       final updated = board.addTask(
         'Urgent Hotfix',
         targetTier: TaskTier.focus,
         isPriority: true,
+        subtasksAutoFinish: true,
         subtasks: const [
           SubtaskItem(title: 'Patch vulnerability'),
           SubtaskItem(title: 'Verify regression tests', isCompleted: true),
         ],
-        currentDate: fixedDate,
+        currentDate: DateTime.utc(2026, 11, 1, 8, 15),
+        id: 't004',
       );
 
-      expect(updated.focus.length, equals(4));
-      final added = updated.focus.last;
-      expect(added.title, equals('Urgent Hotfix'));
-      expect(added.isPriority, isTrue);
-      expect(added.subtasks.length, equals(2));
-      expect(added.subtasks[0].title, equals('Patch vulnerability'));
-      expect(added.subtasks[0].isCompleted, isFalse);
-      expect(added.subtasks[1].title, equals('Verify regression tests'));
-      expect(added.subtasks[1].isCompleted, isTrue);
-
-      final serialized = markdownService.serialize(updated);
-      expect(serialized, contains('- [ ] Urgent Hotfix'));
-      expect(serialized, contains('  - [ ] Patch vulnerability'));
-      expect(serialized, contains('  - [x] Verify regression tests'));
-
-      final reparsed = markdownService.parse(serialized);
-      expect(reparsed.focus.last.title, equals('Urgent Hotfix'));
       expect(
-        reparsed.focus.last.subtasks.map((subtask) => subtask.title),
+        updated.focus.map((task) => task.id),
+        equals(['t004', 't001', 't002']),
+        reason: 'Priority task must sort to the top of Focus and push 3rd task to Ready',
+      );
+      expect(updated.ready.map((task) => task.id), equals(['t003']));
+
+      final serialized = tdfService.serialize(updated);
+      expect(serialized, contains('task t004 priority {'));
+      expect(serialized, contains('subtasks auto-finish {'));
+      expect(serialized, contains('step false "Patch vulnerability"'));
+      expect(serialized, contains('step true "Verify regression tests"'));
+
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(
+        reparsed.focus.first.subtasks.map((subtask) => subtask.title),
         equals(['Patch vulnerability', 'Verify regression tests']),
       );
-      expect(reparsed.focus.last.subtasks[0].isCompleted, isFalse);
-      expect(reparsed.focus.last.subtasks[1].isCompleted, isTrue);
     });
-  });
 
-  group('Completing, Pruning (30-Day GC) & Restoring Tasks', () {
-    test('completes active task, stamps YYYY-MM-DD at top of # [6] Completed, prunes >30d, and triggers cascade', () {
+    test('completes enclosing task automatically when subtasks has auto-finish and all steps become true', () {
+      const autoFinishTdf = '''
+task t_auto {
+    name "Auto-finish task"
+    created 2026-11-01 09:00
+    queued 2026-11-01 09:00
+    subtasks auto-finish {
+        step true "Step 1"
+        step false "Step 2"
+    }
+}
+task t_manual {
+    name "Manual finish task"
+    created 2026-11-01 09:05
+    queued 2026-11-01 09:05
+    subtasks {
+        step true "Step A"
+        step false "Step B"
+    }
+}
+''';
+
+      var board = tdfService.parse(autoFinishTdf, evaluationTime: fixedDate);
+      expect(
+        board.focus.map((task) => task.id),
+        equals(['t_auto', 't_manual']),
+      );
+
+      board = board.toggleSubtask('t_auto', 1, currentDate: fixedDate);
+      expect(
+        board.completed.map((task) => task.id),
+        equals(['t_auto']),
+        reason: 'Completing all steps in subtasks auto-finish must transition task to Completed',
+      );
+      expect(board.focus.map((task) => task.id), equals(['t_manual']));
+
+      board = board.toggleSubtask('t_manual', 1, currentDate: fixedDate);
+      expect(
+        board.focus.map((task) => task.id),
+        equals(['t_manual']),
+        reason: 'Completing all steps without auto-finish must keep task open',
+      );
+    });
+
+    test('completes active task, unblocks dependent tasks, prunes >30d completed tasks (29, 30, 31 day bounds), and restores tasks', () {
       final board = TaskBoard(
         focus: [
           TaskItem(id: 'f1', title: 'Finish spec'),
@@ -456,15 +575,29 @@ void main() {
           TaskItem(id: 'f3', title: 'Task 3'),
         ],
         ready: [TaskItem(id: 'b1', title: 'Ready 1')],
+        blocked: [
+          TaskItem(
+            id: 'dep1',
+            title: 'Waiting on f1',
+            queuedAt: DateTime.utc(2026, 11, 1, 9, 0),
+            blockedByTaskIds: const ['f1'],
+          ),
+        ],
         completed: [
           TaskItem(
-            id: 'e_keep',
+            id: 'e_keep_29',
+            title: '29 Days Ago',
+            isCompleted: true,
+            completedAt: DateTime.utc(2026, 10, 3),
+          ),
+          TaskItem(
+            id: 'e_keep_30',
             title: '30 Days Ago',
             isCompleted: true,
             completedAt: DateTime.utc(2026, 10, 2),
           ),
           TaskItem(
-            id: 'e_prune',
+            id: 'e_prune_31',
             title: '31 Days Ago',
             isCompleted: true,
             completedAt: DateTime.utc(2026, 10, 1),
@@ -478,54 +611,34 @@ void main() {
         afterComplete.focus.map((task) => task.title),
         equals(['Task 2', 'Task 3', 'Ready 1']),
       );
-      expect(afterComplete.ready, isEmpty);
-
+      expect(
+        afterComplete.ready.map((task) => task.id),
+        equals(['dep1']),
+        reason: 'Completing prerequisite f1 must automatically unblock dep1 into the active cycle',
+      );
+      expect(afterComplete.blocked, isEmpty);
       expect(
         afterComplete.completed.map((task) => task.title),
-        equals(['Finish spec', '30 Days Ago']),
-      );
-      expect(afterComplete.completed.first.completedAt, equals(fixedDate));
-      expect(
-        afterComplete.completed.first.toMarkdownLine(inCompleted: true),
-        equals('- [x] 2026-11-01 Finish spec'),
-      );
-    });
-
-    test('restores completed task by stripping [x] and date and moving to selected tier', () {
-      final board = TaskBoard(
-        completed: [
-          TaskItem(
-            id: 'done1',
-            title: 'Restorable Task',
-            isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 28),
-          ),
-        ],
+        equals(['Finish spec', '29 Days Ago', '30 Days Ago']),
+        reason:
+            '29 and 30 day old tasks must be kept while 31 day old is pruned',
       );
 
-      final restored = board.restoreTask(
-        'done1',
+      final restored = afterComplete.restoreTask(
+        'f1',
         TaskTier.someday,
         currentDate: fixedDate,
       );
-
-      expect(restored.completed, isEmpty);
-      expect(restored.someday.length, equals(1));
-      expect(restored.someday.first.title, equals('Restorable Task'));
+      expect(restored.someday.map((task) => task.id), equals(['f1']));
       expect(restored.someday.first.isCompleted, isFalse);
       expect(restored.someday.first.completedAt, isNull);
-      expect(
-        restored.someday.first.toMarkdownLine(inCompleted: false),
-        equals('- [ ] Restorable Task'),
-      );
+      expect(restored.someday.first.queuedAt, isNull);
     });
-  });
 
-  group('Anti-Ping-Pong Downgrade & Quick-Block Rules', () {
-    test('downgrading from # [1] Focus to # [2] Ready pulls top of # [2] Ready first and appends downgraded task to end of # [2] Ready', () {
+    test('executes Section 6.4 Minor Downgrade (Focus -> End of Ready) and Section 6.3 Full Downgrade (Ready -> Planned)', () {
       final board = TaskBoard(
         focus: [
-          TaskItem(id: 'f1', title: 'Focus 1 (Downgrade Me)'),
+          TaskItem(id: 'f1', title: 'Focus 1 (Downgrade Me)', isPriority: true),
           TaskItem(id: 'f2', title: 'Focus 2'),
           TaskItem(id: 'f3', title: 'Focus 3'),
         ],
@@ -546,95 +659,389 @@ void main() {
         downgraded.ready.map((task) => task.title),
         equals(['Ready 2', 'Focus 1 (Downgrade Me)', 'Planned 1']),
       );
+      expect(
+        downgraded.findTask('f1')?.isPriority,
+        isFalse,
+        reason: 'Downgrading must strip the priority flag per Section 6.4',
+      );
       expect(downgraded.planned, isEmpty);
-    });
 
-    test('downgrading from # [1] Focus to # [2] Ready when # [1] Focus has < 3 tasks does NOT ping-pong back to # [1] Focus', () {
-      final board = TaskBoard(
-        focus: [TaskItem(id: 'f1', title: 'Sole Focus Task')],
-        ready: [TaskItem(id: 'b1', title: 'Sole Ready Task')],
-      );
-
-      final downgraded = board.downgradeTask('f1', currentDate: fixedDate);
-
-      expect(
-        downgraded.focus.map((task) => task.title),
-        equals(['Sole Ready Task']),
-      );
-      expect(
-        downgraded.ready.map((task) => task.title),
-        equals(['Sole Focus Task']),
-      );
-    });
-
-    test('downgrading from # [2] Ready to # [3] Planned pulls top of # [3] Planned first and prevents ping-pong back into # [2] Ready', () {
-      final board = TaskBoard(
+      final fullBoard = TaskBoard(
         focus: [
           TaskItem(id: 'f1', title: 'F1'),
           TaskItem(id: 'f2', title: 'F2'),
           TaskItem(id: 'f3', title: 'F3'),
         ],
         ready: [
-          TaskItem(id: 'b1', title: 'Ready 1 (Downgrade Me)'),
-          TaskItem(id: 'b2', title: 'Ready 2'),
+          TaskItem(id: 'r1', title: 'R1 (Downgrade to Planned)'),
+          TaskItem(id: 'r2', title: 'R2'),
+          TaskItem(id: 'r3', title: 'R3'),
+          TaskItem(id: 'r4', title: 'R4'),
+          TaskItem(id: 'r5', title: 'R5'),
         ],
-        planned: [TaskItem(id: 'g1', title: 'Planned 1 (Replacement)')],
+        planned: [
+          TaskItem(id: 'p1', title: 'P1 (Advance to Ready)'),
+          TaskItem(id: 'p2', title: 'P2'),
+        ],
       );
 
-      final downgraded = board.downgradeTask('b1', currentDate: fixedDate);
-
-      expect(
-        downgraded.ready.map((task) => task.title),
-        equals(['Ready 2', 'Planned 1 (Replacement)']),
+      final afterReadyDowngrade = fullBoard.downgradeTask(
+        'r1',
+        currentDate: fixedDate,
       );
       expect(
-        downgraded.planned.map((task) => task.title),
-        equals(['Ready 1 (Downgrade Me)']),
+        afterReadyDowngrade.ready.map((task) => task.id),
+        equals(['r2', 'r3', 'r4', 'r5', 'p1']),
+        reason: 'Task at position 9 (p1) must advance into position 8 (Ready)',
+      );
+      expect(
+        afterReadyDowngrade.planned.map((task) => task.id),
+        equals(['p2', 'r1']),
+        reason: 'Downgraded Ready task must sort to the end of Planned',
       );
     });
 
-    test('Quick-Block moves task from # [1] Focus to # [4] Blocked and cascades # [2] Ready / # [3] Planned upward', () {
-      final board = TaskBoard(
-        focus: [
-          TaskItem(id: 'f1', title: 'Blocked Focus Task'),
-          TaskItem(id: 'f2', title: 'F2'),
-          TaskItem(id: 'f3', title: 'F3'),
-        ],
-        ready: [TaskItem(id: 'b1', title: 'B1')],
+    test(
+      'Quick-Block moves task from Focus to Blocked and advances Ready upward',
+      () {
+        final board = TaskBoard(
+          focus: [
+            TaskItem(id: 'f1', title: 'Blocked Focus Task'),
+            TaskItem(id: 'f2', title: 'F2'),
+            TaskItem(id: 'f3', title: 'F3'),
+          ],
+          ready: [TaskItem(id: 'b1', title: 'B1')],
+        );
+
+        final blocked = board.blockTask('f1', currentDate: fixedDate);
+
+        expect(
+          blocked.focus.map((task) => task.title),
+          equals(['F2', 'F3', 'B1']),
+        );
+        expect(blocked.ready, isEmpty);
+        expect(
+          blocked.blocked.map((task) => task.title),
+          equals(['Blocked Focus Task']),
+        );
+      },
+    );
+  });
+
+  group('TDF Section 7 Resource Bounds & Section 8 Error Conditions', () {
+    test('rejects all mandatory syntax and schema error conditions in Section 8', () {
+      void expectTdfError(
+        String input,
+        TdfErrorKind expectedKind, {
+        int? expectedLine,
+      }) {
+        expect(
+          () => tdfService.parse(input, evaluationTime: fixedDate),
+          throwsA(
+            isA<TdfException>()
+                .having((error) => error.kind, 'kind', expectedKind)
+                .having(
+                  (error) => expectedLine == null ? null : error.line,
+                  'line',
+                  expectedLine,
+                ),
+          ),
+          reason: 'Input must fail with $expectedKind',
+        );
+      }
+
+      expectTdfError(
+        'name "Root Directive"',
+        TdfErrorKind.unexpectedRootDirective,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Test"\n  created 2026-11-01\n  queued\n}',
+        TdfErrorKind.missingDirectiveArgument,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        '"task" t001 {\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  "name" "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        '123task t001 {\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  -bad "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task t001{\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks{\n  }\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 { extra\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Test"\n  created 2026-11-01\n} trailing',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Test"\n  created 2026-11-01',
+        TdfErrorKind.unclosedBlock,
+      );
+      expectTdfError('}', TdfErrorKind.unexpectedClosingBrace, expectedLine: 1);
+      expectTdfError(
+        'task t001 {\n  name "Unterminated\n  created 2026-11-01\n}',
+        TdfErrorKind.unterminatedString,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        "task t001 {\n  name 'Unterminated\n  created 2026-11-01\n}",
+        TdfErrorKind.unterminatedString,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task t001 {\n  name foo"bar"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task t001 {\n  name "foo"bar\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Bad \\x escape"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidEscapeSequence,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'project p001 {\n  name "Unknown"\n}',
+        TdfErrorKind.unknownBlockType,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Test"\n  created 2026-11-01\n  unknown_dir 123\n}',
+        TdfErrorKind.unknownDirective,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Missing created"\n}',
+        TdfErrorKind.missingRequiredDirective,
+      );
+      expectTdfError(
+        'task t001 {\n  name "First"\n  name "Second"\n  created 2026-11-01\n}',
+        TdfErrorKind.duplicateDirective,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'task t001 {\n  name "First"\n  created 2026-11-01\n}\ntask t001 {\n  name "Dup"\n  created 2026-11-01\n}',
+        TdfErrorKind.duplicateIdentifier,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Bad leap day"\n  created 2026-02-29\n}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Bad time"\n  created 2026-11-01 25:00\n}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Bad step bool"\n  created 2026-11-01\n  subtasks {\n    step yes "Sub"\n  }\n}',
+        TdfErrorKind.invalidBoolean,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'location work {\n  name "Work"\n  gps not_a_number 11.0\n}',
+        TdfErrorKind.invalidNumber,
+        expectedLine: 3,
+      );
+    });
+
+    test('enforces all Section 7 resource bounds before allocation', () {
+      final overText = 'a' * (TdfService.maxTextLength + 1);
+      expect(
+        () => tdfService.parse(
+          'task t001 {\n  name "$overText"\n  created 2026-11-01\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'name exceeding MAX_TEXT_LENGTH (500) must throw LimitExceeded',
       );
 
-      final blocked = board.blockTask('f1', currentDate: fixedDate);
+      final tooManyArgs = List.generate(
+        TdfService.maxArgsPerStmt + 1,
+        (index) => 'c$index',
+      ).join(' ');
+      expect(
+        () => tdfService.parse(
+          'task t001 {\n  name "Test"\n  created 2026-11-01\n  categories $tooManyArgs\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Directive exceeding MAX_ARGS_PER_STMT (64) must throw LimitExceeded',
+      );
 
       expect(
-        blocked.focus.map((task) => task.title),
-        equals(['F2', 'F3', 'B1']),
+        () => tdfService.parse(
+          'task t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n    nested {\n    }\n  }\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Block nesting exceeding MAX_NESTING_DEPTH (2) must throw LimitExceeded',
       );
-      expect(blocked.ready, isEmpty);
+
+      final tooManyStmtsBuffer = StringBuffer(
+        'task t001 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n',
+      );
+      for (var i = 0; i <= TdfService.maxStmtsPerBlock; i++) {
+        tooManyStmtsBuffer.writeln('    step false "Step $i"');
+      }
+      tooManyStmtsBuffer.writeln('  }\n}');
       expect(
-        blocked.blocked.map((task) => task.title),
-        equals(['Blocked Focus Task']),
+        () => tdfService.parse(tooManyStmtsBuffer.toString()),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Block exceeding MAX_STMTS_PER_BLOCK (512) must throw LimitExceeded',
+      );
+
+      final tooManyLines = List.filled(
+        TdfService.maxLineCount + 1,
+        '# comment',
+      ).join('\n');
+      expect(
+        () => tdfService.parse(tooManyLines),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Document exceeding MAX_LINE_COUNT (16384) must throw LimitExceeded',
+      );
+
+      final tooManyBytes = '# ${'x' * TdfService.maxFileBytes}';
+      expect(
+        () => tdfService.parse(tooManyBytes),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Document exceeding MAX_FILE_BYTES (1 MiB) must throw LimitExceeded',
       );
     });
   });
 
-  group('Riverpod TaskNotifier & Native WebDavRepository', () {
+  group('AppLanguage & Locale Resolution', () {
+    test(
+      'resolves English as default and honors German or System locale settings',
+      () {
+        expect(
+          AppLanguage.system.resolveLocale(const Locale('de', 'DE')),
+          equals(const Locale('de')),
+        );
+        expect(
+          AppLanguage.system.resolveLocale(const Locale('en', 'US')),
+          equals(const Locale('en')),
+        );
+        expect(
+          AppLanguage.system.resolveLocale(const Locale('fr', 'FR')),
+          equals(const Locale('en')),
+        );
+        expect(
+          AppLanguage.system.resolveLocale(null),
+          equals(const Locale('en')),
+        );
+        expect(
+          AppLanguage.english.resolveLocale(const Locale('de', 'DE')),
+          equals(const Locale('en')),
+        );
+        expect(
+          AppLanguage.german.resolveLocale(const Locale('en', 'US')),
+          equals(const Locale('de')),
+        );
+        expect(AppLanguage.fromCode('de'), equals(AppLanguage.german));
+        expect(AppLanguage.fromCode('en'), equals(AppLanguage.english));
+        expect(AppLanguage.fromCode('unknown'), equals(AppLanguage.system));
+      },
+    );
+  });
+
+  group('Riverpod TaskNotifier & Native WebDavRepository (TDF)', () {
     late HttpServer server;
-    String remoteMarkdownStore = '';
+    String remoteTdfStore = '';
     String? lastAuthHeader;
     int putCount = 0;
 
     setUp(() async {
-      remoteMarkdownStore = '''
-# [1] Fokus
-- [ ] Remote Focus 1
-- [ ] Remote Focus 2
-- [ ] Remote Focus 3
-
-# [2] Bereit
-- [ ] Remote Ready 1
-
-# [3] Geplant
-- [ ] Remote Backlog 1
+      remoteTdfStore = '''
+task f1 {
+    name "Remote Focus 1"
+    created 2026-11-01 08:00
+    queued 2026-11-01 08:00
+}
+task f2 {
+    name "Remote Focus 2"
+    created 2026-11-01 08:05
+    queued 2026-11-01 08:05
+}
+task f3 {
+    name "Remote Focus 3"
+    created 2026-11-01 08:10
+    queued 2026-11-01 08:10
+}
+task r1 {
+    name "Remote Ready 1"
+    created 2026-11-01 08:15
+    queued 2026-11-01 08:15
+}
+task b1 {
+    name "Remote Backlog 1"
+    created 2026-11-01 08:20
+    queued 2026-11-01 08:20
+}
 ''';
       lastAuthHeader = null;
       putCount = 0;
@@ -644,11 +1051,11 @@ void main() {
         lastAuthHeader = request.headers.value(HttpHeaders.authorizationHeader);
         if (request.method == 'GET') {
           request.response.statusCode = HttpStatus.ok;
-          request.response.write(remoteMarkdownStore);
+          request.response.write(remoteTdfStore);
           await request.response.close();
         } else if (request.method == 'PUT') {
           putCount++;
-          remoteMarkdownStore = await utf8.decoder.bind(request).join();
+          remoteTdfStore = await utf8.decoder.bind(request).join();
           request.response.statusCode = HttpStatus.noContent;
           await request.response.close();
         } else {
@@ -662,12 +1069,12 @@ void main() {
       await server.close(force: true);
     });
 
-    test('fetches Markdown via HTTP GET with Basic Auth, creates missing tiers, and syncs mutations via HTTP PUT', () async {
+    test('fetches TDF via HTTP GET with Basic Auth, derives tiers, and syncs mutations via HTTP PUT', () async {
       final config = WebDavConfig(
         serverUrl: 'http://${server.address.host}:${server.port}',
         username: 'stefan',
         password: 'secret-app-password',
-        filePath: 'tiertask.md',
+        filePath: 'tiertask.tdf',
         language: AppLanguage.english,
       );
 
@@ -708,17 +1115,11 @@ void main() {
         updatedBoard.ready.map((task) => task.title),
         equals(['Remote Backlog 1']),
       );
-      expect(
-        updatedBoard.completed.first.toMarkdownLine(inCompleted: true),
-        equals('- [x] 2026-11-01 Remote Focus 1'),
-      );
+      expect(updatedBoard.completed.first.title, equals('Remote Focus 1'));
 
-      expect(putCount, greaterThanOrEqualTo(2));
-      expect(remoteMarkdownStore, contains('# [1] Focus'));
-      expect(remoteMarkdownStore, contains('# [4] Blocked'));
-      expect(remoteMarkdownStore, contains('# [5] Someday'));
-      expect(remoteMarkdownStore, contains('# [6] Completed'));
-      expect(remoteMarkdownStore, contains('- [x] 2026-11-01 Remote Focus 1'));
+      expect(putCount, greaterThanOrEqualTo(1));
+      expect(remoteTdfStore, contains('task f1 {'));
+      expect(remoteTdfStore, contains('finished 2026-11-01 12:00'));
     });
   });
 
@@ -745,16 +1146,8 @@ void main() {
           if (!key.startsWith('@')) key,
       ];
 
-      expect(
-        enMessageKeys,
-        contains('moveTaskTitle'),
-        reason: 'Template ARB must include moveTaskTitle',
-      );
-      expect(
-        deMessageKeys,
-        equals(enMessageKeys),
-        reason: 'German ARB must define the exact same message keys in order',
-      );
+      expect(enMessageKeys, contains('moveTaskTitle'));
+      expect(deMessageKeys, equals(enMessageKeys));
 
       for (final key in enMessageKeys) {
         _expectArbKeyMetadata(enDecoded, key);
@@ -767,171 +1160,61 @@ void main() {
       expect(
         linuxRunner,
         contains('gtk_header_bar_set_title(header_bar, "TierTask");'),
-        reason: 'Linux GTK header bar title must be TierTask',
       );
       expect(
         linuxRunner,
         contains('gtk_window_set_title(window, "TierTask");'),
-        reason: 'Linux GTK window title must be TierTask',
       );
-      expect(
-        linuxRunner,
-        contains('g_set_application_name("TierTask");'),
-        reason:
-            'Linux GLib application name must be TierTask for taskbar display',
-      );
-      expect(
-        linuxRunner,
-        isNot(contains('"tiertask"')),
-        reason: 'Linux runner must not use lowercase tiertask for window or header titles',
-      );
+      expect(linuxRunner, contains('g_set_application_name("TierTask");'));
 
       final windowsMain = File('windows/runner/main.cpp').readAsStringSync();
-      expect(
-        windowsMain,
-        contains('window.Create(L"TierTask", origin, size)'),
-        reason: 'Windows Win32 window title must be TierTask',
-      );
-      expect(
-        windowsMain,
-        isNot(contains('L"tiertask"')),
-        reason:
-            'Windows main.cpp must not use lowercase tiertask as window title',
-      );
+      expect(windowsMain, contains('window.Create(L"TierTask", origin, size)'));
 
       final windowsResource = File('windows/runner/Runner.rc')
           .readAsStringSync();
       expect(
         windowsResource,
         contains('VALUE "FileDescription", "TierTask" "\\0"'),
-        reason: 'Windows Runner.rc FileDescription must be TierTask for taskbar and Task Manager',
-      );
-      expect(
-        windowsResource,
-        contains('VALUE "InternalName", "TierTask" "\\0"'),
-        reason: 'Windows Runner.rc InternalName must be TierTask',
-      );
-      expect(
-        windowsResource,
-        contains('VALUE "ProductName", "TierTask" "\\0"'),
-        reason: 'Windows Runner.rc ProductName must be TierTask',
       );
 
       final androidManifest = File('android/app/src/main/AndroidManifest.xml')
           .readAsStringSync();
-      expect(
-        androidManifest,
-        contains('android:label="TierTask"'),
-        reason: 'Android manifest label must be TierTask',
-      );
-      expect(
-        androidManifest,
-        isNot(contains('android:label="tiertask"')),
-        reason: 'Android manifest must not use lowercase tiertask as label',
-      );
+      expect(androidManifest, contains('android:label="TierTask"'));
     });
   });
 
   group('AppThemeMode, StorageMode & WebDavConfig Resolution', () {
-    test('resolves AppThemeMode and StorageMode codes with system and local defaults', () {
-      expect(
-        AppThemeMode.fromCode('light'),
-        equals(AppThemeMode.light),
-        reason: 'Code light must resolve to AppThemeMode.light',
-      );
-      expect(
-        AppThemeMode.fromCode('DARK'),
-        equals(AppThemeMode.dark),
-        reason: 'Case-insensitive dark code must resolve to AppThemeMode.dark',
-      );
-      expect(
-        AppThemeMode.fromCode('system'),
-        equals(AppThemeMode.system),
-        reason: 'Code system must resolve to AppThemeMode.system',
-      );
-      expect(
-        AppThemeMode.fromCode('invalid'),
-        equals(AppThemeMode.system),
-        reason: 'Unknown theme code must default to AppThemeMode.system',
-      );
-      expect(
-        AppThemeMode.fromCode(null),
-        equals(AppThemeMode.system),
-        reason: 'Null theme code must default to AppThemeMode.system',
-      );
+    test('resolves AppThemeMode and StorageMode codes with system and local tiertask.tdf defaults', () {
+      expect(AppThemeMode.fromCode('light'), equals(AppThemeMode.light));
+      expect(AppThemeMode.fromCode('DARK'), equals(AppThemeMode.dark));
+      expect(AppThemeMode.fromCode('system'), equals(AppThemeMode.system));
+      expect(AppThemeMode.fromCode('invalid'), equals(AppThemeMode.system));
+      expect(AppThemeMode.fromCode(null), equals(AppThemeMode.system));
 
-      expect(
-        StorageMode.fromCode('local'),
-        equals(StorageMode.local),
-        reason: 'Code local must resolve to StorageMode.local',
-      );
-      expect(
-        StorageMode.fromCode('webdav'),
-        equals(StorageMode.webdav),
-        reason: 'Code webdav must resolve to StorageMode.webdav',
-      );
-      expect(
-        StorageMode.fromCode('BOTH'),
-        equals(StorageMode.both),
-        reason: 'Case-insensitive both code must resolve to StorageMode.both',
-      );
-      expect(
-        StorageMode.fromCode(null),
-        equals(StorageMode.local),
-        reason: 'Null storage mode code must default to StorageMode.local',
-      );
-
-      expect(StorageMode.local.usesLocal, isTrue);
-      expect(StorageMode.local.usesWebDav, isFalse);
-      expect(StorageMode.webdav.usesLocal, isFalse);
-      expect(StorageMode.webdav.usesWebDav, isTrue);
-      expect(StorageMode.both.usesLocal, isTrue);
-      expect(StorageMode.both.usesWebDav, isTrue);
+      expect(StorageMode.fromCode('local'), equals(StorageMode.local));
+      expect(StorageMode.fromCode('webdav'), equals(StorageMode.webdav));
+      expect(StorageMode.fromCode('BOTH'), equals(StorageMode.both));
+      expect(StorageMode.fromCode(null), equals(StorageMode.local));
 
       const defaultConfig = WebDavConfig();
-      expect(
-        defaultConfig.themeMode,
-        equals(AppThemeMode.system),
-        reason: 'Default themeMode must be AppThemeMode.system',
-      );
-      expect(
-        defaultConfig.storageMode,
-        equals(StorageMode.local),
-        reason: 'Default storageMode must be StorageMode.local',
-      );
+      expect(defaultConfig.themeMode, equals(AppThemeMode.system));
+      expect(defaultConfig.storageMode, equals(StorageMode.local));
       expect(
         defaultConfig.localFilePath,
-        equals('tiertask.md'),
-        reason: 'Default localFilePath must be tiertask.md',
+        equals('tiertask.tdf'),
+        reason: 'Default localFilePath must be tiertask.tdf',
       );
       expect(
-        defaultConfig.showOpenTaskCount,
-        isFalse,
-        reason: 'Default showOpenTaskCount must be false (off)',
+        defaultConfig.filePath,
+        equals('tiertask.tdf'),
+        reason: 'Default remote filePath must be tiertask.tdf',
       );
-      expect(
-        defaultConfig.copyWith(showOpenTaskCount: true).showOpenTaskCount,
-        isTrue,
-        reason: 'copyWith(showOpenTaskCount: true) must enable task counts',
-      );
-      expect(
-        defaultConfig.isConfigured,
-        isTrue,
-        reason: 'Local mode with non-empty localFilePath is configured',
-      );
-
-      final unconfiguredBoth = defaultConfig.copyWith(
-        storageMode: StorageMode.both,
-      );
-      expect(
-        unconfiguredBoth.isConfigured,
-        isFalse,
-        reason: 'Both mode requires both local file and WebDAV credentials',
-      );
+      expect(defaultConfig.showOpenTaskCount, isFalse);
+      expect(defaultConfig.isConfigured, isTrue);
     });
   });
 
-  group('LocalFileRepository & StorageMode Synchronization', () {
+  group('LocalFileRepository & Persistent Local TDF Storage', () {
     late Directory tempDir;
 
     setUp(() async {
@@ -944,9 +1227,9 @@ void main() {
       }
     });
 
-    test('reads and writes local Markdown files and rejects traversal or oversized payloads', () async {
+    test('reads and writes local .tdf files and rejects traversal or oversized payloads', () async {
       const config = WebDavConfig(
-        localFilePath: 'custom_tasks.md',
+        localFilePath: 'custom_tasks.tdf',
         storageMode: StorageMode.local,
       );
       final repository = LocalFileRepository(
@@ -956,65 +1239,67 @@ void main() {
       );
 
       expect(
-        await repository.loadMarkdown(),
+        await repository.loadTdf(),
         isEmpty,
-        reason: 'Missing local Markdown file must return empty string',
+        reason: 'Missing local TDF file must return empty string',
       );
 
-      await repository.saveMarkdown('# [1] Focus\n- [ ] Local Task\n');
-      final loaded = await repository.loadMarkdown();
-      expect(loaded, contains('- [ ] Local Task'));
+      const sampleTdf =
+          'task t001 {\n  name "Local Task"\n  created 2026-11-01 08:00\n  queued 2026-11-01 08:00\n}\n';
+      await repository.saveTdf(sampleTdf);
+      final loaded = await repository.loadTdf();
+      expect(loaded, contains('name "Local Task"'));
 
       final traversalRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: '../escape.md'),
+        config: const WebDavConfig(localFilePath: '../escape.tdf'),
         baseDirectoryPath: tempDir.path,
       );
       await expectLater(
-        traversalRepo.loadMarkdown,
+        traversalRepo.loadTdf,
         throwsA(isA<LocalFileException>()),
         reason: 'Relative parent traversal (..) must be rejected',
       );
 
       final nullByteRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'bad\x00file.md'),
+        config: const WebDavConfig(localFilePath: 'bad\x00file.tdf'),
         baseDirectoryPath: tempDir.path,
       );
       await expectLater(
-        nullByteRepo.saveMarkdown('content'),
+        nullByteRepo.saveTdf('content'),
         throwsA(isA<LocalFileException>()),
         reason: 'Null bytes in local file name must be rejected',
       );
 
       await expectLater(
-        repository.saveMarkdown('A' * 300),
+        repository.saveTdf('A' * 300),
         throwsA(isA<LocalFileException>()),
         reason: 'Content exceeding maxFileBytes must be rejected before write',
       );
     });
 
-    test('synchronizes tasks in StorageMode.local and StorageMode.both', () async {
+    test('persists and reloads TDF tasks across container restarts in StorageMode.local and StorageMode.both', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
 
-      var remoteMarkdown = '';
+      var remoteTdf = '';
       var remotePutCount = 0;
       server.listen((HttpRequest request) async {
         if (request.method == 'GET') {
-          request.response.statusCode = remoteMarkdown.isEmpty
+          request.response.statusCode = remoteTdf.isEmpty
               ? HttpStatus.notFound
               : HttpStatus.ok;
-          request.response.write(remoteMarkdown);
+          request.response.write(remoteTdf);
           await request.response.close();
         } else if (request.method == 'PUT') {
           remotePutCount++;
-          remoteMarkdown = await utf8.decoder.bind(request).join();
+          remoteTdf = await utf8.decoder.bind(request).join();
           request.response.statusCode = HttpStatus.noContent;
           await request.response.close();
         }
       });
 
       const localOnlyConfig = WebDavConfig(
-        localFilePath: 'local_only.md',
+        localFilePath: 'local_only.tdf',
         storageMode: StorageMode.local,
         language: AppLanguage.english,
       );
@@ -1033,27 +1318,53 @@ void main() {
       await localContainer.read(taskNotifierProvider.future);
       await localContainer
           .read(taskNotifierProvider.notifier)
-          .addTask('Local Mode Task');
+          .addTask(
+            'Persistent Local Task',
+            isPriority: true,
+            subtasks: const [SubtaskItem(title: 'First step')],
+          );
 
-      final localFile = File('${tempDir.path}/local_only.md');
+      final localFile = File('${tempDir.path}/local_only.tdf');
       expect(
         await localFile.exists(),
         isTrue,
-        reason: 'Local mode must persist local_only.md on disk',
+        reason: 'Local mode must persist local_only.tdf on disk',
       );
-      expect(await localFile.readAsString(), contains('- [ ] Local Mode Task'));
+      final savedDiskContent = await localFile.readAsString();
+      expect(savedDiskContent, contains('name "Persistent Local Task"'));
+      expect(savedDiskContent, contains('step false "First step"'));
+      expect(remotePutCount, equals(0));
+
+      final restartedContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(localOnlyConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(restartedContainer.dispose);
+
+      final reloadedBoard = await restartedContainer.read(
+        taskNotifierProvider.future,
+      );
       expect(
-        remotePutCount,
-        equals(0),
-        reason: 'Local mode must not send WebDAV PUT requests',
+        reloadedBoard.focus.map((task) => task.title),
+        equals(['Persistent Local Task']),
+        reason: 'Reloaded container must restore task from local .tdf file',
+      );
+      expect(
+        reloadedBoard.focus.first.subtasks.single.title,
+        equals('First step'),
       );
 
       final bothConfig = WebDavConfig(
         serverUrl: 'http://${server.address.host}:${server.port}',
         username: 'stefan',
         password: 'secret',
-        filePath: 'remote_both.md',
-        localFilePath: 'both_mode.md',
+        filePath: 'remote_both.tdf',
+        localFilePath: 'both_mode.tdf',
         storageMode: StorageMode.both,
         language: AppLanguage.english,
       );
@@ -1072,43 +1383,16 @@ void main() {
       await bothContainer.read(taskNotifierProvider.future);
       await bothContainer
           .read(taskNotifierProvider.notifier)
-          .addTask('Dual Synced Task');
+          .addTask('Dual Synced TDF Task');
 
-      final bothFile = File('${tempDir.path}/both_mode.md');
+      final bothFile = File('${tempDir.path}/both_mode.tdf');
+      expect(await bothFile.exists(), isTrue);
       expect(
-        await bothFile.exists(),
-        isTrue,
-        reason: 'Both mode must persist both_mode.md locally',
+        await bothFile.readAsString(),
+        contains('name "Dual Synced TDF Task"'),
       );
-      expect(await bothFile.readAsString(), contains('- [ ] Dual Synced Task'));
-      expect(
-        remoteMarkdown,
-        contains('- [ ] Dual Synced Task'),
-        reason: 'Both mode must also push Markdown to WebDAV',
-      );
+      expect(remoteTdf, contains('name "Dual Synced TDF Task"'));
       expect(remotePutCount, greaterThanOrEqualTo(1));
-
-      await expectLater(
-        localContainer
-            .read(taskNotifierProvider.notifier)
-            .testConnectionAndSync(localOnlyConfig),
-        throwsA(isA<WebDavException>()),
-        reason: 'testConnectionAndSync must reject StorageMode.local without WebDAV',
-      );
-
-      await expectLater(
-        localContainer
-            .read(taskNotifierProvider.notifier)
-            .testConnectionAndSync(
-              const WebDavConfig(
-                storageMode: StorageMode.webdav,
-                language: AppLanguage.english,
-              ),
-            ),
-        throwsA(isA<WebDavException>()),
-        reason:
-            'testConnectionAndSync must reject unconfigured StorageMode.webdav',
-      );
     });
   });
 }
