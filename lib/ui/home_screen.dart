@@ -179,15 +179,17 @@ class _DrawerLabelTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final resolvedColor = _resolveColor(label.color);
-    final leadingColor = isSelected ? colorScheme.secondary : resolvedColor;
+    final leadingColor = isSelected
+        ? colorScheme.onSecondaryContainer
+        : resolvedColor;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: ListTile(
         dense: true,
         selected: isSelected,
-        selectedColor: colorScheme.secondary,
-        selectedTileColor: colorScheme.secondary.withValues(alpha: 0.18),
+        selectedColor: colorScheme.onSecondaryContainer,
+        selectedTileColor: colorScheme.secondaryContainer,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         visualDensity: const VisualDensity(vertical: -2),
         leading: Icon(Icons.label_outline_rounded, color: leadingColor),
@@ -399,8 +401,8 @@ class _FloatingSyncButton extends StatelessWidget {
       key: const ValueKey('sync_fab'),
       heroTag: null,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      backgroundColor: theme.cardColor,
-      foregroundColor: theme.colorScheme.onSurface,
+      backgroundColor: theme.colorScheme.secondaryContainer,
+      foregroundColor: theme.colorScheme.onSecondaryContainer,
       shape: const CircleBorder(),
       tooltip: localizations.tooltipSyncWebDav,
       onPressed: isSyncing ? null : onSyncRemote,
@@ -410,7 +412,7 @@ class _FloatingSyncButton extends StatelessWidget {
               height: 18,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: theme.colorScheme.onSurface,
+                color: theme.colorScheme.onSecondaryContainer,
               ),
             )
           : const Icon(Icons.sync_rounded, size: 20),
@@ -812,8 +814,8 @@ class _LandingFloatingButtons extends StatelessWidget {
         FloatingActionButton(
           key: const ValueKey('add_task_fab'),
           heroTag: null,
-          backgroundColor: colorScheme.primary,
-          foregroundColor: colorScheme.onPrimary,
+          backgroundColor: colorScheme.primaryContainer,
+          foregroundColor: colorScheme.onPrimaryContainer,
           shape: const CircleBorder(),
           onPressed: onOpenQuickAdd,
           child: const Icon(Icons.add_rounded, size: 28),

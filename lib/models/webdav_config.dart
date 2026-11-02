@@ -86,6 +86,29 @@ enum AppThemeMode {
   }
 }
 
+/// Supported Material 3 color theme palettes in TierTask.
+enum AppThemePalette {
+  /// Chromium-inspired Material 3 slate blue-grey palette (default).
+  slate(code: 'slate'),
+
+  /// Signature TierTask navy and indigo palette.
+  navy(code: 'navy');
+
+  /// Creates an [AppThemePalette] option.
+  const AppThemePalette({required this.code});
+
+  /// Storage identifier persisted in settings (`'slate'` or `'navy'`).
+  final String code;
+
+  /// Resolves an [AppThemePalette] from its persisted [rawCode], defaulting to [AppThemePalette.slate].
+  static AppThemePalette fromCode(String? rawCode) {
+    return switch (rawCode?.trim().toLowerCase()) {
+      'navy' => AppThemePalette.navy,
+      _ => AppThemePalette.slate,
+    };
+  }
+}
+
 /// Supported TDF persistence and synchronization modes in TierTask.
 enum StorageMode {
   /// Persists the `.tdf` file only on the local filesystem.
@@ -132,6 +155,7 @@ class WebDavConfig {
     StorageMode? storageMode,
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
+    this.themePalette = AppThemePalette.slate,
     this.showOpenTaskCount = false,
   }) : storageMode =
            storageMode ??
@@ -167,6 +191,9 @@ class WebDavConfig {
 
   /// Selected color theme preference (`system`, `light`, or `dark`).
   final AppThemeMode themeMode;
+
+  /// Selected Material 3 color palette (`slate` or `navy`).
+  final AppThemePalette themePalette;
 
   /// Whether to display the total open task count on category and location cards.
   final bool showOpenTaskCount;
@@ -209,6 +236,7 @@ class WebDavConfig {
     StorageMode? storageMode,
     AppLanguage? language,
     AppThemeMode? themeMode,
+    AppThemePalette? themePalette,
     bool? showOpenTaskCount,
   }) {
     return WebDavConfig(
@@ -220,6 +248,7 @@ class WebDavConfig {
       storageMode: storageMode ?? this.storageMode,
       language: language ?? this.language,
       themeMode: themeMode ?? this.themeMode,
+      themePalette: themePalette ?? this.themePalette,
       showOpenTaskCount: showOpenTaskCount ?? this.showOpenTaskCount,
     );
   }
@@ -285,6 +314,7 @@ class WebDavConfig {
         other.storageMode == storageMode &&
         other.language == language &&
         other.themeMode == themeMode &&
+        other.themePalette == themePalette &&
         other.showOpenTaskCount == showOpenTaskCount;
   }
 
@@ -298,6 +328,7 @@ class WebDavConfig {
     storageMode,
     language,
     themeMode,
+    themePalette,
     showOpenTaskCount,
   );
 }

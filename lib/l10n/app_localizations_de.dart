@@ -571,4 +571,17 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get tooltipPickEndTime => 'Endzeit auswählen';
+
+  @override
+  String get themePaletteSectionTitle => 'Farbpalette';
+
+  @override
+  String get themePaletteSectionDescription =>
+      'Material-3-Farbpalette für Oberflächen und Hervorhebungen auswählen.';
+
+  @override
+  String get themePaletteSlate => 'Schiefer';
+
+  @override
+  String get themePaletteNavy => 'Marineblau';
 }

@@ -41,6 +41,11 @@ final appThemeModeProvider = Provider<AppThemeMode>((ref) {
   return _resolveCurrentConfig(ref).themeMode;
 });
 
+/// Provides the selected [AppThemePalette] (`slate` or `navy`) from [webDavConfigProvider].
+final appThemePaletteProvider = Provider<AppThemePalette>((ref) {
+  return _resolveCurrentConfig(ref).themePalette;
+});
+
 /// Provides the active [AppThemeSet] (`light` and `dark` [AppTheme] pair) replaceable at runtime.
 final appThemeProvider = NotifierProvider<AppThemeNotifier, AppThemeSet>(
   AppThemeNotifier.new,
@@ -108,7 +113,10 @@ final _inMemoryLocalStoreProvider = Provider<Map<String, String>>((ref) {
 /// Manages the active [AppThemeSet] and supports swapping themes at runtime.
 class AppThemeNotifier extends Notifier<AppThemeSet> {
   @override
-  AppThemeSet build() => AppThemeSet.standard;
+  AppThemeSet build() {
+    final palette = ref.watch(appThemePaletteProvider);
+    return AppThemeSet.forPalette(palette);
+  }
 
   /// Replaces both light and dark themes with a single [theme] at runtime.
   void setTheme(AppTheme theme) {
@@ -576,6 +584,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   Future<void> updateThemeMode(AppThemeMode themeMode) async {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(themeMode: themeMode);
+    await updateConfig(updated);
+  }
+
+  /// Updates only the [themePalette] preference and persists it immediately.
+  Future<void> updateThemePalette(AppThemePalette themePalette) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(themePalette: themePalette);
     await updateConfig(updated);
   }
 }

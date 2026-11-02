@@ -263,14 +263,14 @@ class TaskEditorChip extends StatelessWidget {
         icon,
         size: 16,
         color: isSelected
-            ? colorScheme.onPrimary
+            ? accentColor
             : (isEnabled ? accentColor : mutedColor.withValues(alpha: 0.4)),
       ),
       label: Text(
         label,
         style: TextStyle(
           color: isSelected
-              ? colorScheme.onPrimary
+              ? colorScheme.onSurface
               : (isEnabled ? mutedColor : mutedColor.withValues(alpha: 0.4)),
           fontSize: 13,
           fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
@@ -278,7 +278,7 @@ class TaskEditorChip extends StatelessWidget {
       ),
       backgroundColor: canvasColor,
       disabledColor: canvasColor.withValues(alpha: 0.5),
-      selectedColor: accentColor,
+      selectedColor: accentColor.withValues(alpha: 0.22),
       side: BorderSide(
         color: isSelected
             ? accentColor
@@ -1072,8 +1072,8 @@ class _TaskEditorSubtaskInputRow extends StatelessWidget {
         IconButton.filledTonal(
           key: const ValueKey('task_editor_subtask_add_button'),
           style: IconButton.styleFrom(
-            backgroundColor: appTheme.secondaryAccent,
-            foregroundColor: appTheme.onSecondaryColor,
+            backgroundColor: appTheme.secondaryContainerColor,
+            foregroundColor: appTheme.onSecondaryContainerColor,
             disabledBackgroundColor: appTheme.canvasColor.withValues(
               alpha: 0.55,
             ),

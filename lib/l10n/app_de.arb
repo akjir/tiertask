@@ -169,5 +169,9 @@
   "tooltipPickTime": "Uhrzeit auswählen",
   "tooltipClearDate": "Zeitstempel löschen",
   "tooltipPickStartTime": "Startzeit auswählen",
-  "tooltipPickEndTime": "Endzeit auswählen"
+  "tooltipPickEndTime": "Endzeit auswählen",
+  "themePaletteSectionTitle": "Farbpalette",
+  "themePaletteSectionDescription": "Material-3-Farbpalette für Oberflächen und Hervorhebungen auswählen.",
+  "themePaletteSlate": "Schiefer",
+  "themePaletteNavy": "Marineblau"
 }

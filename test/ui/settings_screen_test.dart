@@ -112,6 +112,7 @@ task t004 {
       expect(find.text('Off'), findsOneWidget);
       expect(find.text('On'), findsOneWidget);
 
+      await tester.ensureVisible(find.text('On'));
       await tester.tap(find.text('On'));
       await tester.pumpAndSettle();
 
@@ -122,6 +123,7 @@ task t004 {
         reason: 'Selecting On must persist showOpenTaskCount as true',
       );
 
+      await tester.ensureVisible(find.text('Off'));
       await tester.tap(find.text('Off'));
       await tester.pumpAndSettle();
 

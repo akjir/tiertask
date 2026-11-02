@@ -1117,6 +1117,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pick end time'**
   String get tooltipPickEndTime;
+
+  /// Settings section title for choosing the Material 3 color palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Color Palette'**
+  String get themePaletteSectionTitle;
+
+  /// Settings section description for choosing the Material 3 color palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Select the Material 3 color palette for surfaces and highlights.'**
+  String get themePaletteSectionDescription;
+
+  /// Label for the Slate Material 3 color palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Slate'**
+  String get themePaletteSlate;
+
+  /// Label for the Navy Material 3 color palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Navy'**
+  String get themePaletteNavy;
 }
 
 class _AppLocalizationsDelegate

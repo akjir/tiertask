@@ -122,6 +122,7 @@ class SecureSettingsRepository implements SettingsRepository {
   static const String _keyShowOpenTaskCount = 't2_show_open_task_count';
   static const String _keyStorageMode = 't2_storage_mode';
   static const String _keyThemeMode = 't2_theme_mode';
+  static const String _keyThemePalette = 't2_theme_palette';
   static const String _keyUsername = 't2_webdav_username';
   static const String _keyWorkspaces = 't2_workspaces_v1';
 
@@ -245,6 +246,7 @@ class SecureSettingsRepository implements SettingsRepository {
       final rawStorageMode = await _storage.read(key: _keyStorageMode);
       final rawLanguage = await _storage.read(key: _keyLanguage);
       final rawThemeMode = await _storage.read(key: _keyThemeMode);
+      final rawThemePalette = await _storage.read(key: _keyThemePalette);
       final rawShowOpenTaskCount = await _storage.read(
         key: _keyShowOpenTaskCount,
       );
@@ -260,6 +262,7 @@ class SecureSettingsRepository implements SettingsRepository {
             : StorageMode.fromCode(rawStorageMode),
         language: AppLanguage.fromCode(rawLanguage),
         themeMode: AppThemeMode.fromCode(rawThemeMode),
+        themePalette: AppThemePalette.fromCode(rawThemePalette),
         showOpenTaskCount: rawShowOpenTaskCount?.trim().toLowerCase() == 'true',
       );
     } on Object {

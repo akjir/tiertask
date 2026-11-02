@@ -734,5 +734,21 @@
   "tooltipPickEndTime": "Pick end time",
   "@tooltipPickEndTime": {
     "description": "Tooltip for the end time picker button in time window conditions."
+  },
+  "themePaletteSectionTitle": "Color Palette",
+  "@themePaletteSectionTitle": {
+    "description": "Settings section title for choosing the Material 3 color palette."
+  },
+  "themePaletteSectionDescription": "Select the Material 3 color palette for surfaces and highlights.",
+  "@themePaletteSectionDescription": {
+    "description": "Settings section description for choosing the Material 3 color palette."
+  },
+  "themePaletteSlate": "Slate",
+  "@themePaletteSlate": {
+    "description": "Label for the Slate Material 3 color palette."
+  },
+  "themePaletteNavy": "Navy",
+  "@themePaletteNavy": {
+    "description": "Label for the Navy Material 3 color palette."
   }
 }

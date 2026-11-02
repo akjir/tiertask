@@ -52,6 +52,7 @@ class AppWorkspace {
             : StorageMode.fromCode(rawStorageMode),
         language: AppLanguage.fromCode(json['language'] as String?),
         themeMode: AppThemeMode.fromCode(json['themeMode'] as String?),
+        themePalette: AppThemePalette.fromCode(json['themePalette'] as String?),
         showOpenTaskCount: json['showOpenTaskCount'] == true,
       ),
     );
@@ -157,6 +158,7 @@ class AppWorkspace {
       'storageMode': config.storageMode.code,
       'language': config.language.code,
       'themeMode': config.themeMode.code,
+      'themePalette': config.themePalette.code,
       'showOpenTaskCount': config.showOpenTaskCount,
     };
   }

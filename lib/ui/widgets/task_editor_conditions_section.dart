@@ -564,8 +564,8 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
             IconButton.filledTonal(
               key: const ValueKey('task_editor_add_location_condition_button'),
               style: IconButton.styleFrom(
-                backgroundColor: appTheme.secondaryAccent,
-                foregroundColor: appTheme.onSecondaryColor,
+                backgroundColor: appTheme.secondaryContainerColor,
+                foregroundColor: appTheme.onSecondaryContainerColor,
               ),
               tooltip: localizations.tooltipAddLocationCondition,
               onPressed: onAdd,
@@ -749,8 +749,8 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
             IconButton.filledTonal(
               key: const ValueKey('task_editor_add_time_condition_button'),
               style: IconButton.styleFrom(
-                backgroundColor: appTheme.secondaryAccent,
-                foregroundColor: appTheme.onSecondaryColor,
+                backgroundColor: appTheme.secondaryContainerColor,
+                foregroundColor: appTheme.onSecondaryContainerColor,
               ),
               tooltip: localizations.tooltipAddTimeCondition,
               onPressed: onAdd,

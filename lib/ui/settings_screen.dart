@@ -381,16 +381,18 @@ class _SettingsFormFields extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, open task count, and storage mode preference cards on [SettingsScreen].
+/// Groups the language, theme, color palette, open task count, and storage mode preference cards on [SettingsScreen].
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
     required this.selectedLanguage,
     required this.selectedThemeMode,
+    required this.selectedThemePalette,
     required this.showOpenTaskCount,
     required this.selectedStorageMode,
     required this.onLanguageChanged,
     required this.onThemeModeChanged,
+    required this.onThemePaletteChanged,
     required this.onShowOpenTaskCountChanged,
     required this.onStorageModeChanged,
   });
@@ -407,6 +409,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
   /// Callback when [AppThemeMode] changes.
   final ValueChanged<AppThemeMode> onThemeModeChanged;
 
+  /// Callback when [AppThemePalette] changes.
+  final ValueChanged<AppThemePalette> onThemePaletteChanged;
+
   /// Currently selected display language.
   final AppLanguage selectedLanguage;
 
@@ -415,6 +420,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
 
   /// Currently selected theme mode.
   final AppThemeMode selectedThemeMode;
+
+  /// Currently selected Material 3 color palette.
+  final AppThemePalette selectedThemePalette;
 
   /// Whether the open task count is shown on category and location cards.
   final bool showOpenTaskCount;
@@ -432,6 +440,11 @@ class _SettingsPreferenceCards extends StatelessWidget {
         _ThemeSelectionCard(
           selectedThemeMode: selectedThemeMode,
           onThemeModeChanged: onThemeModeChanged,
+        ),
+        const SizedBox(height: 16),
+        _ThemePaletteSelectionCard(
+          selectedThemePalette: selectedThemePalette,
+          onThemePaletteChanged: onThemePaletteChanged,
         ),
         const SizedBox(height: 16),
         _OpenTaskCountSelectionCard(
@@ -465,6 +478,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   AppLanguage _selectedLanguage = AppLanguage.system;
   StorageMode _selectedStorageMode = StorageMode.local;
   AppThemeMode _selectedThemeMode = AppThemeMode.system;
+  AppThemePalette _selectedThemePalette = AppThemePalette.slate;
   bool _showOpenTaskCount = false;
   String? _statusBannerMessage;
   _StatusBannerTone _statusTone = _StatusBannerTone.success;
@@ -518,10 +532,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _SettingsPreferenceCards(
                 selectedLanguage: _selectedLanguage,
                 selectedThemeMode: _selectedThemeMode,
+                selectedThemePalette: _selectedThemePalette,
                 showOpenTaskCount: _showOpenTaskCount,
                 selectedStorageMode: _selectedStorageMode,
                 onLanguageChanged: _handleLanguageChanged,
                 onThemeModeChanged: _handleThemeModeChanged,
+                onThemePaletteChanged: _handleThemePaletteChanged,
                 onShowOpenTaskCountChanged: _handleShowOpenTaskCountChanged,
                 onStorageModeChanged: _handleStorageModeChanged,
               ),
@@ -594,6 +610,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       storageMode: _selectedStorageMode,
       language: _selectedLanguage,
       themeMode: _selectedThemeMode,
+      themePalette: _selectedThemePalette,
       showOpenTaskCount: _showOpenTaskCount,
     );
   }
@@ -688,10 +705,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(webDavConfigProvider.notifier).updateThemeMode(newThemeMode);
   }
 
+  /// Updates the selected [AppThemePalette] and persists it immediately.
+  Future<void> _handleThemePaletteChanged(
+    AppThemePalette newThemePalette,
+  ) async {
+    setState(() {
+      _selectedThemePalette = newThemePalette;
+    });
+    await ref
+        .read(webDavConfigProvider.notifier)
+        .updateThemePalette(newThemePalette);
+  }
+
   /// Initializes the text controllers and selections once when [config] finishes loading.
   void _populateFieldsIfNeeded(WebDavConfig config) {
     _selectedLanguage = config.language;
     _selectedThemeMode = config.themeMode;
+    _selectedThemePalette = config.themePalette;
     _showOpenTaskCount = config.showOpenTaskCount;
     _selectedStorageMode = config.storageMode;
     if (_initialized) {
@@ -969,6 +999,52 @@ class _StorageModeSelectionCard extends StatelessWidget {
           onSelectionChanged: (selection) {
             if (selection.isNotEmpty) {
               onStorageModeChanged(selection.first);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// Card for choosing the Material 3 color palette (`Slate` or `Navy`).
+class _ThemePaletteSelectionCard extends StatelessWidget {
+  /// Creates a [_ThemePaletteSelectionCard].
+  const _ThemePaletteSelectionCard({
+    required this.selectedThemePalette,
+    required this.onThemePaletteChanged,
+  });
+
+  /// Callback invoked when the user selects a new [AppThemePalette].
+  final ValueChanged<AppThemePalette> onThemePaletteChanged;
+
+  /// Currently selected [AppThemePalette].
+  final AppThemePalette selectedThemePalette;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return _SettingsSectionCard(
+      icon: Icons.palette_outlined,
+      title: localizations.themePaletteSectionTitle,
+      description: localizations.themePaletteSectionDescription,
+      child: SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<AppThemePalette>(
+          segments: [
+            ButtonSegment(
+              value: AppThemePalette.slate,
+              label: Text(localizations.themePaletteSlate),
+            ),
+            ButtonSegment(
+              value: AppThemePalette.navy,
+              label: Text(localizations.themePaletteNavy),
+            ),
+          ],
+          selected: {selectedThemePalette},
+          onSelectionChanged: (selection) {
+            if (selection.isNotEmpty) {
+              onThemePaletteChanged(selection.first);
             }
           },
         ),
