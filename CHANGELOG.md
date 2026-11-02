@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added Linux, Android, and Windows platform support for the 6-tier task board.
 
 ### Changed
+- Changed task editing and extended task creation from a modal dialog (`TaskEditorDialog`) into a dedicated full-screen panel (`EditTaskScreen` in `lib/ui/edit_task_screen.dart`) similar to `EditLabelsScreen`, preserving all existing task editor fields, validation rules, subtasks, prerequisite dependencies, and activation conditions.
 - Changed `_LandingTopBar` on `HomeScreen` (`lib/ui/home_screen.dart`) to display the selected label's name centered in the top bar when a label filter is active (omitting a title when no label is selected), and to smoothly animate the label name to the left next to the menu button while expanding and fading in the search input between the label name and the search icon when search is opened.
 - Changed `QuickAddBar` (`lib/ui/widgets/quick_add_bar.dart`) to automatically stack the task title input field above the action buttons (`Priority`, `Someday`, `Labels`, `Advanced`, `Cancel`) when the viewport width matches or drops below the Pixel 9 Pro width/aspect-ratio threshold (`<= 488` dp or `<= height * 1280 / 2856`), while keeping the single-row side-by-side layout on wider viewports.
 - Changed `_TierPaneHeader` on `HomeScreen` (`lib/ui/home_screen.dart`) to display the selected label's name instead of the default greeting (`What's up!` / `Was steht an!`) whenever a label filter is active.

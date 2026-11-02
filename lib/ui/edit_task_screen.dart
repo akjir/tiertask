@@ -1,0 +1,767 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../l10n/app_localizations.dart';
+import '../models/task_board.dart';
+import '../models/task_item.dart';
+import '../models/tdf_metadata.dart';
+import '../providers/task_providers.dart';
+import 'widgets/quick_add_bar.dart';
+import 'widgets/task_editor_conditions_section.dart';
+import 'widgets/task_editor_sections.dart';
+
+const Color _canvasColor = Color(0xFF344FA1);
+const Color _cardColor = Color(0xFF071A52);
+
+/// Dedicated panel screen used for both extended task creation and editing an existing task.
+class EditTaskScreen extends ConsumerStatefulWidget {
+  /// Creates an [EditTaskScreen].
+  const EditTaskScreen({
+    super.key,
+    this.initialTask,
+    this.initialTitle = '',
+    this.initialMode = QuickAddMode.standard,
+    this.initialLabelIds = const <String>{},
+    this.onSubmitted,
+  });
+
+  /// Initial label IDs pre-selected when opening in creation mode.
+  final Set<String> initialLabelIds;
+
+  /// Initial scheduling mode when opening in creation mode.
+  final QuickAddMode initialMode;
+
+  /// Existing task to edit, or `null` when creating a new task.
+  final TaskItem? initialTask;
+
+  /// Initial draft title when opening in creation mode.
+  final String initialTitle;
+
+  /// Optional callback invoked after a task is created or updated.
+  final VoidCallback? onSubmitted;
+
+  @override
+  ConsumerState<EditTaskScreen> createState() => _EditTaskScreenState();
+}
+
+/// State for [EditTaskScreen].
+class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
+  late final Set<String> _blockedByTaskIds;
+  late bool _conditionAny;
+  late bool _conditionDayAny;
+  late bool _conditionLocationAny;
+  late bool _conditionTimeAny;
+  String? _errorMessage;
+  late bool _isSuspended;
+  String? _locationErrorMessage;
+  final TextEditingController _locationLatController = TextEditingController();
+  final TextEditingController _locationLonController = TextEditingController();
+  final TextEditingController _locationRadiusController =
+      TextEditingController();
+  late final List<LocationTaskCondition> _locationRules;
+  late QuickAddMode _mode;
+  late final TextEditingController _noteController;
+  late final Set<String> _selectedLabelIds;
+  late final Set<int> _selectedWeekdays;
+  final TextEditingController _subtaskController = TextEditingController();
+  late final List<SubtaskItem> _subtasks;
+  late bool _subtasksAutoFinish;
+  late final TextEditingController _suspendedController;
+  String? _suspendedErrorMessage;
+  final TextEditingController _timeEndController = TextEditingController();
+  String? _timeErrorMessage;
+  late final List<TimeWindowTaskCondition> _timeRules;
+  final TextEditingController _timeStartController = TextEditingController();
+  late final TextEditingController _titleController;
+
+  bool get _hasSubtaskText => _subtaskController.text.trim().isNotEmpty;
+
+  bool get _isEditMode => widget.initialTask != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final task = widget.initialTask;
+    _titleController = TextEditingController(
+      text: task?.title ?? widget.initialTitle,
+    );
+    _noteController = TextEditingController(text: task?.note ?? '');
+    _mode = task != null ? _resolveInitialMode(task) : widget.initialMode;
+    _selectedLabelIds = <String>{
+      ...(task != null ? task.labelIds : widget.initialLabelIds),
+    };
+    _subtasksAutoFinish = task?.subtasksAutoFinish ?? false;
+    _subtasks = <SubtaskItem>[if (task != null) ...task.subtasks];
+    _blockedByTaskIds = <String>{if (task != null) ...task.blockedByTaskIds};
+    _isSuspended = task?.suspendedAt != null;
+    _suspendedController = TextEditingController(
+      text: _formatInitialSuspendedText(task?.suspendedAt),
+    );
+    _initializeConditions(task?.conditions ?? const []);
+
+    _titleController.addListener(_handleTitleChanged);
+    _subtaskController.addListener(_handleSubtaskInputChanged);
+  }
+
+  @override
+  void dispose() {
+    _titleController.removeListener(_handleTitleChanged);
+    _subtaskController.removeListener(_handleSubtaskInputChanged);
+    _titleController.dispose();
+    _noteController.dispose();
+    _subtaskController.dispose();
+    _suspendedController.dispose();
+    _timeStartController.dispose();
+    _timeEndController.dispose();
+    _locationLatController.dispose();
+    _locationLonController.dispose();
+    _locationRadiusController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final board =
+        ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+    final localizations = AppLocalizations.of(context);
+    final headerTitle = _isEditMode
+        ? localizations.editTaskTitle
+        : localizations.advancedTaskTitle;
+
+    return Scaffold(
+      key: const ValueKey('edit_task_screen'),
+      backgroundColor: _canvasColor,
+      appBar: AppBar(
+        backgroundColor: _cardColor,
+        foregroundColor: Colors.white,
+        title: Text(headerTitle),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Material(
+            color: _cardColor,
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: _buildFormColumn(board),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TaskEditorActionsRow(
+                    onCancel: () => Navigator.of(context).pop(),
+                    onSave: _submit,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Validates and appends a GPS location condition from the location input controllers.
+  void _addLocationCondition() {
+    if (_isSuspended) {
+      return;
+    }
+    final localizations = AppLocalizations.of(context);
+    final parsed = LocationTaskCondition.tryParse(
+      _locationLatController.text,
+      _locationLonController.text,
+      _locationRadiusController.text,
+    );
+    if (parsed == null) {
+      setState(() {
+        _locationErrorMessage = localizations.conditionLocationErrorInvalid;
+      });
+      return;
+    }
+    setState(() {
+      _conditionAny = false;
+      _conditionLocationAny = false;
+      if (!_locationRules.contains(parsed)) {
+        _locationRules.add(parsed);
+      }
+      _locationLatController.clear();
+      _locationLonController.clear();
+      _locationRadiusController.clear();
+      _locationErrorMessage = null;
+    });
+  }
+
+  /// Appends the current non-empty subtask text to [_subtasks].
+  void _addSubtask() {
+    final text = _subtaskController.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
+    setState(() {
+      _subtasks.add(SubtaskItem(title: text));
+      _subtaskController.clear();
+    });
+  }
+
+  /// Validates and appends a time window condition from the time input controllers.
+  void _addTimeCondition() {
+    if (_isSuspended) {
+      return;
+    }
+    final localizations = AppLocalizations.of(context);
+    final parsed = TimeWindowTaskCondition.tryParse(
+      _timeStartController.text,
+      _timeEndController.text,
+    );
+    if (parsed == null) {
+      setState(() {
+        _timeErrorMessage = localizations.conditionTimeErrorInvalid;
+      });
+      return;
+    }
+    setState(() {
+      _conditionAny = false;
+      _conditionTimeAny = false;
+      if (!_timeRules.contains(parsed)) {
+        _timeRules.add(parsed);
+      }
+      _timeStartController.clear();
+      _timeEndController.clear();
+      _timeErrorMessage = null;
+    });
+  }
+
+  /// Builds the [TaskEditorConditionsSection] for the current state.
+  Widget _buildConditionsSection() {
+    return TaskEditorConditionsSection(
+      conditionAny: _conditionAny,
+      conditionDayAny: _conditionDayAny,
+      conditionLocationAny: _conditionLocationAny,
+      conditionTimeAny: _conditionTimeAny,
+      isSuspended: _isSuspended,
+      locationErrorMessage: _locationErrorMessage,
+      locationLatController: _locationLatController,
+      locationLonController: _locationLonController,
+      locationRadiusController: _locationRadiusController,
+      locationRules: _locationRules,
+      selectedWeekdays: _selectedWeekdays,
+      timeEndController: _timeEndController,
+      timeErrorMessage: _timeErrorMessage,
+      timeRules: _timeRules,
+      timeStartController: _timeStartController,
+      onAddLocationCondition: _addLocationCondition,
+      onAddTimeCondition: _addTimeCondition,
+      onRemoveLocationCondition: _removeLocationCondition,
+      onRemoveTimeCondition: _removeTimeCondition,
+      onToggleConditionAny: _toggleConditionAny,
+      onToggleDayAny: _toggleDayAny,
+      onToggleLocationAny: _toggleLocationAny,
+      onToggleTimeAny: _toggleTimeAny,
+      onToggleWeekday: _toggleWeekday,
+    );
+  }
+
+  /// Builds the scrollable form column inside [EditTaskScreen].
+  Widget _buildFormColumn(TaskBoard board) {
+    final candidateTasks = _collectCandidateBlockerTasks(board);
+    final disabledIds = _collectDisabledBlockerIds(board, candidateTasks);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TaskEditorTitleField(
+          controller: _titleController,
+          errorMessage: _errorMessage,
+          onSubmit: _submit,
+        ),
+        const SizedBox(height: 8),
+        TaskEditorNoteField(controller: _noteController),
+        const SizedBox(height: 8),
+        TaskEditorModeRow(
+          isSuspended: _isSuspended,
+          mode: _mode,
+          onTogglePriority: _togglePriority,
+          onToggleSomeday: _toggleSomeday,
+          onToggleSuspended: _toggleSuspended,
+        ),
+        if (_isSuspended) ...[
+          const SizedBox(height: 8),
+          TaskEditorSuspendedField(
+            controller: _suspendedController,
+            errorMessage: _suspendedErrorMessage,
+          ),
+        ],
+        TaskEditorContextSection(
+          labels: board.labels,
+          selectedLabelIds: _selectedLabelIds,
+          onToggleLabel: _toggleLabel,
+        ),
+        const SizedBox(height: 8),
+        TaskEditorSubtasksSection(
+          hasSubtaskText: _hasSubtaskText,
+          subtaskController: _subtaskController,
+          subtasks: _subtasks,
+          subtasksAutoFinish: _subtasksAutoFinish,
+          onAddSubtask: _addSubtask,
+          onRemoveSubtask: _removeSubtask,
+          onToggleAutoFinish: _toggleAutoFinish,
+          onToggleSubtaskStep: _toggleSubtaskStep,
+        ),
+        TaskEditorBlockedBySection(
+          candidateTasks: candidateTasks,
+          disabledTaskIds: disabledIds,
+          selectedBlockedByIds: _blockedByTaskIds,
+          onToggleBlockedBy: (taskId) => _toggleBlockedBy(board, taskId),
+        ),
+        const SizedBox(height: 10),
+        _buildConditionsSection(),
+      ],
+    );
+  }
+
+  /// Collects open tasks on [board] that can be displayed in the prerequisites section.
+  List<TaskItem> _collectCandidateBlockerTasks(TaskBoard board) {
+    final currentId = widget.initialTask?.id;
+    return <TaskItem>[
+      for (final task in board.allTasks)
+        if (task.id != currentId &&
+            ((!task.isCompleted && task.completedAt == null) ||
+                _blockedByTaskIds.contains(task.id)))
+          task,
+    ];
+  }
+
+  /// Collects candidate prerequisite task IDs that would create a dependency cycle.
+  Set<String> _collectDisabledBlockerIds(
+    TaskBoard board,
+    List<TaskItem> candidates,
+  ) {
+    final currentTask = widget.initialTask;
+    if (currentTask == null) {
+      return const <String>{};
+    }
+    return <String>{
+      for (final candidate in candidates)
+        if (board.wouldCreateDependencyCycle(currentTask.id, candidate.id))
+          candidate.id,
+    };
+  }
+
+  /// Collects selected prerequisite task IDs in canonical board declaration order.
+  List<String> _collectOrderedBlockedByIds(TaskBoard board) {
+    return <String>[
+      for (final task in board.allTasks)
+        if (_blockedByTaskIds.contains(task.id)) task.id,
+    ];
+  }
+
+  /// Collects selected label IDs in canonical board declaration order.
+  List<String> _collectOrderedLabelIds(TaskBoard board) {
+    return <String>[
+      for (final label in board.labels)
+        if (_selectedLabelIds.contains(label.id)) label.id,
+    ];
+  }
+
+  /// Assembles the ordered [TaskCondition] list from the editor state.
+  List<TaskCondition> _collectTaskConditions() {
+    if (_conditionAny) {
+      return const <TaskCondition>[GlobalResetTaskCondition()];
+    }
+    return <TaskCondition>[
+      if (_conditionDayAny)
+        const GroupResetTaskCondition(targetGroup: ConditionGroup.day)
+      else if (_selectedWeekdays.isNotEmpty)
+        DayTaskCondition.fromWeekdays(_selectedWeekdays),
+      if (_conditionTimeAny)
+        const GroupResetTaskCondition(targetGroup: ConditionGroup.time)
+      else
+        ..._timeRules,
+      if (_conditionLocationAny)
+        const GroupResetTaskCondition(targetGroup: ConditionGroup.location)
+      else
+        ..._locationRules,
+    ];
+  }
+
+  /// Formats an initial `suspended` timestamp for the input field (omitting `defaultSuspendedAt`).
+  static String _formatInitialSuspendedText(DateTime? suspendedAt) {
+    if (suspendedAt == null || suspendedAt == TaskItem.defaultSuspendedAt) {
+      return '';
+    }
+    return TaskItem.formatTdfTimestamp(suspendedAt);
+  }
+
+  /// Rebuilds when the subtask input field text changes.
+  void _handleSubtaskInputChanged() {
+    setState(() {});
+  }
+
+  /// Clears any validation error when the user edits the title field.
+  void _handleTitleChanged() {
+    if (_errorMessage == null) {
+      return;
+    }
+    setState(() {
+      _errorMessage = null;
+    });
+  }
+
+  /// Initializes the condition state fields from [initialConditions].
+  void _initializeConditions(List<TaskCondition> initialConditions) {
+    _conditionAny = false;
+    _conditionDayAny = false;
+    _conditionTimeAny = false;
+    _conditionLocationAny = false;
+    _selectedWeekdays = <int>{};
+    _timeRules = <TimeWindowTaskCondition>[];
+    _locationRules = <LocationTaskCondition>[];
+
+    for (final condition in initialConditions) {
+      switch (condition) {
+        case GlobalResetTaskCondition():
+          _conditionAny = true;
+        case GroupResetTaskCondition(:final targetGroup):
+          if (targetGroup == ConditionGroup.day) {
+            _conditionDayAny = true;
+          } else if (targetGroup == ConditionGroup.time) {
+            _conditionTimeAny = true;
+          } else {
+            _conditionLocationAny = true;
+          }
+        case DayTaskCondition(:final weekdays):
+          _selectedWeekdays.addAll(weekdays);
+        case TimeWindowTaskCondition():
+          _timeRules.add(condition);
+        case LocationTaskCondition():
+          _locationRules.add(condition);
+      }
+    }
+  }
+
+  /// Persists the created or edited task through [TaskNotifier].
+  Future<void> _persistTask(
+    TaskBoard board,
+    String title,
+    List<SubtaskItem> subtasks,
+    DateTime? suspendedAt,
+  ) async {
+    final labelIds = _collectOrderedLabelIds(board);
+    final blockedByIds = _collectOrderedBlockedByIds(board);
+    final conditions = _collectTaskConditions();
+    final noteText = _noteController.text.trim();
+    final notifier = ref.read(taskNotifierProvider.notifier);
+
+    if (widget.initialTask case final existingTask?) {
+      await notifier.updateTask(
+        existingTask.id,
+        title: title,
+        note: noteText,
+        targetTier: _mode.targetTier,
+        isPriority: _mode == QuickAddMode.priority,
+        subtasksAutoFinish: _subtasksAutoFinish,
+        subtasks: subtasks,
+        labelIds: labelIds,
+        suspendedAt: suspendedAt,
+        clearSuspendedAt: !_isSuspended,
+        blockedByTaskIds: blockedByIds,
+        conditions: conditions,
+      );
+      return;
+    }
+
+    await notifier.addTask(
+      title,
+      note: noteText.isEmpty ? null : noteText,
+      targetTier: _mode.targetTier,
+      isPriority: _mode == QuickAddMode.priority,
+      subtasksAutoFinish: _subtasksAutoFinish,
+      subtasks: subtasks,
+      labelIds: labelIds,
+      suspendedAt: suspendedAt,
+      blockedByTaskIds: blockedByIds,
+      conditions: conditions,
+    );
+  }
+
+  /// Removes the GPS location condition at [index].
+  void _removeLocationCondition(int index) {
+    setState(() {
+      _locationRules.removeAt(index);
+    });
+  }
+
+  /// Removes the subtask step at [index].
+  void _removeSubtask(int index) {
+    setState(() {
+      _subtasks.removeAt(index);
+    });
+  }
+
+  /// Removes the time window condition at [index].
+  void _removeTimeCondition(int index) {
+    setState(() {
+      _timeRules.removeAt(index);
+    });
+  }
+
+  /// Derives the initial [QuickAddMode] for an existing [task].
+  static QuickAddMode _resolveInitialMode(TaskItem task) {
+    if (task.isCompleted || task.completedAt != null) {
+      return QuickAddMode.standard;
+    }
+    if (task.isPriority) {
+      return QuickAddMode.priority;
+    }
+    if (task.queuedAt == null) {
+      return QuickAddMode.someday;
+    }
+    return QuickAddMode.standard;
+  }
+
+  /// Resolves the `suspendedAt` timestamp when [_isSuspended] is enabled, or `null` when disabled.
+  DateTime? _resolveSuspendedTimestamp() {
+    if (!_isSuspended) {
+      return null;
+    }
+    final rawText = _suspendedController.text.trim();
+    if (rawText.isEmpty) {
+      return TaskItem.defaultSuspendedAt;
+    }
+    return TaskItem.tryParseTdfTimestampInput(rawText);
+  }
+
+  /// Validates the task inputs and saves the created or updated task.
+  Future<void> _submit() async {
+    final board =
+        ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+    final localizations = AppLocalizations.of(context);
+    final validationError = _validateTitle(board, localizations);
+    if (validationError != null) {
+      setState(() {
+        _errorMessage = validationError;
+      });
+      return;
+    }
+
+    final suspendedTimestamp = _resolveSuspendedTimestamp();
+    if (_isSuspended && suspendedTimestamp == null) {
+      setState(() {
+        _suspendedErrorMessage = localizations.taskSuspendedErrorInvalid;
+      });
+      return;
+    }
+
+    final pendingSubtask = _subtaskController.text.trim();
+    final effectiveSubtasks = <SubtaskItem>[
+      ..._subtasks,
+      if (pendingSubtask.isNotEmpty) SubtaskItem(title: pendingSubtask),
+    ];
+
+    await _persistTask(
+      board,
+      _titleController.text.trim(),
+      effectiveSubtasks,
+      suspendedTimestamp,
+    );
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).pop();
+    widget.onSubmitted?.call();
+  }
+
+  /// Toggles the `subtasks auto-finish` option.
+  void _toggleAutoFinish() {
+    setState(() {
+      _subtasksAutoFinish = !_subtasksAutoFinish;
+    });
+  }
+
+  /// Toggles prerequisite [blockerTaskId] if it does not introduce a dependency cycle.
+  void _toggleBlockedBy(TaskBoard board, String blockerTaskId) {
+    if (widget.initialTask case final currentTask?
+        when board.wouldCreateDependencyCycle(currentTask.id, blockerTaskId)) {
+      return;
+    }
+    setState(() {
+      if (!_blockedByTaskIds.remove(blockerTaskId)) {
+        _blockedByTaskIds.add(blockerTaskId);
+      }
+    });
+  }
+
+  /// Toggles the global `condition any` reset directive.
+  void _toggleConditionAny() {
+    if (_isSuspended) {
+      return;
+    }
+    setState(() {
+      _conditionAny = !_conditionAny;
+      if (_conditionAny) {
+        _conditionDayAny = false;
+        _conditionTimeAny = false;
+        _conditionLocationAny = false;
+        _selectedWeekdays.clear();
+        _timeRules.clear();
+        _locationRules.clear();
+      }
+    });
+  }
+
+  /// Toggles the `condition day any` group reset directive.
+  void _toggleDayAny() {
+    if (_isSuspended) {
+      return;
+    }
+    setState(() {
+      _conditionDayAny = !_conditionDayAny;
+      if (_conditionDayAny) {
+        _conditionAny = false;
+        _selectedWeekdays.clear();
+      }
+    });
+  }
+
+  /// Toggles selection of [labelId].
+  void _toggleLabel(String labelId) {
+    setState(() {
+      if (!_selectedLabelIds.remove(labelId)) {
+        _selectedLabelIds.add(labelId);
+      }
+    });
+  }
+
+  /// Toggles the `condition location any` group reset directive.
+  void _toggleLocationAny() {
+    if (_isSuspended) {
+      return;
+    }
+    setState(() {
+      _conditionLocationAny = !_conditionLocationAny;
+      if (_conditionLocationAny) {
+        _conditionAny = false;
+        _locationRules.clear();
+      }
+    });
+  }
+
+  /// Toggles Priority mode on or off.
+  void _togglePriority() {
+    setState(() {
+      _mode = _mode == QuickAddMode.priority
+          ? QuickAddMode.standard
+          : QuickAddMode.priority;
+    });
+  }
+
+  /// Toggles Someday mode on or off.
+  void _toggleSomeday() {
+    setState(() {
+      _mode = _mode == QuickAddMode.someday
+          ? QuickAddMode.standard
+          : QuickAddMode.someday;
+    });
+  }
+
+  /// Toggles completion state of the subtask step at [index].
+  void _toggleSubtaskStep(int index) {
+    final current = _subtasks[index];
+    setState(() {
+      _subtasks[index] = current.copyWith(isCompleted: !current.isCompleted);
+    });
+  }
+
+  /// Toggles `suspended` state on or off.
+  void _toggleSuspended() {
+    setState(() {
+      _isSuspended = !_isSuspended;
+      _suspendedErrorMessage = null;
+    });
+  }
+
+  /// Toggles the `condition time any` group reset directive.
+  void _toggleTimeAny() {
+    if (_isSuspended) {
+      return;
+    }
+    setState(() {
+      _conditionTimeAny = !_conditionTimeAny;
+      if (_conditionTimeAny) {
+        _conditionAny = false;
+        _timeRules.clear();
+      }
+    });
+  }
+
+  /// Toggles ISO [weekday] (`1..7`) in `condition day`.
+  void _toggleWeekday(int weekday) {
+    if (_isSuspended) {
+      return;
+    }
+    setState(() {
+      _conditionAny = false;
+      _conditionDayAny = false;
+      if (!_selectedWeekdays.remove(weekday)) {
+        _selectedWeekdays.add(weekday);
+      }
+    });
+  }
+
+  /// Validates the entered task title against empty and duplicate constraints.
+  String? _validateTitle(TaskBoard board, AppLocalizations localizations) {
+    final trimmed = _titleController.text.trim();
+    if (trimmed.isEmpty) {
+      return localizations.taskNameErrorEmpty;
+    }
+    if (board.hasDuplicateTaskTitle(
+      trimmed,
+      excludingTaskId: widget.initialTask?.id,
+    )) {
+      return localizations.taskNameErrorDuplicate;
+    }
+    return null;
+  }
+}
+
+/// Pushes [EditTaskScreen] onto the navigation stack for extended task creation or task editing.
+Future<void> openEditTaskScreen(
+  BuildContext context, {
+  TaskItem? initialTask,
+  String initialTitle = '',
+  QuickAddMode initialMode = QuickAddMode.standard,
+  Set<String> initialLabelIds = const <String>{},
+  VoidCallback? onSubmitted,
+}) {
+  return Navigator.of(context).push<void>(
+    MaterialPageRoute<void>(
+      builder: (_) => EditTaskScreen(
+        initialTask: initialTask,
+        initialTitle: initialTitle,
+        initialMode: initialMode,
+        initialLabelIds: initialLabelIds,
+        onSubmitted: onSubmitted,
+      ),
+    ),
+  );
+}

@@ -25,7 +25,7 @@ import '../test_helpers.dart';
 
 void main() {
   testWidgets(
-    'TaskEditorDialog supports setting and editing Suspended, Prerequisite tasks (blocked), and Activation Conditions (any, day, time, location) while Suspended disables condition evaluation and places the task in Blocked',
+    'EditTaskScreen supports setting and editing Suspended, Prerequisite tasks (blocked), and Activation Conditions (any, day, time, location) while Suspended disables condition evaluation and places the task in Blocked',
     (WidgetTester tester) async {
       const seededTdf = '''
 tdf 0.2.0
@@ -75,6 +75,12 @@ task t001 {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
       await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('edit_task_screen')),
+        findsOneWidget,
+        reason: 'Advanced button must open EditTaskScreen',
+      );
 
       final titleInputFinder = find.byKey(
         const ValueKey('task_editor_title_input'),

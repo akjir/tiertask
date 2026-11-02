@@ -163,17 +163,16 @@ void main() {
       await tester.tap(advancedFinder);
       await tester.pumpAndSettle();
       expect(
-        find.byKey(const ValueKey('task_editor_dialog')),
+        find.byKey(const ValueKey('edit_task_screen')),
         findsOneWidget,
-        reason: 'Advanced button must open the shared TaskEditorDialog in extended creation mode',
+        reason: 'Advanced button must open the shared EditTaskScreen panel in extended creation mode',
       );
       await tester.tap(find.byKey(const ValueKey('task_editor_cancel_button')));
       await tester.pumpAndSettle();
       expect(
         barFinder,
         findsOneWidget,
-        reason:
-            'QuickAddBar must remain open after cancelling TaskEditorDialog',
+        reason: 'QuickAddBar must remain open after cancelling EditTaskScreen',
       );
 
       await tester.enterText(inputFinder, 'Draft to cancel');

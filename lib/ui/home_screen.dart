@@ -24,9 +24,9 @@ import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
 import 'edit_labels_screen.dart';
+import 'edit_task_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/quick_add_bar.dart';
-import 'widgets/task_editor_dialog.dart';
 import 'widgets/tier_page_indicator.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
@@ -1195,7 +1195,7 @@ class _TierTaskPill extends ConsumerWidget {
                       .read(taskNotifierProvider.notifier)
                       .downgradeTask(task.id)
                 : null,
-            onEdit: () => showTaskEditorDialog(context, initialTask: task),
+            onEdit: () => openEditTaskScreen(context, initialTask: task),
           ),
         ),
       ),

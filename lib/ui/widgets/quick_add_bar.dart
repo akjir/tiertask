@@ -21,7 +21,7 @@ import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_tier.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/task_providers.dart';
-import 'task_editor_dialog.dart';
+import '../edit_task_screen.dart';
 
 const Color _accentBlue = Color(0xFF2196F3);
 const Color _accentCyan = Color(0xFF00E5FF);
@@ -442,10 +442,10 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
     setState(() {});
   }
 
-  /// Opens the shared [TaskEditorDialog] pre-filled with the current draft values.
+  /// Opens the shared [EditTaskScreen] pre-filled with the current draft values.
   Future<void> _openAdvancedDialog() async {
     _dismissPopup();
-    await showTaskEditorDialog(
+    await openEditTaskScreen(
       context,
       initialTitle: _controller.text,
       initialMode: _mode,

@@ -21,11 +21,11 @@ import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 
-import '../test_helpers.dart';
+import 'test_helpers.dart';
 
 void main() {
   testWidgets(
-    'Right-side task edit button and QuickAddBar Advanced button open the shared TaskEditorDialog enforcing non-empty, non-duplicate names and shared fields',
+    'Right-side task edit button and QuickAddBar Advanced button open the dedicated EditTaskScreen panel enforcing non-empty, non-duplicate names and shared fields',
     (WidgetTester tester) async {
       const seededTdf = '''
 tdf 0.2.0
@@ -122,7 +122,8 @@ task t001 {
       expect(
         dividerFinder,
         findsOneWidget,
-        reason: 'Task pill must display a semi-transparent vertical divider before the edit button',
+        reason:
+            'Task pill must display a vertical divider before the edit button',
       );
       expect(
         editButtonFinder,
@@ -191,9 +192,10 @@ task t001 {
             'Tapping the task title or pill body must not complete the task',
       );
       expect(
-        find.byKey(const ValueKey('task_editor_dialog')),
+        find.byKey(const ValueKey('edit_task_screen')),
         findsNothing,
-        reason: 'Tapping the task title or pill body must not open TaskEditorDialog',
+        reason:
+            'Tapping the task title or pill body must not open EditTaskScreen',
       );
 
       await tester.tap(find.byType(FloatingActionButton));
@@ -204,7 +206,7 @@ task t001 {
       await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
       await tester.pumpAndSettle();
 
-      final dialogFinder = find.byKey(const ValueKey('task_editor_dialog'));
+      final screenFinder = find.byKey(const ValueKey('edit_task_screen'));
       final titleInputFinder = find.byKey(
         const ValueKey('task_editor_title_input'),
       );
@@ -216,11 +218,23 @@ task t001 {
       );
 
       expect(
-        dialogFinder,
+        screenFinder,
         findsOneWidget,
-        reason: 'Tapping Advanced in QuickAddBar must open TaskEditorDialog',
+        reason: 'Tapping Advanced in QuickAddBar must open the dedicated EditTaskScreen panel',
       );
-      expect(find.text('Extended Task View'), findsOneWidget);
+      expect(
+        find.byType(Dialog),
+        findsNothing,
+        reason: 'EditTaskScreen must be a full-screen panel rather than a modal dialog',
+      );
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Extended Task View'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(BackButton), findsOneWidget);
 
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
@@ -229,7 +243,7 @@ task t001 {
         findsOneWidget,
         reason: 'Saving with an empty name in create mode must show error',
       );
-      expect(dialogFinder, findsOneWidget);
+      expect(screenFinder, findsOneWidget);
 
       await tester.enterText(titleInputFinder, '  existing server audit  ');
       await tester.pump();
@@ -240,7 +254,7 @@ task t001 {
         findsOneWidget,
         reason: 'Saving a duplicate name in create mode must show error',
       );
-      expect(dialogFinder, findsOneWidget);
+      expect(screenFinder, findsOneWidget);
 
       await tester.enterText(titleInputFinder, 'Rotate SSH Keys');
       await tester.enterText(noteInputFinder, 'Use ed25519 keys');
@@ -263,9 +277,9 @@ task t001 {
       await tester.pumpAndSettle();
 
       expect(
-        dialogFinder,
+        screenFinder,
         findsNothing,
-        reason: 'Saving a valid new task must close TaskEditorDialog',
+        reason: 'Saving a valid new task must close EditTaskScreen',
       );
       expect(
         find.byKey(const ValueKey('quick_add_bar')),
@@ -291,25 +305,31 @@ task t001 {
       await tester.pumpAndSettle();
 
       expect(
-        dialogFinder,
+        screenFinder,
         findsOneWidget,
-        reason: 'Clicking the edit button on a task pill must open the same shared TaskEditorDialog',
+        reason: 'Clicking the edit button on a task pill must open the dedicated EditTaskScreen panel',
       );
-      expect(find.text('Edit Task'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(AppBar),
+          matching: find.text('Edit Task'),
+        ),
+        findsOneWidget,
+      );
       expect(
         tester.widget<TextField>(titleInputFinder).controller?.text,
         equals('Existing Server Audit'),
-        reason: 'Edit dialog must pre-fill the task title',
+        reason: 'EditTaskScreen must pre-fill the task title',
       );
       expect(
         tester.widget<TextField>(noteInputFinder).controller?.text,
         equals('Initial audit note'),
-        reason: 'Edit dialog must pre-fill the task note',
+        reason: 'EditTaskScreen must pre-fill the task note',
       );
       expect(
         find.text('Check firewall rules'),
         findsOneWidget,
-        reason: 'Edit dialog must pre-fill existing subtasks',
+        reason: 'EditTaskScreen must pre-fill existing subtasks',
       );
 
       await tester.enterText(titleInputFinder, '   ');
@@ -319,7 +339,7 @@ task t001 {
       expect(
         find.text('Please enter a task name.'),
         findsOneWidget,
-        reason: 'Edit dialog must reject empty task names',
+        reason: 'EditTaskScreen must reject empty task names',
       );
 
       await tester.enterText(titleInputFinder, 'rotate ssh keys');
@@ -329,7 +349,7 @@ task t001 {
       expect(
         find.text('A task with this name already exists.'),
         findsOneWidget,
-        reason: 'Edit dialog must reject duplicate task names',
+        reason: 'EditTaskScreen must reject duplicate task names',
       );
 
       await tester.enterText(titleInputFinder, 'Updated Server Audit');
@@ -341,9 +361,9 @@ task t001 {
       await tester.pumpAndSettle();
 
       expect(
-        dialogFinder,
+        screenFinder,
         findsNothing,
-        reason: 'Saving valid edits must close TaskEditorDialog',
+        reason: 'Saving valid edits must close EditTaskScreen',
       );
 
       board = container.read(taskNotifierProvider).value!;
@@ -423,10 +443,10 @@ task t001 {
       await tester.pumpAndSettle();
 
       expect(
-        dialogFinder,
+        screenFinder,
         findsOneWidget,
         reason:
-            'Tapping edit on a completed task pill must open TaskEditorDialog',
+            'Tapping edit on a completed task pill must open EditTaskScreen',
       );
       final priorityChip = tester.widget<FilterChip>(
         find.byKey(const ValueKey('task_editor_priority_button')),
@@ -452,7 +472,7 @@ task t001 {
       expect(
         board.completed,
         isEmpty,
-        reason: 'Saving a completed task in TaskEditorDialog with default mode must restore it to Planned',
+        reason: 'Saving a completed task in EditTaskScreen with default mode must restore it to Planned',
       );
       expect(board.focus.single.id, equals(rotateTaskId));
       expect(board.focus.single.isPriority, isFalse);
