@@ -211,9 +211,9 @@ void main() {
           )
           .dy;
       expect(
-        firstTaskPillTop - focusRect.bottom >= 24.0,
-        isTrue,
-        reason: 'Spacing below Focus tasks heading to the first task pill must be increased to at least 24px',
+        firstTaskPillTop - focusRect.bottom,
+        equals(36.0),
+        reason: 'Spacing below Focus tasks heading to the first task pill must be 36px (1.5x of 24px)',
       );
 
       await tester.tap(find.byIcon(Icons.search_rounded));
@@ -628,9 +628,9 @@ task cmp1 {
         reason: 'Blocked tasks heading must be horizontally centered on screen',
       );
       expect(
-        blockedPillTop - blockedHeadingRect.bottom >= 24.0,
-        isTrue,
-        reason: 'Spacing below Blocked tasks heading to the first task pill must be at least 24px',
+        blockedPillTop - blockedHeadingRect.bottom,
+        equals(36.0),
+        reason: 'Spacing below Blocked tasks heading to the first task pill must be 36px (1.5x of 24px)',
       );
       expect(
         find.text('Blocked Prerequisite Task'),
@@ -654,9 +654,12 @@ task cmp1 {
         reason: 'Blocked task must render as a dark-blue pill card matching Focus screen',
       );
       expect(
-        find.byIcon(Icons.more_vert_rounded),
-        findsNothing,
-        reason: 'Task entries must not render the legacy overflow menu or Move to button',
+        find.descendant(
+          of: find.byKey(const ValueKey('edit_task_button_blk_dep')),
+          matching: find.byIcon(Icons.more_vert_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Task entries must render the three-dots edit button',
       );
       expect(
         find.byType(Checkbox),
@@ -667,7 +670,7 @@ task cmp1 {
   );
 
   testWidgets(
-    'Clicking the downward arrow button next to the right-side gap downgrades tasks from Focus to Ready, from Ready to Planned, and from Planned to Someday per TDF_SPEC.md Section 6.3',
+    'Task pills display identical primaryContainer squares with white circles across all tasks and downgrade via the > button per TDF_SPEC.md Section 6.3',
     (WidgetTester tester) async {
       const seededTdf = '''
 tdf 0.2.0
@@ -745,6 +748,36 @@ task p1 {
         ),
       );
       await tester.pumpAndSettle();
+
+      final theme = Theme.of(
+        tester.element(find.byKey(const ValueKey('tier_pill_focus_f1'))),
+      );
+      for (final taskId in ['f1', 'f2', 'f3']) {
+        final squareContainers = tester
+            .widgetList<Container>(
+              find.descendant(
+                of: find.byKey(ValueKey('complete_task_button_$taskId')),
+                matching: find.byType(Container),
+              ),
+            )
+            .toList();
+        final outerDecoration =
+            squareContainers.first.decoration as BoxDecoration?;
+        final innerDecoration =
+            squareContainers.last.decoration as BoxDecoration?;
+        expect(
+          outerDecoration?.color,
+          equals(theme.colorScheme.primaryContainer),
+          reason:
+              'Every task ($taskId) must display the identical M3 primaryContainer square without even/odd distinction',
+        );
+        expect(
+          innerDecoration?.border?.top.color,
+          equals(Colors.white),
+          reason:
+              'Every task ($taskId) must display a white circle inside the square',
+        );
+      }
 
       await tester.tap(find.byKey(const ValueKey('downgrade_task_button_f1')));
       await tester.pumpAndSettle();

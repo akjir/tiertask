@@ -38,32 +38,6 @@ class SettingsScreen extends ConsumerStatefulWidget {
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-/// Reusable row of preset `.tdf` filename [ActionChip]s (`tasks.tdf` and `t2.tdf`).
-class _FileNamePresetChips extends StatelessWidget {
-  /// Creates [_FileNamePresetChips].
-  const _FileNamePresetChips({required this.onSelectFileName});
-
-  /// Callback invoked with the selected preset file name.
-  final ValueChanged<String> onSelectFileName;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      children: [
-        ActionChip(
-          label: const Text(WebDavConfig.defaultFileName),
-          onPressed: () => onSelectFileName(WebDavConfig.defaultFileName),
-        ),
-        ActionChip(
-          label: const Text('t2.tdf'),
-          onPressed: () => onSelectFileName('t2.tdf'),
-        ),
-      ],
-    );
-  }
-}
-
 /// Card for choosing the application display language (`System`, `English`, or `Deutsch`).
 class _LanguageSelectionCard extends StatelessWidget {
   /// Creates a [_LanguageSelectionCard].
@@ -120,14 +94,10 @@ class _LocalStorageSection extends StatelessWidget {
   const _LocalStorageSection({
     required this.localFilePathController,
     required this.resolvedLocalPath,
-    required this.onSelectFileName,
   });
 
   /// Controller for the local Markdown file name or path field.
   final TextEditingController localFilePathController;
-
-  /// Callback invoked when a preset file name chip is selected.
-  final ValueChanged<String> onSelectFileName;
 
   /// Resolved local filesystem path preview, or `null` if invalid.
   final String? resolvedLocalPath;
@@ -157,8 +127,6 @@ class _LocalStorageSection extends StatelessWidget {
                 ? localizations.localFilePathErrorEmpty
                 : null,
           ),
-          const SizedBox(height: 8),
-          _FileNamePresetChips(onSelectFileName: onSelectFileName),
           if (previewPath != null) ...[
             const SizedBox(height: 12),
             _ResolvedPathPreview(
@@ -315,7 +283,7 @@ class _SettingsActionRow extends StatelessWidget {
   }
 }
 
-/// WebDAV connection text fields and filename quick-select chips.
+/// WebDAV connection text fields and remote file path input.
 class _SettingsFormFields extends StatelessWidget {
   /// Creates [_SettingsFormFields].
   const _SettingsFormFields({
@@ -325,7 +293,6 @@ class _SettingsFormFields extends StatelessWidget {
     required this.filePathController,
     required this.obscurePassword,
     required this.onToggleObscurePassword,
-    required this.onSelectFileName,
   });
 
   /// Controller for the remote Markdown file path field.
@@ -333,9 +300,6 @@ class _SettingsFormFields extends StatelessWidget {
 
   /// Whether the password input is obscured.
   final bool obscurePassword;
-
-  /// Callback when a preset filename chip is tapped.
-  final ValueChanged<String> onSelectFileName;
 
   /// Callback to toggle password visibility.
   final VoidCallback onToggleObscurePassword;
@@ -374,8 +338,6 @@ class _SettingsFormFields extends StatelessWidget {
             border: const OutlineInputBorder(),
           ),
         ),
-        const SizedBox(height: 8),
-        _FileNamePresetChips(onSelectFileName: onSelectFileName),
       ],
     );
   }
@@ -546,7 +508,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 _LocalStorageSection(
                   localFilePathController: _localFilePathController,
                   resolvedLocalPath: _resolvePreviewLocalPath(currentConfig),
-                  onSelectFileName: _selectLocalFileName,
                 ),
               ],
               if (_selectedStorageMode.usesWebDav) ...[
@@ -559,7 +520,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   obscurePassword: _obscurePassword,
                   resolvedUri: currentConfig.resolveEndpointUri(),
                   onToggleObscurePassword: _toggleObscurePassword,
-                  onSelectFileName: _selectRemoteFileName,
                 ),
               ],
               const SizedBox(height: 20),
@@ -769,22 +729,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// Sets [_localFilePathController] to [name] and clears stale status banners.
-  void _selectLocalFileName(String name) {
-    setState(() {
-      _localFilePathController.text = name;
-      _clearStatusBanner();
-    });
-  }
-
-  /// Sets [_filePathController] to [name] and clears stale status banners.
-  void _selectRemoteFileName(String name) {
-    setState(() {
-      _filePathController.text = name;
-      _clearStatusBanner();
-    });
-  }
-
   /// Displays [message] with [tone] and schedules an automatic fade-out.
   void _showStatusBanner(String message, _StatusBannerTone tone) {
     _bannerTimer?.cancel();
@@ -828,18 +772,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 }
 
-/// Shared Material 3 card container with an icon, title, description, and optional body [child].
+/// Shared Material 3 card container with an icon, title, description, and body [child].
 class _SettingsSectionCard extends StatelessWidget {
   /// Creates a [_SettingsSectionCard].
   const _SettingsSectionCard({
     required this.icon,
     required this.title,
     required this.description,
-    this.child,
+    required this.child,
   });
 
-  /// Optional interactive content below the description.
-  final Widget? child;
+  /// Interactive content below the description.
+  final Widget child;
 
   /// Section subtitle description.
   final String description;
@@ -854,7 +798,6 @@ class _SettingsSectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final bodyChild = child;
 
     return Card(
       color: theme.cardColor,
@@ -884,7 +827,8 @@ class _SettingsSectionCard extends StatelessWidget {
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-            if (bodyChild != null) ...[const SizedBox(height: 12), bodyChild],
+            const SizedBox(height: 12),
+            child,
           ],
         ),
       ),
@@ -1222,7 +1166,7 @@ class _WebDavPasswordField extends StatelessWidget {
   }
 }
 
-/// Section grouping the WebDAV informational card, connection form fields, and resolved URI preview.
+/// Card grouping the WebDAV synchronization header, connection form fields, and resolved URI preview.
 class _WebDavStorageSection extends StatelessWidget {
   /// Creates a [_WebDavStorageSection].
   const _WebDavStorageSection({
@@ -1233,7 +1177,6 @@ class _WebDavStorageSection extends StatelessWidget {
     required this.obscurePassword,
     required this.resolvedUri,
     required this.onToggleObscurePassword,
-    required this.onSelectFileName,
   });
 
   /// Controller for the remote Markdown file path field.
@@ -1241,9 +1184,6 @@ class _WebDavStorageSection extends StatelessWidget {
 
   /// Whether the password input is obscured.
   final bool obscurePassword;
-
-  /// Callback when a preset filename chip is tapped.
-  final ValueChanged<String> onSelectFileName;
 
   /// Callback to toggle password visibility.
   final VoidCallback onToggleObscurePassword;
@@ -1265,32 +1205,30 @@ class _WebDavStorageSection extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     final endpointUri = resolvedUri;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _SettingsSectionCard(
-          icon: Icons.cloud_sync_outlined,
-          title: localizations.webdavSectionTitle,
-          description: localizations.webdavSectionDescription,
-        ),
-        const SizedBox(height: 16),
-        _SettingsFormFields(
-          serverUrlController: serverUrlController,
-          usernameController: usernameController,
-          passwordController: passwordController,
-          filePathController: filePathController,
-          obscurePassword: obscurePassword,
-          onToggleObscurePassword: onToggleObscurePassword,
-          onSelectFileName: onSelectFileName,
-        ),
-        if (endpointUri != null) ...[
-          const SizedBox(height: 12),
-          _ResolvedPathPreview(
-            label: localizations.resolvedEndpointLabel,
-            value: endpointUri.toString(),
+    return _SettingsSectionCard(
+      icon: Icons.cloud_sync_outlined,
+      title: localizations.webdavSectionTitle,
+      description: localizations.webdavSectionDescription,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SettingsFormFields(
+            serverUrlController: serverUrlController,
+            usernameController: usernameController,
+            passwordController: passwordController,
+            filePathController: filePathController,
+            obscurePassword: obscurePassword,
+            onToggleObscurePassword: onToggleObscurePassword,
           ),
+          if (endpointUri != null) ...[
+            const SizedBox(height: 12),
+            _ResolvedPathPreview(
+              label: localizations.resolvedEndpointLabel,
+              value: endpointUri.toString(),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

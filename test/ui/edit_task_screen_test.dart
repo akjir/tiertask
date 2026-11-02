@@ -104,26 +104,72 @@ task t001 {
         completeButtonFinder,
         findsOneWidget,
         reason:
-            'Task pill must display a clickable completion circle at the front',
+            'Task pill must display a clickable completion square at the front',
+      );
+      final theme = Theme.of(tester.element(pillFinder));
+      final squareContainers = tester
+          .widgetList<Container>(
+            find.descendant(
+              of: completeButtonFinder,
+              matching: find.byType(Container),
+            ),
+          )
+          .toList();
+      expect(
+        squareContainers.length,
+        equals(2),
+        reason: 'Completion button must consist of an outer rounded square and an inner circle',
+      );
+      final outerDecoration =
+          squareContainers.first.decoration as BoxDecoration?;
+      final innerDecoration =
+          squareContainers.last.decoration as BoxDecoration?;
+      expect(
+        outerDecoration?.color,
+        equals(theme.colorScheme.primaryContainer),
+        reason: 'Outer completion square must use the M3 primaryContainer color from the theme',
+      );
+      expect(
+        outerDecoration?.borderRadius,
+        equals(BorderRadius.circular(10)),
+        reason: 'Outer completion square must have rounded corners',
+      );
+      expect(
+        innerDecoration?.shape,
+        equals(BoxShape.circle),
+        reason: 'Inner completion indicator must be a circle',
+      );
+      expect(
+        innerDecoration?.border?.top.color,
+        equals(Colors.white),
+        reason: 'Inner completion circle must have a white border',
+      );
+      expect(
+        find.descendant(
+          of: completeButtonFinder,
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsNothing,
+        reason:
+            'Open task must not display a checkmark inside the white circle',
       );
       expect(
         downgradeButtonFinder,
         findsOneWidget,
-        reason: 'Task pill must display a downward arrow button to the left of the right-side gap',
+        reason: 'Task pill must display a right-chevron downgrade button before the edit button',
       );
       expect(
         find.descendant(
           of: downgradeButtonFinder,
-          matching: find.byIcon(Icons.arrow_downward_rounded),
+          matching: find.byIcon(Icons.chevron_right_rounded),
         ),
         findsOneWidget,
-        reason: 'Downgrade button must display a downward arrow icon',
+        reason: 'Downgrade button must display a > chevron icon',
       );
       expect(
         dividerFinder,
-        findsOneWidget,
-        reason:
-            'Task pill must display a vertical divider before the edit button',
+        findsNothing,
+        reason: 'Task pill must not render a vertical divider before the edit button',
       );
       expect(
         editButtonFinder,
@@ -131,52 +177,26 @@ task t001 {
         reason: 'Task pill must display an edit button on the right side',
       );
       expect(
+        find.descendant(
+          of: editButtonFinder,
+          matching: find.byIcon(Icons.more_vert_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Edit button must display the three-dots icon',
+      );
+      expect(
         tester.getTopLeft(completeButtonFinder).dx <
             tester.getTopLeft(taskTitleFinder).dx,
         isTrue,
-        reason: 'Completion circle must be positioned at the front before the task title',
+        reason: 'Completion square must be positioned at the front before the task title',
       );
       expect(
         tester.getTopLeft(downgradeButtonFinder).dx >
                 tester.getTopLeft(taskTitleFinder).dx &&
             tester.getTopRight(downgradeButtonFinder).dx <=
-                tester.getTopLeft(dividerFinder).dx,
-        isTrue,
-        reason: 'Downgrade arrow button must be positioned to the right of the task title and to the left of the vertical gap',
-      );
-      expect(
-        tester.getTopLeft(dividerFinder).dx >=
-                tester.getTopRight(downgradeButtonFinder).dx &&
-            tester.getTopRight(dividerFinder).dx <=
                 tester.getTopLeft(editButtonFinder).dx,
         isTrue,
-        reason: 'Vertical divider must be positioned between the downgrade button and the edit button',
-      );
-      final pillCardFinder = find
-          .descendant(of: pillFinder, matching: find.byType(Material))
-          .first;
-      expect(
-        tester.getTopLeft(dividerFinder).dy,
-        closeTo(tester.getTopLeft(pillCardFinder).dy, 0.01),
-        reason: 'Vertical divider must start flush at the very top edge of the task pill card',
-      );
-      expect(
-        tester.getBottomLeft(dividerFinder).dy,
-        closeTo(tester.getBottomLeft(pillCardFinder).dy, 0.01),
-        reason: 'Vertical divider must extend flush to the very bottom edge of the task pill card',
-      );
-      final dividerContainer = tester.widget<Container>(dividerFinder);
-      final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
-      expect(
-        dividerContainer.color,
-        equals(scaffold.backgroundColor),
-        reason: 'Vertical gap before the edit button must match the screen background color',
-      );
-      expect(
-        tester.getSize(dividerFinder).width,
-        equals(3.0),
-        reason:
-            'Vertical gap before the edit button must have a width of 3.0px',
+        reason: 'Downgrade > button must be positioned between the task title and the three-dots edit button',
       );
 
       await tester.tap(taskTitleFinder);
@@ -433,10 +453,22 @@ task t001 {
         reason:
             'Completed task pill must be rendered in the Completed tier pane',
       );
-
-      await tester.tap(
-        find.byKey(ValueKey('complete_task_button_$rotateTaskId')),
+      final completedButtonFinder = find.byKey(
+        ValueKey('complete_task_button_$rotateTaskId'),
       );
+      final completedCheckIcon = tester.widget<Icon>(
+        find.descendant(
+          of: completedButtonFinder,
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+      );
+      expect(
+        completedCheckIcon.color,
+        equals(Colors.white),
+        reason: 'Completed task must display a white checkmark inside the white circle',
+      );
+
+      await tester.tap(completedButtonFinder);
       await tester.pumpAndSettle();
 
       board = container.read(taskNotifierProvider).value!;

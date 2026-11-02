@@ -252,6 +252,69 @@ task t004 {
         findsOneWidget,
         reason: 'Both mode must also show WebDAV server URL field',
       );
+      expect(
+        find.byType(ActionChip),
+        findsNothing,
+        reason: 'Preset file name recommendation buttons (tasks.tdf, t2.tdf) must not be rendered in either storage section',
+      );
+      expect(
+        find.text('t2.tdf'),
+        findsNothing,
+        reason: 't2.tdf recommendation button must not be rendered',
+      );
+
+      final localSectionCard = find.ancestor(
+        of: find.text('Local TDF File'),
+        matching: find.byType(Card),
+      );
+      expect(
+        find.descendant(
+          of: localSectionCard,
+          matching: find.widgetWithText(TextFormField, 'Local TDF File Name'),
+        ),
+        findsOneWidget,
+        reason: 'Local TDF File Name field must be grouped inside the Local TDF File card',
+      );
+
+      final webdavSectionCard = find.ancestor(
+        of: find.text('WebDAV Synchronization (Single Source of Truth)'),
+        matching: find.byType(Card),
+      );
+      expect(
+        find.descendant(
+          of: webdavSectionCard,
+          matching: find.widgetWithText(TextFormField, 'WebDAV Server URL'),
+        ),
+        findsOneWidget,
+        reason: 'WebDAV Server URL field must be grouped inside the WebDAV Synchronization card',
+      );
+      expect(
+        find.descendant(
+          of: webdavSectionCard,
+          matching: find.widgetWithText(TextFormField, 'Username'),
+        ),
+        findsOneWidget,
+        reason: 'Username field must be grouped inside the WebDAV Synchronization card',
+      );
+      expect(
+        find.descendant(
+          of: webdavSectionCard,
+          matching: find.widgetWithText(
+            TextFormField,
+            'App Password / Password',
+          ),
+        ),
+        findsOneWidget,
+        reason: 'Password field must be grouped inside the WebDAV Synchronization card',
+      );
+      expect(
+        find.descendant(
+          of: webdavSectionCard,
+          matching: find.widgetWithText(TextFormField, 'TDF File Name / Path'),
+        ),
+        findsOneWidget,
+        reason: 'TDF File Name / Path field must be grouped inside the WebDAV Synchronization card',
+      );
 
       await tester.ensureVisible(find.text('Local'));
       await tester.tap(find.text('Local'));
@@ -452,6 +515,19 @@ task t004 {
       await tester.pumpAndSettle();
 
       await openSettingsFromMenu(tester);
+
+      final webdavSectionCard = find.ancestor(
+        of: find.text('WebDAV Synchronization (Single Source of Truth)'),
+        matching: find.byType(Card),
+      );
+      expect(
+        find.descendant(
+          of: webdavSectionCard,
+          matching: find.text('Resolved WebDAV Endpoint (GET / PUT):'),
+        ),
+        findsOneWidget,
+        reason: 'Resolved WebDAV endpoint preview must be grouped inside the WebDAV Synchronization card',
+      );
 
       final saveButtonFinder = find.text('Save');
       await tester.ensureVisible(saveButtonFinder);

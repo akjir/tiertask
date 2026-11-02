@@ -274,14 +274,17 @@ task cmp1 {
             'Ready task must render as a pill card matching the Focus screen',
       );
       expect(
-        find.byIcon(Icons.more_vert_rounded),
-        findsNothing,
-        reason: 'Ready task pill must not display the legacy overflow menu',
+        find.descendant(
+          of: find.byKey(const ValueKey('edit_task_button_r1')),
+          matching: find.byIcon(Icons.more_vert_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Ready task pill must display the three-dots edit button',
       );
       expect(
         find.byKey(const ValueKey('downgrade_task_button_r1')),
         findsOneWidget,
-        reason: 'Ready task pill must display the downgrade arrow button to the left of the gap',
+        reason: 'Ready task pill must display the > downgrade button',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_ready')),
@@ -316,12 +319,13 @@ task cmp1 {
       expect(
         find.byKey(const ValueKey('downgrade_task_button_p1')),
         findsOneWidget,
-        reason: 'Planned task pill must display the downgrade arrow button to the left of the gap',
+        reason: 'Planned task pill must display the > downgrade button',
       );
       expect(
-        find.byIcon(Icons.arrow_downward_rounded),
+        find.byIcon(Icons.chevron_right_rounded),
         findsOneWidget,
-        reason: 'Planned pane must render the downgrade arrow icon for Planned tasks',
+        reason:
+            'Planned pane must render the > downgrade icon for Planned tasks',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_planned')),
@@ -361,12 +365,12 @@ task cmp1 {
       expect(
         find.byKey(const ValueKey('downgrade_task_button_blk1')),
         findsNothing,
-        reason: 'Blocked task pill must not display a downgrade arrow button',
+        reason: 'Blocked task pill must not display a downgrade button',
       );
       expect(
-        find.byIcon(Icons.arrow_downward_rounded),
+        find.byIcon(Icons.chevron_right_rounded),
         findsNothing,
-        reason: 'Blocked pane must not render any downgrade arrow icons',
+        reason: 'Blocked pane must not render any > downgrade icons',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_blocked')),
@@ -525,19 +529,22 @@ task cmp1 {
         reason: 'Completed task must render as a pill card matching the Focus screen',
       );
       expect(
-        find.byIcon(Icons.more_vert_rounded),
-        findsNothing,
-        reason: 'Completed task pill must not render the legacy overflow menu or Move to button',
+        find.descendant(
+          of: find.byKey(const ValueKey('edit_task_button_cmp1')),
+          matching: find.byIcon(Icons.more_vert_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Completed task pill must render the three-dots edit button',
       );
       expect(
         find.byKey(const ValueKey('downgrade_task_button_cmp1')),
         findsNothing,
-        reason: 'Completed task pill must not display a downgrade arrow button',
+        reason: 'Completed task pill must not display a downgrade button',
       );
       expect(
-        find.byIcon(Icons.arrow_downward_rounded),
+        find.byIcon(Icons.chevron_right_rounded),
         findsNothing,
-        reason: 'Completed pane must not render any downgrade arrow icons',
+        reason: 'Completed pane must not render any > downgrade icons',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_completed')),
@@ -615,12 +622,12 @@ task cmp1 {
       expect(
         find.byKey(const ValueKey('downgrade_task_button_smd1')),
         findsNothing,
-        reason: 'Someday task pill must not display a downgrade arrow button',
+        reason: 'Someday task pill must not display a downgrade button',
       );
       expect(
-        find.byIcon(Icons.arrow_downward_rounded),
+        find.byIcon(Icons.chevron_right_rounded),
         findsNothing,
-        reason: 'Someday pane must not render any downgrade arrow icons',
+        reason: 'Someday pane must not render any > downgrade icons',
       );
       expect(
         find.byKey(const ValueKey('tier_indicator_icon_someday')),
