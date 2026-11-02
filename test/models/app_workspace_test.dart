@@ -13,7 +13,9 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -63,30 +65,94 @@ class _FakeFlutterSecureStorage extends FlutterSecureStorage {
   }
 }
 
+Uint8List _buildRawRecord({
+  int flags = 0,
+  String id = 'tasks',
+  String name = 'Tasks',
+  String serverUrl = '',
+  String username = '',
+  String password = '',
+  String filePath = 'tasks.tdf',
+  String localFilePath = 'tasks.tdf',
+}) {
+  final builder = BytesBuilder(copy: false)..addByte(flags);
+  for (final field in <String>[
+    id,
+    name,
+    serverUrl,
+    username,
+    password,
+    filePath,
+    localFilePath,
+  ]) {
+    final encoded = utf8.encode(field);
+    builder
+      ..addByte((encoded.length >> 8) & 0xFF)
+      ..addByte(encoded.length & 0xFF)
+      ..add(encoded);
+  }
+  return builder.toBytes();
+}
+
 void main() {
   final fixedDate = DateTime.utc(2026, 11, 2, 10, 0);
 
   group('AppWorkspace & Suggested TDF File Names', () {
-    test('defaults to Tasks workspace with tasks.tdf and derives lowercase .tdf filenames from workspace names', () {
+    test('defaults to Tasks workspace with tasks.tdf and derives lowercase .tdf filenames and collision IDs', () {
       const defaultWorkspace = AppWorkspace.defaultWorkspace;
-      expect(defaultWorkspace.id, equals('tasks'));
-      expect(defaultWorkspace.name, equals('Tasks'));
-      expect(defaultWorkspace.config.localFilePath, equals('tasks.tdf'));
-      expect(defaultWorkspace.config.filePath, equals('tasks.tdf'));
+      expect(
+        defaultWorkspace.id,
+        equals('tasks'),
+        reason: 'Default workspace ID must be tasks',
+      );
+      expect(
+        defaultWorkspace.name,
+        equals('Tasks'),
+        reason: 'Default workspace name must be Tasks',
+      );
+      expect(
+        defaultWorkspace.config.localFilePath,
+        equals('tasks.tdf'),
+        reason: 'Default localFilePath must be tasks.tdf',
+      );
+      expect(
+        defaultWorkspace.config.filePath,
+        equals('tasks.tdf'),
+        reason: 'Default remote filePath must be tasks.tdf',
+      );
 
-      expect(AppWorkspace.suggestFileName('Tasks'), equals('tasks.tdf'));
-      expect(AppWorkspace.suggestFileName('Arbeit'), equals('arbeit.tdf'));
+      for (final (rawName, expectedFile) in <(String, String)>[
+        ('Tasks', 'tasks.tdf'),
+        ('Arbeit', 'arbeit.tdf'),
+        ('  Kunde Müller & Söhne! ', 'kunde_mueller_soehne.tdf'),
+        ('Großprojekt ÄÖÜ', 'grossprojekt_aeoeue.tdf'),
+        ('   ---   ', 'workspace.tdf'),
+      ]) {
+        expect(
+          AppWorkspace.suggestFileName(rawName),
+          equals(expectedFile),
+          reason: 'suggestFileName("$rawName") must return "$expectedFile"',
+        );
+      }
+
+      final summaries = <WorkspaceSummary>[
+        defaultWorkspace.summary,
+        const WorkspaceSummary(
+          id: 'tasks_2',
+          name: 'Tasks 2',
+          localFilePath: 'tasks_2.tdf',
+          filePath: 'tasks_2.tdf',
+        ),
+      ];
       expect(
-        AppWorkspace.suggestFileName('  Kunde Müller & Söhne! '),
-        equals('kunde_mueller_soehne.tdf'),
+        AppWorkspace.deriveWorkspaceId('Tasks', summaries),
+        equals('tasks_3'),
+        reason: 'deriveWorkspaceId must increment numeric suffix on collision',
       );
       expect(
-        AppWorkspace.suggestFileName('Großprojekt ÄÖÜ'),
-        equals('grossprojekt_aeoeue.tdf'),
-      );
-      expect(
-        AppWorkspace.suggestFileName('   ---   '),
-        equals('workspace.tdf'),
+        AppWorkspace.deriveWorkspaceId('!!!', summaries),
+        equals('workspace'),
+        reason: 'deriveWorkspaceId must fall back to workspace on empty slug',
       );
 
       final updated = defaultWorkspace.copyWith(
@@ -94,29 +160,89 @@ void main() {
         config: const WebDavConfig(
           localFilePath: 'private.tdf',
           filePath: 'private.tdf',
+          storageMode: StorageMode.both,
+          language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
+          themePalette: AppThemePalette.navy,
+          showOpenTaskCount: true,
         ),
       );
-      final roundTrip = AppWorkspace.fromJson(updated.toJson());
-      expect(roundTrip, equals(updated));
-      expect(roundTrip.hashCode, equals(updated.hashCode));
-      expect(roundTrip.summary.id, equals('tasks'));
-      expect(roundTrip.summary.name, equals('Private Tasks'));
-      expect(roundTrip.summary.localFilePath, equals('private.tdf'));
-      expect(roundTrip.summary.filePath, equals('private.tdf'));
+      final encodedBytes = updated.toBytes();
+      expect(
+        encodedBytes.sublist(0, 4),
+        equals(<int>[0x54, 0x54, 0x57, 0x01]),
+        reason: 'Binary payload must start with TTW\\x01 magic header',
+      );
+      expect(
+        defaultWorkspace.toBytes().length,
+        equals(49),
+        reason: 'Default workspace binary encoding must be 49 bytes',
+      );
+      expect(
+        encodedBytes.length,
+        equals(61),
+        reason: 'Updated workspace binary encoding must be 61 bytes',
+      );
+      final roundTrip = AppWorkspace.fromBytes(encodedBytes);
+      expect(
+        roundTrip,
+        equals(updated),
+        reason: 'Binary round-trip must preserve AppWorkspace equality',
+      );
+      expect(
+        roundTrip.hashCode,
+        equals(updated.hashCode),
+        reason: 'Binary round-trip must preserve AppWorkspace hashCode',
+      );
+      expect(
+        roundTrip.summary,
+        equals(
+          const WorkspaceSummary(
+            id: 'tasks',
+            name: 'Private Tasks',
+            localFilePath: 'private.tdf',
+            filePath: 'private.tdf',
+          ),
+        ),
+        reason: 'summary getter must match id, name, and paths',
+      );
+      expect(
+        roundTrip.summary.hashCode,
+        equals(updated.summary.hashCode),
+        reason: 'WorkspaceSummary hashCode must be deterministic',
+      );
     });
   });
 
-  group('Workspace Uniqueness, Bounds & Error Exhaustiveness', () {
-    test('enforces non-empty names, unique workspace names, unique .tdf file paths, and all WorkspaceErrorKind variants', () async {
+  group('Workspace Uniqueness, Path Traversal, Control/BiDi Injection & Bounds', () {
+    test('enforces name bounds, control/BiDi rejection, path traversal rejection, and all WorkspaceErrorKind variants', () async {
       final repository = InMemorySettingsRepository();
 
-      final initialActive = await repository.loadActiveWorkspace();
-      expect(initialActive.id, equals('tasks'));
-      expect(initialActive.name, equals('Tasks'));
-      expect(initialActive.config.localFilePath, equals('tasks.tdf'));
+      final maxLenName = 'A' * AppWorkspace.maxNameLength;
+      expect(
+        AppWorkspace.validateName(maxLenName, const <WorkspaceSummary>[]),
+        equals(maxLenName),
+        reason: 'Exact 128-character workspace name must be accepted',
+      );
 
-      for (final invalidName in ['', '   ', 'Bad\nName', 'A' * 129]) {
+      for (final invalidName in <String>[
+        '',
+        '   ',
+        'Bad\nName',
+        'Bad\rName',
+        'Bad\x00Name',
+        'Bad\x7FName',
+        'Bad\u0085Name',
+        'Bad\u009FName',
+        'Bad\u2028Name',
+        'Bad\u2029Name',
+        'Bad\u202EName',
+        'Bad\u2066Name',
+        'Bad\u061CName',
+        'Bad\u200EName',
+        'Bad\u200FName',
+        'A' * (AppWorkspace.maxNameLength + 1),
+      ]) {
         await expectLater(
           () => repository.createWorkspace(invalidName),
           throwsA(
@@ -130,7 +256,7 @@ void main() {
         );
       }
 
-      for (final duplicateName in ['Tasks', 'tasks', '  TASKS  ']) {
+      for (final duplicateName in <String>['Tasks', 'tasks', '  TASKS  ']) {
         await expectLater(
           () => repository.createWorkspace(duplicateName),
           throwsA(
@@ -145,10 +271,11 @@ void main() {
       }
 
       final arbeitWorkspace = await repository.createWorkspace('Arbeit');
-      expect(arbeitWorkspace.id, equals('arbeit'));
-      expect(arbeitWorkspace.name, equals('Arbeit'));
-      expect(arbeitWorkspace.config.localFilePath, equals('arbeit.tdf'));
-      expect(arbeitWorkspace.config.filePath, equals('arbeit.tdf'));
+      expect(
+        arbeitWorkspace.id,
+        equals('arbeit'),
+        reason: 'Arbeit workspace ID must be arbeit',
+      );
 
       await expectLater(
         () => repository.createWorkspace(
@@ -186,11 +313,24 @@ void main() {
         reason: 'Duplicate remote filePath must be rejected across workspaces',
       );
 
-      for (final invalidPath in [
+      for (final invalidPath in <String>[
         '',
+        '.tdf',
+        '/.tdf',
+        'sub/.tdf',
+        'dir/..tdf',
+        'dir/ .tdf',
+        'dir/ .. /tasks.tdf',
+        'dir/ . /tasks.tdf',
+        'dir/ /tasks.tdf',
+        'dir/ sub/tasks.tdf',
+        'dir/sub /tasks.tdf',
         '../escape.tdf',
         'notes.txt',
         'bad\x00.tdf',
+        'bad\u0085.tdf',
+        'bad\u2028.tdf',
+        'bad\u202E.tdf',
       ]) {
         await expectLater(
           () => repository.createWorkspace(
@@ -227,7 +367,11 @@ void main() {
         'arbeit',
         'Kunde Nord',
       );
-      expect(renamedArbeit.name, equals('Kunde Nord'));
+      expect(
+        renamedArbeit.name,
+        equals('Kunde Nord'),
+        reason: 'Renamed workspace must reflect new display name',
+      );
       expect(
         renamedArbeit.config.localFilePath,
         equals('arbeit.tdf'),
@@ -260,6 +404,7 @@ void main() {
             WorkspaceErrorKind.workspaceNotFound,
           ),
         ),
+        reason: 'Activating unknown workspace ID must throw workspaceNotFound',
       );
 
       await repository.deleteWorkspace('arbeit');
@@ -288,6 +433,84 @@ void main() {
           ),
         ),
         reason: 'Exceeding AppWorkspace.maxWorkspaces must be rejected',
+      );
+    });
+
+    test('rejects corrupt, negative-indexed, oversized, trailing-byte, invalid-UTF8, and duplicate binary payloads', () {
+      final validSingle = AppWorkspace.defaultWorkspace.toBytes();
+      final recordDefault = _buildRawRecord();
+      final recordControlName = _buildRawRecord(name: 'Bad\nName');
+      final recordBiDiPath = _buildRawRecord(localFilePath: 'bad\u202E.tdf');
+      final recordTraversalPath = _buildRawRecord(
+        localFilePath: '../escape.tdf',
+      );
+      final recordOverlongName = _buildRawRecord(
+        name: 'A' * (AppWorkspace.maxNameLength + 1),
+      );
+
+      for (final corruptBytes in <List<int>>[
+        <int>[],
+        <int>[0x54, 0x54, 0x57],
+        <int>[0x00, 0x00, 0x00, 0x01, 0x01, 0x00],
+        <int>[0x154, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordDefault],
+        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x00, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x01, -1, 0x00, ...recordDefault],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x21, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x01],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, -256, ...recordDefault],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, 0x00, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, 0x00, 0x00, 0x05, 0x61],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xFE],
+        <int>[...validSingle, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordControlName],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordBiDiPath],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordTraversalPath],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordOverlongName],
+        <int>[
+          0x54,
+          0x54,
+          0x57,
+          0x01,
+          0x02,
+          0x00,
+          ...recordDefault,
+          ...recordDefault,
+        ],
+        Uint8List(AppWorkspace.maxBinaryBytes + 1),
+      ]) {
+        expect(
+          () => AppWorkspace.decodePersistedState(corruptBytes),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.corruptBinaryPayload,
+            ),
+          ),
+          reason:
+              'Corrupt binary payload (length ${corruptBytes.length}) must throw corruptBinaryPayload',
+        );
+      }
+
+      final hugePasswordWorkspace = AppWorkspace(
+        id: 'tasks',
+        name: 'Tasks',
+        config: WebDavConfig(password: 'P' * AppWorkspace.maxBinaryBytes),
+      );
+      expect(
+        () => AppWorkspace.encodePersistedState(<AppWorkspace>[
+          hugePasswordWorkspace,
+        ], activeId: 'tasks'),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.corruptBinaryPayload,
+          ),
+        ),
+        reason: 'Encoding a workspace payload exceeding maxBinaryBytes must throw corruptBinaryPayload',
       );
     });
   });
@@ -326,14 +549,38 @@ void main() {
       final initialWorkspace = await container.read(
         activeWorkspaceProvider.future,
       );
-      expect(initialWorkspace.id, equals('tasks'));
-      expect(initialWorkspace.name, equals('Tasks'));
-      expect(initialWorkspace.config.localFilePath, equals('tasks.tdf'));
-      expect(container.read(appThemeModeProvider), equals(AppThemeMode.dark));
-      expect(container.read(appLocaleProvider), equals(const Locale('de')));
+      expect(
+        initialWorkspace.id,
+        equals('tasks'),
+        reason: 'Initial active workspace ID must be tasks',
+      );
+      expect(
+        initialWorkspace.name,
+        equals('Tasks'),
+        reason: 'Initial active workspace name must be Tasks',
+      );
+      expect(
+        initialWorkspace.config.localFilePath,
+        equals('tasks.tdf'),
+        reason: 'Initial active workspace localFilePath must be tasks.tdf',
+      );
+      expect(
+        container.read(appThemeModeProvider),
+        equals(AppThemeMode.dark),
+        reason: 'Initial theme mode must follow active workspace config',
+      );
+      expect(
+        container.read(appLocaleProvider),
+        equals(const Locale('de')),
+        reason: 'Initial locale must follow active workspace config',
+      );
 
       final initialBoard = await container.read(taskNotifierProvider.future);
-      expect(initialBoard.allTasks, isEmpty);
+      expect(
+        initialBoard.allTasks,
+        isEmpty,
+        reason: 'Initial board before adding tasks must be empty',
+      );
 
       await container
           .read(taskNotifierProvider.notifier)
@@ -343,12 +590,18 @@ void main() {
       expect(
         tasksBoard.focus.map((task) => task.title),
         equals(['Private Steuererklärung']),
+        reason: 'Task added to Tasks workspace must appear in Focus tier',
       );
       final tasksFile = File('${tempDir.path}/tasks.tdf');
-      expect(await tasksFile.exists(), isTrue);
+      expect(
+        await tasksFile.exists(),
+        isTrue,
+        reason: 'tasks.tdf must be created on disk',
+      );
       expect(
         await tasksFile.readAsString(),
         contains('name "Private Steuererklärung"'),
+        reason: 'tasks.tdf must contain the serialized task name',
       );
 
       final arbeitWorkspace = await container
@@ -364,7 +617,11 @@ void main() {
             activate: true,
           );
 
-      expect(arbeitWorkspace.id, equals('arbeit'));
+      expect(
+        arbeitWorkspace.id,
+        equals('arbeit'),
+        reason: 'Derived workspace ID for Arbeit must be arbeit',
+      );
       expect(
         container.read(activeWorkspaceProvider).requireValue.name,
         equals('Arbeit'),
@@ -372,7 +629,11 @@ void main() {
       );
 
       final switchedConfig = await container.read(webDavConfigProvider.future);
-      expect(switchedConfig.localFilePath, equals('arbeit.tdf'));
+      expect(
+        switchedConfig.localFilePath,
+        equals('arbeit.tdf'),
+        reason: 'Switched config must point to arbeit.tdf',
+      );
       expect(
         container.read(appThemeModeProvider),
         equals(AppThemeMode.light),
@@ -400,10 +661,15 @@ void main() {
       await container
           .read(taskNotifierProvider.notifier)
           .addTask('Sprint Planning vorbereiten', isPriority: true);
-      expect(await arbeitFile.exists(), isTrue);
+      expect(
+        await arbeitFile.exists(),
+        isTrue,
+        reason: 'arbeit.tdf must exist after adding a task to Arbeit',
+      );
       expect(
         await arbeitFile.readAsString(),
         contains('name "Sprint Planning vorbereiten"'),
+        reason: 'arbeit.tdf must contain the task added in Arbeit',
       );
       expect(
         await tasksFile.readAsString(),
@@ -417,6 +683,7 @@ void main() {
       expect(
         container.read(activeWorkspaceProvider).requireValue.name,
         equals('Kunde Alpha'),
+        reason: 'Active workspace name must update in memory after rename',
       );
 
       await container
@@ -426,9 +693,21 @@ void main() {
       final reloadedTasksConfig = await container.read(
         webDavConfigProvider.future,
       );
-      expect(reloadedTasksConfig.localFilePath, equals('tasks.tdf'));
-      expect(container.read(appThemeModeProvider), equals(AppThemeMode.dark));
-      expect(container.read(appLocaleProvider), equals(const Locale('de')));
+      expect(
+        reloadedTasksConfig.localFilePath,
+        equals('tasks.tdf'),
+        reason: 'Switching back to tasks must restore tasks.tdf config',
+      );
+      expect(
+        container.read(appThemeModeProvider),
+        equals(AppThemeMode.dark),
+        reason: 'Switching back to tasks must restore dark theme mode',
+      );
+      expect(
+        container.read(appLocaleProvider),
+        equals(const Locale('de')),
+        reason: 'Switching back to tasks must restore German locale',
+      );
 
       final reloadedTasksBoard = await container.read(
         taskNotifierProvider.future,
@@ -456,44 +735,123 @@ void main() {
       expect(
         fallbackBoard.focus.map((task) => task.title),
         equals(['Private Steuererklärung']),
+        reason: 'Fallback workspace board must contain its original tasks',
       );
     });
 
-    test('SecureSettingsRepository migrates legacy single-profile keys into Tasks workspace and persists workspace switches', () async {
-      final fakeStorage = _FakeFlutterSecureStorage(<String, String>{
-        't2_webdav_server_url': 'https://cloud.example.com',
-        't2_webdav_username': 'alice',
-        't2_webdav_password': 'secret',
-        't2_webdav_file_path': 'tiertask.md',
-        't2_local_file_path': '',
-        't2_storage_mode': 'both',
-        't2_app_language': 'de',
-        't2_theme_mode': 'dark',
-        't2_show_open_task_count': 'true',
-      });
+    test('SecureSettingsRepository persists workspaces and activeId in a single Base64-encoded binary key without quotes or backslashes and restores StorageMode.both across restarts', () async {
+      final fakeStorage = _FakeFlutterSecureStorage();
       final repository = SecureSettingsRepository(storage: fakeStorage);
 
-      final migrated = await repository.loadActiveWorkspace();
-      expect(migrated.id, equals('tasks'));
-      expect(migrated.name, equals('Tasks'));
-      expect(migrated.config.filePath, equals('tasks.tdf'));
-      expect(migrated.config.localFilePath, equals('tasks.tdf'));
-      expect(migrated.config.storageMode, equals(StorageMode.both));
-      expect(migrated.config.language, equals(AppLanguage.german));
-      expect(migrated.config.themeMode, equals(AppThemeMode.dark));
-      expect(migrated.config.showOpenTaskCount, isTrue);
+      final initial = await repository.loadActiveWorkspace();
+      expect(
+        initial,
+        equals(AppWorkspace.defaultWorkspace),
+        reason: 'Empty storage must return AppWorkspace.defaultWorkspace',
+      );
+      expect(
+        initial.config.storageMode,
+        equals(StorageMode.local),
+        reason: 'Default storage mode must be StorageMode.local',
+      );
 
-      await repository.createWorkspace('Arbeit', activate: true);
-      final activeArbeit = await repository.loadActiveWorkspace();
-      expect(activeArbeit.id, equals('arbeit'));
-      expect(activeArbeit.name, equals('Arbeit'));
-      expect(activeArbeit.config.localFilePath, equals('arbeit.tdf'));
+      await repository.saveConfig(
+        const WebDavConfig(
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+          localFilePath: 'tasks.tdf',
+          storageMode: StorageMode.both,
+          language: AppLanguage.german,
+          themeMode: AppThemeMode.dark,
+          themePalette: AppThemePalette.navy,
+          showOpenTaskCount: true,
+        ),
+      );
 
-      await repository.renameWorkspace('arbeit', 'Beratung');
-      await repository.activateWorkspace('tasks');
-      expect((await repository.loadActiveWorkspace()).id, equals('tasks'));
-      await repository.deleteWorkspace('arbeit');
-      expect((await repository.loadActiveWorkspace()).id, equals('tasks'));
+      final rawStoredSettings = await fakeStorage.read(key: 't2_settings_v1');
+      expect(
+        rawStoredSettings,
+        isNotNull,
+        reason: 'Persisted settings key must be populated',
+      );
+      expect(
+        rawStoredSettings?.contains('"'),
+        isFalse,
+        reason: 'Persisted settings payload must be Base64 without quotes',
+      );
+      expect(
+        rawStoredSettings?.contains(r'\'),
+        isFalse,
+        reason: 'Persisted settings payload must not contain backslashes',
+      );
+
+      final reloadedRepository = SecureSettingsRepository(storage: fakeStorage);
+      final reloaded = await reloadedRepository.loadActiveWorkspace();
+      expect(
+        reloaded.id,
+        equals('tasks'),
+        reason: 'Reloaded workspace ID must be tasks',
+      );
+      expect(
+        reloaded.name,
+        equals('Tasks'),
+        reason: 'Reloaded workspace name must be Tasks',
+      );
+      expect(
+        reloaded.config.storageMode,
+        equals(StorageMode.both),
+        reason: 'Reloaded storageMode must preserve StorageMode.both',
+      );
+      expect(
+        reloaded.config.language,
+        equals(AppLanguage.german),
+        reason: 'Reloaded language must preserve AppLanguage.german',
+      );
+      expect(
+        reloaded.config.themeMode,
+        equals(AppThemeMode.dark),
+        reason: 'Reloaded themeMode must preserve AppThemeMode.dark',
+      );
+      expect(
+        reloaded.config.themePalette,
+        equals(AppThemePalette.navy),
+        reason: 'Reloaded themePalette must preserve AppThemePalette.navy',
+      );
+      expect(
+        reloaded.config.showOpenTaskCount,
+        isTrue,
+        reason: 'Reloaded showOpenTaskCount must preserve true',
+      );
+
+      await reloadedRepository.createWorkspace('Arbeit', activate: true);
+      final activeArbeit = await reloadedRepository.loadActiveWorkspace();
+      expect(
+        activeArbeit.id,
+        equals('arbeit'),
+        reason: 'Newly activated workspace ID must be arbeit',
+      );
+      expect(
+        activeArbeit.config.localFilePath,
+        equals('arbeit.tdf'),
+        reason: 'Newly activated workspace localFilePath must be arbeit.tdf',
+      );
+
+      await reloadedRepository.renameWorkspace('arbeit', 'Beratung');
+      await reloadedRepository.activateWorkspace('tasks');
+      final reactivatedTasks = await reloadedRepository.loadActiveWorkspace();
+      expect(
+        reactivatedTasks.id,
+        equals('tasks'),
+        reason: 'Reactivated workspace ID must be tasks',
+      );
+      expect(
+        reactivatedTasks.config.storageMode,
+        equals(StorageMode.both),
+        reason: 'Reactivated tasks workspace must retain StorageMode.both',
+      );
+      await reloadedRepository.deleteWorkspace('arbeit');
     });
   });
 }

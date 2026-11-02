@@ -42,19 +42,19 @@ task t1 priority {
 
   test('AppThemePalette, AppThemeSet, Slate and Navy themes, and Material 3 ColorScheme container roles build complete ThemeData', () {
     expect(
-      AppThemePalette.fromCode('slate'),
+      AppThemePalette.fromId(0),
       equals(AppThemePalette.slate),
-      reason: 'fromCode must resolve slate to AppThemePalette.slate',
+      reason: 'fromId(0) must resolve to AppThemePalette.slate',
     );
     expect(
-      AppThemePalette.fromCode('navy'),
+      AppThemePalette.fromId(1),
       equals(AppThemePalette.navy),
-      reason: 'fromCode must resolve navy to AppThemePalette.navy',
+      reason: 'fromId(1) must resolve to AppThemePalette.navy',
     );
     expect(
-      AppThemePalette.fromCode('unknown'),
+      AppThemePalette.fromId(99),
       equals(AppThemePalette.slate),
-      reason: 'fromCode must default unknown values to AppThemePalette.slate',
+      reason: 'fromId must default unknown values to AppThemePalette.slate',
     );
     expect(
       const WebDavConfig().themePalette,
@@ -67,11 +67,11 @@ task t1 priority {
       name: 'Work',
       config: WebDavConfig(themePalette: AppThemePalette.navy),
     );
-    final roundTripped = AppWorkspace.fromJson(workspace.toJson());
+    final roundTripped = AppWorkspace.fromBytes(workspace.toBytes());
     expect(
       roundTripped.config.themePalette,
       equals(AppThemePalette.navy),
-      reason: 'AppWorkspace JSON serialization must preserve themePalette',
+      reason: 'AppWorkspace binary serialization must preserve themePalette',
     );
 
     expect(

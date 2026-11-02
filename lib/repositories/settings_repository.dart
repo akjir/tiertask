@@ -13,12 +13,11 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:convert';
-
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
+import '../services/base64_service.dart';
 
 /// In-memory [SettingsRepository] implementation for unit and widget tests.
 class InMemorySettingsRepository implements SettingsRepository {
@@ -113,18 +112,8 @@ class SecureSettingsRepository implements SettingsRepository {
   SecureSettingsRepository({FlutterSecureStorage? storage})
     : _storage = storage ?? const FlutterSecureStorage();
 
-  static const String _keyActiveWorkspaceId = 't2_active_workspace_id';
-  static const String _keyFilePath = 't2_webdav_file_path';
-  static const String _keyLanguage = 't2_app_language';
-  static const String _keyLocalFilePath = 't2_local_file_path';
-  static const String _keyPassword = 't2_webdav_password';
-  static const String _keyServerUrl = 't2_webdav_server_url';
-  static const String _keyShowOpenTaskCount = 't2_show_open_task_count';
-  static const String _keyStorageMode = 't2_storage_mode';
-  static const String _keyThemeMode = 't2_theme_mode';
-  static const String _keyThemePalette = 't2_theme_palette';
-  static const String _keyUsername = 't2_webdav_username';
-  static const String _keyWorkspaces = 't2_workspaces_v1';
+  static const Base64Service _base64Service = Base64Service();
+  static const String _keySettings = 't2_settings_v1';
 
   final FlutterSecureStorage _storage;
 
@@ -206,107 +195,19 @@ class SecureSettingsRepository implements SettingsRepository {
     await _writePersistedState(updatedWorkspaces, persisted.activeId);
   }
 
-  /// Decodes a JSON list of persisted workspaces, falling back to an empty list when invalid.
-  static List<AppWorkspace> _decodeWorkspacesJson(String? rawJson) {
-    if (rawJson == null || rawJson.trim().isEmpty) {
-      return const <AppWorkspace>[];
-    }
-    try {
-      final decoded = jsonDecode(rawJson);
-      if (decoded is! List<Object?>) {
-        return const <AppWorkspace>[];
-      }
-      final result = <AppWorkspace>[];
-      for (final item in decoded) {
-        if (result.length >= AppWorkspace.maxWorkspaces) {
-          break;
-        }
-        if (item is Map<String, Object?>) {
-          result.add(AppWorkspace.fromJson(item));
-        }
-      }
-      return result;
-    } on Object {
-      return const <AppWorkspace>[];
-    }
-  }
-
-  /// Loads legacy single-profile settings from [FlutterSecureStorage] for migration into `Tasks`.
-  Future<WebDavConfig> _loadLegacyConfig() async {
-    try {
-      final serverUrl = await _storage.read(key: _keyServerUrl) ?? '';
-      final username = await _storage.read(key: _keyUsername) ?? '';
-      final password = await _storage.read(key: _keyPassword) ?? '';
-      final filePath =
-          await _storage.read(key: _keyFilePath) ??
-          WebDavConfig.defaultFileName;
-      final localFilePath =
-          await _storage.read(key: _keyLocalFilePath) ??
-          WebDavConfig.defaultFileName;
-      final rawStorageMode = await _storage.read(key: _keyStorageMode);
-      final rawLanguage = await _storage.read(key: _keyLanguage);
-      final rawThemeMode = await _storage.read(key: _keyThemeMode);
-      final rawThemePalette = await _storage.read(key: _keyThemePalette);
-      final rawShowOpenTaskCount = await _storage.read(
-        key: _keyShowOpenTaskCount,
-      );
-
-      return WebDavConfig(
-        serverUrl: serverUrl,
-        username: username,
-        password: password,
-        filePath: _normalizeLegacyTdfFilePath(filePath),
-        localFilePath: _normalizeLegacyTdfFilePath(localFilePath),
-        storageMode: rawStorageMode == null
-            ? null
-            : StorageMode.fromCode(rawStorageMode),
-        language: AppLanguage.fromCode(rawLanguage),
-        themeMode: AppThemeMode.fromCode(rawThemeMode),
-        themePalette: AppThemePalette.fromCode(rawThemePalette),
-        showOpenTaskCount: rawShowOpenTaskCount?.trim().toLowerCase() == 'true',
-      );
-    } on Object {
-      return const WebDavConfig();
-    }
-  }
-
-  /// Normalizes a legacy stored file path, defaulting empty or `.md` presets to `.tdf`.
-  static String _normalizeLegacyTdfFilePath(String rawPath) {
-    final trimmed = rawPath.trim();
-    if (trimmed.isEmpty || trimmed == 'tiertask.md') {
-      return WebDavConfig.defaultFileName;
-    }
-    if (trimmed == 't2.md') {
-      return 't2.tdf';
-    }
-    return trimmed;
-  }
-
   /// Reads all persisted workspaces and the active workspace identifier from [_storage].
   Future<({List<AppWorkspace> workspaces, String activeId})>
   _readPersistedState() async {
     try {
-      final rawWorkspaces = await _storage.read(key: _keyWorkspaces);
-      final decoded = _decodeWorkspacesJson(rawWorkspaces);
-      if (decoded.isNotEmpty) {
-        final rawActiveId = await _storage.read(key: _keyActiveWorkspaceId);
-        final active = _resolveActiveWorkspace(
-          decoded,
-          rawActiveId ?? AppWorkspace.defaultId,
+      final rawSettings = await _storage.read(key: _keySettings);
+      if (rawSettings == null || rawSettings.trim().isEmpty) {
+        return (
+          workspaces: const <AppWorkspace>[AppWorkspace.defaultWorkspace],
+          activeId: AppWorkspace.defaultId,
         );
-        return (workspaces: decoded, activeId: active.id);
       }
-
-      final legacyConfig = await _loadLegacyConfig();
-      final defaultEntry = AppWorkspace(
-        id: AppWorkspace.defaultId,
-        name: AppWorkspace.defaultName,
-        config: legacyConfig,
-      );
-      return (
-        workspaces: <AppWorkspace>[defaultEntry],
-        activeId: defaultEntry.id,
-      );
+      final binaryPayload = _base64Service.decodeBytes(rawSettings.trim());
+      return AppWorkspace.decodePersistedState(binaryPayload);
     } on Object {
       return (
         workspaces: const <AppWorkspace>[AppWorkspace.defaultWorkspace],
@@ -315,16 +216,17 @@ class SecureSettingsRepository implements SettingsRepository {
     }
   }
 
-  /// Persists [workspaces] and [activeId] to [_storage].
+  /// Persists [workspaces] and [activeId] as a single Base64-encoded binary payload to [_storage].
   Future<void> _writePersistedState(
     List<AppWorkspace> workspaces,
     String activeId,
   ) async {
-    final encoded = jsonEncode(<Map<String, Object?>>[
-      for (final workspace in workspaces) workspace.toJson(),
-    ]);
-    await _storage.write(key: _keyWorkspaces, value: encoded);
-    await _storage.write(key: _keyActiveWorkspaceId, value: activeId);
+    final binaryPayload = AppWorkspace.encodePersistedState(
+      workspaces,
+      activeId: activeId,
+    );
+    final encodedPayload = _base64Service.encodeBytes(binaryPayload);
+    await _storage.write(key: _keySettings, value: encodedPayload);
   }
 }
 

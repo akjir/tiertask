@@ -56,9 +56,10 @@ void main() {
           AppLanguage.german.resolveLocale(const Locale('en', 'US')),
           equals(const Locale('de')),
         );
-        expect(AppLanguage.fromCode('de'), equals(AppLanguage.german));
-        expect(AppLanguage.fromCode('en'), equals(AppLanguage.english));
-        expect(AppLanguage.fromCode('unknown'), equals(AppLanguage.system));
+        expect(AppLanguage.fromId(2), equals(AppLanguage.german));
+        expect(AppLanguage.fromId(1), equals(AppLanguage.english));
+        expect(AppLanguage.fromId(0), equals(AppLanguage.system));
+        expect(AppLanguage.fromId(99), equals(AppLanguage.system));
       },
     );
   });
@@ -248,17 +249,16 @@ task b1 {
   });
 
   group('AppThemeMode, StorageMode & WebDavConfig Resolution', () {
-    test('resolves AppThemeMode and StorageMode codes with system and local tiertask.tdf defaults', () {
-      expect(AppThemeMode.fromCode('light'), equals(AppThemeMode.light));
-      expect(AppThemeMode.fromCode('DARK'), equals(AppThemeMode.dark));
-      expect(AppThemeMode.fromCode('system'), equals(AppThemeMode.system));
-      expect(AppThemeMode.fromCode('invalid'), equals(AppThemeMode.system));
-      expect(AppThemeMode.fromCode(null), equals(AppThemeMode.system));
+    test('resolves AppThemeMode and StorageMode binary IDs with system and local tasks.tdf defaults', () {
+      expect(AppThemeMode.fromId(1), equals(AppThemeMode.light));
+      expect(AppThemeMode.fromId(2), equals(AppThemeMode.dark));
+      expect(AppThemeMode.fromId(0), equals(AppThemeMode.system));
+      expect(AppThemeMode.fromId(99), equals(AppThemeMode.system));
 
-      expect(StorageMode.fromCode('local'), equals(StorageMode.local));
-      expect(StorageMode.fromCode('webdav'), equals(StorageMode.webdav));
-      expect(StorageMode.fromCode('BOTH'), equals(StorageMode.both));
-      expect(StorageMode.fromCode(null), equals(StorageMode.local));
+      expect(StorageMode.fromId(0), equals(StorageMode.local));
+      expect(StorageMode.fromId(1), equals(StorageMode.webdav));
+      expect(StorageMode.fromId(2), equals(StorageMode.both));
+      expect(StorageMode.fromId(99), equals(StorageMode.local));
 
       const defaultConfig = WebDavConfig();
       expect(defaultConfig.themeMode, equals(AppThemeMode.system));

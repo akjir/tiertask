@@ -20,25 +20,25 @@ import 'package:flutter/foundation.dart';
 /// Supported display language modes in TierTask.
 enum AppLanguage {
   /// Follows the operating system language (`de` -> German, otherwise English default).
-  system(code: 'system'),
+  system(id: 0),
 
   /// Forces English (`en`).
-  english(code: 'en'),
+  english(id: 1),
 
   /// Forces German (`de`).
-  german(code: 'de');
+  german(id: 2);
 
   /// Creates an [AppLanguage] option.
-  const AppLanguage({required this.code});
+  const AppLanguage({required this.id});
 
-  /// Storage identifier persisted in settings (`'system'`, `'en'`, or `'de'`).
-  final String code;
+  /// Compact 2-bit binary identifier (`0`, `1`, or `2`).
+  final int id;
 
-  /// Resolves an [AppLanguage] from its persisted [rawCode], defaulting to [AppLanguage.system].
-  static AppLanguage fromCode(String? rawCode) {
-    return switch (rawCode?.trim().toLowerCase()) {
-      'en' => AppLanguage.english,
-      'de' => AppLanguage.german,
+  /// Resolves an [AppLanguage] from its binary [rawId], defaulting to [AppLanguage.system].
+  static AppLanguage fromId(int rawId) {
+    return switch (rawId) {
+      1 => AppLanguage.english,
+      2 => AppLanguage.german,
       _ => AppLanguage.system,
     };
   }
@@ -62,25 +62,25 @@ enum AppLanguage {
 /// Supported color theme modes in TierTask.
 enum AppThemeMode {
   /// Follows the operating system brightness setting.
-  system(code: 'system'),
+  system(id: 0),
 
   /// Forces the light Material 3 theme.
-  light(code: 'light'),
+  light(id: 1),
 
   /// Forces the dark Material 3 theme.
-  dark(code: 'dark');
+  dark(id: 2);
 
   /// Creates an [AppThemeMode] option.
-  const AppThemeMode({required this.code});
+  const AppThemeMode({required this.id});
 
-  /// Storage identifier persisted in settings (`'system'`, `'light'`, or `'dark'`).
-  final String code;
+  /// Compact 2-bit binary identifier (`0`, `1`, or `2`).
+  final int id;
 
-  /// Resolves an [AppThemeMode] from its persisted [rawCode], defaulting to [AppThemeMode.system].
-  static AppThemeMode fromCode(String? rawCode) {
-    return switch (rawCode?.trim().toLowerCase()) {
-      'light' => AppThemeMode.light,
-      'dark' => AppThemeMode.dark,
+  /// Resolves an [AppThemeMode] from its binary [rawId], defaulting to [AppThemeMode.system].
+  static AppThemeMode fromId(int rawId) {
+    return switch (rawId) {
+      1 => AppThemeMode.light,
+      2 => AppThemeMode.dark,
       _ => AppThemeMode.system,
     };
   }
@@ -89,21 +89,21 @@ enum AppThemeMode {
 /// Supported Material 3 color theme palettes in TierTask.
 enum AppThemePalette {
   /// Chromium-inspired Material 3 slate blue-grey palette (default).
-  slate(code: 'slate'),
+  slate(id: 0),
 
   /// Signature TierTask navy and indigo palette.
-  navy(code: 'navy');
+  navy(id: 1);
 
   /// Creates an [AppThemePalette] option.
-  const AppThemePalette({required this.code});
+  const AppThemePalette({required this.id});
 
-  /// Storage identifier persisted in settings (`'slate'` or `'navy'`).
-  final String code;
+  /// Compact 1-bit binary identifier (`0` or `1`).
+  final int id;
 
-  /// Resolves an [AppThemePalette] from its persisted [rawCode], defaulting to [AppThemePalette.slate].
-  static AppThemePalette fromCode(String? rawCode) {
-    return switch (rawCode?.trim().toLowerCase()) {
-      'navy' => AppThemePalette.navy,
+  /// Resolves an [AppThemePalette] from its binary [rawId], defaulting to [AppThemePalette.slate].
+  static AppThemePalette fromId(int rawId) {
+    return switch (rawId) {
+      1 => AppThemePalette.navy,
       _ => AppThemePalette.slate,
     };
   }
@@ -112,19 +112,19 @@ enum AppThemePalette {
 /// Supported TDF persistence and synchronization modes in TierTask.
 enum StorageMode {
   /// Persists the `.tdf` file only on the local filesystem.
-  local(code: 'local'),
+  local(id: 0),
 
   /// Synchronizes the `.tdf` file only with a remote WebDAV server.
-  webdav(code: 'webdav'),
+  webdav(id: 1),
 
   /// Persists the `.tdf` file locally and synchronizes it with a WebDAV server.
-  both(code: 'both');
+  both(id: 2);
 
   /// Creates a [StorageMode] option.
-  const StorageMode({required this.code});
+  const StorageMode({required this.id});
 
-  /// Storage identifier persisted in settings (`'local'`, `'webdav'`, or `'both'`).
-  final String code;
+  /// Compact 2-bit binary identifier (`0`, `1`, or `2`).
+  final int id;
 
   /// Whether local `.tdf` file persistence is enabled in this mode.
   bool get usesLocal => this == StorageMode.local || this == StorageMode.both;
@@ -132,11 +132,11 @@ enum StorageMode {
   /// Whether remote WebDAV synchronization is enabled in this mode.
   bool get usesWebDav => this == StorageMode.webdav || this == StorageMode.both;
 
-  /// Resolves a [StorageMode] from its persisted [rawCode], defaulting to [StorageMode.local].
-  static StorageMode fromCode(String? rawCode) {
-    return switch (rawCode?.trim().toLowerCase()) {
-      'webdav' => StorageMode.webdav,
-      'both' => StorageMode.both,
+  /// Resolves a [StorageMode] from its binary [rawId], defaulting to [StorageMode.local].
+  static StorageMode fromId(int rawId) {
+    return switch (rawId) {
+      1 => StorageMode.webdav,
+      2 => StorageMode.both,
       _ => StorageMode.local,
     };
   }

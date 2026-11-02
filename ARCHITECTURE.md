@@ -9,7 +9,7 @@
 | :--- | :--- | :--- |
 | Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, and `TaskTier` localization mappings. |
 | Models | `lib/models/` | Immutable domain data structures (`AppWorkspace`, `WorkspaceSummary`, `WorkspaceException`, `WorkspaceErrorKind`, `TaskTier`, `TaskItem`, `SubtaskItem`, `ConditionGroup`, `TaskCondition`, `TdfLabel`, `TdfColor`, `TaskBoard`, `AppLanguage`, `AppThemeMode`, `AppThemePalette`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation and mutation pipeline. |
-| Services | `lib/services/` | Stateless single-pass $O(N)$ TDF lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`, `TdfException`, `TdfErrorKind`). |
+| Services | `lib/services/` | Stateless single-pass $O(N)$ RFC 4648 Base64 codec (`Base64Service`, `Base64Exception`, `Base64ErrorKind`) and TDF lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`, `TdfException`, `TdfErrorKind`). |
 | Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local `.tdf` file reads/writes (`dart:io` `File`), and encrypted workspace and settings persistence (`flutter_secure_storage`). |
 | Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating single-active-workspace unload/load transitions, locale and theme resolution, domain mutations, and repository synchronization. |
 | UI | `lib/ui/` | Localized Material 3 screens and modular leaf widgets for Linux, Android, and Windows. |
@@ -61,6 +61,7 @@ tiertask/
 │   │   ├── settings_repository.dart
 │   │   └── webdav_repository.dart
 │   ├── services/
+│   │   ├── base64_service.dart
 │   │   └── tdf_service.dart
 │   └── ui/
 │       ├── app_theme.dart
@@ -84,6 +85,7 @@ tiertask/
     ├── repositories/
     │   └── storage_and_providers_test.dart
     ├── services/
+    │   ├── base64_service_test.dart
     │   ├── tdf_service_bounds_test.dart
     │   └── tdf_service_parser_test.dart
     └── ui/
@@ -125,17 +127,18 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations and `.tdf` files, defaulting to `Tasks` (`tasks.tdf`), deriving suggested lowercase `.tdf` filenames (`AppWorkspace.suggestFileName`), and enforcing unique workspace names and `.tdf` file paths. |
+| `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations and `.tdf` files, defaulting to `Tasks` (`tasks.tdf`), deriving suggested lowercase `.tdf` filenames (`AppWorkspace.suggestFileName`), enforcing unique workspace names and `.tdf` file paths, and serializing workspaces and the active workspace index into a compact `TTW\x01` binary `Uint8List` format (`encodePersistedState`, `decodePersistedState`, `toBytes`, `fromBytes`) with bit-packed enum/boolean flags and 16-bit length-prefixed UTF-8 strings. |
 | `lib/models/task_tier.dart` | Defines the `TaskTier` enum for the 6 derived tiers (`1` `focus`, `2` `ready`, `3` `planned`, `4` `blocked`, `5` `someday`, `6` `completed`) and WIP soft limits. |
 | `lib/models/tdf_metadata.dart` | Immutable `ConditionGroup` (`day`, `time`, `location`), `TaskCondition` (`DayTaskCondition`, `GlobalResetTaskCondition`, `GroupResetTaskCondition`, `LocationTaskCondition`, `TimeWindowTaskCondition`), `TdfLabel`, and `TdfColor` hex color utilities from `TDF_SPEC.md` Section 4. |
 | `lib/models/task_item.dart` | Immutable `TaskItem` and `SubtaskItem` value classes with TDF `<id>`, `priority` flag, `created` / `queued` / `finished` / `suspended` timestamps (with optional `:SS` precision), `labels`, `blocked` dependencies, `conditions`, `subtasks auto-finish`, and strict ISO-8601 date/time helpers. |
 | `lib/models/task_board.dart` | Immutable `TaskBoard` aggregate implementing the $O(N)$ dynamic 6-tier derivation pipeline (`TaskBoard.evaluate`), context-filtered evaluation (`TaskBoard.evaluateForContext`), group-level condition inheritance and overrides, auto-pull cascade, 30-day completed task pruning, `subtasks auto-finish` completion, label creation/renaming/deletion and open task counting (`openTaskCountForLabel`), and Section 6 mutations. |
-| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `AppThemePalette` (`slate`, `navy`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model defaulting to `tasks.tdf` and `AppThemePalette.slate`. |
+| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `AppThemePalette` (`slate`, `navy`), `StorageMode` (`local`, `webdav`, `both`) with compact binary IDs (`id` / `fromId`), and the immutable `WebDavConfig` model defaulting to `tasks.tdf` and `AppThemePalette.slate`. |
 
 ## Services
 
 | File | Function |
 | :--- | :--- |
+| `lib/services/base64_service.dart` | Single-pass $O(N)$ RFC 4648 Base64 encoder and decoder (`Base64Service`, `Base64Exception`, `Base64ErrorKind`) with pre-allocated `Uint8List` buffers, strict input byte bounds (`maxInputBytes`), alphabet validation, padding verification, and non-zero padding-bit rejection (RFC 4648 Section 3.5). |
 | `lib/services/tdf_service.dart` | Single-pass $O(N)$ lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`) enforcing all `TDF_SPEC.md` Section 7 resource bounds and Section 8 `TdfErrorKind` error conditions without regular expressions. |
 
 ## Repositories
@@ -143,7 +146,7 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/repositories/local_file_repository.dart` | Native `dart:io` `File` repository reading (`loadTdf`) and writing (`saveTdf`) the local `.tdf` file (`localFilePath`) with path traversal validation and `maxFileBytes` bounds checking. |
-| `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting workspaces (`Tasks` default and custom workspaces with unique names and `.tdf` file paths) and loading only the single active `AppWorkspace` and its `WebDavConfig` into memory. |
+| `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting workspaces and the active workspace in a single atomic Base64-encoded `TTW\x01` binary key (`t2_settings_v1`) via `Base64Service` and loading only the single active `AppWorkspace` and its `WebDavConfig` into memory. |
 | `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository executing authenticated HTTP `GET` (`fetchTdf`) and `PUT` (`saveTdf`) operations with localized `WebDavException` error mapping. |
 
 ## State Providers
