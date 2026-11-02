@@ -584,4 +584,20 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get themePaletteNavy => 'Marineblau';
+
+  @override
+  String get timeZoneSectionTitle => 'Zeitzone';
+
+  @override
+  String get timeZoneSectionDescription =>
+      'Wählen Sie, ob die lokale Zeitzone automatisch vom Gerät übernommen oder manuell für Aufgabenbedingungen und Anzeige festgelegt wird.';
+
+  @override
+  String get timeZoneModeAutomatic => 'Automatisch';
+
+  @override
+  String get timeZoneModeManual => 'Manuell';
+
+  @override
+  String get timeZoneOffsetLabel => 'UTC-Verschiebung';
 }

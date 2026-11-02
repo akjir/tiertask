@@ -20,11 +20,11 @@ Whenever the user modifies `TDF_SPEC.md` or instructs you to implement or change
 
 1. **Diff & Analyze Spec:** Read `TDF_SPEC.md` and identify the exact lexical, grammatical, schema, tier evaluation, mutation, or resource bound changes in Sections 2 through 8.
 2. **Update Tests First (TDD Red Phase — `P-TDD-FIRST`, `P-FILE-SIZE`):**
-   - Locate the corresponding domain or service test suite in `test/services/` and `test/models/` (keeping each test file around **400–500 lines** per `P-FILE-SIZE`).
+   - Locate the corresponding domain or service test suite in `test/services/` and `test/models/` (aiming for around **500 lines** per test file as a soft target per `P-FILE-SIZE`, splitting only when practical).
    - Add or update positive test cases for valid TDF syntax, present vs. omitted directive/flag semantics (`priority`, `queued`, `finished`, `blocked`, `suspended`, `condition`, `auto-finish`), 6-tier derivation, and document mutations.
    - Add or update negative test cases for every error condition in `TDF_SPEC.md` Section 8 and resource bound in Section 7 (`M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, delimiter/quote/newline/comment injection).
    - Run `flutter test` to verify that the new or updated tests fail as expected against the current implementation.
 3. **Update Implementation (TDD Green & Refactor Phase — `P-FILE-SIZE`):**
-   - Modify the scanner, parser, serializer (`lib/services/`), and domain models (`lib/models/`) to satisfy `TDF_SPEC.md` while strictly adhering to `AGENTS.md` layout, file-size (`P-FILE-SIZE`, 400–500 lines), and memory rules (`P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-BOUND-ALLOC`, `P-ZERO-COPY`, `P-FLAT-CONTROL-FLOW`, `P-NO-NESTED-LOOPS`).
+   - Modify the scanner, parser, serializer (`lib/services/`), and domain models (`lib/models/`) to satisfy `TDF_SPEC.md` while adhering to `AGENTS.md` layout, the ~500-line soft file-size target (`P-FILE-SIZE`, checking whether large files can be split when practical), and memory rules (`P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-BOUND-ALLOC`, `P-ZERO-COPY`, `P-FLAT-CONTROL-FLOW`, `P-NO-NESTED-LOOPS`).
 4. **Update Documentation:** Synchronize `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and `CHANGELOG.md` per **`update-documentation`** and **`changelog-updater`**.
 5. **Verify:** Run `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, and `flutter test` until all checks pass with zero warnings.

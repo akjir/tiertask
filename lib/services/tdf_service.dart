@@ -125,6 +125,9 @@ class TdfService {
   /// Creates a const [TdfService].
   const TdfService();
 
+  /// Legacy TDF specification version string (`tdf 0.2.0`) accepted for backward-compatible parsing.
+  static const String legacyVersion = '0.2.0';
+
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = 64;
 
@@ -149,13 +152,14 @@ class TdfService {
   /// Maximum character length of a `name` or `step` text value (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = 500;
 
-  /// Canonical TDF specification version string (`tdf 0.2.0`).
-  static const String supportedVersion = '0.2.0';
+  /// Canonical TDF specification version string (`tdf 0.3.0`).
+  static const String supportedVersion = '0.3.0';
 
   /// Scans and parses [tdfContent] into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -190,7 +194,7 @@ class TdfService {
       throw const TdfException(
         kind: TdfErrorKind.missingVersionHeader,
         line: 1,
-        message: 'TDF document is missing required "tdf 0.2.0" version header.',
+        message: 'TDF document is missing required "tdf 0.3.0" version header.',
       );
     }
 
@@ -210,6 +214,7 @@ class TdfService {
     return TaskBoard.evaluate(
       tasks: tasks,
       evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
       labels: state.labels,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
@@ -350,6 +355,11 @@ class TdfService {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.note = _requireNoteArg(args, lineNumber);
+      case 'modified':
+        if (builder.modifiedAt != null) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.modifiedAt = _requireTimestampArgs(args, lineNumber);
       case 'condition':
         final rule = _parseInlineConditionArgs(
           args,
@@ -461,6 +471,11 @@ class TdfService {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.completedAt = _requireTimestampArgs(args, lineNumber);
+      case 'modified':
+        if (builder.modifiedAt != null) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.modifiedAt = _requireTimestampArgs(args, lineNumber);
       case 'suspended':
         if (builder.suspendedAt != null) {
           _throwDuplicateDirective(directive, lineNumber);
@@ -1399,7 +1414,8 @@ class TdfService {
       }
       if (tokens.length != 2 ||
           tokens[1].kind != _TokenKind.bareWord ||
-          tokens[1].value != supportedVersion) {
+          (tokens[1].value != supportedVersion &&
+              tokens[1].value != legacyVersion)) {
         throw TdfException(
           kind: TdfErrorKind.unsupportedVersion,
           line: lineNumber,
@@ -1952,6 +1968,11 @@ class TdfService {
       buffer.write(_escapeQuotedString(note));
       buffer.write('\n');
     }
+    if (label.modifiedAt case final modifiedAt?) {
+      buffer.write('    modified ');
+      buffer.write(TaskItem.formatTdfTimestamp(modifiedAt));
+      buffer.write('\n');
+    }
     _writeConditions(buffer, label.conditions);
     buffer.write('}\n\n');
   }
@@ -1982,6 +2003,11 @@ class TdfService {
     if (task.completedAt case final completedAt?) {
       buffer.write('    finished ');
       buffer.write(TaskItem.formatTdfTimestamp(completedAt));
+      buffer.write('\n');
+    }
+    if (task.modifiedAt case final modifiedAt?) {
+      buffer.write('    modified ');
+      buffer.write(TaskItem.formatTdfTimestamp(modifiedAt));
       buffer.write('\n');
     }
     if (task.labelIds.isNotEmpty) {
@@ -2059,6 +2085,9 @@ final class _LabelBuilder extends _BlockBuilder {
   /// Whether a legacy `gps` directive has been parsed.
   bool hasLegacyGps = false;
 
+  /// Optional `modified` timestamp.
+  DateTime? modifiedAt;
+
   /// Required `name` value.
   String? name;
 
@@ -2080,6 +2109,7 @@ final class _LabelBuilder extends _BlockBuilder {
       name: resolvedName,
       color: color,
       note: note,
+      modifiedAt: modifiedAt,
       conditions: List<TaskCondition>.unmodifiable(conditions),
     );
   }
@@ -2242,6 +2272,9 @@ final class _TaskBuilder extends _BlockBuilder {
   /// 1-based line number of the `labels` directive.
   int labelsLine = 0;
 
+  /// Optional `modified` timestamp.
+  DateTime? modifiedAt;
+
   /// Required `name` string.
   String? name;
 
@@ -2295,6 +2328,7 @@ final class _TaskBuilder extends _BlockBuilder {
       createdAt: resolvedCreated,
       queuedAt: queuedAt,
       completedAt: completedAt,
+      modifiedAt: modifiedAt,
       suspendedAt: suspendedAt,
       labelIds: mergedLabelIds,
       blockedByTaskIds: blockedByTaskIds ?? const <String>[],

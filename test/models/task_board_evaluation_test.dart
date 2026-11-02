@@ -14,7 +14,9 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -472,6 +474,95 @@ task it_completed {
         itBoard.ready.map((task) => task.id),
         equals(['it_fourth']),
         reason: '4th active c_it task must overflow into Ready when Focus has 3 tasks',
+      );
+    });
+
+    test('evaluates condition day, condition time, and suspended against localEvaluationTime while keeping point-in-time timestamps and 30-day retention in UTC', () {
+      const manualPlusTwo = WebDavConfig(
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+      );
+      const manualMinusFive = WebDavConfig(
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: -300,
+      );
+      expect(WebDavConfig.formatUtcOffset(0), equals('UTC+00:00'));
+      expect(WebDavConfig.formatUtcOffset(120), equals('UTC+02:00'));
+      expect(WebDavConfig.formatUtcOffset(-330), equals('UTC-05:30'));
+
+      final utcInstant = DateTime.utc(2026, 11, 1, 23, 30, 15, 999);
+      expect(
+        TaskItem.normalizeTimestamp(utcInstant),
+        equals(DateTime.utc(2026, 11, 1, 23, 30, 15)),
+        reason: 'normalizeTimestamp must truncate sub-second precision to UTC seconds',
+      );
+      expect(
+        TaskItem.nextModifiedTimestamp(
+          DateTime.utc(2026, 11, 1, 23, 30, 15),
+          DateTime.utc(2026, 11, 1, 23, 30, 15),
+        ),
+        equals(DateTime.utc(2026, 11, 1, 23, 30, 16)),
+        reason:
+            'nextModifiedTimestamp must advance by +1s when now <= previous',
+      );
+
+      final localPlusTwo = manualPlusTwo.toLocalWallClock(utcInstant);
+      expect(
+        localPlusTwo,
+        equals(DateTime.utc(2026, 11, 2, 1, 30, 15)),
+        reason: '23:30 Sunday UTC in UTC+02:00 must convert to 01:30 Monday local wall-clock time',
+      );
+      expect(
+        manualPlusTwo.localWallClockToUtc(localPlusTwo),
+        equals(DateTime.utc(2026, 11, 1, 23, 30, 15)),
+        reason: 'localWallClockToUtc must invert toLocalWallClock in manual timezone mode',
+      );
+      expect(
+        manualMinusFive.toLocalWallClock(DateTime.utc(2026, 11, 1, 2, 0)),
+        equals(DateTime.utc(2026, 10, 31, 21, 0)),
+      );
+
+      const wallClockTdf = '''
+tdf 0.3.0
+
+task t_monday_morning {
+    name "Monday Early Task"
+    created 2026-11-01 20:00
+    queued 2026-11-01 20:00
+    condition {
+        day mon
+        time 01:00 03:00
+    }
+}
+
+task t_suspended_local {
+    name "Suspended Until Monday 01:00 Local"
+    created 2026-11-01 20:00
+    queued 2026-11-01 20:05
+    suspended 2026-11-02 01:00
+}
+''';
+
+      final boardInUtc = tdfService.parse(
+        wallClockTdf,
+        evaluationTime: DateTime.utc(2026, 11, 1, 23, 30),
+        localEvaluationTime: DateTime.utc(2026, 11, 1, 23, 30),
+      );
+      expect(
+        boardInUtc.blocked.map((task) => task.id),
+        equals(['t_monday_morning', 't_suspended_local']),
+        reason: 'At 23:30 Sunday wall-clock time, Monday condition and Monday 01:00 suspension must block both tasks',
+      );
+
+      final boardInPlusTwo = tdfService.parse(
+        wallClockTdf,
+        evaluationTime: DateTime.utc(2026, 11, 1, 23, 30),
+        localEvaluationTime: localPlusTwo,
+      );
+      expect(
+        boardInPlusTwo.focus.map((task) => task.id),
+        equals(['t_monday_morning', 't_suspended_local']),
+        reason: 'At the same UTC instant (23:30 Sunday UTC), local wall-clock in UTC+02:00 is 01:30 Monday so both tasks become active in Focus',
       );
     });
   });

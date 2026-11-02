@@ -1141,6 +1141,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Navy'**
   String get themePaletteNavy;
+
+  /// Settings section title for choosing the local time zone mode and offset.
+  ///
+  /// In en, this message translates to:
+  /// **'Time Zone'**
+  String get timeZoneSectionTitle;
+
+  /// Settings section description for choosing the local time zone mode and offset.
+  ///
+  /// In en, this message translates to:
+  /// **'Select whether the local time zone is detected automatically from the device or set manually for task conditions and display.'**
+  String get timeZoneSectionDescription;
+
+  /// Option label for automatic device time zone detection.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatic'**
+  String get timeZoneModeAutomatic;
+
+  /// Option label for manual UTC offset selection.
+  ///
+  /// In en, this message translates to:
+  /// **'Manual'**
+  String get timeZoneModeManual;
+
+  /// Dropdown label for selecting the manual UTC offset.
+  ///
+  /// In en, this message translates to:
+  /// **'UTC Offset'**
+  String get timeZoneOffsetLabel;
 }
 
 class _AppLocalizationsDelegate

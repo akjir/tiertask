@@ -22,6 +22,7 @@ import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
+import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import 'edit_labels_screen.dart';
 import 'edit_task_screen.dart';
@@ -443,14 +444,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final boardAsync = ref.watch(taskNotifierProvider);
     final board = boardAsync.asData?.value ?? TaskBoard.empty();
     final activeLabel = _resolveActiveLabel(board);
-    final evaluationTime = ref.watch(clockProvider)();
+    final config =
+        ref.watch(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final rawEvaluationTime = ref.watch(clockProvider)().toUtc();
+    final localEvaluationTime = config.toLocalWallClock(rawEvaluationTime);
     final syncState = ref.watch(syncStateProvider);
-    final showSyncAction = ref.watch(
-      webDavConfigProvider.select(
-        (configAsync) =>
-            configAsync.asData?.value.storageMode.usesWebDav ?? false,
-      ),
-    );
+    final showSyncAction = config.storageMode.usesWebDav;
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -491,7 +490,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           activeTier: _activeTier,
           boardAsync: boardAsync,
           errorMessage: syncState.errorMessage,
-          evaluationTime: evaluationTime,
+          evaluationTime: rawEvaluationTime,
+          localEvaluationTime: localEvaluationTime,
           isSearching: _isSearching,
           pageController: _pageController,
           searchController: _searchController,
@@ -639,6 +639,7 @@ class _LandingContentSwitcher extends StatelessWidget {
     required this.activeLabel,
     required this.boardAsync,
     required this.evaluationTime,
+    required this.localEvaluationTime,
     required this.pageController,
     required this.searchQuery,
     required this.onOpenSettings,
@@ -652,8 +653,11 @@ class _LandingContentSwitcher extends StatelessWidget {
   /// Asynchronous board state.
   final AsyncValue<TaskBoard> boardAsync;
 
-  /// Reference evaluation time for active label context derivation.
+  /// Reference UTC evaluation time for active label context derivation.
   final DateTime evaluationTime;
+
+  /// Reference local wall-clock evaluation time for recurring conditions and `suspended`.
+  final DateTime localEvaluationTime;
 
   /// Callback to open settings.
   final VoidCallback onOpenSettings;
@@ -687,6 +691,7 @@ class _LandingContentSwitcher extends StatelessWidget {
             ? board.evaluateForContext(
                 activeLabelId: label.id,
                 evaluationTime: evaluationTime,
+                localEvaluationTime: localEvaluationTime,
               )
             : board;
         return PageView.builder(
@@ -834,6 +839,7 @@ class _LandingScaffoldBody extends StatelessWidget {
     required this.boardAsync,
     required this.errorMessage,
     required this.evaluationTime,
+    required this.localEvaluationTime,
     required this.isSearching,
     required this.pageController,
     required this.searchController,
@@ -859,11 +865,14 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Optional synchronization error message.
   final String? errorMessage;
 
-  /// Reference evaluation time for active label context derivation.
+  /// Reference UTC evaluation time for active label context derivation.
   final DateTime evaluationTime;
 
   /// Whether the inline search bar is active.
   final bool isSearching;
+
+  /// Reference local wall-clock evaluation time for recurring conditions and `suspended`.
+  final DateTime localEvaluationTime;
 
   /// Callback to dismiss the error banner.
   final VoidCallback onClearError;
@@ -914,6 +923,7 @@ class _LandingScaffoldBody extends StatelessWidget {
             activeLabel: activeLabel,
             boardAsync: boardAsync,
             evaluationTime: evaluationTime,
+            localEvaluationTime: localEvaluationTime,
             pageController: pageController,
             searchQuery: searchQuery,
             onOpenSettings: onOpenSettings,

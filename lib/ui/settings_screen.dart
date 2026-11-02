@@ -343,24 +343,34 @@ class _SettingsFormFields extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, color palette, open task count, and storage mode preference cards on [SettingsScreen].
+/// Groups the language, theme, color palette, time zone, open task count, and storage mode preference cards on [SettingsScreen].
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
     required this.selectedLanguage,
     required this.selectedThemeMode,
     required this.selectedThemePalette,
+    required this.selectedTimeZoneMode,
+    required this.manualTimeZoneOffsetMinutes,
     required this.showOpenTaskCount,
     required this.selectedStorageMode,
     required this.onLanguageChanged,
     required this.onThemeModeChanged,
     required this.onThemePaletteChanged,
+    required this.onTimeZoneModeChanged,
+    required this.onManualTimeZoneOffsetChanged,
     required this.onShowOpenTaskCountChanged,
     required this.onStorageModeChanged,
   });
 
+  /// Currently selected manual UTC offset in minutes.
+  final int manualTimeZoneOffsetMinutes;
+
   /// Callback when [AppLanguage] changes.
   final ValueChanged<AppLanguage> onLanguageChanged;
+
+  /// Callback when the manual UTC offset in minutes changes.
+  final ValueChanged<int> onManualTimeZoneOffsetChanged;
 
   /// Callback when open task count visibility changes.
   final ValueChanged<bool> onShowOpenTaskCountChanged;
@@ -374,6 +384,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
   /// Callback when [AppThemePalette] changes.
   final ValueChanged<AppThemePalette> onThemePaletteChanged;
 
+  /// Callback when [AppTimeZoneMode] changes.
+  final ValueChanged<AppTimeZoneMode> onTimeZoneModeChanged;
+
   /// Currently selected display language.
   final AppLanguage selectedLanguage;
 
@@ -385,6 +398,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
 
   /// Currently selected Material 3 color palette.
   final AppThemePalette selectedThemePalette;
+
+  /// Currently selected local time zone mode.
+  final AppTimeZoneMode selectedTimeZoneMode;
 
   /// Whether the open task count is shown on category and location cards.
   final bool showOpenTaskCount;
@@ -407,6 +423,13 @@ class _SettingsPreferenceCards extends StatelessWidget {
         _ThemePaletteSelectionCard(
           selectedThemePalette: selectedThemePalette,
           onThemePaletteChanged: onThemePaletteChanged,
+        ),
+        const SizedBox(height: 16),
+        _TimeZoneSelectionCard(
+          selectedTimeZoneMode: selectedTimeZoneMode,
+          manualOffsetMinutes: manualTimeZoneOffsetMinutes,
+          onTimeZoneModeChanged: onTimeZoneModeChanged,
+          onManualOffsetChanged: onManualTimeZoneOffsetChanged,
         ),
         const SizedBox(height: 16),
         _OpenTaskCountSelectionCard(
@@ -436,11 +459,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _initialized = false;
   bool _isBannerVisible = false;
   bool _isTesting = false;
+  int _manualTimeZoneOffsetMinutes = 0;
   bool _obscurePassword = true;
   AppLanguage _selectedLanguage = AppLanguage.system;
   StorageMode _selectedStorageMode = StorageMode.local;
   AppThemeMode _selectedThemeMode = AppThemeMode.system;
   AppThemePalette _selectedThemePalette = AppThemePalette.slate;
+  AppTimeZoneMode _selectedTimeZoneMode = AppTimeZoneMode.automatic;
   bool _showOpenTaskCount = false;
   String? _statusBannerMessage;
   _StatusBannerTone _statusTone = _StatusBannerTone.success;
@@ -495,11 +520,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 selectedLanguage: _selectedLanguage,
                 selectedThemeMode: _selectedThemeMode,
                 selectedThemePalette: _selectedThemePalette,
+                selectedTimeZoneMode: _selectedTimeZoneMode,
+                manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
                 showOpenTaskCount: _showOpenTaskCount,
                 selectedStorageMode: _selectedStorageMode,
                 onLanguageChanged: _handleLanguageChanged,
                 onThemeModeChanged: _handleThemeModeChanged,
                 onThemePaletteChanged: _handleThemePaletteChanged,
+                onTimeZoneModeChanged: _handleTimeZoneModeChanged,
+                onManualTimeZoneOffsetChanged:
+                    _handleManualTimeZoneOffsetChanged,
                 onShowOpenTaskCountChanged: _handleShowOpenTaskCountChanged,
                 onStorageModeChanged: _handleStorageModeChanged,
               ),
@@ -572,6 +602,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       themeMode: _selectedThemeMode,
       themePalette: _selectedThemePalette,
       showOpenTaskCount: _showOpenTaskCount,
+      timeZoneMode: _selectedTimeZoneMode,
+      manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
     );
   }
 
@@ -623,6 +655,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _clearStatusBanner();
     });
     await ref.read(webDavConfigProvider.notifier).updateLanguage(newLanguage);
+  }
+
+  /// Updates [_manualTimeZoneOffsetMinutes] and persists it immediately.
+  Future<void> _handleManualTimeZoneOffsetChanged(int newOffsetMinutes) async {
+    setState(() {
+      _manualTimeZoneOffsetMinutes = newOffsetMinutes;
+      _clearStatusBanner();
+    });
+    await ref
+        .read(webDavConfigProvider.notifier)
+        .updateManualTimeZoneOffsetMinutes(newOffsetMinutes);
   }
 
   /// Updates [_showOpenTaskCount] and persists the preference immediately.
@@ -677,11 +720,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         .updateThemePalette(newThemePalette);
   }
 
+  /// Updates the selected [AppTimeZoneMode] and persists it immediately.
+  Future<void> _handleTimeZoneModeChanged(
+    AppTimeZoneMode newTimeZoneMode,
+  ) async {
+    setState(() {
+      _selectedTimeZoneMode = newTimeZoneMode;
+      _clearStatusBanner();
+    });
+    await ref
+        .read(webDavConfigProvider.notifier)
+        .updateTimeZoneMode(newTimeZoneMode);
+  }
+
   /// Initializes the text controllers and selections once when [config] finishes loading.
   void _populateFieldsIfNeeded(WebDavConfig config) {
     _selectedLanguage = config.language;
     _selectedThemeMode = config.themeMode;
     _selectedThemePalette = config.themePalette;
+    _selectedTimeZoneMode = config.timeZoneMode;
+    _manualTimeZoneOffsetMinutes = config.manualTimeZoneOffsetMinutes;
     _showOpenTaskCount = config.showOpenTaskCount;
     _selectedStorageMode = config.storageMode;
     if (_initialized) {
@@ -1042,6 +1100,93 @@ class _ThemeSelectionCard extends StatelessWidget {
             }
           },
         ),
+      ),
+    );
+  }
+}
+
+/// Card for choosing whether the local time zone is detected automatically or configured manually.
+class _TimeZoneSelectionCard extends StatelessWidget {
+  /// Creates a [_TimeZoneSelectionCard].
+  const _TimeZoneSelectionCard({
+    required this.selectedTimeZoneMode,
+    required this.manualOffsetMinutes,
+    required this.onTimeZoneModeChanged,
+    required this.onManualOffsetChanged,
+  });
+
+  /// Currently selected manual UTC offset in minutes.
+  final int manualOffsetMinutes;
+
+  /// Callback invoked when the user selects a manual UTC offset.
+  final ValueChanged<int> onManualOffsetChanged;
+
+  /// Callback invoked when the user selects a new [AppTimeZoneMode].
+  final ValueChanged<AppTimeZoneMode> onTimeZoneModeChanged;
+
+  /// Currently selected [AppTimeZoneMode].
+  final AppTimeZoneMode selectedTimeZoneMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final effectiveOffset =
+        WebDavConfig.supportedUtcOffsetMinutes.contains(manualOffsetMinutes)
+        ? manualOffsetMinutes
+        : 0;
+
+    return _SettingsSectionCard(
+      icon: Icons.schedule_rounded,
+      title: localizations.timeZoneSectionTitle,
+      description: localizations.timeZoneSectionDescription,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<AppTimeZoneMode>(
+              segments: [
+                ButtonSegment(
+                  value: AppTimeZoneMode.automatic,
+                  label: Text(localizations.timeZoneModeAutomatic),
+                ),
+                ButtonSegment(
+                  value: AppTimeZoneMode.manual,
+                  label: Text(localizations.timeZoneModeManual),
+                ),
+              ],
+              selected: {selectedTimeZoneMode},
+              onSelectionChanged: (selection) {
+                if (selection.isNotEmpty) {
+                  onTimeZoneModeChanged(selection.first);
+                }
+              },
+            ),
+          ),
+          if (selectedTimeZoneMode == AppTimeZoneMode.manual) ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<int>(
+              initialValue: effectiveOffset,
+              decoration: InputDecoration(
+                labelText: localizations.timeZoneOffsetLabel,
+                prefixIcon: const Icon(Icons.public_rounded),
+                border: const OutlineInputBorder(),
+              ),
+              items: [
+                for (final offset in WebDavConfig.supportedUtcOffsetMinutes)
+                  DropdownMenuItem<int>(
+                    value: offset,
+                    child: Text(WebDavConfig.formatUtcOffset(offset)),
+                  ),
+              ],
+              onChanged: (selected) {
+                if (selected != null) {
+                  onManualOffsetChanged(selected);
+                }
+              },
+            ),
+          ],
+        ],
       ),
     );
   }

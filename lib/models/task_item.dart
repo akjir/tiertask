@@ -65,6 +65,7 @@ class TaskItem {
     DateTime? createdAt,
     this.queuedAt,
     this.completedAt,
+    this.modifiedAt,
     this.suspendedAt,
     List<String> labelIds = const [],
     List<String> blockedByTaskIds = const [],
@@ -110,6 +111,9 @@ class TaskItem {
   /// Associated label IDs (`labels` directive).
   final List<String> labelIds;
 
+  /// Optional UTC modification timestamp (`modified` directive).
+  final DateTime? modifiedAt;
+
   /// Optional extended description (`note` directive).
   final String? note;
 
@@ -128,6 +132,10 @@ class TaskItem {
   /// Human-readable task title (`name` directive).
   final String title;
 
+  /// Effective UTC modification timestamp (`modifiedAt ?? max(createdAt, queuedAt, completedAt)`).
+  DateTime get effectiveModifiedAt =>
+      modifiedAt ?? _latestTimestamp(createdAt, queuedAt, completedAt);
+
   /// Returns a copy of this task with the provided fields updated.
   TaskItem copyWith({
     String? id,
@@ -138,6 +146,7 @@ class TaskItem {
     DateTime? createdAt,
     DateTime? queuedAt,
     DateTime? completedAt,
+    DateTime? modifiedAt,
     DateTime? suspendedAt,
     List<String>? labelIds,
     List<String>? blockedByTaskIds,
@@ -147,6 +156,7 @@ class TaskItem {
     bool clearNote = false,
     bool clearQueuedAt = false,
     bool clearCompletedAt = false,
+    bool clearModifiedAt = false,
     bool clearSuspendedAt = false,
   }) {
     return TaskItem(
@@ -158,6 +168,7 @@ class TaskItem {
       createdAt: createdAt ?? this.createdAt,
       queuedAt: clearQueuedAt ? null : (queuedAt ?? this.queuedAt),
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
+      modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
       labelIds: labelIds ?? this.labelIds,
       blockedByTaskIds: blockedByTaskIds ?? this.blockedByTaskIds,
@@ -187,12 +198,39 @@ class TaskItem {
     return '$datePart $hour:$minute';
   }
 
+  /// Computes a strictly advancing UTC modification timestamp (`max(normalize(now), normalize(previous) + 1s)`).
+  static DateTime nextModifiedTimestamp(DateTime now, DateTime? previous) {
+    final normalizedNow = normalizeTimestamp(now);
+    if (previous == null) {
+      return normalizedNow;
+    }
+    final normalizedPrevious = normalizeTimestamp(previous);
+    if (normalizedNow.isAfter(normalizedPrevious)) {
+      return normalizedNow;
+    }
+    return normalizedPrevious.add(const Duration(seconds: 1));
+  }
+
+  /// Normalizes [timestamp] to UTC at second precision (truncating milliseconds and microseconds).
+  static DateTime normalizeTimestamp(DateTime timestamp) {
+    final utc = timestamp.toUtc();
+    return DateTime.utc(
+      utc.year,
+      utc.month,
+      utc.day,
+      utc.hour,
+      utc.minute,
+      utc.second,
+    );
+  }
+
   /// Creates an open (incomplete) task with no `finished` timestamp.
   TaskItem toActive({
     DateTime? queuedAt,
     bool clearQueuedAt = false,
     bool? isPriority,
     bool clearBlocking = false,
+    DateTime? modifiedAt,
   }) {
     return copyWith(
       isCompleted: false,
@@ -202,20 +240,18 @@ class TaskItem {
       isPriority: isPriority,
       clearSuspendedAt: clearBlocking,
       blockedByTaskIds: clearBlocking ? const [] : null,
+      modifiedAt: modifiedAt,
     );
   }
 
-  /// Creates a completed task stamped with [completionDate] (`finished` directive).
+  /// Creates a completed task stamped with [completionDate] (`finished` and `modified` directives).
   TaskItem toCompleted(DateTime completionDate) {
-    final normalized = DateTime.utc(
-      completionDate.year,
-      completionDate.month,
-      completionDate.day,
-      completionDate.hour,
-      completionDate.minute,
-      completionDate.second,
+    final normalized = normalizeTimestamp(completionDate);
+    return copyWith(
+      isCompleted: true,
+      completedAt: normalized,
+      modifiedAt: nextModifiedTimestamp(normalized, effectiveModifiedAt),
     );
-    return copyWith(isCompleted: true, completedAt: normalized);
   }
 
   /// Parses a strict ISO-8601 date string (`YYYY-MM-DD`) into a UTC [DateTime],
@@ -337,6 +373,28 @@ class TaskItem {
     return hour * 60 + minute;
   }
 
+  /// Returns the latest non-null UTC timestamp among [created], [queued], and [completed].
+  static DateTime _latestTimestamp(
+    DateTime created,
+    DateTime? queued,
+    DateTime? completed,
+  ) {
+    var latest = normalizeTimestamp(created);
+    if (queued case final q?) {
+      final normalizedQueued = normalizeTimestamp(q);
+      if (normalizedQueued.isAfter(latest)) {
+        latest = normalizedQueued;
+      }
+    }
+    if (completed case final c?) {
+      final normalizedCompleted = normalizeTimestamp(c);
+      if (normalizedCompleted.isAfter(latest)) {
+        latest = normalizedCompleted;
+      }
+    }
+    return latest;
+  }
+
   /// Generates a sequential TDF-compatible identifier (`t001`, `t002`, ...).
   static String _nextId() {
     _idCounter++;
@@ -368,6 +426,7 @@ class TaskItem {
         other.createdAt == createdAt &&
         other.queuedAt == queuedAt &&
         other.completedAt == completedAt &&
+        other.modifiedAt == modifiedAt &&
         other.suspendedAt == suspendedAt &&
         other.subtasksAutoFinish == subtasksAutoFinish &&
         listEquals(other.labelIds, labelIds) &&
@@ -386,6 +445,7 @@ class TaskItem {
     createdAt,
     queuedAt,
     completedAt,
+    modifiedAt,
     suspendedAt,
     subtasksAutoFinish,
     Object.hashAll(labelIds),

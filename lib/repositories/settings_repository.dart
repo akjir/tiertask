@@ -16,6 +16,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/app_workspace.dart';
+import '../models/task_board_sync.dart';
 import '../models/webdav_config.dart';
 import '../services/base64_service.dart';
 
@@ -34,6 +35,8 @@ class InMemorySettingsRepository implements SettingsRepository {
        ];
 
   String _activeWorkspaceId;
+  final Map<String, WorkspaceSyncState> _syncStates =
+      <String, WorkspaceSyncState>{};
   List<AppWorkspace> _workspaces;
 
   @override
@@ -72,6 +75,7 @@ class InMemorySettingsRepository implements SettingsRepository {
     );
     _workspaces = updated.workspaces;
     _activeWorkspaceId = updated.activeId;
+    _syncStates.remove(workspaceId.trim());
     return _resolveActiveWorkspace(_workspaces, _activeWorkspaceId);
   }
 
@@ -84,6 +88,11 @@ class InMemorySettingsRepository implements SettingsRepository {
   Future<WebDavConfig> loadConfig() async {
     final active = await loadActiveWorkspace();
     return active.config;
+  }
+
+  @override
+  Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId) async {
+    return _syncStates[workspaceId.trim()] ?? WorkspaceSyncState.empty;
   }
 
   @override
@@ -104,6 +113,14 @@ class InMemorySettingsRepository implements SettingsRepository {
       config,
     );
   }
+
+  @override
+  Future<void> saveWorkspaceSyncState(
+    String workspaceId,
+    WorkspaceSyncState state,
+  ) async {
+    _syncStates[workspaceId.trim()] = state;
+  }
 }
 
 /// Encrypted settings repository backed by [FlutterSecureStorage].
@@ -114,6 +131,7 @@ class SecureSettingsRepository implements SettingsRepository {
 
   static const Base64Service _base64Service = Base64Service();
   static const String _keySettings = 't2_settings_v1';
+  static const String _keySyncPrefix = 't2_sync_v1_';
 
   final FlutterSecureStorage _storage;
 
@@ -154,6 +172,10 @@ class SecureSettingsRepository implements SettingsRepository {
       workspaceId,
     );
     await _writePersistedState(updated.workspaces, updated.activeId);
+    await _storage.write(
+      key: '$_keySyncPrefix${workspaceId.trim()}',
+      value: null,
+    );
     return _resolveActiveWorkspace(updated.workspaces, updated.activeId);
   }
 
@@ -167,6 +189,22 @@ class SecureSettingsRepository implements SettingsRepository {
   Future<WebDavConfig> loadConfig() async {
     final active = await loadActiveWorkspace();
     return active.config;
+  }
+
+  @override
+  Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId) async {
+    try {
+      final raw = await _storage.read(
+        key: '$_keySyncPrefix${workspaceId.trim()}',
+      );
+      if (raw == null || raw.trim().isEmpty) {
+        return WorkspaceSyncState.empty;
+      }
+      final bytes = _base64Service.decodeBytes(raw.trim());
+      return WorkspaceSyncState.fromBytes(bytes);
+    } on Object {
+      return WorkspaceSyncState.empty;
+    }
   }
 
   @override
@@ -193,6 +231,18 @@ class SecureSettingsRepository implements SettingsRepository {
       config,
     );
     await _writePersistedState(updatedWorkspaces, persisted.activeId);
+  }
+
+  @override
+  Future<void> saveWorkspaceSyncState(
+    String workspaceId,
+    WorkspaceSyncState state,
+  ) async {
+    final encoded = _base64Service.encodeBytes(state.toBytes());
+    await _storage.write(
+      key: '$_keySyncPrefix${workspaceId.trim()}',
+      value: encoded,
+    );
   }
 
   /// Reads all persisted workspaces and the active workspace identifier from [_storage].
@@ -252,11 +302,20 @@ abstract class SettingsRepository {
   /// Loads the persisted [WebDavConfig] of the currently active workspace.
   Future<WebDavConfig> loadConfig();
 
+  /// Loads the persisted [WorkspaceSyncState] for [workspaceId], or [WorkspaceSyncState.empty] if absent.
+  Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId);
+
   /// Renames the workspace with [workspaceId] to [newName] after verifying name uniqueness.
   Future<AppWorkspace> renameWorkspace(String workspaceId, String newName);
 
   /// Saves [config] to the currently active workspace after verifying `.tdf` file path uniqueness.
   Future<void> saveConfig(WebDavConfig config);
+
+  /// Persists the synchronization [state] for [workspaceId].
+  Future<void> saveWorkspaceSyncState(
+    String workspaceId,
+    WorkspaceSyncState state,
+  );
 }
 
 /// Validates and constructs a new [AppWorkspace] against [existingWorkspaces].

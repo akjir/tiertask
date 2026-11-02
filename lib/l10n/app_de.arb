@@ -173,5 +173,10 @@
   "themePaletteSectionTitle": "Farbpalette",
   "themePaletteSectionDescription": "Material-3-Farbpalette für Oberflächen und Hervorhebungen auswählen.",
   "themePaletteSlate": "Schiefer",
-  "themePaletteNavy": "Marineblau"
+  "themePaletteNavy": "Marineblau",
+  "timeZoneSectionTitle": "Zeitzone",
+  "timeZoneSectionDescription": "Wählen Sie, ob die lokale Zeitzone automatisch vom Gerät übernommen oder manuell für Aufgabenbedingungen und Anzeige festgelegt wird.",
+  "timeZoneModeAutomatic": "Automatisch",
+  "timeZoneModeManual": "Manuell",
+  "timeZoneOffsetLabel": "UTC-Verschiebung"
 }

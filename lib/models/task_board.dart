@@ -61,13 +61,20 @@ class TaskBoard {
   factory TaskBoard.evaluate({
     required Iterable<TaskItem> tasks,
     DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
     List<TdfLabel> labels = const [],
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
   }) {
-    final now = evaluationTime ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      evaluationTime ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      evaluationTime,
+      localEvaluationTime,
+    );
     final normalizedNow = DateTime.utc(now.year, now.month, now.day);
     final taskList = List<TaskItem>.from(tasks);
     final unfinishedIds = _collectUnfinishedIds(taskList);
@@ -84,7 +91,7 @@ class TaskBoard {
       _classifyTaskIntoPipeline(
         task: taskList[i],
         index: i,
-        now: now,
+        localNow: localNow,
         normalizedNow: normalizedNow,
         unfinishedIds: unfinishedIds,
         labelMap: labelMap,
@@ -167,6 +174,8 @@ class TaskBoard {
     String? color,
     String? id,
     String? note,
+    DateTime? currentDate,
+    DateTime? modifiedAt,
     List<TaskCondition> conditions = const [],
   }) {
     final trimmed = name.trim();
@@ -179,11 +188,17 @@ class TaskBoard {
         : _slugifyContextName(trimmed, 'l');
     final labelId = _ensureUniqueContextId(baseId, existingIds);
     final normalizedColor = TdfColor.normalizeHex(color);
+    final resolvedModifiedAt = modifiedAt != null
+        ? TaskItem.normalizeTimestamp(modifiedAt)
+        : (currentDate != null
+              ? TaskItem.normalizeTimestamp(currentDate)
+              : null);
     final newLabel = TdfLabel(
       id: labelId,
       name: trimmed,
       color: normalizedColor,
       note: note,
+      modifiedAt: resolvedModifiedAt,
       conditions: List<TaskCondition>.unmodifiable(conditions),
     );
     return copyWith(labels: [...labels, newLabel]);
@@ -198,6 +213,8 @@ class TaskBoard {
     bool subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    DateTime? modifiedAt,
     String? id,
     String? note,
     List<String> labelIds = const [],
@@ -210,7 +227,13 @@ class TaskBoard {
       return this;
     }
 
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final trimmedNote = note?.trim();
     final effectiveNote = (trimmedNote != null && trimmedNote.isNotEmpty)
         ? trimmedNote
@@ -227,12 +250,15 @@ class TaskBoard {
         ? null
         : (suspendedAt ?? (isBlocked ? TaskItem.defaultSuspendedAt : null));
     final isActivelySuspended =
-        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(now);
+        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(localNow);
     final isSomeday =
         targetTier == TaskTier.someday && !isDone && !isActivelySuspended;
     final taskId = id ?? _generateUniqueTaskId();
     final cleanBlockedBy = _sanitizeBlockedByForTask(taskId, blockedByTaskIds);
     final cleanConditions = _sanitizeTaskConditions(conditions);
+    final resolvedModifiedAt = modifiedAt != null
+        ? TaskItem.normalizeTimestamp(modifiedAt)
+        : now;
 
     final newTask = TaskItem(
       id: taskId,
@@ -243,6 +269,7 @@ class TaskBoard {
       createdAt: now,
       queuedAt: isSomeday ? null : now,
       completedAt: isDone ? now : null,
+      modifiedAt: resolvedModifiedAt,
       suspendedAt: effectiveSuspendedAt,
       blockedByTaskIds: cleanBlockedBy,
       labelIds: labelIds,
@@ -254,20 +281,30 @@ class TaskBoard {
     if (isDone) {
       return copyWith(completed: [newTask, ...completed])
           .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now);
+          .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
     }
 
     return TaskBoard.evaluate(
       tasks: [...allTasks, newTask],
       evaluationTime: now,
+      localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
     );
   }
 
   /// Evaluates the active pull cycle and unblocks any tasks whose prerequisites or deferrals cleared.
-  TaskBoard applyAutoPull({DateTime? currentDate}) {
-    final now = currentDate ?? DateTime.now().toUtc();
+  TaskBoard applyAutoPull({
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+  }) {
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final unfinishedIds = _collectUnfinishedIds(allTasks);
     final labelMap = <String, TdfLabel>{
       for (final label in labels) label.id: label,
@@ -282,14 +319,22 @@ class TaskBoard {
         task: task,
         unfinishedIds: unfinishedIds,
         labelMap: labelMap,
-        evaluationTime: now,
+        evaluationTime: localNow,
         activeLabelId: null,
         currentLatitude: null,
         currentLongitude: null,
       )) {
         nextBlocked.add(task);
       } else {
-        nextPlanned.add(task.copyWith(queuedAt: task.queuedAt ?? now));
+        final nextModified = task.queuedAt == null
+            ? TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt)
+            : task.modifiedAt;
+        nextPlanned.add(
+          task.copyWith(
+            queuedAt: task.queuedAt ?? now,
+            modifiedAt: nextModified,
+          ),
+        );
       }
     }
 
@@ -311,9 +356,16 @@ class TaskBoard {
   TaskBoard blockTask(
     String taskId, {
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
     DateTime? suspendedUntil,
   }) {
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final sourceTier = findTierOfTask(taskId);
     if (sourceTier == null || sourceTier == TaskTier.blocked) {
       return this;
@@ -329,20 +381,31 @@ class TaskBoard {
       isPriority: false,
       queuedAt: task.queuedAt ?? now,
       suspendedAt: suspendedUntil ?? TaskItem.defaultSuspendedAt,
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
 
     return _removeTaskFromTier(taskId, sourceTier)
         .copyWith(blocked: [...blocked, blockedTask])
         .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now);
+        .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
   }
 
   /// Marks an active task as done per `TDF_SPEC.md` Section 6.5:
   /// 1. Sets `finished` to [currentDate] and places it at the top of Tier 6 (`Completed`).
   /// 2. Prunes items in Tier 6 older than 30 days.
   /// 3. Unblocks any tasks waiting on [taskId] and refills Tier 1 and Tier 2.
-  TaskBoard completeTask(String taskId, {DateTime? currentDate}) {
-    final now = currentDate ?? DateTime.now().toUtc();
+  TaskBoard completeTask(
+    String taskId, {
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+  }) {
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final sourceTier = findTierOfTask(taskId);
     if (sourceTier == null || sourceTier == TaskTier.completed) {
       return this;
@@ -360,7 +423,7 @@ class TaskBoard {
 
     return updated
         .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now);
+        .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
   }
 
   /// Returns a copy of this [TaskBoard] with the specified collections replaced.
@@ -385,7 +448,7 @@ class TaskBoard {
   }
 
   /// Deletes the label with [labelId] and removes its reference from all tasks.
-  TaskBoard deleteLabel(String labelId) {
+  TaskBoard deleteLabel(String labelId, {DateTime? currentDate}) {
     final nextLabels = <TdfLabel>[
       for (final label in labels)
         if (label.id != labelId) label,
@@ -393,20 +456,25 @@ class TaskBoard {
     if (nextLabels.length == labels.length) {
       return this;
     }
+    final now = currentDate != null
+        ? TaskItem.normalizeTimestamp(currentDate)
+        : null;
     return copyWith(
-      focus: _stripLabelFromTasks(focus, labelId),
-      ready: _stripLabelFromTasks(ready, labelId),
-      planned: _stripLabelFromTasks(planned, labelId),
-      blocked: _stripLabelFromTasks(blocked, labelId),
-      someday: _stripLabelFromTasks(someday, labelId),
-      completed: _stripLabelFromTasks(completed, labelId),
+      focus: _stripLabelFromTasks(focus, labelId, now),
+      ready: _stripLabelFromTasks(ready, labelId, now),
+      planned: _stripLabelFromTasks(planned, labelId, now),
+      blocked: _stripLabelFromTasks(blocked, labelId, now),
+      someday: _stripLabelFromTasks(someday, labelId, now),
+      completed: _stripLabelFromTasks(completed, labelId, now),
       labels: nextLabels,
     );
   }
 
   /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
   TaskBoard downgradeTask(String taskId, {DateTime? currentDate}) {
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
     final sourceTier = findTierOfTask(taskId);
     if (sourceTier == null) {
       return this;
@@ -435,10 +503,12 @@ class TaskBoard {
     double? currentLatitude,
     double? currentLongitude,
     DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
   }) {
     return TaskBoard.evaluate(
       tasks: allTasks,
       evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
       labels: labels,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
@@ -496,7 +566,9 @@ class TaskBoard {
 
   /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (UTC) per `TDF_SPEC.md` Section 5.1.
   TaskBoard pruneCompletedTasks({DateTime? currentDate}) {
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
     final normalizedNow = DateTime.utc(now.year, now.month, now.day);
 
     final retained = <TaskItem>[
@@ -508,14 +580,27 @@ class TaskBoard {
   }
 
   /// Updates the display [name] of the label with [labelId], ignoring empty names.
-  TaskBoard renameLabel(String labelId, String name) {
+  TaskBoard renameLabel(String labelId, String name, {DateTime? currentDate}) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) {
       return this;
     }
+    final now = currentDate != null
+        ? TaskItem.normalizeTimestamp(currentDate)
+        : null;
     final nextLabels = <TdfLabel>[
       for (final label in labels)
-        label.id == labelId ? label.copyWith(name: trimmed) : label,
+        label.id == labelId
+            ? label.copyWith(
+                name: trimmed,
+                modifiedAt: now != null
+                    ? TaskItem.nextModifiedTimestamp(
+                        now,
+                        label.effectiveModifiedAt,
+                      )
+                    : label.modifiedAt,
+              )
+            : label,
     ];
     return copyWith(labels: nextLabels);
   }
@@ -525,11 +610,18 @@ class TaskBoard {
     String taskId, {
     TaskTier targetTier = TaskTier.planned,
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
   }) {
     if (targetTier == TaskTier.completed) {
       return this;
     }
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final existing = findTask(taskId);
     if (existing == null ||
         (!existing.isCompleted && existing.completedAt == null)) {
@@ -544,6 +636,10 @@ class TaskBoard {
       queuedAt: isSomeday ? null : now,
       clearQueuedAt: isSomeday,
       isPriority: isFocus,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        now,
+        existing.effectiveModifiedAt,
+      ),
     );
     final updatedTasks = <TaskItem>[
       for (final task in allTasks) task.id == taskId ? restored : task,
@@ -552,6 +648,7 @@ class TaskBoard {
     return TaskBoard.evaluate(
       tasks: updatedTasks,
       evaluationTime: now,
+      localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
     );
@@ -561,9 +658,16 @@ class TaskBoard {
   TaskBoard scheduleTask(
     String taskId, {
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
     bool isPriority = false,
   }) {
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final existing = findTask(taskId);
     if (existing == null) {
       return this;
@@ -574,6 +678,10 @@ class TaskBoard {
       clearCompletedAt: true,
       queuedAt: now,
       isPriority: isPriority || existing.isPriority,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        now,
+        existing.effectiveModifiedAt,
+      ),
     );
     final updatedTasks = <TaskItem>[
       for (final task in allTasks) task.id == taskId ? scheduled : task,
@@ -582,6 +690,7 @@ class TaskBoard {
     return TaskBoard.evaluate(
       tasks: updatedTasks,
       evaluationTime: now,
+      localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
     );
@@ -605,8 +714,11 @@ class TaskBoard {
     String taskId,
     int stepIndex, {
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
   }) {
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
     final tier = findTierOfTask(taskId);
     final task = findTask(taskId);
     if (tier == null || task == null) {
@@ -624,7 +736,10 @@ class TaskBoard {
               )
             : task.subtasks[i],
     ];
-    final updatedTask = task.copyWith(subtasks: updatedSubtasks);
+    final updatedTask = task.copyWith(
+      subtasks: updatedSubtasks,
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+    );
     final replacedBoard = _replaceTaskInTier(tier, updatedTask);
 
     final allStepsDone =
@@ -633,7 +748,11 @@ class TaskBoard {
     if (updatedTask.subtasksAutoFinish &&
         allStepsDone &&
         tier != TaskTier.completed) {
-      return replacedBoard.completeTask(taskId, currentDate: now);
+      return replacedBoard.completeTask(
+        taskId,
+        currentDate: now,
+        localEvaluationTime: localEvaluationTime,
+      );
     }
     return replacedBoard;
   }
@@ -654,6 +773,7 @@ class TaskBoard {
     List<String>? blockedByTaskIds,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty ||
@@ -665,7 +785,13 @@ class TaskBoard {
       return this;
     }
 
-    final now = currentDate ?? DateTime.now().toUtc();
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
     final sanitizedBlockedBy = blockedByTaskIds != null
         ? _sanitizeBlockedByForTask(taskId, blockedByTaskIds)
         : null;
@@ -686,6 +812,7 @@ class TaskBoard {
       blockedByTaskIds: sanitizedBlockedBy,
       conditions: sanitizedConditions,
       now: now,
+      localNow: localNow,
     );
     final updatedTasks = <TaskItem>[
       for (final task in allTasks) task.id == taskId ? updatedTask : task,
@@ -694,6 +821,7 @@ class TaskBoard {
     return TaskBoard.evaluate(
       tasks: updatedTasks,
       evaluationTime: now,
+      localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
     );
@@ -781,6 +909,7 @@ class TaskBoard {
     required List<String>? blockedByTaskIds,
     required List<TaskCondition>? conditions,
     required DateTime now,
+    required DateTime localNow,
   }) {
     final wasCompleted = existing.isCompleted || existing.completedAt != null;
     final isRestoringCompleted =
@@ -807,7 +936,7 @@ class TaskBoard {
                   ? (existing.suspendedAt ?? TaskItem.defaultSuspendedAt)
                   : existing.suspendedAt));
     final isActivelySuspended =
-        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(now);
+        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(localNow);
     final isSomeday =
         !isDone &&
         !isActivelySuspended &&
@@ -844,6 +973,10 @@ class TaskBoard {
       conditions: conditions,
       subtasksAutoFinish: effectiveAutoFinish,
       subtasks: cleanSubtasks,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        now,
+        existing.effectiveModifiedAt,
+      ),
     );
   }
 
@@ -897,7 +1030,7 @@ class TaskBoard {
   static void _classifyTaskIntoPipeline({
     required TaskItem task,
     required int index,
-    required DateTime now,
+    required DateTime localNow,
     required DateTime normalizedNow,
     required Set<String> unfinishedIds,
     required Map<String, TdfLabel> labelMap,
@@ -922,7 +1055,7 @@ class TaskBoard {
     }
 
     if (task.suspendedAt case final suspendedUntil?
-        when suspendedUntil.isAfter(now)) {
+        when suspendedUntil.isAfter(localNow)) {
       blockedList.add(task);
       return;
     }
@@ -936,7 +1069,7 @@ class TaskBoard {
       task: task,
       unfinishedIds: unfinishedIds,
       labelMap: labelMap,
-      evaluationTime: now,
+      evaluationTime: localNow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
@@ -1005,6 +1138,10 @@ class TaskBoard {
       final downgradedTask = task.toActive(
         isPriority: false,
         queuedAt: effectiveQueued,
+        modifiedAt: TaskItem.nextModifiedTimestamp(
+          effectiveQueued,
+          task.effectiveModifiedAt,
+        ),
       );
       if (nextFocus.length < focusSoftLimit) {
         nextFocus.add(downgradedTask);
@@ -1017,12 +1154,20 @@ class TaskBoard {
       final slot8Queued = slot8Task.queuedAt ?? slot8Task.createdAt;
       final downgradedQueued = slot8Queued.add(const Duration(seconds: 1));
       nextReady.add(
-        task.toActive(isPriority: alignedPriority, queuedAt: downgradedQueued),
+        task.toActive(
+          isPriority: alignedPriority,
+          queuedAt: downgradedQueued,
+          modifiedAt: TaskItem.nextModifiedTimestamp(
+            now.isAfter(downgradedQueued) ? now : downgradedQueued,
+            task.effectiveModifiedAt,
+          ),
+        ),
       );
       _shiftCollidingPlannedTasks(
         nextPlanned,
         downgradedQueued,
         isPriorityGroup: alignedPriority,
+        now: now,
       );
     }
 
@@ -1054,6 +1199,10 @@ class TaskBoard {
     final downgradedTask = task.toActive(
       isPriority: false,
       queuedAt: effectiveQueued,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        effectiveQueued,
+        task.effectiveModifiedAt,
+      ),
     );
 
     if (nextFocus.length < focusSoftLimit) {
@@ -1077,6 +1226,7 @@ class TaskBoard {
     final downgradedTask = task.toActive(
       clearQueuedAt: true,
       isPriority: false,
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
 
     return copyWith(
@@ -1424,7 +1574,11 @@ class TaskBoard {
   }
 
   /// Returns [task] without [labelId] in its `labelIds` list.
-  static TaskItem _removeIdFromTaskLabels(TaskItem task, String labelId) {
+  static TaskItem _removeIdFromTaskLabels(
+    TaskItem task,
+    String labelId,
+    DateTime? now,
+  ) {
     if (!task.labelIds.contains(labelId)) {
       return task;
     }
@@ -1433,6 +1587,9 @@ class TaskBoard {
         for (final id in task.labelIds)
           if (id != labelId) id,
       ],
+      modifiedAt: now != null
+          ? TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt)
+          : task.modifiedAt,
     );
   }
 
@@ -1489,6 +1646,42 @@ class TaskBoard {
       return latestRegular.add(const Duration(seconds: 1));
     }
     return now;
+  }
+
+  /// Resolves the effective local wall-clock evaluation timestamp for `condition day`, `condition time`, and `suspended`.
+  static DateTime _resolveLocalEvaluationTime(
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+  ) {
+    if (localEvaluationTime != null) {
+      return DateTime.utc(
+        localEvaluationTime.year,
+        localEvaluationTime.month,
+        localEvaluationTime.day,
+        localEvaluationTime.hour,
+        localEvaluationTime.minute,
+        localEvaluationTime.second,
+      );
+    }
+    if (evaluationTime != null) {
+      return DateTime.utc(
+        evaluationTime.year,
+        evaluationTime.month,
+        evaluationTime.day,
+        evaluationTime.hour,
+        evaluationTime.minute,
+        evaluationTime.second,
+      );
+    }
+    final systemLocal = DateTime.now();
+    return DateTime.utc(
+      systemLocal.year,
+      systemLocal.month,
+      systemLocal.day,
+      systemLocal.hour,
+      systemLocal.minute,
+      systemLocal.second,
+    );
   }
 
   /// Deduplicates and filters [candidateBlockedBy] for [taskId], rejecting self-dependencies
@@ -1576,6 +1769,7 @@ class TaskBoard {
     List<TaskItem> plannedList,
     DateTime minimumAfterQueued, {
     required bool isPriorityGroup,
+    required DateTime now,
   }) {
     var cursor = minimumAfterQueued;
     for (var i = 0; i < plannedList.length; i++) {
@@ -1586,7 +1780,13 @@ class TaskBoard {
       final currentQueued = current.queuedAt ?? current.createdAt;
       if (!currentQueued.isAfter(cursor)) {
         final shifted = cursor.add(const Duration(seconds: 1));
-        plannedList[i] = current.copyWith(queuedAt: shifted);
+        plannedList[i] = current.copyWith(
+          queuedAt: shifted,
+          modifiedAt: TaskItem.nextModifiedTimestamp(
+            now.isAfter(shifted) ? now : shifted,
+            current.effectiveModifiedAt,
+          ),
+        );
         cursor = shifted;
       } else {
         cursor = currentQueued;
@@ -1645,8 +1845,11 @@ class TaskBoard {
   static List<TaskItem> _stripLabelFromTasks(
     List<TaskItem> tasks,
     String labelId,
+    DateTime? now,
   ) {
-    return [for (final task in tasks) _removeIdFromTaskLabels(task, labelId)];
+    return [
+      for (final task in tasks) _removeIdFromTaskLabels(task, labelId, now),
+    ];
   }
 }
 

@@ -7,14 +7,16 @@
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.2.0`, `label`, `task`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
+`TierTask` stores objective task facts (`tdf 0.3.0`, `label`, `task`, `modified`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
 * **Dynamic $O(N)$ 6-Tier Derivation:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (`blocked`, future `suspended`, or unmet `condition` across `day`, `time`, and `location` rule groups with label inheritance), and slices active tasks by `priority` and ascending `queued` FIFO timestamp into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
+* **UTC Storage & Local Wall-Clock Conditions:** Stores and compares point-in-time directives (`created`, `queued`, `finished`, `modified`) and 30-day completed task pruning strictly in UTC while evaluating `condition day`, `condition time`, and `suspended` against the user's device or manually configured local time zone (`Automatic` / `Manual` UTC offset).
+* **Two-Stage Entity-Level Synchronization (`In-Memory <-> Local File <-> WebDAV`):** Compares individual `task` and `label` blocks via monotonic `modified` timestamps (`TaskBoardSync.merge`) on every save and manual sync, resolving offline sequential task ID collisions (`tNNN`) and rewriting `blocked` references automatically.
 * **Anti-Ping-Pong Downgrade & Auto-Finish Checklists:** Updates `queued` timestamps and strips `priority` when downgrading tasks, and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.
 * **30-Day Completed Task Pruning:** Removes `Completed` tasks whose `finished` timestamp is strictly older than `30` days (UTC) on save.
 * **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only `.tdf` persistence (`LocalFileRepository` defaulting to `tiertask.tdf`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
-* **Encrypted Configuration Persistence:** Stores storage mode, local and remote `.tdf` file names, WebDAV credentials, language, and theme settings via `flutter_secure_storage`.
+* **Encrypted Configuration Persistence:** Stores storage mode, local and remote `.tdf` file names, WebDAV credentials, language, theme, and time zone settings via `flutter_secure_storage`.
 
 ## Requirements
 
@@ -67,24 +69,27 @@ See [`TDF_SPEC.md`](TDF_SPEC.md) for the complete grammar and evaluation pipelin
 Canonical `tiertask.tdf` example:
 
 ```text
-tdf 0.2.0
+tdf 0.3.0
 
 label home {
-    name  "Home"
-    color "#4CAF50"
+    name     "Home"
+    color    "#4CAF50"
+    modified 2026-11-01 08:30
 }
 
 task t001 priority {
-    name    "Verify server backup"
-    created 2026-11-01 08:30
-    queued  2026-11-01 08:30
-    labels  home
+    name     "Verify server backup"
+    created  2026-11-01 08:30
+    queued   2026-11-01 08:30
+    modified 2026-11-01 08:30
+    labels   home
 }
 
 task t002 {
-    name    "Clean up study"
-    created 2026-11-01 09:00
-    queued  2026-11-01 09:15
+    name     "Clean up study"
+    created  2026-11-01 09:00
+    queued   2026-11-01 09:15
+    modified 2026-11-01 09:15
     subtasks auto-finish {
         step true  "Wipe desk"
         step false "Organize cables"

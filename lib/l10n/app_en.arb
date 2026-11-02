@@ -750,5 +750,25 @@
   "themePaletteNavy": "Navy",
   "@themePaletteNavy": {
     "description": "Label for the Navy Material 3 color palette."
+  },
+  "timeZoneSectionTitle": "Time Zone",
+  "@timeZoneSectionTitle": {
+    "description": "Settings section title for choosing the local time zone mode and offset."
+  },
+  "timeZoneSectionDescription": "Select whether the local time zone is detected automatically from the device or set manually for task conditions and display.",
+  "@timeZoneSectionDescription": {
+    "description": "Settings section description for choosing the local time zone mode and offset."
+  },
+  "timeZoneModeAutomatic": "Automatic",
+  "@timeZoneModeAutomatic": {
+    "description": "Option label for automatic device time zone detection."
+  },
+  "timeZoneModeManual": "Manual",
+  "@timeZoneModeManual": {
+    "description": "Option label for manual UTC offset selection."
+  },
+  "timeZoneOffsetLabel": "UTC Offset",
+  "@timeZoneOffsetLabel": {
+    "description": "Dropdown label for selecting the manual UTC offset."
   }
 }

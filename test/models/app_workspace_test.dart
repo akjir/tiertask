@@ -91,6 +91,9 @@ Uint8List _buildRawRecord({
       ..addByte(encoded.length & 0xFF)
       ..add(encoded);
   }
+  builder
+    ..addByte(0x02)
+    ..addByte(0xD0);
   return builder.toBytes();
 }
 
@@ -165,6 +168,8 @@ void main() {
           themeMode: AppThemeMode.dark,
           themePalette: AppThemePalette.navy,
           showOpenTaskCount: true,
+          timeZoneMode: AppTimeZoneMode.manual,
+          manualTimeZoneOffsetMinutes: 120,
         ),
       );
       final encodedBytes = updated.toBytes();
@@ -175,13 +180,13 @@ void main() {
       );
       expect(
         defaultWorkspace.toBytes().length,
-        equals(49),
-        reason: 'Default workspace binary encoding must be 49 bytes',
+        equals(51),
+        reason: 'Default workspace binary encoding must be 51 bytes',
       );
       expect(
         encodedBytes.length,
-        equals(61),
-        reason: 'Updated workspace binary encoding must be 61 bytes',
+        equals(63),
+        reason: 'Updated workspace binary encoding must be 63 bytes',
       );
       final roundTrip = AppWorkspace.fromBytes(encodedBytes);
       expect(

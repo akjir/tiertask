@@ -590,8 +590,12 @@ class TdfLabel {
     required this.name,
     this.color,
     this.note,
+    this.modifiedAt,
     this.conditions = const [],
   });
+
+  /// Fallback UTC modification timestamp when a `label` block omits `modified`.
+  static final DateTime defaultModifiedAt = DateTime.utc(2026, 11, 1, 8, 0);
 
   /// Optional hexadecimal color code (`"#RRGGBB"`).
   final String? color;
@@ -602,11 +606,17 @@ class TdfLabel {
   /// Unique label identifier (`<id>`).
   final String id;
 
+  /// Optional UTC modification timestamp (`modified` directive).
+  final DateTime? modifiedAt;
+
   /// Human-readable display name of the label.
   final String name;
 
   /// Optional extended description (`1..2000` characters).
   final String? note;
+
+  /// Effective UTC modification timestamp (`modifiedAt ?? defaultModifiedAt`).
+  DateTime get effectiveModifiedAt => modifiedAt ?? defaultModifiedAt;
 
   /// Returns a copy of this label with updated fields.
   TdfLabel copyWith({
@@ -614,6 +624,8 @@ class TdfLabel {
     String? name,
     String? color,
     String? note,
+    DateTime? modifiedAt,
+    bool clearModifiedAt = false,
     List<TaskCondition>? conditions,
   }) {
     return TdfLabel(
@@ -621,6 +633,7 @@ class TdfLabel {
       name: name ?? this.name,
       color: color ?? this.color,
       note: note ?? this.note,
+      modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       conditions: conditions != null
           ? List<TaskCondition>.unmodifiable(conditions)
           : this.conditions,
@@ -635,12 +648,19 @@ class TdfLabel {
         other.name == name &&
         other.color == color &&
         other.note == note &&
+        other.modifiedAt == modifiedAt &&
         listEquals(other.conditions, conditions);
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, name, color, note, Object.hashAll(conditions));
+  int get hashCode => Object.hash(
+    id,
+    name,
+    color,
+    note,
+    modifiedAt,
+    Object.hashAll(conditions),
+  );
 
   @override
   String toString() => 'label $id ($name)';

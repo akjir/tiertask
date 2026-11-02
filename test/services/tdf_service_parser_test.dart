@@ -15,6 +15,7 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -345,15 +346,139 @@ task t001 {
       );
     });
 
-    test('accepts tdf 0.2.0 with zero blocks as valid empty TaskBoard and serializes empty board with tdf 0.2.0', () {
+    test('accepts tdf 0.3.0 and legacy tdf 0.2.0 with zero blocks as valid empty TaskBoard and serializes with tdf 0.3.0', () {
+      expect(
+        TdfService.supportedVersion,
+        equals('0.3.0'),
+        reason: 'Supported TDF version must be 0.3.0',
+      );
+      expect(tdfService.parse('tdf 0.3.0\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.2.0\n').focus, isEmpty);
       expect(
         tdfService
-            .parse('   \t  \n# only comment\r\ntdf 0.2.0  # version\n')
+            .parse('   \t  \n# only comment\r\ntdf 0.3.0  # version\n')
             .focus,
         isEmpty,
       );
-      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.2.0\n'));
+      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.3.0\n'));
+    });
+
+    test('parses and serializes per-entity modified UTC timestamps on label and task blocks with effectiveModifiedAt fallbacks and duplicate/invalid error checks', () {
+      const tdfWithModified = '''
+tdf 0.3.0
+
+label l_explicit {
+    name     "Explicit Label"
+    modified 2026-11-01 09:15:30
+}
+
+label l_fallback {
+    name "Fallback Label"
+}
+
+task t_explicit {
+    name     "Explicit Modified Task"
+    created  2026-11-01 08:00
+    queued   2026-11-01 08:30
+    modified 2026-11-01 10:45:12
+    labels   l_explicit
+}
+
+task t_fallback {
+    name     "Fallback Modified Task"
+    created  2026-11-01 08:00
+    queued   2026-11-01 09:20
+    labels   l_fallback
+}
+''';
+
+      final board = tdfService.parse(
+        tdfWithModified,
+        evaluationTime: fixedDate,
+      );
+      expect(
+        board.labels[0].modifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 15, 30)),
+        reason: 'Label modified directive must parse to UTC second precision',
+      );
+      expect(
+        board.labels[0].effectiveModifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 15, 30)),
+      );
+      expect(
+        board.labels[1].modifiedAt,
+        isNull,
+        reason: 'Label without modified directive must keep modifiedAt null',
+      );
+      expect(
+        board.labels[1].effectiveModifiedAt,
+        equals(TaskItem.defaultCreatedAt),
+        reason:
+            'Label without modified must fall back to defaultCreatedAt in UTC',
+      );
+
+      final explicitTask = board.findTask('t_explicit')!;
+      expect(
+        explicitTask.modifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 10, 45, 12)),
+      );
+      expect(
+        explicitTask.effectiveModifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 10, 45, 12)),
+      );
+
+      final fallbackTask = board.findTask('t_fallback')!;
+      expect(fallbackTask.modifiedAt, isNull);
+      expect(
+        fallbackTask.effectiveModifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 20)),
+        reason: 'Task without modified must fall back to max(created, queued, finished) in UTC',
+      );
+
+      final serialized = tdfService.serialize(board);
+      expect(serialized, startsWith('tdf 0.3.0\n'));
+      expect(serialized, contains('modified 2026-11-01 09:15:30\n'));
+      expect(serialized, contains('modified 2026-11-01 10:45:12\n'));
+
+      expect(
+        () => tdfService.parse(
+          'tdf 0.3.0\nlabel l1 {\n  name "L1"\n  modified 2026-11-01 08:00\n  modified 2026-11-01 09:00\n}\n',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.duplicateDirective,
+          ),
+        ),
+        reason: 'Duplicate modified on label must throw duplicateDirective',
+      );
+      expect(
+        () => tdfService.parse(
+          'tdf 0.3.0\ntask t1 {\n  name "T1"\n  created 2026-11-01\n  modified 2026-11-01 08:00\n  modified 2026-11-01 09:00\n}\n',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.duplicateDirective,
+          ),
+        ),
+        reason: 'Duplicate modified on task must throw duplicateDirective',
+      );
+      expect(
+        () => tdfService.parse(
+          'tdf 0.3.0\ntask t1 {\n  name "T1"\n  created 2026-11-01\n  modified 2026-11-01 25:99\n}\n',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidTimestamp,
+          ),
+        ),
+        reason: 'Invalid modified timestamp must throw invalidTimestamp',
+      );
     });
   });
 }

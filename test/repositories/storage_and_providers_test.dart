@@ -175,7 +175,7 @@ task b1 {
       expect(updatedBoard.completed.first.title, equals('Remote Focus 1'));
 
       expect(putCount, greaterThanOrEqualTo(1));
-      expect(remoteTdfStore, contains('tdf 0.2.0'));
+      expect(remoteTdfStore, contains('tdf 0.3.0'));
       expect(remoteTdfStore, contains('task f1 {'));
       expect(remoteTdfStore, contains('finished 2026-11-01 12:00'));
     });
@@ -395,7 +395,7 @@ task b1 {
         reason: 'Local mode must persist local_only.tdf on disk',
       );
       final savedDiskContent = await localFile.readAsString();
-      expect(savedDiskContent, contains('tdf 0.2.0'));
+      expect(savedDiskContent, contains('tdf 0.3.0'));
       expect(savedDiskContent, contains('name "Persistent Local Task"'));
       expect(savedDiskContent, contains('step false "First step"'));
       expect(remotePutCount, equals(0));

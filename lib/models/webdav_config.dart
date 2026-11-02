@@ -109,6 +109,29 @@ enum AppThemePalette {
   }
 }
 
+/// Supported time zone resolution modes in TierTask.
+enum AppTimeZoneMode {
+  /// Uses the operating system's local time zone automatically.
+  automatic(id: 0),
+
+  /// Uses a manually configured fixed UTC offset (`manualTimeZoneOffsetMinutes`).
+  manual(id: 1);
+
+  /// Creates an [AppTimeZoneMode] option.
+  const AppTimeZoneMode({required this.id});
+
+  /// Compact 1-bit binary identifier (`0` or `1`).
+  final int id;
+
+  /// Resolves an [AppTimeZoneMode] from its binary [rawId], defaulting to [AppTimeZoneMode.automatic].
+  static AppTimeZoneMode fromId(int rawId) {
+    return switch (rawId) {
+      1 => AppTimeZoneMode.manual,
+      _ => AppTimeZoneMode.automatic,
+    };
+  }
+}
+
 /// Supported TDF persistence and synchronization modes in TierTask.
 enum StorageMode {
   /// Persists the `.tdf` file only on the local filesystem.
@@ -142,7 +165,7 @@ enum StorageMode {
   }
 }
 
-/// Immutable configuration for local TDF file storage, WebDAV synchronization, language, theme, and task count visibility.
+/// Immutable configuration for local TDF file storage, WebDAV synchronization, language, theme, time zone, and task count visibility.
 @immutable
 class WebDavConfig {
   /// Creates a [WebDavConfig] instance.
@@ -157,14 +180,69 @@ class WebDavConfig {
     this.themeMode = AppThemeMode.system,
     this.themePalette = AppThemePalette.slate,
     this.showOpenTaskCount = false,
+    this.timeZoneMode = AppTimeZoneMode.automatic,
+    int manualTimeZoneOffsetMinutes = 0,
   }) : storageMode =
            storageMode ??
            (serverUrl != '' && username != '' && password != ''
                ? StorageMode.webdav
-               : StorageMode.local);
+               : StorageMode.local),
+       manualTimeZoneOffsetMinutes =
+           manualTimeZoneOffsetMinutes < minUtcOffsetMinutes
+           ? minUtcOffsetMinutes
+           : (manualTimeZoneOffsetMinutes > maxUtcOffsetMinutes
+                 ? maxUtcOffsetMinutes
+                 : manualTimeZoneOffsetMinutes);
 
   /// Default `.tdf` file name used by the default `Tasks` workspace.
   static const String defaultFileName = 'tasks.tdf';
+
+  /// Maximum supported UTC offset in minutes (`+14:00`).
+  static const int maxUtcOffsetMinutes = 840;
+
+  /// Minimum supported UTC offset in minutes (`-12:00`).
+  static const int minUtcOffsetMinutes = -720;
+
+  /// Standard selectable UTC offsets in minutes (`UTC-12:00` through `UTC+14:00`).
+  static const List<int> supportedUtcOffsetMinutes = <int>[
+    -720,
+    -660,
+    -600,
+    -570,
+    -540,
+    -480,
+    -420,
+    -360,
+    -300,
+    -240,
+    -210,
+    -180,
+    -120,
+    -60,
+    0,
+    60,
+    120,
+    180,
+    210,
+    240,
+    270,
+    300,
+    330,
+    345,
+    360,
+    390,
+    420,
+    480,
+    540,
+    570,
+    600,
+    630,
+    660,
+    720,
+    765,
+    780,
+    840,
+  ];
 
   static final RegExp _leadingSlashesPattern = RegExp(r'^/+');
 
@@ -197,6 +275,12 @@ class WebDavConfig {
 
   /// Whether to display the total open task count on category and location cards.
   final bool showOpenTaskCount;
+
+  /// Selected time zone resolution mode (`automatic` or `manual`).
+  final AppTimeZoneMode timeZoneMode;
+
+  /// Manually configured UTC offset in minutes (`-720..840`) when [timeZoneMode] is [AppTimeZoneMode.manual].
+  final int manualTimeZoneOffsetMinutes;
 
   /// Whether at least one storage backend required by [storageMode] is ready for I/O.
   bool get hasActiveStorage {
@@ -238,6 +322,8 @@ class WebDavConfig {
     AppThemeMode? themeMode,
     AppThemePalette? themePalette,
     bool? showOpenTaskCount,
+    AppTimeZoneMode? timeZoneMode,
+    int? manualTimeZoneOffsetMinutes,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -250,6 +336,55 @@ class WebDavConfig {
       themeMode: themeMode ?? this.themeMode,
       themePalette: themePalette ?? this.themePalette,
       showOpenTaskCount: showOpenTaskCount ?? this.showOpenTaskCount,
+      timeZoneMode: timeZoneMode ?? this.timeZoneMode,
+      manualTimeZoneOffsetMinutes:
+          manualTimeZoneOffsetMinutes ?? this.manualTimeZoneOffsetMinutes,
+    );
+  }
+
+  /// Formats [offsetMinutes] as an ISO-style `UTC±HH:MM` label.
+  static String formatUtcOffset(int offsetMinutes) {
+    final clamped = offsetMinutes < minUtcOffsetMinutes
+        ? minUtcOffsetMinutes
+        : (offsetMinutes > maxUtcOffsetMinutes
+              ? maxUtcOffsetMinutes
+              : offsetMinutes);
+    final sign = clamped < 0 ? '-' : '+';
+    final absolute = clamped.abs();
+    final hours = (absolute ~/ 60).toString().padLeft(2, '0');
+    final minutes = (absolute % 60).toString().padLeft(2, '0');
+    return 'UTC$sign$hours:$minutes';
+  }
+
+  /// Converts a wall-clock [localWallClock] date-time into a second-precision UTC [DateTime]
+  /// according to [timeZoneMode] and [manualTimeZoneOffsetMinutes].
+  DateTime localWallClockToUtc(DateTime localWallClock) {
+    if (timeZoneMode == AppTimeZoneMode.manual) {
+      final wallAsUtc = DateTime.utc(
+        localWallClock.year,
+        localWallClock.month,
+        localWallClock.day,
+        localWallClock.hour,
+        localWallClock.minute,
+        localWallClock.second,
+      );
+      return wallAsUtc.subtract(Duration(minutes: manualTimeZoneOffsetMinutes));
+    }
+    final osLocal = DateTime(
+      localWallClock.year,
+      localWallClock.month,
+      localWallClock.day,
+      localWallClock.hour,
+      localWallClock.minute,
+      localWallClock.second,
+    ).toUtc();
+    return DateTime.utc(
+      osLocal.year,
+      osLocal.month,
+      osLocal.day,
+      osLocal.hour,
+      osLocal.minute,
+      osLocal.second,
     );
   }
 
@@ -302,6 +437,32 @@ class WebDavConfig {
     return Uri.tryParse(fullUrl);
   }
 
+  /// Converts [instant] into a wall-clock [DateTime] (encoded with `isUtc: true` components
+  /// for deterministic field access) according to [timeZoneMode] and [manualTimeZoneOffsetMinutes].
+  DateTime toLocalWallClock(DateTime instant) {
+    final utc = instant.toUtc();
+    if (timeZoneMode == AppTimeZoneMode.manual) {
+      final shifted = utc.add(Duration(minutes: manualTimeZoneOffsetMinutes));
+      return DateTime.utc(
+        shifted.year,
+        shifted.month,
+        shifted.day,
+        shifted.hour,
+        shifted.minute,
+        shifted.second,
+      );
+    }
+    final local = utc.toLocal();
+    return DateTime.utc(
+      local.year,
+      local.month,
+      local.day,
+      local.hour,
+      local.minute,
+      local.second,
+    );
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -315,7 +476,9 @@ class WebDavConfig {
         other.language == language &&
         other.themeMode == themeMode &&
         other.themePalette == themePalette &&
-        other.showOpenTaskCount == showOpenTaskCount;
+        other.showOpenTaskCount == showOpenTaskCount &&
+        other.timeZoneMode == timeZoneMode &&
+        other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes;
   }
 
   @override
@@ -330,5 +493,7 @@ class WebDavConfig {
     themeMode,
     themePalette,
     showOpenTaskCount,
+    timeZoneMode,
+    manualTimeZoneOffsetMinutes,
   );
 }

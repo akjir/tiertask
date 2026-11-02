@@ -574,4 +574,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get themePaletteNavy => 'Navy';
+
+  @override
+  String get timeZoneSectionTitle => 'Time Zone';
+
+  @override
+  String get timeZoneSectionDescription =>
+      'Select whether the local time zone is detected automatically from the device or set manually for task conditions and display.';
+
+  @override
+  String get timeZoneModeAutomatic => 'Automatic';
+
+  @override
+  String get timeZoneModeManual => 'Manual';
+
+  @override
+  String get timeZoneOffsetLabel => 'UTC Offset';
 }

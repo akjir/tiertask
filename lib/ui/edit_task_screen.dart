@@ -20,6 +20,7 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/tdf_metadata.dart';
+import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_editor_conditions_section.dart';
@@ -593,7 +594,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
   /// Opens a Material 3 date picker and updates [_suspendedController] with `YYYY-MM-DD`.
   Future<void> _pickSuspendedDate() async {
-    final now = ref.read(clockProvider)();
+    final config =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final now = config.toLocalWallClock(ref.read(clockProvider)().toUtc());
     final initialDate = _resolveInitialSuspendedDate(now);
     final pickedDate = await showDatePicker(
       context: context,
@@ -616,7 +619,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
   /// Opens a 24-hour Material 3 time picker and updates the `HH:MM` portion of [_suspendedController].
   Future<void> _pickSuspendedTime() async {
-    final now = ref.read(clockProvider)();
+    final config =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final now = config.toLocalWallClock(ref.read(clockProvider)().toUtc());
     final existingTimeSuffix = _extractTimeSuffix(_suspendedController.text);
     final initialTime = _extractTimeOfDay(
       existingTimeSuffix ?? '',

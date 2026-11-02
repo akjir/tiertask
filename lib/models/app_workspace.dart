@@ -244,7 +244,7 @@ class AppWorkspace {
     ]) {
       final encoded = _utf8Codec.encode(rawField);
       if (encoded.length > 0xFFFF ||
-          builder.length + 2 + encoded.length > maxBinaryBytes) {
+          builder.length + 4 + encoded.length > maxBinaryBytes) {
         _throwCorrupt('Binary workspace payload exceeds maximum size.');
       }
       builder
@@ -252,6 +252,14 @@ class AppWorkspace {
         ..addByte(encoded.length & 0xFF)
         ..add(encoded);
     }
+    final tzWord =
+        ((config.timeZoneMode.id & 0x01) << 15) |
+        ((config.manualTimeZoneOffsetMinutes -
+                WebDavConfig.minUtcOffsetMinutes) &
+            0x07FF);
+    builder
+      ..addByte((tzWord >> 8) & 0xFF)
+      ..addByte(tzWord & 0xFF);
   }
 
   /// Converts [input] into a lowercase ASCII identifier slug with `_` separators.
@@ -288,6 +296,11 @@ class AppWorkspace {
       fields.add(decoded);
       cursor = nextCursor;
     }
+    if (cursor + 2 > source.length) {
+      _throwCorrupt('Truncated time zone bytes in binary workspace record.');
+    }
+    final tzWord = (source[cursor] << 8) | source[cursor + 1];
+    cursor += 2;
 
     final filePath = fields[5].trim();
     final localPath = fields[6].trim();
@@ -305,6 +318,9 @@ class AppWorkspace {
         themeMode: AppThemeMode.fromId((flags >> 4) & 0x03),
         themePalette: AppThemePalette.fromId((flags >> 6) & 0x01),
         showOpenTaskCount: ((flags >> 7) & 0x01) == 1,
+        timeZoneMode: AppTimeZoneMode.fromId((tzWord >> 15) & 0x01),
+        manualTimeZoneOffsetMinutes:
+            (tzWord & 0x07FF) + WebDavConfig.minUtcOffsetMinutes,
       ),
     );
     if (workspace.id.isEmpty ||

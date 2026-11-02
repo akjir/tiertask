@@ -597,4 +597,50 @@ task t004 {
       );
     },
   );
+
+  testWidgets(
+    'SettingsScreen switches Time Zone mode between Automatic and Manual and persists manual UTC offset',
+    (WidgetTester tester) async {
+      final settingsRepository = InMemorySettingsRepository(
+        const WebDavConfig(language: AppLanguage.english),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await openSettingsFromMenu(tester);
+
+      expect(
+        find.text('Time Zone'),
+        findsOneWidget,
+        reason: 'SettingsScreen must display the Time Zone section card',
+      );
+      expect(find.text('Automatic'), findsOneWidget);
+      expect(find.text('Manual'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Manual'));
+      await tester.tap(find.text('Manual'));
+      await tester.pumpAndSettle();
+
+      var savedConfig = await settingsRepository.loadConfig();
+      expect(
+        savedConfig.timeZoneMode,
+        equals(AppTimeZoneMode.manual),
+        reason: 'Selecting Manual must persist AppTimeZoneMode.manual',
+      );
+      expect(
+        find.text('UTC Offset'),
+        findsOneWidget,
+        reason: 'Manual time zone mode must reveal the UTC Offset selector',
+      );
+    },
+  );
 }

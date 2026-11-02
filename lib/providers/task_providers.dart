@@ -19,6 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
+import '../models/task_board_sync.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
@@ -199,6 +200,9 @@ class SyncStateNotifier extends Notifier<SyncState> {
 
 /// Manages the in-memory [TaskBoard] and synchronizes mutations to local files and WebDAV.
 class TaskNotifier extends AsyncNotifier<TaskBoard> {
+  final Map<String, DateTime> _pendingDeletedLabelTimestamps =
+      <String, DateTime>{};
+
   TaskBoard get _currentBoard => state.asData?.value ?? TaskBoard.empty();
 
   @override
@@ -208,7 +212,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     if (!config.hasActiveStorage) {
       return TaskBoard.empty();
     }
-    return _fetchAndNormalizeBoard(config);
+    return _runSyncWithStatus(config, isInitialLoad: true);
   }
 
   /// Adds a new TDF `label` block with [name] and optional `#RRGGBB` [color] and persists to storage.
@@ -217,12 +221,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String? color,
     String? id,
     String? note,
+    DateTime? currentDate,
   }) async {
+    final (utcNow, _) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.addLabel(
       name,
       color: color,
       id: id,
       note: note,
+      currentDate: utcNow,
     );
     await _commitMutation(updated);
   }
@@ -243,7 +250,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? currentDate,
     String? id,
   }) async {
-    final now = currentDate ?? ref.read(clockProvider)();
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.addTask(
       title,
       note: note,
@@ -255,7 +262,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       suspendedAt: suspendedAt,
       blockedByTaskIds: blockedByTaskIds,
       conditions: conditions,
-      currentDate: now,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
       id: id,
     );
     await _commitMutation(updated);
@@ -264,25 +272,39 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Marks an active task as done in Tier 6 ([TaskTier.completed]), prunes expired tasks,
   /// triggers the Auto-Pull Cascade, and persists to storage.
   Future<void> completeTask(String taskId, {DateTime? currentDate}) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.completeTask(taskId, currentDate: now);
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final updated = _currentBoard.completeTask(
+      taskId,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+    );
     await _commitMutation(updated);
   }
 
   /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
-  Future<void> deleteLabel(String labelId) async {
-    final updated = _currentBoard.deleteLabel(labelId);
+  Future<void> deleteLabel(String labelId, {DateTime? currentDate}) async {
+    final (utcNow, _) = _resolveTimestamps(currentDate);
+    final existingLabel = _currentBoard.labels
+        .where((label) => label.id == labelId)
+        .firstOrNull;
+    final deleteTimestamp = TaskItem.nextModifiedTimestamp(
+      existingLabel?.effectiveModifiedAt ?? TdfLabel.defaultModifiedAt,
+      utcNow,
+    );
+    _pendingDeletedLabelTimestamps[labelId] = deleteTimestamp;
+    await _persistPendingLabelDeletion(labelId, deleteTimestamp);
+    final updated = _currentBoard.deleteLabel(labelId, currentDate: utcNow);
     await _commitMutation(updated);
   }
 
   /// Downgrades an active task per `TDF_SPEC.md` Section 6.3 and persists to storage.
   Future<void> downgradeTask(String taskId, {DateTime? currentDate}) async {
-    final now = currentDate ?? ref.read(clockProvider)();
-    final updated = _currentBoard.downgradeTask(taskId, currentDate: now);
+    final (utcNow, _) = _resolveTimestamps(currentDate);
+    final updated = _currentBoard.downgradeTask(taskId, currentDate: utcNow);
     await _commitMutation(updated);
   }
 
-  /// Persists the current in-memory [board] state to the configured local and/or WebDAV `.tdf` storage.
+  /// Synchronizes and persists the in-memory [board] state across the configured local and WebDAV stages.
   Future<void> pushToRemote(TaskBoard board) async {
     final WebDavConfig config =
         ref.read(webDavConfigProvider).asData?.value ??
@@ -291,10 +313,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       return;
     }
 
-    final serialized = _serializeTdf(board);
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
-      await _writeBoardToConfiguredTargets(config, serialized);
+      final converged = await _synchronizePipeline(
+        config,
+        candidateBoard: board,
+      );
+      state = AsyncData(converged);
       ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
     } on Object catch (error) {
       ref.read(syncStateProvider.notifier).setError(error.toString());
@@ -302,8 +327,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Updates the display [name] of the label with [labelId] and persists to storage.
-  Future<void> renameLabel(String labelId, String name) async {
-    final updated = _currentBoard.renameLabel(labelId, name);
+  Future<void> renameLabel(
+    String labelId,
+    String name, {
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, _) = _resolveTimestamps(currentDate);
+    final updated = _currentBoard.renameLabel(
+      labelId,
+      name,
+      currentDate: utcNow,
+    );
     await _commitMutation(updated);
   }
 
@@ -314,16 +348,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TaskTier targetTier = TaskTier.planned,
     DateTime? currentDate,
   }) async {
-    final now = currentDate ?? ref.read(clockProvider)();
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.restoreTask(
       taskId,
       targetTier: targetTier,
-      currentDate: now,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
     await _commitMutation(updated);
   }
 
-  /// Reloads the `.tdf` file from the configured local or WebDAV storage backend.
+  /// Synchronizes the in-memory board with the configured local and/or WebDAV storage backends.
   Future<void> syncFromRemote() async {
     final config = await ref.read(webDavConfigProvider.future);
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
@@ -340,11 +375,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       return;
     }
 
+    final existingBoard = state.asData?.value;
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() => _fetchAndNormalizeBoard(config));
+    state = await AsyncValue.guard(
+      () => _runSyncWithStatus(config, candidateBoard: existingBoard),
+    );
   }
 
-  /// Tests storage access using [config], fetches or initializes the `.tdf` file, and updates the board.
+  /// Tests storage access using [config], runs the two-stage merge pipeline, and updates the board.
   Future<void> testConnectionAndSync(WebDavConfig config) async {
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
     if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
@@ -353,25 +391,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       throw exception;
     }
 
+    final existingBoard = state.asData?.value;
     await ref.read(webDavConfigProvider.notifier).updateConfig(config);
-    final now = ref.read(clockProvider)();
-
-    ref.read(syncStateProvider.notifier).setSyncing();
-    try {
-      final rawTdf = await _loadRawTdfForSync(config);
-      final board = _resolveBoardFromTdf(
-        rawTdf,
-        now,
-        fallbackBoard: state.asData?.value ?? TaskBoard.empty(),
-      );
-      final serialized = _serializeTdf(board);
-      await _writeBoardToRequiredTargets(config, serialized);
-      state = AsyncData(board);
-      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
-    } on Object catch (error) {
-      ref.read(syncStateProvider.notifier).setError(error.toString());
-      rethrow;
-    }
+    final converged = await _runSyncWithStatus(
+      config,
+      candidateBoard: existingBoard,
+      requireTargets: true,
+    );
+    state = AsyncData(converged);
   }
 
   /// Toggles the subtask step at [stepIndex] on [taskId] and persists to storage.
@@ -380,11 +407,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     int stepIndex, {
     DateTime? currentDate,
   }) async {
-    final now = currentDate ?? ref.read(clockProvider)();
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.toggleSubtask(
       taskId,
       stepIndex,
-      currentDate: now,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
     await _commitMutation(updated);
   }
@@ -405,7 +433,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) async {
-    final now = currentDate ?? ref.read(clockProvider)();
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.updateTask(
       taskId,
       title: title,
@@ -419,96 +447,77 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       clearSuspendedAt: clearSuspendedAt,
       blockedByTaskIds: blockedByTaskIds,
       conditions: conditions,
-      currentDate: now,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
     await _commitMutation(updated);
   }
 
-  /// Updates the in-memory board state and persists the serialized `.tdf` document.
+  /// Updates the in-memory board state and executes the two-stage persistence pipeline.
   Future<void> _commitMutation(TaskBoard updatedBoard) async {
     state = AsyncData(updatedBoard);
     await pushToRemote(updatedBoard);
   }
 
-  /// Loads the `.tdf` file from the active backend, normalizes the board, and writes back if changed.
-  Future<TaskBoard> _fetchAndNormalizeBoard(WebDavConfig config) async {
-    final now = ref.read(clockProvider)();
+  /// Parses [rawTdf] using [utcNow] and [localNow].
+  TaskBoard _parseTdf(String rawTdf, DateTime utcNow, DateTime localNow) {
+    return ref
+        .read(tdfServiceProvider)
+        .parse(rawTdf, evaluationTime: utcNow, localEvaluationTime: localNow);
+  }
 
+  /// Immediately persists a label deletion timestamp to [WorkspaceSyncState] so offline restarts preserve it.
+  Future<void> _persistPendingLabelDeletion(
+    String labelId,
+    DateTime deletedAt,
+  ) async {
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    final currentSyncState = await settingsRepo.loadWorkspaceSyncState(
+      workspace.id,
+    );
+    final updatedDeleted = <String, DateTime>{
+      ...currentSyncState.deletedLabelTimestamps,
+      labelId: deletedAt,
+    };
+    await settingsRepo.saveWorkspaceSyncState(
+      workspace.id,
+      currentSyncState.copyWith(deletedLabelTimestamps: updatedDeleted),
+    );
+  }
+
+  /// Resolves the normalized UTC timestamp and configured local wall-clock timestamp.
+  (DateTime utcNow, DateTime localNow) _resolveTimestamps(
+    DateTime? currentDate,
+  ) {
+    final rawClock = currentDate ?? ref.read(clockProvider)();
+    final utcNow = TaskItem.normalizeTimestamp(rawClock.toUtc());
+    final config = _resolveCurrentConfig(ref);
+    final localNow = config.toLocalWallClock(utcNow);
+    return (utcNow, localNow);
+  }
+
+  /// Wraps [_synchronizePipeline] with [SyncStateNotifier] status updates.
+  Future<TaskBoard> _runSyncWithStatus(
+    WebDavConfig config, {
+    TaskBoard? candidateBoard,
+    bool isInitialLoad = false,
+    bool requireTargets = false,
+  }) async {
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
-      final rawTdf = await _loadRawTdfForSync(config);
-      final normalizedBoard = _resolveBoardFromTdf(
-        rawTdf,
-        now,
-        fallbackBoard: TaskBoard.empty(),
+      final board = await _synchronizePipeline(
+        config,
+        candidateBoard: candidateBoard,
+        isInitialLoad: isInitialLoad,
+        requireTargets: requireTargets,
       );
-      final normalizedTdf = _serializeTdf(normalizedBoard);
-
-      await _persistNormalizedTdf(config, rawTdf, normalizedTdf);
       ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
-      return normalizedBoard;
+      return board;
     } on Object catch (error) {
       ref.read(syncStateProvider.notifier).setError(error.toString());
       rethrow;
     }
-  }
-
-  /// Loads raw `.tdf` text according to [config.storageMode].
-  Future<String> _loadRawTdfForSync(WebDavConfig config) async {
-    return switch (config.storageMode) {
-      StorageMode.local => ref.read(localFileRepositoryProvider).loadTdf(),
-      StorageMode.webdav => ref.read(webDavRepositoryProvider).fetchTdf(),
-      StorageMode.both => _loadRawTdfInBothMode(config),
-    };
-  }
-
-  /// Loads raw `.tdf` in [StorageMode.both], preferring remote content and falling back to local content.
-  Future<String> _loadRawTdfInBothMode(WebDavConfig config) async {
-    if (config.isWebDavConfigured) {
-      final remote = await ref.read(webDavRepositoryProvider).fetchTdf();
-      if (remote.trim().isNotEmpty) {
-        return remote;
-      }
-    }
-    if (config.isLocalConfigured) {
-      return ref.read(localFileRepositoryProvider).loadTdf();
-    }
-    return '';
-  }
-
-  /// Writes back [normalizedTdf] when normalization modified [rawTdf] or when syncing both backends.
-  Future<void> _persistNormalizedTdf(
-    WebDavConfig config,
-    String rawTdf,
-    String normalizedTdf,
-  ) async {
-    final hasContent = rawTdf.trim().isNotEmpty;
-    if (!hasContent) {
-      return;
-    }
-    final isChanged = rawTdf.trim() != normalizedTdf.trim();
-    if (config.storageMode == StorageMode.both || isChanged) {
-      await _writeBoardToConfiguredTargets(config, normalizedTdf);
-    }
-  }
-
-  /// Parses [rawTdf] or normalizes [fallbackBoard] when [rawTdf] is empty.
-  TaskBoard _resolveBoardFromTdf(
-    String rawTdf,
-    DateTime now, {
-    required TaskBoard fallbackBoard,
-  }) {
-    if (rawTdf.trim().isEmpty) {
-      return fallbackBoard
-          .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now);
-    }
-    final parsed = ref
-        .read(tdfServiceProvider)
-        .parse(rawTdf, evaluationTime: now);
-    return parsed
-        .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now);
   }
 
   /// Serializes [board] into canonical `.tdf` text.
@@ -516,29 +525,147 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return ref.read(tdfServiceProvider).serialize(board);
   }
 
-  /// Writes [serialized] to all configured targets enabled by [config.storageMode].
-  Future<void> _writeBoardToConfiguredTargets(
-    WebDavConfig config,
-    String serialized,
-  ) async {
-    if (config.storageMode.usesLocal && config.isLocalConfigured) {
-      await ref.read(localFileRepositoryProvider).saveTdf(serialized);
+  /// Executes the two-stage merge pipeline (`In-Memory <-> Local File <-> WebDAV`).
+  Future<TaskBoard> _synchronizePipeline(
+    WebDavConfig config, {
+    TaskBoard? candidateBoard,
+    bool isInitialLoad = false,
+    bool requireTargets = false,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(null);
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    var syncState = await settingsRepo.loadWorkspaceSyncState(workspace.id);
+    final deletedLabels = <String, DateTime>{
+      ...syncState.deletedLabelTimestamps,
+      ..._pendingDeletedLabelTimestamps,
+    };
+
+    var hasWorkingBoard = candidateBoard != null && !isInitialLoad;
+    var workingBoard = candidateBoard ?? TaskBoard.empty();
+
+    if (config.storageMode.usesLocal &&
+        (requireTargets || config.isLocalConfigured)) {
+      final rawLocal = await ref.read(localFileRepositoryProvider).loadTdf();
+      final hasLocalContent = rawLocal.trim().isNotEmpty;
+      if (hasLocalContent) {
+        final localBoard = _parseTdf(rawLocal, utcNow, localNow);
+        final localBaseline = _tryParseBaseline(
+          syncState.lastSyncedLocalTdf,
+          utcNow,
+          localNow,
+        );
+        workingBoard = TaskBoardSync.merge(
+          primary: hasWorkingBoard ? workingBoard : localBoard,
+          secondary: localBoard,
+          baseline: localBaseline ?? (hasWorkingBoard ? null : localBoard),
+          deletedLabelTimestamps: deletedLabels,
+          evaluationTime: utcNow,
+          localEvaluationTime: localNow,
+        );
+        hasWorkingBoard = true;
+      }
+      if (hasLocalContent || hasWorkingBoard || requireTargets) {
+        workingBoard = TaskBoardSync.stampAndNormalize(
+          workingBoard,
+          evaluationTime: utcNow,
+          localEvaluationTime: localNow,
+        );
+        final serializedLocal = _serializeTdf(workingBoard);
+        if (requireTargets ||
+            candidateBoard != null ||
+            rawLocal.trim() != serializedLocal.trim()) {
+          await ref.read(localFileRepositoryProvider).saveTdf(serializedLocal);
+        }
+        syncState = syncState.copyWith(
+          lastSyncedLocalTdf: serializedLocal,
+          deletedLabelTimestamps: deletedLabels,
+        );
+        await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
+        if (candidateBoard != null) {
+          state = AsyncData(workingBoard);
+        }
+      }
     }
-    if (config.storageMode.usesWebDav && config.isWebDavConfigured) {
-      await ref.read(webDavRepositoryProvider).saveTdf(serialized);
+
+    if (config.storageMode.usesWebDav &&
+        (requireTargets || config.isWebDavConfigured)) {
+      final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
+      final hasRemoteContent = rawRemote.trim().isNotEmpty;
+      if (hasRemoteContent) {
+        final remoteBoard = _parseTdf(rawRemote, utcNow, localNow);
+        final remoteBaseline = _tryParseBaseline(
+          syncState.lastSyncedRemoteTdf,
+          utcNow,
+          localNow,
+        );
+        workingBoard = TaskBoardSync.merge(
+          primary: hasWorkingBoard ? workingBoard : remoteBoard,
+          secondary: remoteBoard,
+          baseline: remoteBaseline ?? (hasWorkingBoard ? null : remoteBoard),
+          deletedLabelTimestamps: deletedLabels,
+          evaluationTime: utcNow,
+          localEvaluationTime: localNow,
+        );
+        hasWorkingBoard = true;
+      }
+      if (hasRemoteContent || hasWorkingBoard || requireTargets) {
+        workingBoard = TaskBoardSync.stampAndNormalize(
+          workingBoard,
+          evaluationTime: utcNow,
+          localEvaluationTime: localNow,
+        );
+        final serializedFinal = _serializeTdf(workingBoard);
+        if (requireTargets ||
+            candidateBoard != null ||
+            config.storageMode == StorageMode.both ||
+            rawRemote.trim() != serializedFinal.trim()) {
+          await ref.read(webDavRepositoryProvider).saveTdf(serializedFinal);
+        }
+        syncState = syncState.copyWith(lastSyncedRemoteTdf: serializedFinal);
+        if (config.storageMode.usesLocal &&
+            (requireTargets || config.isLocalConfigured)) {
+          if (requireTargets ||
+              (syncState.lastSyncedLocalTdf ?? '').trim() !=
+                  serializedFinal.trim()) {
+            await ref
+                .read(localFileRepositoryProvider)
+                .saveTdf(serializedFinal);
+          }
+          syncState = syncState.copyWith(lastSyncedLocalTdf: serializedFinal);
+        }
+      }
     }
+
+    if (!hasWorkingBoard) {
+      workingBoard = TaskBoardSync.stampAndNormalize(
+        workingBoard,
+        evaluationTime: utcNow,
+        localEvaluationTime: localNow,
+      );
+    }
+
+    _pendingDeletedLabelTimestamps.clear();
+    syncState = syncState.copyWith(
+      deletedLabelTimestamps: const <String, DateTime>{},
+    );
+    await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
+    return workingBoard;
   }
 
-  /// Writes [serialized] to all targets required by [config.storageMode] during an explicit sync test.
-  Future<void> _writeBoardToRequiredTargets(
-    WebDavConfig config,
-    String serialized,
-  ) async {
-    if (config.storageMode.usesLocal) {
-      await ref.read(localFileRepositoryProvider).saveTdf(serialized);
+  /// Parses [rawBaselineTdf] into a [TaskBoard], or returns `null` when empty or malformed.
+  TaskBoard? _tryParseBaseline(
+    String? rawBaselineTdf,
+    DateTime utcNow,
+    DateTime localNow,
+  ) {
+    if (rawBaselineTdf == null || rawBaselineTdf.trim().isEmpty) {
+      return null;
     }
-    if (config.storageMode.usesWebDav) {
-      await ref.read(webDavRepositoryProvider).saveTdf(serialized);
+    try {
+      return _parseTdf(rawBaselineTdf, utcNow, localNow);
+    } on TdfException {
+      return null;
     }
   }
 }
@@ -563,6 +690,15 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   Future<void> updateLanguage(AppLanguage language) async {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(language: language);
+    await updateConfig(updated);
+  }
+
+  /// Updates only the [manualTimeZoneOffsetMinutes] preference and persists it immediately.
+  Future<void> updateManualTimeZoneOffsetMinutes(int offsetMinutes) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(
+      manualTimeZoneOffsetMinutes: offsetMinutes,
+    );
     await updateConfig(updated);
   }
 
@@ -591,6 +727,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   Future<void> updateThemePalette(AppThemePalette themePalette) async {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(themePalette: themePalette);
+    await updateConfig(updated);
+  }
+
+  /// Updates only the [timeZoneMode] preference and persists it immediately.
+  Future<void> updateTimeZoneMode(AppTimeZoneMode timeZoneMode) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(timeZoneMode: timeZoneMode);
     await updateConfig(updated);
   }
 }

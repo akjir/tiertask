@@ -1,6 +1,6 @@
 # TierTask Data Format (TDF) Specification
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Status:** Specification
 **File Extension:** `.tdf`
 **Character Encoding:** UTF-8
@@ -11,14 +11,14 @@ The TierTask Data Format (`TDF`) is a deterministic, line-oriented, block-based 
 
 ### 1.1 Core Philosophy: Data vs. View Separation
 
-A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `suspended`), dependencies (`blocked`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
+A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `modified`, `suspended`), dependencies (`blocked`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
 
 1. **No Explicit Tier Storage:** Unlike positional list formats, a `.tdf` document does NOT store an explicit tier assignment (`[1]` through `[6]`) on any task.
 2. **Dynamic Derivation ($O(N)$ Pipeline):** The six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed`) are derived deterministically from the stored task and label attributes via a single-pass $O(N)$ filtering, sorting, and slicing pipeline (see Section 5).
 
 ### 1.2 Core Design Principles
 
-1. **Mandatory Version Header & Strict Root Block Enforcement:** Every valid `.tdf` document MUST begin with the single-line version header `tdf 0.2.0` at nesting depth `0` before any root block, making it the only directive allowed at depth `0`. Following the version header, every top-level statement at nesting depth `0` MUST be a root block (`task` or `label`); all other standalone directives at the root level are forbidden.
+1. **Mandatory Version Header & Strict Root Block Enforcement:** Every valid `.tdf` document MUST begin with the single-line version header `tdf 0.3.0` (or legacy `tdf 0.2.0` on input) at nesting depth `0` before any root block, making it the only directive allowed at depth `0`. Following the version header, every top-level statement at nesting depth `0` MUST be a root block (`task` or `label`); all other standalone directives at the root level are forbidden.
 2. **No Empty Directives:** Optional directives that have no value (such as an unset `finished` or `queued` timestamp) MUST be omitted entirely from the block rather than written with empty arguments.
 3. **Single-Pass Linear Grammar:** TDF is designed to be tokenized and parsed in a single $O(N)$ linear pass without regular expressions or backtracking.
 4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (format version header, ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
@@ -93,29 +93,30 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 ### 2.8 Primitive Domain Value Types
 At the semantic validation layer, directive and header arguments map to the following primitive types:
-- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.2.0` for this specification).
+- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.3.0` for this specification; `0.2.0` is accepted for backwards-compatible parsing and upgraded to `0.3.0` upon serialization).
 - **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Unlike block and directive identifiers (Section 2.6), an `<id>` argument may start with a digit (`0-9`) or hyphen (`-`). Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `it`) are equally valid when authored manually.
 - **Boolean (`<bool>`):** Exact case-sensitive bare word `true` or `false`.
 - **Weekday (`<weekday>`):** Exact case-sensitive lowercase bare word from the set `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
-- **Time of Day (`<time>`):** 24-hour minute-precision time written as `<HH:MM>` (e.g., `08:00`, `18:00`), where `HH` is `00..23` and `MM` is `00..59`.
-- **Timestamp (`<timestamp>`):** ISO-8601 local date with optional 24-hour time (minute or second precision), written as either:
+- **Time of Day (`<time>`):** 24-hour minute-precision local wall-clock time written as `<HH:MM>` (e.g., `08:00`, `18:00`), where `HH` is `00..23` and `MM` is `00..59`.
+- **Timestamp (`<timestamp>`):** ISO-8601 date with optional 24-hour time (minute or second precision), written as either:
   - One bare-word token: `<YYYY-MM-DD>` (e.g., `2026-11-01`).
   - Two whitespace-separated bare-word tokens: `<YYYY-MM-DD> <HH:MM[:SS]>` (e.g., `2026-11-01 19:30` or `2026-11-01 19:30:05`), where `MM` (month) is `01..12`, `DD` is valid for the calendar month/year, `HH` is `00..23`, `MM` (minute) is `00..59`, and optional `SS` (second) is `00..59`.
-  - All timestamps represent local time. When `<HH:MM[:SS]>` is omitted on a date-only timestamp, chronological ordering and comparison treat the local time component as `00:00:00`. When `:SS` is omitted on a minute-precision timestamp (`<HH:MM>`), the seconds component defaults to `00` (`<HH:MM:00>`).
-  - Optional seconds precision (`:SS`) allows rapid successive mutations and step-down downgrades (Section 6) to sort deterministically by `queued` timestamp without reordering blocks in the file.
+  - **UTC Point-in-Time vs. Local Wall-Clock Semantics:** All point-in-time event and synchronization timestamps (`created`, `queued`, `finished`, `modified`) are stored, parsed, serialized, and compared strictly in **UTC** (normalized to UTC second precision `YYYY-MM-DD [HH:MM[:SS]]`). Recurring calendar and wall-clock deferral rules (`condition day`, `condition time`, and `suspended`) are evaluated against the user's effective **local wall-clock time** (`localEvaluationTime`) so daylight saving time (DST) transitions and UTC offsets do not shift daily time windows. In the UI layer, stored UTC timestamps are converted to the configured local time for display and user inputs are converted back to UTC.
+  - When `<HH:MM[:SS]>` is omitted on a date-only timestamp, chronological ordering and comparison treat the time component as `00:00:00`. When `:SS` is omitted on a minute-precision timestamp (`<HH:MM>`), the seconds component defaults to `00` (`<HH:MM:00>`).
+  - Optional seconds precision (`:SS`) allows rapid successive mutations, step-down downgrades (Section 6.3), and per-entity synchronization timestamps (`modified`, Section 6.7) to sort and compare deterministically without reordering blocks in the file.
 - **Floating-Point / Numeric (`<number>`):** Standard ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`) used for geographic latitude (`-90.0` to `90.0`), longitude (`-180.0` to `180.0`), and radius values in meters (`> 0`).
 - **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` (or single-quoted `'#RRGGBB'`; canonical serialization emits double-quoted `"#RRGGBB"`) where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`. Because `#` outside quotes starts a comment (Section 2.4), `<color>` values MUST be quoted.
 
 ## 3. Structural Grammar
 
 ### 3.1 Document Structure & Nesting Depth
-A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.2.0`) followed by a sequence of zero or more root-level **Blocks**.
+A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.3.0`) followed by a sequence of zero or more root-level **Blocks**.
 - **Nesting Depth Definition:** Nesting depth equals the number of currently open `{ ... }` blocks:
-  - Depth `0` (document root): Only the mandatory initial version header (`tdf 0.2.0`), root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
+  - Depth `0` (document root): Only the mandatory initial version header (`tdf 0.3.0`), root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
   - Depth `1` (inside a `task` or `label` block body): Block directives and nested sub-block headers (`subtasks`, `condition`) are permitted.
   - Depth `2` (inside a `subtasks` or `condition` sub-block body): Only sub-block directives (`step`, `day`, `time`, `location`) are permitted; no further nested blocks are allowed (`MAX_NESTING_DEPTH = 2`).
-- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.2.0` at nesting depth `0` before any root block (preceded only by optional blank lines and `#` comments). A file with no statements (empty or containing only whitespace and `#` comments) or whose first statement is not `tdf <version>` MUST be rejected with `MissingVersionHeader`. A file containing `tdf 0.2.0` and zero root blocks is a valid empty TDF document.
-- **Root-Level Directive Prohibition:** Aside from the initial `tdf 0.2.0` version header, any directive appearing at nesting depth `0` (outside of a `{ ... }` block), including a duplicate `tdf` directive later in the file, MUST be rejected as a syntax error (`UnexpectedRootDirective`).
+- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.3.0` (or legacy `tdf 0.2.0`) at nesting depth `0` before any root block (preceded only by optional blank lines and `#` comments). A file with no statements (empty or containing only whitespace and `#` comments) or whose first statement is not `tdf <version>` MUST be rejected with `MissingVersionHeader`. A file containing `tdf 0.3.0` and zero root blocks is a valid empty TDF document.
+- **Root-Level Directive Prohibition:** Aside from the initial `tdf` version header, any directive appearing at nesting depth `0` (outside of a `{ ... }` block), including a duplicate `tdf` directive later in the file, MUST be rejected as a syntax error (`UnexpectedRootDirective`).
 
 ### 3.2 Blocks
 A **Block** groups related directives and optional nested sub-blocks under a named context.
@@ -140,10 +141,10 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 <identifier> <argument> [<argument> ...]
 ```
 
-- **Scope:** Except for the mandatory initial `tdf 0.2.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
+- **Scope:** Except for the mandatory initial `tdf 0.3.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
 - **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line inside a block without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
 - **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a block directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
-- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `note`, `color`, `labels`, `blocked`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
+- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
 
 ### 3.4 Formal Grammar (EBNF)
 
@@ -207,16 +208,16 @@ At nesting depth `0`, every TDF document MUST start with the `tdf` version heade
 Every `.tdf` document MUST begin with a single-line `tdf` version header at nesting depth `0` before any root block:
 
 ```text
-tdf 0.2.0
+tdf 0.3.0
 ```
 
-- **First Statement Requirement:** `tdf 0.2.0` MUST be the first statement of every `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at nesting depth `0`.
-- **Version Argument:** Takes a single bare-word `<version>` argument formatted as `<MAJOR>.<MINOR>.<PATCH>` and equal to `0.2.0`.
+- **First Statement Requirement:** `tdf 0.3.0` (or legacy `tdf 0.2.0` on input) MUST be the first statement of every `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at nesting depth `0`.
+- **Version Argument:** Takes a single bare-word `<version>` argument formatted as `<MAJOR>.<MINOR>.<PATCH>` and equal to `0.3.0` (or `0.2.0` for legacy input migration).
 - **Validation Rules:**
   - If the file contains no statements or its first statement is not `tdf <version>`, the parser MUST fail with `MissingVersionHeader`.
-  - If `<version>` is not `0.2.0`, is quoted, or is followed by extra arguments on the header line, the parser MUST fail with `UnsupportedVersion`.
+  - If `<version>` is not `0.3.0` (or legacy `0.2.0`), is quoted, or is followed by extra arguments on the header line, the parser MUST fail with `UnsupportedVersion`.
   - If a duplicate `tdf` directive appears anywhere later in the file at nesting depth `0`, the parser MUST fail with `UnexpectedRootDirective`.
-- **Serializer Output:** A conforming TDF serializer MUST always emit `tdf 0.2.0` as the first statement of every output document (including an empty board with zero `label` and `task` blocks).
+- **Serializer Output:** A conforming TDF serializer MUST always emit `tdf 0.3.0` as the first statement of every output document (including an empty board with zero `label` and `task` blocks).
 
 ### 4.1 The `task` Block (Tasks)
 
@@ -241,13 +242,14 @@ task <id> [priority] {
 | Directive | Required | Multiplicity | Format / Arguments | Semantics When Present / Omitted |
 | :--- | :--- | :--- | :--- | :--- |
 | `name` | Yes | `1` | `"<text>"` | Human-readable title of the task (`1..MAX_TEXT_LENGTH` characters). Required in every `task` block. |
-| `created` | Yes | `1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Creation timestamp of the task in local time. Required in every `task` block. |
-| `queued` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local timestamp governing ascending FIFO ordering in the active cycle. **When omitted** (and `finished` is omitted), the task is classified as `Someday` and excluded from the active cycle. |
-| `finished` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local completion timestamp. **When present**, the task is classified as `Completed` and subject to garbage collection once older than $30$ days in local time. **When omitted**, the task is open. |
+| `created` | Yes | `1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Creation timestamp of the task in UTC. Required in every `task` block. |
+| `queued` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC timestamp governing ascending FIFO ordering in the active cycle. **When omitted** (and `finished` is omitted), the task is classified as `Someday` and excluded from the active cycle. |
+| `finished` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC completion timestamp. **When present**, the task is classified as `Completed` and subject to garbage collection once older than $30$ days in UTC. **When omitted**, the task is open. |
+| `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC per-entity modification timestamp used for entity-level synchronization (Section 6.7). **When omitted**, effective modification time falls back to $\max(\text{created}, \text{queued}, \text{finished})$ in UTC. |
 | `note` | No | `0..1` | `"<text>"` | Optional extended description or note (`1..MAX_NOTE_LENGTH` characters). **When omitted**, the task has no extended note. |
 | `labels` | No | `0..1` | `<id1> [<id2> ...]` | One or more space-separated `label` `<id>`s assigned to the task. Every referenced `<id>` MUST match a declared `label` block in the document (`UnknownLabelReference`). **When present**, associates the task with the referenced labels for context filtering and group-level condition inheritance. **When omitted**, the task has no label assignment. |
 | `blocked` | No | `0..1` | `<task_id1> [<task_id2> ...]` | One or more space-separated `<id>`s of prerequisite tasks. **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive (non-existent, pruned, or already completed task IDs do not block the task). Dependency references MUST NOT form a direct or indirect cycle (`CircularDependency`). **When omitted**, no task-dependency block applies. |
-| `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local deferral / snooze timestamp. **When present**, while the timestamp lies strictly in the future relative to the local evaluation timestamp (`suspended > now`), the task is classified immediately as `Blocked` (`Tier 4`) and evaluation of all other conditions (`blocked` prerequisites and `condition` rules) is disabled. **When omitted** (or `<= now`), no time-deferral block applies. |
+| `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local wall-clock deferral / snooze timestamp. **When present**, while the timestamp lies strictly in the future relative to the local wall-clock evaluation timestamp (`suspended > localNow`), the task is classified immediately as `Blocked` (`Tier 4`) and evaluation of all other conditions (`blocked` prerequisites and `condition` rules) is disabled. **When omitted** (or `<= localNow`), no time-deferral block applies. |
 | `condition` | No | `0..N` | `<type> <args...>`, `<type> any`, `any`, or `{ ... }` | Task-level activation condition(s) (`day`, `time`, `location`, group resets `day any`, `time any`, `location any`, or global reset `condition any`) written either as an inline directive or a `condition { ... }` sub-block (see Section 4.3). **When present**, `condition any` disables all inherited `label` conditions, whereas a group-specific rule (`day`, `time`, or `location`) or group reset (`<type> any`) overrides only that specific rule group from assigned labels while preserving all other inherited label condition groups and keeping the task's `labels` assignment intact. |
 
 #### 4.1.3 Sub-Block `subtasks` (Checklists)
@@ -261,7 +263,7 @@ subtasks [auto-finish] {
 ```
 
 - `auto-finish` (**Optional Header Flag**):
-  - **When present:** As soon as all contained `step` directives have the value `true`, the enclosing `task` automatically transitions to completed (`finished` is set to the current timestamp).
+  - **When present:** As soon as all contained `step` directives have the value `true`, the enclosing `task` automatically transitions to completed (`finished` is set to the current UTC timestamp).
   - **When omitted:** Completing all `step` directives does not automatically set `finished` on the enclosing `task`.
   - Any unknown or extra header argument on `subtasks` MUST be rejected with `InvalidBlockHeader`.
 - `step <bool> "<text>"` (**Repeatable Directive**): Defines a single checklist step where `false` indicates open and `true` indicates completed (`"<text>"` up to `MAX_TEXT_LENGTH` characters). The top-to-bottom declaration order of `step` directives is preserved. A `subtasks` block MUST contain at least one `step` directive (`MissingRequiredDirective`).
@@ -272,9 +274,10 @@ Defines a named label (work context and reusable condition profile) at the root 
 
 ```text
 label <id> {
-    name  "<display_name>"
-    color "<hex_color_code>"
-    note  "<optional_description>"
+    name     "<display_name>"
+    color    "<hex_color_code>"
+    note     "<optional_description>"
+    modified <YYYY-MM-DD> [<HH:MM[:SS]>]
 
     condition {
         day      <d1> [<d2> ...]
@@ -289,6 +292,7 @@ label <id> {
 | `name` | Yes | `1` | `"<text>"` | Human-readable display name of the label (`1..MAX_TEXT_LENGTH` characters, e.g., `"Home & Garden"`). |
 | `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the label. |
 | `note` | No | `0..1` | `"<text>"` | Optional description of the label (`1..MAX_NOTE_LENGTH` characters). |
+| `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Optional UTC per-entity modification timestamp used for entity-level synchronization (Section 6.7). **When omitted**, effective modification time falls back to `2026-11-01 08:00:00` UTC. |
 | `condition` | No | `0..N` | `<type> <args...>` or `{ ... }` | Optional activation conditions (`day`, `time`, `location`) inherited by rule group for tasks carrying this label unless overridden for that group or cleared globally via `condition any` on the task (see Section 4.3). |
 
 ### 4.3 Activation Conditions (`condition`)
@@ -385,7 +389,7 @@ To minimize computational cost, each effective condition context $C$ is evaluate
 
 ## 5. Dynamic Computation of the 6 Tiers (Evaluation Pipeline)
 
-When evaluating a `.tdf` document against a local reference timestamp (`now`), optional device GPS coordinates, and an optional active `label` context filter, the six tiers are derived deterministically in a single $O(N)$ pipeline across all `task` blocks. All timestamp comparisons (`created`, `queued`, `finished`, `suspended`), weekday/time condition checks, and 30-day completed task retention pruning are evaluated in local time relative to `now`:
+When evaluating a `.tdf` document against a UTC reference timestamp (`now`) and effective local wall-clock timestamp (`localNow`), optional device GPS coordinates, and an optional active `label` context filter, the six tiers are derived deterministically in a single $O(N)$ pipeline across all `task` blocks. Point-in-time ordering (`created`, `queued`, `finished`, `modified`) and 30-day completed task retention pruning are evaluated in **UTC** relative to `now`, whereas recurring calendar/wall-clock rules (`condition day`, `condition time`, and `suspended`) are evaluated against the effective **local wall-clock time** (`localNow`):
 
 ### 5.1 Pre-Filtering — Active `label` Context Filter
 - **When an active `label` context filter is selected:** Only tasks whose `labels` directive contains the active `label` `<id>` enter the tier classification steps (Sections 5.2 through 5.5). All 6 tiers (`Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, `Planned`) are scoped to that label context.
@@ -393,26 +397,26 @@ When evaluating a `.tdf` document against a local reference timestamp (`now`), o
 
 ### 5.2 Tier 6 — `Completed`
 - **Selection Rule:** All retained tasks (after Section 5.1 `labels` pre-filtering when an active `label` filter is selected) that possess a `finished` directive.
-- **No Blocking or Condition Evaluation:** Aside from Section 5.1 `labels` membership filtering, activation conditions (`condition` rules on the task or on its assigned `labels`), prerequisite dependencies (`blocked`), and deferral timestamps (`suspended`) are NOT evaluated for completed tasks. Any retained task matching the active `label` filter that possesses a `finished` directive is classified unconditionally into `Completed` (`Tier 6`) even when its `condition`, `blocked`, or `suspended` rules are unmet at `now`.
-- **Garbage Collection (30-Day Retention Pruning):** Tasks whose `finished` timestamp lies strictly more than $30$ days in the past in local time relative to the evaluation timestamp (`now`) are removed when persisting the document.
+- **No Blocking or Condition Evaluation:** Aside from Section 5.1 `labels` membership filtering, activation conditions (`condition` rules on the task or on its assigned `labels`), prerequisite dependencies (`blocked`), and deferral timestamps (`suspended`) are NOT evaluated for completed tasks. Any retained task matching the active `label` filter that possesses a `finished` directive is classified unconditionally into `Completed` (`Tier 6`) even when its `condition`, `blocked`, or `suspended` rules are unmet at `localNow`.
+- **Garbage Collection (30-Day Retention Pruning in UTC):** Tasks whose `finished` UTC timestamp lies strictly more than $30$ days in the past in UTC relative to the UTC evaluation timestamp (`now`) are removed when persisting the document.
 
 ### 5.3 Tier 5 — `Someday`
-- **Selection Rule:** All retained open tasks (`finished` is absent) that do NOT possess a `queued` directive and do NOT have an active future `suspended` timestamp (`suspended > now`).
+- **Selection Rule:** All retained open tasks (`finished` is absent) that do NOT possess a `queued` directive and do NOT have an active future `suspended` timestamp (`suspended > localNow`).
 - **Behavior:** These tasks form the unscheduled backlog and do not participate in the active pull cycle.
 
 ### 5.4 Tier 4 — `Blocked`
-- **Selection Rule:** All retained open tasks (`finished` is absent) that either have an active future `suspended` timestamp (`suspended > now`) or are scheduled (`queued` is present) and satisfy at least one of the following blocking conditions at the local evaluation timestamp (`now`), evaluated in this exact short-circuit order:
-  1. **Future Deferral (`suspended` — Short-Circuit):** The task's `suspended` timestamp lies strictly in the future in local time (`suspended > now`). While `suspended > now`, evaluation of all other conditions (`blocked` prerequisites and `condition` rules on the task or its assigned `labels`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`).
+- **Selection Rule:** All retained open tasks (`finished` is absent) that either have an active future `suspended` timestamp (`suspended > localNow`) or are scheduled (`queued` is present) and satisfy at least one of the following blocking conditions at the local wall-clock evaluation timestamp (`localNow`), evaluated in this exact short-circuit order:
+  1. **Future Deferral (`suspended` — Short-Circuit):** The task's `suspended` timestamp lies strictly in the future relative to the local wall-clock time (`suspended > localNow`). While `suspended > localNow`, evaluation of all other conditions (`blocked` prerequisites and `condition` rules on the task or its assigned `labels`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`).
   2. **Unfinished Prerequisite (`blocked`):** At least one task ID referenced in the task's `blocked` directive exists anywhere in the document (regardless of the active `label` filter) and does not have a `finished` directive.
-  3. **Unmet Condition (`condition` — `day` -> `time` -> `location` Short-Circuit):** Each candidate condition context (determined per Section 4.3.3: the task's own context if unlabeled, the active `label`'s effective context when filtered, or each assigned `label`'s independent effective context with `OR` across labels in global view) is evaluated by group in the order `day`, `time`, `location` (Section 4.3.4). If no candidate context has all three of its effective groups satisfied, the task is classified as `Blocked`.
+  3. **Unmet Condition (`condition` — `day` -> `time` -> `location` Short-Circuit):** Each candidate condition context (determined per Section 4.3.3: the task's own context if unlabeled, the active `label`'s effective context when filtered, or each assigned `label`'s independent effective context with `OR` across labels in global view) is evaluated against `localNow` by group in the order `day`, `time`, `location` (Section 4.3.4). If no candidate context has all three of its effective groups satisfied, the task is classified as `Blocked`.
 - **Auto-Pull Cascade Behavior:** Any task derived as `Blocked` is skipped during the auto-pull cascade into `Focus` (limit `3`) and `Ready` (limit `5`), allowing the next unblocked task in queue order to advance automatically.
 
 ### 5.5 Active Pull Cycle (`Focus`, `Ready`, `Planned`)
 All remaining retained scheduled, unblocked, open tasks (`queued` is present, `finished` is absent, and none of the Section 5.4 blocking criteria apply) enter the active cycle pipeline:
 
 1. **Step 1 — Deterministic Sorting:**
-   - **Primary Group (`priority` Flag Present):** Tasks carrying the `priority` header flag are placed ahead of regular tasks and sorted among themselves in ascending chronological order by their local `queued` timestamp (`<YYYY-MM-DD> [<HH:MM[:SS]>]`, with omitted time defaulting to `00:00:00` and omitted seconds defaulting to `00`).
-   - **Secondary Group (`priority` Flag Omitted — Regular FIFO):** Regular tasks follow in ascending chronological order by their local `queued` timestamp (oldest timestamp first = FIFO).
+   - **Primary Group (`priority` Flag Present):** Tasks carrying the `priority` header flag are placed ahead of regular tasks and sorted among themselves in ascending chronological order by their UTC `queued` timestamp (`<YYYY-MM-DD> [<HH:MM[:SS]>]`, with omitted time defaulting to `00:00:00` and omitted seconds defaulting to `00`).
+   - **Secondary Group (`priority` Flag Omitted — Regular FIFO):** Regular tasks follow in ascending chronological order by their UTC `queued` timestamp (oldest timestamp first = FIFO).
    - **Tie-Breaking:** Tasks with identical `priority` status and identical `queued` timestamps preserve their relative document declaration order. Because `<timestamp>` supports optional seconds precision (`:SS`), rapid mutations and step-down downgrades (Section 6.3) sort deterministically by `queued` without reordering blocks in the file.
 2. **Step 2 — Slot Slicing:**
    - **Tier 1 — `Focus` (Positions $1$ to $3$):** The first up to `3` tasks of the sorted list (indices `0..2`).
@@ -421,41 +425,54 @@ All remaining retained scheduled, unblocked, open tasks (`queued` is present, `f
 
 ## 6. State Transitions & Document Mutations
 
-State transitions mutate the task directives (`queued`, `finished`) and header flags (`priority`) in the `.tdf` document rather than moving task blocks between static tier sections. Tier membership is always derived deterministically from the resulting task attributes via Section 5:
+State transitions mutate the task directives (`queued`, `finished`, `modified`) and header flags (`priority`) in the `.tdf` document rather than moving task blocks between static tier sections. Tier membership is always derived deterministically from the resulting task attributes via Section 5:
 
 ### 6.1 Creating a New Task
-- **For `Planned` (Default):** Sets both `created` and `queued` to the current local timestamp (`now`). If `Focus` or `Ready` has open capacity ($< 3$ or $< 5$ tasks) and all effective conditions are satisfied, the slicing pipeline (Section 5.5) places the task into the corresponding higher tier automatically.
-- **For `Someday`:** Sets `created` to the current local timestamp (`now`) and omits `queued`.
-- **With `priority` Flag (For `Focus`):** Sets `created` and `queued` to `now` and adds the `priority` flag to the `task` block header so that the task sorts ahead of regular tasks in the active pull cycle (Section 5.5).
+- **For `Planned` (Default):** Sets `created`, `queued`, and `modified` to the current UTC timestamp (`now`). If `Focus` or `Ready` has open capacity ($< 3$ or $< 5$ tasks) and all effective conditions are satisfied, the slicing pipeline (Section 5.5) places the task into the corresponding higher tier automatically.
+- **For `Someday`:** Sets `created` and `modified` to the current UTC timestamp (`now`) and omits `queued`.
+- **With `priority` Flag (For `Focus`):** Sets `created`, `queued`, and `modified` to `now` in UTC and adds the `priority` flag to the `task` block header so that the task sorts ahead of regular tasks in the active pull cycle (Section 5.5).
 
 ### 6.2 Scheduling a Task from `Someday`
-- Adds the `queued` directive set to the current local timestamp (`now`).
+- Adds the `queued` directive set to the current UTC timestamp (`now`) and advances `modified`.
 
 ### 6.3 Downgrading an Active Task (`Focus`, `Ready`, and `Planned`)
 - **Allowed Source Tiers (`Focus`, `Ready`, and `Planned` Only):** Only tasks currently derived in `Focus` (`Tier 1`), `Ready` (`Tier 2`), or `Planned` (`Tier 3`) can be downgraded. Tasks in `Blocked` (`Tier 4`), `Someday` (`Tier 5`), or `Completed` (`Tier 6`) CANNOT be downgraded (attempting to downgrade a task outside `Focus`, `Ready`, and `Planned` is a no-op).
 - **Downgrade from `Focus` to `Ready`:**
-  - **Fewer than `8` active tasks (`< 8`):** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`).
+  - **Fewer than `8` active tasks (`< 8`):** Removes the `priority` header flag if present, sets `queued` to the current UTC timestamp (`now`), and advances `modified`.
   - **At least `8` active tasks (`>= 8`):** To place the downgraded task deterministically at active slot `8` (index `7`, the last slot of `Ready`) without reordering blocks in the file:
     1. **Priority Alignment with Slot `8`:** Removes the `priority` header flag if the task currently at active slot `8` is a regular task, or retains `priority` if the task at active slot `8` carries `priority` (ensuring the downgraded task is compared within the same sorting group as slot `8`).
-    2. **Timestamp Offset (`+00:00:01`):** Sets the downgraded task's `queued` timestamp to `1` second (`+00:00:01`, using `<HH:MM:SS>` precision) after the `queued` timestamp of the task currently at active slot `8`.
-    3. **Collision Shift in `Planned` (Slot `9` Onward):** If the task at active slot `9` (the first task in `Planned`) belongs to the same `priority` group and has a `queued` timestamp less than or equal to the downgraded task's new `queued` timestamp (`slot_9.queued <= new_queued`), shifts `slot_9` (and any subsequent colliding tasks in `Planned` within the same group) forward so each has a `queued` timestamp at least `1` second (`+00:00:01`) after its predecessor, guaranteeing `slot_8.queued < new_queued < slot_9.queued`.
-- **Downgrade from `Ready` to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`) so the task moves to the end of the regular FIFO queue (if fewer than `8` other active tasks exist, the Section 5.5 slicing pipeline places the task into the highest open slot in `Focus` or `Ready`).
-- **Downgrade from `Planned` to `Someday`:** Removes the `priority` header flag if present and omits the `queued` directive so the task leaves the active pull cycle and is classified as `Someday` (`Tier 5`).
+    2. **Timestamp Offset (`+00:00:01`):** Sets the downgraded task's `queued` timestamp to `1` second (`+00:00:01`, using `<HH:MM:SS>` precision) after the `queued` timestamp of the task currently at active slot `8`, and advances `modified`.
+    3. **Collision Shift in `Planned` (Slot `9` Onward):** If the task at active slot `9` (the first task in `Planned`) belongs to the same `priority` group and has a `queued` timestamp less than or equal to the downgraded task's new `queued` timestamp (`slot_9.queued <= new_queued`), shifts `slot_9` (and any subsequent colliding tasks in `Planned` within the same group) forward so each has a `queued` timestamp at least `1` second (`+00:00:01`) after its predecessor (advancing `modified` on each shifted task), guaranteeing `slot_8.queued < new_queued < slot_9.queued`.
+- **Downgrade from `Ready` to `Planned`:** Removes the `priority` header flag if present, sets `queued` to the current UTC timestamp (`now`), and advances `modified` so the task moves to the end of the regular FIFO queue (if fewer than `8` other active tasks exist, the Section 5.5 slicing pipeline places the task into the highest open slot in `Focus` or `Ready`).
+- **Downgrade from `Planned` to `Someday`:** Removes the `priority` header flag if present, omits the `queued` directive, and advances `modified` so the task leaves the active pull cycle and is classified as `Someday` (`Tier 5`).
 
 ### 6.4 Completing a Task (From Any Open Tier)
-- Any open task—regardless of whether it is currently derived in `Focus`, `Ready`, `Planned`, `Blocked`, or `Someday`—can be completed directly by adding the `finished` directive set to the current local timestamp (`now`) (or automatically when all `step` directives in a `subtasks auto-finish` sub-block become `true`).
+- Any open task—regardless of whether it is currently derived in `Focus`, `Ready`, `Planned`, `Blocked`, or `Someday`—can be completed directly by adding the `finished` directive set to the current UTC timestamp (`now`) and advancing `modified` (or automatically when all `step` directives in a `subtasks auto-finish` sub-block become `true`).
 - The completed task transitions into `Completed` (`Tier 6`), unblocking any dependent tasks whose `blocked` directive waited exclusively on this task. If the completed task occupied a slot in `Focus` or `Ready` (or if a newly unblocked task enters the active pull cycle), re-running the Section 5 pipeline automatically refills `Focus` (up to `3`) and `Ready` (up to `5`) in queue order.
 
 ### 6.5 Restoring a Task from `Completed`
-- Removes the `finished` directive and applies the chosen target state:
+- Removes the `finished` directive, advances `modified`, and applies the chosen target state:
   - **Restore to `Someday`:** Removes the `priority` header flag if present and omits `queued`.
-  - **Restore to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current local timestamp (`now`).
-  - **Restore to `Focus`:** Adds the `priority` header flag to the `task` block and sets `queued` to the current local timestamp (`now`).
+  - **Restore to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current UTC timestamp (`now`).
+  - **Restore to `Focus`:** Adds the `priority` header flag to the `task` block and sets `queued` to the current UTC timestamp (`now`).
 
 ### 6.6 Setting Task Deferral (`suspended`), Prerequisites (`blocked`), and Activation Conditions (`condition`)
-- **Setting `suspended`:** Sets the `suspended` directive on an open task to a future timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date) and ensures `queued` is set. While `suspended > now`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive and re-evaluates the task's remaining conditions.
-- **Setting `blocked`:** Sets or updates the space-separated prerequisite `<id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle).
-- **Setting `condition`:** Sets or updates task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or the global reset (`condition any`).
+- **Setting `suspended`:** Sets the `suspended` directive on an open task to a future local wall-clock timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date), ensures `queued` is set in UTC, and advances `modified`. While `suspended > localNow`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive and re-evaluates the task's remaining conditions.
+- **Setting `blocked`:** Sets or updates the space-separated prerequisite `<id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle) and advances `modified`.
+- **Setting `condition`:** Sets or updates task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or the global reset (`condition any`) and advances `modified`.
+
+### 6.7 Per-Entity Synchronization & Monotonic Modification Timestamps (`modified`)
+To support entity-level merging across in-memory state, local `.tdf` files, and WebDAV remote `.tdf` files without whole-file overwrites:
+1. **Effective Modification Timestamp (`effectiveModifiedAt`):**
+   - For a `task` block, `effectiveModifiedAt` equals `modified` if present, or $\max(\text{created}, \text{queued}, \text{finished})$ in UTC if `modified` is omitted.
+   - For a `label` block, `effectiveModifiedAt` equals `modified` if present, or `2026-11-01 08:00:00` UTC if `modified` is omitted.
+2. **Monotonic Hybrid Logical Clock (HLC) Advancement:**
+   - Whenever an existing `task` or `label` is mutated at UTC timestamp $\text{now}$ (truncated to second precision), its new `modified` timestamp is $\max(\text{now}, \text{prevModifiedAt} + 1\text{s})$.
+3. **Entity-Level Merge Rules:**
+   - **Last-Write-Wins (LWW) & External Edit Tie-Breaking:** For matching `<id>` entities, the entity with the strictly newer `effectiveModifiedAt` wins. If both sides have identical `effectiveModifiedAt` values but differing content, the incoming file (`secondary`) wins and its `modified` timestamp is advanced by $+1\text{s}$.
+   - **Offline Sequential Task ID Collisions & Dependency Rewriting:** If two tasks share the same `<id>` (e.g., `t006`) but have different `created` timestamps and distinct `name` values, both are preserved by assigning the next free sequential `tNNN` ID to the later-created task and rewriting any intra-board `blocked` references on that same incoming board for tasks created on or after the reassigned task.
+   - **Baseline-Aware External Task & Label Deletions:** If a task or label existed in the last-synced baseline, was unmodified on the primary side (`primary == baseline`), and is absent from the incoming secondary file, it is recognized as an intentional external deletion and omitted.
+   - **Handwritten Labels Without `modified`:** If an incoming file contains a `label` block without an explicit `modified` directive (`modified` omitted) that was not present in the last-synced baseline, it is treated as newly added/re-added in an external text editor and preserved (stamping `modified` to `now` UTC) even if an older label deletion timestamp exists.
 
 ## 7. Conformance & Resource Bounds
 
@@ -477,7 +494,7 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 A conforming TDF parser MUST report a structured error (including the 1-based line number) and MUST fail deterministically on any of the following inputs:
 
 - **Missing Version Header (`MissingVersionHeader`):** The file contains no statements (empty or only whitespace and `#` comments), or the first statement at nesting depth `0` is not `tdf <version>` (e.g., the file starts directly with `label home {` or `task t001 {`, or bare `tdf` without a version argument).
-- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies a `<version>` other than `0.2.0` (e.g., `tdf 0.1.0` or `tdf 1.0.0`), quotes the version token, or has extra arguments (e.g., `tdf 0.2.0 extra`).
+- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies a `<version>` other than `0.3.0` (or legacy `0.2.0`) (e.g., `tdf 0.1.0` or `tdf 1.0.0`), quotes the version token, or has extra arguments (e.g., `tdf 0.3.0 extra`).
 - **Root Directive (`UnexpectedRootDirective`):** Any root-level directive other than the initial `tdf` version header appears at nesting depth `0` outside of any `{ ... }` block (e.g., `name "Mow the lawn"` at root level, or a duplicate `tdf` directive later in the file).
 - **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (e.g., `queued` with no timestamp value).
 - **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" t001 {` or `"name" "Mow the lawn"`), a block/directive identifier starts with an invalid character (e.g., `123task {` or `-flag val`), or an `<id>` argument does not match `[a-zA-Z0-9_-]+`.
@@ -491,7 +508,7 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
   - `UnknownBlockType`: Root block is not `task` or `label`; nested block inside `task` is not `subtasks` or `condition`; nested block inside `label` is not `condition`; or a block appears inside `subtasks` or `condition`.
   - `UnknownDirective`: A directive name is not valid for its enclosing block (`task`, `label`, `subtasks`, or `condition`), or a `condition` rule type is not `day`, `time`, or `location`.
   - `MissingRequiredDirective`: A required directive (`name` or `created` in `task`; `name` in `label`) is missing, or a `subtasks` or `condition` sub-block contains zero directives.
-  - `DuplicateDirective`: A single-valued directive (`name`, `created`, `queued`, `finished`, `note`, `color`, `labels`, `blocked`, `suspended`) appears more than once in the same block, or more than one `subtasks` sub-block appears in a `task`.
+  - `DuplicateDirective`: A single-valued directive (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`) appears more than once in the same block, or more than one `subtasks` sub-block appears in a `task`.
   - `DuplicateIdentifier`: Two root blocks in the same namespace (`task` or `label`) share an identical `<id>`.
   - `UnknownLabelReference`: A `labels` directive in a `task` block references a label `<id>` that does not match any declared `label` block in the document (whereas `blocked` task `<id>`s referencing non-existent or pruned completed tasks remain valid and non-blocking).
   - `CircularDependency`: Task dependency references in `blocked` directives form a direct cycle (self-dependency) or an indirect cycle across two or more `task` blocks.
@@ -505,10 +522,11 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-tdf 0.2.0
+tdf 0.3.0
 
 label home {
-    name "Home & Garden"
+    name     "Home & Garden"
+    modified 2026-11-01 08:00
 
     condition {
         day      sat sun
@@ -518,8 +536,9 @@ label home {
 }
 
 label it {
-    name  "IT & Servers"
-    color "#2196F3"
+    name     "IT & Servers"
+    color    "#2196F3"
+    modified 2026-11-01 08:00
 
     condition {
         day  mon tue wed thu fri
@@ -535,6 +554,7 @@ task t001 priority {
     note      "Check fuel level before starting"
     created   2026-11-01 19:30
     queued    2026-11-01 19:30
+    modified  2026-11-01 19:30
     labels    home
     blocked   t002
     suspended 2026-11-05
@@ -552,6 +572,7 @@ task t002 {
     name      "Order replacement lawnmower blades online"
     created   2026-11-01 18:00
     queued    2026-11-01 18:00
+    modified  2026-11-01 18:00
     labels    home
     condition any
 }
@@ -561,17 +582,19 @@ task t002 {
 # of 'home' OR all condition groups of 'it' are satisfied; when filtered by 'home'
 # or 'it', evaluates only the selected label's conditions):
 task t003 {
-    name    "Clean dust filters on home NAS server"
-    created 2026-11-01 10:00
-    queued  2026-11-01 10:00
-    labels  home it
+    name     "Clean dust filters on home NAS server"
+    created  2026-11-01 10:00
+    queued   2026-11-01 10:00
+    modified 2026-11-01 10:00
+    labels   home it
 }
 
 # Task in "Someday" (no 'queued' directive present)
 task t004 {
-    name    "Design 3D-printed enclosure for backup NAS"
-    created 2026-11-01 12:00
-    labels  it
+    name     "Design 3D-printed enclosure for backup NAS"
+    created  2026-11-01 12:00
+    modified 2026-11-01 12:00
+    labels   it
 }
 
 # Completed task ('finished' is set -> deleted after 30 days)
@@ -580,6 +603,7 @@ task t005 {
     created  2026-10-20 14:00
     queued   2026-10-21 08:00
     finished 2026-10-29 16:45
+    modified 2026-10-29 16:45
     labels   home
 }
 ```
