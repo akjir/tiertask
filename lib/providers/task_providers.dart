@@ -28,18 +28,17 @@ import '../repositories/settings_repository.dart';
 import '../repositories/webdav_repository.dart';
 import '../services/tdf_service.dart';
 import '../ui/app_theme.dart';
+import 'workspace_providers.dart';
 
 /// Provides the effective [Locale] (`en` or `de`) based on [webDavConfigProvider] and OS locale.
 final appLocaleProvider = Provider<Locale>((ref) {
-  final configAsync = ref.watch(webDavConfigProvider);
-  final language = configAsync.asData?.value.language ?? AppLanguage.system;
+  final language = _resolveCurrentConfig(ref).language;
   return language.resolveLocale(PlatformDispatcher.instance.locale);
 });
 
 /// Provides the selected [AppThemeMode] (`system`, `light`, or `dark`) from [webDavConfigProvider].
 final appThemeModeProvider = Provider<AppThemeMode>((ref) {
-  final configAsync = ref.watch(webDavConfigProvider);
-  return configAsync.asData?.value.themeMode ?? AppThemeMode.system;
+  return _resolveCurrentConfig(ref).themeMode;
 });
 
 /// Provides the active [AppThemeSet] (`light` and `dark` [AppTheme] pair) replaceable at runtime.
@@ -54,8 +53,7 @@ final clockProvider = Provider<DateTime Function()>((ref) {
 
 /// Provides a [LocalFileRepository] configured with the current [WebDavConfig].
 final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
-  final configAsync = ref.watch(webDavConfigProvider);
-  final config = configAsync.asData?.value ?? const WebDavConfig();
+  final config = _resolveCurrentConfig(ref);
   final baseDirectoryPath = ref.watch(localStorageDirectoryPathProvider);
   final inMemoryStore = ref.watch(_inMemoryLocalStoreProvider);
   return LocalFileRepository(
@@ -98,8 +96,7 @@ final webDavConfigProvider =
 
 /// Provides a [WebDavRepository] configured with the current [WebDavConfig].
 final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
-  final configAsync = ref.watch(webDavConfigProvider);
-  final config = configAsync.asData?.value ?? const WebDavConfig();
+  final config = _resolveCurrentConfig(ref);
   return WebDavRepository(config: config);
 });
 
@@ -160,7 +157,12 @@ class SyncState {
 /// Manages [SyncState] updates during local and WebDAV load and save operations.
 class SyncStateNotifier extends Notifier<SyncState> {
   @override
-  SyncState build() => const SyncState();
+  SyncState build() {
+    ref.watch(
+      activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
+    );
+    return const SyncState();
+  }
 
   /// Clears any active synchronization error banner.
   void clearError() {
@@ -193,6 +195,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   @override
   Future<TaskBoard> build() async {
+    state = const AsyncLoading();
     final config = await ref.watch(webDavConfigProvider.future);
     if (!config.hasActiveStorage) {
       return TaskBoard.empty();
@@ -348,7 +351,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
       final rawTdf = await _loadRawTdfForSync(config);
-      final board = _resolveBoardFromTdf(rawTdf, now);
+      final board = _resolveBoardFromTdf(
+        rawTdf,
+        now,
+        fallbackBoard: state.asData?.value ?? TaskBoard.empty(),
+      );
       final serialized = _serializeTdf(board);
       await _writeBoardToRequiredTargets(config, serialized);
       state = AsyncData(board);
@@ -422,7 +429,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
       final rawTdf = await _loadRawTdfForSync(config);
-      final normalizedBoard = _resolveBoardFromTdf(rawTdf, now);
+      final normalizedBoard = _resolveBoardFromTdf(
+        rawTdf,
+        now,
+        fallbackBoard: TaskBoard.empty(),
+      );
       final normalizedTdf = _serializeTdf(normalizedBoard);
 
       await _persistNormalizedTdf(config, rawTdf, normalizedTdf);
@@ -473,11 +484,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Parses [rawTdf] or normalizes the existing board when [rawTdf] is empty.
-  TaskBoard _resolveBoardFromTdf(String rawTdf, DateTime now) {
+  /// Parses [rawTdf] or normalizes [fallbackBoard] when [rawTdf] is empty.
+  TaskBoard _resolveBoardFromTdf(
+    String rawTdf,
+    DateTime now, {
+    required TaskBoard fallbackBoard,
+  }) {
     if (rawTdf.trim().isEmpty) {
-      final currentBoard = state.asData?.value ?? TaskBoard.empty();
-      return currentBoard
+      return fallbackBoard
           .pruneCompletedTasks(currentDate: now)
           .applyAutoPull(currentDate: now);
     }
@@ -521,18 +535,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 }
 
-/// Manages the persisted [WebDavConfig] state, including language, theme, and storage mode selection.
+/// Manages the persisted [WebDavConfig] state for the currently active workspace.
 class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   @override
   Future<WebDavConfig> build() async {
-    final repository = ref.watch(settingsRepositoryProvider);
-    return repository.loadConfig();
+    final activeWorkspace = await ref.watch(activeWorkspaceProvider.future);
+    return activeWorkspace.config;
   }
 
-  /// Persists [newConfig] and updates provider state.
+  /// Persists [newConfig] to the active workspace and updates provider state.
   Future<void> updateConfig(WebDavConfig newConfig) async {
-    final repository = ref.read(settingsRepositoryProvider);
-    await repository.saveConfig(newConfig);
+    await ref
+        .read(activeWorkspaceProvider.notifier)
+        .updateActiveConfig(newConfig);
     state = AsyncData(newConfig);
   }
 
@@ -563,4 +578,14 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     final updated = current.copyWith(themeMode: themeMode);
     await updateConfig(updated);
   }
+}
+
+/// Resolves the active [WebDavConfig] synchronously from [webDavConfigProvider] or [activeWorkspaceProvider].
+WebDavConfig _resolveCurrentConfig(Ref ref) {
+  final configAsync = ref.watch(webDavConfigProvider);
+  if (configAsync.asData?.value case final config?) {
+    return config;
+  }
+  final workspaceAsync = ref.watch(activeWorkspaceProvider);
+  return workspaceAsync.asData?.value.config ?? const WebDavConfig();
 }

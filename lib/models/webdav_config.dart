@@ -127,8 +127,8 @@ class WebDavConfig {
     this.serverUrl = '',
     this.username = '',
     this.password = '',
-    this.filePath = 'tiertask.tdf',
-    this.localFilePath = 'tiertask.tdf',
+    this.filePath = defaultFileName,
+    this.localFilePath = defaultFileName,
     StorageMode? storageMode,
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
@@ -138,6 +138,9 @@ class WebDavConfig {
            (serverUrl != '' && username != '' && password != ''
                ? StorageMode.webdav
                : StorageMode.local);
+
+  /// Default `.tdf` file name used by the default `Tasks` workspace.
+  static const String defaultFileName = 'tasks.tdf';
 
   static final RegExp _leadingSlashesPattern = RegExp(r'^/+');
 
@@ -242,7 +245,7 @@ class WebDavConfig {
     }
 
     final cleanFile = filePath.trim().isEmpty
-        ? 'tiertask.tdf'
+        ? defaultFileName
         : filePath.trim().replaceFirst(_leadingSlashesPattern, '');
 
     final encodedFileSegments = cleanFile

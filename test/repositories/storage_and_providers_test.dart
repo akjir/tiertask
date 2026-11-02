@@ -265,13 +265,13 @@ task b1 {
       expect(defaultConfig.storageMode, equals(StorageMode.local));
       expect(
         defaultConfig.localFilePath,
-        equals('tiertask.tdf'),
-        reason: 'Default localFilePath must be tiertask.tdf',
+        equals('tasks.tdf'),
+        reason: 'Default localFilePath must be tasks.tdf',
       );
       expect(
         defaultConfig.filePath,
-        equals('tiertask.tdf'),
-        reason: 'Default remote filePath must be tiertask.tdf',
+        equals('tasks.tdf'),
+        reason: 'Default remote filePath must be tasks.tdf',
       );
       expect(defaultConfig.showOpenTaskCount, isFalse);
       expect(defaultConfig.isConfigured, isTrue);

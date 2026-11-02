@@ -8,10 +8,10 @@
 | Layer | Path | Responsibility |
 | :--- | :--- | :--- |
 | Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, and `TaskTier` localization mappings. |
-| Models | `lib/models/` | Immutable domain data structures (`TaskTier`, `TaskItem`, `SubtaskItem`, `ConditionGroup`, `TaskCondition`, `TdfLabel`, `TdfColor`, `TaskBoard`, `AppLanguage`, `AppThemeMode`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation and mutation pipeline. |
+| Models | `lib/models/` | Immutable domain data structures (`AppWorkspace`, `WorkspaceSummary`, `WorkspaceException`, `WorkspaceErrorKind`, `TaskTier`, `TaskItem`, `SubtaskItem`, `ConditionGroup`, `TaskCondition`, `TdfLabel`, `TdfColor`, `TaskBoard`, `AppLanguage`, `AppThemeMode`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation and mutation pipeline. |
 | Services | `lib/services/` | Stateless single-pass $O(N)$ TDF lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`, `TdfException`, `TdfErrorKind`). |
-| Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local `.tdf` file reads/writes (`dart:io` `File`), and encrypted settings persistence (`flutter_secure_storage`). |
-| Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating locale and theme resolution, domain mutations, and repository synchronization. |
+| Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local `.tdf` file reads/writes (`dart:io` `File`), and encrypted workspace and settings persistence (`flutter_secure_storage`). |
+| Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating single-active-workspace unload/load transitions, locale and theme resolution, domain mutations, and repository synchronization. |
 | UI | `lib/ui/` | Localized Material 3 screens and modular leaf widgets for Linux, Android, and Windows. |
 
 > [!NOTE]
@@ -47,13 +47,15 @@ tiertask/
 │   │   ├── app_localizations_en.dart
 │   │   └── tier_localization_extension.dart
 │   ├── models/
+│   │   ├── app_workspace.dart
 │   │   ├── task_board.dart
 │   │   ├── task_item.dart
 │   │   ├── task_tier.dart
 │   │   ├── tdf_metadata.dart
 │   │   └── webdav_config.dart
 │   ├── providers/
-│   │   └── task_providers.dart
+│   │   ├── task_providers.dart
+│   │   └── workspace_providers.dart
 │   ├── repositories/
 │   │   ├── local_file_repository.dart
 │   │   ├── settings_repository.dart
@@ -74,6 +76,7 @@ tiertask/
 │           └── tier_page_indicator.dart
 └── test/
     ├── models/
+    │   ├── app_workspace_test.dart
     │   ├── task_board_downgrade_test.dart
     │   ├── task_board_evaluation_test.dart
     │   ├── task_board_lifecycle_test.dart
@@ -122,11 +125,12 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
+| `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations and `.tdf` files, defaulting to `Tasks` (`tasks.tdf`), deriving suggested lowercase `.tdf` filenames (`AppWorkspace.suggestFileName`), and enforcing unique workspace names and `.tdf` file paths. |
 | `lib/models/task_tier.dart` | Defines the `TaskTier` enum for the 6 derived tiers (`1` `focus`, `2` `ready`, `3` `planned`, `4` `blocked`, `5` `someday`, `6` `completed`) and WIP soft limits. |
 | `lib/models/tdf_metadata.dart` | Immutable `ConditionGroup` (`day`, `time`, `location`), `TaskCondition` (`DayTaskCondition`, `GlobalResetTaskCondition`, `GroupResetTaskCondition`, `LocationTaskCondition`, `TimeWindowTaskCondition`), `TdfLabel`, and `TdfColor` hex color utilities from `TDF_SPEC.md` Section 4. |
 | `lib/models/task_item.dart` | Immutable `TaskItem` and `SubtaskItem` value classes with TDF `<id>`, `priority` flag, `created` / `queued` / `finished` / `suspended` timestamps (with optional `:SS` precision), `labels`, `blocked` dependencies, `conditions`, `subtasks auto-finish`, and strict ISO-8601 date/time helpers. |
 | `lib/models/task_board.dart` | Immutable `TaskBoard` aggregate implementing the $O(N)$ dynamic 6-tier derivation pipeline (`TaskBoard.evaluate`), context-filtered evaluation (`TaskBoard.evaluateForContext`), group-level condition inheritance and overrides, auto-pull cascade, 30-day completed task pruning, `subtasks auto-finish` completion, label creation/renaming/deletion and open task counting (`openTaskCountForLabel`), and Section 6 mutations. |
-| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model defaulting to `tiertask.tdf`. |
+| `lib/models/webdav_config.dart` | Defines `AppLanguage` (`system`, `english`, `german`), `AppThemeMode` (`system`, `light`, `dark`), `StorageMode` (`local`, `webdav`, `both`), and the immutable `WebDavConfig` model defaulting to `tasks.tdf`. |
 
 ## Services
 
@@ -139,14 +143,15 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/repositories/local_file_repository.dart` | Native `dart:io` `File` repository reading (`loadTdf`) and writing (`saveTdf`) the local `.tdf` file (`localFilePath`) with path traversal validation and `maxFileBytes` bounds checking. |
-| `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting `StorageMode`, local and remote `.tdf` file paths, WebDAV credentials, `AppLanguage`, and `AppThemeMode`. |
+| `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting workspaces (`Tasks` default and custom workspaces with unique names and `.tdf` file paths) and loading only the single active `AppWorkspace` and its `WebDavConfig` into memory. |
 | `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository executing authenticated HTTP `GET` (`fetchTdf`) and `PUT` (`saveTdf`) operations with localized `WebDavException` error mapping. |
 
 ## State Providers
 
 | File | Function |
 | :--- | :--- |
-| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemeProvider`, `localFileRepositoryProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme resolution, runtime theme replacement, board loading, mutations, and local/WebDAV `.tdf` persistence. |
+| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemeProvider`, `localFileRepositoryProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme resolution, runtime theme replacement, board loading/unloading, mutations, and local/WebDAV `.tdf` persistence for the active workspace. |
+| `lib/providers/workspace_providers.dart` | Defines `activeWorkspaceProvider` and `ActiveWorkspaceNotifier`, holding only the single active `AppWorkspace` in memory and orchestrating runtime workspace unload/load switching (`switchWorkspace`), creation (`createWorkspace`), renaming (`renameWorkspace`), deletion (`deleteWorkspace`), and active configuration updates (`updateActiveConfig`). |
 
 ## User Interface
 
@@ -166,7 +171,7 @@ tiertask/
 
 ## Execution & Synchronization Flow
 
-1. **Startup, Configuration & Locale Resolution:** `main.dart` initializes `ProviderScope`. `WebDavConfigNotifier` loads persisted `StorageMode`, `.tdf` paths, WebDAV credentials, and `AppLanguage` settings via `SettingsRepository`. `appLocaleProvider` resolves the active `Locale`.
+1. **Startup, Workspace Loading & Locale Resolution:** `main.dart` initializes `ProviderScope`. `ActiveWorkspaceNotifier` loads only the single active `AppWorkspace` (`Tasks` / `tasks.tdf` by default) from `SettingsRepository`, `WebDavConfigNotifier` exposes its `WebDavConfig`, and `appLocaleProvider` / `appThemeModeProvider` resolve the active `Locale` and `AppThemeMode`. Switching workspaces at runtime via `ActiveWorkspaceNotifier.switchWorkspace` unloads the current `TaskBoard` and `SyncState` from memory and loads the selected `AppWorkspace` and its `.tdf` file without restarting the application.
 2. **TDF Fetch (Local File or WebDAV):** `TaskNotifier` reads the raw `.tdf` document either from the configured local `.tdf` file (`LocalFileRepository.loadTdf`) or from the configured WebDAV endpoint via HTTP `GET` (`WebDavRepository.fetchTdf`). Missing files (`HTTP 404` or non-existent local file) initialize an empty board.
 3. **Single-Pass Parse & Dynamic 6-Tier Derivation:** `TdfService.parse` validates the `tdf 0.2.0` header (while automatically migrating legacy `category` / `location` root blocks and `categories` / `locations` directives to unified `label` / `labels`), scans and validates all `label` and `task` blocks in a single $O(N)$ pass, and invokes `TaskBoard.evaluate` to derive `Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, and `Planned` per `TDF_SPEC.md` Section 5.
 4. **Mutation & Persistence:** Every user action (`addTask`, `updateTask`, `completeTask`, `restoreTask`, `downgradeTask`, `toggleSubtask`) produces a new immutable `TaskBoard`, updates UI state, serializes canonical `LF`-terminated `tdf 0.2.0` output via `TdfService.serialize`, and persists the `.tdf` document to the local filesystem and/or WebDAV server.

@@ -38,7 +38,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-/// Reusable row of preset `.tdf` filename [ActionChip]s (`tiertask.tdf` and `t2.tdf`).
+/// Reusable row of preset `.tdf` filename [ActionChip]s (`tasks.tdf` and `t2.tdf`).
 class _FileNamePresetChips extends StatelessWidget {
   /// Creates [_FileNamePresetChips].
   const _FileNamePresetChips({required this.onSelectFileName});
@@ -52,8 +52,8 @@ class _FileNamePresetChips extends StatelessWidget {
       spacing: 8,
       children: [
         ActionChip(
-          label: const Text('tiertask.tdf'),
-          onPressed: () => onSelectFileName('tiertask.tdf'),
+          label: const Text(WebDavConfig.defaultFileName),
+          onPressed: () => onSelectFileName(WebDavConfig.defaultFileName),
         ),
         ActionChip(
           label: const Text('t2.tdf'),
@@ -475,8 +475,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _serverUrlController = TextEditingController();
     _usernameController = TextEditingController();
     _passwordController = TextEditingController();
-    _filePathController = TextEditingController(text: 'tiertask.tdf');
-    _localFilePathController = TextEditingController(text: 'tiertask.tdf');
+    _filePathController = TextEditingController(
+      text: WebDavConfig.defaultFileName,
+    );
+    _localFilePathController = TextEditingController(
+      text: WebDavConfig.defaultFileName,
+    );
   }
 
   @override
@@ -582,10 +586,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       username: _usernameController.text.trim(),
       password: _passwordController.text,
       filePath: _filePathController.text.trim().isEmpty
-          ? 'tiertask.tdf'
+          ? WebDavConfig.defaultFileName
           : _filePathController.text.trim(),
       localFilePath: _localFilePathController.text.trim().isEmpty
-          ? 'tiertask.tdf'
+          ? WebDavConfig.defaultFileName
           : _localFilePathController.text.trim(),
       storageMode: _selectedStorageMode,
       language: _selectedLanguage,
@@ -698,10 +702,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _usernameController.text = config.username;
     _passwordController.text = config.password;
     _filePathController.text = config.filePath.isEmpty
-        ? 'tiertask.tdf'
+        ? WebDavConfig.defaultFileName
         : config.filePath;
     _localFilePathController.text = config.localFilePath.isEmpty
-        ? 'tiertask.tdf'
+        ? WebDavConfig.defaultFileName
         : config.localFilePath;
   }
 
