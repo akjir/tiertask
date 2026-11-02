@@ -24,3 +24,6 @@ dev_dependencies:
 flutter:
   generate: true
   uses-material-design: true
+  assets:
+    - assets/logo/tiertask_logo.png
+    - assets/logo/tiertask_logo.svg

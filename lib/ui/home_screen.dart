@@ -26,6 +26,7 @@ import '../providers/task_providers.dart';
 import 'edit_labels_screen.dart';
 import 'edit_task_screen.dart';
 import 'settings_screen.dart';
+import 'widgets/app_logo.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/tier_page_indicator.dart';
 
@@ -126,7 +127,7 @@ class _DrawerFooterSection extends StatelessWidget {
   }
 }
 
-/// Header title block inside [_LandingDrawer].
+/// Header title block inside [_LandingDrawer] displaying [AppLogo] and [title].
 class _DrawerHeader extends StatelessWidget {
   /// Creates a [_DrawerHeader].
   const _DrawerHeader({required this.title});
@@ -139,11 +140,19 @@ class _DrawerHeader extends StatelessWidget {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-      child: Text(
-        title,
-        style: theme.textTheme.headlineSmall?.copyWith(
-          fontWeight: FontWeight.bold,
-        ),
+      child: Row(
+        children: [
+          const AppLogo(size: 32),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              title,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
