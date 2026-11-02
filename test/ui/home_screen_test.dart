@@ -114,11 +114,41 @@ void main() {
             'No location card accent bar must render when locations are empty',
       );
 
+      final viewportWidth =
+          tester.view.physicalSize.width / tester.view.devicePixelRatio;
       final menuButtonRect = tester.getRect(find.byIcon(Icons.menu_rounded));
-      final focusDy = tester.getTopLeft(find.text('FOCUS TASKS')).dy;
+      final pageViewTop = tester.getTopLeft(find.byType(PageView)).dy;
+      final focusFinder = find.text('FOCUS TASKS');
+      final focusRect = tester.getRect(focusFinder);
+      final focusText = tester.widget<Text>(focusFinder);
 
       expect(
-        menuButtonRect.bottom <= focusDy,
+        focusText.style?.fontSize,
+        equals(15),
+        reason: 'Focus tasks heading must use the enlarged 15px font size',
+      );
+      expect(
+        focusText.textAlign,
+        equals(TextAlign.center),
+        reason: 'Focus tasks heading must be center-aligned',
+      );
+      expect(
+        focusRect.center.dx,
+        closeTo(viewportWidth / 2.0, 1.0),
+        reason: 'Focus tasks heading must be horizontally centered on screen',
+      );
+      expect(
+        focusRect.left > 24.0,
+        isTrue,
+        reason: 'Centered Focus tasks heading must not be left-aligned at the list padding edge',
+      );
+      expect(
+        focusRect.top - pageViewTop >= 24.0,
+        isTrue,
+        reason: 'Spacing above Focus tasks heading to the top bar must be increased to at least 24px',
+      );
+      expect(
+        menuButtonRect.bottom <= focusRect.top,
         isTrue,
         reason: 'Top bar must appear above Focus tasks',
       );
@@ -169,6 +199,21 @@ void main() {
         find.text('Daily meeting with team'),
         findsOneWidget,
         reason: 'Added task must appear in the Focus tasks section on the landing page',
+      );
+      final firstTaskPillTop = tester
+          .getTopLeft(
+            find
+                .ancestor(
+                  of: find.text('Daily meeting with team'),
+                  matching: find.byType(Material),
+                )
+                .first,
+          )
+          .dy;
+      expect(
+        firstTaskPillTop - focusRect.bottom >= 24.0,
+        isTrue,
+        reason: 'Spacing below Focus tasks heading to the first task pill must be increased to at least 24px',
       );
 
       await tester.tap(find.byIcon(Icons.search_rounded));
@@ -559,10 +604,33 @@ task cmp1 {
         findsNothing,
         reason: 'Top header must not display a title when no label is selected on Blocked',
       );
+      final blockedHeadingFinder = find.text('BLOCKED TASKS');
       expect(
-        find.text('BLOCKED TASKS'),
+        blockedHeadingFinder,
         findsOneWidget,
         reason: 'Blocked tier panel must display the uppercase section heading',
+      );
+      final blockedHeadingText = tester.widget<Text>(blockedHeadingFinder);
+      final blockedHeadingRect = tester.getRect(blockedHeadingFinder);
+      final blockedPillTop = tester
+          .getTopLeft(find.byKey(const ValueKey('tier_pill_blocked_blk_dep')))
+          .dy;
+      final viewportWidth =
+          tester.view.physicalSize.width / tester.view.devicePixelRatio;
+      expect(
+        blockedHeadingText.style?.fontSize,
+        equals(15),
+        reason: 'Blocked tasks heading must use the enlarged 15px font size',
+      );
+      expect(
+        blockedHeadingRect.center.dx,
+        closeTo(viewportWidth / 2.0, 1.0),
+        reason: 'Blocked tasks heading must be horizontally centered on screen',
+      );
+      expect(
+        blockedPillTop - blockedHeadingRect.bottom >= 24.0,
+        isTrue,
+        reason: 'Spacing below Blocked tasks heading to the first task pill must be at least 24px',
       );
       expect(
         find.text('Blocked Prerequisite Task'),

@@ -234,10 +234,33 @@ task cmp1 {
         findsNothing,
         reason: 'Top header must not display a title on the Ready pane when no label is selected',
       );
+      final readyHeadingFinder = find.text('READY TASKS');
       expect(
-        find.text('READY TASKS'),
+        readyHeadingFinder,
         findsOneWidget,
         reason: 'Ready pane must display the uppercase section label matching the Focus screen',
+      );
+      final readyHeadingText = tester.widget<Text>(readyHeadingFinder);
+      final readyHeadingRect = tester.getRect(readyHeadingFinder);
+      final readyPillTop = tester
+          .getTopLeft(find.byKey(const ValueKey('tier_pill_ready_r1')))
+          .dy;
+      final viewportWidth =
+          tester.view.physicalSize.width / tester.view.devicePixelRatio;
+      expect(
+        readyHeadingText.style?.fontSize,
+        equals(15),
+        reason: 'Ready tasks heading must use the enlarged 15px font size',
+      );
+      expect(
+        readyHeadingRect.center.dx,
+        closeTo(viewportWidth / 2.0, 1.0),
+        reason: 'Ready tasks heading must be horizontally centered on screen',
+      );
+      expect(
+        readyPillTop - readyHeadingRect.bottom >= 24.0,
+        isTrue,
+        reason: 'Spacing below Ready tasks heading to the first task pill must be at least 24px',
       );
       expect(
         find.text('Ready Pane Task'),

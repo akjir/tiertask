@@ -932,13 +932,16 @@ class _LandingSectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      title,
-      style: const TextStyle(
-        color: _mutedLabelColor,
-        fontSize: 12,
-        fontWeight: FontWeight.w600,
-        letterSpacing: 1.6,
+    return Center(
+      child: Text(
+        title,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: _mutedLabelColor,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.6,
+        ),
       ),
     );
   }
@@ -1060,7 +1063,7 @@ class _TierPaneHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(top: 16, bottom: 24),
       child: _LandingSectionLabel(title: localizations.tierSectionTitle(tier)),
     );
   }
