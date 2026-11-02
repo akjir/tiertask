@@ -65,7 +65,16 @@ tiertask/
 │           ├── task_editor_dialog.dart
 │           └── tier_page_indicator.dart
 └── test/
-    ├── tiertask_domain_test.dart
+    ├── models/
+    │   ├── task_board_downgrade_test.dart
+    │   ├── task_board_evaluation_test.dart
+    │   ├── task_board_lifecycle_test.dart
+    │   └── task_board_mutation_test.dart
+    ├── repositories/
+    │   └── storage_and_providers_test.dart
+    ├── services/
+    │   ├── tdf_service_bounds_test.dart
+    │   └── tdf_service_parser_test.dart
     └── ui/
         ├── edit_labels_screen_test.dart
         ├── home_screen_test.dart
@@ -73,6 +82,7 @@ tiertask/
         ├── test_helpers.dart
         └── widgets/
             ├── quick_add_bar_test.dart
+            ├── task_editor_conditions_test.dart
             ├── task_editor_dialog_test.dart
             └── tier_page_indicator_test.dart
 ```
