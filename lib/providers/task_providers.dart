@@ -27,6 +27,7 @@ import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../repositories/webdav_repository.dart';
 import '../services/tdf_service.dart';
+import '../ui/app_theme.dart';
 
 /// Provides the effective [Locale] (`en` or `de`) based on [webDavConfigProvider] and OS locale.
 final appLocaleProvider = Provider<Locale>((ref) {
@@ -40,6 +41,11 @@ final appThemeModeProvider = Provider<AppThemeMode>((ref) {
   final configAsync = ref.watch(webDavConfigProvider);
   return configAsync.asData?.value.themeMode ?? AppThemeMode.system;
 });
+
+/// Provides the active [AppThemeSet] (`light` and `dark` [AppTheme] pair) replaceable at runtime.
+final appThemeProvider = NotifierProvider<AppThemeNotifier, AppThemeSet>(
+  AppThemeNotifier.new,
+);
 
 /// Injectable clock function for deterministic date handling in unit tests.
 final clockProvider = Provider<DateTime Function()>((ref) {
@@ -101,6 +107,22 @@ final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
 final _inMemoryLocalStoreProvider = Provider<Map<String, String>>((ref) {
   return <String, String>{};
 });
+
+/// Manages the active [AppThemeSet] and supports swapping themes at runtime.
+class AppThemeNotifier extends Notifier<AppThemeSet> {
+  @override
+  AppThemeSet build() => AppThemeSet.standard;
+
+  /// Replaces both light and dark themes with a single [theme] at runtime.
+  void setTheme(AppTheme theme) {
+    state = AppThemeSet.uniform(theme);
+  }
+
+  /// Replaces the active [AppThemeSet] (`light` and `dark` pair) at runtime.
+  void setThemeSet(AppThemeSet themeSet) {
+    state = themeSet;
+  }
+}
 
 /// Represents the current synchronization state for local and WebDAV storage.
 class SyncState {

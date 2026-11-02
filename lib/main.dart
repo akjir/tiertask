@@ -30,6 +30,7 @@ class TierTaskApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final locale = ref.watch(appLocaleProvider);
     final appThemeMode = ref.watch(appThemeModeProvider);
+    final appThemeSet = ref.watch(appThemeProvider);
 
     return MaterialApp(
       title: 'TierTask',
@@ -39,16 +40,8 @@ class TierTaskApp extends ConsumerWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       themeMode: _toFlutterThemeMode(appThemeMode),
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.teal,
-        brightness: Brightness.light,
-      ),
-      darkTheme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.teal,
-        brightness: Brightness.dark,
-      ),
+      theme: appThemeSet.light.toThemeData(),
+      darkTheme: appThemeSet.dark.toThemeData(),
       home: const HomeScreen(),
     );
   }

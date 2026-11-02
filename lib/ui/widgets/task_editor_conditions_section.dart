@@ -17,14 +17,8 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/tdf_metadata.dart';
+import '../app_theme.dart';
 import 'task_editor_sections.dart';
-
-const Color _accentAmber = Color(0xFFFFB300);
-const Color _accentBlue = Color(0xFF2196F3);
-const Color _accentCyan = Color(0xFF00E5FF);
-const Color _accentMagenta = Color(0xFFEB06FF);
-const Color _canvasColor = Color(0xFF344FA1);
-const Color _mutedLabelColor = Color(0xFF9BA8E5);
 
 /// Activation conditions (`condition`) editor section inside the task editor.
 class TaskEditorConditionsSection extends StatelessWidget {
@@ -132,14 +126,15 @@ class TaskEditorConditionsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           localizations.sectionTaskConditions,
-          style: const TextStyle(
-            color: _mutedLabelColor,
+          style: TextStyle(
+            color: appTheme.mutedTextColor,
             fontSize: 11,
             fontWeight: FontWeight.w600,
             letterSpacing: 1.2,
@@ -150,7 +145,7 @@ class TaskEditorConditionsSection extends StatelessWidget {
           Text(
             localizations.taskSuspendedDisablesConditionsHint,
             key: const ValueKey('task_editor_conditions_disabled_hint'),
-            style: const TextStyle(color: _accentAmber, fontSize: 12),
+            style: TextStyle(color: appTheme.warningAccent, fontSize: 12),
           ),
         ],
         const SizedBox(height: 6),
@@ -158,7 +153,7 @@ class TaskEditorConditionsSection extends StatelessWidget {
           ignoring: isSuspended,
           child: Opacity(
             opacity: isSuspended ? 0.45 : 1.0,
-            child: _buildConditionControls(localizations),
+            child: _buildConditionControls(localizations, appTheme),
           ),
         ),
       ],
@@ -166,7 +161,10 @@ class TaskEditorConditionsSection extends StatelessWidget {
   }
 
   /// Builds the interactive condition controls inside [TaskEditorConditionsSection].
-  Widget _buildConditionControls(AppLocalizations localizations) {
+  Widget _buildConditionControls(
+    AppLocalizations localizations,
+    AppTheme appTheme,
+  ) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -176,7 +174,7 @@ class TaskEditorConditionsSection extends StatelessWidget {
           icon: Icons.filter_alt_off_rounded,
           label: localizations.conditionGlobalAnyLabel,
           isSelected: conditionAny,
-          accentColor: _accentMagenta,
+          accentColor: appTheme.primaryAccent,
           onTap: onToggleConditionAny,
         ),
         const SizedBox(height: 8),
@@ -239,6 +237,7 @@ class _TaskEditorConditionDaySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     final dayLabels = <int, String>{
       1: localizations.weekdayMon,
       2: localizations.weekdayTue,
@@ -258,8 +257,8 @@ class _TaskEditorConditionDaySection extends StatelessWidget {
             Expanded(
               child: Text(
                 localizations.conditionDayGroupTitle,
-                style: const TextStyle(
-                  color: _mutedLabelColor,
+                style: TextStyle(
+                  color: appTheme.mutedTextColor,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -270,7 +269,7 @@ class _TaskEditorConditionDaySection extends StatelessWidget {
               icon: Icons.calendar_today_rounded,
               label: localizations.conditionDayAnyLabel,
               isSelected: conditionDayAny,
-              accentColor: _accentCyan,
+              accentColor: appTheme.tertiaryAccent,
               onTap: onToggleDayAny,
             ),
           ],
@@ -289,7 +288,7 @@ class _TaskEditorConditionDaySection extends StatelessWidget {
                 label: dayLabels[weekday] ?? '',
                 isSelected:
                     !conditionDayAny && selectedWeekdays.contains(weekday),
-                accentColor: _accentBlue,
+                accentColor: appTheme.secondaryAccent,
                 onTap: () => onToggleWeekday(weekday),
               ),
           ],
@@ -344,6 +343,7 @@ class _TaskEditorConditionLocationSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -353,8 +353,8 @@ class _TaskEditorConditionLocationSection extends StatelessWidget {
             Expanded(
               child: Text(
                 localizations.conditionLocationGroupTitle,
-                style: const TextStyle(
-                  color: _mutedLabelColor,
+                style: TextStyle(
+                  color: appTheme.mutedTextColor,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -367,7 +367,7 @@ class _TaskEditorConditionLocationSection extends StatelessWidget {
               icon: Icons.public_rounded,
               label: localizations.conditionLocationAnyLabel,
               isSelected: conditionLocationAny,
-              accentColor: _accentCyan,
+              accentColor: appTheme.tertiaryAccent,
               onTap: onToggleLocationAny,
             ),
           ],
@@ -435,6 +435,7 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -444,8 +445,8 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
             Expanded(
               child: Text(
                 localizations.conditionTimeGroupTitle,
-                style: const TextStyle(
-                  color: _mutedLabelColor,
+                style: TextStyle(
+                  color: appTheme.mutedTextColor,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -456,7 +457,7 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
               icon: Icons.schedule_rounded,
               label: localizations.conditionTimeAnyLabel,
               isSelected: conditionTimeAny,
-              accentColor: _accentCyan,
+              accentColor: appTheme.tertiaryAccent,
               onTap: onToggleTimeAny,
             ),
           ],
@@ -510,6 +511,7 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -518,6 +520,7 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
           children: [
             Expanded(
               child: _buildCompactField(
+                appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_location_lat_input'),
                 controller: latController,
                 hintText: localizations.conditionLocationLatHint,
@@ -526,6 +529,7 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: _buildCompactField(
+                appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_location_lon_input'),
                 controller: lonController,
                 hintText: localizations.conditionLocationLonHint,
@@ -534,6 +538,7 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: _buildCompactField(
+                appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_location_radius_input'),
                 controller: radiusController,
                 hintText: localizations.conditionLocationRadiusHint,
@@ -543,8 +548,8 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
             IconButton.filledTonal(
               key: const ValueKey('task_editor_add_location_condition_button'),
               style: IconButton.styleFrom(
-                backgroundColor: _accentBlue,
-                foregroundColor: Colors.white,
+                backgroundColor: appTheme.secondaryAccent,
+                foregroundColor: appTheme.onSecondaryColor,
               ),
               tooltip: localizations.tooltipAddLocationCondition,
               onPressed: onAdd,
@@ -557,7 +562,7 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               errorMessage ?? '',
-              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+              style: TextStyle(color: appTheme.errorColor, fontSize: 12),
             ),
           ),
       ],
@@ -566,6 +571,7 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
 
   /// Builds a compact single-line text field for GPS coordinate or radius input.
   Widget _buildCompactField({
+    required AppTheme appTheme,
     required Key fieldKey,
     required TextEditingController controller,
     required String hintText,
@@ -573,25 +579,27 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
     final borderRadius = BorderRadius.circular(12);
     final defaultBorder = OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: _mutedLabelColor.withValues(alpha: 0.35)),
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
     );
     return TextField(
       key: fieldKey,
       controller: controller,
-      cursorColor: _accentCyan,
-      style: const TextStyle(color: Colors.white, fontSize: 13),
+      cursorColor: appTheme.tertiaryAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 13),
       decoration: InputDecoration(
         hintText: hintText,
-        hintStyle: const TextStyle(color: _mutedLabelColor, fontSize: 12),
+        hintStyle: TextStyle(color: appTheme.mutedTextColor, fontSize: 12),
         isDense: true,
         filled: true,
-        fillColor: _canvasColor,
+        fillColor: appTheme.canvasColor,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         border: defaultBorder,
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius,
-          borderSide: const BorderSide(color: _accentCyan, width: 1.5),
+          borderSide: BorderSide(color: appTheme.tertiaryAccent, width: 1.5),
         ),
       ),
     );
@@ -626,26 +634,27 @@ class _TaskEditorRuleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final appTheme = AppTheme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: _accentCyan),
+          Icon(icon, size: 16, color: appTheme.tertiaryAccent),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               label,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: TextStyle(color: appTheme.primaryTextColor, fontSize: 13),
             ),
           ),
           IconButton(
             key: removeKey,
             visualDensity: VisualDensity.compact,
             tooltip: tooltip,
-            icon: const Icon(
+            icon: Icon(
               Icons.close_rounded,
               size: 18,
-              color: _mutedLabelColor,
+              color: appTheme.mutedTextColor,
             ),
             onPressed: onRemove,
           ),
@@ -680,6 +689,7 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -688,6 +698,7 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
           children: [
             Expanded(
               child: _buildTimeField(
+                appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_time_start_input'),
                 controller: startController,
                 hintText: localizations.conditionTimeStartHint,
@@ -696,6 +707,7 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
             const SizedBox(width: 6),
             Expanded(
               child: _buildTimeField(
+                appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_time_end_input'),
                 controller: endController,
                 hintText: localizations.conditionTimeEndHint,
@@ -705,8 +717,8 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
             IconButton.filledTonal(
               key: const ValueKey('task_editor_add_time_condition_button'),
               style: IconButton.styleFrom(
-                backgroundColor: _accentBlue,
-                foregroundColor: Colors.white,
+                backgroundColor: appTheme.secondaryAccent,
+                foregroundColor: appTheme.onSecondaryColor,
               ),
               tooltip: localizations.tooltipAddTimeCondition,
               onPressed: onAdd,
@@ -719,7 +731,7 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               errorMessage ?? '',
-              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+              style: TextStyle(color: appTheme.errorColor, fontSize: 12),
             ),
           ),
       ],
@@ -728,6 +740,7 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
 
   /// Builds a compact single-line text field for `HH:MM` time input.
   Widget _buildTimeField({
+    required AppTheme appTheme,
     required Key fieldKey,
     required TextEditingController controller,
     required String hintText,
@@ -735,25 +748,27 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
     final borderRadius = BorderRadius.circular(12);
     final defaultBorder = OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: _mutedLabelColor.withValues(alpha: 0.35)),
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
     );
     return TextField(
       key: fieldKey,
       controller: controller,
-      cursorColor: _accentCyan,
-      style: const TextStyle(color: Colors.white, fontSize: 13),
+      cursorColor: appTheme.tertiaryAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 13),
       decoration: InputDecoration(
         hintText: hintText,
-        hintStyle: const TextStyle(color: _mutedLabelColor, fontSize: 12),
+        hintStyle: TextStyle(color: appTheme.mutedTextColor, fontSize: 12),
         isDense: true,
         filled: true,
-        fillColor: _canvasColor,
+        fillColor: appTheme.canvasColor,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         border: defaultBorder,
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius,
-          borderSide: const BorderSide(color: _accentCyan, width: 1.5),
+          borderSide: BorderSide(color: appTheme.tertiaryAccent, width: 1.5),
         ),
       ),
     );

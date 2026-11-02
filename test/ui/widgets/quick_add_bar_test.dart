@@ -115,6 +115,7 @@ void main() {
         reason: 'QuickAddBar items must be ordered left-to-right: input, priority, someday, labels, advanced, cancel',
       );
 
+      final barTheme = Theme.of(tester.element(barFinder));
       final priorityIconFinder = find.descendant(
         of: priorityFinder,
         matching: find.byType(Icon),
@@ -125,12 +126,12 @@ void main() {
       );
       expect(
         tester.widget<Icon>(priorityIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
+        equals(barTheme.colorScheme.onSurfaceVariant),
         reason: 'Priority icon must be muted when unselected',
       );
       expect(
         tester.widget<Icon>(somedayIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
+        equals(barTheme.colorScheme.onSurfaceVariant),
         reason: 'Someday icon must be muted when unselected',
       );
 
@@ -138,12 +139,12 @@ void main() {
       await tester.pump();
       expect(
         tester.widget<Icon>(priorityIconFinder).color,
-        equals(const Color(0xFFEB06FF)),
+        equals(barTheme.colorScheme.primary),
         reason: 'Tapping Priority must highlight the Priority button',
       );
       expect(
         tester.widget<Icon>(somedayIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
+        equals(barTheme.colorScheme.onSurfaceVariant),
         reason: 'Someday must remain unselected when Priority is active',
       );
 
@@ -151,12 +152,12 @@ void main() {
       await tester.pump();
       expect(
         tester.widget<Icon>(somedayIconFinder).color,
-        equals(const Color(0xFF2196F3)),
+        equals(barTheme.colorScheme.secondary),
         reason: 'Tapping Someday must highlight the Someday button',
       );
       expect(
         tester.widget<Icon>(priorityIconFinder).color,
-        equals(const Color(0xFF9BA8E5)),
+        equals(barTheme.colorScheme.onSurfaceVariant),
         reason: 'Enabling Someday must automatically turn off Priority',
       );
 

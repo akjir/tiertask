@@ -23,12 +23,6 @@ import '../../models/tdf_metadata.dart';
 import '../../providers/task_providers.dart';
 import '../edit_task_screen.dart';
 
-const Color _accentBlue = Color(0xFF2196F3);
-const Color _accentCyan = Color(0xFF00E5FF);
-const Color _accentMagenta = Color(0xFFEB06FF);
-const Color _canvasColor = Color(0xFF344FA1);
-const Color _cardColor = Color(0xFF071A52);
-const Color _mutedLabelColor = Color(0xFF9BA8E5);
 const double _pixel9ProAspectRatio = 1280.0 / 2856.0;
 const double _pixel9ProLogicalWidth = 488.0;
 const String _popupTapRegionGroupId = 'quick_add_popup_region';
@@ -110,6 +104,7 @@ class _QuickAddActionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -118,7 +113,7 @@ class _QuickAddActionButtons extends StatelessWidget {
           buttonKey: const ValueKey('quick_add_priority_button'),
           icon: Icons.bolt_rounded,
           isActive: mode == QuickAddMode.priority,
-          activeColor: _accentMagenta,
+          activeColor: colorScheme.primary,
           tooltip: localizations.quickAddPriority,
           onTap: onTogglePriority,
         ),
@@ -126,7 +121,7 @@ class _QuickAddActionButtons extends StatelessWidget {
           buttonKey: const ValueKey('quick_add_someday_button'),
           icon: Icons.lightbulb_outline_rounded,
           isActive: mode == QuickAddMode.someday,
-          activeColor: _accentBlue,
+          activeColor: colorScheme.secondary,
           tooltip: localizations.tierName(TaskTier.someday),
           onTap: onToggleSomeday,
         ),
@@ -136,7 +131,7 @@ class _QuickAddActionButtons extends StatelessWidget {
             buttonKey: const ValueKey('quick_add_labels_button'),
             icon: Icons.label_outline_rounded,
             isActive: isLabelsPopupOpen || hasSelectedLabels,
-            activeColor: _accentMagenta,
+            activeColor: colorScheme.primary,
             tooltip: localizations.drawerLabels,
             onTap: onToggleLabelsPopup,
           ),
@@ -145,7 +140,7 @@ class _QuickAddActionButtons extends StatelessWidget {
           buttonKey: const ValueKey('quick_add_advanced_button'),
           icon: Icons.tune_rounded,
           isActive: false,
-          activeColor: _accentCyan,
+          activeColor: colorScheme.tertiary,
           tooltip: localizations.quickAddAdvanced,
           onTap: onAdvanced,
         ),
@@ -153,7 +148,7 @@ class _QuickAddActionButtons extends StatelessWidget {
           buttonKey: const ValueKey('quick_add_cancel_button'),
           icon: Icons.close_rounded,
           isActive: false,
-          activeColor: _mutedLabelColor,
+          activeColor: colorScheme.onSurfaceVariant,
           tooltip: localizations.actionCancel,
           onTap: onCancel,
         ),
@@ -194,6 +189,7 @@ class _QuickAddActionIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -214,7 +210,7 @@ class _QuickAddActionIconButton extends StatelessWidget {
               child: Icon(
                 icon,
                 size: 20,
-                color: isActive ? activeColor : _mutedLabelColor,
+                color: isActive ? activeColor : mutedColor,
               ),
             ),
           ),
@@ -357,6 +353,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final labels = ref.watch(
       taskNotifierProvider.select(
         (boardAsync) => boardAsync.asData?.value.labels ?? const <TdfLabel>[],
@@ -386,13 +383,16 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
         Material(
           key: const ValueKey('quick_add_bar'),
           elevation: 8,
-          color: _cardColor,
+          color: theme.cardColor,
           child: SafeArea(
             top: false,
             child: DecoratedBox(
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 border: Border(
-                  top: BorderSide(color: _canvasColor, width: 1.5),
+                  top: BorderSide(
+                    color: theme.scaffoldBackgroundColor,
+                    width: 1.5,
+                  ),
                 ),
               ),
               child: _QuickAddBarLayout(
@@ -565,6 +565,7 @@ class _QuickAddPopupOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: InkWell(
@@ -581,7 +582,9 @@ class _QuickAddPopupOptionTile extends StatelessWidget {
                 child: Text(
                   label,
                   style: TextStyle(
-                    color: isSelected ? Colors.white : _mutedLabelColor,
+                    color: isSelected
+                        ? colorScheme.onSurface
+                        : colorScheme.onSurfaceVariant,
                     fontSize: 15,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                   ),
@@ -595,7 +598,7 @@ class _QuickAddPopupOptionTile extends StatelessWidget {
                 size: 18,
                 color: isSelected
                     ? accentColor
-                    : _mutedLabelColor.withValues(alpha: 0.5),
+                    : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
               ),
             ],
           ),
@@ -630,21 +633,25 @@ class _QuickAddTextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
     final heading = localizations.tierName(effectiveTier);
 
     return TextField(
       key: const ValueKey('quick_add_input'),
       controller: controller,
       autofocus: true,
-      cursorColor: _accentMagenta,
-      style: const TextStyle(color: Colors.white, fontSize: 15),
+      cursorColor: colorScheme.primary,
+      style: TextStyle(color: colorScheme.onSurface, fontSize: 15),
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => onSubmit(),
       decoration: InputDecoration(
+        filled: false,
         hintText: localizations.quickAddHint(heading),
-        hintStyle: const TextStyle(color: _mutedLabelColor, fontSize: 15),
+        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 15),
         isDense: true,
         border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
         contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
         suffixIconConstraints: const BoxConstraints(
           minWidth: 32,
@@ -656,9 +663,9 @@ class _QuickAddTextField extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 visualDensity: VisualDensity.compact,
                 tooltip: localizations.actionAdd,
-                icon: const Icon(
+                icon: Icon(
                   Icons.check_rounded,
-                  color: _accentMagenta,
+                  color: colorScheme.primary,
                   size: 20,
                 ),
                 onPressed: onSubmit,
@@ -690,15 +697,17 @@ class _UpwardLabelsMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Material(
       key: const ValueKey('quick_add_labels_menu'),
-      color: _cardColor,
+      color: theme.cardColor,
       elevation: 12,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: const BorderSide(color: _canvasColor, width: 1.2),
+        side: BorderSide(color: theme.scaffoldBackgroundColor, width: 1.2),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(minWidth: 220, maxWidth: 280),
@@ -712,8 +721,8 @@ class _UpwardLabelsMenu extends StatelessWidget {
                   ),
                   child: Text(
                     localizations.emptyLabelsHint,
-                    style: const TextStyle(
-                      color: _mutedLabelColor,
+                    style: TextStyle(
+                      color: colorScheme.onSurfaceVariant,
                       fontSize: 14,
                     ),
                   ),
@@ -727,7 +736,10 @@ class _UpwardLabelsMenu extends StatelessWidget {
                         icon: Icons.label_outline_rounded,
                         label: label.name,
                         isSelected: selectedLabelIds.contains(label.id),
-                        accentColor: _resolveColor(label.color, _accentMagenta),
+                        accentColor: _resolveColor(
+                          label.color,
+                          colorScheme.primary,
+                        ),
                         onTap: () => onToggleLabel(label.id),
                       ),
                   ],

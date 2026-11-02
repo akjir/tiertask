@@ -30,12 +30,6 @@ import 'widgets/app_logo.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/tier_page_indicator.dart';
 
-const Color _accentBlue = Color(0xFF2196F3);
-const Color _accentMagenta = Color(0xFFEB06FF);
-const Color _canvasColor = Color(0xFF344FA1);
-const Color _cardColor = Color(0xFF071A52);
-const Color _mutedLabelColor = Color(0xFF9BA8E5);
-
 /// Primary landing page screen for TierTask across Linux, Android, and Windows.
 class HomeScreen extends ConsumerStatefulWidget {
   /// Creates a [HomeScreen] widget.
@@ -183,16 +177,17 @@ class _DrawerLabelTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     final resolvedColor = _resolveColor(label.color);
-    final leadingColor = isSelected ? _accentBlue : resolvedColor;
+    final leadingColor = isSelected ? colorScheme.secondary : resolvedColor;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       child: ListTile(
         dense: true,
         selected: isSelected,
-        selectedColor: _accentBlue,
-        selectedTileColor: _accentBlue.withValues(alpha: 0.18),
+        selectedColor: colorScheme.secondary,
+        selectedTileColor: colorScheme.secondary.withValues(alpha: 0.18),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         visualDensity: const VisualDensity(vertical: -2),
         leading: Icon(Icons.label_outline_rounded, color: leadingColor),
@@ -269,16 +264,20 @@ class _EmptyTierCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       decoration: BoxDecoration(
-        color: _cardColor,
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         message,
-        style: const TextStyle(color: _mutedLabelColor, fontSize: 15),
+        style: TextStyle(
+          color: theme.colorScheme.onSurfaceVariant,
+          fontSize: 15,
+        ),
       ),
     );
   }
@@ -340,22 +339,19 @@ class _ErrorStateView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(
-              Icons.cloud_off_rounded,
-              size: 48,
-              color: _accentMagenta,
-            ),
+            Icon(Icons.cloud_off_rounded, size: 48, color: colorScheme.primary),
             const SizedBox(height: 12),
             Text(
               localizations.syncErrorTitle,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: colorScheme.onSurface,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -364,7 +360,10 @@ class _ErrorStateView extends StatelessWidget {
             Text(
               error,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _mutedLabelColor, fontSize: 14),
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+              ),
             ),
             const SizedBox(height: 16),
             _ErrorActionButtons(
@@ -395,22 +394,23 @@ class _FloatingSyncButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     return FloatingActionButton.small(
       key: const ValueKey('sync_fab'),
       heroTag: null,
       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      backgroundColor: _cardColor,
-      foregroundColor: Colors.white,
+      backgroundColor: theme.cardColor,
+      foregroundColor: theme.colorScheme.onSurface,
       shape: const CircleBorder(),
       tooltip: localizations.tooltipSyncWebDav,
       onPressed: isSyncing ? null : onSyncRemote,
       child: isSyncing
-          ? const SizedBox(
+          ? SizedBox(
               width: 18,
               height: 18,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: Colors.white,
+                color: theme.colorScheme.onSurface,
               ),
             )
           : const Icon(Icons.sync_rounded, size: 20),
@@ -437,6 +437,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final boardAsync = ref.watch(taskNotifierProvider);
     final board = boardAsync.asData?.value ?? TaskBoard.empty();
     final activeLabel = _resolveActiveLabel(board);
@@ -450,7 +451,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
 
     return Scaffold(
-      backgroundColor: _canvasColor,
+      backgroundColor: theme.scaffoldBackgroundColor,
       drawer: _LandingDrawer(
         activeLabelId: activeLabel?.id,
         board: board,
@@ -669,9 +670,10 @@ class _LandingContentSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return boardAsync.when(
       loading: () =>
-          const Center(child: CircularProgressIndicator(color: _accentMagenta)),
+          Center(child: CircularProgressIndicator(color: colorScheme.primary)),
       error: (error, _) => _ErrorStateView(
         error: error.toString(),
         onRetry: onRetry,
@@ -798,6 +800,7 @@ class _LandingFloatingButtons extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -809,8 +812,8 @@ class _LandingFloatingButtons extends StatelessWidget {
         FloatingActionButton(
           key: const ValueKey('add_task_fab'),
           heroTag: null,
-          backgroundColor: _accentMagenta,
-          foregroundColor: Colors.white,
+          backgroundColor: colorScheme.primary,
+          foregroundColor: colorScheme.onPrimary,
           shape: const CircleBorder(),
           onPressed: onOpenQuickAdd,
           child: const Icon(Icons.add_rounded, size: 28),
@@ -936,12 +939,7 @@ class _LandingSectionLabel extends StatelessWidget {
       child: Text(
         title,
         textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: _mutedLabelColor,
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 1.6,
-        ),
+        style: Theme.of(context).textTheme.titleSmall,
       ),
     );
   }
@@ -1090,6 +1088,7 @@ class _TierScrollView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
     final tasks = _filterTasks(board.tasksForTier(tier), searchQuery);
     final isCompletedTier = tier == TaskTier.completed;
 
@@ -1113,7 +1112,9 @@ class _TierScrollView extends StatelessWidget {
               tier == TaskTier.ready ||
               tier == TaskTier.planned,
           isCompleted: isCompletedTier,
-          ringColor: taskIndex.isEven ? _accentMagenta : _accentBlue,
+          ringColor: taskIndex.isEven
+              ? colorScheme.primary
+              : colorScheme.secondary,
         );
       },
     );
@@ -1156,6 +1157,7 @@ class _TierTaskActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Center(
@@ -1165,7 +1167,7 @@ class _TierTaskActionButton extends StatelessWidget {
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           tooltip: tooltip,
-          icon: Icon(icon, size: 20, color: _mutedLabelColor),
+          icon: Icon(icon, size: 20, color: mutedColor),
           onPressed: onPressed,
         ),
       ),
@@ -1241,10 +1243,11 @@ class _TierTaskPill extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
-        color: _cardColor,
+        color: theme.cardColor,
         clipBehavior: Clip.antiAlias,
         borderRadius: BorderRadius.circular(20),
         child: IntrinsicHeight(
@@ -1292,6 +1295,7 @@ class _TierTaskPillContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 4, 18),
       child: Row(
@@ -1307,7 +1311,9 @@ class _TierTaskPillContent extends StatelessWidget {
             child: Text(
               task.title,
               style: TextStyle(
-                color: isCompleted ? _mutedLabelColor : Colors.white,
+                color: isCompleted
+                    ? colorScheme.onSurfaceVariant
+                    : colorScheme.onSurface,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
                 decoration: isCompleted ? TextDecoration.lineThrough : null,
@@ -1353,6 +1359,7 @@ class _TierTaskPillRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final theme = Theme.of(context);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1374,7 +1381,7 @@ class _TierTaskPillRow extends StatelessWidget {
         Container(
           key: ValueKey('edit_task_divider_${task.id}'),
           width: 3,
-          color: _canvasColor,
+          color: theme.scaffoldBackgroundColor,
         ),
         _TierTaskActionButton(
           buttonKey: ValueKey('edit_task_button_${task.id}'),
@@ -1521,9 +1528,10 @@ class _TopBarMenuButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return IconButton(
       tooltip: tooltip,
-      icon: const Icon(Icons.menu_rounded, color: _mutedLabelColor, size: 28),
+      icon: Icon(Icons.menu_rounded, color: mutedColor, size: 28),
       onPressed: () => Scaffold.of(context).openDrawer(),
     );
   }
@@ -1546,6 +1554,7 @@ class _TopBarSearchButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return IconButton(
       tooltip: isSearching
           ? localizations.actionClose
@@ -1557,7 +1566,7 @@ class _TopBarSearchButton extends StatelessWidget {
         child: Icon(
           isSearching ? Icons.close_rounded : Icons.search_rounded,
           key: ValueKey<bool>(isSearching),
-          color: _mutedLabelColor,
+          color: mutedColor,
           size: 26,
         ),
       ),
@@ -1580,15 +1589,19 @@ class _TopBarSearchField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
     return TextField(
       controller: controller,
       autofocus: true,
       onChanged: onChanged,
-      style: const TextStyle(color: Colors.white),
+      style: TextStyle(color: colorScheme.onSurface),
       decoration: InputDecoration(
+        filled: false,
         hintText: localizations.searchHint,
-        hintStyle: const TextStyle(color: _mutedLabelColor),
+        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
         border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
         isDense: true,
       ),
     );
@@ -1614,6 +1627,7 @@ class _TopBarTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 200),
       switchInCurve: Curves.easeOutCubic,
@@ -1623,8 +1637,8 @@ class _TopBarTitle extends StatelessWidget {
         key: ValueKey<String>(title),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: colorScheme.onSurface,
           fontSize: 20,
           fontWeight: FontWeight.bold,
         ),

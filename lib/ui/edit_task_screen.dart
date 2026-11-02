@@ -25,9 +25,6 @@ import 'widgets/quick_add_bar.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_sections.dart';
 
-const Color _canvasColor = Color(0xFF344FA1);
-const Color _cardColor = Color(0xFF071A52);
-
 /// Dedicated panel screen used for both extended task creation and editing an existing task.
 class EditTaskScreen extends ConsumerStatefulWidget {
   /// Creates an [EditTaskScreen].
@@ -136,6 +133,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final board =
         ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
@@ -145,17 +143,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
     return Scaffold(
       key: const ValueKey('edit_task_screen'),
-      backgroundColor: _canvasColor,
-      appBar: AppBar(
-        backgroundColor: _cardColor,
-        foregroundColor: Colors.white,
-        title: Text(headerTitle),
-      ),
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(title: Text(headerTitle)),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Material(
-            color: _cardColor,
+            color: theme.cardColor,
             borderRadius: BorderRadius.circular(20),
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),

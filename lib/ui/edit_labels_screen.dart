@@ -21,11 +21,6 @@ import '../models/task_board.dart';
 import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
 
-const Color _accentMagenta = Color(0xFFEB06FF);
-const Color _canvasColor = Color(0xFF344FA1);
-const Color _cardColor = Color(0xFF071A52);
-const Color _mutedLabelColor = Color(0xFF9BA8E5);
-
 /// Dedicated Google Keep style screen for creating, renaming, and deleting labels while displaying open task counts.
 class EditLabelsScreen extends ConsumerStatefulWidget {
   /// Creates an [EditLabelsScreen] widget.
@@ -67,6 +62,7 @@ class _CreateLabelRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
@@ -78,7 +74,7 @@ class _CreateLabelRow extends StatelessWidget {
                 : localizations.actionAdd,
             icon: Icon(
               hasText ? Icons.close_rounded : Icons.add_rounded,
-              color: _mutedLabelColor,
+              color: colorScheme.onSurfaceVariant,
             ),
             onPressed: hasText ? onClear : null,
           ),
@@ -88,14 +84,17 @@ class _CreateLabelRow extends StatelessWidget {
               key: const ValueKey('create_label_input'),
               controller: controller,
               autofocus: autofocus,
-              cursorColor: _accentMagenta,
-              style: const TextStyle(color: Colors.white, fontSize: 16),
+              cursorColor: colorScheme.primary,
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => onSubmit(),
               decoration: InputDecoration(
+                filled: false,
                 hintText: localizations.createNewLabel,
-                hintStyle: const TextStyle(color: _mutedLabelColor),
+                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                 border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
                 isDense: true,
               ),
             ),
@@ -105,7 +104,9 @@ class _CreateLabelRow extends StatelessWidget {
             tooltip: localizations.actionAdd,
             icon: Icon(
               Icons.check_rounded,
-              color: hasText ? _accentMagenta : _mutedLabelColor,
+              color: hasText
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
             ),
             onPressed: hasText ? onSubmit : null,
           ),
@@ -139,23 +140,20 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final board =
         ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
 
     return Scaffold(
       key: const ValueKey('edit_labels_screen'),
-      backgroundColor: _canvasColor,
-      appBar: AppBar(
-        backgroundColor: _cardColor,
-        foregroundColor: Colors.white,
-        title: Text(localizations.editLabelsTitle),
-      ),
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(title: Text(localizations.editLabelsTitle)),
       body: SafeArea(
         child: Column(
           children: [
             Material(
-              color: _cardColor,
+              color: theme.cardColor,
               child: _CreateLabelRow(
                 autofocus: widget.autofocusCreate,
                 controller: _createController,
@@ -164,7 +162,7 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
                 onSubmit: _submitCreateLabel,
               ),
             ),
-            const Divider(height: 1, color: _canvasColor),
+            Divider(height: 1, color: theme.scaffoldBackgroundColor),
             Expanded(
               child: board.labels.isEmpty
                   ? _EmptyLabelsView(message: localizations.emptyLabelsHint)
@@ -289,12 +287,17 @@ class _EditableLabelRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final iconColor = _resolveLabelColor(label.color);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final iconColor = _resolveLabelColor(
+      label.color,
+      colorScheme.onSurfaceVariant,
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Material(
-        color: _cardColor,
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -303,9 +306,9 @@ class _EditableLabelRow extends StatelessWidget {
               IconButton(
                 key: ValueKey('delete_label_button_${label.id}'),
                 tooltip: localizations.tooltipDeleteLabel,
-                icon: const Icon(
+                icon: Icon(
                   Icons.delete_outline_rounded,
-                  color: _mutedLabelColor,
+                  color: colorScheme.onSurfaceVariant,
                 ),
                 onPressed: onDelete,
               ),
@@ -332,7 +335,9 @@ class _EditableLabelRow extends StatelessWidget {
                     : localizations.tooltipRenameLabel,
                 icon: Icon(
                   isEditing ? Icons.check_rounded : Icons.edit_outlined,
-                  color: isEditing ? _accentMagenta : _mutedLabelColor,
+                  color: isEditing
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
                 ),
                 onPressed: isEditing ? onSaveRename : onStartRename,
               ),
@@ -343,10 +348,10 @@ class _EditableLabelRow extends StatelessWidget {
     );
   }
 
-  /// Resolves the optional `#RRGGBB` color of [rawHex] or falls back to [_mutedLabelColor].
-  static Color _resolveLabelColor(String? rawHex) {
+  /// Resolves the optional `#RRGGBB` color of [rawHex] or falls back to [fallback].
+  static Color _resolveLabelColor(String? rawHex, Color fallback) {
     final parsed = TdfColor.tryParseArgb(rawHex);
-    return parsed != null ? Color(parsed) : _mutedLabelColor;
+    return parsed != null ? Color(parsed) : fallback;
   }
 }
 
@@ -374,25 +379,29 @@ class _EditableLabelTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     if (isEditing && renameController != null) {
       return TextField(
         key: ValueKey('rename_label_input_${label.id}'),
         controller: renameController,
         autofocus: true,
-        cursorColor: _accentMagenta,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
+        cursorColor: colorScheme.primary,
+        style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
         textInputAction: TextInputAction.done,
         onSubmitted: (_) => onSaveRename(),
         decoration: const InputDecoration(
+          filled: false,
           border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
           isDense: true,
         ),
       );
     }
     return Text(
       label.name,
-      style: const TextStyle(
-        color: Colors.white,
+      style: TextStyle(
+        color: colorScheme.onSurface,
         fontSize: 16,
         fontWeight: FontWeight.w500,
       ),
@@ -410,12 +419,13 @@ class _EmptyLabelsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
           message,
-          style: const TextStyle(color: _mutedLabelColor, fontSize: 15),
+          style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 15),
         ),
       ),
     );

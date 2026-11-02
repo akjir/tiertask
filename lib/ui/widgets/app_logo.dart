@@ -15,15 +15,7 @@
 
 import 'package:flutter/material.dart';
 
-const Color _backgroundEnd = Color(0xFF071A52);
-const Color _backgroundStart = Color(0xFF0D256C);
-const Color _borderCyan = Color(0x3300E5FF);
-const Color _cyanBright = Color(0xFF00E5FF);
-const Color _tealBright = Color(0xFF00BFA5);
-const Color _tealDeep = Color(0xFF004D40);
-const Color _tealMedium = Color(0xFF26A69A);
-const Color _tealPrimary = Color(0xFF009688);
-const Color _tealSlate = Color(0xFF00796B);
+import '../app_theme.dart';
 
 /// Vector application logo widget rendering the stacked tier bars and completion checkmark.
 class AppLogo extends StatelessWidget {
@@ -35,20 +27,24 @@ class AppLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final appTheme = AppTheme.of(context);
     return SizedBox.square(
       dimension: size,
-      child: const CustomPaint(painter: _AppLogoPainter()),
+      child: CustomPaint(painter: _AppLogoPainter(appTheme: appTheme)),
     );
   }
 }
 
 /// Custom painter drawing the TierTask stacked tier bars and checkmark badge on a 512x512 grid.
 class _AppLogoPainter extends CustomPainter {
-  /// Creates a const [_AppLogoPainter].
-  const _AppLogoPainter();
+  /// Creates a const [_AppLogoPainter] bound to [appTheme].
+  const _AppLogoPainter({required this.appTheme});
 
   /// Reference coordinate grid dimension matching `assets/logo/tiertask_logo.svg`.
   static const double _gridSize = 512.0;
+
+  /// Active application theme providing logo surface and bar gradient tokens.
+  final AppTheme appTheme;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -62,7 +58,9 @@ class _AppLogoPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _AppLogoPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _AppLogoPainter oldDelegate) {
+    return oldDelegate.appTheme != appTheme;
+  }
 
   /// Paints a single rounded tier bar at [rect] with a horizontal gradient from [start] to [end].
   void _paintBar(Canvas canvas, Rect rect, Color start, Color end) {
@@ -75,7 +73,7 @@ class _AppLogoPainter extends CustomPainter {
     canvas.drawRRect(roundedRect, paint);
   }
 
-  /// Paints the dark-navy squircle background and subtle cyan inner border.
+  /// Paints the squircle background and subtle accent inner border.
   void _paintBackground(Canvas canvas) {
     const rect = Rect.fromLTWH(0, 0, _gridSize, _gridSize);
     final backgroundRRect = RRect.fromRectAndRadius(
@@ -83,32 +81,32 @@ class _AppLogoPainter extends CustomPainter {
       const Radius.circular(112),
     );
     final fillPaint = Paint()
-      ..shader = const LinearGradient(
+      ..shader = LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [_backgroundStart, _backgroundEnd],
+        colors: [appTheme.logoBackgroundStart, appTheme.logoBackgroundEnd],
       ).createShader(rect);
     canvas.drawRRect(backgroundRRect, fillPaint);
 
     final borderPaint = Paint()
-      ..color = _borderCyan
+      ..color = appTheme.logoTier1Start.withValues(alpha: 0.2)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 6;
     canvas.drawRRect(backgroundRRect.deflate(3), borderPaint);
   }
 
-  /// Paints the circular completion badge with a dark-navy cutout halo and white checkmark.
+  /// Paints the circular completion badge with a cutout halo and checkmark.
   void _paintCheckmarkBadge(Canvas canvas) {
     const center = Offset(348, 332);
-    final haloPaint = Paint()..color = _backgroundEnd;
+    final haloPaint = Paint()..color = appTheme.logoBackgroundEnd;
     canvas.drawCircle(center, 98, haloPaint);
 
     final badgeRect = Rect.fromCircle(center: center, radius: 82);
     final badgePaint = Paint()
-      ..shader = const LinearGradient(
+      ..shader = LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [_cyanBright, _tealPrimary],
+        colors: [appTheme.logoTier1Start, appTheme.logoTier2End],
       ).createShader(badgeRect);
     canvas.drawCircle(center, 82, badgePaint);
 
@@ -117,7 +115,7 @@ class _AppLogoPainter extends CustomPainter {
       ..lineTo(336, 362)
       ..lineTo(392, 302);
     final checkPaint = Paint()
-      ..color = Colors.white
+      ..color = appTheme.onPrimaryColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 22
       ..strokeCap = StrokeCap.round
@@ -130,20 +128,20 @@ class _AppLogoPainter extends CustomPainter {
     _paintBar(
       canvas,
       const Rect.fromLTWH(96, 116, 320, 56),
-      _cyanBright,
-      _tealBright,
+      appTheme.logoTier1Start,
+      appTheme.logoTier1End,
     );
     _paintBar(
       canvas,
       const Rect.fromLTWH(96, 204, 248, 56),
-      _tealMedium,
-      _tealPrimary,
+      appTheme.logoTier2Start,
+      appTheme.logoTier2End,
     );
     _paintBar(
       canvas,
       const Rect.fromLTWH(96, 292, 176, 56),
-      _tealSlate,
-      _tealDeep,
+      appTheme.logoTier3Start,
+      appTheme.logoTier3End,
     );
   }
 }

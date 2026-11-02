@@ -501,6 +501,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final bannerMessage = _statusBannerMessage;
 
     return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: Text(localizations.settingsTitle)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -822,7 +823,7 @@ class _SettingsSectionCard extends StatelessWidget {
     final bodyChild = child;
 
     return Card(
-      color: colorScheme.surfaceContainerLow,
+      color: theme.cardColor,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

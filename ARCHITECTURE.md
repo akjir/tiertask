@@ -61,6 +61,7 @@ tiertask/
 │   ├── services/
 │   │   └── tdf_service.dart
 │   └── ui/
+│       ├── app_theme.dart
 │       ├── edit_labels_screen.dart
 │       ├── edit_task_screen.dart
 │       ├── home_screen.dart
@@ -83,6 +84,7 @@ tiertask/
     │   ├── tdf_service_bounds_test.dart
     │   └── tdf_service_parser_test.dart
     └── ui/
+        ├── app_theme_test.dart
         ├── edit_labels_screen_test.dart
         ├── edit_task_screen_test.dart
         ├── home_screen_test.dart
@@ -144,13 +146,14 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `localFileRepositoryProvider`, `tdfServiceProvider`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme resolution, board loading, mutations, and local/WebDAV `.tdf` persistence. |
+| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemeProvider`, `localFileRepositoryProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme resolution, runtime theme replacement, board loading, mutations, and local/WebDAV `.tdf` persistence. |
 
 ## User Interface
 
 | File | Function |
 | :--- | :--- |
-| `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes and `AppLocalizations` delegates (`en` and `de`). |
+| `lib/main.dart` | Application entry point wrapping `TierTaskApp` in a `ProviderScope` with Material 3 light/dark/system themes from `appThemeProvider` (`lib/ui/app_theme.dart`) and `AppLocalizations` delegates (`en` and `de`). |
+| `lib/ui/app_theme.dart` | Single unified application theme definition (`AppTheme` and `AppThemeSet`) implementing `ThemeExtension<AppTheme>` and `toThemeData()` for both `AppTheme.dark` and `AppTheme.light`, providing all semantic surface, accent, text, indicator, and logo gradient tokens consumed across the UI and replaceable at runtime via `appThemeProvider`. |
 | `lib/ui/edit_labels_screen.dart` | Dedicated Google Keep style label management screen (`EditLabelsScreen`) opened from the navigation drawer's `Edit` button or `+ Create new label` entry, supporting new label creation, open task count badges (`Badge.count`) per label, inline label renaming, and label deletion. |
 | `lib/ui/edit_task_screen.dart` | Dedicated panel screen (`EditTaskScreen` and `openEditTaskScreen`) similar to `EditLabelsScreen`, used for both extended task creation (`QuickAddBar` `Advanced` button) and editing an existing task (`_TierTaskPill` edit button), enforcing non-empty and non-duplicate task names and editing notes, scheduling mode (`Priority`, `Someday`, and `Suspended` with optional timestamp), labels, subtasks (`auto-finish`), prerequisite tasks (`blocked` with cycle prevention), and activation conditions (`condition any`, `day`, `time`, and `location` rules). |
 | `lib/ui/home_screen.dart` | Primary landing page screen displaying a top navigation bar (`_LandingTopBar`) with the menu button on the left, the active label name centered in the middle when a label filter is selected (smoothly animating to the left next to the menu button with the inline search field expanding between the label name and the search/close button when search is opened), and the search toggle on the right; a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the centered uppercase tier section heading, minimalist task pill cards (`_TierTaskPill` with a leading completion/restoration circle, a downward arrow downgrade button on `Focus`, `Ready`, and `Planned` tasks immediately to the left of a full-height 3px vertical gap matching the screen background, and a right-side edit button) or empty-state card (`_EmptyTierCard`); a bottom `TierPageIndicator`; floating action buttons (`_LandingFloatingButtons`) with a smaller conditional WebDAV sync button (`_FloatingSyncButton` in `WebDAV` / `Both` mode) right-aligned above the circular task-add button that both hide when the task-add button transforms into the inline bottom `QuickAddBar`; and a top-left navigation drawer (`_LandingDrawer`) featuring a Google Keep style `Labels` section (top `Edit` button, selectable label filter pills with open task count badges, and `+ Create new label` entry) alongside synchronization, TDF preview, and settings actions without tier navigation items. |

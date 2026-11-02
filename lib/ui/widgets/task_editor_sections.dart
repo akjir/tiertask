@@ -20,14 +20,8 @@ import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
 import '../../models/tdf_metadata.dart';
+import '../app_theme.dart';
 import 'quick_add_bar.dart';
-
-const Color _accentAmber = Color(0xFFFFB300);
-const Color _accentBlue = Color(0xFF2196F3);
-const Color _accentCyan = Color(0xFF00E5FF);
-const Color _accentMagenta = Color(0xFFEB06FF);
-const Color _canvasColor = Color(0xFF344FA1);
-const Color _mutedLabelColor = Color(0xFF9BA8E5);
 
 /// Footer row inside the task editor containing Cancel and Save actions.
 class TaskEditorActionsRow extends StatelessWidget {
@@ -52,17 +46,12 @@ class TaskEditorActionsRow extends StatelessWidget {
       children: [
         TextButton(
           key: const ValueKey('task_editor_cancel_button'),
-          style: TextButton.styleFrom(foregroundColor: _mutedLabelColor),
           onPressed: onCancel,
           child: Text(localizations.actionCancel),
         ),
         const SizedBox(width: 8),
         FilledButton(
           key: const ValueKey('task_editor_save_button'),
-          style: FilledButton.styleFrom(
-            backgroundColor: _accentMagenta,
-            foregroundColor: Colors.white,
-          ),
           onPressed: onSave,
           child: Text(localizations.actionSave),
         ),
@@ -100,6 +89,7 @@ class TaskEditorBlockedBySection extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -107,8 +97,8 @@ class TaskEditorBlockedBySection extends StatelessWidget {
         const SizedBox(height: 10),
         Text(
           localizations.sectionBlockedByTasks,
-          style: const TextStyle(
-            color: _mutedLabelColor,
+          style: TextStyle(
+            color: appTheme.mutedTextColor,
             fontSize: 11,
             fontWeight: FontWeight.w600,
             letterSpacing: 1.2,
@@ -126,7 +116,7 @@ class TaskEditorBlockedBySection extends StatelessWidget {
                 label: candidate.title,
                 isSelected: selectedBlockedByIds.contains(candidate.id),
                 isEnabled: !disabledTaskIds.contains(candidate.id),
-                accentColor: _accentAmber,
+                accentColor: appTheme.warningAccent,
                 onTap: () => onToggleBlockedBy(candidate.id),
               ),
           ],
@@ -173,6 +163,11 @@ class TaskEditorChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mutedColor = colorScheme.onSurfaceVariant;
+    final canvasColor = theme.scaffoldBackgroundColor;
+
     return FilterChip(
       key: chipKey,
       selected: isSelected,
@@ -183,30 +178,26 @@ class TaskEditorChip extends StatelessWidget {
         icon,
         size: 16,
         color: isSelected
-            ? Colors.white
-            : (isEnabled
-                  ? accentColor
-                  : _mutedLabelColor.withValues(alpha: 0.4)),
+            ? colorScheme.onPrimary
+            : (isEnabled ? accentColor : mutedColor.withValues(alpha: 0.4)),
       ),
       label: Text(
         label,
         style: TextStyle(
           color: isSelected
-              ? Colors.white
-              : (isEnabled
-                    ? _mutedLabelColor
-                    : _mutedLabelColor.withValues(alpha: 0.4)),
+              ? colorScheme.onPrimary
+              : (isEnabled ? mutedColor : mutedColor.withValues(alpha: 0.4)),
           fontSize: 13,
           fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
         ),
       ),
-      backgroundColor: _canvasColor,
-      disabledColor: _canvasColor.withValues(alpha: 0.5),
+      backgroundColor: canvasColor,
+      disabledColor: canvasColor.withValues(alpha: 0.5),
       selectedColor: accentColor,
       side: BorderSide(
         color: isSelected
             ? accentColor
-            : _mutedLabelColor.withValues(alpha: isEnabled ? 0.35 : 0.15),
+            : mutedColor.withValues(alpha: isEnabled ? 0.35 : 0.15),
       ),
       onSelected: isEnabled ? (_) => onTap() : null,
     );
@@ -238,6 +229,7 @@ class TaskEditorContextSection extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -245,8 +237,8 @@ class TaskEditorContextSection extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           localizations.sectionLabels,
-          style: const TextStyle(
-            color: _mutedLabelColor,
+          style: TextStyle(
+            color: colorScheme.onSurfaceVariant,
             fontSize: 11,
             fontWeight: FontWeight.w600,
             letterSpacing: 1.2,
@@ -263,7 +255,7 @@ class TaskEditorContextSection extends StatelessWidget {
                 icon: Icons.label_outline_rounded,
                 label: label.name,
                 isSelected: selectedLabelIds.contains(label.id),
-                accentColor: _resolveColor(label.color, _accentMagenta),
+                accentColor: _resolveColor(label.color, colorScheme.primary),
                 onTap: () => onToggleLabel(label.id),
               ),
           ],
@@ -309,6 +301,7 @@ class TaskEditorModeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Wrap(
       spacing: 8,
       runSpacing: 6,
@@ -318,7 +311,7 @@ class TaskEditorModeRow extends StatelessWidget {
           icon: Icons.bolt_rounded,
           label: localizations.quickAddPriority,
           isSelected: mode == QuickAddMode.priority,
-          accentColor: _accentMagenta,
+          accentColor: appTheme.primaryAccent,
           onTap: onTogglePriority,
         ),
         TaskEditorChip(
@@ -326,7 +319,7 @@ class TaskEditorModeRow extends StatelessWidget {
           icon: Icons.lightbulb_outline_rounded,
           label: localizations.tierName(TaskTier.someday),
           isSelected: mode == QuickAddMode.someday,
-          accentColor: _accentBlue,
+          accentColor: appTheme.secondaryAccent,
           onTap: onToggleSomeday,
         ),
         TaskEditorChip(
@@ -334,7 +327,7 @@ class TaskEditorModeRow extends StatelessWidget {
           icon: Icons.pause_circle_outline_rounded,
           label: localizations.taskSuspendedLabel,
           isSelected: isSuspended,
-          accentColor: _accentAmber,
+          accentColor: appTheme.warningAccent,
           onTap: onToggleSuspended,
         ),
       ],
@@ -353,27 +346,30 @@ class TaskEditorNoteField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     final borderRadius = BorderRadius.circular(14);
     final defaultBorder = OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: _mutedLabelColor.withValues(alpha: 0.35)),
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
     );
 
     return TextField(
       key: const ValueKey('task_editor_note_input'),
       controller: controller,
-      cursorColor: _accentCyan,
-      style: const TextStyle(color: Colors.white, fontSize: 14),
+      cursorColor: appTheme.tertiaryAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
       minLines: 1,
       maxLines: 2,
       decoration: InputDecoration(
         labelText: localizations.taskNoteLabel,
-        labelStyle: const TextStyle(color: _mutedLabelColor),
+        labelStyle: TextStyle(color: appTheme.mutedTextColor),
         hintText: localizations.taskNoteHint,
-        hintStyle: const TextStyle(color: _mutedLabelColor),
+        hintStyle: TextStyle(color: appTheme.mutedTextColor),
         isDense: true,
         filled: true,
-        fillColor: _canvasColor,
+        fillColor: appTheme.canvasColor,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
           vertical: 10,
@@ -382,7 +378,7 @@ class TaskEditorNoteField extends StatelessWidget {
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius,
-          borderSide: const BorderSide(color: _accentCyan, width: 1.6),
+          borderSide: BorderSide(color: appTheme.tertiaryAccent, width: 1.6),
         ),
       ),
     );
@@ -431,6 +427,7 @@ class TaskEditorSubtasksSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -440,8 +437,8 @@ class TaskEditorSubtasksSection extends StatelessWidget {
             Expanded(
               child: Text(
                 localizations.subtasksSectionTitle,
-                style: const TextStyle(
-                  color: _mutedLabelColor,
+                style: TextStyle(
+                  color: appTheme.mutedTextColor,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -452,7 +449,7 @@ class TaskEditorSubtasksSection extends StatelessWidget {
               icon: Icons.done_all_rounded,
               label: localizations.subtasksAutoFinishLabel,
               isSelected: subtasksAutoFinish,
-              accentColor: _accentCyan,
+              accentColor: appTheme.tertiaryAccent,
               onTap: onToggleAutoFinish,
             ),
           ],
@@ -493,26 +490,29 @@ class TaskEditorSuspendedField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     final borderRadius = BorderRadius.circular(14);
     final defaultBorder = OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: _mutedLabelColor.withValues(alpha: 0.35)),
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
     );
 
     return TextField(
       key: const ValueKey('task_editor_suspended_input'),
       controller: controller,
-      cursorColor: _accentAmber,
-      style: const TextStyle(color: Colors.white, fontSize: 14),
+      cursorColor: appTheme.warningAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
       decoration: InputDecoration(
         labelText: localizations.taskSuspendedUntilLabel,
-        labelStyle: const TextStyle(color: _mutedLabelColor),
+        labelStyle: TextStyle(color: appTheme.mutedTextColor),
         hintText: localizations.taskSuspendedUntilHint,
-        hintStyle: const TextStyle(color: _mutedLabelColor),
+        hintStyle: TextStyle(color: appTheme.mutedTextColor),
         errorText: errorMessage,
         isDense: true,
         filled: true,
-        fillColor: _canvasColor,
+        fillColor: appTheme.canvasColor,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
           vertical: 10,
@@ -521,7 +521,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius,
-          borderSide: const BorderSide(color: _accentAmber, width: 1.6),
+          borderSide: BorderSide(color: appTheme.warningAccent, width: 1.6),
         ),
       ),
     );
@@ -550,27 +550,30 @@ class TaskEditorTitleField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     final borderRadius = BorderRadius.circular(14);
     final defaultBorder = OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: _mutedLabelColor.withValues(alpha: 0.35)),
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
     );
 
     return TextField(
       key: const ValueKey('task_editor_title_input'),
       controller: controller,
       autofocus: true,
-      cursorColor: _accentMagenta,
-      style: const TextStyle(color: Colors.white, fontSize: 15),
+      cursorColor: appTheme.primaryAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 15),
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => onSubmit(),
       decoration: InputDecoration(
         labelText: localizations.taskNameLabel,
-        labelStyle: const TextStyle(color: _mutedLabelColor),
+        labelStyle: TextStyle(color: appTheme.mutedTextColor),
         errorText: errorMessage,
         isDense: true,
         filled: true,
-        fillColor: _canvasColor,
+        fillColor: appTheme.canvasColor,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
           vertical: 10,
@@ -579,7 +582,7 @@ class TaskEditorTitleField extends StatelessWidget {
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius,
-          borderSide: const BorderSide(color: _accentMagenta, width: 1.6),
+          borderSide: BorderSide(color: appTheme.primaryAccent, width: 1.6),
         ),
       ),
     );
@@ -607,10 +610,13 @@ class _TaskEditorSubtaskInputRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     final borderRadius = BorderRadius.circular(14);
     final defaultBorder = OutlineInputBorder(
       borderRadius: borderRadius,
-      borderSide: BorderSide(color: _mutedLabelColor.withValues(alpha: 0.35)),
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
     );
 
     return Row(
@@ -619,16 +625,16 @@ class _TaskEditorSubtaskInputRow extends StatelessWidget {
           child: TextField(
             key: const ValueKey('task_editor_subtask_input'),
             controller: controller,
-            cursorColor: _accentCyan,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            cursorColor: appTheme.tertiaryAccent,
+            style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => onAddSubtask(),
             decoration: InputDecoration(
               hintText: localizations.subtaskInputHint,
-              hintStyle: const TextStyle(color: _mutedLabelColor),
+              hintStyle: TextStyle(color: appTheme.mutedTextColor),
               isDense: true,
               filled: true,
-              fillColor: _canvasColor,
+              fillColor: appTheme.canvasColor,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 10,
@@ -637,7 +643,10 @@ class _TaskEditorSubtaskInputRow extends StatelessWidget {
               enabledBorder: defaultBorder,
               focusedBorder: OutlineInputBorder(
                 borderRadius: borderRadius,
-                borderSide: const BorderSide(color: _accentCyan, width: 1.6),
+                borderSide: BorderSide(
+                  color: appTheme.tertiaryAccent,
+                  width: 1.6,
+                ),
               ),
             ),
           ),
@@ -646,10 +655,14 @@ class _TaskEditorSubtaskInputRow extends StatelessWidget {
         IconButton.filledTonal(
           key: const ValueKey('task_editor_subtask_add_button'),
           style: IconButton.styleFrom(
-            backgroundColor: _accentBlue,
-            foregroundColor: Colors.white,
-            disabledBackgroundColor: _canvasColor.withValues(alpha: 0.55),
-            disabledForegroundColor: _mutedLabelColor.withValues(alpha: 0.6),
+            backgroundColor: appTheme.secondaryAccent,
+            foregroundColor: appTheme.onSecondaryColor,
+            disabledBackgroundColor: appTheme.canvasColor.withValues(
+              alpha: 0.55,
+            ),
+            disabledForegroundColor: appTheme.mutedTextColor.withValues(
+              alpha: 0.6,
+            ),
           ),
           tooltip: localizations.tooltipAddSubtask,
           onPressed: hasText ? onAddSubtask : null,
@@ -685,6 +698,7 @@ class _TaskEditorSubtaskRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
@@ -700,7 +714,9 @@ class _TaskEditorSubtaskRow extends StatelessWidget {
                     ? Icons.check_circle_rounded
                     : Icons.radio_button_unchecked_rounded,
                 size: 18,
-                color: subtask.isCompleted ? _accentCyan : _mutedLabelColor,
+                color: subtask.isCompleted
+                    ? appTheme.tertiaryAccent
+                    : appTheme.mutedTextColor,
               ),
             ),
           ),
@@ -709,7 +725,9 @@ class _TaskEditorSubtaskRow extends StatelessWidget {
             child: Text(
               subtask.title,
               style: TextStyle(
-                color: subtask.isCompleted ? _mutedLabelColor : Colors.white,
+                color: subtask.isCompleted
+                    ? appTheme.mutedTextColor
+                    : appTheme.primaryTextColor,
                 decoration: subtask.isCompleted
                     ? TextDecoration.lineThrough
                     : null,
@@ -720,10 +738,10 @@ class _TaskEditorSubtaskRow extends StatelessWidget {
             key: ValueKey('task_editor_remove_subtask_$index'),
             visualDensity: VisualDensity.compact,
             tooltip: localizations.tooltipRemoveSubtask,
-            icon: const Icon(
+            icon: Icon(
               Icons.close_rounded,
               size: 18,
-              color: _mutedLabelColor,
+              color: appTheme.mutedTextColor,
             ),
             onPressed: onRemove,
           ),

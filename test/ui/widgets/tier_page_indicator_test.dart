@@ -23,7 +23,7 @@ import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
-import 'package:tiertask/ui/widgets/tier_page_indicator.dart';
+import 'package:tiertask/ui/app_theme.dart';
 
 import '../test_helpers.dart';
 
@@ -448,6 +448,7 @@ task cmp1 {
         reason: 'Non-adjacent dots must keep the base dot size',
       );
 
+      final activeAppTheme = AppTheme.of(tester.element(indicatorFinder));
       final plannedDotDecoration =
           tester.widget<Container>(plannedDotFinder).decoration
               as BoxDecoration?;
@@ -455,12 +456,12 @@ task cmp1 {
           tester.widget<Container>(focusDotFinder).decoration as BoxDecoration?;
       expect(
         plannedDotDecoration?.color,
-        equals(TierPageIndicator.intermediateColor),
+        equals(activeAppTheme.indicatorIntermediateColor),
         reason: 'Larger adjacent wave dots must use the intermediate color between inactive dot and active icon',
       );
       expect(
         focusDotDecoration?.color,
-        equals(TierPageIndicator.inactiveDotColor),
+        equals(activeAppTheme.indicatorInactiveDotColor),
         reason: 'Non-adjacent dots must use the standard inactive dot color',
       );
 
@@ -578,12 +579,12 @@ task cmp1 {
       );
       expect(
         hoveredSomedayIcon.color,
-        equals(TierPageIndicator.intermediateColor),
+        equals(activeAppTheme.indicatorIntermediateColor),
         reason: 'Hovered indicator icon must be rendered in the color between the active icon color and inactive dot color',
       );
       expect(
         activeCompletedIcon.color,
-        equals(TierPageIndicator.activeIconColor),
+        equals(activeAppTheme.indicatorActiveIconColor),
         reason: 'Active indicator icon must keep the active icon color',
       );
       expect(

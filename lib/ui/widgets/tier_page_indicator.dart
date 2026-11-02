@@ -21,9 +21,9 @@ import 'package:flutter/services.dart';
 import '../../l10n/app_localizations.dart';
 import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_tier.dart';
+import '../app_theme.dart';
 
 const double _baseDotDiameter = 8.0;
-const Color _cardColor = Color(0xFF071A52);
 const double _indicatorHeight = 48.0;
 const double _slotWidth = 48.0;
 const double _trackWidth = _slotWidth * 6;
@@ -38,16 +38,6 @@ class TierPageIndicator extends StatefulWidget {
     required this.activeTier,
     required this.onTierSelected,
   });
-
-  /// Color of the currently active tier icon.
-  static const Color activeIconColor = Colors.white;
-
-  /// Color of unselected non-adjacent indicator dots.
-  static const Color inactiveDotColor = Color(0xA69BA8E5);
-
-  /// Midpoint color between [inactiveDotColor] and [activeIconColor] used for
-  /// desktop mouse-over icons and the two adjacent larger wave dots.
-  static const Color intermediateColor = Color(0xD3CDD4F2);
 
   /// Currently visible [TaskTier] pane.
   final TaskTier activeTier;
@@ -113,6 +103,7 @@ class _TierIndicatorDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final appTheme = AppTheme.of(context);
     final diameter = isAdjacentInWave
         ? _baseDotDiameter * 1.5
         : _baseDotDiameter;
@@ -122,8 +113,8 @@ class _TierIndicatorDot extends StatelessWidget {
       height: diameter,
       decoration: BoxDecoration(
         color: isAdjacentInWave
-            ? TierPageIndicator.intermediateColor
-            : TierPageIndicator.inactiveDotColor,
+            ? appTheme.indicatorIntermediateColor
+            : appTheme.indicatorInactiveDotColor,
         shape: BoxShape.circle,
       ),
     );
@@ -140,24 +131,18 @@ class _TierIndicatorNameLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
       key: const ValueKey('tier_indicator_wave_label'),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
       decoration: BoxDecoration(
-        color: _cardColor,
+        color: theme.cardColor,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
       ),
       child: Text(
         label,
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: theme.colorScheme.onSurface,
           fontSize: 13,
           fontWeight: FontWeight.w600,
           letterSpacing: 0.3,
@@ -203,6 +188,7 @@ class _TierIndicatorSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final appTheme = AppTheme.of(context);
     final showIcon = isActive || isHovered;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -217,8 +203,8 @@ class _TierIndicatorSlot extends StatelessWidget {
             child: showIcon
                 ? _TierIndicatorActiveIcon(
                     color: isActive
-                        ? TierPageIndicator.activeIconColor
-                        : TierPageIndicator.intermediateColor,
+                        ? appTheme.indicatorActiveIconColor
+                        : appTheme.indicatorIntermediateColor,
                     isScrubbing: isScrubbing && isActive,
                     tier: tier,
                   )
