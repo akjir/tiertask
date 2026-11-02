@@ -369,6 +369,46 @@ class _ErrorStateView extends StatelessWidget {
   }
 }
 
+/// Smaller circular floating action button for triggering WebDAV synchronization above the task-add button.
+class _FloatingSyncButton extends StatelessWidget {
+  /// Creates a [_FloatingSyncButton].
+  const _FloatingSyncButton({
+    required this.isSyncing,
+    required this.onSyncRemote,
+  });
+
+  /// Whether a synchronization request is currently in progress.
+  final bool isSyncing;
+
+  /// Callback invoked when the floating WebDAV sync button is pressed.
+  final VoidCallback onSyncRemote;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return FloatingActionButton.small(
+      key: const ValueKey('sync_fab'),
+      heroTag: null,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      backgroundColor: _cardColor,
+      foregroundColor: Colors.white,
+      shape: const CircleBorder(),
+      tooltip: localizations.tooltipSyncWebDav,
+      onPressed: isSyncing ? null : onSyncRemote,
+      child: isSyncing
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.sync_rounded, size: 20),
+    );
+  }
+}
+
 /// State for [HomeScreen].
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _activeLabelId;
@@ -415,12 +455,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       floatingActionButton: _isQuickAddOpen
           ? null
-          : FloatingActionButton(
-              backgroundColor: _accentMagenta,
-              foregroundColor: Colors.white,
-              shape: const CircleBorder(),
-              onPressed: _openQuickAdd,
-              child: const Icon(Icons.add_rounded, size: 28),
+          : _LandingFloatingButtons(
+              isSyncing: syncState.isSyncing,
+              showSyncAction: showSyncAction,
+              onOpenQuickAdd: _openQuickAdd,
+              onSyncRemote: () =>
+                  ref.read(taskNotifierProvider.notifier).syncFromRemote(),
             ),
       bottomNavigationBar: _isQuickAddOpen
           ? Padding(
@@ -441,11 +481,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           errorMessage: syncState.errorMessage,
           evaluationTime: evaluationTime,
           isSearching: _isSearching,
-          isSyncing: syncState.isSyncing,
           pageController: _pageController,
           searchController: _searchController,
           searchQuery: _searchQuery,
-          showSyncAction: showSyncAction,
           onClearError: () => ref.read(syncStateProvider.notifier).clearError(),
           onOpenSettings: () => _openSettings(context),
           onPageChanged: _handlePageChanged,
@@ -453,8 +491,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ref.read(taskNotifierProvider.notifier).syncFromRemote(),
           onSearchChanged: _updateSearchQuery,
           onSelectTier: _selectTierPane,
-          onSyncRemote: () =>
-              ref.read(taskNotifierProvider.notifier).syncFromRemote(),
           onToggleSearch: _toggleSearch,
         ),
       ),
@@ -729,6 +765,52 @@ class _LandingDrawer extends StatelessWidget {
   }
 }
 
+/// Floating action buttons column displaying the smaller WebDAV sync button above the task-add button.
+class _LandingFloatingButtons extends StatelessWidget {
+  /// Creates [_LandingFloatingButtons].
+  const _LandingFloatingButtons({
+    required this.isSyncing,
+    required this.showSyncAction,
+    required this.onOpenQuickAdd,
+    required this.onSyncRemote,
+  });
+
+  /// Whether a synchronization request is currently in progress.
+  final bool isSyncing;
+
+  /// Callback invoked when the primary add task button is pressed.
+  final VoidCallback onOpenQuickAdd;
+
+  /// Callback invoked when the floating WebDAV sync button is pressed.
+  final VoidCallback onSyncRemote;
+
+  /// Whether WebDAV synchronization is enabled (`WebDAV` or `Both` mode).
+  final bool showSyncAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        if (showSyncAction) ...[
+          _FloatingSyncButton(isSyncing: isSyncing, onSyncRemote: onSyncRemote),
+          const SizedBox(height: 12),
+        ],
+        FloatingActionButton(
+          key: const ValueKey('add_task_fab'),
+          heroTag: null,
+          backgroundColor: _accentMagenta,
+          foregroundColor: Colors.white,
+          shape: const CircleBorder(),
+          onPressed: onOpenQuickAdd,
+          child: const Icon(Icons.add_rounded, size: 28),
+        ),
+      ],
+    );
+  }
+}
+
 /// Column layout inside [HomeScreen] combining the top bar, error banner, content switcher, and bottom tier indicator.
 class _LandingScaffoldBody extends StatelessWidget {
   /// Creates a [_LandingScaffoldBody].
@@ -739,18 +821,15 @@ class _LandingScaffoldBody extends StatelessWidget {
     required this.errorMessage,
     required this.evaluationTime,
     required this.isSearching,
-    required this.isSyncing,
     required this.pageController,
     required this.searchController,
     required this.searchQuery,
-    required this.showSyncAction,
     required this.onClearError,
     required this.onOpenSettings,
     required this.onPageChanged,
     required this.onRetry,
     required this.onSearchChanged,
     required this.onSelectTier,
-    required this.onSyncRemote,
     required this.onToggleSearch,
   });
 
@@ -772,9 +851,6 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Whether the inline search bar is active.
   final bool isSearching;
 
-  /// Whether a synchronization request is in progress.
-  final bool isSyncing;
-
   /// Callback to dismiss the error banner.
   final VoidCallback onClearError;
 
@@ -793,9 +869,6 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Callback invoked when a tier is selected in [TierPageIndicator].
   final ValueChanged<TaskTier> onSelectTier;
 
-  /// Callback to trigger WebDAV synchronization from the top bar.
-  final VoidCallback onSyncRemote;
-
   /// Callback to toggle the search bar.
   final VoidCallback onToggleSearch;
 
@@ -808,9 +881,6 @@ class _LandingScaffoldBody extends StatelessWidget {
   /// Active search query string.
   final String searchQuery;
 
-  /// Whether the top bar should display the WebDAV sync action next to search.
-  final bool showSyncAction;
-
   @override
   Widget build(BuildContext context) {
     final activeError = errorMessage;
@@ -819,11 +889,8 @@ class _LandingScaffoldBody extends StatelessWidget {
         _LandingTopBar(
           activeLabelName: activeLabel?.name,
           isSearching: isSearching,
-          isSyncing: isSyncing,
           searchController: searchController,
-          showSyncAction: showSyncAction,
           onSearchChanged: onSearchChanged,
-          onSyncRemote: onSyncRemote,
           onToggleSearch: onToggleSearch,
         ),
         if (activeError != null)
@@ -868,17 +935,14 @@ class _LandingSectionLabel extends StatelessWidget {
   }
 }
 
-/// Top navigation bar displaying the menu button on the left, the active label name in the center when a label filter is selected (smoothly gliding left next to the menu when searching), and search and optional sync on the right.
+/// Top navigation bar displaying the menu button on the left, the active label name in the center when a label filter is selected (smoothly gliding left next to the menu when searching), and the search toggle on the right.
 class _LandingTopBar extends StatelessWidget {
   /// Creates a [_LandingTopBar].
   const _LandingTopBar({
     required this.activeLabelName,
     required this.isSearching,
-    required this.isSyncing,
     required this.searchController,
-    required this.showSyncAction,
     required this.onSearchChanged,
-    required this.onSyncRemote,
     required this.onToggleSearch,
   });
 
@@ -888,23 +952,14 @@ class _LandingTopBar extends StatelessWidget {
   /// Whether the inline search input is currently expanded.
   final bool isSearching;
 
-  /// Whether a background sync request is currently in progress.
-  final bool isSyncing;
-
   /// Callback invoked when the search input text changes.
   final ValueChanged<String> onSearchChanged;
-
-  /// Callback invoked when the WebDAV sync button is pressed.
-  final VoidCallback onSyncRemote;
 
   /// Callback invoked when the search button or close button is pressed.
   final VoidCallback onToggleSearch;
 
   /// Controller for the inline search input field.
   final TextEditingController searchController;
-
-  /// Whether to display the sync button next to search (`WebDAV` or `Both` mode).
-  final bool showSyncAction;
 
   @override
   Widget build(BuildContext context) {
@@ -927,8 +982,6 @@ class _LandingTopBar extends StatelessWidget {
             isSearching: isSearching,
             onPressed: onToggleSearch,
           ),
-          if (showSyncAction)
-            _TopBarSyncAction(isSyncing: isSyncing, onSyncRemote: onSyncRemote),
         ],
       ),
     );
@@ -1537,44 +1590,6 @@ enum _TopBarSlot {
 
   /// Inline search input slot.
   search,
-}
-
-/// Sync button or progress spinner rendered next to search when WebDAV is enabled.
-class _TopBarSyncAction extends StatelessWidget {
-  /// Creates a [_TopBarSyncAction].
-  const _TopBarSyncAction({
-    required this.isSyncing,
-    required this.onSyncRemote,
-  });
-
-  /// Whether a synchronization request is currently in flight.
-  final bool isSyncing;
-
-  /// Callback invoked when the sync button is pressed.
-  final VoidCallback onSyncRemote;
-
-  @override
-  Widget build(BuildContext context) {
-    if (isSyncing) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 8),
-        child: SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            color: _mutedLabelColor,
-          ),
-        ),
-      );
-    }
-    final localizations = AppLocalizations.of(context);
-    return IconButton(
-      tooltip: localizations.tooltipSyncWebDav,
-      icon: const Icon(Icons.sync_rounded, color: _mutedLabelColor, size: 26),
-      onPressed: onSyncRemote,
-    );
-  }
 }
 
 /// Active label title displayed inside [_LandingTopBar].

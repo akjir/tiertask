@@ -56,7 +56,7 @@ void main() {
       expect(
         find.byIcon(Icons.sync_rounded),
         findsNothing,
-        reason: 'Sync button must be hidden in the top bar when StorageMode.local is active',
+        reason: 'Floating sync button must be hidden when StorageMode.local is active',
       );
       expect(
         find.byIcon(Icons.settings_outlined),
@@ -258,7 +258,7 @@ void main() {
   );
 
   testWidgets(
-    'Top-right bar shows sync icon next to search only when WebDAV or Both storage mode is selected',
+    'Sync button floats as a smaller button above the add button only when WebDAV or Both mode is active and hides when QuickAddBar opens',
     (WidgetTester tester) async {
       await tester.pumpWidget(
         ProviderScope(
@@ -279,10 +279,23 @@ void main() {
 
       await tester.pumpAndSettle();
 
+      final syncFabFinder = find.byKey(const ValueKey('sync_fab'));
+      final addFabFinder = find.byKey(const ValueKey('add_task_fab'));
+
+      expect(
+        syncFabFinder,
+        findsNothing,
+        reason: 'Local mode must not display the floating sync button',
+      );
       expect(
         find.byIcon(Icons.sync_rounded),
         findsNothing,
-        reason: 'Local mode must not display the sync icon in the top bar',
+        reason: 'Local mode must not display the sync icon anywhere on screen',
+      );
+      expect(
+        addFabFinder,
+        findsOneWidget,
+        reason: 'Add task button must be visible when QuickAddBar is closed',
       );
 
       await openSettingsFromMenu(tester);
@@ -293,9 +306,96 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
+        syncFabFinder,
+        findsOneWidget,
+        reason: 'WebDAV mode must display the floating sync button',
+      );
+      expect(
         find.byIcon(Icons.sync_rounded),
         findsOneWidget,
-        reason: 'WebDAV mode must display the sync icon in the top-right bar',
+        reason:
+            'WebDAV mode must display the sync icon inside the floating button',
+      );
+
+      final searchButtonRect = tester.getRect(
+        find.byIcon(Icons.search_rounded),
+      );
+      final syncRect = tester.getRect(syncFabFinder);
+      final addRect = tester.getRect(addFabFinder);
+
+      expect(
+        syncRect.top > searchButtonRect.bottom + 40.0,
+        isTrue,
+        reason: 'Sync button must no longer reside in the top bar',
+      );
+      expect(
+        syncRect.width < addRect.width && syncRect.height < addRect.height,
+        isTrue,
+        reason: 'Sync button must be smaller than the add task button',
+      );
+      expect(
+        syncRect.bottom <= addRect.top,
+        isTrue,
+        reason: 'Sync button must float above the add task button',
+      );
+      final syncMaterialRect = tester.getRect(
+        find.descendant(of: syncFabFinder, matching: find.byType(Material)),
+      );
+      final addMaterialRect = tester.getRect(
+        find.descendant(of: addFabFinder, matching: find.byType(Material)),
+      );
+      expect(
+        syncRect.right,
+        closeTo(addRect.right, 0.01),
+        reason: 'Sync button must be right-aligned with the add task button at the same distance from the right screen edge',
+      );
+      expect(
+        syncMaterialRect.right,
+        closeTo(addMaterialRect.right, 0.01),
+        reason: 'Visual circle of the sync button must have the exact same right-edge distance as the add task button',
+      );
+      expect(
+        syncRect.left > addRect.left,
+        isTrue,
+        reason: 'Smaller right-aligned sync button must not be horizontally centered over the add task button',
+      );
+
+      await tester.tap(addFabFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('quick_add_bar')),
+        findsOneWidget,
+        reason: 'Tapping the add button must open QuickAddBar',
+      );
+      expect(
+        addFabFinder,
+        findsNothing,
+        reason: 'Add button must hide when transformed into QuickAddBar',
+      );
+      expect(
+        syncFabFinder,
+        findsNothing,
+        reason: 'Sync button must also hide when Add button transforms into QuickAddBar',
+      );
+      expect(
+        find.byIcon(Icons.sync_rounded),
+        findsNothing,
+        reason: 'Sync icon must not be visible while QuickAddBar is open',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('quick_add_cancel_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        syncFabFinder,
+        findsOneWidget,
+        reason: 'Closing QuickAddBar must restore the floating sync button',
+      );
+      expect(
+        addFabFinder,
+        findsOneWidget,
+        reason: 'Closing QuickAddBar must restore the floating add button',
       );
 
       await openSettingsFromMenu(tester);
@@ -306,9 +406,18 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.byIcon(Icons.sync_rounded),
+        syncFabFinder,
         findsOneWidget,
-        reason: 'Both mode must display the sync icon in the top-right bar',
+        reason: 'Both mode must display the floating sync button above the add button',
+      );
+      final bothSyncRect = tester.getRect(syncFabFinder);
+      final bothAddRect = tester.getRect(addFabFinder);
+      expect(
+        bothSyncRect.bottom <= bothAddRect.top &&
+            bothSyncRect.width < bothAddRect.width &&
+            (bothSyncRect.right - bothAddRect.right).abs() < 0.01,
+        isTrue,
+        reason: 'Both mode must keep the smaller sync button right-aligned above the add button',
       );
     },
   );
