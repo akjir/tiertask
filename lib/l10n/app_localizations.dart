@@ -878,18 +878,6 @@ abstract class AppLocalizations {
   /// **'Suspended is active: evaluation of all other conditions is disabled and this task appears under Blocked.'**
   String get taskSuspendedDisablesConditionsHint;
 
-  /// Uppercase section label above the prerequisite tasks selector in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'PREREQUISITE TASKS (BLOCKED BY)'**
-  String get sectionBlockedByTasks;
-
-  /// Uppercase section label above the activation conditions section in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'ACTIVATION CONDITIONS'**
-  String get sectionTaskConditions;
-
   /// Toggle chip label for the global condition any reset directive.
   ///
   /// In en, this message translates to:
@@ -1039,6 +1027,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Remove location rule'**
   String get tooltipRemoveLocationCondition;
+
+  /// Section card title for task name and note in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Task Details'**
+  String get taskDetailsSectionTitle;
+
+  /// Section card title for scheduling mode and suspension in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Scheduling & Status'**
+  String get taskSchedulingSectionTitle;
+
+  /// Section card title for labels in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Labels'**
+  String get taskLabelsSectionTitle;
+
+  /// Section card title for prerequisite tasks in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Prerequisite Tasks'**
+  String get taskBlockedBySectionTitle;
+
+  /// Section card description for prerequisite tasks in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Search for open tasks by name and select tasks that must be finished before this task becomes active.'**
+  String get taskBlockedBySectionDescription;
+
+  /// Placeholder hint for searching prerequisite tasks by name.
+  ///
+  /// In en, this message translates to:
+  /// **'Search tasks by name...'**
+  String get blockedBySearchHint;
+
+  /// Empty-state text shown when no prerequisite task matches the search query.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching tasks found.'**
+  String get blockedBySearchNoResults;
+
+  /// Tooltip for clearing the prerequisite task search input.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear search'**
+  String get tooltipClearSearch;
+
+  /// Section card title for activation conditions in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation Conditions'**
+  String get taskConditionsSectionTitle;
+
+  /// Section card description for activation conditions in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Restrict when and where this task becomes active, or override inherited label conditions.'**
+  String get taskConditionsSectionDescription;
+
+  /// Tooltip for the date picker button on the suspended timestamp field.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick date'**
+  String get tooltipPickDate;
+
+  /// Tooltip for the time picker button on the suspended timestamp field.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick time'**
+  String get tooltipPickTime;
+
+  /// Tooltip for clearing the suspended timestamp field.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear timestamp'**
+  String get tooltipClearDate;
+
+  /// Tooltip for the start time picker button in time window conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick start time'**
+  String get tooltipPickStartTime;
+
+  /// Tooltip for the end time picker button in time window conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick end time'**
+  String get tooltipPickEndTime;
 }
 
 class _AppLocalizationsDelegate

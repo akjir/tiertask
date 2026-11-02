@@ -448,12 +448,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Zurückgestellt ist aktiv: Die Auswertung aller anderen Bedingungen ist deaktiviert und diese Aufgabe erscheint unter Blockiert.';
 
   @override
-  String get sectionBlockedByTasks => 'VORAUSSETZUNGEN (BLOCKIERT DURCH)';
-
-  @override
-  String get sectionTaskConditions => 'AKTIVIERUNGSBEDINGUNGEN';
-
-  @override
   String get conditionGlobalAnyLabel =>
       'Beliebig (Label-Bedingungen ignorieren)';
 
@@ -530,4 +524,51 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get tooltipRemoveLocationCondition => 'Standortregel entfernen';
+
+  @override
+  String get taskDetailsSectionTitle => 'Aufgabendetails';
+
+  @override
+  String get taskSchedulingSectionTitle => 'Planung & Status';
+
+  @override
+  String get taskLabelsSectionTitle => 'Labels';
+
+  @override
+  String get taskBlockedBySectionTitle => 'Voraussetzungen';
+
+  @override
+  String get taskBlockedBySectionDescription =>
+      'Suche nach offenen Aufgaben anhand des Namens und wähle Aufgaben aus, die zuerst erledigt sein müssen.';
+
+  @override
+  String get blockedBySearchHint => 'Aufgaben nach Namen suchen...';
+
+  @override
+  String get blockedBySearchNoResults => 'Keine passenden Aufgaben gefunden.';
+
+  @override
+  String get tooltipClearSearch => 'Suche löschen';
+
+  @override
+  String get taskConditionsSectionTitle => 'Aktivierungsbedingungen';
+
+  @override
+  String get taskConditionsSectionDescription =>
+      'Schränke ein, wann und wo diese Aufgabe aktiv wird, oder überschreibe geerbte Label-Bedingungen.';
+
+  @override
+  String get tooltipPickDate => 'Datum auswählen';
+
+  @override
+  String get tooltipPickTime => 'Uhrzeit auswählen';
+
+  @override
+  String get tooltipClearDate => 'Zeitstempel löschen';
+
+  @override
+  String get tooltipPickStartTime => 'Startzeit auswählen';
+
+  @override
+  String get tooltipPickEndTime => 'Endzeit auswählen';
 }

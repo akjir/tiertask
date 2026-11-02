@@ -440,12 +440,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Suspended is active: evaluation of all other conditions is disabled and this task appears under Blocked.';
 
   @override
-  String get sectionBlockedByTasks => 'PREREQUISITE TASKS (BLOCKED BY)';
-
-  @override
-  String get sectionTaskConditions => 'ACTIVATION CONDITIONS';
-
-  @override
   String get conditionGlobalAnyLabel => 'Any (ignore label conditions)';
 
   @override
@@ -520,4 +514,51 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipRemoveLocationCondition => 'Remove location rule';
+
+  @override
+  String get taskDetailsSectionTitle => 'Task Details';
+
+  @override
+  String get taskSchedulingSectionTitle => 'Scheduling & Status';
+
+  @override
+  String get taskLabelsSectionTitle => 'Labels';
+
+  @override
+  String get taskBlockedBySectionTitle => 'Prerequisite Tasks';
+
+  @override
+  String get taskBlockedBySectionDescription =>
+      'Search for open tasks by name and select tasks that must be finished before this task becomes active.';
+
+  @override
+  String get blockedBySearchHint => 'Search tasks by name...';
+
+  @override
+  String get blockedBySearchNoResults => 'No matching tasks found.';
+
+  @override
+  String get tooltipClearSearch => 'Clear search';
+
+  @override
+  String get taskConditionsSectionTitle => 'Activation Conditions';
+
+  @override
+  String get taskConditionsSectionDescription =>
+      'Restrict when and where this task becomes active, or override inherited label conditions.';
+
+  @override
+  String get tooltipPickDate => 'Pick date';
+
+  @override
+  String get tooltipPickTime => 'Pick time';
+
+  @override
+  String get tooltipClearDate => 'Clear timestamp';
+
+  @override
+  String get tooltipPickStartTime => 'Pick start time';
+
+  @override
+  String get tooltipPickEndTime => 'Pick end time';
 }

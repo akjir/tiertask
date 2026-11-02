@@ -228,6 +228,36 @@ task t001 {
         reason: 'EditTaskScreen must be a full-screen panel rather than a modal dialog',
       );
       expect(
+        find.byKey(const ValueKey('task_editor_details_card')),
+        findsOneWidget,
+        reason: 'EditTaskScreen must group task title and note in a Settings-style card',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_scheduling_card')),
+        findsOneWidget,
+        reason: 'EditTaskScreen must group scheduling modes in a Settings-style card',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_labels_card')),
+        findsOneWidget,
+        reason: 'EditTaskScreen must group labels in a Settings-style card',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_subtasks_card')),
+        findsOneWidget,
+        reason: 'EditTaskScreen must group subtasks in a Settings-style card',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_blocked_card')),
+        findsOneWidget,
+        reason: 'EditTaskScreen must group prerequisite tasks in a Settings-style card',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_conditions_card')),
+        findsOneWidget,
+        reason: 'EditTaskScreen must group activation conditions in a Settings-style card',
+      );
+      expect(
         find.descendant(
           of: find.byType(AppBar),
           matching: find.text('Extended Task View'),

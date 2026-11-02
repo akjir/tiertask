@@ -42,32 +42,42 @@ class TaskEditorActionsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        TextButton(
-          key: const ValueKey('task_editor_cancel_button'),
-          onPressed: onCancel,
-          child: Text(localizations.actionCancel),
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const ValueKey('task_editor_cancel_button'),
+            onPressed: onCancel,
+            icon: const Icon(Icons.close_rounded),
+            label: Text(localizations.actionCancel),
+          ),
         ),
-        const SizedBox(width: 8),
-        FilledButton(
-          key: const ValueKey('task_editor_save_button'),
-          onPressed: onSave,
-          child: Text(localizations.actionSave),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 2,
+          child: FilledButton.icon(
+            key: const ValueKey('task_editor_save_button'),
+            onPressed: onSave,
+            icon: const Icon(Icons.save_outlined),
+            label: Text(localizations.actionSave),
+          ),
         ),
       ],
     );
   }
 }
 
-/// Multi-select prerequisite task (`blocked`) chip group inside the task editor.
+/// Search-driven multi-select prerequisite task (`blocked`) card inside the task editor.
 class TaskEditorBlockedBySection extends StatelessWidget {
   /// Creates a [TaskEditorBlockedBySection].
   const TaskEditorBlockedBySection({
     super.key,
     required this.candidateTasks,
     required this.disabledTaskIds,
+    required this.hasSearchText,
+    required this.searchController,
+    required this.searchQuery,
     required this.selectedBlockedByIds,
+    required this.onClearSearch,
     required this.onToggleBlockedBy,
   });
 
@@ -77,8 +87,20 @@ class TaskEditorBlockedBySection extends StatelessWidget {
   /// Task IDs that cannot be selected because they would create a dependency cycle.
   final Set<String> disabledTaskIds;
 
+  /// Whether the search input currently contains non-empty text.
+  final bool hasSearchText;
+
+  /// Callback invoked to clear the prerequisite search field.
+  final VoidCallback onClearSearch;
+
   /// Callback invoked when a prerequisite task chip is tapped.
   final ValueChanged<String> onToggleBlockedBy;
+
+  /// Controller for the prerequisite task name search input.
+  final TextEditingController searchController;
+
+  /// Current prerequisite task search query.
+  final String searchQuery;
 
   /// Currently selected prerequisite task IDs.
   final Set<String> selectedBlockedByIds;
@@ -90,39 +112,102 @@ class TaskEditorBlockedBySection extends StatelessWidget {
     }
     final localizations = AppLocalizations.of(context);
     final appTheme = AppTheme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 10),
-        Text(
-          localizations.sectionBlockedByTasks,
-          style: TextStyle(
-            color: appTheme.mutedTextColor,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final candidate in candidateTasks)
-              TaskEditorChip(
-                chipKey: ValueKey('task_editor_blocked_${candidate.id}'),
-                icon: Icons.lock_outline_rounded,
-                label: candidate.title,
-                isSelected: selectedBlockedByIds.contains(candidate.id),
-                isEnabled: !disabledTaskIds.contains(candidate.id),
-                accentColor: appTheme.warningAccent,
-                onTap: () => onToggleBlockedBy(candidate.id),
-              ),
+    final selectedTasks = _collectSelectedTasks();
+    final trimmedQuery = searchQuery.trim();
+
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('task_editor_blocked_card'),
+      icon: Icons.lock_outline_rounded,
+      title: localizations.taskBlockedBySectionTitle,
+      description: localizations.taskBlockedBySectionDescription,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (selectedTasks.isNotEmpty) ...[
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final selected in selectedTasks)
+                  TaskEditorChip(
+                    chipKey: ValueKey('task_editor_blocked_${selected.id}'),
+                    icon: Icons.lock_outline_rounded,
+                    label: selected.title,
+                    isSelected: true,
+                    accentColor: appTheme.warningAccent,
+                    onTap: () => onToggleBlockedBy(selected.id),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 10),
           ],
-        ),
-      ],
+          _TaskEditorBlockedSearchField(
+            controller: searchController,
+            hasText: hasSearchText,
+            onClear: onClearSearch,
+          ),
+          if (trimmedQuery.isNotEmpty)
+            _buildSuggestionsList(localizations, appTheme, trimmedQuery),
+        ],
+      ),
     );
+  }
+
+  /// Builds the filtered prerequisite suggestion chips for [trimmedQuery].
+  Widget _buildSuggestionsList(
+    AppLocalizations localizations,
+    AppTheme appTheme,
+    String trimmedQuery,
+  ) {
+    final matchingTasks = _collectMatchingUnselectedTasks(trimmedQuery);
+    if (matchingTasks.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Text(
+          localizations.blockedBySearchNoResults,
+          style: TextStyle(color: appTheme.mutedTextColor, fontSize: 12),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final candidate in matchingTasks)
+            TaskEditorChip(
+              chipKey: ValueKey('task_editor_blocked_${candidate.id}'),
+              icon: Icons.add_link_rounded,
+              label: candidate.title,
+              isSelected: false,
+              isEnabled: !disabledTaskIds.contains(candidate.id),
+              accentColor: appTheme.warningAccent,
+              onTap: () => onToggleBlockedBy(candidate.id),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Collects unselected candidate tasks whose titles match [trimmedQuery] case-insensitively.
+  List<TaskItem> _collectMatchingUnselectedTasks(String trimmedQuery) {
+    final normalizedQuery = trimmedQuery.toLowerCase();
+    return <TaskItem>[
+      for (final candidate in candidateTasks)
+        if (!selectedBlockedByIds.contains(candidate.id) &&
+            candidate.title.toLowerCase().contains(normalizedQuery))
+          candidate,
+    ];
+  }
+
+  /// Collects currently selected prerequisite tasks in canonical board order.
+  List<TaskItem> _collectSelectedTasks() {
+    return <TaskItem>[
+      for (final candidate in candidateTasks)
+        if (selectedBlockedByIds.contains(candidate.id)) candidate,
+    ];
   }
 }
 
@@ -204,7 +289,7 @@ class TaskEditorChip extends StatelessWidget {
   }
 }
 
-/// Multi-select label chip group inside the task editor.
+/// Multi-select label chip card inside the task editor.
 class TaskEditorContextSection extends StatelessWidget {
   /// Creates a [TaskEditorContextSection].
   const TaskEditorContextSection({
@@ -230,37 +315,25 @@ class TaskEditorContextSection extends StatelessWidget {
     }
     final localizations = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 8),
-        Text(
-          localizations.sectionLabels,
-          style: TextStyle(
-            color: colorScheme.onSurfaceVariant,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final label in labels)
-              TaskEditorChip(
-                chipKey: ValueKey('task_editor_label_${label.id}'),
-                icon: Icons.label_outline_rounded,
-                label: label.name,
-                isSelected: selectedLabelIds.contains(label.id),
-                accentColor: _resolveColor(label.color, colorScheme.primary),
-                onTap: () => onToggleLabel(label.id),
-              ),
-          ],
-        ),
-      ],
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('task_editor_labels_card'),
+      icon: Icons.label_outline_rounded,
+      title: localizations.taskLabelsSectionTitle,
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final label in labels)
+            TaskEditorChip(
+              chipKey: ValueKey('task_editor_label_${label.id}'),
+              icon: Icons.label_outline_rounded,
+              label: label.name,
+              isSelected: selectedLabelIds.contains(label.id),
+              accentColor: _resolveColor(label.color, colorScheme.primary),
+              onTap: () => onToggleLabel(label.id),
+            ),
+        ],
+      ),
     );
   }
 
@@ -268,6 +341,53 @@ class TaskEditorContextSection extends StatelessWidget {
   Color _resolveColor(String? rawHex, Color fallback) {
     final parsed = TdfColor.tryParseArgb(rawHex);
     return parsed != null ? Color(parsed) : fallback;
+  }
+}
+
+/// Card grouping the task title and optional note fields inside the task editor.
+class TaskEditorDetailsCard extends StatelessWidget {
+  /// Creates a [TaskEditorDetailsCard].
+  const TaskEditorDetailsCard({
+    super.key,
+    required this.errorMessage,
+    required this.noteController,
+    required this.titleController,
+    required this.onSubmit,
+  });
+
+  /// Optional validation error message for the task title.
+  final String? errorMessage;
+
+  ///Controller for the optional task note input.
+  final TextEditingController noteController;
+
+  /// Callback invoked when submitting from the title input field.
+  final VoidCallback onSubmit;
+
+  /// Controller for the task title input.
+  final TextEditingController titleController;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('task_editor_details_card'),
+      icon: Icons.edit_note_rounded,
+      title: localizations.taskDetailsSectionTitle,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TaskEditorTitleField(
+            controller: titleController,
+            errorMessage: errorMessage,
+            onSubmit: onSubmit,
+          ),
+          const SizedBox(height: 8),
+          TaskEditorNoteField(controller: noteController),
+        ],
+      ),
+    );
   }
 }
 
@@ -361,7 +481,7 @@ class TaskEditorNoteField extends StatelessWidget {
       cursorColor: appTheme.tertiaryAccent,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
       minLines: 1,
-      maxLines: 2,
+      maxLines: 3,
       decoration: InputDecoration(
         labelText: localizations.taskNoteLabel,
         labelStyle: TextStyle(color: appTheme.mutedTextColor),
@@ -385,7 +505,177 @@ class TaskEditorNoteField extends StatelessWidget {
   }
 }
 
-/// Subtasks editor section inside the task editor with `auto-finish` toggle, list, and input row.
+/// Card grouping the scheduling mode chips and optional `suspended` timestamp field.
+class TaskEditorSchedulingCard extends StatelessWidget {
+  /// Creates a [TaskEditorSchedulingCard].
+  const TaskEditorSchedulingCard({
+    super.key,
+    required this.hasSuspendedText,
+    required this.isSuspended,
+    required this.mode,
+    required this.suspendedController,
+    required this.suspendedErrorMessage,
+    required this.onClearSuspended,
+    required this.onPickSuspendedDate,
+    required this.onPickSuspendedTime,
+    required this.onTogglePriority,
+    required this.onToggleSomeday,
+    required this.onToggleSuspended,
+  });
+
+  /// Whether the suspended timestamp field currently contains non-empty text.
+  final bool hasSuspendedText;
+
+  /// Whether the task is marked as suspended.
+  final bool isSuspended;
+
+  /// Active scheduling mode.
+  final QuickAddMode mode;
+
+  /// Callback invoked to clear the suspended timestamp field.
+  final VoidCallback onClearSuspended;
+
+  /// Callback invoked to open the date picker for the suspended timestamp.
+  final VoidCallback onPickSuspendedDate;
+
+  /// Callback invoked to open the time picker for the suspended timestamp.
+  final VoidCallback onPickSuspendedTime;
+
+  /// Callback invoked when Priority is tapped.
+  final VoidCallback onTogglePriority;
+
+  /// Callback invoked when Someday is tapped.
+  final VoidCallback onToggleSomeday;
+
+  /// Callback invoked when Suspended is tapped.
+  final VoidCallback onToggleSuspended;
+
+  /// Controller for the optional `suspended` timestamp input.
+  final TextEditingController suspendedController;
+
+  /// Optional validation error message for the suspended timestamp.
+  final String? suspendedErrorMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('task_editor_scheduling_card'),
+      icon: Icons.tune_rounded,
+      title: localizations.taskSchedulingSectionTitle,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TaskEditorModeRow(
+            isSuspended: isSuspended,
+            mode: mode,
+            onTogglePriority: onTogglePriority,
+            onToggleSomeday: onToggleSomeday,
+            onToggleSuspended: onToggleSuspended,
+          ),
+          if (isSuspended) ...[
+            const SizedBox(height: 8),
+            TaskEditorSuspendedField(
+              controller: suspendedController,
+              errorMessage: suspendedErrorMessage,
+              hasText: hasSuspendedText,
+              onClear: onClearSuspended,
+              onPickDate: onPickSuspendedDate,
+              onPickTime: onPickSuspendedTime,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Shared Material 3 card container matching the section groupings on `SettingsScreen`.
+class TaskEditorSectionCard extends StatelessWidget {
+  /// Creates a [TaskEditorSectionCard].
+  const TaskEditorSectionCard({
+    super.key,
+    required this.cardKey,
+    required this.icon,
+    required this.title,
+    this.description,
+    this.child,
+    this.trailing,
+  });
+
+  /// Deterministic widget key for the card.
+  final Key cardKey;
+
+  /// Optional interactive content below the header or description.
+  final Widget? child;
+
+  /// Optional section subtitle description.
+  final String? description;
+
+  /// Leading header icon.
+  final IconData icon;
+
+  /// Section title text.
+  final String title;
+
+  /// Optional widget rendered on the right side of the header row.
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final bodyChild = child;
+    final headerTrailing = trailing;
+    final subtitleText = description;
+
+    return Card(
+      key: cardKey,
+      margin: EdgeInsets.zero,
+      color: theme.cardColor,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 18, color: colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                if (headerTrailing != null) ...[
+                  const SizedBox(width: 8),
+                  headerTrailing,
+                ],
+              ],
+            ),
+            if (subtitleText != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                subtitleText,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+            if (bodyChild != null) ...[const SizedBox(height: 8), bodyChild],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Subtasks editor card inside the task editor with `auto-finish` toggle, list, and input row.
 class TaskEditorSubtasksSection extends StatelessWidget {
   /// Creates a [TaskEditorSubtasksSection].
   const TaskEditorSubtasksSection({
@@ -428,57 +718,51 @@ class TaskEditorSubtasksSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final appTheme = AppTheme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                localizations.subtasksSectionTitle,
-                style: TextStyle(
-                  color: appTheme.mutedTextColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('task_editor_subtasks_card'),
+      icon: Icons.checklist_rounded,
+      title: localizations.subtasksSectionTitle,
+      trailing: TaskEditorChip(
+        chipKey: const ValueKey('task_editor_auto_finish_toggle'),
+        icon: Icons.done_all_rounded,
+        label: localizations.subtasksAutoFinishLabel,
+        isSelected: subtasksAutoFinish,
+        accentColor: appTheme.tertiaryAccent,
+        onTap: onToggleAutoFinish,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var i = 0; i < subtasks.length; i++)
+            _TaskEditorSubtaskRow(
+              index: i,
+              subtask: subtasks[i],
+              onRemove: () => onRemoveSubtask(i),
+              onToggle: () => onToggleSubtaskStep(i),
             ),
-            TaskEditorChip(
-              chipKey: const ValueKey('task_editor_auto_finish_toggle'),
-              icon: Icons.done_all_rounded,
-              label: localizations.subtasksAutoFinishLabel,
-              isSelected: subtasksAutoFinish,
-              accentColor: appTheme.tertiaryAccent,
-              onTap: onToggleAutoFinish,
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        for (var i = 0; i < subtasks.length; i++)
-          _TaskEditorSubtaskRow(
-            index: i,
-            subtask: subtasks[i],
-            onRemove: () => onRemoveSubtask(i),
-            onToggle: () => onToggleSubtaskStep(i),
+          _TaskEditorSubtaskInputRow(
+            controller: subtaskController,
+            hasText: hasSubtaskText,
+            onAddSubtask: onAddSubtask,
           ),
-        _TaskEditorSubtaskInputRow(
-          controller: subtaskController,
-          hasText: hasSubtaskText,
-          onAddSubtask: onAddSubtask,
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-/// Optional `suspended` timestamp input field inside the task editor.
+/// Optional `suspended` timestamp input field with modern date and time picker options.
 class TaskEditorSuspendedField extends StatelessWidget {
   /// Creates a [TaskEditorSuspendedField].
   const TaskEditorSuspendedField({
     super.key,
     required this.controller,
     required this.errorMessage,
+    required this.hasText,
+    required this.onClear,
+    required this.onPickDate,
+    required this.onPickTime,
   });
 
   /// Controller for the optional `suspended` timestamp input.
@@ -486,6 +770,18 @@ class TaskEditorSuspendedField extends StatelessWidget {
 
   /// Optional validation error message.
   final String? errorMessage;
+
+  /// Whether the input field currently contains text.
+  final bool hasText;
+
+  /// Callback invoked to clear the timestamp input.
+  final VoidCallback onClear;
+
+  /// Callback invoked to open the Material 3 date picker.
+  final VoidCallback onPickDate;
+
+  /// Callback invoked to open the Material 3 time picker.
+  final VoidCallback onPickTime;
 
   @override
   Widget build(BuildContext context) {
@@ -517,6 +813,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
           horizontal: 12,
           vertical: 10,
         ),
+        suffixIcon: _buildPickerSuffixActions(localizations, appTheme),
         border: defaultBorder,
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(
@@ -524,6 +821,52 @@ class TaskEditorSuspendedField extends StatelessWidget {
           borderSide: BorderSide(color: appTheme.warningAccent, width: 1.6),
         ),
       ),
+    );
+  }
+
+  /// Builds the trailing clear, date picker, and time picker icon buttons.
+  Widget _buildPickerSuffixActions(
+    AppLocalizations localizations,
+    AppTheme appTheme,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (hasText)
+          IconButton(
+            key: const ValueKey('task_editor_suspended_clear_button'),
+            visualDensity: VisualDensity.compact,
+            tooltip: localizations.tooltipClearDate,
+            icon: Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: appTheme.mutedTextColor,
+            ),
+            onPressed: onClear,
+          ),
+        IconButton(
+          key: const ValueKey('task_editor_suspended_date_picker_button'),
+          visualDensity: VisualDensity.compact,
+          tooltip: localizations.tooltipPickDate,
+          icon: Icon(
+            Icons.calendar_month_rounded,
+            size: 18,
+            color: appTheme.warningAccent,
+          ),
+          onPressed: onPickDate,
+        ),
+        IconButton(
+          key: const ValueKey('task_editor_suspended_time_picker_button'),
+          visualDensity: VisualDensity.compact,
+          tooltip: localizations.tooltipPickTime,
+          icon: Icon(
+            Icons.access_time_rounded,
+            size: 18,
+            color: appTheme.warningAccent,
+          ),
+          onPressed: onPickTime,
+        ),
+      ],
     );
   }
 }
@@ -583,6 +926,80 @@ class TaskEditorTitleField extends StatelessWidget {
         focusedBorder: OutlineInputBorder(
           borderRadius: borderRadius,
           borderSide: BorderSide(color: appTheme.primaryAccent, width: 1.6),
+        ),
+      ),
+    );
+  }
+}
+
+/// Search field for filtering prerequisite tasks by name inside [TaskEditorBlockedBySection].
+class _TaskEditorBlockedSearchField extends StatelessWidget {
+  /// Creates a [_TaskEditorBlockedSearchField].
+  const _TaskEditorBlockedSearchField({
+    required this.controller,
+    required this.hasText,
+    required this.onClear,
+  });
+
+  /// Controller for the prerequisite search query.
+  final TextEditingController controller;
+
+  /// Whether the search query is currently non-empty.
+  final bool hasText;
+
+  /// Callback invoked when the clear button is tapped.
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
+    final borderRadius = BorderRadius.circular(14);
+    final defaultBorder = OutlineInputBorder(
+      borderRadius: borderRadius,
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
+    );
+
+    return TextField(
+      key: const ValueKey('task_editor_blocked_search_input'),
+      controller: controller,
+      cursorColor: appTheme.warningAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
+      decoration: InputDecoration(
+        hintText: localizations.blockedBySearchHint,
+        hintStyle: TextStyle(color: appTheme.mutedTextColor),
+        prefixIcon: Icon(
+          Icons.search_rounded,
+          size: 18,
+          color: appTheme.mutedTextColor,
+        ),
+        suffixIcon: hasText
+            ? IconButton(
+                key: const ValueKey('task_editor_blocked_search_clear_button'),
+                visualDensity: VisualDensity.compact,
+                tooltip: localizations.tooltipClearSearch,
+                icon: Icon(
+                  Icons.close_rounded,
+                  size: 18,
+                  color: appTheme.mutedTextColor,
+                ),
+                onPressed: onClear,
+              )
+            : null,
+        isDense: true,
+        filled: true,
+        fillColor: appTheme.canvasColor,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        border: defaultBorder,
+        enabledBorder: defaultBorder,
+        focusedBorder: OutlineInputBorder(
+          borderRadius: borderRadius,
+          borderSide: BorderSide(color: appTheme.warningAccent, width: 1.6),
         ),
       ),
     );

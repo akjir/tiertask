@@ -575,14 +575,6 @@
   "@taskSuspendedDisablesConditionsHint": {
     "description": "Informational banner shown when a task is suspended and condition evaluation is disabled."
   },
-  "sectionBlockedByTasks": "PREREQUISITE TASKS (BLOCKED BY)",
-  "@sectionBlockedByTasks": {
-    "description": "Uppercase section label above the prerequisite tasks selector in the task editor."
-  },
-  "sectionTaskConditions": "ACTIVATION CONDITIONS",
-  "@sectionTaskConditions": {
-    "description": "Uppercase section label above the activation conditions section in the task editor."
-  },
   "conditionGlobalAnyLabel": "Any (ignore label conditions)",
   "@conditionGlobalAnyLabel": {
     "description": "Toggle chip label for the global condition any reset directive."
@@ -682,5 +674,65 @@
   "tooltipRemoveLocationCondition": "Remove location rule",
   "@tooltipRemoveLocationCondition": {
     "description": "Tooltip for the button that removes a GPS location condition."
+  },
+  "taskDetailsSectionTitle": "Task Details",
+  "@taskDetailsSectionTitle": {
+    "description": "Section card title for task name and note in the task editor."
+  },
+  "taskSchedulingSectionTitle": "Scheduling & Status",
+  "@taskSchedulingSectionTitle": {
+    "description": "Section card title for scheduling mode and suspension in the task editor."
+  },
+  "taskLabelsSectionTitle": "Labels",
+  "@taskLabelsSectionTitle": {
+    "description": "Section card title for labels in the task editor."
+  },
+  "taskBlockedBySectionTitle": "Prerequisite Tasks",
+  "@taskBlockedBySectionTitle": {
+    "description": "Section card title for prerequisite tasks in the task editor."
+  },
+  "taskBlockedBySectionDescription": "Search for open tasks by name and select tasks that must be finished before this task becomes active.",
+  "@taskBlockedBySectionDescription": {
+    "description": "Section card description for prerequisite tasks in the task editor."
+  },
+  "blockedBySearchHint": "Search tasks by name...",
+  "@blockedBySearchHint": {
+    "description": "Placeholder hint for searching prerequisite tasks by name."
+  },
+  "blockedBySearchNoResults": "No matching tasks found.",
+  "@blockedBySearchNoResults": {
+    "description": "Empty-state text shown when no prerequisite task matches the search query."
+  },
+  "tooltipClearSearch": "Clear search",
+  "@tooltipClearSearch": {
+    "description": "Tooltip for clearing the prerequisite task search input."
+  },
+  "taskConditionsSectionTitle": "Activation Conditions",
+  "@taskConditionsSectionTitle": {
+    "description": "Section card title for activation conditions in the task editor."
+  },
+  "taskConditionsSectionDescription": "Restrict when and where this task becomes active, or override inherited label conditions.",
+  "@taskConditionsSectionDescription": {
+    "description": "Section card description for activation conditions in the task editor."
+  },
+  "tooltipPickDate": "Pick date",
+  "@tooltipPickDate": {
+    "description": "Tooltip for the date picker button on the suspended timestamp field."
+  },
+  "tooltipPickTime": "Pick time",
+  "@tooltipPickTime": {
+    "description": "Tooltip for the time picker button on the suspended timestamp field."
+  },
+  "tooltipClearDate": "Clear timestamp",
+  "@tooltipClearDate": {
+    "description": "Tooltip for clearing the suspended timestamp field."
+  },
+  "tooltipPickStartTime": "Pick start time",
+  "@tooltipPickStartTime": {
+    "description": "Tooltip for the start time picker button in time window conditions."
+  },
+  "tooltipPickEndTime": "Pick end time",
+  "@tooltipPickEndTime": {
+    "description": "Tooltip for the end time picker button in time window conditions."
   }
 }

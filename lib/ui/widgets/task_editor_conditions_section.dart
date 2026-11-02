@@ -20,7 +20,7 @@ import '../../models/tdf_metadata.dart';
 import '../app_theme.dart';
 import 'task_editor_sections.dart';
 
-/// Activation conditions (`condition`) editor section inside the task editor.
+/// Activation conditions (`condition`) editor card inside the task editor.
 class TaskEditorConditionsSection extends StatelessWidget {
   /// Creates a [TaskEditorConditionsSection].
   const TaskEditorConditionsSection({
@@ -42,6 +42,8 @@ class TaskEditorConditionsSection extends StatelessWidget {
     required this.timeStartController,
     required this.onAddLocationCondition,
     required this.onAddTimeCondition,
+    required this.onPickEndTime,
+    required this.onPickStartTime,
     required this.onRemoveLocationCondition,
     required this.onRemoveTimeCondition,
     required this.onToggleConditionAny,
@@ -87,6 +89,12 @@ class TaskEditorConditionsSection extends StatelessWidget {
   /// Callback to add a time window condition.
   final VoidCallback onAddTimeCondition;
 
+  /// Callback to open the time picker for the end time field.
+  final VoidCallback onPickEndTime;
+
+  /// Callback to open the time picker for the start time field.
+  final VoidCallback onPickStartTime;
+
   /// Callback to remove the GPS location condition at the given index.
   final ValueChanged<int> onRemoveLocationCondition;
 
@@ -127,36 +135,32 @@ class TaskEditorConditionsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final appTheme = AppTheme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          localizations.sectionTaskConditions,
-          style: TextStyle(
-            color: appTheme.mutedTextColor,
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-        if (isSuspended) ...[
-          const SizedBox(height: 6),
-          Text(
-            localizations.taskSuspendedDisablesConditionsHint,
-            key: const ValueKey('task_editor_conditions_disabled_hint'),
-            style: TextStyle(color: appTheme.warningAccent, fontSize: 12),
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('task_editor_conditions_card'),
+      icon: Icons.rule_rounded,
+      title: localizations.taskConditionsSectionTitle,
+      description: localizations.taskConditionsSectionDescription,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (isSuspended) ...[
+            Text(
+              localizations.taskSuspendedDisablesConditionsHint,
+              key: const ValueKey('task_editor_conditions_disabled_hint'),
+              style: TextStyle(color: appTheme.warningAccent, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+          ],
+          IgnorePointer(
+            ignoring: isSuspended,
+            child: Opacity(
+              opacity: isSuspended ? 0.45 : 1.0,
+              child: _buildConditionControls(localizations, appTheme),
+            ),
           ),
         ],
-        const SizedBox(height: 6),
-        IgnorePointer(
-          ignoring: isSuspended,
-          child: Opacity(
-            opacity: isSuspended ? 0.45 : 1.0,
-            child: _buildConditionControls(localizations, appTheme),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -177,14 +181,14 @@ class TaskEditorConditionsSection extends StatelessWidget {
           accentColor: appTheme.primaryAccent,
           onTap: onToggleConditionAny,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _TaskEditorConditionDaySection(
           conditionDayAny: conditionDayAny,
           selectedWeekdays: selectedWeekdays,
           onToggleDayAny: onToggleDayAny,
           onToggleWeekday: onToggleWeekday,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _TaskEditorConditionTimeSection(
           conditionTimeAny: conditionTimeAny,
           startController: timeStartController,
@@ -192,10 +196,12 @@ class TaskEditorConditionsSection extends StatelessWidget {
           errorMessage: timeErrorMessage,
           rules: timeRules,
           onAddTimeCondition: onAddTimeCondition,
+          onPickEndTime: onPickEndTime,
+          onPickStartTime: onPickStartTime,
           onRemoveTimeCondition: onRemoveTimeCondition,
           onToggleTimeAny: onToggleTimeAny,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         _TaskEditorConditionLocationSection(
           conditionLocationAny: conditionLocationAny,
           latController: locationLatController,
@@ -274,7 +280,7 @@ class _TaskEditorConditionDaySection extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -372,7 +378,7 @@ class _TaskEditorConditionLocationSection extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         for (var i = 0; i < rules.length; i++)
           _TaskEditorRuleRow(
             removeKey: ValueKey('task_editor_remove_location_condition_$i'),
@@ -404,6 +410,8 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
     required this.rules,
     required this.startController,
     required this.onAddTimeCondition,
+    required this.onPickEndTime,
+    required this.onPickStartTime,
     required this.onRemoveTimeCondition,
     required this.onToggleTimeAny,
   });
@@ -419,6 +427,12 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
 
   /// Callback to add a time window condition.
   final VoidCallback onAddTimeCondition;
+
+  /// Callback to open the time picker for the end time field.
+  final VoidCallback onPickEndTime;
+
+  /// Callback to open the time picker for the start time field.
+  final VoidCallback onPickStartTime;
 
   /// Callback to remove the time window condition at the given index.
   final ValueChanged<int> onRemoveTimeCondition;
@@ -462,7 +476,7 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         for (var i = 0; i < rules.length; i++)
           _TaskEditorRuleRow(
             removeKey: ValueKey('task_editor_remove_time_condition_$i'),
@@ -476,6 +490,8 @@ class _TaskEditorConditionTimeSection extends StatelessWidget {
           endController: endController,
           errorMessage: errorMessage,
           onAdd: onAddTimeCondition,
+          onPickStartTime: onPickStartTime,
+          onPickEndTime: onPickEndTime,
         ),
       ],
     );
@@ -672,6 +688,8 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
     required this.errorMessage,
     required this.startController,
     required this.onAdd,
+    required this.onPickEndTime,
+    required this.onPickStartTime,
   });
 
   /// Controller for the end time (`HH:MM`).
@@ -682,6 +700,12 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
 
   /// Callback invoked when the add time window button is pressed.
   final VoidCallback onAdd;
+
+  /// Callback invoked to open the end time picker.
+  final VoidCallback onPickEndTime;
+
+  /// Callback invoked to open the start time picker.
+  final VoidCallback onPickStartTime;
 
   /// Controller for the start time (`HH:MM`).
   final TextEditingController startController;
@@ -700,8 +724,13 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
               child: _buildTimeField(
                 appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_time_start_input'),
+                pickerKey: const ValueKey(
+                  'task_editor_time_start_picker_button',
+                ),
                 controller: startController,
                 hintText: localizations.conditionTimeStartHint,
+                pickerTooltip: localizations.tooltipPickStartTime,
+                onPickTime: onPickStartTime,
               ),
             ),
             const SizedBox(width: 6),
@@ -709,8 +738,11 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
               child: _buildTimeField(
                 appTheme: appTheme,
                 fieldKey: const ValueKey('task_editor_time_end_input'),
+                pickerKey: const ValueKey('task_editor_time_end_picker_button'),
                 controller: endController,
                 hintText: localizations.conditionTimeEndHint,
+                pickerTooltip: localizations.tooltipPickEndTime,
+                onPickTime: onPickEndTime,
               ),
             ),
             const SizedBox(width: 6),
@@ -738,12 +770,15 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
     );
   }
 
-  /// Builds a compact single-line text field for `HH:MM` time input.
+  /// Builds a compact single-line text field for `HH:MM` time input with a trailing time picker button.
   Widget _buildTimeField({
     required AppTheme appTheme,
     required Key fieldKey,
+    required Key pickerKey,
     required TextEditingController controller,
     required String hintText,
+    required String pickerTooltip,
+    required VoidCallback onPickTime,
   }) {
     final borderRadius = BorderRadius.circular(12);
     final defaultBorder = OutlineInputBorder(
@@ -764,6 +799,17 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
         filled: true,
         fillColor: appTheme.canvasColor,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        suffixIcon: IconButton(
+          key: pickerKey,
+          visualDensity: VisualDensity.compact,
+          tooltip: pickerTooltip,
+          icon: Icon(
+            Icons.access_time_rounded,
+            size: 16,
+            color: appTheme.tertiaryAccent,
+          ),
+          onPressed: onPickTime,
+        ),
         border: defaultBorder,
         enabledBorder: defaultBorder,
         focusedBorder: OutlineInputBorder(

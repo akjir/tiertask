@@ -59,6 +59,8 @@ class EditTaskScreen extends ConsumerStatefulWidget {
 /// State for [EditTaskScreen].
 class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final Set<String> _blockedByTaskIds;
+  final TextEditingController _blockedSearchController =
+      TextEditingController();
   late bool _conditionAny;
   late bool _conditionDayAny;
   late bool _conditionLocationAny;
@@ -86,7 +88,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   final TextEditingController _timeStartController = TextEditingController();
   late final TextEditingController _titleController;
 
+  bool get _hasBlockedSearchText => _blockedSearchController.text.isNotEmpty;
+
   bool get _hasSubtaskText => _subtaskController.text.trim().isNotEmpty;
+
+  bool get _hasSuspendedText => _suspendedController.text.isNotEmpty;
 
   bool get _isEditMode => widget.initialTask != null;
 
@@ -112,17 +118,22 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _initializeConditions(task?.conditions ?? const []);
 
     _titleController.addListener(_handleTitleChanged);
-    _subtaskController.addListener(_handleSubtaskInputChanged);
+    _subtaskController.addListener(_handleInputStateChanged);
+    _suspendedController.addListener(_handleInputStateChanged);
+    _blockedSearchController.addListener(_handleInputStateChanged);
   }
 
   @override
   void dispose() {
     _titleController.removeListener(_handleTitleChanged);
-    _subtaskController.removeListener(_handleSubtaskInputChanged);
+    _subtaskController.removeListener(_handleInputStateChanged);
+    _suspendedController.removeListener(_handleInputStateChanged);
+    _blockedSearchController.removeListener(_handleInputStateChanged);
     _titleController.dispose();
     _noteController.dispose();
     _subtaskController.dispose();
     _suspendedController.dispose();
+    _blockedSearchController.dispose();
     _timeStartController.dispose();
     _timeEndController.dispose();
     _locationLatController.dispose();
@@ -146,30 +157,23 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(title: Text(headerTitle)),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Material(
-            color: theme.cardColor,
-            borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: _buildFormColumn(board),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TaskEditorActionsRow(
-                    onCancel: () => Navigator.of(context).pop(),
-                    onSave: _submit,
-                  ),
-                ],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: _buildFormColumn(board),
               ),
             ),
-          ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: TaskEditorActionsRow(
+                onCancel: () => Navigator.of(context).pop(),
+                onSave: _submit,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -245,6 +249,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Wraps a [showTimePicker] dialog in a 24-hour [MediaQuery] configuration.
+  static Widget _build24HourTimePicker(BuildContext context, Widget? child) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+      child: child ?? const SizedBox.shrink(),
+    );
+  }
+
   /// Builds the [TaskEditorConditionsSection] for the current state.
   Widget _buildConditionsSection() {
     return TaskEditorConditionsSection(
@@ -265,6 +277,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       timeStartController: _timeStartController,
       onAddLocationCondition: _addLocationCondition,
       onAddTimeCondition: _addTimeCondition,
+      onPickEndTime: _pickEndTime,
+      onPickStartTime: _pickStartTime,
       onRemoveLocationCondition: _removeLocationCondition,
       onRemoveTimeCondition: _removeTimeCondition,
       onToggleConditionAny: _toggleConditionAny,
@@ -275,7 +289,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     );
   }
 
-  /// Builds the scrollable form column inside [EditTaskScreen].
+  /// Builds the Settings-style card column inside [EditTaskScreen].
   Widget _buildFormColumn(TaskBoard board) {
     final candidateTasks = _collectCandidateBlockerTasks(board);
     final disabledIds = _collectDisabledBlockerIds(board, candidateTasks);
@@ -283,34 +297,35 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TaskEditorTitleField(
-          controller: _titleController,
+        TaskEditorDetailsCard(
+          titleController: _titleController,
+          noteController: _noteController,
           errorMessage: _errorMessage,
           onSubmit: _submit,
         ),
-        const SizedBox(height: 8),
-        TaskEditorNoteField(controller: _noteController),
-        const SizedBox(height: 8),
-        TaskEditorModeRow(
+        const SizedBox(height: 10),
+        TaskEditorSchedulingCard(
+          hasSuspendedText: _hasSuspendedText,
           isSuspended: _isSuspended,
           mode: _mode,
+          suspendedController: _suspendedController,
+          suspendedErrorMessage: _suspendedErrorMessage,
+          onClearSuspended: _clearSuspendedTimestamp,
+          onPickSuspendedDate: _pickSuspendedDate,
+          onPickSuspendedTime: _pickSuspendedTime,
           onTogglePriority: _togglePriority,
           onToggleSomeday: _toggleSomeday,
           onToggleSuspended: _toggleSuspended,
         ),
-        if (_isSuspended) ...[
-          const SizedBox(height: 8),
-          TaskEditorSuspendedField(
-            controller: _suspendedController,
-            errorMessage: _suspendedErrorMessage,
+        if (board.labels.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          TaskEditorContextSection(
+            labels: board.labels,
+            selectedLabelIds: _selectedLabelIds,
+            onToggleLabel: _toggleLabel,
           ),
         ],
-        TaskEditorContextSection(
-          labels: board.labels,
-          selectedLabelIds: _selectedLabelIds,
-          onToggleLabel: _toggleLabel,
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         TaskEditorSubtasksSection(
           hasSubtaskText: _hasSubtaskText,
           subtaskController: _subtaskController,
@@ -321,19 +336,39 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           onToggleAutoFinish: _toggleAutoFinish,
           onToggleSubtaskStep: _toggleSubtaskStep,
         ),
-        TaskEditorBlockedBySection(
-          candidateTasks: candidateTasks,
-          disabledTaskIds: disabledIds,
-          selectedBlockedByIds: _blockedByTaskIds,
-          onToggleBlockedBy: (taskId) => _toggleBlockedBy(board, taskId),
-        ),
+        if (candidateTasks.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          TaskEditorBlockedBySection(
+            candidateTasks: candidateTasks,
+            disabledTaskIds: disabledIds,
+            hasSearchText: _hasBlockedSearchText,
+            searchController: _blockedSearchController,
+            searchQuery: _blockedSearchController.text,
+            selectedBlockedByIds: _blockedByTaskIds,
+            onClearSearch: _clearBlockedSearch,
+            onToggleBlockedBy: (taskId) => _toggleBlockedBy(board, taskId),
+          ),
+        ],
         const SizedBox(height: 10),
         _buildConditionsSection(),
       ],
     );
   }
 
-  /// Collects open tasks on [board] that can be displayed in the prerequisites section.
+  /// Clears the prerequisite task search input field.
+  void _clearBlockedSearch() {
+    _blockedSearchController.clear();
+  }
+
+  /// Clears the optional `suspended` timestamp field.
+  void _clearSuspendedTimestamp() {
+    setState(() {
+      _suspendedController.clear();
+      _suspendedErrorMessage = null;
+    });
+  }
+
+  /// Collects open tasks on [board] that can be referenced in the prerequisites section.
   List<TaskItem> _collectCandidateBlockerTasks(TaskBoard board) {
     final currentId = widget.initialTask?.id;
     return <TaskItem>[
@@ -398,6 +433,41 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     ];
   }
 
+  /// Extracts a valid `YYYY-MM-DD` date prefix from [rawInput], or `null` if invalid.
+  static String? _extractDatePart(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.length < 10) {
+      return null;
+    }
+    final candidate = trimmed.substring(0, 10);
+    return TaskItem.tryParseIsoDate(candidate) != null ? candidate : null;
+  }
+
+  /// Parses [rawTime] (`HH:MM`) into a [TimeOfDay], or returns [fallback] if invalid.
+  static TimeOfDay _extractTimeOfDay(String rawTime, TimeOfDay fallback) {
+    final minutes = TaskItem.tryParseTimeMinutes(rawTime.trim());
+    if (minutes == null) {
+      return fallback;
+    }
+    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
+  }
+
+  /// Extracts a valid `HH:MM` suffix from a `YYYY-MM-DD HH:MM` timestamp string, or `null`.
+  static String? _extractTimeSuffix(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.length <= 10) {
+      return null;
+    }
+    final remainder = trimmed.substring(10).trim();
+    if (remainder.length >= 5) {
+      final hhMm = remainder.substring(0, 5);
+      if (TaskItem.tryParseTimeMinutes(hhMm) != null) {
+        return hhMm;
+      }
+    }
+    return null;
+  }
+
   /// Formats an initial `suspended` timestamp for the input field (omitting `defaultSuspendedAt`).
   static String _formatInitialSuspendedText(DateTime? suspendedAt) {
     if (suspendedAt == null || suspendedAt == TaskItem.defaultSuspendedAt) {
@@ -406,8 +476,15 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     return TaskItem.formatTdfTimestamp(suspendedAt);
   }
 
-  /// Rebuilds when the subtask input field text changes.
-  void _handleSubtaskInputChanged() {
+  /// Formats [time] as a zero-padded 24-hour `HH:MM` string.
+  static String _formatTimeOfDay(TimeOfDay time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  /// Rebuilds when subtask, suspended, or prerequisite search text changes.
+  void _handleInputStateChanged() {
     setState(() {});
   }
 
@@ -498,6 +575,94 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     );
   }
 
+  /// Opens the Material 3 time picker for the condition end time field (`17:00` default).
+  Future<void> _pickEndTime() async {
+    await _pickTimeIntoController(
+      _timeEndController,
+      defaultTime: const TimeOfDay(hour: 17, minute: 0),
+    );
+  }
+
+  /// Opens the Material 3 time picker for the condition start time field (`09:00` default).
+  Future<void> _pickStartTime() async {
+    await _pickTimeIntoController(
+      _timeStartController,
+      defaultTime: const TimeOfDay(hour: 9, minute: 0),
+    );
+  }
+
+  /// Opens a Material 3 date picker and updates [_suspendedController] with `YYYY-MM-DD`.
+  Future<void> _pickSuspendedDate() async {
+    final now = ref.read(clockProvider)();
+    final initialDate = _resolveInitialSuspendedDate(now);
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime.utc(2000),
+      lastDate: DateTime.utc(2100, 12, 31),
+    );
+    if (!mounted || pickedDate == null) {
+      return;
+    }
+    final formattedDate = TaskItem.formatIsoDate(pickedDate);
+    final existingTime = _extractTimeSuffix(_suspendedController.text);
+    setState(() {
+      _suspendedController.text = existingTime != null
+          ? '$formattedDate $existingTime'
+          : formattedDate;
+      _suspendedErrorMessage = null;
+    });
+  }
+
+  /// Opens a 24-hour Material 3 time picker and updates the `HH:MM` portion of [_suspendedController].
+  Future<void> _pickSuspendedTime() async {
+    final now = ref.read(clockProvider)();
+    final existingTimeSuffix = _extractTimeSuffix(_suspendedController.text);
+    final initialTime = _extractTimeOfDay(
+      existingTimeSuffix ?? '',
+      const TimeOfDay(hour: 9, minute: 0),
+    );
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      builder: _build24HourTimePicker,
+    );
+    if (!mounted || pickedTime == null) {
+      return;
+    }
+    final datePart =
+        _extractDatePart(_suspendedController.text) ??
+        TaskItem.formatIsoDate(now);
+    final formattedTime = _formatTimeOfDay(pickedTime);
+    setState(() {
+      _suspendedController.text = '$datePart $formattedTime';
+      _suspendedErrorMessage = null;
+    });
+  }
+
+  /// Opens a 24-hour Material 3 time picker and writes `HH:MM` into [controller].
+  Future<void> _pickTimeIntoController(
+    TextEditingController controller, {
+    required TimeOfDay defaultTime,
+  }) async {
+    if (_isSuspended) {
+      return;
+    }
+    final initialTime = _extractTimeOfDay(controller.text, defaultTime);
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      builder: _build24HourTimePicker,
+    );
+    if (!mounted || pickedTime == null) {
+      return;
+    }
+    setState(() {
+      controller.text = _formatTimeOfDay(pickedTime);
+      _timeErrorMessage = null;
+    });
+  }
+
   /// Removes the GPS location condition at [index].
   void _removeLocationCondition(int index) {
     setState(() {
@@ -531,6 +696,18 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       return QuickAddMode.someday;
     }
     return QuickAddMode.standard;
+  }
+
+  /// Resolves the initial [DateTime] for the suspended date picker from [_suspendedController] or [fallback].
+  DateTime _resolveInitialSuspendedDate(DateTime fallback) {
+    final datePart = _extractDatePart(_suspendedController.text);
+    if (datePart != null) {
+      final parsed = TaskItem.tryParseIsoDate(datePart);
+      if (parsed != null && parsed.year >= 2000 && parsed.year <= 2100) {
+        return parsed;
+      }
+    }
+    return DateTime.utc(fallback.year, fallback.month, fallback.day);
   }
 
   /// Resolves the `suspendedAt` timestamp when [_isSuspended] is enabled, or `null` when disabled.
