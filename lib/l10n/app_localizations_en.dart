@@ -360,9 +360,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get landingGreeting => 'What\'s up!';
-
-  @override
   String get sectionFocusTasks => 'FOCUS TASKS';
 
   @override

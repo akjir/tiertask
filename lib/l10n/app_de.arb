@@ -105,7 +105,6 @@
   "errorLocalFileTooLarge": "Die TDF-Datei überschreitet die maximal zulässige Größe.",
   "errorLoadLocalFileFailed": "Fehler beim Lesen der lokalen TDF-Datei ({details}).",
   "errorSaveLocalFileFailed": "Fehler beim Schreiben der lokalen TDF-Datei ({details}).",
-  "landingGreeting": "Was steht an!",
   "sectionFocusTasks": "FOKUSAUFGABEN",
   "sectionReadyTasks": "BEREITE AUFGABEN",
   "sectionPlannedTasks": "GEPLANTE AUFGABEN",

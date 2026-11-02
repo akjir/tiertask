@@ -369,9 +369,6 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get landingGreeting => 'Was steht an!';
-
-  @override
   String get sectionFocusTasks => 'FOKUSAUFGABEN';
 
   @override

@@ -75,8 +75,19 @@ task t002 {
 
       expect(
         find.text("What's up!"),
-        findsOneWidget,
-        reason: 'Landing page must display default greeting when no label is selected',
+        findsNothing,
+        reason: 'Legacy greeting must be removed from the landing page',
+      );
+      final topBarTitleFinder = find.byKey(const ValueKey('top_bar_title'));
+      expect(
+        topBarTitleFinder,
+        findsNothing,
+        reason: 'Top bar must not display TierTask or any title when no label is selected',
+      );
+      expect(
+        find.text('TierTask'),
+        findsNothing,
+        reason: 'TierTask must not be rendered in the top bar',
       );
       expect(
         find.text('Prepare quarterly report'),
@@ -159,15 +170,66 @@ task t002 {
       await tester.pumpAndSettle();
 
       expect(
-        find.text("What's up!"),
+        find.text('TierTask'),
         findsNothing,
-        reason: 'Selecting a label must replace the default greeting with the label name',
+        reason: 'Selecting a label must replace TierTask in the top bar with the label name',
       );
       expect(
         find.text('Business'),
         findsOneWidget,
-        reason: 'Selected label name must be displayed at the top instead of the default greeting',
+        reason: 'Selected label name must appear only once (in the top bar) and not above the tier section heading',
       );
+      expect(
+        find.descendant(of: topBarTitleFinder, matching: find.text('Business')),
+        findsOneWidget,
+        reason: 'Top bar header title must display the selected label name',
+      );
+      final centeredLabelRect = tester.getRect(topBarTitleFinder);
+      final menuButtonRect = tester.getRect(find.byIcon(Icons.menu_rounded));
+      expect(
+        centeredLabelRect.left > menuButtonRect.right + 20,
+        isTrue,
+        reason: 'Selected label name must be centered in the top bar when search is inactive',
+      );
+
+      await tester.tap(find.byIcon(Icons.search_rounded));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final midAnimationLabelRect = tester.getRect(topBarTitleFinder);
+      expect(
+        midAnimationLabelRect.left < centeredLabelRect.left &&
+            midAnimationLabelRect.left > menuButtonRect.right,
+        isTrue,
+        reason: 'Selected label name must smoothly animate from the center toward the menu button',
+      );
+
+      await tester.pumpAndSettle();
+
+      final searchingLabelRect = tester.getRect(topBarTitleFinder);
+      final searchFieldRect = tester.getRect(find.byType(TextField));
+      final closeSearchRect = tester.getRect(find.byIcon(Icons.close_rounded));
+      expect(
+        searchingLabelRect.left < midAnimationLabelRect.left,
+        isTrue,
+        reason: 'Completed search animation must position the label name next to the menu button',
+      );
+      expect(
+        searchFieldRect.left >= searchingLabelRect.right - 1.0 &&
+            searchFieldRect.right <= closeSearchRect.left + 1.0,
+        isTrue,
+        reason: 'Search field must appear between the shifted label name and the search/close button',
+      );
+
+      await tester.tap(find.byIcon(Icons.close_rounded));
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getRect(topBarTitleFinder).left,
+        closeTo(centeredLabelRect.left, 0.5),
+        reason: 'Closing search must smoothly return the selected label name to the center',
+      );
+
       expect(
         find.text('Prepare quarterly report'),
         findsOneWidget,
@@ -185,9 +247,9 @@ task t002 {
       await tester.pumpAndSettle();
 
       expect(
-        find.text("What's up!"),
-        findsOneWidget,
-        reason: 'Clearing the selected label filter must restore the default greeting',
+        topBarTitleFinder,
+        findsNothing,
+        reason: 'Clearing the selected label filter must remove the label title from the top bar',
       );
       expect(
         find.text('Business'),

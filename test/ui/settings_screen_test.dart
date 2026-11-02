@@ -164,7 +164,8 @@ task t004 {
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
 
-      expect(find.text('Was steht an!'), findsOneWidget);
+      expect(find.text('Was steht an!'), findsNothing);
+      expect(find.byKey(const ValueKey('top_bar_title')), findsNothing);
       expect(find.text('FOKUSAUFGABEN'), findsOneWidget);
       expect(find.textContaining('# ['), findsNothing);
     },

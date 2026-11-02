@@ -66,8 +66,18 @@ void main() {
 
       expect(
         find.text("What's up!"),
-        findsOneWidget,
-        reason: 'Landing page must display the greeting at the top',
+        findsNothing,
+        reason: 'Greeting must be removed from the landing page',
+      );
+      expect(
+        find.byKey(const ValueKey('top_bar_title')),
+        findsNothing,
+        reason: 'Top bar must not display TierTask or any title when no label filter is selected',
+      );
+      expect(
+        find.text('TierTask'),
+        findsNothing,
+        reason: 'TierTask must be omitted from the landing page header',
       );
       expect(
         find.textContaining('Olivia'),
@@ -104,13 +114,13 @@ void main() {
             'No location card accent bar must render when locations are empty',
       );
 
-      final greetingDy = tester.getTopLeft(find.text("What's up!")).dy;
+      final menuButtonRect = tester.getRect(find.byIcon(Icons.menu_rounded));
       final focusDy = tester.getTopLeft(find.text('FOCUS TASKS')).dy;
 
       expect(
-        greetingDy < focusDy,
+        menuButtonRect.bottom <= focusDy,
         isTrue,
-        reason: 'Greeting must appear above Focus tasks',
+        reason: 'Top bar must appear above Focus tasks',
       );
 
       expect(
@@ -164,6 +174,22 @@ void main() {
       await tester.tap(find.byIcon(Icons.search_rounded));
       await tester.pumpAndSettle();
 
+      final searchFieldRect = tester.getRect(find.byType(TextField));
+      final closeSearchButtonRect = tester.getRect(
+        find.byIcon(Icons.close_rounded),
+      );
+
+      expect(
+        searchFieldRect.left >= menuButtonRect.right - 1.0,
+        isTrue,
+        reason: 'Search bar must appear to the right of the menu button when no label is selected',
+      );
+      expect(
+        searchFieldRect.right <= closeSearchButtonRect.left + 1.0,
+        isTrue,
+        reason: 'Search bar must appear to the left of the search/close button',
+      );
+
       await tester.enterText(find.byType(TextField), 'Nonexistent');
       await tester.pumpAndSettle();
       expect(
@@ -201,7 +227,8 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      expect(find.text('Was steht an!'), findsOneWidget);
+      expect(find.text('Was steht an!'), findsNothing);
+      expect(find.byKey(const ValueKey('top_bar_title')), findsNothing);
       expect(find.textContaining('Olivia'), findsNothing);
       expect(find.text('FOKUSAUFGABEN'), findsOneWidget);
       expect(
@@ -415,8 +442,13 @@ task cmp1 {
 
       expect(
         find.text("What's up!"),
-        findsOneWidget,
-        reason: 'Blocked tier panel must display the greeting like the Focus screen',
+        findsNothing,
+        reason: 'Blocked tier panel must not display the legacy greeting',
+      );
+      expect(
+        find.byKey(const ValueKey('top_bar_title')),
+        findsNothing,
+        reason: 'Top header must not display a title when no label is selected on Blocked',
       );
       expect(
         find.text('BLOCKED TASKS'),

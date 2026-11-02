@@ -645,7 +645,6 @@ class _LandingContentSwitcher extends StatelessWidget {
           itemCount: TaskTier.values.length,
           onPageChanged: onPageChanged,
           itemBuilder: (context, index) => _TierScrollView(
-            activeLabelName: label?.name,
             board: effectiveBoard,
             searchQuery: searchQuery,
             tier: TaskTier.values[index],
@@ -818,6 +817,7 @@ class _LandingScaffoldBody extends StatelessWidget {
     return Column(
       children: [
         _LandingTopBar(
+          activeLabelName: activeLabel?.name,
           isSearching: isSearching,
           isSyncing: isSyncing,
           searchController: searchController,
@@ -868,10 +868,11 @@ class _LandingSectionLabel extends StatelessWidget {
   }
 }
 
-/// Top navigation bar with the menu button on the left and search and optional sync on the right.
+/// Top navigation bar displaying the menu button on the left, the active label name in the center when a label filter is selected (smoothly gliding left next to the menu when searching), and search and optional sync on the right.
 class _LandingTopBar extends StatelessWidget {
   /// Creates a [_LandingTopBar].
   const _LandingTopBar({
+    required this.activeLabelName,
     required this.isSearching,
     required this.isSyncing,
     required this.searchController,
@@ -880,6 +881,9 @@ class _LandingTopBar extends StatelessWidget {
     required this.onSyncRemote,
     required this.onToggleSearch,
   });
+
+  /// Active label display name when a label filter is selected, or `null` when unfiltered.
+  final String? activeLabelName;
 
   /// Whether the inline search input is currently expanded.
   final bool isSearching;
@@ -910,35 +914,17 @@ class _LandingTopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(
         children: [
-          Builder(
-            builder: (drawerContext) => IconButton(
-              tooltip: localizations.tooltipMenu,
-              icon: const Icon(
-                Icons.menu_rounded,
-                color: _mutedLabelColor,
-                size: 28,
-              ),
-              onPressed: () => Scaffold.of(drawerContext).openDrawer(),
+          _TopBarMenuButton(tooltip: localizations.tooltipMenu),
+          Expanded(
+            child: _TopBarCenterArea(
+              activeLabelName: activeLabelName,
+              isSearching: isSearching,
+              searchController: searchController,
+              onSearchChanged: onSearchChanged,
             ),
           ),
-          if (isSearching)
-            Expanded(
-              child: _TopBarSearchField(
-                controller: searchController,
-                onChanged: onSearchChanged,
-              ),
-            )
-          else
-            const Spacer(),
-          IconButton(
-            tooltip: isSearching
-                ? localizations.actionClose
-                : localizations.tooltipSearch,
-            icon: Icon(
-              isSearching ? Icons.close_rounded : Icons.search_rounded,
-              color: _mutedLabelColor,
-              size: 26,
-            ),
+          _TopBarSearchButton(
+            isSearching: isSearching,
             onPressed: onToggleSearch,
           ),
           if (showSyncAction)
@@ -1000,13 +986,10 @@ class _SyncErrorBanner extends StatelessWidget {
   }
 }
 
-/// Header block inside [_TierScrollView] displaying the active label name or greeting and uppercase tier section label.
+/// Header block inside [_TierScrollView] displaying the uppercase tier section label.
 class _TierPaneHeader extends StatelessWidget {
   /// Creates a [_TierPaneHeader].
-  const _TierPaneHeader({required this.activeLabelName, required this.tier});
-
-  /// Active label display name when a label filter is selected, or `null` for the default greeting.
-  final String? activeLabelName;
+  const _TierPaneHeader({required this.tier});
 
   /// Active [TaskTier] pane.
   final TaskTier tier;
@@ -1014,38 +997,21 @@ class _TierPaneHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          activeLabelName ?? localizations.landingGreeting,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
-            letterSpacing: -0.5,
-          ),
-        ),
-        const SizedBox(height: 28),
-        _LandingSectionLabel(title: localizations.tierSectionTitle(tier)),
-        const SizedBox(height: 12),
-      ],
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: _LandingSectionLabel(title: localizations.tierSectionTitle(tier)),
     );
   }
 }
 
-/// Scrollable tier pane body rendering the active label name or greeting, uppercase section label, and minimalist task pills.
+/// Scrollable tier pane body rendering the uppercase section label and minimalist task pills.
 class _TierScrollView extends StatelessWidget {
   /// Creates a [_TierScrollView].
   const _TierScrollView({
-    required this.activeLabelName,
     required this.board,
     required this.searchQuery,
     required this.tier,
   });
-
-  /// Active label display name when a label filter is selected, or `null` when unfiltered.
-  final String? activeLabelName;
 
   /// Current task board snapshot.
   final TaskBoard board;
@@ -1067,7 +1033,7 @@ class _TierScrollView extends StatelessWidget {
       itemCount: tasks.isEmpty ? 2 : tasks.length + 1,
       itemBuilder: (context, index) {
         if (index == 0) {
-          return _TierPaneHeader(activeLabelName: activeLabelName, tier: tier);
+          return _TierPaneHeader(tier: tier);
         }
         if (tasks.isEmpty) {
           return _EmptyTierCard(message: localizations.tierEmptyHint(tier));
@@ -1356,6 +1322,185 @@ class _TierTaskPillRow extends StatelessWidget {
   }
 }
 
+/// Animated middle region of [_LandingTopBar] that smoothly glides the active label name from the center to the left edge next to the menu button and expands the search input when search is toggled.
+class _TopBarCenterArea extends StatelessWidget {
+  /// Creates a [_TopBarCenterArea].
+  const _TopBarCenterArea({
+    required this.activeLabelName,
+    required this.isSearching,
+    required this.searchController,
+    required this.onSearchChanged,
+  });
+
+  /// Active label display name when a label filter is selected, or `null` when unfiltered.
+  final String? activeLabelName;
+
+  /// Whether the inline search bar is currently expanded.
+  final bool isSearching;
+
+  /// Callback invoked when the search input text changes.
+  final ValueChanged<String> onSearchChanged;
+
+  /// Controller for the inline search input field.
+  final TextEditingController searchController;
+
+  @override
+  Widget build(BuildContext context) {
+    final labelName = activeLabelName;
+
+    return SizedBox(
+      height: 48,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: isSearching ? 1.0 : 0.0),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeInOutCubic,
+        builder: (context, searchProgress, _) {
+          final showSearch = isSearching || searchProgress > 0.0;
+          return CustomMultiChildLayout(
+            delegate: _TopBarLayoutDelegate(searchProgress: searchProgress),
+            children: [
+              if (labelName != null)
+                LayoutId(
+                  id: _TopBarSlot.title,
+                  child: _TopBarTitle(
+                    key: const ValueKey('top_bar_title'),
+                    title: labelName,
+                  ),
+                ),
+              if (showSearch)
+                LayoutId(
+                  id: _TopBarSlot.search,
+                  child: Opacity(
+                    opacity: searchProgress.clamp(0.0, 1.0),
+                    child: IgnorePointer(
+                      ignoring: !isSearching,
+                      child: _TopBarSearchField(
+                        controller: searchController,
+                        onChanged: onSearchChanged,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Layout delegate positioning the optional active label title and inline search field according to [searchProgress].
+class _TopBarLayoutDelegate extends MultiChildLayoutDelegate {
+  /// Creates a [_TopBarLayoutDelegate].
+  _TopBarLayoutDelegate({required this.searchProgress});
+
+  /// Interpolation progress between centered label (`0.0`) and expanded search (`1.0`).
+  final double searchProgress;
+
+  @override
+  void performLayout(Size size) {
+    var titleRightEdge = 0.0;
+    final hasTitle = hasChild(_TopBarSlot.title);
+
+    if (hasTitle) {
+      final maxTitleWidth = size.width * (1.0 - (0.45 * searchProgress));
+      final titleSize = layoutChild(
+        _TopBarSlot.title,
+        BoxConstraints(
+          maxWidth: maxTitleWidth.clamp(0.0, size.width),
+          maxHeight: size.height,
+        ),
+      );
+      final centeredX = (size.width - titleSize.width) / 2.0;
+      final titleX = centeredX * (1.0 - searchProgress);
+      final titleY = (size.height - titleSize.height) / 2.0;
+      positionChild(_TopBarSlot.title, Offset(titleX, titleY));
+      titleRightEdge = titleX + titleSize.width + 12.0;
+    }
+
+    if (hasChild(_TopBarSlot.search)) {
+      final availableWidth = (size.width - titleRightEdge).clamp(
+        0.0,
+        size.width,
+      );
+      final searchWidth = hasTitle
+          ? availableWidth
+          : size.width * searchProgress;
+      final searchX = hasTitle ? titleRightEdge : size.width - searchWidth;
+      final searchSize = layoutChild(
+        _TopBarSlot.search,
+        BoxConstraints(
+          minWidth: searchWidth,
+          maxWidth: searchWidth,
+          maxHeight: size.height,
+        ),
+      );
+      final searchY = (size.height - searchSize.height) / 2.0;
+      positionChild(_TopBarSlot.search, Offset(searchX, searchY));
+    }
+  }
+
+  @override
+  bool shouldRelayout(_TopBarLayoutDelegate oldDelegate) {
+    return oldDelegate.searchProgress != searchProgress;
+  }
+}
+
+/// Leading drawer menu button inside [_LandingTopBar].
+class _TopBarMenuButton extends StatelessWidget {
+  /// Creates a [_TopBarMenuButton].
+  const _TopBarMenuButton({required this.tooltip});
+
+  /// Localized tooltip message for opening the drawer.
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      icon: const Icon(Icons.menu_rounded, color: _mutedLabelColor, size: 28),
+      onPressed: () => Scaffold.of(context).openDrawer(),
+    );
+  }
+}
+
+/// Search toggle button inside [_LandingTopBar] with animated icon transition.
+class _TopBarSearchButton extends StatelessWidget {
+  /// Creates a [_TopBarSearchButton].
+  const _TopBarSearchButton({
+    required this.isSearching,
+    required this.onPressed,
+  });
+
+  /// Whether the inline search bar is currently active.
+  final bool isSearching;
+
+  /// Callback invoked when the button is tapped.
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return IconButton(
+      tooltip: isSearching
+          ? localizations.actionClose
+          : localizations.tooltipSearch,
+      icon: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: Icon(
+          isSearching ? Icons.close_rounded : Icons.search_rounded,
+          key: ValueKey<bool>(isSearching),
+          color: _mutedLabelColor,
+          size: 26,
+        ),
+      ),
+      onPressed: onPressed,
+    );
+  }
+}
+
 /// Inline search [TextField] displayed inside [_LandingTopBar].
 class _TopBarSearchField extends StatelessWidget {
   /// Creates a [_TopBarSearchField].
@@ -1383,6 +1528,15 @@ class _TopBarSearchField extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Layout slot identifiers for [_TopBarLayoutDelegate].
+enum _TopBarSlot {
+  /// Active label title slot.
+  title,
+
+  /// Inline search input slot.
+  search,
 }
 
 /// Sync button or progress spinner rendered next to search when WebDAV is enabled.
@@ -1419,6 +1573,35 @@ class _TopBarSyncAction extends StatelessWidget {
       tooltip: localizations.tooltipSyncWebDav,
       icon: const Icon(Icons.sync_rounded, color: _mutedLabelColor, size: 26),
       onPressed: onSyncRemote,
+    );
+  }
+}
+
+/// Active label title displayed inside [_LandingTopBar].
+class _TopBarTitle extends StatelessWidget {
+  /// Creates a [_TopBarTitle].
+  const _TopBarTitle({super.key, required this.title});
+
+  /// Active label name to display.
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 200),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: Text(
+        title,
+        key: ValueKey<String>(title),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 }

@@ -226,8 +226,13 @@ task cmp1 {
 
       expect(
         find.text("What's up!"),
-        findsOneWidget,
-        reason: 'Ready pane must display the top greeting matching the Focus screen',
+        findsNothing,
+        reason: 'Ready pane must not display the legacy greeting',
+      );
+      expect(
+        find.byKey(const ValueKey('top_bar_title')),
+        findsNothing,
+        reason: 'Top header must not display a title on the Ready pane when no label is selected',
       );
       expect(
         find.text('READY TASKS'),

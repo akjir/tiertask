@@ -29,6 +29,8 @@ const Color _accentMagenta = Color(0xFFEB06FF);
 const Color _canvasColor = Color(0xFF344FA1);
 const Color _cardColor = Color(0xFF071A52);
 const Color _mutedLabelColor = Color(0xFF9BA8E5);
+const double _pixel9ProAspectRatio = 1280.0 / 2856.0;
+const double _pixel9ProLogicalWidth = 488.0;
 const String _popupTapRegionGroupId = 'quick_add_popup_region';
 
 /// Inline bottom task creation bar with title input, Priority, Someday, upward Labels selector, Advanced dialog trigger, and Cancel actions.
@@ -67,7 +69,100 @@ enum QuickAddMode {
   }
 }
 
-/// Compact icon button rendered on the right side of [_QuickAddBarRow].
+/// Horizontal row of action icon buttons inside [QuickAddBar].
+class _QuickAddActionButtons extends StatelessWidget {
+  /// Creates a [_QuickAddActionButtons] row.
+  const _QuickAddActionButtons({
+    required this.hasSelectedLabels,
+    required this.isLabelsPopupOpen,
+    required this.mode,
+    required this.onAdvanced,
+    required this.onCancel,
+    required this.onToggleLabelsPopup,
+    required this.onTogglePriority,
+    required this.onToggleSomeday,
+  });
+
+  /// Whether at least one label is selected.
+  final bool hasSelectedLabels;
+
+  /// Whether the upward Labels popup menu is currently open.
+  final bool isLabelsPopupOpen;
+
+  /// Active scheduling mode.
+  final QuickAddMode mode;
+
+  /// Callback to open the extended task creation dialog.
+  final VoidCallback onAdvanced;
+
+  /// Callback invoked when the Cancel button is pressed.
+  final VoidCallback onCancel;
+
+  /// Callback to toggle the upward Labels popup menu.
+  final VoidCallback onToggleLabelsPopup;
+
+  /// Callback to toggle Priority mode.
+  final VoidCallback onTogglePriority;
+
+  /// Callback to toggle Someday mode.
+  final VoidCallback onToggleSomeday;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _QuickAddActionIconButton(
+          buttonKey: const ValueKey('quick_add_priority_button'),
+          icon: Icons.bolt_rounded,
+          isActive: mode == QuickAddMode.priority,
+          activeColor: _accentMagenta,
+          tooltip: localizations.quickAddPriority,
+          onTap: onTogglePriority,
+        ),
+        _QuickAddActionIconButton(
+          buttonKey: const ValueKey('quick_add_someday_button'),
+          icon: Icons.lightbulb_outline_rounded,
+          isActive: mode == QuickAddMode.someday,
+          activeColor: _accentBlue,
+          tooltip: localizations.tierName(TaskTier.someday),
+          onTap: onToggleSomeday,
+        ),
+        TapRegion(
+          groupId: _popupTapRegionGroupId,
+          child: _QuickAddActionIconButton(
+            buttonKey: const ValueKey('quick_add_labels_button'),
+            icon: Icons.label_outline_rounded,
+            isActive: isLabelsPopupOpen || hasSelectedLabels,
+            activeColor: _accentMagenta,
+            tooltip: localizations.drawerLabels,
+            onTap: onToggleLabelsPopup,
+          ),
+        ),
+        _QuickAddActionIconButton(
+          buttonKey: const ValueKey('quick_add_advanced_button'),
+          icon: Icons.tune_rounded,
+          isActive: false,
+          activeColor: _accentCyan,
+          tooltip: localizations.quickAddAdvanced,
+          onTap: onAdvanced,
+        ),
+        _QuickAddActionIconButton(
+          buttonKey: const ValueKey('quick_add_cancel_button'),
+          icon: Icons.close_rounded,
+          isActive: false,
+          activeColor: _mutedLabelColor,
+          tooltip: localizations.actionCancel,
+          onTap: onCancel,
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact icon button rendered inside [_QuickAddActionButtons].
 class _QuickAddActionIconButton extends StatelessWidget {
   /// Creates a [_QuickAddActionIconButton].
   const _QuickAddActionIconButton({
@@ -129,10 +224,10 @@ class _QuickAddActionIconButton extends StatelessWidget {
   }
 }
 
-/// Single-row layout inside [QuickAddBar] combining the text field and action icon buttons.
-class _QuickAddBarRow extends StatelessWidget {
-  /// Creates a [_QuickAddBarRow].
-  const _QuickAddBarRow({
+/// Responsive layout inside [QuickAddBar] that stacks the text input above the action buttons at or below the Pixel 9 Pro width threshold and places them side-by-side on wider viewports.
+class _QuickAddBarLayout extends StatelessWidget {
+  /// Creates a [_QuickAddBarLayout].
+  const _QuickAddBarLayout({
     required this.controller,
     required this.effectiveTier,
     required this.hasSelectedLabels,
@@ -185,62 +280,55 @@ class _QuickAddBarRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
+    final viewportSize = MediaQuery.sizeOf(context);
+    final textField = _QuickAddTextField(
+      controller: controller,
+      effectiveTier: effectiveTier,
+      hasText: hasTaskText,
+      onSubmit: onSubmit,
+    );
+    final actionButtons = _QuickAddActionButtons(
+      hasSelectedLabels: hasSelectedLabels,
+      isLabelsPopupOpen: isLabelsPopupOpen,
+      mode: mode,
+      onAdvanced: onAdvanced,
+      onCancel: onCancel,
+      onToggleLabelsPopup: onToggleLabelsPopup,
+      onTogglePriority: onTogglePriority,
+      onToggleSomeday: onToggleSomeday,
+    );
 
-    return Row(
-      children: [
-        Expanded(
-          child: _QuickAddTextField(
-            controller: controller,
-            effectiveTier: effectiveTier,
-            hasText: hasTaskText,
-            onSubmit: onSubmit,
-          ),
-        ),
-        _QuickAddActionIconButton(
-          buttonKey: const ValueKey('quick_add_priority_button'),
-          icon: Icons.bolt_rounded,
-          isActive: mode == QuickAddMode.priority,
-          activeColor: _accentMagenta,
-          tooltip: localizations.quickAddPriority,
-          onTap: onTogglePriority,
-        ),
-        _QuickAddActionIconButton(
-          buttonKey: const ValueKey('quick_add_someday_button'),
-          icon: Icons.lightbulb_outline_rounded,
-          isActive: mode == QuickAddMode.someday,
-          activeColor: _accentBlue,
-          tooltip: localizations.tierName(TaskTier.someday),
-          onTap: onToggleSomeday,
-        ),
-        TapRegion(
-          groupId: _popupTapRegionGroupId,
-          child: _QuickAddActionIconButton(
-            buttonKey: const ValueKey('quick_add_labels_button'),
-            icon: Icons.label_outline_rounded,
-            isActive: isLabelsPopupOpen || hasSelectedLabels,
-            activeColor: _accentMagenta,
-            tooltip: localizations.drawerLabels,
-            onTap: onToggleLabelsPopup,
-          ),
-        ),
-        _QuickAddActionIconButton(
-          buttonKey: const ValueKey('quick_add_advanced_button'),
-          icon: Icons.tune_rounded,
-          isActive: false,
-          activeColor: _accentCyan,
-          tooltip: localizations.quickAddAdvanced,
-          onTap: onAdvanced,
-        ),
-        _QuickAddActionIconButton(
-          buttonKey: const ValueKey('quick_add_cancel_button'),
-          icon: Icons.close_rounded,
-          isActive: false,
-          activeColor: _mutedLabelColor,
-          tooltip: localizations.actionCancel,
-          onTap: onCancel,
-        ),
-      ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final barWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : viewportSize.width;
+        final isStacked =
+            barWidth <= _pixel9ProLogicalWidth ||
+            barWidth <= viewportSize.height * _pixel9ProAspectRatio;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: isStacked
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    textField,
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: actionButtons,
+                    ),
+                  ],
+                )
+              : Row(
+                  children: [
+                    Expanded(child: textField),
+                    actionButtons,
+                  ],
+                ),
+        );
+      },
     );
   }
 }
@@ -301,14 +389,13 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
           color: _cardColor,
           child: SafeArea(
             top: false,
-            child: Container(
+            child: DecoratedBox(
               decoration: const BoxDecoration(
                 border: Border(
                   top: BorderSide(color: _canvasColor, width: 1.5),
                 ),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: _QuickAddBarRow(
+              child: _QuickAddBarLayout(
                 controller: _controller,
                 effectiveTier: _mode.targetTier,
                 hasSelectedLabels: _selectedLabelIds.isNotEmpty,
@@ -518,7 +605,7 @@ class _QuickAddPopupOptionTile extends StatelessWidget {
   }
 }
 
-/// Borderless inline task title [TextField] inside [_QuickAddBarRow].
+/// Borderless inline task title [TextField] inside [_QuickAddBarLayout].
 class _QuickAddTextField extends StatelessWidget {
   /// Creates a [_QuickAddTextField].
   const _QuickAddTextField({

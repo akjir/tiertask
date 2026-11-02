@@ -350,7 +350,7 @@ label c_hr {
       await tester.tap(labelHomeOption);
       await tester.pump();
 
-      await tester.tap(find.text("What's up!"));
+      await tester.tap(find.text('FOCUS TASKS'));
       await tester.pumpAndSettle();
       expect(
         labelsMenu,
@@ -374,6 +374,108 @@ label c_hr {
         createdTask.labelIds,
         equals(['home', 'c_it', 'c_ops']),
         reason: 'Created task must store all selected labels in board declaration order',
+      );
+    },
+  );
+
+  testWidgets(
+    'QuickAddBar stacks input above action buttons at Pixel 9 Pro width and when window width drops below threshold',
+    (WidgetTester tester) async {
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      // Pixel 9 Pro physical resolution (1280x2856) at 3.0x density (426.67x952 dp).
+      tester.view.physicalSize = const Size(1280, 2856);
+      tester.view.devicePixelRatio = 3.0;
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      final inputFinder = find.byKey(const ValueKey('quick_add_input'));
+      final priorityFinder = find.byKey(
+        const ValueKey('quick_add_priority_button'),
+      );
+      final somedayFinder = find.byKey(
+        const ValueKey('quick_add_someday_button'),
+      );
+      final labelsFinder = find.byKey(
+        const ValueKey('quick_add_labels_button'),
+      );
+      final advancedFinder = find.byKey(
+        const ValueKey('quick_add_advanced_button'),
+      );
+      final cancelFinder = find.byKey(
+        const ValueKey('quick_add_cancel_button'),
+      );
+
+      expect(
+        tester.getBottomLeft(inputFinder).dy <=
+            tester.getTopLeft(priorityFinder).dy,
+        isTrue,
+        reason: 'At Pixel 9 Pro viewport width, input must be positioned above the action buttons',
+      );
+      expect(
+        tester.getTopLeft(priorityFinder).dx <
+                tester.getTopLeft(somedayFinder).dx &&
+            tester.getTopLeft(somedayFinder).dx <
+                tester.getTopLeft(labelsFinder).dx &&
+            tester.getTopLeft(labelsFinder).dx <
+                tester.getTopLeft(advancedFinder).dx &&
+            tester.getTopLeft(advancedFinder).dx <
+                tester.getTopLeft(cancelFinder).dx,
+        isTrue,
+        reason: 'Action buttons must remain ordered left-to-right on the bottom row',
+      );
+
+      // Resize to a wide desktop window (1280x720 at 1.0x): input must sit beside buttons.
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1280, 720);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getTopRight(inputFinder).dx <=
+            tester.getTopLeft(priorityFinder).dx,
+        isTrue,
+        reason: 'In a wide desktop window, input must sit to the left of the action buttons',
+      );
+      expect(
+        (tester.getCenter(inputFinder).dy - tester.getCenter(priorityFinder).dy)
+            .abs(),
+        lessThan(8.0),
+        reason: 'In a wide desktop window, input and buttons must share the same row',
+      );
+
+      // Narrow the desktop window below the Pixel 9 Pro width threshold (320x720): input must stack above buttons.
+      tester.view.physicalSize = const Size(320, 720);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getBottomLeft(inputFinder).dy <=
+            tester.getTopLeft(priorityFinder).dy,
+        isTrue,
+        reason: 'When window width drops below the Pixel 9 Pro threshold, input must automatically stack above the buttons',
       );
     },
   );

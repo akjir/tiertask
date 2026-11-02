@@ -470,10 +470,6 @@
       }
     }
   },
-  "landingGreeting": "What's up!",
-  "@landingGreeting": {
-    "description": "Greeting header shown at the top of the landing page."
-  },
   "sectionFocusTasks": "FOCUS TASKS",
   "@sectionFocusTasks": {
     "description": "Uppercase section label above the Focus tasks list on the landing page."

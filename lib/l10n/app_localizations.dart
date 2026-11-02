@@ -728,12 +728,6 @@ abstract class AppLocalizations {
   /// **'Failed to write local TDF file ({details}).'**
   String errorSaveLocalFileFailed(String details);
 
-  /// Greeting header shown at the top of the landing page.
-  ///
-  /// In en, this message translates to:
-  /// **'What\'s up!'**
-  String get landingGreeting;
-
   /// Uppercase section label above the Focus tasks list on the landing page.
   ///
   /// In en, this message translates to:

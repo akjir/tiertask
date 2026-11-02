@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added Linux, Android, and Windows platform support for the 6-tier task board.
 
 ### Changed
+- Changed `_LandingTopBar` on `HomeScreen` (`lib/ui/home_screen.dart`) to display the selected label's name centered in the top bar when a label filter is active (omitting a title when no label is selected), and to smoothly animate the label name to the left next to the menu button while expanding and fading in the search input between the label name and the search icon when search is opened.
+- Changed `QuickAddBar` (`lib/ui/widgets/quick_add_bar.dart`) to automatically stack the task title input field above the action buttons (`Priority`, `Someday`, `Labels`, `Advanced`, `Cancel`) when the viewport width matches or drops below the Pixel 9 Pro width/aspect-ratio threshold (`<= 488` dp or `<= height * 1280 / 2856`), while keeping the single-row side-by-side layout on wider viewports.
 - Changed `_TierPaneHeader` on `HomeScreen` (`lib/ui/home_screen.dart`) to display the selected label's name instead of the default greeting (`What's up!` / `Was steht an!`) whenever a label filter is active.
 - Changed `TdfService.parse`, domain models (`TdfLabel`, `TaskItem.labelIds`, `TaskBoard.labels`), Riverpod providers (`TaskNotifier`), UI widgets (`QuickAddBar`, `TaskEditorDialog`), and localization bundles (`app_en.arb`, `app_de.arb`) to unify `category` and `location` into `label` and automatically migrate legacy `category` / `location` (`gps`) blocks and `categories` / `locations` directives to `tdf 0.2.0` `label` / `labels` on parse and save.
 - Changed task pill cards (`_TierTaskPill`) so only the leading completion circle and the right-side edit button are clickable (rather than the entire task card), and added a full-height 3px vertical gap matching the screen background before the edit button.
@@ -35,6 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed UI tier headings, tab labels, and quick-add chips to display localized tier names (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`).
 
 ### Removed
+- Removed the `What's up!` / `Was steht an!` greeting (`landingGreeting`) and the active label title from above the tier section heading in `_TierPaneHeader` on `HomeScreen`.
 - Removed the tier navigation entries (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from the side panel navigation drawer (`_LandingDrawer`).
 - Removed legacy `TaskTile` (`lib/ui/widgets/task_tile.dart`), `RestoreTaskSheet` (`lib/ui/widgets/restore_task_sheet.dart`), the `Move to...` / `Edit text` / `Delete` entry overflow menu and quick-action buttons, and associated `moveTask`, `restoreTask`, `editTaskTitle`, and `deleteTask` methods.
 - Removed Markdown (`.md`) parsing, serialization, and `MarkdownService` in favor of the TierTask Data Format (`.tdf`).
