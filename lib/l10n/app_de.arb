@@ -201,5 +201,20 @@
   "tooltipIndicatorPriority": "Priorität",
   "tooltipIndicatorRepeat": "Wiederkehrende Aufgabe",
   "tooltipIndicatorSubtasks": "Unteraufgaben",
-  "tooltipIndicatorSubtasksAutoFinish": "Unteraufgaben (automatisch abschließen)"
+  "tooltipIndicatorSubtasksAutoFinish": "Unteraufgaben (automatisch abschließen)",
+  "tooltipManageWorkspaces": "Arbeitsbereich wechseln oder verwalten",
+  "workspacesDialogTitle": "Arbeitsbereiche",
+  "workspacesDialogDescription": "Wechsle zwischen isolierten Aufgabenbereichen oder erstelle einen neuen Arbeitsbereich mit eigener TDF-Datei.",
+  "workspaceActiveBadge": "Aktiv",
+  "createWorkspaceHint": "Neuer Arbeitsbereich...",
+  "workspaceSuggestedFileLabel": "TDF-Datei: {fileName}",
+  "tooltipCreateWorkspace": "Arbeitsbereich erstellen",
+  "tooltipRenameWorkspace": "Arbeitsbereich umbenennen",
+  "tooltipDeleteWorkspace": "Arbeitsbereich löschen",
+  "deleteWorkspaceConfirmMessage": "Arbeitsbereich „{name}“ entfernen? Die TDF-Datei wird nicht gelöscht.",
+  "actionDelete": "Löschen",
+  "errorWorkspaceNameEmpty": "Bitte einen gültigen Namen eingeben (1–128 Zeichen).",
+  "errorWorkspaceNameDuplicate": "Ein Arbeitsbereich mit diesem Namen existiert bereits.",
+  "errorWorkspaceCannotDeleteLast": "Der letzte verbleibende Arbeitsbereich kann nicht gelöscht werden.",
+  "errorWorkspaceMaxExceeded": "Die maximale Anzahl an Arbeitsbereichen (32) ist erreicht."
 }

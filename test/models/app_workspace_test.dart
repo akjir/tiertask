@@ -954,7 +954,8 @@ void main() {
       expect(
         await projektBFile.exists(),
         isTrue,
-        reason: 'Deleting a workspace profile must preserve its .tdf file on disk',
+        reason:
+            'Deleting a workspace profile must preserve its .tdf file on disk',
       );
       expect(
         await projektBFile.readAsString(),

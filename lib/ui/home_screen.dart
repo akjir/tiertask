@@ -18,18 +18,21 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../l10n/tier_localization_extension.dart';
+import '../models/app_workspace.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
+import '../providers/workspace_providers.dart';
 import 'edit_labels_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/app_logo.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/tier_page_indicator.dart';
 import 'widgets/tier_task_pill.dart';
+import 'widgets/workspace_dialog.dart';
 
 /// Primary landing page screen for TierTask across Linux, Android, and Windows.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -522,7 +525,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(
+      activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
+      _handleWorkspaceChanged,
+    );
     final theme = Theme.of(context);
+    final activeWorkspace =
+        ref.watch(activeWorkspaceProvider).asData?.value ??
+        AppWorkspace.defaultWorkspace;
     final boardAsync = ref.watch(taskNotifierProvider);
     final board = boardAsync.asData?.value ?? TaskBoard.empty();
     final activeLabel = _resolveActiveLabel(board);
@@ -537,7 +547,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       backgroundColor: theme.scaffoldBackgroundColor,
       drawer: _LandingDrawer(
         activeLabelId: activeLabel?.id,
+        activeWorkspace: activeWorkspace,
         board: board,
+        onManageWorkspaces: () => showWorkspaceDialog(context),
         onOpenEditLabels: (autofocusCreate) =>
             _openEditLabels(context, autofocusCreate: autofocusCreate),
         onOpenMarkdownPreview: () => _showMarkdownPreviewDialog(context),
@@ -609,6 +621,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
     setState(() {
       _activeTier = tier;
+    });
+  }
+
+  /// Resets ephemeral label, search, and quick-add filters when the active workspace changes.
+  void _handleWorkspaceChanged(String? previousId, String? nextId) {
+    if (previousId == null || nextId == null || previousId == nextId) {
+      return;
+    }
+    setState(() {
+      _activeLabelId = null;
+      _activeTier = TaskTier.focus;
+      _isQuickAddOpen = false;
+      _isSearching = false;
+      _searchController.clear();
+      _searchQuery = '';
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(TaskTier.focus.index);
+      }
     });
   }
 
@@ -809,12 +839,14 @@ class _LandingContentSwitcher extends StatelessWidget {
   }
 }
 
-/// Left-side navigation drawer containing the Google Keep style Labels section, sync, preview, and settings.
+/// Left-side navigation drawer containing the workspace switcher card, Google Keep style Labels section, sync, preview, and settings.
 class _LandingDrawer extends StatelessWidget {
   /// Creates a [_LandingDrawer].
   const _LandingDrawer({
     required this.activeLabelId,
+    required this.activeWorkspace,
     required this.board,
+    required this.onManageWorkspaces,
     required this.onOpenEditLabels,
     required this.onOpenMarkdownPreview,
     required this.onOpenSettings,
@@ -825,8 +857,14 @@ class _LandingDrawer extends StatelessWidget {
   /// Currently selected label filter ID, or `null` when all tasks are shown.
   final String? activeLabelId;
 
+  /// Currently active [AppWorkspace] displayed beneath `TierTask`.
+  final AppWorkspace activeWorkspace;
+
   /// Current task board snapshot.
   final TaskBoard board;
+
+  /// Callback to open [WorkspaceDialog] for switching or managing workspaces.
+  final VoidCallback onManageWorkspaces;
 
   /// Callback to open [EditLabelsScreen], passing whether the create input should autofocus.
   final ValueChanged<bool> onOpenEditLabels;
@@ -853,6 +891,17 @@ class _LandingDrawer extends StatelessWidget {
           padding: EdgeInsets.zero,
           children: [
             _DrawerHeader(title: localizations.appTitle),
+            const Divider(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: DrawerWorkspaceCard(
+                workspace: activeWorkspace,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onManageWorkspaces();
+                },
+              ),
+            ),
             const Divider(height: 8),
             _DrawerLabelsHeader(onEditLabels: () => onOpenEditLabels(false)),
             for (final label in board.labels)

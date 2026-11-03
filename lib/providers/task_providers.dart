@@ -216,6 +216,7 @@ class SyncStateNotifier extends Notifier<SyncState> {
 
 /// Manages the in-memory [TaskBoard] and synchronizes mutations to local files and WebDAV.
 class TaskNotifier extends AsyncNotifier<TaskBoard> {
+  Future<void>? _inFlightSync;
   final Map<String, DateTime> _pendingDeletedLabelTimestamps =
       <String, DateTime>{};
 
@@ -223,6 +224,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   @override
   Future<TaskBoard> build() async {
+    ref
+        .read(workspaceUnloadCoordinatorProvider)
+        .register(prepareForWorkspaceUnload);
+    _pendingDeletedLabelTimestamps.clear();
     state = const AsyncLoading();
     final config = await ref.watch(webDavConfigProvider.future);
     if (!config.hasActiveStorage) {
@@ -322,25 +327,41 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
+  /// Awaits any in-flight synchronization and flushes the outgoing [TaskBoard] to local storage if populated before switching workspaces.
+  Future<void> prepareForWorkspaceUnload() async {
+    if (_inFlightSync case final pending?) {
+      try {
+        await pending;
+      } on Object {
+        // Proceed with local flush.
+      }
+    }
+    final currentWorkspace = ref.read(activeWorkspaceProvider).asData?.value;
+    final currentBoard = state.asData?.value;
+    if (currentWorkspace != null &&
+        currentBoard != null &&
+        (currentBoard.allTasks.isNotEmpty || currentBoard.labels.isNotEmpty)) {
+      await _flushOutgoingLocalBoard(currentWorkspace, currentBoard);
+    }
+  }
+
   /// Synchronizes and persists the in-memory [board] state across the configured local and WebDAV stages.
   Future<void> pushToRemote(TaskBoard board) async {
-    final WebDavConfig config =
-        ref.read(webDavConfigProvider).asData?.value ??
-        await ref.read(webDavConfigProvider.future);
-    if (!config.hasActiveStorage) {
-      return;
+    if (_inFlightSync case final pending?) {
+      try {
+        await pending;
+      } on Object {
+        // Continue with next mutation sync.
+      }
     }
-
-    ref.read(syncStateProvider.notifier).setSyncing();
+    final operation = _executePushToRemote(board);
+    _inFlightSync = operation;
     try {
-      final converged = await _synchronizePipeline(
-        config,
-        candidateBoard: board,
-      );
-      state = AsyncData(converged);
-      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
-    } on Object catch (error) {
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
     }
   }
 
@@ -481,6 +502,48 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await pushToRemote(updatedBoard);
   }
 
+  /// Executes a single [pushToRemote] persistence pass for [board].
+  Future<void> _executePushToRemote(TaskBoard board) async {
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final WebDavConfig config =
+        ref.read(webDavConfigProvider).asData?.value ??
+        await ref.read(webDavConfigProvider.future);
+    if (!config.hasActiveStorage) {
+      return;
+    }
+
+    ref.read(syncStateProvider.notifier).setSyncing();
+    try {
+      final converged = await _synchronizePipeline(
+        config,
+        candidateBoard: board,
+      );
+      if (ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
+        state = AsyncData(converged);
+      }
+      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+    } on Object catch (error) {
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+    }
+  }
+
+  /// Flushes [board] to the local `.tdf` file of [workspace] before unloading when local persistence is enabled.
+  Future<void> _flushOutgoingLocalBoard(
+    AppWorkspace workspace,
+    TaskBoard board,
+  ) async {
+    final config = workspace.config;
+    if (!config.storageMode.usesLocal || !config.isLocalConfigured) {
+      return;
+    }
+    try {
+      final serialized = _serializeTdf(board);
+      await ref.read(localFileRepositoryProvider).saveTdf(serialized);
+    } on Object {
+      // Best-effort flush before workspace unload.
+    }
+  }
+
   /// Parses [rawTdf] using [utcNow] and [localNow].
   TaskBoard _parseTdf(String rawTdf, DateTime utcNow, DateTime localNow) {
     return ref
@@ -604,7 +667,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           deletedLabelTimestamps: deletedLabels,
         );
         await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
-        if (candidateBoard != null) {
+        if (candidateBoard != null &&
+            ref.read(activeWorkspaceProvider).asData?.value.id ==
+                workspace.id) {
           state = AsyncData(workingBoard);
         }
       }

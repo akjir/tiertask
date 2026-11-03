@@ -200,8 +200,9 @@ class SecureSettingsRepository implements SettingsRepository {
 
   @override
   Future<List<WorkspaceSummary>> loadWorkspaceSummaries() async {
+    final persisted = await _readPersistedState();
     return List<WorkspaceSummary>.unmodifiable(<WorkspaceSummary>[
-      for (final workspace in _workspaces) workspace.summary,
+      for (final workspace in persisted.workspaces) workspace.summary,
     ]);
   }
 
@@ -315,6 +316,9 @@ abstract class SettingsRepository {
 
   /// Loads the persisted [WebDavConfig] of the currently active workspace.
   Future<WebDavConfig> loadConfig();
+
+  /// Loads lightweight [WorkspaceSummary] entries for all persisted workspaces.
+  Future<List<WorkspaceSummary>> loadWorkspaceSummaries();
 
   /// Loads the persisted [WorkspaceSyncState] for [workspaceId], or [WorkspaceSyncState.empty] if absent.
   Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId);

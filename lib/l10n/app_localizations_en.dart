@@ -684,4 +684,58 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipIndicatorSubtasksAutoFinish => 'Subtasks (auto-finish)';
+
+  @override
+  String get tooltipManageWorkspaces => 'Switch or manage workspaces';
+
+  @override
+  String get workspacesDialogTitle => 'Workspaces';
+
+  @override
+  String get workspacesDialogDescription =>
+      'Switch between isolated task boards or create a new workspace with its own TDF file.';
+
+  @override
+  String get workspaceActiveBadge => 'Active';
+
+  @override
+  String get createWorkspaceHint => 'New workspace name...';
+
+  @override
+  String workspaceSuggestedFileLabel(String fileName) {
+    return 'TDF file: $fileName';
+  }
+
+  @override
+  String get tooltipCreateWorkspace => 'Create workspace';
+
+  @override
+  String get tooltipRenameWorkspace => 'Rename workspace';
+
+  @override
+  String get tooltipDeleteWorkspace => 'Delete workspace';
+
+  @override
+  String deleteWorkspaceConfirmMessage(String name) {
+    return 'Remove workspace \"$name\"? Its TDF file will not be deleted.';
+  }
+
+  @override
+  String get actionDelete => 'Delete';
+
+  @override
+  String get errorWorkspaceNameEmpty =>
+      'Please enter a valid workspace name (1–128 characters).';
+
+  @override
+  String get errorWorkspaceNameDuplicate =>
+      'A workspace with this name already exists.';
+
+  @override
+  String get errorWorkspaceCannotDeleteLast =>
+      'The last remaining workspace cannot be deleted.';
+
+  @override
+  String get errorWorkspaceMaxExceeded =>
+      'Maximum number of workspaces (32) reached.';
 }

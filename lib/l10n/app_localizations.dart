@@ -1309,6 +1309,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Subtasks (auto-finish)'**
   String get tooltipIndicatorSubtasksAutoFinish;
+
+  /// Tooltip for the active workspace card beneath the TierTask title in the navigation drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch or manage workspaces'**
+  String get tooltipManageWorkspaces;
+
+  /// Title of the workspace management dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspaces'**
+  String get workspacesDialogTitle;
+
+  /// Subtitle description inside the workspace management dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch between isolated task boards or create a new workspace with its own TDF file.'**
+  String get workspacesDialogDescription;
+
+  /// Badge label displayed on the currently active workspace in the workspace management dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get workspaceActiveBadge;
+
+  /// Placeholder hint inside the input field for creating a new workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'New workspace name...'**
+  String get createWorkspaceHint;
+
+  /// Helper label showing the suggested .tdf filename for a new workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'TDF file: {fileName}'**
+  String workspaceSuggestedFileLabel(String fileName);
+
+  /// Tooltip for the button that creates and activates a new workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Create workspace'**
+  String get tooltipCreateWorkspace;
+
+  /// Tooltip for the button that starts or saves inline renaming of a workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename workspace'**
+  String get tooltipRenameWorkspace;
+
+  /// Tooltip for the button that deletes a workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete workspace'**
+  String get tooltipDeleteWorkspace;
+
+  /// Inline confirmation message shown before removing a workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove workspace \"{name}\"? Its TDF file will not be deleted.'**
+  String deleteWorkspaceConfirmMessage(String name);
+
+  /// Button label to confirm deleting an item.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get actionDelete;
+
+  /// Validation error shown when a workspace name is empty, contains control characters, or exceeds 128 characters.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a valid workspace name (1–128 characters).'**
+  String get errorWorkspaceNameEmpty;
+
+  /// Validation error shown when another workspace already uses the same display name.
+  ///
+  /// In en, this message translates to:
+  /// **'A workspace with this name already exists.'**
+  String get errorWorkspaceNameDuplicate;
+
+  /// Validation error shown when attempting to delete the only remaining workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'The last remaining workspace cannot be deleted.'**
+  String get errorWorkspaceCannotDeleteLast;
+
+  /// Validation error shown when attempting to create more than 32 workspaces.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum number of workspaces (32) reached.'**
+  String get errorWorkspaceMaxExceeded;
 }
 
 class _AppLocalizationsDelegate

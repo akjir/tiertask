@@ -922,5 +922,75 @@
   "tooltipIndicatorSubtasksAutoFinish": "Subtasks (auto-finish)",
   "@tooltipIndicatorSubtasksAutoFinish": {
     "description": "Tooltip for the passive subtasks indicator icon on a task card when auto-finish is enabled."
+  },
+  "tooltipManageWorkspaces": "Switch or manage workspaces",
+  "@tooltipManageWorkspaces": {
+    "description": "Tooltip for the active workspace card beneath the TierTask title in the navigation drawer."
+  },
+  "workspacesDialogTitle": "Workspaces",
+  "@workspacesDialogTitle": {
+    "description": "Title of the workspace management dialog."
+  },
+  "workspacesDialogDescription": "Switch between isolated task boards or create a new workspace with its own TDF file.",
+  "@workspacesDialogDescription": {
+    "description": "Subtitle description inside the workspace management dialog."
+  },
+  "workspaceActiveBadge": "Active",
+  "@workspaceActiveBadge": {
+    "description": "Badge label displayed on the currently active workspace in the workspace management dialog."
+  },
+  "createWorkspaceHint": "New workspace name...",
+  "@createWorkspaceHint": {
+    "description": "Placeholder hint inside the input field for creating a new workspace."
+  },
+  "workspaceSuggestedFileLabel": "TDF file: {fileName}",
+  "@workspaceSuggestedFileLabel": {
+    "description": "Helper label showing the suggested .tdf filename for a new workspace.",
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "tooltipCreateWorkspace": "Create workspace",
+  "@tooltipCreateWorkspace": {
+    "description": "Tooltip for the button that creates and activates a new workspace."
+  },
+  "tooltipRenameWorkspace": "Rename workspace",
+  "@tooltipRenameWorkspace": {
+    "description": "Tooltip for the button that starts or saves inline renaming of a workspace."
+  },
+  "tooltipDeleteWorkspace": "Delete workspace",
+  "@tooltipDeleteWorkspace": {
+    "description": "Tooltip for the button that deletes a workspace."
+  },
+  "deleteWorkspaceConfirmMessage": "Remove workspace \"{name}\"? Its TDF file will not be deleted.",
+  "@deleteWorkspaceConfirmMessage": {
+    "description": "Inline confirmation message shown before removing a workspace.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "actionDelete": "Delete",
+  "@actionDelete": {
+    "description": "Button label to confirm deleting an item."
+  },
+  "errorWorkspaceNameEmpty": "Please enter a valid workspace name (1–128 characters).",
+  "@errorWorkspaceNameEmpty": {
+    "description": "Validation error shown when a workspace name is empty, contains control characters, or exceeds 128 characters."
+  },
+  "errorWorkspaceNameDuplicate": "A workspace with this name already exists.",
+  "@errorWorkspaceNameDuplicate": {
+    "description": "Validation error shown when another workspace already uses the same display name."
+  },
+  "errorWorkspaceCannotDeleteLast": "The last remaining workspace cannot be deleted.",
+  "@errorWorkspaceCannotDeleteLast": {
+    "description": "Validation error shown when attempting to delete the only remaining workspace."
+  },
+  "errorWorkspaceMaxExceeded": "Maximum number of workspaces (32) reached.",
+  "@errorWorkspaceMaxExceeded": {
+    "description": "Validation error shown when attempting to create more than 32 workspaces."
   }
 }

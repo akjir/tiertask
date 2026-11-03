@@ -25,6 +25,28 @@ final activeWorkspaceProvider =
       ActiveWorkspaceNotifier.new,
     );
 
+/// Provides lightweight [WorkspaceSummary] entries for all persisted workspaces.
+final workspaceSummariesProvider = FutureProvider<List<WorkspaceSummary>>((
+  ref,
+) async {
+  ref.watch(_workspaceListRevisionProvider);
+  final repository = ref.watch(settingsRepositoryProvider);
+  return repository.loadWorkspaceSummaries();
+});
+
+/// Provides the [WorkspaceUnloadCoordinator] for flushing state before unloading a workspace.
+final workspaceUnloadCoordinatorProvider = Provider<WorkspaceUnloadCoordinator>(
+  (ref) {
+    return WorkspaceUnloadCoordinator();
+  },
+);
+
+/// Internal revision counter incremented whenever the persisted workspace list changes.
+final _workspaceListRevisionProvider =
+    NotifierProvider<_WorkspaceListRevisionNotifier, int>(
+      _WorkspaceListRevisionNotifier.new,
+    );
+
 /// Manages the single active [AppWorkspace] in memory and orchestrates workspace unload and load transitions.
 class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
   @override
@@ -40,6 +62,9 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     String? id,
     bool activate = false,
   }) async {
+    if (activate) {
+      await ref.read(workspaceUnloadCoordinatorProvider).runBeforeUnload();
+    }
     final repository = ref.read(settingsRepositoryProvider);
     final created = await repository.createWorkspace(
       name,
@@ -50,17 +75,24 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     if (activate) {
       _replaceLoadedWorkspace(created);
     }
+    ref.read(_workspaceListRevisionProvider.notifier).bump();
     return created;
   }
 
   /// Deletes the workspace with [workspaceId] and loads the fallback workspace when the active workspace was deleted.
   Future<AppWorkspace> deleteWorkspace(String workspaceId) async {
     final previousId = state.asData?.value.id;
+    final isDeletingActive =
+        previousId == null || previousId == workspaceId.trim();
+    if (isDeletingActive) {
+      await ref.read(workspaceUnloadCoordinatorProvider).runBeforeUnload();
+    }
     final repository = ref.read(settingsRepositoryProvider);
     final activeAfterDelete = await repository.deleteWorkspace(workspaceId);
     if (previousId == null || previousId != activeAfterDelete.id) {
       _replaceLoadedWorkspace(activeAfterDelete);
     }
+    ref.read(_workspaceListRevisionProvider.notifier).bump();
     return activeAfterDelete;
   }
 
@@ -74,6 +106,7 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     if (state.asData?.value.id == renamed.id) {
       state = AsyncData(renamed);
     }
+    ref.read(_workspaceListRevisionProvider.notifier).bump();
     return renamed;
   }
 
@@ -83,9 +116,11 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     if (current != null && current.id == workspaceId.trim()) {
       return current;
     }
+    await ref.read(workspaceUnloadCoordinatorProvider).runBeforeUnload();
     final repository = ref.read(settingsRepositoryProvider);
     final nextWorkspace = await repository.activateWorkspace(workspaceId);
     _replaceLoadedWorkspace(nextWorkspace);
+    ref.read(_workspaceListRevisionProvider.notifier).bump();
     return nextWorkspace;
   }
 
@@ -95,11 +130,40 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     await repository.saveConfig(newConfig);
     final reloaded = await repository.loadActiveWorkspace();
     state = AsyncData(reloaded);
+    ref.read(_workspaceListRevisionProvider.notifier).bump();
   }
 
   /// Unloads the current [AppWorkspace] snapshot and replaces it with [nextWorkspace].
   void _replaceLoadedWorkspace(AppWorkspace nextWorkspace) {
     state = const AsyncLoading();
     state = AsyncData(nextWorkspace);
+  }
+}
+
+/// Coordinates pre-unload persistence flushes before [ActiveWorkspaceNotifier] unloads the active workspace.
+class WorkspaceUnloadCoordinator {
+  Future<void> Function()? _onBeforeUnload;
+
+  /// Registers the [callback] invoked before the active workspace is unloaded.
+  void register(Future<void> Function() callback) {
+    _onBeforeUnload = callback;
+  }
+
+  /// Invokes the registered pre-unload callback if present.
+  Future<void> runBeforeUnload() async {
+    if (_onBeforeUnload case final callback?) {
+      await callback();
+    }
+  }
+}
+
+/// Tracks revisions to the persisted workspace list so [workspaceSummariesProvider] refreshes without cyclic dependencies.
+class _WorkspaceListRevisionNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  /// Increments the workspace list revision counter.
+  void bump() {
+    state++;
   }
 }

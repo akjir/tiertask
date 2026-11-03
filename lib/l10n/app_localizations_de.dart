@@ -695,4 +695,59 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get tooltipIndicatorSubtasksAutoFinish =>
       'Unteraufgaben (automatisch abschließen)';
+
+  @override
+  String get tooltipManageWorkspaces =>
+      'Arbeitsbereich wechseln oder verwalten';
+
+  @override
+  String get workspacesDialogTitle => 'Arbeitsbereiche';
+
+  @override
+  String get workspacesDialogDescription =>
+      'Wechsle zwischen isolierten Aufgabenbereichen oder erstelle einen neuen Arbeitsbereich mit eigener TDF-Datei.';
+
+  @override
+  String get workspaceActiveBadge => 'Aktiv';
+
+  @override
+  String get createWorkspaceHint => 'Neuer Arbeitsbereich...';
+
+  @override
+  String workspaceSuggestedFileLabel(String fileName) {
+    return 'TDF-Datei: $fileName';
+  }
+
+  @override
+  String get tooltipCreateWorkspace => 'Arbeitsbereich erstellen';
+
+  @override
+  String get tooltipRenameWorkspace => 'Arbeitsbereich umbenennen';
+
+  @override
+  String get tooltipDeleteWorkspace => 'Arbeitsbereich löschen';
+
+  @override
+  String deleteWorkspaceConfirmMessage(String name) {
+    return 'Arbeitsbereich „$name“ entfernen? Die TDF-Datei wird nicht gelöscht.';
+  }
+
+  @override
+  String get actionDelete => 'Löschen';
+
+  @override
+  String get errorWorkspaceNameEmpty =>
+      'Bitte einen gültigen Namen eingeben (1–128 Zeichen).';
+
+  @override
+  String get errorWorkspaceNameDuplicate =>
+      'Ein Arbeitsbereich mit diesem Namen existiert bereits.';
+
+  @override
+  String get errorWorkspaceCannotDeleteLast =>
+      'Der letzte verbleibende Arbeitsbereich kann nicht gelöscht werden.';
+
+  @override
+  String get errorWorkspaceMaxExceeded =>
+      'Die maximale Anzahl an Arbeitsbereichen (32) ist erreicht.';
 }
