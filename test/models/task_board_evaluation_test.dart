@@ -26,9 +26,9 @@ void main() {
   group('TDF Section 4.3 & Section 5 Dynamic 6-Tier Derivation, Condition Inheritance & Context Filtering', () {
     test('evaluates blocking conditions, group-level label condition inheritance, task overrides, group resets, global resets, Haversine GPS, and cohesive per-label OR logic', () {
       const tdfWithConditions = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label office {
+label officeOkD2 {
     name "Office"
     condition {
         day mon tue wed thu fri
@@ -36,7 +36,7 @@ label office {
         location 50.9787 11.0328 150
     }
 }
-label weekend_home {
+label wkhom0OkD2 {
     name "Weekend Home"
     condition {
         day sat sun
@@ -44,76 +44,76 @@ label weekend_home {
     }
 }
 
-task prereq_open {
+task preopnOkD2 {
     name "Open Prerequisite"
     created 2026-11-01 07:00
     queued 2026-11-01 07:00
 }
 
-task prereq_done {
+task predonOkD2 {
     name "Finished Prerequisite"
     created 2026-11-01 07:00
     queued 2026-11-01 07:00
     finished 2026-11-01 07:30
 }
 
-task wait_on_open {
+task wtopenOkD2 {
     name "Blocked by open task"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
-    blocked prereq_open
+    blocked preopnOkD2
 }
 
-task wait_on_done {
+task wtdoneOkD2 {
     name "Unblocked because prereq is finished"
     created 2026-11-01 08:05
     queued 2026-11-01 08:05
-    blocked prereq_done
+    blocked predonOkD2
 }
 
-task suspended_future {
+task susfutOkD2 {
     name "Suspended until tomorrow"
     created 2026-11-01 08:10
     queued 2026-11-01 08:10
     suspended 2026-11-02 09:00
 }
 
-task multi_label_or {
+task multorOkD2 {
     name "Multi-label task (office OR weekend_home)"
     created 2026-11-01 08:15
     queued 2026-11-01 08:15
-    labels office weekend_home
+    labels officeOkD2 wkhom0OkD2
 }
 
-task override_day {
+task ovrdayOkD2 {
     name "Office task overridden to Sunday"
     created 2026-11-01 08:20
     queued 2026-11-01 08:20
-    labels office
+    labels officeOkD2
     condition day sun
 }
 
-task reset_day {
+task rstdayOkD2 {
     name "Office task with day reset"
     created 2026-11-01 08:25
     queued 2026-11-01 08:25
-    labels office
+    labels officeOkD2
     condition day any
 }
 
-task reset_global {
+task rstglbOkD2 {
     name "Office task with global condition any"
     created 2026-11-01 08:30
     queued 2026-11-01 08:30
-    labels office
+    labels officeOkD2
     condition any
 }
 
-task office_strict {
+task offstrOkD2 {
     name "Strict office task"
     created 2026-11-01 08:35
     queued 2026-11-01 08:35
-    labels office
+    labels officeOkD2
 }
 ''';
 
@@ -125,17 +125,17 @@ task office_strict {
 
       expect(
         boardAtNoon.blocked.map((task) => task.id),
-        equals(['wait_on_open', 'suspended_future', 'office_strict']),
+        equals(['wtopenOkD2', 'susfutOkD2', 'offstrOkD2']),
         reason: 'Tasks with unfinished prereqs, future suspension, or unmet inherited weekday condition must be Blocked',
       );
       expect(
         boardAtNoon.focus.map((task) => task.id),
-        equals(['prereq_open', 'wait_on_done', 'multi_label_or']),
+        equals(['preopnOkD2', 'wtdoneOkD2', 'multorOkD2']),
       );
       expect(
         boardAtNoon.ready.map((task) => task.id),
-        equals(['override_day', 'reset_day', 'reset_global']),
-        reason: 'override_day (day sun), reset_day (day any), and reset_global (condition any) must all be active on Sunday noon',
+        equals(['ovrdayOkD2', 'rstdayOkD2', 'rstglbOkD2']),
+        reason: 'ovrdayOkD2 (day sun), rstdayOkD2 (day any), and rstglbOkD2 (condition any) must all be active on Sunday noon',
       );
 
       final sunday930 = DateTime.utc(2026, 11, 1, 9, 30);
@@ -145,12 +145,12 @@ task office_strict {
       );
       expect(
         boardAt930.blocked.map((task) => task.id),
-        contains('multi_label_or'),
+        contains('multorOkD2'),
         reason: 'At Sunday 09:30, office fails day (mon..fri) and weekend_home fails time (10:00..20:00); per-label evaluation must not mix groups across labels',
       );
       expect(
         boardAt930.focus.followedBy(boardAt930.ready).map((task) => task.id),
-        containsAll(['override_day', 'reset_day', 'reset_global']),
+        containsAll(['ovrdayOkD2', 'rstdayOkD2', 'rstglbOkD2']),
         reason: 'At Sunday 09:30, office time (09:00..17:00) is satisfied when day is overridden or reset',
       );
 
@@ -161,12 +161,12 @@ task office_strict {
       );
       expect(
         boardAtLate.blocked.map((task) => task.id),
-        containsAll(['override_day', 'reset_day']),
-        reason: 'At Sunday 22:00, inherited office time (09:00..17:00) fails for override_day and reset_day',
+        containsAll(['ovrdayOkD2', 'rstdayOkD2']),
+        reason: 'At Sunday 22:00, inherited office time (09:00..17:00) fails for ovrdayOkD2 and rstdayOkD2',
       );
       expect(
         boardAtLate.focus.followedBy(boardAtLate.ready).map((task) => task.id),
-        contains('reset_global'),
+        contains('rstglbOkD2'),
         reason: 'condition any must ignore all inherited label conditions even at 22:00',
       );
 
@@ -177,13 +177,13 @@ task office_strict {
       );
       expect(
         farGpsBoard.blocked.map((task) => task.id),
-        containsAll(['override_day', 'reset_day']),
+        containsAll(['ovrdayOkD2', 'rstdayOkD2']),
         reason: 'When device GPS coordinates are outside the 150m radius of office, inherited location condition must block the task',
       );
       expect(
         farGpsBoard.focus.followedBy(farGpsBoard.ready).map((task) => task.id),
-        containsAll(['multi_label_or', 'reset_global']),
-        reason: 'multi_label_or (via weekend_home without GPS) and reset_global (via condition any) must remain active when away from office',
+        containsAll(['multorOkD2', 'rstglbOkD2']),
+        reason: 'multorOkD2 (via weekend_home without GPS) and rstglbOkD2 (via condition any) must remain active when away from office',
       );
 
       final nearGpsBoard = boardAtNoon.evaluateForContext(
@@ -195,26 +195,26 @@ task office_strict {
         nearGpsBoard.focus
             .followedBy(nearGpsBoard.ready)
             .map((task) => task.id),
-        containsAll(['override_day', 'reset_day']),
+        containsAll(['ovrdayOkD2', 'rstdayOkD2']),
         reason: 'When device GPS coordinates are within the 150m radius of office, inherited location condition must be satisfied',
       );
 
       final filteredWeekendHome = boardAtNoon.evaluateForContext(
-        activeLabelId: 'weekend_home',
+        activeLabelId: 'wkhom0OkD2',
         evaluationTime: sundayNoon,
       );
       expect(
         filteredWeekendHome.allTasks.map((task) => task.id),
-        equals(['multi_label_or']),
+        equals(['multorOkD2']),
         reason: 'Section 5.1 label pre-filtering must restrict all 6 tiers to tasks referencing activeLabelId',
       );
     });
 
     test('does not evaluate conditions, prerequisites, or suspension for completed tasks in Section 5.2 and evaluates them upon restoration', () {
       const completedWithUnmetConditionsTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label office {
+label officeOkD2 {
     name "Office"
     condition {
         day mon tue wed thu fri
@@ -223,20 +223,20 @@ label office {
     }
 }
 
-task open_prereq {
+task opnpreOkD2 {
     name "Open prerequisite"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
 }
 
-task done_with_unmet_conditions priority {
+task donunmOkD2 priority {
     name "Completed with unmet conditions, prereq, and suspension"
     created 2026-10-25 08:00
     queued 2026-10-25 08:00
     finished 2026-11-01 09:00
     suspended 2026-11-05 09:00
-    blocked open_prereq
-    labels office
+    blocked opnpreOkD2
+    labels officeOkD2
     condition {
         day wed
         time 14:00 15:00
@@ -255,7 +255,7 @@ task done_with_unmet_conditions priority {
 
       expect(
         board.completed.map((task) => task.id),
-        equals(['done_with_unmet_conditions']),
+        equals(['donunmOkD2']),
         reason: 'Completed task with unmet day/time/location conditions, unfinished blocked prerequisite, and future suspended timestamp must remain in Completed (Section 5.2)',
       );
       expect(
@@ -265,20 +265,20 @@ task done_with_unmet_conditions priority {
       );
 
       final filteredOffice = board.evaluateForContext(
-        activeLabelId: 'office',
+        activeLabelId: 'officeOkD2',
         evaluationTime: sundayNoon,
         currentLatitude: 52.5200,
         currentLongitude: 13.4050,
       );
       expect(
         filteredOffice.completed.map((task) => task.id),
-        equals(['done_with_unmet_conditions']),
+        equals(['donunmOkD2']),
         reason: 'Label-filtered view must include completed task matching activeLabelId without evaluating its unmet label conditions',
       );
       expect(filteredOffice.blocked, isEmpty);
 
       final filteredOtherLabel = board.evaluateForContext(
-        activeLabelId: 'home',
+        activeLabelId: 'home00OkD2',
         evaluationTime: sundayNoon,
       );
       expect(
@@ -289,7 +289,7 @@ task done_with_unmet_conditions priority {
 
       final restoredTime = DateTime.utc(2026, 11, 1, 16, 0);
       final restoredBoard = board.restoreTask(
-        'done_with_unmet_conditions',
+        'donunmOkD2',
         targetTier: TaskTier.planned,
         currentDate: restoredTime,
       );
@@ -300,12 +300,10 @@ task done_with_unmet_conditions priority {
       );
       expect(
         restoredBoard.blocked.map((task) => task.id),
-        equals(['done_with_unmet_conditions']),
+        equals(['donunmOkD2']),
         reason: 'Once restored to an open scheduled state, the task conditions must be evaluated again and classify it as Blocked when unmet',
       );
-      final restoredTask = restoredBoard.findTask(
-        'done_with_unmet_conditions',
-      )!;
+      final restoredTask = restoredBoard.findTask('donunmOkD2')!;
       expect(restoredTask.isCompleted, isFalse);
       expect(restoredTask.completedAt, isNull);
       expect(
@@ -323,29 +321,29 @@ task done_with_unmet_conditions priority {
 
     test('sorts priority tasks ahead of regular FIFO tasks and preserves declaration order on ties', () {
       const sortingTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-task reg1 {
+task reg100OkD2 {
     name "Regular 1 (09:00)"
     created 2026-11-01 09:00
     queued 2026-11-01 09:00
 }
-task reg2 {
+task reg200OkD2 {
     name "Regular 2 (08:00 first)"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
 }
-task reg3 {
+task reg300OkD2 {
     name "Regular 3 (08:00 second)"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
 }
-task prio1 priority {
+task prio10OkD2 priority {
     name "Priority 1 (10:00)"
     created 2026-11-01 10:00
     queued 2026-11-01 10:00
 }
-task prio2 priority {
+task prio20OkD2 priority {
     name "Priority 2 (09:30)"
     created 2026-11-01 09:30
     queued 2026-11-01 09:30
@@ -356,95 +354,95 @@ task prio2 priority {
 
       expect(
         board.focus.map((task) => task.id),
-        equals(['prio2', 'prio1', 'reg2']),
+        equals(['prio20OkD2', 'prio10OkD2', 'reg200OkD2']),
         reason: 'Priority tasks ordered by queued must precede regular tasks ordered by queued',
       );
       expect(
         board.ready.map((task) => task.id),
-        equals(['reg3', 'reg1']),
-        reason: 'Tie between reg2 and reg3 at 08:00 must preserve declaration order',
+        equals(['reg300OkD2', 'reg100OkD2']),
+        reason: 'Tie between reg200OkD2 and reg300OkD2 at 08:00 must preserve declaration order',
       );
     });
 
     test('evaluateForContext derives top 3 Focus tasks for an active label while preserving all other filters', () {
       const multiLabelTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label c_house {
+label chouseOkD2 {
     name "Household"
 }
-label c_it {
+label cit000OkD2 {
     name "IT"
 }
 
-task house_prio priority {
+task hsprioOkD2 priority {
     name "Urgent roof repair"
     created 2026-11-01 11:00
     queued 2026-11-01 11:00
-    labels c_house
+    labels chouseOkD2
 }
-task house_regular {
+task hsreg0OkD2 {
     name "Mow lawn"
     created 2026-11-01 07:30
     queued 2026-11-01 07:30
-    labels c_house
+    labels chouseOkD2
 }
-task it_first {
+task it1st0OkD2 {
     name "Patch database"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
-    labels c_it
+    labels cit000OkD2
 }
-task it_second {
+task it2nd0OkD2 {
     name "Rotate TLS certificates"
     created 2026-11-01 08:30
     queued 2026-11-01 08:30
-    labels c_it
+    labels cit000OkD2
 }
-task it_prio priority {
+task itprioOkD2 priority {
     name "Restore production cluster"
     created 2026-11-01 09:30
     queued 2026-11-01 09:30
-    labels c_it
+    labels cit000OkD2
 }
-task it_fourth {
+task it4th0OkD2 {
     name "Audit SSH keys"
     created 2026-11-01 10:00
     queued 2026-11-01 10:00
-    labels c_it
+    labels cit000OkD2
 }
-task it_blocked_prereq {
+task itblkdOkD2 {
     name "Deploy app after lawn"
     created 2026-11-01 08:05
     queued 2026-11-01 08:05
-    labels c_it
-    blocked house_regular
+    labels cit000OkD2
+    blocked hsreg0OkD2
 }
-task it_suspended {
+task itsuspOkD2 {
     name "Deferred hardware upgrade"
     created 2026-11-01 08:10
     queued 2026-11-01 08:10
-    labels c_it
+    labels cit000OkD2
     suspended 2026-11-05 09:00
 }
-task it_wrong_day {
+task itwdayOkD2 {
     name "Monday maintenance window"
     created 2026-11-01 08:15
     queued 2026-11-01 08:15
-    labels c_it
+    labels cit000OkD2
     condition day mon
 }
-task it_someday {
+task itsmdeOkD2 {
     name "Evaluate Rust kernel module"
     created 2026-11-01 08:20
-    labels c_it
+    labels cit000OkD2
 }
-task it_completed {
+task itdoneOkD2 {
     name "Decommission old switch"
     created 2026-10-25 08:00
     queued 2026-10-25 08:00
     finished 2026-10-26 10:00
-    labels c_it
+    labels cit000OkD2
 }
 ''';
 
@@ -456,24 +454,25 @@ task it_completed {
 
       expect(
         globalBoard.focus.map((task) => task.id),
-        equals(['it_prio', 'house_prio', 'house_regular']),
+        equals(['itprioOkD2', 'hsprioOkD2', 'hsreg0OkD2']),
         reason: 'Global Focus must contain top 3 tasks across all labels',
       );
 
       final itBoard = globalBoard.evaluateForContext(
-        activeLabelId: 'c_it',
+        activeLabelId: 'cit000OkD2',
         evaluationTime: sundayNoon,
       );
 
       expect(
         itBoard.focus.map((task) => task.id),
-        equals(['it_prio', 'it_first', 'it_second']),
-        reason: 'Label c_it Focus must contain top 3 unblocked scheduled c_it tasks in priority then FIFO order',
+        equals(['itprioOkD2', 'it1st0OkD2', 'it2nd0OkD2']),
+        reason: 'Label cit000OkD2 Focus must contain top 3 unblocked scheduled tasks in priority then FIFO order',
       );
       expect(
         itBoard.ready.map((task) => task.id),
-        equals(['it_fourth']),
-        reason: '4th active c_it task must overflow into Ready when Focus has 3 tasks',
+        equals(['it4th0OkD2']),
+        reason:
+            '4th active task must overflow into Ready when Focus has 3 tasks',
       );
     });
 
@@ -523,9 +522,9 @@ task it_completed {
       );
 
       const wallClockTdf = '''
-tdf 0.3.0
+tdf 0.4.0
 
-task t_monday_morning {
+task monmrnOkD2 {
     name "Monday Early Task"
     created 2026-11-01 20:00
     queued 2026-11-01 20:00
@@ -535,7 +534,7 @@ task t_monday_morning {
     }
 }
 
-task t_suspended_local {
+task suslocOkD2 {
     name "Suspended Until Monday 01:00 Local"
     created 2026-11-01 20:00
     queued 2026-11-01 20:05
@@ -550,7 +549,7 @@ task t_suspended_local {
       );
       expect(
         boardInUtc.blocked.map((task) => task.id),
-        equals(['t_monday_morning', 't_suspended_local']),
+        equals(['monmrnOkD2', 'suslocOkD2']),
         reason: 'At 23:30 Sunday wall-clock time, Monday condition and Monday 01:00 suspension must block both tasks',
       );
 
@@ -561,7 +560,7 @@ task t_suspended_local {
       );
       expect(
         boardInPlusTwo.focus.map((task) => task.id),
-        equals(['t_monday_morning', 't_suspended_local']),
+        equals(['monmrnOkD2', 'suslocOkD2']),
         reason: 'At the same UTC instant (23:30 Sunday UTC), local wall-clock in UTC+02:00 is 01:30 Monday so both tasks become active in Focus',
       );
     });

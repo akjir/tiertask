@@ -128,6 +128,9 @@ class TdfService {
   /// Legacy TDF specification version string (`tdf 0.2.0`) accepted for backward-compatible parsing.
   static const String legacyVersion = '0.2.0';
 
+  /// Legacy TDF specification version string (`tdf 0.3.0`) accepted for backward-compatible parsing.
+  static const String legacyVersion030 = '0.3.0';
+
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = 64;
 
@@ -155,8 +158,8 @@ class TdfService {
   /// Maximum character length of a `name` or `step` text value (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = 500;
 
-  /// Canonical TDF specification version string (`tdf 0.3.0`).
-  static const String supportedVersion = '0.3.0';
+  /// Canonical TDF specification version string (`tdf 0.4.0`).
+  static const String supportedVersion = '0.4.0';
 
   /// Scans and parses [tdfContent] into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
@@ -197,7 +200,7 @@ class TdfService {
       throw const TdfException(
         kind: TdfErrorKind.missingVersionHeader,
         line: 1,
-        message: 'TDF document is missing required "tdf 0.3.0" version header.',
+        message: 'TDF document is missing required "tdf 0.4.0" version header.',
       );
     }
 
@@ -211,6 +214,10 @@ class TdfService {
 
     _validateAndResolveLabelReferences(state);
     _validateDependencyCycles(state.taskEntries);
+    final resolvedActiveLabelId = _migrateLegacyIds(
+      state,
+      activeLabelId: activeLabelId,
+    );
 
     final tasks = <TaskItem>[for (final entry in state.taskEntries) entry.task];
 
@@ -219,7 +226,7 @@ class TdfService {
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       labels: state.labels,
-      activeLabelId: activeLabelId,
+      activeLabelId: resolvedActiveLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
@@ -673,7 +680,7 @@ class TdfService {
     }
     final idToken = headerArgs[0];
     if (idToken.kind != _TokenKind.bareWord ||
-        !_isValidEntityId(idToken.value)) {
+        !_isValidLegacyEntityId(idToken.value)) {
       throw TdfException(
         kind: TdfErrorKind.invalidIdentifier,
         line: lineNumber,
@@ -922,12 +929,12 @@ class TdfService {
     return true;
   }
 
-  /// Validates that [value] matches `<id>` (`[a-zA-Z0-9_-]+`).
-  static bool _isValidEntityId(String value) {
-    if (value.isEmpty) {
+  /// Validates that [value] matches the TDF identifier rule (`[a-zA-Z_][a-zA-Z0-9_-]*`).
+  static bool _isValidIdentifier(String value) {
+    if (value.isEmpty || !_isIdStartChar(value.codeUnitAt(0))) {
       return false;
     }
-    for (var i = 0; i < value.length; i++) {
+    for (var i = 1; i < value.length; i++) {
       if (!_isIdContinueChar(value.codeUnitAt(i))) {
         return false;
       }
@@ -935,12 +942,12 @@ class TdfService {
     return true;
   }
 
-  /// Validates that [value] matches the TDF identifier rule (`[a-zA-Z_][a-zA-Z0-9_-]*`).
-  static bool _isValidIdentifier(String value) {
-    if (value.isEmpty || !_isIdStartChar(value.codeUnitAt(0))) {
+  /// Validates that [value] matches a legacy TDF 0.2.0 or 0.3.0 `<id>` (`[a-zA-Z0-9_-]+`).
+  static bool _isValidLegacyEntityId(String value) {
+    if (value.isEmpty) {
       return false;
     }
-    for (var i = 1; i < value.length; i++) {
+    for (var i = 0; i < value.length; i++) {
       if (!_isIdContinueChar(value.codeUnitAt(i))) {
         return false;
       }
@@ -964,6 +971,83 @@ class TdfService {
         _addConditionToTask(parent, entry.rule, entry.line);
       }
     }
+  }
+
+  /// Deterministically converts any non-conforming label and task IDs on [state]
+  /// into 10-character TDF 0.4.0 Base62 IDs and rewrites intra-document references.
+  static String? _migrateLegacyIds(
+    _ParserState state, {
+    required String? activeLabelId,
+  }) {
+    final labelIdMap = <String, String>{};
+    final usedLabelIds = <String>{};
+    for (final label in state.labels) {
+      if (isValidLabelId(label.id)) {
+        usedLabelIds.add(label.id);
+        labelIdMap[label.id] = label.id;
+      }
+    }
+    for (var i = 0; i < state.labels.length; i++) {
+      final label = state.labels[i];
+      if (isValidLabelId(label.id)) {
+        continue;
+      }
+      final newId = convertLegacyEntityId(
+        prefix: 'l',
+        legacyId: label.id,
+        existingIds: usedLabelIds,
+      );
+      usedLabelIds.add(newId);
+      labelIdMap[label.id] = newId;
+      state.labels[i] = label.copyWith(id: newId);
+    }
+
+    final taskIdMap = <String, String>{};
+    final usedTaskIds = <String>{};
+    for (final entry in state.taskEntries) {
+      final id = entry.task.id;
+      if (isValidTaskId(id)) {
+        usedTaskIds.add(id);
+        taskIdMap[id] = id;
+      }
+    }
+    for (final entry in state.taskEntries) {
+      final oldId = entry.task.id;
+      if (isValidTaskId(oldId)) {
+        continue;
+      }
+      final newId = convertLegacyEntityId(
+        prefix: 't',
+        legacyId: oldId,
+        timestamp: entry.task.createdAt,
+        existingIds: usedTaskIds,
+      );
+      usedTaskIds.add(newId);
+      taskIdMap[oldId] = newId;
+    }
+
+    for (var i = 0; i < state.taskEntries.length; i++) {
+      state.taskEntries[i] = _rewriteLegacyTaskEntry(
+        state.taskEntries[i],
+        taskIdMap: taskIdMap,
+        usedTaskIds: usedTaskIds,
+        labelIdMap: labelIdMap,
+      );
+    }
+
+    if (activeLabelId == null) {
+      return null;
+    }
+    if (labelIdMap.containsKey(activeLabelId)) {
+      return labelIdMap[activeLabelId];
+    }
+    return isValidLabelId(activeLabelId)
+        ? activeLabelId
+        : convertLegacyEntityId(
+            prefix: 'l',
+            legacyId: activeLabelId,
+            existingIds: usedLabelIds,
+          );
   }
 
   /// Opens a new root or nested block on [state] after checking Section 7 bounds.
@@ -1344,6 +1428,54 @@ class TdfService {
     }
   }
 
+  /// Validates the first non-empty statement (`tdf 0.4.0`, legacy `0.3.0`/`0.2.0`, or legacy `category`/`location` root block).
+  static bool _processInitialStatement(
+    _ParserState state,
+    List<_ScannedToken> tokens,
+    int lineNumber,
+  ) {
+    final firstToken = tokens[0];
+    if (firstToken.kind == _TokenKind.bareWord &&
+        firstToken.value == 'tdf' &&
+        _findTokenKindIndex(tokens, _TokenKind.openBrace) == -1 &&
+        _findTokenKindIndex(tokens, _TokenKind.closeBrace) == -1) {
+      if (tokens.length == 1) {
+        throw TdfException(
+          kind: TdfErrorKind.missingVersionHeader,
+          line: lineNumber,
+          message: 'Version header "tdf" requires a version argument.',
+        );
+      }
+      if (tokens.length != 2 ||
+          tokens[1].kind != _TokenKind.bareWord ||
+          (tokens[1].value != supportedVersion &&
+              tokens[1].value != legacyVersion &&
+              tokens[1].value != legacyVersion030)) {
+        throw TdfException(
+          kind: TdfErrorKind.unsupportedVersion,
+          line: lineNumber,
+          message: 'Unsupported or malformed TDF version "${tokens[1].value}".',
+        );
+      }
+      state.hasSeenFirstStatement = true;
+      return true;
+    }
+
+    if (firstToken.kind == _TokenKind.bareWord &&
+        (firstToken.value == 'category' || firstToken.value == 'location') &&
+        _findTokenKindIndex(tokens, _TokenKind.openBrace) != -1) {
+      state.hasSeenFirstStatement = true;
+      return false;
+    }
+
+    throw TdfException(
+      kind: TdfErrorKind.missingVersionHeader,
+      line: lineNumber,
+      message:
+          'TDF document must start with "tdf $supportedVersion" version header.',
+    );
+  }
+
   /// Tokenizes and executes a single logical line `[lineStart, lineEnd)`.
   static void _processLogicalLine(
     String source,
@@ -1402,53 +1534,6 @@ class TdfService {
     _processDirectiveLine(state, tokens, lineNumber);
   }
 
-  /// Validates the first non-empty statement (`tdf 0.2.0` or legacy `category`/`location` root block).
-  static bool _processInitialStatement(
-    _ParserState state,
-    List<_ScannedToken> tokens,
-    int lineNumber,
-  ) {
-    final firstToken = tokens[0];
-    if (firstToken.kind == _TokenKind.bareWord &&
-        firstToken.value == 'tdf' &&
-        _findTokenKindIndex(tokens, _TokenKind.openBrace) == -1 &&
-        _findTokenKindIndex(tokens, _TokenKind.closeBrace) == -1) {
-      if (tokens.length == 1) {
-        throw TdfException(
-          kind: TdfErrorKind.missingVersionHeader,
-          line: lineNumber,
-          message: 'Version header "tdf" requires a version argument.',
-        );
-      }
-      if (tokens.length != 2 ||
-          tokens[1].kind != _TokenKind.bareWord ||
-          (tokens[1].value != supportedVersion &&
-              tokens[1].value != legacyVersion)) {
-        throw TdfException(
-          kind: TdfErrorKind.unsupportedVersion,
-          line: lineNumber,
-          message: 'Unsupported or malformed TDF version "${tokens[1].value}".',
-        );
-      }
-      state.hasSeenFirstStatement = true;
-      return true;
-    }
-
-    if (firstToken.kind == _TokenKind.bareWord &&
-        (firstToken.value == 'category' || firstToken.value == 'location') &&
-        _findTokenKindIndex(tokens, _TokenKind.openBrace) != -1) {
-      state.hasSeenFirstStatement = true;
-      return false;
-    }
-
-    throw TdfException(
-      kind: TdfErrorKind.missingVersionHeader,
-      line: lineNumber,
-      message:
-          'TDF document must start with "tdf $supportedVersion" version header.',
-    );
-  }
-
   /// Validates that [args] contains a single quoted `#RRGGBB` hexadecimal color string.
   static String _requireColorArg(List<_ScannedToken> args, int lineNumber) {
     if (args.length != 1) {
@@ -1477,7 +1562,8 @@ class TdfService {
   ) {
     final ids = <String>[];
     for (final token in args) {
-      if (token.kind != _TokenKind.bareWord || !_isValidEntityId(token.value)) {
+      if (token.kind != _TokenKind.bareWord ||
+          !_isValidLegacyEntityId(token.value)) {
         throw TdfException(
           kind: TdfErrorKind.invalidIdentifier,
           line: lineNumber,
@@ -1644,6 +1730,48 @@ class TdfService {
       );
     }
     return parsed;
+  }
+
+  /// Rewrites `id`, `labelIds`, and `blockedByTaskIds` on [entry] using [taskIdMap] and [labelIdMap].
+  static _ParsedTaskEntry _rewriteLegacyTaskEntry(
+    _ParsedTaskEntry entry, {
+    required Map<String, String> taskIdMap,
+    required Set<String> usedTaskIds,
+    required Map<String, String> labelIdMap,
+  }) {
+    final task = entry.task;
+    final newTaskId = taskIdMap[task.id] ?? task.id;
+    final mappedLabels = <String>[
+      for (final labelId in task.labelIds) labelIdMap[labelId] ?? labelId,
+    ];
+    final mappedBlockers = <String>[];
+    for (final blockerId in task.blockedByTaskIds) {
+      if (taskIdMap.containsKey(blockerId)) {
+        mappedBlockers.add(taskIdMap[blockerId]!);
+      } else if (isValidTaskId(blockerId)) {
+        mappedBlockers.add(blockerId);
+      } else {
+        final converted = convertLegacyEntityId(
+          prefix: 't',
+          legacyId: blockerId,
+          existingIds: usedTaskIds,
+        );
+        taskIdMap[blockerId] = converted;
+        usedTaskIds.add(converted);
+        mappedBlockers.add(converted);
+      }
+    }
+    return _ParsedTaskEntry(
+      task: task.copyWith(
+        id: newTaskId,
+        labelIds: mappedLabels,
+        blockedByTaskIds: mappedBlockers,
+      ),
+      canonicalLabelIds: mappedLabels,
+      legacyLabelIds: const <String>[],
+      labelsLine: entry.labelsLine,
+      blockedLine: entry.blockedLine,
+    );
   }
 
   /// Scans an unquoted bare word token starting at [start].
@@ -2256,7 +2384,7 @@ class _ParserState {
   /// Set of seen `task` IDs to enforce uniqueness.
   final Set<String> taskIds = <String>{};
 
-  /// Whether the initial `tdf 0.2.0` header (or legacy root block) has been processed.
+  /// Whether the initial `tdf 0.4.0` header (or legacy version/root block) has been processed.
   bool hasSeenFirstStatement = false;
 
   /// Total blocks opened across the document.

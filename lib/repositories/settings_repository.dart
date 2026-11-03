@@ -91,6 +91,13 @@ class InMemorySettingsRepository implements SettingsRepository {
   }
 
   @override
+  Future<List<WorkspaceSummary>> loadWorkspaceSummaries() async {
+    return List<WorkspaceSummary>.unmodifiable(<WorkspaceSummary>[
+      for (final workspace in _workspaces) workspace.summary,
+    ]);
+  }
+
+  @override
   Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId) async {
     return _syncStates[workspaceId.trim()] ?? WorkspaceSyncState.empty;
   }
@@ -189,6 +196,13 @@ class SecureSettingsRepository implements SettingsRepository {
   Future<WebDavConfig> loadConfig() async {
     final active = await loadActiveWorkspace();
     return active.config;
+  }
+
+  @override
+  Future<List<WorkspaceSummary>> loadWorkspaceSummaries() async {
+    return List<WorkspaceSummary>.unmodifiable(<WorkspaceSummary>[
+      for (final workspace in _workspaces) workspace.summary,
+    ]);
   }
 
   @override

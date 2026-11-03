@@ -24,16 +24,16 @@ void main() {
   final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
 
   group('TdfService Lexical Scanner, Parser & Canonical Serializer', () {
-    test('parses canonical TDF document from TDF_SPEC.md Section 9 and derives all 6 tiers', () {
+    test('parses canonical TDF 0.4.0 document from TDF_SPEC.md Section 9 and derives all 6 tiers', () {
       const canonicalTdf = '''
 # ==========================================
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-tdf 0.2.0
+tdf 0.4.0
 
 # === Labels ===
-label home {
+label 4x9p2mOkD2 {
     name  "Home"
     color "#4CAF50"
     condition {
@@ -42,7 +42,7 @@ label home {
     }
 }
 
-label it {
+label 7qB1kZOkD2 {
     name  "IT & Servers"
     color "#2196F3"
     condition time 09:00 18:00
@@ -51,20 +51,20 @@ label it {
 # === Tasks ===
 
 # Prioritized task -> Lands at the top of Focus (in it)
-task t001 priority {
+task 8jKaCdOkD2 priority {
     name      "Verify server backup"
     note      "Inspect logs under /var/log/backup"
     created   2026-11-01 08:30
     queued    2026-11-01 08:30
-    labels    it
+    labels    7qB1kZOkD2
 }
 
 # Regular active task with subtasks -> Focus / Ready
-task t002 {
+task 3nR8vWOkD8 {
     name      "Clean up study"
     created   2026-11-01 09:00
     queued    2026-11-01 09:15
-    labels    home
+    labels    4x9p2mOkD2
 
     subtasks auto-finish {
         step true  "Wipe desk"
@@ -74,38 +74,38 @@ task t002 {
 }
 
 # Task with multiple labels and global condition reset (always active)
-task t003 {
+task 9mP4xLOkDS {
     name      "Clean dust from NAS drives"
     created   2026-11-01 10:00
     queued    2026-11-01 10:00
-    labels    home it
+    labels    4x9p2mOkD2 7qB1kZOkD2
     condition any
 }
 
-# Blocked task (waits for t001 and is suspended until Nov 5)
-task t004 {
+# Blocked task (waits for 8jKaCdOkD2 and is suspended until Nov 5)
+task 2kF7yQOkDm {
     name      "Apply firewall update"
     created   2026-11-01 11:00
     queued    2026-11-01 11:00
-    labels    it
-    blocked   t001
+    labels    7qB1kZOkD2
+    blocked   8jKaCdOkD2
     suspended 2026-11-05 08:00
 }
 
 # Task in "Someday" (no 'queued' directive present)
-task t005 {
+task 5vH3nTOkE6 {
     name      "3D-print custom NAS enclosure"
     created   2026-11-01 12:00
-    labels    it
+    labels    7qB1kZOkD2
 }
 
 # Completed task ('finished' is set -> deleted after 30 days)
-task t006 {
+task 6wJ9cMOjcG {
     name      "Mount winter tires"
     created   2026-10-20 14:00
     queued    2026-10-21 08:00
     finished  2026-10-29 16:45
-    labels    home
+    labels    4x9p2mOkD2
 }
 ''';
 
@@ -113,8 +113,8 @@ task t006 {
 
       expect(
         board.labels.map((label) => label.id),
-        equals(['home', 'it']),
-        reason: 'Labels must be parsed in declaration order',
+        equals(['4x9p2mOkD2', '7qB1kZOkD2']),
+        reason: 'Labels must be parsed in declaration order with 13-char IDs',
       );
       expect(board.labels[0].color, equals('#4CAF50'));
       expect(board.labels[0].conditions.length, equals(2));
@@ -147,8 +147,8 @@ task t006 {
 
       expect(
         board.focus.map((task) => task.id),
-        equals(['t001', 't002', 't003']),
-        reason: 't001 (priority in it at 12:00), t002 (active on Sunday in home), and t003 (condition any) must fill Focus',
+        equals(['8jKaCdOkD2', '3nR8vWOkD8', '9mP4xLOkDS']),
+        reason: 'Active tasks must fill Focus in priority and queued order',
       );
       expect(board.focus[0].isPriority, isTrue);
       expect(board.focus[0].note, equals('Inspect logs under /var/log/backup'));
@@ -162,21 +162,26 @@ task t006 {
       expect(board.planned, isEmpty);
       expect(
         board.blocked.map((task) => task.id),
-        equals(['t004']),
-        reason: 't004 is blocked by t001 and suspended until 2026-11-05',
+        equals(['2kF7yQOkDm']),
+        reason: '2kF7yQOkDm is blocked by 8jKaCdOkD2 and suspended',
       );
       expect(
         board.someday.map((task) => task.id),
-        equals(['t005']),
-        reason: 't005 has no queued directive so it lands in Someday',
+        equals(['5vH3nTOkE6']),
+        reason: '5vH3nTOkE6 has no queued directive so it lands in Someday',
       );
       expect(
         board.completed.map((task) => task.id),
-        equals(['t006']),
-        reason: 't006 has a finished directive so it lands in Completed',
+        equals(['6wJ9cMOjcG']),
+        reason: '6wJ9cMOjcG has a finished directive so it lands in Completed',
       );
 
       final serialized = tdfService.serialize(board);
+      expect(
+        serialized,
+        startsWith('tdf 0.4.0\n'),
+        reason: 'Canonical serialization must emit tdf 0.4.0 header',
+      );
       expect(
         serialized.contains('\r\n'),
         isFalse,
@@ -185,7 +190,7 @@ task t006 {
       expect(
         serialized,
         contains(
-          'label home {\n'
+          'label 4x9p2mOkD2 {\n'
           '    name "Home"\n'
           '    color "#4CAF50"\n'
           '    condition {\n'
@@ -199,7 +204,7 @@ task t006 {
       expect(
         serialized,
         contains(
-          'label it {\n'
+          'label 7qB1kZOkD2 {\n'
           '    name "IT & Servers"\n'
           '    color "#2196F3"\n'
           '    condition time 09:00 18:00\n'
@@ -207,21 +212,22 @@ task t006 {
         ),
         reason: 'Label with 1 condition must serialize as an inline condition directive',
       );
-      expect(serialized, contains('labels home it'));
+      expect(serialized, contains('labels 4x9p2mOkD2 7qB1kZOkD2'));
       expect(serialized, contains('condition any'));
 
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
       expect(
         reparsed.focus.map((task) => task.id),
-        equals(['t001', 't002', 't003']),
+        equals(['8jKaCdOkD2', '3nR8vWOkD8', '9mP4xLOkDS']),
       );
-      expect(reparsed.blocked.map((task) => task.id), equals(['t004']));
-      expect(reparsed.someday.map((task) => task.id), equals(['t005']));
-      expect(reparsed.completed.map((task) => task.id), equals(['t006']));
+      expect(reparsed.blocked.map((task) => task.id), equals(['2kF7yQOkDm']));
+      expect(reparsed.someday.map((task) => task.id), equals(['5vH3nTOkE6']));
+      expect(reparsed.completed.map((task) => task.id), equals(['6wJ9cMOjcG']));
     });
 
-    test('automatically migrates legacy category and location blocks and task categories/locations directives into canonical labels', () {
-      const legacyTdf = '''
+    test('immediately converts legacy tdf 0.2.0 and tdf 0.3.0 task and label IDs to 10-character Base62 IDs and rewrites intra-document references', () {
+      const legacy020Tdf = '''
+tdf 0.2.0
 location home {
     name "Home"
 }
@@ -244,16 +250,34 @@ task t001 {
     locations  home work
     categories c_house c_it
 }
+task t002 {
+    name       "Follow-up task"
+    created    2026-11-01 10:00
+    queued     2026-11-01 10:00
+    blocked    t001
+    locations  home
+}
 ''';
 
-      final board = tdfService.parse(legacyTdf, evaluationTime: fixedDate);
+      final board020 = tdfService.parse(
+        legacy020Tdf,
+        evaluationTime: fixedDate,
+      );
+      expect(board020.labels.length, equals(4));
+      for (final label in board020.labels) {
+        expect(
+          isValidLabelId(label.id),
+          isTrue,
+          reason:
+              'Every migrated 0.2.0 label ID (${label.id}) must be a valid 10-character <6xBase62><4xBase62> ID',
+        );
+      }
       expect(
-        board.labels.map((label) => label.id),
-        equals(['home', 'work', 'c_house', 'c_it']),
-        reason: 'Legacy location and category blocks must migrate to TdfLabel in declaration order',
+        board020.labels.map((label) => label.name),
+        equals(['Home', 'Work', 'Household', 'IT & Servers']),
       );
       expect(
-        board.labels[1].conditions.single,
+        board020.labels[1].conditions.single,
         isA<LocationTaskCondition>()
             .having((condition) => condition.latitude, 'latitude', 50.9787)
             .having((condition) => condition.longitude, 'longitude', 11.0328)
@@ -262,45 +286,96 @@ task t001 {
               'radiusMeters',
               150.0,
             ),
-        reason: 'Legacy gps directive on location block must migrate to LocationTaskCondition on TdfLabel',
-      );
-      expect(
-        board.focus.single.labelIds,
-        equals(['home', 'work', 'c_house', 'c_it']),
-        reason: 'Legacy locations and categories task directives must merge into labelIds',
       );
 
-      final serialized = tdfService.serialize(board);
-      expect(serialized, contains('label home {'));
-      expect(serialized, contains('label work {'));
-      expect(serialized, contains('condition location 50.9787 11.0328 150'));
-      expect(serialized, contains('label c_house {'));
-      expect(serialized, contains('labels home work c_house c_it'));
-      expect(serialized, isNot(contains('category ')));
-      expect(serialized, isNot(contains('location work')));
-      expect(serialized, isNot(contains('categories ')));
-      expect(serialized, isNot(contains('locations ')));
+      final convertedFirstTask = board020.focus.single;
+      final convertedSecondTask = board020.blocked.single;
+      expect(
+        isValidTaskId(convertedFirstTask.id),
+        isTrue,
+        reason: 'Migrated t001 must have a valid 10-char task ID',
+      );
+      expect(
+        isValidTaskId(convertedSecondTask.id),
+        isTrue,
+        reason: 'Migrated t002 must have a valid 10-char task ID',
+      );
+      expect(
+        convertedFirstTask.labelIds,
+        equals(board020.labels.map((label) => label.id).toList()),
+        reason: 'Legacy locations and categories references must be rewritten to the new 10-char label IDs',
+      );
+      expect(
+        convertedSecondTask.blockedByTaskIds,
+        equals([convertedFirstTask.id]),
+        reason: 'Legacy blocked t001 reference must be rewritten to the new 10-char task ID',
+      );
+
+      final serialized020 = tdfService.serialize(board020);
+      expect(serialized020, startsWith('tdf 0.4.0\n'));
+      expect(serialized020, isNot(contains('task t001')));
+      expect(serialized020, isNot(contains('label home')));
+      final reparsed020 = tdfService.parse(
+        serialized020,
+        evaluationTime: fixedDate,
+      );
+      expect(reparsed020.focus.single.id, equals(convertedFirstTask.id));
+      expect(reparsed020.blocked.single.id, equals(convertedSecondTask.id));
+
+      const legacy030Tdf = '''
+tdf 0.3.0
+label office_work {
+    name "Office Work"
+}
+task t001 {
+    name "Prepare slides"
+    created 2026-11-01 09:00
+    queued 2026-11-01 09:00
+    labels office_work
+}
+task t002 {
+    name "Present slides"
+    created 2026-11-01 09:30
+    queued 2026-11-01 09:30
+    blocked t001
+    labels office_work
+}
+''';
+      final board030 = tdfService.parse(
+        legacy030Tdf,
+        evaluationTime: fixedDate,
+      );
+      final convertedLabelId = board030.labels.single.id;
+      expect(isValidLabelId(convertedLabelId), isTrue);
+      expect(convertedLabelId, isNot(equals('office_work')));
+      expect(isValidTaskId(board030.focus.single.id), isTrue);
+      expect(isValidTaskId(board030.blocked.single.id), isTrue);
+      expect(board030.focus.single.labelIds, equals([convertedLabelId]));
+      expect(
+        board030.blocked.single.blockedByTaskIds,
+        equals([board030.focus.single.id]),
+      );
     });
 
     test('supports bare words, double-quoted escapes, single-quoted raw strings, inline comments, CRLF, and optional seconds in timestamps', () {
       const validDocument =
-          'tdf 0.2.0 # version comment\r\n'
-          'label c_dev { # comment\r\n'
+          'tdf 0.4.0 # version comment\r\n'
+          'label cdev00OkD2 { # comment\r\n'
           '  name \'Raw "quote" and \\\\backslash\'\r\n'
           '  note "Line1\\nLine2\\tTabbed\\rReturn\\\\Slash\\"Quote"\r\n'
           '}#comment\r\n'
-          'task taxes2026 {#comment\r\n'
+          'task tax260OkD2 {#comment\r\n'
           '  name "File taxes #2026"#comment\r\n'
           '  created 2026-11-01#inline_date_comment\r\n'
           '  queued 2026-11-01 08:00:05\r\n'
-          '  labels c_dev#inline_id_comment\r\n'
+          '  labels cdev00OkD2#inline_id_comment\r\n'
           '  subtasks {\r\n'
           '    step false "Collect receipts"\r\n'
           '  }\r\n'
           '}';
 
       final board = tdfService.parse(validDocument, evaluationTime: fixedDate);
-      expect(board.labels.single.id, equals('c_dev'));
+      expect(board.labels.single.id, equals('cdev00OkD2'));
       expect(
         board.labels.single.name,
         equals('Raw "quote" and \\\\backslash'),
@@ -311,7 +386,7 @@ task t001 {
         equals('Line1\nLine2\tTabbed\rReturn\\Slash"Quote'),
         reason: 'Double-quoted strings must unescape \\n, \\t, \\r, \\\\, \\"',
       );
-      expect(board.focus.single.id, equals('taxes2026'));
+      expect(board.focus.single.id, equals('tax260OkD2'));
       expect(board.focus.single.title, equals('File taxes #2026'));
       expect(
         board.focus.single.createdAt,
@@ -346,49 +421,186 @@ task t001 {
       );
     });
 
-    test('accepts tdf 0.3.0 and legacy tdf 0.2.0 with zero blocks as valid empty TaskBoard and serializes with tdf 0.3.0', () {
+    test('accepts tdf 0.4.0 and legacy tdf 0.3.0 / 0.2.0 with zero blocks as valid empty TaskBoard and serializes with tdf 0.4.0', () {
       expect(
         TdfService.supportedVersion,
-        equals('0.3.0'),
-        reason: 'Supported TDF version must be 0.3.0',
+        equals('0.4.0'),
+        reason: 'Supported TDF version must be 0.4.0',
       );
+      expect(tdfService.parse('tdf 0.4.0\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.3.0\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.2.0\n').focus, isEmpty);
       expect(
         tdfService
-            .parse('   \t  \n# only comment\r\ntdf 0.3.0  # version\n')
+            .parse('   \t  \n# only comment\r\ntdf 0.4.0  # version\n')
             .focus,
         isEmpty,
       );
-      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.3.0\n'));
+      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.4.0\n'));
+    });
+
+    test('automatically normalizes non-conforming entity identifiers in tdf 0.4.0 documents (including 13-char t_/l_ IDs and short IDs) and rewrites all labels and blocked references while rejecting quoted or non-identifier tokens', () {
+      const mixed040Tdf = '''
+tdf 0.4.0
+
+label 4x9p2mOkD2 {
+    name "Valid Label"
+}
+
+label l_legacy_OkD2 {
+    name "Old 13-Char Label"
+}
+
+label work-ctx {
+    name "Short Hyphen Label"
+}
+
+task 8jKaCdOkD2 {
+    name    "Valid Prerequisite Task"
+    created 2026-11-01 08:00
+    queued  2026-11-01 08:00
+    labels  4x9p2mOkD2 l_legacy_OkD2
+}
+
+task t_8jKaCd_OkD2 {
+    name    "Old 13-Char Task Blocked By Valid Task"
+    created 2026-11-01 08:30
+    queued  2026-11-01 08:30
+    blocked 8jKaCdOkD2
+    labels  l_legacy_OkD2 work-ctx
+}
+
+task t003 {
+    name    "Short ID Task Blocked By Old 13-Char Task And Dangling Old ID"
+    created 2026-11-01 09:00
+    queued  2026-11-01 09:00
+    blocked t_8jKaCd_OkD2 t_pruned_OkD2
+    labels  work-ctx
+}
+''';
+
+      final board = tdfService.parse(mixed040Tdf, evaluationTime: fixedDate);
+      expect(board.labels.length, equals(3));
+      expect(
+        board.labels[0].id,
+        equals('4x9p2mOkD2'),
+        reason: 'Already-valid 10-character label ID must remain unchanged',
+      );
+      final converted13CharLabelId = board.labels[1].id;
+      final convertedShortLabelId = board.labels[2].id;
+      expect(isValidLabelId(converted13CharLabelId), isTrue);
+      expect(isValidLabelId(convertedShortLabelId), isTrue);
+      expect(converted13CharLabelId, isNot(equals('l_legacy_OkD2')));
+      expect(convertedShortLabelId, isNot(equals('work-ctx')));
+
+      final validTask = board.findTask('8jKaCdOkD2')!;
+      expect(
+        validTask.labelIds,
+        equals(['4x9p2mOkD2', converted13CharLabelId]),
+        reason:
+            'Valid task must have its non-conforming label reference rewritten',
+      );
+
+      expect(board.blocked.length, equals(2));
+      final converted13CharTask = board.blocked.firstWhere(
+        (task) => task.title == 'Old 13-Char Task Blocked By Valid Task',
+      );
+      final convertedShortTask = board.blocked.firstWhere(
+        (task) =>
+            task.title ==
+            'Short ID Task Blocked By Old 13-Char Task And Dangling Old ID',
+      );
+      expect(isValidTaskId(converted13CharTask.id), isTrue);
+      expect(isValidTaskId(convertedShortTask.id), isTrue);
+      expect(
+        converted13CharTask.blockedByTaskIds,
+        equals(['8jKaCdOkD2']),
+        reason: 'Valid prerequisite reference must remain intact',
+      );
+      expect(
+        converted13CharTask.labelIds,
+        equals([converted13CharLabelId, convertedShortLabelId]),
+        reason: 'All non-conforming label references on task must be rewritten',
+      );
+      expect(
+        convertedShortTask.blockedByTaskIds.first,
+        equals(converted13CharTask.id),
+        reason: 'Blocked reference to t_8jKaCd_OkD2 must be rewritten to its new 10-character ID',
+      );
+      expect(
+        isValidTaskId(convertedShortTask.blockedByTaskIds[1]),
+        isTrue,
+        reason: 'Dangling non-conforming blocked reference must also be normalized to 10-character Base62',
+      );
+
+      final filteredByOldLabel = tdfService.parse(
+        mixed040Tdf,
+        evaluationTime: fixedDate,
+        activeLabelId: 'l_legacy_OkD2',
+      );
+      expect(
+        filteredByOldLabel.focus.map((task) => task.id),
+        equals(['8jKaCdOkD2']),
+        reason: 'activeLabelId matching a normalized label ID must filter tasks using the rewritten ID',
+      );
+      expect(
+        filteredByOldLabel.blocked.map((task) => task.id),
+        equals([converted13CharTask.id]),
+      );
+
+      final invalidDocuments = <String>[
+        'tdf 0.4.0\ntask "8jKaCdOkD2" {\n  name "Quoted task ID"\n  created 2026-11-01\n}\n',
+        'tdf 0.4.0\ntask bad\$id {\n  name "Disallowed char in task ID"\n  created 2026-11-01\n}\n',
+        'tdf 0.4.0\nlabel "4x9p2mOkD2" {\n  name "Quoted label ID"\n}\n',
+        'tdf 0.4.0\nlabel bad\$label {\n  name "Disallowed char in label ID"\n}\n',
+        'tdf 0.4.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  labels "4x9p2mOkD2"\n}\n',
+        'tdf 0.4.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  labels bad\$label\n}\n',
+        'tdf 0.4.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked "3nQp7ROkB8"\n}\n',
+        'tdf 0.4.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked bad\$task\n}\n',
+      ];
+
+      for (final doc in invalidDocuments) {
+        expect(
+          () => tdfService.parse(doc, evaluationTime: fixedDate),
+          throwsA(
+            isA<TdfException>().having(
+              (error) => error.kind,
+              'kind',
+              TdfErrorKind.invalidIdentifier,
+            ),
+          ),
+          reason:
+              'Quoted or non-identifier entity token must throw invalidIdentifier: $doc',
+        );
+      }
     });
 
     test('parses and serializes per-entity modified UTC timestamps on label and task blocks with effectiveModifiedAt fallbacks and duplicate/invalid error checks', () {
       const tdfWithModified = '''
-tdf 0.3.0
+tdf 0.4.0
 
-label l_explicit {
+label explicOkD2 {
     name     "Explicit Label"
     modified 2026-11-01 09:15:30
 }
 
-label l_fallback {
+label fallbkOkD2 {
     name "Fallback Label"
 }
 
-task t_explicit {
+task explicOkD2 {
     name     "Explicit Modified Task"
     created  2026-11-01 08:00
     queued   2026-11-01 08:30
     modified 2026-11-01 10:45:12
-    labels   l_explicit
+    labels   explicOkD2
 }
 
-task t_fallback {
+task fallbkOkD2 {
     name     "Fallback Modified Task"
     created  2026-11-01 08:00
     queued   2026-11-01 09:20
-    labels   l_fallback
+    labels   fallbkOkD2
 }
 ''';
 
@@ -417,7 +629,7 @@ task t_fallback {
             'Label without modified must fall back to defaultCreatedAt in UTC',
       );
 
-      final explicitTask = board.findTask('t_explicit')!;
+      final explicitTask = board.findTask('explicOkD2')!;
       expect(
         explicitTask.modifiedAt,
         equals(DateTime.utc(2026, 11, 1, 10, 45, 12)),
@@ -427,7 +639,7 @@ task t_fallback {
         equals(DateTime.utc(2026, 11, 1, 10, 45, 12)),
       );
 
-      final fallbackTask = board.findTask('t_fallback')!;
+      final fallbackTask = board.findTask('fallbkOkD2')!;
       expect(fallbackTask.modifiedAt, isNull);
       expect(
         fallbackTask.effectiveModifiedAt,
@@ -436,13 +648,13 @@ task t_fallback {
       );
 
       final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.3.0\n'));
+      expect(serialized, startsWith('tdf 0.4.0\n'));
       expect(serialized, contains('modified 2026-11-01 09:15:30\n'));
       expect(serialized, contains('modified 2026-11-01 10:45:12\n'));
 
       expect(
         () => tdfService.parse(
-          'tdf 0.3.0\nlabel l1 {\n  name "L1"\n  modified 2026-11-01 08:00\n  modified 2026-11-01 09:00\n}\n',
+          'tdf 0.4.0\nlabel 000001OkD2 {\n  name "L1"\n  modified 2026-11-01 08:00\n  modified 2026-11-01 09:00\n}\n',
         ),
         throwsA(
           isA<TdfException>().having(
@@ -455,7 +667,7 @@ task t_fallback {
       );
       expect(
         () => tdfService.parse(
-          'tdf 0.3.0\ntask t1 {\n  name "T1"\n  created 2026-11-01\n  modified 2026-11-01 08:00\n  modified 2026-11-01 09:00\n}\n',
+          'tdf 0.4.0\ntask 000001OkD2 {\n  name "T1"\n  created 2026-11-01\n  modified 2026-11-01 08:00\n  modified 2026-11-01 09:00\n}\n',
         ),
         throwsA(
           isA<TdfException>().having(
@@ -468,7 +680,7 @@ task t_fallback {
       );
       expect(
         () => tdfService.parse(
-          'tdf 0.3.0\ntask t1 {\n  name "T1"\n  created 2026-11-01\n  modified 2026-11-01 25:99\n}\n',
+          'tdf 0.4.0\ntask 000001OkD2 {\n  name "T1"\n  created 2026-11-01\n  modified 2026-11-01 25:99\n}\n',
         ),
         throwsA(
           isA<TdfException>().having(
@@ -485,23 +697,23 @@ task t_fallback {
       'parses and serializes repeat directives across days, weeks, and months',
       () {
         const tdfWithRepeat = '''
-tdf 0.3.0
+tdf 0.4.0
 
-task t_days {
+task days00OkD2 {
     name    "Daily standup"
     created 2026-11-01 08:00
     queued  2026-11-01 08:00
     repeat  1 days
 }
 
-task t_weeks {
+task weeks0OkD2 {
     name    "Weekly review"
     created 2026-11-01 09:00
     queued  2026-11-01 09:00
     repeat  2 weeks
 }
 
-task t_months {
+task monthsOkD2 {
     name    "Monthly billing"
     created 2026-11-01 10:00
     queued  2026-11-01 10:00
@@ -514,17 +726,17 @@ task t_months {
           evaluationTime: fixedDate,
         );
         expect(
-          board.findTask('t_days')!.repeatRule,
+          board.findTask('days00OkD2')!.repeatRule,
           equals(const TaskRepeatRule(count: 1, unit: RepeatUnit.days)),
           reason: 'repeat 1 days must parse to RepeatUnit.days with count 1',
         );
         expect(
-          board.findTask('t_weeks')!.repeatRule,
+          board.findTask('weeks0OkD2')!.repeatRule,
           equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
           reason: 'repeat 2 weeks must parse to RepeatUnit.weeks with count 2',
         );
         expect(
-          board.findTask('t_months')!.repeatRule,
+          board.findTask('monthsOkD2')!.repeatRule,
           equals(const TaskRepeatRule(count: 3, unit: RepeatUnit.months)),
           reason:
               'repeat 3 months must parse to RepeatUnit.months with count 3',
@@ -540,15 +752,15 @@ task t_months {
           evaluationTime: fixedDate,
         );
         expect(
-          reparsed.findTask('t_days')!.repeatRule,
+          reparsed.findTask('days00OkD2')!.repeatRule,
           equals(const TaskRepeatRule(count: 1, unit: RepeatUnit.days)),
         );
         expect(
-          reparsed.findTask('t_weeks')!.repeatRule,
+          reparsed.findTask('weeks0OkD2')!.repeatRule,
           equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
         );
         expect(
-          reparsed.findTask('t_months')!.repeatRule,
+          reparsed.findTask('monthsOkD2')!.repeatRule,
           equals(const TaskRepeatRule(count: 3, unit: RepeatUnit.months)),
         );
       },

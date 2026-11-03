@@ -230,7 +230,7 @@ void main() {
       var board = TaskBoard(
         labels: [
           TdfLabel(
-            id: 'office',
+            id: 'officeOkD2',
             name: 'Office',
             conditions: [
               DayTaskCondition(
@@ -247,15 +247,15 @@ void main() {
         'Suspended Task With Satisfied Condition Any',
         targetTier: TaskTier.someday,
         suspendedAt: futureSuspend,
-        labelIds: const ['office'],
+        labelIds: const ['officeOkD2'],
         conditions: const [GlobalResetTaskCondition()],
         currentDate: fixedDate,
-        id: 't_susp',
+        id: 'susp00OkD2',
       );
 
       expect(
         board.blocked.map((task) => task.id),
-        equals(['t_susp']),
+        equals(['susp00OkD2']),
         reason: 'Setting suspended in the future must disable evaluation of all other conditions (even condition any or Someday mode) and place the task under Blocked',
       );
       expect(
@@ -263,23 +263,23 @@ void main() {
         isEmpty,
         reason: 'Suspended task must appear in Blocked rather than Someday',
       );
-      expect(board.findTask('t_susp')?.suspendedAt, equals(futureSuspend));
+      expect(board.findTask('susp00OkD2')?.suspendedAt, equals(futureSuspend));
 
       board = board.updateTask(
-        't_susp',
+        'susp00OkD2',
         title: 'Suspended Task With Satisfied Condition Any',
         clearSuspendedAt: true,
         currentDate: fixedDate,
       );
       expect(
         board.focus.map((task) => task.id),
-        equals(['t_susp']),
+        equals(['susp00OkD2']),
         reason: 'Clearing suspendedAt must re-enable condition evaluation so condition any places the task in Focus',
       );
 
       board = board.addTask(
         'Dependent Task',
-        blockedByTaskIds: const ['t_susp', 't_dependent'],
+        blockedByTaskIds: const ['susp00OkD2', 'dependOkD2'],
         conditions: [
           const GroupResetTaskCondition(targetGroup: ConditionGroup.day),
           const TimeWindowTaskCondition(
@@ -294,43 +294,43 @@ void main() {
             radiusMeters: 200.0,
           ),
         ],
-        labelIds: const ['office'],
+        labelIds: const ['officeOkD2'],
         currentDate: fixedDate,
-        id: 't_dependent',
+        id: 'dependOkD2',
       );
 
       expect(
         board.blocked.map((task) => task.id),
-        equals(['t_dependent']),
-        reason: 'Task with open prerequisite t_susp must be placed in Blocked',
-      );
-      expect(
-        board.findTask('t_dependent')?.blockedByTaskIds,
-        equals(['t_susp']),
-        reason: 'Self-dependency on t_dependent must be stripped automatically',
-      );
-      expect(
-        board.wouldCreateDependencyCycle('t_susp', 't_dependent'),
-        isTrue,
+        equals(['dependOkD2']),
         reason:
-            'Adding t_dependent as a prerequisite of t_susp would form a cycle',
+            'Task with open prerequisite susp00OkD2 must be placed in Blocked',
+      );
+      expect(
+        board.findTask('dependOkD2')?.blockedByTaskIds,
+        equals(['susp00OkD2']),
+        reason: 'Self-dependency on dependOkD2 must be stripped automatically',
+      );
+      expect(
+        board.wouldCreateDependencyCycle('susp00OkD2', 'dependOkD2'),
+        isTrue,
+        reason: 'Adding dependOkD2 as a prerequisite of susp00OkD2 would form a cycle',
       );
 
       board = board.updateTask(
-        't_susp',
+        'susp00OkD2',
         title: 'Suspended Task With Satisfied Condition Any',
-        blockedByTaskIds: const ['t_dependent'],
+        blockedByTaskIds: const ['dependOkD2'],
         currentDate: fixedDate,
       );
       expect(
-        board.findTask('t_susp')?.blockedByTaskIds,
+        board.findTask('susp00OkD2')?.blockedByTaskIds,
         isEmpty,
         reason: 'updateTask must reject circular dependency references',
       );
 
       final serialized = tdfService.serialize(board);
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
-      expect(reparsed.blocked.map((task) => task.id), equals(['t_dependent']));
+      expect(reparsed.blocked.map((task) => task.id), equals(['dependOkD2']));
     });
 
     test('normalizes hex colors, parses/serializes label colors, and rejects duplicate label color directives', () {
@@ -367,9 +367,9 @@ void main() {
       );
 
       const labelWithColorTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label office {
+label officeOkD2 {
     name  "Main Office"
     color "#FF9100"
     note  "Downtown"
@@ -379,7 +379,7 @@ label office {
         labelWithColorTdf,
         evaluationTime: fixedDate,
       );
-      expect(parsed.labels.single.id, equals('office'));
+      expect(parsed.labels.single.id, equals('officeOkD2'));
       expect(parsed.labels.single.name, equals('Main Office'));
       expect(
         parsed.labels.single.color,
@@ -396,7 +396,7 @@ label office {
 
       expect(
         () => tdfService.parse(
-          'tdf 0.2.0\nlabel home {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
+          'tdf 0.4.0\nlabel home00OkD2 {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
           evaluationTime: fixedDate,
         ),
         throwsA(
@@ -410,17 +410,54 @@ label office {
       );
     });
 
-    test('adds and deletes labels on TaskBoard and assigns multiple labels to tasks', () {
+    test('adds and deletes labels on TaskBoard with 10-character Base62 IDs and assigns multiple labels to tasks', () {
       var board = TaskBoard.empty();
-      board = board.addLabel('IT & Servers', color: '2196f3');
-      board = board.addLabel('IT & Servers', color: '#4CAF50');
-      board = board.addLabel('   ', color: '#000000');
-      board = board.addLabel('Home Office', color: 'ff9100');
+      board = board.addLabel(
+        'IT & Servers',
+        color: '2196f3',
+        currentDate: fixedDate,
+      );
+      board = board.addLabel(
+        'IT & Servers',
+        color: '#4CAF50',
+        currentDate: fixedDate,
+      );
+      board = board.addLabel('   ', color: '#000000', currentDate: fixedDate);
+      board = board.addLabel(
+        'Home Office',
+        color: 'ff9100',
+        currentDate: fixedDate,
+      );
 
+      expect(board.labels.length, equals(3));
+      final firstLabelId = board.labels[0].id;
+      final secondLabelId = board.labels[1].id;
+      final thirdLabelId = board.labels[2].id;
+      final expectedTimeSuffix = encodeTdfBase62Time(fixedDate);
+      for (final labelId in [firstLabelId, secondLabelId, thirdLabelId]) {
+        expect(
+          labelId.length,
+          equals(10),
+          reason:
+              'Generated label ID ($labelId) must be 10 characters without prefix or underscore',
+        );
+        expect(
+          isValidLabelId(labelId),
+          isTrue,
+          reason:
+              'Generated label ID ($labelId) must be a valid 10-character Base62 ID',
+        );
+        expect(
+          labelId.endsWith(expectedTimeSuffix),
+          isTrue,
+          reason:
+              'Generated label ID ($labelId) must encode the creation timestamp in Base62',
+        );
+      }
       expect(
-        board.labels.map((label) => label.id),
-        equals(['l_it_servers', 'l_it_servers_2', 'l_home_office']),
-        reason: 'Duplicate label names must generate distinct TDF identifiers',
+        {firstLabelId, secondLabelId, thirdLabelId}.length,
+        equals(3),
+        reason: 'Generated label IDs must be unique',
       );
       expect(
         board.labels.first.color,
@@ -431,56 +468,67 @@ label office {
       board = board.addTask(
         'Configure VPN router',
         currentDate: fixedDate,
-        labelIds: const ['l_it_servers', 'l_home_office'],
+        labelIds: [firstLabelId, thirdLabelId],
       );
 
+      final createdTask = board.focus.single;
       expect(
-        board.focus.single.labelIds,
-        equals(['l_it_servers', 'l_home_office']),
+        createdTask.id.length,
+        equals(10),
+        reason: 'Generated task ID must be 10 characters without prefix or underscore',
+      );
+      expect(
+        isValidTaskId(createdTask.id),
+        isTrue,
+        reason: 'Generated task ID must be a valid 10-character Base62 ID',
+      );
+      expect(createdTask.id.endsWith(expectedTimeSuffix), isTrue);
+      expect(
+        createdTask.labelIds,
+        equals([firstLabelId, thirdLabelId]),
         reason: 'Task must store multiple selected label IDs',
       );
 
-      board = board.deleteLabel('l_it_servers');
+      board = board.deleteLabel(firstLabelId);
       expect(
         board.labels.map((label) => label.id),
-        equals(['l_it_servers_2', 'l_home_office']),
+        equals([secondLabelId, thirdLabelId]),
         reason: 'Deleting a label must remove it from board.labels',
       );
       expect(
         board.focus.single.labelIds,
-        equals(['l_home_office']),
+        equals([thirdLabelId]),
         reason: 'Deleting a label must strip its ID from referencing tasks',
       );
 
       expect(
-        board.openTaskCountForLabel('l_home_office'),
+        board.openTaskCountForLabel(thirdLabelId),
         equals(1),
         reason:
             'openTaskCountForLabel must count open tasks referencing the label',
       );
       expect(
-        board.openTaskCountForLabel('l_it_servers_2'),
+        board.openTaskCountForLabel(secondLabelId),
         equals(0),
         reason: 'openTaskCountForLabel must return 0 when no open tasks reference the label',
       );
       expect(
         board.openTaskCountsByLabel,
-        equals(<String, int>{'l_home_office': 1}),
+        equals(<String, int>{thirdLabelId: 1}),
         reason: 'Precomputed openTaskCountsByLabel map must expose O(1) counts for open tasks',
       );
 
-      board = board.renameLabel('l_home_office', '  Remote Work  ');
+      board = board.renameLabel(thirdLabelId, '  Remote Work  ');
       expect(
         board.labels.map((label) => label.name),
         equals(['IT & Servers', 'Remote Work']),
         reason: 'renameLabel must update the trimmed display name of the matching label',
       );
 
-      board = board.renameLabel('l_home_office', '   ');
+      board = board.renameLabel(thirdLabelId, '   ');
       expect(
         board.labels.map((label) => label.name),
         equals(['IT & Servers', 'Remote Work']),
-        reason: 'renameLabel must ignore empty or whitespace-only names',
       );
     });
 

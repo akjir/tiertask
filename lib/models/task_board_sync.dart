@@ -48,18 +48,9 @@ class TaskBoardSync {
     );
     final validLabelIds = <String>{for (final label in mergedLabels) label.id};
 
-    final (
-      resolvedPrimaryTasks,
-      resolvedSecondaryTasks,
-    ) = _resolveTaskIdCollisions(
+    final rawMergedTasks = _mergeTasks(
       primaryTasks: primary.allTasks,
       secondaryTasks: secondary.allTasks,
-      now: now,
-    );
-
-    final rawMergedTasks = _mergeTasks(
-      primaryTasks: resolvedPrimaryTasks,
-      secondaryTasks: resolvedSecondaryTasks,
       baselineTasks: baseline?.allTasks,
       now: now,
     );
@@ -127,18 +118,6 @@ class TaskBoardSync {
     return ordered;
   }
 
-  /// Allocates the next unused sequential `tNNN` task ID not present in [usedIds].
-  static String _nextFreeTaskId(Set<String> usedIds) {
-    var number = usedIds.length + 1;
-    while (true) {
-      final candidate = 't${number.toString().padLeft(3, '0')}';
-      if (usedIds.add(candidate)) {
-        return candidate;
-      }
-      number++;
-    }
-  }
-
   /// Merges `label` blocks across [primaryLabels] and [secondaryLabels] using [baselineLabels] and [deletedLabelTimestamps].
   static List<TdfLabel> _mergeLabels({
     required List<TdfLabel> primaryLabels,
@@ -147,6 +126,9 @@ class TaskBoardSync {
     required Map<String, DateTime> deletedLabelTimestamps,
     required DateTime now,
   }) {
+    final normalizedDeleted = _normalizeDeletedLabelTimestamps(
+      deletedLabelTimestamps,
+    );
     final primaryMap = <String, TdfLabel>{
       for (final label in primaryLabels) label.id: label,
     };
@@ -168,7 +150,7 @@ class TaskBoardSync {
         secondaryLabel: secondaryMap[id],
         baselineLabel: baselineMap?[id],
         hasBaseline: baselineMap != null,
-        deletedAt: deletedLabelTimestamps[id],
+        deletedAt: normalizedDeleted[id],
         now: now,
       );
       if (resolved != null) {
@@ -211,64 +193,26 @@ class TaskBoardSync {
     return merged;
   }
 
-  /// Resolves a single colliding task ID between [primaryTasks] and [secondaryTasks].
-  static void _reassignCollidingTask({
-    required String collidingId,
-    required Map<String, int> primaryIndexById,
-    required Map<String, int> secondaryIndexById,
-    required List<TaskItem> nextPrimary,
-    required List<TaskItem> nextSecondary,
-    required Set<String> usedIds,
-    required DateTime now,
-  }) {
-    final pIndex = primaryIndexById[collidingId];
-    final sIndex = secondaryIndexById[collidingId];
-    if (pIndex == null || sIndex == null) {
-      return;
+  /// Normalizes [deletedLabelTimestamps] so both 10-character TDF 0.4.0 label IDs
+  /// and deterministically converted legacy label IDs match during synchronization.
+  static Map<String, DateTime> _normalizeDeletedLabelTimestamps(
+    Map<String, DateTime> deletedLabelTimestamps,
+  ) {
+    if (deletedLabelTimestamps.isEmpty) {
+      return const <String, DateTime>{};
     }
-    final pTask = nextPrimary[pIndex];
-    final sTask = nextSecondary[sIndex];
-    final pCreated = TaskItem.normalizeTimestamp(pTask.createdAt);
-    final sCreated = TaskItem.normalizeTimestamp(sTask.createdAt);
-    final sameTitle =
-        pTask.title.trim().toLowerCase() == sTask.title.trim().toLowerCase();
-    if (pCreated == sCreated || sameTitle) {
-      return;
+    final normalized = <String, DateTime>{};
+    for (final entry in deletedLabelTimestamps.entries) {
+      normalized[entry.key] = entry.value;
+      if (!isValidLabelId(entry.key)) {
+        final convertedKey = convertLegacyEntityId(
+          prefix: 'l',
+          legacyId: entry.key,
+        );
+        normalized[convertedKey] = entry.value;
+      }
     }
-
-    final newId = _nextFreeTaskId(usedIds);
-    if (sCreated.isBefore(pCreated)) {
-      nextPrimary[pIndex] = pTask.copyWith(
-        id: newId,
-        modifiedAt: TaskItem.nextModifiedTimestamp(
-          now,
-          pTask.effectiveModifiedAt,
-        ),
-      );
-      _rewriteBlockedReferences(
-        tasks: nextPrimary,
-        oldId: collidingId,
-        newId: newId,
-        minCreatedAt: pCreated,
-        now: now,
-      );
-      return;
-    }
-
-    nextSecondary[sIndex] = sTask.copyWith(
-      id: newId,
-      modifiedAt: TaskItem.nextModifiedTimestamp(
-        now,
-        sTask.effectiveModifiedAt,
-      ),
-    );
-    _rewriteBlockedReferences(
-      tasks: nextSecondary,
-      oldId: collidingId,
-      newId: newId,
-      minCreatedAt: sCreated,
-      now: now,
-    );
+    return normalized;
   }
 
   /// Resolves a single label entity across primary, secondary, baseline, and deletion state.
@@ -372,70 +316,6 @@ class TaskBoardSync {
       return null;
     }
     return secondaryTask.copyWith(modifiedAt: sMod);
-  }
-
-  /// Detects offline sequential task ID collisions and reassigns the later-created task,
-  /// updating intra-board `blocked` references on the same side.
-  static (List<TaskItem>, List<TaskItem>) _resolveTaskIdCollisions({
-    required List<TaskItem> primaryTasks,
-    required List<TaskItem> secondaryTasks,
-    required DateTime now,
-  }) {
-    final nextPrimary = List<TaskItem>.from(primaryTasks);
-    final nextSecondary = List<TaskItem>.from(secondaryTasks);
-    final primaryIndexById = <String, int>{
-      for (var i = 0; i < nextPrimary.length; i++) nextPrimary[i].id: i,
-    };
-    final secondaryIndexById = <String, int>{
-      for (var i = 0; i < nextSecondary.length; i++) nextSecondary[i].id: i,
-    };
-    final usedIds = <String>{
-      ...primaryIndexById.keys,
-      ...secondaryIndexById.keys,
-    };
-
-    for (final collidingId in secondaryIndexById.keys) {
-      _reassignCollidingTask(
-        collidingId: collidingId,
-        primaryIndexById: primaryIndexById,
-        secondaryIndexById: secondaryIndexById,
-        nextPrimary: nextPrimary,
-        nextSecondary: nextSecondary,
-        usedIds: usedIds,
-        now: now,
-      );
-    }
-    return (nextPrimary, nextSecondary);
-  }
-
-  /// Rewrites `blockedByTaskIds` references from [oldId] to [newId] for tasks in [tasks]
-  /// created on or after [minCreatedAt].
-  static void _rewriteBlockedReferences({
-    required List<TaskItem> tasks,
-    required String oldId,
-    required String newId,
-    required DateTime minCreatedAt,
-    required DateTime now,
-  }) {
-    for (var i = 0; i < tasks.length; i++) {
-      final task = tasks[i];
-      final taskCreated = TaskItem.normalizeTimestamp(task.createdAt);
-      if (taskCreated.isBefore(minCreatedAt) ||
-          !task.blockedByTaskIds.contains(oldId)) {
-        continue;
-      }
-      final updatedBlockers = <String>[
-        for (final blockerId in task.blockedByTaskIds)
-          blockerId == oldId ? newId : blockerId,
-      ];
-      tasks[i] = task.copyWith(
-        blockedByTaskIds: updatedBlockers,
-        modifiedAt: TaskItem.nextModifiedTimestamp(
-          now,
-          task.effectiveModifiedAt,
-        ),
-      );
-    }
   }
 
   /// Strips unknown label references and self-referential blockers from merged [tasks].

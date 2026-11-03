@@ -841,6 +841,13 @@ void main() {
       );
 
       await reloadedRepository.renameWorkspace('arbeit', 'Beratung');
+      final summariesBeforeDelete = await reloadedRepository
+          .loadWorkspaceSummaries();
+      expect(
+        summariesBeforeDelete.map((summary) => (summary.id, summary.name)),
+        equals(<(String, String)>[('tasks', 'Tasks'), ('arbeit', 'Beratung')]),
+        reason: 'loadWorkspaceSummaries must list all workspaces in order',
+      );
       await reloadedRepository.activateWorkspace('tasks');
       final reactivatedTasks = await reloadedRepository.loadActiveWorkspace();
       expect(
@@ -854,6 +861,115 @@ void main() {
         reason: 'Reactivated tasks workspace must retain StorageMode.both',
       );
       await reloadedRepository.deleteWorkspace('arbeit');
+      final summariesAfterDelete = await reloadedRepository
+          .loadWorkspaceSummaries();
+      expect(
+        summariesAfterDelete.map((summary) => summary.id),
+        equals(<String>['tasks']),
+        reason: 'Deleted workspace must be removed from loadWorkspaceSummaries',
+      );
+    });
+
+    test('workspaceSummariesProvider reflects creation, renaming, and deletion and prepareForWorkspaceUnload flushes outgoing board before switching or deleting', () async {
+      final settingsRepository = InMemorySettingsRepository();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final initialSummaries = await container.read(
+        workspaceSummariesProvider.future,
+      );
+      expect(
+        initialSummaries.map((summary) => (summary.id, summary.name)),
+        equals(<(String, String)>[('tasks', 'Tasks')]),
+        reason: 'Initial workspaceSummariesProvider must contain Tasks',
+      );
+
+      await container.read(taskNotifierProvider.future);
+      await container
+          .read(taskNotifierProvider.notifier)
+          .addTask('Task Before Switch', isPriority: true);
+
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .createWorkspace('Projekt B', activate: true);
+
+      final summariesAfterCreate = await container.read(
+        workspaceSummariesProvider.future,
+      );
+      expect(
+        summariesAfterCreate.map(
+          (summary) => (summary.id, summary.name, summary.localFilePath),
+        ),
+        equals(<(String, String, String)>[
+          ('tasks', 'Tasks', 'tasks.tdf'),
+          ('projekt_b', 'Projekt B', 'projekt_b.tdf'),
+        ]),
+        reason: 'Creating Projekt B must update workspaceSummariesProvider',
+      );
+
+      final projektBBoard = await container.read(taskNotifierProvider.future);
+      expect(
+        projektBBoard.allTasks,
+        isEmpty,
+        reason: 'Newly activated Projekt B board must be empty',
+      );
+      await container
+          .read(taskNotifierProvider.notifier)
+          .addTask('Projekt B Task', isPriority: true);
+
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .renameWorkspace('projekt_b', 'Projekt Beta');
+      final summariesAfterRename = await container.read(
+        workspaceSummariesProvider.future,
+      );
+      expect(
+        summariesAfterRename.map((summary) => (summary.id, summary.name)),
+        equals(<(String, String)>[
+          ('tasks', 'Tasks'),
+          ('projekt_b', 'Projekt Beta'),
+        ]),
+        reason: 'Renaming workspace must update workspaceSummariesProvider',
+      );
+
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .deleteWorkspace('projekt_b');
+
+      final summariesAfterDelete = await container.read(
+        workspaceSummariesProvider.future,
+      );
+      expect(
+        summariesAfterDelete.map((summary) => summary.id),
+        equals(<String>['tasks']),
+        reason: 'Deleting workspace must update workspaceSummariesProvider',
+      );
+      final projektBFile = File('${tempDir.path}/projekt_b.tdf');
+      expect(
+        await projektBFile.exists(),
+        isTrue,
+        reason: 'Deleting a workspace profile must preserve its .tdf file on disk',
+      );
+      expect(
+        await projektBFile.readAsString(),
+        contains('name "Projekt B Task"'),
+        reason: 'Preserved .tdf file must retain all tasks without data loss',
+      );
+
+      final restoredTasksBoard = await container.read(
+        taskNotifierProvider.future,
+      );
+      expect(
+        restoredTasksBoard.focus.map((task) => task.title),
+        equals(<String>['Task Before Switch']),
+        reason: 'Fallback Tasks workspace must reload its original tasks',
+      );
     });
   });
 }

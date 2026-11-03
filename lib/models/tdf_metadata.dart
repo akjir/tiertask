@@ -17,6 +17,16 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+/// Canonical Base62 character alphabet (`0-9`, `A-Z`, `a-z`) defined in `TDF_SPEC.md` Section 2.9.
+const String tdfBase62Alphabet =
+    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+
+/// Modulo divisor `62^4` (`14,776,336` seconds) for the 4-character Base62 timestamp suffix.
+const int tdfBase62TimeModulo = 14776336;
+
+/// Fixed total character length of a TDF 0.4.0 `<task-id>` or `<label-id>`.
+const int _tdfEntityIdLength = 10;
+
 /// Canonical condition rule groups defined in `TDF_SPEC.md` Section 4.3.
 enum ConditionGroup {
   /// Weekday rule group (`day`).
@@ -664,4 +674,137 @@ class TdfLabel {
 
   @override
   String toString() => 'label $id ($name)';
+}
+
+/// Deterministically converts a legacy `<task-id>` or `<label-id>` into a 10-character Base62 ID (`TDF_SPEC.md` Section 2.9).
+String convertLegacyEntityId({
+  required String prefix,
+  required String legacyId,
+  DateTime? timestamp,
+  Set<String> existingIds = const <String>{},
+}) {
+  final timePart = timestamp != null
+      ? encodeTdfBase62Time(timestamp)
+      : _encodeBase62Fixed(
+          _fnv1a32('$prefix:time:$legacyId') % tdfBase62TimeModulo,
+          4,
+        );
+  for (var attempt = 0; attempt < 1024; attempt++) {
+    final seed = attempt == 0
+        ? '$prefix:id:$legacyId'
+        : '$prefix:id:$legacyId:$attempt';
+    final randomPart = _deterministicBase62Segment(seed);
+    final candidate = '$randomPart$timePart';
+    if (!existingIds.contains(candidate)) {
+      return candidate;
+    }
+  }
+  return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
+}
+
+/// Encodes the UTC seconds of [timestamp] modulo `62^4` (`14,776,336`) as a 4-character Base62 string.
+String encodeTdfBase62Time(DateTime timestamp) {
+  final utcSeconds = timestamp.toUtc().millisecondsSinceEpoch ~/ 1000;
+  final normalized =
+      ((utcSeconds % tdfBase62TimeModulo) + tdfBase62TimeModulo) %
+      tdfBase62TimeModulo;
+  return _encodeBase62Fixed(normalized, 4);
+}
+
+/// Generates a unique 10-character TDF 0.4.0 label identifier (`<6xBase62Random><4xBase62Time>`).
+String generateLabelId({
+  DateTime? timestamp,
+  Set<String> existingIds = const <String>{},
+}) {
+  return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
+}
+
+/// Generates a unique 10-character TDF 0.4.0 task identifier (`<6xBase62Random><4xBase62Time>`).
+String generateTaskId({
+  DateTime? timestamp,
+  Set<String> existingIds = const <String>{},
+}) {
+  return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
+}
+
+/// Checks whether [value] is a canonical 10-character TDF 0.4.0 label identifier (`[0-9A-Za-z]{10}`).
+bool isValidLabelId(String value) => _isValidEntityId(value);
+
+/// Checks whether [value] is a canonical 10-character TDF 0.4.0 task identifier (`[0-9A-Za-z]{10}`).
+bool isValidTaskId(String value) => _isValidEntityId(value);
+
+/// Derives a deterministic 6-character Base62 string from [seed].
+String _deterministicBase62Segment(String seed) {
+  final high = _fnv1a32('hi:$seed');
+  final low = _fnv1a32('lo:$seed');
+  final combined = ((high & 0x1FFFFF) << 32) | low;
+  return _encodeBase62Fixed(combined, 6);
+}
+
+/// Encodes non-negative integer [value] into a fixed-width Base62 string of [width] characters, left-padded with `'0'`.
+String _encodeBase62Fixed(int value, int width) {
+  final units = List<int>.filled(width, 0x30);
+  var remaining = value < 0 ? 0 : value;
+  for (var i = width - 1; i >= 0; i--) {
+    final digit = remaining % 62;
+    units[i] = tdfBase62Alphabet.codeUnitAt(digit);
+    remaining ~/= 62;
+  }
+  return String.fromCharCodes(units);
+}
+
+/// Computes a deterministic 32-bit FNV-1a hash of [input].
+int _fnv1a32(String input) {
+  var hash = 0x811c9dc5;
+  for (var i = 0; i < input.length; i++) {
+    hash ^= input.codeUnitAt(i);
+    hash = (hash * 0x01000193) & 0xFFFFFFFF;
+  }
+  return hash;
+}
+
+/// Generates a unique 10-character `<6xBase62Random><4xBase62Time>` identifier not present in [existingIds].
+String _generateEntityId({
+  DateTime? timestamp,
+  Set<String> existingIds = const <String>{},
+}) {
+  final resolvedTime = timestamp ?? DateTime.now().toUtc();
+  final timePart = encodeTdfBase62Time(resolvedTime);
+  while (true) {
+    final randomPart = _randomBase62Segment();
+    final candidate = '$randomPart$timePart';
+    if (!existingIds.contains(candidate)) {
+      return candidate;
+    }
+  }
+}
+
+/// Checks whether [unit] is an ASCII Base62 character (`0-9`, `A-Z`, `a-z`).
+bool _isBase62CodeUnit(int unit) {
+  return (unit >= 0x30 && unit <= 0x39) ||
+      (unit >= 0x41 && unit <= 0x5A) ||
+      (unit >= 0x61 && unit <= 0x7A);
+}
+
+/// Validates a 10-character `<6xBase62Random><4xBase62Time>` identifier without regular expressions.
+bool _isValidEntityId(String value) {
+  if (value.length != _tdfEntityIdLength) {
+    return false;
+  }
+  for (var i = 0; i < _tdfEntityIdLength; i++) {
+    if (!_isBase62CodeUnit(value.codeUnitAt(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Generates 6 cryptographically random Base62 characters (`62^6` possibilities).
+String _randomBase62Segment() {
+  final random = math.Random.secure();
+  final units = List<int>.filled(6, 0x30);
+  for (var i = 0; i < 6; i++) {
+    units[i] = tdfBase62Alphabet.codeUnitAt(random.nextInt(62));
+  }
+  return String.fromCharCodes(units);
 }

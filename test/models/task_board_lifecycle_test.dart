@@ -67,24 +67,24 @@ void main() {
         'Task 1',
         targetTier: TaskTier.planned,
         currentDate: DateTime.utc(2026, 11, 1, 8, 0),
-        id: 't001',
+        id: '000001OkD2',
       );
       board = board.addTask(
         'Task 2',
         targetTier: TaskTier.planned,
         currentDate: DateTime.utc(2026, 11, 1, 8, 5),
-        id: 't002',
+        id: '000002OkD2',
       );
       board = board.addTask(
         'Task 3',
         targetTier: TaskTier.planned,
         currentDate: DateTime.utc(2026, 11, 1, 8, 10),
-        id: 't003',
+        id: '000003OkD2',
       );
 
       expect(
         board.focus.map((task) => task.id),
-        equals(['t001', 't002', 't003']),
+        equals(['000001OkD2', '000002OkD2', '000003OkD2']),
       );
 
       final updated = board.addTask(
@@ -97,18 +97,18 @@ void main() {
           SubtaskItem(title: 'Verify regression tests', isCompleted: true),
         ],
         currentDate: DateTime.utc(2026, 11, 1, 8, 15),
-        id: 't004',
+        id: '000004OkD2',
       );
 
       expect(
         updated.focus.map((task) => task.id),
-        equals(['t004', 't001', 't002']),
+        equals(['000004OkD2', '000001OkD2', '000002OkD2']),
         reason: 'Priority task must sort to the top of Focus and push 3rd task to Ready',
       );
-      expect(updated.ready.map((task) => task.id), equals(['t003']));
+      expect(updated.ready.map((task) => task.id), equals(['000003OkD2']));
 
       final serialized = tdfService.serialize(updated);
-      expect(serialized, contains('task t004 priority {'));
+      expect(serialized, contains('task 000004OkD2 priority {'));
       expect(serialized, contains('subtasks auto-finish {'));
       expect(serialized, contains('step false "Patch vulnerability"'));
       expect(serialized, contains('step true "Verify regression tests"'));
@@ -122,9 +122,9 @@ void main() {
 
     test('completes enclosing task automatically when subtasks has auto-finish and all steps become true', () {
       const autoFinishTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-task t_auto {
+task auto00OkD2 {
     name "Auto-finish task"
     created 2026-11-01 09:00
     queued 2026-11-01 09:00
@@ -133,7 +133,7 @@ task t_auto {
         step false "Step 2"
     }
 }
-task t_manual {
+task manualOkD2 {
     name "Manual finish task"
     created 2026-11-01 09:05
     queued 2026-11-01 09:05
@@ -147,21 +147,21 @@ task t_manual {
       var board = tdfService.parse(autoFinishTdf, evaluationTime: fixedDate);
       expect(
         board.focus.map((task) => task.id),
-        equals(['t_auto', 't_manual']),
+        equals(['auto00OkD2', 'manualOkD2']),
       );
 
-      board = board.toggleSubtask('t_auto', 1, currentDate: fixedDate);
+      board = board.toggleSubtask('auto00OkD2', 1, currentDate: fixedDate);
       expect(
         board.completed.map((task) => task.id),
-        equals(['t_auto']),
+        equals(['auto00OkD2']),
         reason: 'Completing all steps in subtasks auto-finish must transition task to Completed',
       );
-      expect(board.focus.map((task) => task.id), equals(['t_manual']));
+      expect(board.focus.map((task) => task.id), equals(['manualOkD2']));
 
-      board = board.toggleSubtask('t_manual', 1, currentDate: fixedDate);
+      board = board.toggleSubtask('manualOkD2', 1, currentDate: fixedDate);
       expect(
         board.focus.map((task) => task.id),
-        equals(['t_manual']),
+        equals(['manualOkD2']),
         reason: 'Completing all steps without auto-finish must keep task open',
       );
     });

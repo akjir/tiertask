@@ -28,9 +28,9 @@ void main() {
     'EditTaskScreen supports Suspended with date/time pickers, search-based multi-select Prerequisite tasks (blocked), and Activation Conditions (any, day, time with pickers, location)',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label office {
+label officeOkD2 {
   name "Office"
   color "#2196F3"
   condition {
@@ -38,17 +38,17 @@ label office {
     time 09:00 17:00
   }
 }
-task t001 {
+task 000001OkD2 {
   name "Prepare Database Migration"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
 }
-task t002 {
+task 000002OkD2 {
   name "Prepare Backup Verification"
   created 2026-11-01 08:05
   queued 2026-11-01 08:05
 }
-task t003 {
+task 000003OkD2 {
   name "Write Release Notes"
   created 2026-11-01 08:10
   queued 2026-11-01 08:10
@@ -103,7 +103,9 @@ task t003 {
       );
 
       await tester.enterText(titleInputFinder, 'Deferred Release');
-      await tester.tap(find.byKey(const ValueKey('task_editor_label_office')));
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_label_officeOkD2')),
+      );
       await tester.pump();
 
       final conditionAnyToggle = find.byKey(
@@ -244,13 +246,13 @@ task t003 {
         const ValueKey('task_editor_blocked_search_input'),
       );
       final prereqChipT001 = find.byKey(
-        const ValueKey('task_editor_blocked_t001'),
+        const ValueKey('task_editor_blocked_000001OkD2'),
       );
       final prereqChipT002 = find.byKey(
-        const ValueKey('task_editor_blocked_t002'),
+        const ValueKey('task_editor_blocked_000002OkD2'),
       );
       final prereqChipT003 = find.byKey(
-        const ValueKey('task_editor_blocked_t003'),
+        const ValueKey('task_editor_blocked_000003OkD2'),
       );
 
       await tester.ensureVisible(blockedSearchFinder);
@@ -431,7 +433,7 @@ task t003 {
       );
       expect(
         updatedDeferred.blockedByTaskIds,
-        equals(['t001']),
+        equals(['000001OkD2']),
         reason: 'Selected prerequisite task must be stored on blockedByTaskIds',
       );
       expect(
@@ -442,7 +444,9 @@ task t003 {
 
       await tester.tap(find.byKey(const ValueKey('tier_indicator_item_focus')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('edit_task_button_t001')));
+      await tester.tap(
+        find.byKey(const ValueKey('edit_task_button_000001OkD2')),
+      );
       await tester.pumpAndSettle();
 
       await tester.ensureVisible(blockedSearchFinder);

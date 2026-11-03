@@ -124,43 +124,43 @@ void main() {
       );
     });
 
-    test('resolves offline sequential task ID collisions by reassigning the later-created task and rewriting intra-board blocked references', () {
+    test('treats 10-character entity IDs as immutable sync identities where identical IDs unconditionally resolve via modified Last-Write-Wins without ID reassignment', () {
       final sharedExisting = TaskItem(
-        id: 't001',
+        id: 'base01OkD2',
         title: 'Base Task',
         createdAt: DateTime.utc(2026, 11, 1, 8, 0),
         queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
         modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
       );
-      final localColliding = TaskItem(
-        id: 't002',
-        title: 'Offline Local Task Created Earlier',
+      final localSameId = TaskItem(
+        id: 'same02OkD2',
+        title: 'Task Version Older',
         createdAt: DateTime.utc(2026, 11, 1, 9, 0),
         queuedAt: DateTime.utc(2026, 11, 1, 9, 0),
         modifiedAt: DateTime.utc(2026, 11, 1, 9, 0),
       );
-      final remoteColliding = TaskItem(
-        id: 't002',
-        title: 'Offline Remote Task Created Later',
+      final remoteSameIdNewer = TaskItem(
+        id: 'same02OkD2',
+        title: 'Task Version Newer',
         createdAt: DateTime.utc(2026, 11, 1, 9, 30),
         queuedAt: DateTime.utc(2026, 11, 1, 9, 30),
         modifiedAt: DateTime.utc(2026, 11, 1, 9, 30),
       );
       final remoteDependent = TaskItem(
-        id: 't003',
-        title: 'Remote Follow-Up Blocked By Colliding Task',
+        id: 'dep003OkD2',
+        title: 'Remote Follow-Up Blocked By same02OkD2',
         createdAt: DateTime.utc(2026, 11, 1, 9, 35),
         queuedAt: DateTime.utc(2026, 11, 1, 9, 35),
         modifiedAt: DateTime.utc(2026, 11, 1, 9, 35),
-        blockedByTaskIds: const ['t002'],
+        blockedByTaskIds: const ['same02OkD2'],
       );
 
       final primary = TaskBoard.evaluate(
-        tasks: [sharedExisting, localColliding],
+        tasks: [sharedExisting, localSameId],
         evaluationTime: evaluationTime,
       );
       final secondary = TaskBoard.evaluate(
-        tasks: [sharedExisting, remoteColliding, remoteDependent],
+        tasks: [sharedExisting, remoteSameIdNewer, remoteDependent],
         evaluationTime: evaluationTime,
       );
 
@@ -171,32 +171,21 @@ void main() {
       );
 
       expect(
-        merged.findTask('t002')?.title,
-        equals('Offline Local Task Created Earlier'),
-        reason: 'Earlier-created task must keep the colliding ID t002',
-      );
-      final reassignedTask = merged.findTask('t004');
-      expect(
-        reassignedTask,
-        isNotNull,
-        reason: 'Later-created colliding task must be reassigned to next free ID t004',
+        merged.allTasks.map((task) => task.id).toSet(),
+        equals({'base01OkD2', 'same02OkD2', 'dep003OkD2'}),
+        reason: 'Identical 10-character task IDs must unconditionally represent the same entity without reassigning to a new ID',
       );
       expect(
-        reassignedTask?.title,
-        equals('Offline Remote Task Created Later'),
-      );
-      final updatedDependent = merged.findTask('t003');
-      expect(
-        updatedDependent?.blockedByTaskIds,
-        equals(['t004']),
-        reason: 'Intra-board blocked reference on t003 (created after remote t002) must be rewritten to t004',
+        merged.findTask('same02OkD2')?.title,
+        equals('Task Version Newer'),
+        reason: 'Newer modifiedAt on same02OkD2 must win via Last-Write-Wins',
       );
       expect(
-        merged.blocked.map((task) => task.id),
-        contains('t003'),
-        reason:
-            't003 must remain blocked by the reassigned unfinished task t004',
+        merged.findTask('dep003OkD2')?.blockedByTaskIds,
+        equals(['same02OkD2']),
+        reason: 'Blocked reference to same02OkD2 must remain intact',
       );
+      expect(merged.blocked.map((task) => task.id), contains('dep003OkD2'));
     });
 
     test('preserves handwritten labels without modified when not in baseline even if an older deletedLabelTimestamps entry exists, while honoring baseline-aware label and task deletions', () {

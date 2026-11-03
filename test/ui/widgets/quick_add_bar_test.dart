@@ -233,25 +233,25 @@ void main() {
     'QuickAddBar Labels button expands upward menu to select multiple labels',
     (WidgetTester tester) async {
       const seededLabelsTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label home {
+label home00OkD2 {
   name "Home"
   color "#00E5FF"
 }
-label office {
+label officeOkD2 {
   name "Office"
   color "#FF9100"
 }
-label c_it {
+label cit000OkD2 {
   name "IT"
   color "#2196F3"
 }
-label c_ops {
+label cops00OkD2 {
   name "Operations"
   color "#EB06FF"
 }
-label c_hr {
+label chr000OkD2 {
   name "HR"
   color "#4CAF50"
 }
@@ -332,16 +332,20 @@ label c_hr {
       );
 
       final labelHomeOption = find.byKey(
-        const ValueKey('quick_add_label_home'),
+        const ValueKey('quick_add_label_home00OkD2'),
       );
       final labelOfficeOption = find.byKey(
-        const ValueKey('quick_add_label_office'),
+        const ValueKey('quick_add_label_officeOkD2'),
       );
-      final labelItOption = find.byKey(const ValueKey('quick_add_label_c_it'));
+      final labelItOption = find.byKey(
+        const ValueKey('quick_add_label_cit000OkD2'),
+      );
       final labelOpsOption = find.byKey(
-        const ValueKey('quick_add_label_c_ops'),
+        const ValueKey('quick_add_label_cops00OkD2'),
       );
-      final labelHrOption = find.byKey(const ValueKey('quick_add_label_c_hr'));
+      final labelHrOption = find.byKey(
+        const ValueKey('quick_add_label_chr000OkD2'),
+      );
       expect(labelHomeOption, findsOneWidget);
       expect(labelOfficeOption, findsOneWidget);
       expect(labelItOption, findsOneWidget);
@@ -386,7 +390,7 @@ label c_hr {
       expect(createdTask.title, equals('Audit hybrid network'));
       expect(
         createdTask.labelIds,
-        equals(['home', 'c_it', 'c_ops']),
+        equals(['home00OkD2', 'cit000OkD2', 'cops00OkD2']),
         reason: 'Created task must store all selected labels in board declaration order',
       );
     },

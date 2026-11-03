@@ -29,30 +29,30 @@ void main() {
     'Right-side task edit button and QuickAddBar Advanced button open the dedicated EditTaskScreen panel enforcing non-empty, non-duplicate names and shared fields',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label home {
+label home00OkD2 {
   name "Home"
   color "#00E5FF"
 }
-label office {
+label officeOkD2 {
   name "Office"
   color "#FF9100"
 }
-label c_it {
+label cit000OkD2 {
   name "IT"
   color "#2196F3"
 }
-label c_ops {
+label cops00OkD2 {
   name "Operations"
   color "#EB06FF"
 }
-task t001 {
+task 000001OkD2 {
   name "Existing Server Audit"
   note "Initial audit note"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
-  labels c_it office
+  labels cit000OkD2 officeOkD2
   subtasks {
     step false "Check firewall rules"
   }
@@ -85,19 +85,21 @@ task t001 {
       );
       await tester.pumpAndSettle();
 
-      final pillFinder = find.byKey(const ValueKey('tier_pill_focus_t001'));
+      final pillFinder = find.byKey(
+        const ValueKey('tier_pill_focus_000001OkD2'),
+      );
       final taskTitleFinder = find.text('Existing Server Audit');
       final completeButtonFinder = find.byKey(
-        const ValueKey('complete_task_button_t001'),
+        const ValueKey('complete_task_button_000001OkD2'),
       );
       final downgradeButtonFinder = find.byKey(
-        const ValueKey('downgrade_task_button_t001'),
+        const ValueKey('downgrade_task_button_000001OkD2'),
       );
       final dividerFinder = find.byKey(
-        const ValueKey('edit_task_divider_t001'),
+        const ValueKey('edit_task_divider_000001OkD2'),
       );
       final editButtonFinder = find.byKey(
-        const ValueKey('edit_task_button_t001'),
+        const ValueKey('edit_task_button_000001OkD2'),
       );
       expect(pillFinder, findsOneWidget);
       expect(taskTitleFinder, findsOneWidget);
@@ -208,7 +210,7 @@ task t001 {
             .value!
             .focus
             .map((task) => task.id),
-        contains('t001'),
+        contains('000001OkD2'),
         reason:
             'Tapping the task title or pill body must not complete the task',
       );
@@ -309,8 +311,12 @@ task t001 {
 
       await tester.enterText(titleInputFinder, 'Rotate SSH Keys');
       await tester.enterText(noteInputFinder, 'Use ed25519 keys');
-      await tester.tap(find.byKey(const ValueKey('task_editor_label_c_ops')));
-      await tester.tap(find.byKey(const ValueKey('task_editor_label_home')));
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_label_cops00OkD2')),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_label_home00OkD2')),
+      );
       await tester.tap(
         find.byKey(const ValueKey('task_editor_auto_finish_toggle')),
       );
@@ -345,7 +351,7 @@ task t001 {
         reason: 'Created priority task must be at the top of Focus',
       );
       expect(board.focus.first.note, equals('Use ed25519 keys'));
-      expect(board.focus.first.labelIds, equals(['home', 'c_ops']));
+      expect(board.focus.first.labelIds, equals(['home00OkD2', 'cops00OkD2']));
       expect(board.focus.first.subtasksAutoFinish, isTrue);
       expect(
         board.focus.first.subtasks.map((step) => step.title),

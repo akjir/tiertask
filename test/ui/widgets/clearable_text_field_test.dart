@@ -239,12 +239,12 @@ void main() {
     'QuickAddBar, EditTaskScreen, TaskEditorConditionsSection, and EditLabelsScreen text fields show clear button when focused and clear text on click',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.3.0
+tdf 0.4.0
 
-label office {
+label officeOkD2 {
   name "Office"
 }
-task t001 {
+task 000001OkD2 {
   name "First Task"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
@@ -354,12 +354,12 @@ task t001 {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.byKey(const ValueKey('rename_label_button_office')),
+        find.byKey(const ValueKey('rename_label_button_officeOkD2')),
       );
       await tester.pumpAndSettle();
 
       final renameInput = find.byKey(
-        const ValueKey('rename_label_input_office'),
+        const ValueKey('rename_label_input_officeOkD2'),
       );
       final renameClearBtn = find.descendant(
         of: renameInput,

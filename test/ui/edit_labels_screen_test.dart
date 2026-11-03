@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -28,45 +29,50 @@ void main() {
     'Side panel removes tier items, displays Google Keep style Labels with Edit at top, task counts, label filtering, and Create new label opening EditLabelsScreen',
     (WidgetTester tester) async {
       const labelsTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-label home {
+label home00OkD2 {
   name "Home"
   color "#00E5FF"
 }
-label business {
+label busin0OkD2 {
   name "Business"
   color "#EB06FF"
 }
-task t001 {
+task 000001OkD2 {
   name "Prepare quarterly report"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
-  labels business home
+  labels busin0OkD2 home00OkD2
 }
-task t002 {
+task 000002OkD2 {
   name "Water garden plants"
   created 2026-11-01 08:30
   queued 2026-11-01 08:30
-  labels home
+  labels home00OkD2
 }
 ''';
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: labelsTdf,
+            ),
+          ),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+        ],
+      );
+      addTearDown(container.dispose);
+
       await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            settingsRepositoryProvider.overrideWithValue(
-              InMemorySettingsRepository(
-                const WebDavConfig(language: AppLanguage.english),
-              ),
-            ),
-            localFileRepositoryProvider.overrideWith(
-              (ref) => FakeLocalFileRepository(
-                config: const WebDavConfig(language: AppLanguage.english),
-                initialTdf: labelsTdf,
-              ),
-            ),
-            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
-          ],
+        UncontrolledProviderScope(
+          container: container,
           child: const TierTaskApp(),
         ),
       );
@@ -142,10 +148,10 @@ task t002 {
       expect(find.text('Edit'), findsOneWidget);
 
       final homeTileFinder = find.byKey(
-        const ValueKey('drawer_label_tile_home'),
+        const ValueKey('drawer_label_tile_home00OkD2'),
       );
       final businessTileFinder = find.byKey(
-        const ValueKey('drawer_label_tile_business'),
+        const ValueKey('drawer_label_tile_busin0OkD2'),
       );
       final createLabelTileFinder = find.byKey(
         const ValueKey('drawer_create_label_tile'),
@@ -276,7 +282,7 @@ task t002 {
       expect(find.text('Edit labels'), findsOneWidget);
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_label_row_home')),
+          of: find.byKey(const ValueKey('edit_label_row_home00OkD2')),
           matching: find.text('2'),
         ),
         findsOneWidget,
@@ -284,7 +290,7 @@ task t002 {
       );
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_label_row_business')),
+          of: find.byKey(const ValueKey('edit_label_row_busin0OkD2')),
           matching: find.text('1'),
         ),
         findsOneWidget,
@@ -301,8 +307,18 @@ task t002 {
       );
       await tester.pumpAndSettle();
 
+      final campingLabel = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .labels
+          .singleWhere((label) => label.name == 'Camping');
       expect(
-        find.byKey(const ValueKey('edit_label_row_l_camping')),
+        isValidLabelId(campingLabel.id),
+        isTrue,
+        reason: 'Created label must have a valid 13-character Base62 label ID',
+      );
+      expect(
+        find.byKey(ValueKey('edit_label_row_${campingLabel.id}')),
         findsOneWidget,
         reason:
             'Creating a new label in EditLabelsScreen must add it to the list',
@@ -310,15 +326,15 @@ task t002 {
       expect(find.text('Camping'), findsOneWidget);
 
       await tester.tap(
-        find.byKey(const ValueKey('rename_label_button_l_camping')),
+        find.byKey(ValueKey('rename_label_button_${campingLabel.id}')),
       );
       await tester.pump();
       await tester.enterText(
-        find.byKey(const ValueKey('rename_label_input_l_camping')),
+        find.byKey(ValueKey('rename_label_input_${campingLabel.id}')),
         'Outdoor Camping',
       );
       await tester.tap(
-        find.byKey(const ValueKey('rename_label_button_l_camping')),
+        find.byKey(ValueKey('rename_label_button_${campingLabel.id}')),
       );
       await tester.pumpAndSettle();
 
@@ -330,7 +346,7 @@ task t002 {
       );
 
       await tester.tap(
-        find.byKey(const ValueKey('delete_label_button_l_camping')),
+        find.byKey(ValueKey('delete_label_button_${campingLabel.id}')),
       );
       await tester.pumpAndSettle();
 

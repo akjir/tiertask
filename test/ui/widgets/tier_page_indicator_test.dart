@@ -32,70 +32,70 @@ void main() {
     'Bottom tier indicator renders above QuickAddBar when add button is pressed, updates active icon when sliding across tiers, and jumps to target pane via wave wheel on long-press drag',
     (WidgetTester tester) async {
       const allTiersTdf = '''
-tdf 0.2.0
+tdf 0.4.0
 
-task f1 {
+task f10000OkD2 {
   name "Focus Pane Task"
   created 2026-11-01 07:00
   queued 2026-11-01 07:00
 }
-task f2 {
+task f20000OkD2 {
   name "Focus Pane Task 2"
   created 2026-11-01 07:05
   queued 2026-11-01 07:05
 }
-task f3 {
+task f30000OkD2 {
   name "Focus Pane Task 3"
   created 2026-11-01 07:10
   queued 2026-11-01 07:10
 }
-task r1 {
+task r10000OkD2 {
   name "Ready Pane Task"
   created 2026-11-01 07:15
   queued 2026-11-01 07:15
 }
-task r2 {
+task r20000OkD2 {
   name "Ready Pane Task 2"
   created 2026-11-01 07:20
   queued 2026-11-01 07:20
 }
-task r3 {
+task r30000OkD2 {
   name "Ready Pane Task 3"
   created 2026-11-01 07:25
   queued 2026-11-01 07:25
 }
-task r4 {
+task r40000OkD2 {
   name "Ready Pane Task 4"
   created 2026-11-01 07:30
   queued 2026-11-01 07:30
 }
-task r5 {
+task r50000OkD2 {
   name "Ready Pane Task 5"
   created 2026-11-01 07:35
   queued 2026-11-01 07:35
 }
-task p1 {
+task p10000OkD2 {
   name "Planned Pane Task"
   created 2026-11-01 07:40
   queued 2026-11-01 07:40
 }
-task blk1 {
+task blk100OkD2 {
   name "Blocked Pane Task"
   created 2026-11-01 07:45
   queued 2026-11-01 07:45
-  blocked f1
+  blocked f10000OkD2
 }
-task susp1 {
+task susp10OkD2 {
   name "Suspended Pane Task"
   created 2026-11-01 07:50
   queued 2026-11-01 07:50
   suspended 2026-11-05 09:00
 }
-task smd1 {
+task smd100OkD2 {
   name "Someday Pane Task"
   created 2026-11-01 08:00
 }
-task cmp1 {
+task cmp100OkD2 {
   name "Completed Pane Task"
   created 2026-10-28 08:00
   queued 2026-10-28 08:00
@@ -243,7 +243,7 @@ task cmp1 {
       final readyHeadingText = tester.widget<Text>(readyHeadingFinder);
       final readyHeadingRect = tester.getRect(readyHeadingFinder);
       final readyPillTop = tester
-          .getTopLeft(find.byKey(const ValueKey('tier_pill_ready_r1')))
+          .getTopLeft(find.byKey(const ValueKey('tier_pill_ready_r10000OkD2')))
           .dy;
       final viewportWidth =
           tester.view.physicalSize.width / tester.view.devicePixelRatio;
@@ -268,21 +268,21 @@ task cmp1 {
         reason: 'Sliding right-to-left from Focus must display Ready tier pane',
       );
       expect(
-        find.byKey(const ValueKey('tier_pill_ready_r1')),
+        find.byKey(const ValueKey('tier_pill_ready_r10000OkD2')),
         findsOneWidget,
         reason:
             'Ready task must render as a pill card matching the Focus screen',
       );
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_task_button_r1')),
+          of: find.byKey(const ValueKey('edit_task_button_r10000OkD2')),
           matching: find.byIcon(Icons.more_vert_rounded),
         ),
         findsOneWidget,
         reason: 'Ready task pill must display the three-dots edit button',
       );
       expect(
-        find.byKey(const ValueKey('downgrade_task_button_r1')),
+        find.byKey(const ValueKey('downgrade_task_button_r10000OkD2')),
         findsOneWidget,
         reason: 'Ready task pill must display the > downgrade button',
       );
@@ -311,13 +311,13 @@ task cmp1 {
         reason: 'Sliding again must display Planned tier pane',
       );
       expect(
-        find.byKey(const ValueKey('tier_pill_planned_p1')),
+        find.byKey(const ValueKey('tier_pill_planned_p10000OkD2')),
         findsOneWidget,
         reason:
             'Planned task must render as a pill card matching the Focus screen',
       );
       expect(
-        find.byKey(const ValueKey('downgrade_task_button_p1')),
+        find.byKey(const ValueKey('downgrade_task_button_p10000OkD2')),
         findsOneWidget,
         reason: 'Planned task pill must display the > downgrade button',
       );
@@ -352,7 +352,7 @@ task cmp1 {
         reason: 'Blocked pane must also show suspended tasks',
       );
       expect(
-        find.byKey(const ValueKey('tier_pill_blocked_blk1')),
+        find.byKey(const ValueKey('tier_pill_blocked_blk100OkD2')),
         findsOneWidget,
         reason:
             'Blocked task must render as a pill card matching the Focus screen',
@@ -363,7 +363,7 @@ task cmp1 {
         reason: 'Blocked task pill must not display the legacy promote arrow button',
       );
       expect(
-        find.byKey(const ValueKey('downgrade_task_button_blk1')),
+        find.byKey(const ValueKey('downgrade_task_button_blk100OkD2')),
         findsNothing,
         reason: 'Blocked task pill must not display a downgrade button',
       );
@@ -524,20 +524,20 @@ task cmp1 {
         reason: 'Releasing the indicator on Completed must jump directly to the Completed pane',
       );
       expect(
-        find.byKey(const ValueKey('tier_pill_completed_cmp1')),
+        find.byKey(const ValueKey('tier_pill_completed_cmp100OkD2')),
         findsOneWidget,
         reason: 'Completed task must render as a pill card matching the Focus screen',
       );
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_task_button_cmp1')),
+          of: find.byKey(const ValueKey('edit_task_button_cmp100OkD2')),
           matching: find.byIcon(Icons.more_vert_rounded),
         ),
         findsOneWidget,
         reason: 'Completed task pill must render the three-dots edit button',
       );
       expect(
-        find.byKey(const ValueKey('downgrade_task_button_cmp1')),
+        find.byKey(const ValueKey('downgrade_task_button_cmp100OkD2')),
         findsNothing,
         reason: 'Completed task pill must not display a downgrade button',
       );
@@ -614,13 +614,13 @@ task cmp1 {
         reason: 'Clicking a tier indicator item on desktop must jump to that tier pane',
       );
       expect(
-        find.byKey(const ValueKey('tier_pill_someday_smd1')),
+        find.byKey(const ValueKey('tier_pill_someday_smd100OkD2')),
         findsOneWidget,
         reason:
             'Someday task must render as a pill card matching the Focus screen',
       );
       expect(
-        find.byKey(const ValueKey('downgrade_task_button_smd1')),
+        find.byKey(const ValueKey('downgrade_task_button_smd100OkD2')),
         findsNothing,
         reason: 'Someday task pill must not display a downgrade button',
       );

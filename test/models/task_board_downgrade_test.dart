@@ -161,19 +161,19 @@ void main() {
       final allPriorityBoard = TaskBoard(
         focus: [
           TaskItem(
-            id: 'pf1',
+            id: 'pf1000OkD2',
             title: 'PF1',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
           ),
           TaskItem(
-            id: 'pf2',
+            id: 'pf2000OkD2',
             title: 'PF2',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 5),
           ),
           TaskItem(
-            id: 'pf3',
+            id: 'pf3000OkD2',
             title: 'PF3',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 10),
@@ -181,31 +181,31 @@ void main() {
         ],
         ready: [
           TaskItem(
-            id: 'pr1',
+            id: 'pr1000OkD2',
             title: 'PR1',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 15),
           ),
           TaskItem(
-            id: 'pr2',
+            id: 'pr2000OkD2',
             title: 'PR2',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 20),
           ),
           TaskItem(
-            id: 'pr3',
+            id: 'pr3000OkD2',
             title: 'PR3',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 25),
           ),
           TaskItem(
-            id: 'pr4',
+            id: 'pr4000OkD2',
             title: 'PR4',
             isPriority: true,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 30),
           ),
           TaskItem(
-            id: 'pr5',
+            id: 'pr5000OkD2',
             title: 'PR5 (Priority Slot 8)',
             isPriority: true,
             queuedAt: slot8Time,
@@ -213,13 +213,13 @@ void main() {
         ],
         planned: [
           TaskItem(
-            id: 'pp1',
+            id: 'pp1000OkD2',
             title: 'PP1 (Priority Slot 9)',
             isPriority: true,
             queuedAt: collidingSlot9Time,
           ),
           TaskItem(
-            id: 'reg_p2',
+            id: 'regp20OkD2',
             title: 'Regular Planned Task',
             isPriority: false,
             queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
@@ -228,26 +228,26 @@ void main() {
       );
 
       final afterPriorityFocusDowngrade = allPriorityBoard.downgradeTask(
-        'pf1',
+        'pf1000OkD2',
         currentDate: fixedDate,
       );
       expect(
-        afterPriorityFocusDowngrade.findTask('pf1')?.isPriority,
+        afterPriorityFocusDowngrade.findTask('pf1000OkD2')?.isPriority,
         isTrue,
         reason: 'When slot 8 carries priority, downgraded Focus task must retain priority per Section 6.3 Step 1',
       );
       expect(
-        afterPriorityFocusDowngrade.findTask('pf1')?.queuedAt,
+        afterPriorityFocusDowngrade.findTask('pf1000OkD2')?.queuedAt,
         equals(DateTime.utc(2026, 11, 1, 9, 0, 1)),
         reason: 'Downgraded priority Focus task must receive slot_8.queued + 00:00:01',
       );
       expect(
-        afterPriorityFocusDowngrade.findTask('pp1')?.queuedAt,
+        afterPriorityFocusDowngrade.findTask('pp1000OkD2')?.queuedAt,
         equals(DateTime.utc(2026, 11, 1, 9, 0, 2)),
-        reason: 'Colliding priority task pp1 at slot 9 must be shifted to 09:00:02 per Section 6.3 Step 3',
+        reason: 'Colliding priority task pp1000OkD2 at slot 9 must be shifted to 09:00:02 per Section 6.3 Step 3',
       );
       expect(
-        afterPriorityFocusDowngrade.findTask('reg_p2')?.queuedAt,
+        afterPriorityFocusDowngrade.findTask('regp20OkD2')?.queuedAt,
         equals(DateTime.utc(2026, 11, 1, 8, 0)),
         reason: 'Non-priority task in Planned belongs to a different sorting group and must not be shifted',
       );
@@ -257,12 +257,18 @@ void main() {
       );
       expect(
         reparsedPriorityDowngrade.ready.map((task) => task.id),
-        equals(['pr2', 'pr3', 'pr4', 'pr5', 'pf1']),
-        reason: 'Reparsed TDF document must keep pf1 at Ready slot 8 ahead of pp1 in Planned',
+        equals([
+          'pr2000OkD2',
+          'pr3000OkD2',
+          'pr4000OkD2',
+          'pr5000OkD2',
+          'pf1000OkD2',
+        ]),
+        reason: 'Reparsed TDF document must keep pf1000OkD2 at Ready slot 8 ahead of pp1000OkD2 in Planned',
       );
       expect(
         reparsedPriorityDowngrade.planned.map((task) => task.id),
-        equals(['pp1', 'reg_p2']),
+        equals(['pp1000OkD2', 'regp20OkD2']),
       );
 
       final afterReadyDowngrade = fullBoard.downgradeTask(
@@ -311,24 +317,26 @@ void main() {
       );
 
       final afterPriorityPlannedDowngrade = afterPriorityFocusDowngrade
-          .downgradeTask('pp1', currentDate: fixedDate);
+          .downgradeTask('pp1000OkD2', currentDate: fixedDate);
       expect(
         afterPriorityPlannedDowngrade.planned.map((task) => task.id),
-        equals(['reg_p2']),
-        reason: 'Downgraded priority Planned task pp1 must leave Planned',
+        equals(['regp20OkD2']),
+        reason:
+            'Downgraded priority Planned task pp1000OkD2 must leave Planned',
       );
       expect(
         afterPriorityPlannedDowngrade.someday.map((task) => task.id),
-        equals(['pp1']),
-        reason: 'Downgraded priority Planned task pp1 must move to Someday',
+        equals(['pp1000OkD2']),
+        reason:
+            'Downgraded priority Planned task pp1000OkD2 must move to Someday',
       );
       expect(
-        afterPriorityPlannedDowngrade.findTask('pp1')?.isPriority,
+        afterPriorityPlannedDowngrade.findTask('pp1000OkD2')?.isPriority,
         isFalse,
         reason: 'Downgrading a priority Planned task to Someday must remove the priority flag per Section 6.3',
       );
       expect(
-        afterPriorityPlannedDowngrade.findTask('pp1')?.queuedAt,
+        afterPriorityPlannedDowngrade.findTask('pp1000OkD2')?.queuedAt,
         isNull,
         reason: 'Downgrading a priority Planned task to Someday must omit queued per Section 6.3',
       );

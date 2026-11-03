@@ -29,9 +29,9 @@ void main() {
     'Task pill displays darker right-side indicators for priority, repeat, and subtasks regardless of subtask completion state, distinct from action button icons',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.3.0
+tdf 0.4.0
 
-task t_all priority {
+task all000OkD2 priority {
   name "Priority Repeating Checklist Task"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
@@ -41,7 +41,7 @@ task t_all priority {
     step true "Checked step"
   }
 }
-task t_done_subs {
+task donesbOkD2 {
   name "All Checked Subtasks Task"
   created 2026-11-01 08:05
   queued 2026-11-01 08:05
@@ -49,7 +49,7 @@ task t_done_subs {
     step true "Already completed step"
   }
 }
-task t_plain {
+task plain0OkD2 {
   name "Plain Task Without Indicators"
   created 2026-11-01 08:10
   queued 2026-11-01 08:10
@@ -84,13 +84,13 @@ task t_plain {
       await tester.pumpAndSettle();
 
       final priorityIndicatorFinder = find.byKey(
-        const ValueKey('priority_task_indicator_t_all'),
+        const ValueKey('priority_task_indicator_all000OkD2'),
       );
       final repeatIndicatorFinder = find.byKey(
-        const ValueKey('repeat_task_indicator_t_all'),
+        const ValueKey('repeat_task_indicator_all000OkD2'),
       );
       final subtasksIndicatorFinder = find.byKey(
-        const ValueKey('subtasks_task_indicator_t_all'),
+        const ValueKey('subtasks_task_indicator_all000OkD2'),
       );
 
       expect(
@@ -110,36 +110,36 @@ task t_plain {
       );
 
       expect(
-        find.byKey(const ValueKey('subtasks_task_indicator_t_done_subs')),
+        find.byKey(const ValueKey('subtasks_task_indicator_donesbOkD2')),
         findsOneWidget,
         reason: 'Task with subtasks must display the subtasks indicator even when all subtasks are checked',
       );
       expect(
-        find.byKey(const ValueKey('priority_task_indicator_t_done_subs')),
+        find.byKey(const ValueKey('priority_task_indicator_donesbOkD2')),
         findsNothing,
         reason: 'Non-priority task must not display the priority indicator',
       );
       expect(
-        find.byKey(const ValueKey('repeat_task_indicator_t_done_subs')),
+        find.byKey(const ValueKey('repeat_task_indicator_donesbOkD2')),
         findsNothing,
         reason: 'Non-repeating task must not display the repeat indicator',
       );
 
       expect(
-        find.byKey(const ValueKey('priority_task_indicator_t_plain')),
+        find.byKey(const ValueKey('priority_task_indicator_plain0OkD2')),
         findsNothing,
       );
       expect(
-        find.byKey(const ValueKey('repeat_task_indicator_t_plain')),
+        find.byKey(const ValueKey('repeat_task_indicator_plain0OkD2')),
         findsNothing,
       );
       expect(
-        find.byKey(const ValueKey('subtasks_task_indicator_t_plain')),
+        find.byKey(const ValueKey('subtasks_task_indicator_plain0OkD2')),
         findsNothing,
       );
 
       final pillContext = tester.element(
-        find.byKey(const ValueKey('tier_pill_focus_t_all')),
+        find.byKey(const ValueKey('tier_pill_focus_all000OkD2')),
       );
       final colorScheme = Theme.of(pillContext).colorScheme;
       final expectedIndicatorColor = colorScheme.onSurfaceVariant.withValues(
@@ -151,13 +151,13 @@ task t_plain {
       final subtasksIcon = tester.widget<Icon>(subtasksIndicatorFinder);
       final downgradeButtonIcon = tester.widget<Icon>(
         find.descendant(
-          of: find.byKey(const ValueKey('downgrade_task_button_t_all')),
+          of: find.byKey(const ValueKey('downgrade_task_button_all000OkD2')),
           matching: find.byType(Icon),
         ),
       );
       final editButtonIcon = tester.widget<Icon>(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_task_button_t_all')),
+          of: find.byKey(const ValueKey('edit_task_button_all000OkD2')),
           matching: find.byType(Icon),
         ),
       );
@@ -191,7 +191,9 @@ task t_plain {
       final priorityLeft = tester.getTopLeft(priorityIndicatorFinder).dx;
       final subtasksRight = tester.getTopRight(subtasksIndicatorFinder).dx;
       final downgradeLeft = tester
-          .getTopLeft(find.byKey(const ValueKey('downgrade_task_button_t_all')))
+          .getTopLeft(
+            find.byKey(const ValueKey('downgrade_task_button_all000OkD2')),
+          )
           .dx;
 
       expect(
@@ -212,9 +214,9 @@ task t_plain {
     'Tapping a task pill with subtasks animates subtasks downward, shifts subsequent tasks down, toggles subtasks on and off, and collapses on second tap',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.3.0
+tdf 0.4.0
 
-task t1 {
+task 000001OkD2 {
   name "Deploy release candidate"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
@@ -223,7 +225,7 @@ task t1 {
     step false "Verify checksum"
   }
 }
-task t2 {
+task 000002OkD2 {
   name "Update status page"
   created 2026-11-01 08:05
   queued 2026-11-01 08:05
@@ -257,10 +259,14 @@ task t2 {
       );
       await tester.pumpAndSettle();
 
-      final step0Finder = find.byKey(const ValueKey('subtask_step_t1_0'));
-      final step1Finder = find.byKey(const ValueKey('subtask_step_t1_1'));
+      final step0Finder = find.byKey(
+        const ValueKey('subtask_step_000001OkD2_0'),
+      );
+      final step1Finder = find.byKey(
+        const ValueKey('subtask_step_000001OkD2_1'),
+      );
       final secondTaskPillFinder = find.byKey(
-        const ValueKey('tier_pill_focus_t2'),
+        const ValueKey('tier_pill_focus_000002OkD2'),
       );
 
       expect(
@@ -311,17 +317,17 @@ task t2 {
 
       var board = container.read(taskNotifierProvider).value!;
       expect(
-        board.findTask('t1')!.subtasks[0].isCompleted,
+        board.findTask('000001OkD2')!.subtasks[0].isCompleted,
         isTrue,
         reason: 'Tapping an unchecked subtask must mark it as completed',
       );
       expect(
-        board.findTask('t1')!.subtasks[1].isCompleted,
+        board.findTask('000001OkD2')!.subtasks[1].isCompleted,
         isFalse,
         reason: 'Other subtasks must remain unchanged',
       );
       expect(
-        find.byKey(const ValueKey('subtasks_task_indicator_t1')),
+        find.byKey(const ValueKey('subtasks_task_indicator_000001OkD2')),
         findsOneWidget,
         reason: 'Subtasks indicator icon must remain visible when a subtask is checked',
       );
@@ -331,12 +337,15 @@ task t2 {
 
       board = container.read(taskNotifierProvider).value!;
       expect(
-        board.findTask('t1')!.subtasks.every((step) => step.isCompleted),
+        board
+            .findTask('000001OkD2')!
+            .subtasks
+            .every((step) => step.isCompleted),
         isTrue,
         reason: 'Tapping the second subtask must mark all subtasks completed',
       );
       expect(
-        find.byKey(const ValueKey('subtasks_task_indicator_t1')),
+        find.byKey(const ValueKey('subtasks_task_indicator_000001OkD2')),
         findsOneWidget,
         reason: 'Subtasks indicator icon must remain visible when all subtasks are checked',
       );
@@ -346,7 +355,7 @@ task t2 {
 
       board = container.read(taskNotifierProvider).value!;
       expect(
-        board.findTask('t1')!.subtasks[0].isCompleted,
+        board.findTask('000001OkD2')!.subtasks[0].isCompleted,
         isFalse,
         reason: 'Tapping a checked subtask again must uncheck it',
       );
@@ -372,9 +381,9 @@ task t2 {
     'Checking all expanded subtasks on a task with subtasks auto-finish completes the task automatically and differentiates subtask indicator icons and hover tooltips',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.3.0
+tdf 0.4.0
 
-task t_auto priority {
+task auto00OkD2 priority {
   name "Auto Finish Checklist Task"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
@@ -384,7 +393,7 @@ task t_auto priority {
     step false "Second step"
   }
 }
-task t_manual {
+task manualOkD2 {
   name "Manual Subtasks Task"
   created 2026-11-01 08:05
   queued 2026-11-01 08:05
@@ -422,10 +431,10 @@ task t_manual {
       await tester.pumpAndSettle();
 
       final autoSubtasksIcon = tester.widget<Icon>(
-        find.byKey(const ValueKey('subtasks_task_indicator_t_auto')),
+        find.byKey(const ValueKey('subtasks_task_indicator_auto00OkD2')),
       );
       final manualSubtasksIcon = tester.widget<Icon>(
-        find.byKey(const ValueKey('subtasks_task_indicator_t_manual')),
+        find.byKey(const ValueKey('subtasks_task_indicator_manualOkD2')),
       );
 
       expect(
@@ -446,25 +455,25 @@ task t_manual {
 
       final priorityTooltip = tester.widget<Tooltip>(
         find.ancestor(
-          of: find.byKey(const ValueKey('priority_task_indicator_t_auto')),
+          of: find.byKey(const ValueKey('priority_task_indicator_auto00OkD2')),
           matching: find.byType(Tooltip),
         ),
       );
       final repeatTooltip = tester.widget<Tooltip>(
         find.ancestor(
-          of: find.byKey(const ValueKey('repeat_task_indicator_t_auto')),
+          of: find.byKey(const ValueKey('repeat_task_indicator_auto00OkD2')),
           matching: find.byType(Tooltip),
         ),
       );
       final autoSubtasksTooltip = tester.widget<Tooltip>(
         find.ancestor(
-          of: find.byKey(const ValueKey('subtasks_task_indicator_t_auto')),
+          of: find.byKey(const ValueKey('subtasks_task_indicator_auto00OkD2')),
           matching: find.byType(Tooltip),
         ),
       );
       final manualSubtasksTooltip = tester.widget<Tooltip>(
         find.ancestor(
-          of: find.byKey(const ValueKey('subtasks_task_indicator_t_manual')),
+          of: find.byKey(const ValueKey('subtasks_task_indicator_manualOkD2')),
           matching: find.byType(Tooltip),
         ),
       );
@@ -482,7 +491,7 @@ task t_manual {
 
       await mouseGesture.moveTo(
         tester.getCenter(
-          find.byKey(const ValueKey('repeat_task_indicator_t_auto')),
+          find.byKey(const ValueKey('repeat_task_indicator_auto00OkD2')),
         ),
       );
       await tester.pumpAndSettle();
@@ -502,7 +511,7 @@ task t_manual {
             .widget<Tooltip>(
               find.ancestor(
                 of: find.byKey(
-                  const ValueKey('priority_task_indicator_t_auto'),
+                  const ValueKey('priority_task_indicator_auto00OkD2'),
                 ),
                 matching: find.byType(Tooltip),
               ),
@@ -514,7 +523,9 @@ task t_manual {
         tester
             .widget<Tooltip>(
               find.ancestor(
-                of: find.byKey(const ValueKey('repeat_task_indicator_t_auto')),
+                of: find.byKey(
+                  const ValueKey('repeat_task_indicator_auto00OkD2'),
+                ),
                 matching: find.byType(Tooltip),
               ),
             )
@@ -526,7 +537,7 @@ task t_manual {
             .widget<Tooltip>(
               find.ancestor(
                 of: find.byKey(
-                  const ValueKey('subtasks_task_indicator_t_auto'),
+                  const ValueKey('subtasks_task_indicator_auto00OkD2'),
                 ),
                 matching: find.byType(Tooltip),
               ),
@@ -539,7 +550,7 @@ task t_manual {
             .widget<Tooltip>(
               find.ancestor(
                 of: find.byKey(
-                  const ValueKey('subtasks_task_indicator_t_manual'),
+                  const ValueKey('subtasks_task_indicator_manualOkD2'),
                 ),
                 matching: find.byType(Tooltip),
               ),
@@ -551,20 +562,20 @@ task t_manual {
       await tester.tap(find.text('Auto Finish Checklist Task'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('subtask_step_t_auto_0')));
+      await tester.tap(find.byKey(const ValueKey('subtask_step_auto00OkD2_0')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('subtask_step_t_auto_1')));
+      await tester.tap(find.byKey(const ValueKey('subtask_step_auto00OkD2_1')));
       await tester.pumpAndSettle();
 
       final board = container.read(taskNotifierProvider).value!;
       expect(
         board.focus.map((task) => task.id),
-        equals(['t_manual']),
+        equals(['manualOkD2']),
         reason: 'Auto-finished recurring task must leave Focus and reschedule into Blocked when all steps are done',
       );
       expect(
         board.blocked.map((task) => task.id),
-        equals(['t_auto']),
+        equals(['auto00OkD2']),
         reason: 'Auto-finished recurring task must move to Blocked',
       );
     },

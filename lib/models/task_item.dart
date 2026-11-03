@@ -232,7 +232,7 @@ class TaskItem {
     List<TaskCondition> conditions = const [],
     this.subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
-  }) : id = id ?? _nextId(),
+  }) : id = id ?? generateTaskId(timestamp: createdAt ?? defaultCreatedAt),
        createdAt = createdAt ?? defaultCreatedAt,
        labelIds = List<String>.unmodifiable(labelIds),
        blockedByTaskIds = List<String>.unmodifiable(blockedByTaskIds),
@@ -244,8 +244,6 @@ class TaskItem {
 
   /// Far-future UTC deferral timestamp used when a task is manually blocked without a specific date.
   static final DateTime defaultSuspendedAt = DateTime.utc(9999, 12, 31, 23, 59);
-
-  static int _idCounter = 0;
 
   /// Prerequisite task IDs (`blocked` directive).
   final List<String> blockedByTaskIds;
@@ -559,12 +557,6 @@ class TaskItem {
       }
     }
     return latest;
-  }
-
-  /// Generates a sequential TDF-compatible identifier (`t001`, `t002`, ...).
-  static String _nextId() {
-    _idCounter++;
-    return 't${_idCounter.toString().padLeft(3, '0')}';
   }
 
   /// Parses an unsigned ASCII integer from `input[start..end]`, or `null` if any char is non-digit.

@@ -189,16 +189,22 @@ class TaskBoard {
       return this;
     }
     final existingIds = <String>{for (final label in labels) label.id};
-    final baseId = (id != null && id.trim().isNotEmpty)
-        ? id.trim()
-        : _slugifyContextName(trimmed, 'l');
-    final labelId = _ensureUniqueContextId(baseId, existingIds);
-    final normalizedColor = TdfColor.normalizeHex(color);
     final resolvedModifiedAt = modifiedAt != null
         ? TaskItem.normalizeTimestamp(modifiedAt)
         : (currentDate != null
               ? TaskItem.normalizeTimestamp(currentDate)
               : null);
+    final trimmedId = id?.trim();
+    final labelId = (trimmedId != null && trimmedId.isNotEmpty)
+        ? trimmedId
+        : generateLabelId(
+            timestamp: resolvedModifiedAt,
+            existingIds: existingIds,
+          );
+    if (existingIds.contains(labelId)) {
+      return this;
+    }
+    final normalizedColor = TdfColor.normalizeHex(color);
     final newLabel = TdfLabel(
       id: labelId,
       name: trimmed,
@@ -264,7 +270,9 @@ class TaskBoard {
         effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(localNow);
     final isSomeday =
         targetTier == TaskTier.someday && !isDone && !isActivelySuspended;
-    final taskId = id ?? _generateUniqueTaskId();
+    final existingIds = <String>{for (final task in allTasks) task.id};
+    final taskId =
+        id ?? generateTaskId(timestamp: now, existingIds: existingIds);
     final cleanBlockedBy = _sanitizeBlockedByForTask(taskId, blockedByTaskIds);
     final cleanConditions = _sanitizeTaskConditions(conditions);
     final resolvedModifiedAt = modifiedAt != null
@@ -1331,21 +1339,6 @@ class TaskBoard {
     ).pruneCompletedTasks(currentDate: now);
   }
 
-  /// Appends a numeric suffix (`_2`, `_3`, ...) if [baseId] already exists in [existingIds].
-  static String _ensureUniqueContextId(String baseId, Set<String> existingIds) {
-    if (!existingIds.contains(baseId)) {
-      return baseId;
-    }
-    var suffix = 2;
-    while (true) {
-      final candidate = '${baseId}_$suffix';
-      if (!existingIds.contains(candidate)) {
-        return candidate;
-      }
-      suffix++;
-    }
-  }
-
   /// Evaluates all rules belonging to [group] within [rules] using intra-group `OR` short-circuiting.
   static bool _evaluateGroupRules({
     required List<TaskCondition> rules,
@@ -1415,19 +1408,6 @@ class TaskBoard {
       }
     }
     return null;
-  }
-
-  /// Generates a sequential task ID (`t001`, `t002`, ...) that does not collide with existing tasks.
-  String _generateUniqueTaskId() {
-    final existingIds = <String>{for (final task in allTasks) task.id};
-    var candidateNumber = existingIds.length + 1;
-    while (true) {
-      final candidate = 't${candidateNumber.toString().padLeft(3, '0')}';
-      if (!existingIds.contains(candidate)) {
-        return candidate;
-      }
-      candidateNumber++;
-    }
   }
 
   /// Checks whether [conditions] contains a [GlobalResetTaskCondition] (`condition any`).
@@ -1948,34 +1928,6 @@ class TaskBoard {
         plannedList.add(task);
       }
     }
-  }
-
-  /// Builds a lowercase ASCII TDF entity identifier (`<prefix>_<slug>`) from [name].
-  static String _slugifyContextName(String name, String prefix) {
-    final buffer = StringBuffer();
-    var lastWasSeparator = false;
-    for (var i = 0; i < name.length; i++) {
-      final unit = name.codeUnitAt(i);
-      if (unit >= 0x41 && unit <= 0x5A) {
-        buffer.writeCharCode(unit + 0x20);
-        lastWasSeparator = false;
-      } else if ((unit >= 0x61 && unit <= 0x7A) ||
-          (unit >= 0x30 && unit <= 0x39)) {
-        buffer.writeCharCode(unit);
-        lastWasSeparator = false;
-      } else if (buffer.isNotEmpty && !lastWasSeparator) {
-        buffer.write('_');
-        lastWasSeparator = true;
-      }
-    }
-    var slug = buffer.toString();
-    if (slug.endsWith('_')) {
-      slug = slug.substring(0, slug.length - 1);
-    }
-    if (slug.isEmpty) {
-      return '${prefix}001';
-    }
-    return '${prefix}_$slug';
   }
 
   /// Sorts active tasks across [nextFocus], [nextReady], and [nextPlanned] by Section 5.5 priority/FIFO order and re-slices them.
