@@ -1230,7 +1230,7 @@ class _TierPaneHeader extends StatelessWidget {
 }
 
 /// Scrollable tier pane body rendering the uppercase section label and minimalist task pills.
-class _TierScrollView extends StatelessWidget {
+class _TierScrollView extends StatefulWidget {
   /// Creates a [_TierScrollView].
   const _TierScrollView({required this.board, required this.tier});
 
@@ -1241,9 +1241,47 @@ class _TierScrollView extends StatelessWidget {
   final TaskTier tier;
 
   @override
+  State<_TierScrollView> createState() => _TierScrollViewState();
+}
+
+/// State for [_TierScrollView] tracking newly upgraded tasks entering [ _TierScrollView.tier].
+class _TierScrollViewState extends State<_TierScrollView> {
+  Set<String> _enteringTaskIds = const <String>{};
+  late Set<String> _knownTaskIds;
+
+  @override
+  void initState() {
+    super.initState();
+    _knownTaskIds = _collectTaskIds(widget.board.tasksForTier(widget.tier));
+  }
+
+  @override
+  void didUpdateWidget(covariant _TierScrollView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final currentTasks = widget.board.tasksForTier(widget.tier);
+    if (oldWidget.tier != widget.tier) {
+      _knownTaskIds = _collectTaskIds(currentTasks);
+      _enteringTaskIds = const <String>{};
+      return;
+    }
+    if (oldWidget.board == widget.board) {
+      return;
+    }
+    final newlyEntered = <String>{
+      for (final task in currentTasks)
+        if (!_knownTaskIds.contains(task.id)) task.id,
+    };
+    _knownTaskIds = _collectTaskIds(currentTasks);
+    if (newlyEntered.isNotEmpty) {
+      _enteringTaskIds = newlyEntered;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final tasks = board.tasksForTier(tier);
+    final tier = widget.tier;
+    final tasks = widget.board.tasksForTier(tier);
     final isCompletedTier = tier == TaskTier.completed;
 
     return ListView.builder(
@@ -1260,6 +1298,7 @@ class _TierScrollView extends StatelessWidget {
         final task = tasks[taskIndex];
         return TierTaskPill(
           key: ValueKey('tier_pill_${tier.name}_${task.id}'),
+          animateEntry: _enteringTaskIds.contains(task.id),
           task: task,
           canDowngrade:
               tier == TaskTier.focus ||
@@ -1269,6 +1308,11 @@ class _TierScrollView extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// Collects the task IDs present in [tasks].
+  static Set<String> _collectTaskIds(List<TaskItem> tasks) {
+    return <String>{for (final task in tasks) task.id};
   }
 }
 

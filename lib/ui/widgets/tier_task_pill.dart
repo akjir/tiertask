@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-/// Task pill card with animated downward subtask expansion and right-side status indicators.
+/// Task pill card with animated subtask expansion, closing, upgrade, and downgrade transitions.
 library;
 
 import 'package:flutter/material.dart';
@@ -27,15 +27,25 @@ import '../edit_task_screen.dart';
 /// Animation duration for expanding and collapsing task subtasks.
 const Duration _subtaskExpandDuration = Duration(milliseconds: 220);
 
+/// Animation duration for closing, downgrading, or restoring a task pill.
+const Duration _taskExitDuration = Duration(milliseconds: 260);
+
+/// Animation duration for a task upgrading into a tier via auto-pull.
+const Duration _taskUpgradeEntryDuration = Duration(milliseconds: 240);
+
 /// Minimal pill card representing a single task entry across all 6 tier panes.
 class TierTaskPill extends ConsumerStatefulWidget {
   /// Creates a [TierTaskPill].
   const TierTaskPill({
     super.key,
+    this.animateEntry = false,
     required this.canDowngrade,
     required this.isCompleted,
     required this.task,
   });
+
+  /// Whether this pill should play an upgrade entry animation when first mounted.
+  final bool animateEntry;
 
   /// Whether the task belongs to a downgradable tier (`Focus`, `Ready`, or `Planned`).
   final bool canDowngrade;
@@ -50,15 +60,19 @@ class TierTaskPill extends ConsumerStatefulWidget {
   ConsumerState<TierTaskPill> createState() => _TierTaskPillState();
 }
 
-/// Animated container that glides the subtask checklist downward when [isExpanded] is `true`.
+/// Animated container that glides the subtask checklist downward or upward driven by [controller].
 class _AnimatedSubtasksSection extends StatelessWidget {
   /// Creates an [_AnimatedSubtasksSection].
   const _AnimatedSubtasksSection({
+    required this.controller,
     required this.isExpanded,
     required this.subtasks,
     required this.taskId,
     required this.onToggleSubtask,
   });
+
+  /// Animation controller driving the expansion progress between `0.0` and `1.0`.
+  final Animation<double> controller;
 
   /// Whether the subtask list is currently expanded.
   final bool isExpanded;
@@ -77,14 +91,14 @@ class _AnimatedSubtasksSection extends StatelessWidget {
     if (subtasks.isEmpty) {
       return const SizedBox.shrink();
     }
-    return TweenAnimationBuilder<double>(
-      tween: Tween<double>(end: isExpanded ? 1.0 : 0.0),
-      duration: _subtaskExpandDuration,
-      curve: Curves.easeInOutCubic,
-      builder: (context, progress, child) {
-        if (!isExpanded && progress <= 0.0) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        final rawValue = controller.value;
+        if (!isExpanded && rawValue <= 0.0) {
           return const SizedBox.shrink();
         }
+        final progress = Curves.easeInOutCubic.transform(rawValue);
         return ClipRect(
           child: Align(
             alignment: Alignment.bottomCenter,
@@ -100,6 +114,144 @@ class _AnimatedSubtasksSection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Wrapper widget applying directional entry, closing, downgrade, and restore animations to [child].
+class _AnimatedTaskTransitionWrapper extends StatelessWidget {
+  /// Creates an [_AnimatedTaskTransitionWrapper].
+  const _AnimatedTaskTransitionWrapper({
+    required this.entryAnimation,
+    required this.exitAction,
+    required this.exitAnimation,
+    required this.exitStage1Fraction,
+    required this.child,
+  });
+
+  /// Pill card subtree being animated.
+  final Widget child;
+
+  /// Controller driving the upgrade entry animation (`0.0` to `1.0`).
+  final Animation<double> entryAnimation;
+
+  /// Active exit transition, or `null` when the task is not exiting.
+  final _TaskExitAction? exitAction;
+
+  /// Controller driving the overall exit sequence (`0.0` to `1.0`).
+  final Animation<double> exitAnimation;
+
+  /// Fraction of [exitAnimation] dedicated to Stage 1 subgroup collapse (`0.0` when no subgroup was open).
+  final double exitStage1Fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([entryAnimation, exitAnimation]),
+      builder: (context, animatedChild) {
+        final metrics = _resolveMetrics();
+        return IgnorePointer(
+          ignoring: exitAction != null,
+          child: ClipRect(
+            child: Align(
+              alignment: Alignment.topCenter,
+              heightFactor: metrics.heightFactor,
+              child: Opacity(
+                opacity: metrics.opacity,
+                child: FractionalTranslation(
+                  translation: metrics.translation,
+                  child: Transform.scale(
+                    scale: metrics.scale,
+                    child: animatedChild,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+
+  /// Computes layout height factor, opacity, translation, and scale for the current animation frame.
+  ({double heightFactor, double opacity, double scale, Offset translation})
+  _resolveMetrics() {
+    final activeExit = exitAction;
+    if (activeExit != null && exitAnimation.value > exitStage1Fraction) {
+      final rawStage2 =
+          (exitAnimation.value - exitStage1Fraction) /
+          (1.0 - exitStage1Fraction);
+      final progress = Curves.easeInOutCubic.transform(
+        rawStage2.clamp(0.0, 1.0),
+      );
+      final heightFactor = (1.0 - progress).clamp(0.0, 1.0);
+      final opacity = (1.0 - progress).clamp(0.0, 1.0);
+      return switch (activeExit) {
+        _CompleteTaskExit() || _SubtaskCompleteTaskExit() => (
+          heightFactor: heightFactor,
+          opacity: opacity,
+          scale: 1.0 - (0.04 * progress),
+          translation: Offset(0.04 * progress, 0.0),
+        ),
+        _DowngradeTaskExit() => (
+          heightFactor: heightFactor,
+          opacity: opacity,
+          scale: 1.0,
+          translation: Offset(0.18 * progress, 0.0),
+        ),
+        _RestoreTaskExit() => (
+          heightFactor: heightFactor,
+          opacity: opacity,
+          scale: 1.0,
+          translation: Offset(-0.18 * progress, 0.0),
+        ),
+      };
+    }
+
+    if (entryAnimation.value < 1.0) {
+      final progress = Curves.easeOutCubic.transform(entryAnimation.value);
+      final remaining = 1.0 - progress;
+      return (
+        heightFactor: progress.clamp(0.0, 1.0),
+        opacity: progress.clamp(0.0, 1.0),
+        scale: 0.96 + (0.04 * progress),
+        translation: Offset(-0.06 * remaining, 0.12 * remaining),
+      );
+    }
+
+    return (
+      heightFactor: 1.0,
+      opacity: 1.0,
+      scale: 1.0,
+      translation: Offset.zero,
+    );
+  }
+}
+
+/// Direct task completion triggered via the leading completion square.
+final class _CompleteTaskExit extends _TaskExitAction {
+  /// Creates a [_CompleteTaskExit].
+  const _CompleteTaskExit();
+}
+
+/// Task downgrade triggered via the right-chevron downgrade button.
+final class _DowngradeTaskExit extends _TaskExitAction {
+  /// Creates a [_DowngradeTaskExit].
+  const _DowngradeTaskExit();
+}
+
+/// Task restoration (upgrade from `Completed`) triggered via the leading completion square.
+final class _RestoreTaskExit extends _TaskExitAction {
+  /// Creates a [_RestoreTaskExit].
+  const _RestoreTaskExit();
+}
+
+/// Task auto-completion triggered by checking the final subtask at [stepIndex].
+final class _SubtaskCompleteTaskExit extends _TaskExitAction {
+  /// Creates a [_SubtaskCompleteTaskExit].
+  const _SubtaskCompleteTaskExit(this.stepIndex);
+
+  /// Zero-based index of the subtask step that triggered auto-completion.
+  final int stepIndex;
 }
 
 /// Column of interactive subtask rows rendered below the main task pill header.
@@ -145,6 +297,12 @@ class _SubtaskStepsColumn extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Represents the active exit transition on a [TierTaskPill].
+sealed class _TaskExitAction {
+  /// Creates a [_TaskExitAction].
+  const _TaskExitAction();
 }
 
 /// Compact circular check indicator rendered at the leading edge of [_TierSubtaskStepRow].
@@ -536,16 +694,53 @@ class _TierTaskPillRow extends StatelessWidget {
   }
 }
 
-/// State for [TierTaskPill] managing subtask expansion and collapse.
-class _TierTaskPillState extends ConsumerState<TierTaskPill> {
+/// State for [TierTaskPill] coordinating subtask expansion, closing, downgrade, and upgrade animations.
+class _TierTaskPillState extends ConsumerState<TierTaskPill>
+    with TickerProviderStateMixin {
+  late final AnimationController _entryController;
+  _TaskExitAction? _exitAction;
+  late final AnimationController _exitController;
+  double _exitInitialSubtaskValue = 0.0;
+  double _exitStage1Fraction = 0.0;
   bool _isExpanded = false;
+  late final AnimationController _subtaskController;
+
+  @override
+  void initState() {
+    super.initState();
+    _subtaskController = AnimationController(
+      vsync: this,
+      duration: _subtaskExpandDuration,
+    );
+    _exitController =
+        AnimationController(vsync: this, duration: _taskExitDuration)
+          ..addListener(_handleExitProgressChanged)
+          ..addStatusListener(_handleExitStatusChanged);
+    _entryController = AnimationController(
+      vsync: this,
+      duration: _taskUpgradeEntryDuration,
+      value: widget.animateEntry ? 0.0 : 1.0,
+    );
+    if (widget.animateEntry) {
+      _entryController.forward();
+    }
+  }
 
   @override
   void didUpdateWidget(covariant TierTaskPill oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.task.subtasks.isEmpty && _isExpanded) {
       _isExpanded = false;
+      _subtaskController.value = 0.0;
     }
+  }
+
+  @override
+  void dispose() {
+    _subtaskController.dispose();
+    _exitController.dispose();
+    _entryController.dispose();
+    super.dispose();
   }
 
   @override
@@ -553,57 +748,206 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill> {
     final theme = Theme.of(context);
     final task = widget.task;
     final hasSubtasks = task.subtasks.isNotEmpty;
+    final effectiveSubtasks = _resolveDisplayedSubtasks(task.subtasks);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: theme.cardColor,
-        clipBehavior: Clip.antiAlias,
-        borderRadius: BorderRadius.circular(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            IntrinsicHeight(
-              child: _TierTaskPillRow(
-                isCompleted: widget.isCompleted,
-                task: task,
-                onComplete: () => widget.isCompleted
-                    ? ref
-                          .read(taskNotifierProvider.notifier)
-                          .restoreTask(task.id)
-                    : ref
-                          .read(taskNotifierProvider.notifier)
-                          .completeTask(task.id),
-                onDowngrade: widget.canDowngrade
-                    ? () => ref
-                          .read(taskNotifierProvider.notifier)
-                          .downgradeTask(task.id)
-                    : null,
-                onEdit: () => openEditTaskScreen(context, initialTask: task),
-                onToggleExpand: hasSubtasks ? _toggleExpanded : null,
+    return _AnimatedTaskTransitionWrapper(
+      entryAnimation: _entryController,
+      exitAction: _exitAction,
+      exitAnimation: _exitController,
+      exitStage1Fraction: _exitStage1Fraction,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Material(
+          color: theme.cardColor,
+          clipBehavior: Clip.antiAlias,
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              IntrinsicHeight(
+                child: _TierTaskPillRow(
+                  isCompleted: _resolveEffectiveCompleted(),
+                  task: task,
+                  onComplete: _handleCompletePressed,
+                  onDowngrade: widget.canDowngrade
+                      ? _handleDowngradePressed
+                      : null,
+                  onEdit: () => openEditTaskScreen(context, initialTask: task),
+                  onToggleExpand: hasSubtasks ? _toggleExpanded : null,
+                ),
               ),
-            ),
-            _AnimatedSubtasksSection(
-              isExpanded: _isExpanded && hasSubtasks,
-              subtasks: task.subtasks,
-              taskId: task.id,
-              onToggleSubtask: widget.isCompleted
-                  ? null
-                  : (stepIndex) => ref
-                        .read(taskNotifierProvider.notifier)
-                        .toggleSubtask(task.id, stepIndex),
-            ),
-          ],
+              _AnimatedSubtasksSection(
+                controller: _subtaskController,
+                isExpanded: _isExpanded && hasSubtasks,
+                subtasks: effectiveSubtasks,
+                taskId: task.id,
+                onToggleSubtask: widget.isCompleted
+                    ? null
+                    : _handleToggleSubtask,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
+  /// Returns `true` when every subtask in [subtasks] except [toggledIndex] is already completed.
+  bool _areAllOtherSubtasksCompleted(
+    List<SubtaskItem> subtasks,
+    int toggledIndex,
+  ) {
+    for (var i = 0; i < subtasks.length; i++) {
+      if (i != toggledIndex && !subtasks[i].isCompleted) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Starts the closing or restore exit transition when the leading completion button is pressed.
+  void _handleCompletePressed() {
+    if (widget.isCompleted) {
+      _startExitTransition(const _RestoreTaskExit());
+      return;
+    }
+    _startExitTransition(const _CompleteTaskExit());
+  }
+
+  /// Starts the rightward downgrade exit transition when the downgrade button is pressed.
+  void _handleDowngradePressed() {
+    _startExitTransition(const _DowngradeTaskExit());
+  }
+
+  /// Synchronizes Stage 1 subgroup collapse progress with [_exitController] when closing an expanded task.
+  void _handleExitProgressChanged() {
+    if (_exitStage1Fraction <= 0.0) {
+      return;
+    }
+    final value = _exitController.value;
+    if (value < _exitStage1Fraction) {
+      final stage1Progress = value / _exitStage1Fraction;
+      _subtaskController.value =
+          _exitInitialSubtaskValue * (1.0 - stage1Progress);
+      return;
+    }
+    if (_subtaskController.value != 0.0) {
+      _subtaskController.value = 0.0;
+    }
+  }
+
+  /// Commits the pending domain mutation to [TaskNotifier] once [_exitController] finishes.
+  void _handleExitStatusChanged(AnimationStatus status) {
+    if (status != AnimationStatus.completed || !mounted) {
+      return;
+    }
+    final action = _exitAction;
+    if (action == null) {
+      return;
+    }
+    final notifier = ref.read(taskNotifierProvider.notifier);
+    final taskId = widget.task.id;
+    switch (action) {
+      case _CompleteTaskExit():
+        notifier.completeTask(taskId);
+      case _DowngradeTaskExit():
+        notifier.downgradeTask(taskId);
+        if (mounted) {
+          setState(() {
+            _exitAction = null;
+            _exitStage1Fraction = 0.0;
+            _exitController.value = 0.0;
+          });
+          _entryController.forward(from: 0.0);
+        }
+      case _RestoreTaskExit():
+        notifier.restoreTask(taskId);
+      case _SubtaskCompleteTaskExit(:final stepIndex):
+        notifier.toggleSubtask(taskId, stepIndex);
+    }
+  }
+
+  /// Handles tapping a subtask at [stepIndex], initiating two-stage closing when auto-finish completes.
+  void _handleToggleSubtask(int stepIndex) {
+    if (_exitAction != null || widget.isCompleted) {
+      return;
+    }
+    final subtasks = widget.task.subtasks;
+    if (stepIndex < 0 || stepIndex >= subtasks.length) {
+      return;
+    }
+    final willAutoComplete =
+        widget.task.subtasksAutoFinish &&
+        !subtasks[stepIndex].isCompleted &&
+        _areAllOtherSubtasksCompleted(subtasks, stepIndex);
+    if (!willAutoComplete) {
+      ref
+          .read(taskNotifierProvider.notifier)
+          .toggleSubtask(widget.task.id, stepIndex);
+      return;
+    }
+    _startExitTransition(_SubtaskCompleteTaskExit(stepIndex));
+  }
+
+  /// Returns the subtask list with the final auto-finishing step marked completed during Stage 1 collapse.
+  List<SubtaskItem> _resolveDisplayedSubtasks(List<SubtaskItem> subtasks) {
+    if (_exitAction case _SubtaskCompleteTaskExit(:final stepIndex)) {
+      return [
+        for (var i = 0; i < subtasks.length; i++)
+          i == stepIndex
+              ? subtasks[i].copyWith(isCompleted: true)
+              : subtasks[i],
+      ];
+    }
+    return subtasks;
+  }
+
+  /// Resolves the visual completion state shown in [_TierTaskPillRow] during an active transition.
+  bool _resolveEffectiveCompleted() {
+    return switch (_exitAction) {
+      _CompleteTaskExit() || _SubtaskCompleteTaskExit() => true,
+      _RestoreTaskExit() => false,
+      _DowngradeTaskExit() || null => widget.isCompleted,
+    };
+  }
+
+  /// Initiates an exit transition, collapsing the subtask subgroup first if currently expanded.
+  void _startExitTransition(_TaskExitAction action) {
+    if (_exitAction != null) {
+      return;
+    }
+    final subtaskValue = _subtaskController.value;
+    _subtaskController.stop();
+    final stage1Microseconds =
+        (_subtaskExpandDuration.inMicroseconds * subtaskValue).round();
+    final stage2Microseconds = _taskExitDuration.inMicroseconds;
+    final totalMicroseconds = stage1Microseconds + stage2Microseconds;
+
+    setState(() {
+      _exitAction = action;
+      _isExpanded = false;
+      _exitInitialSubtaskValue = subtaskValue;
+      _exitStage1Fraction = stage1Microseconds > 0
+          ? stage1Microseconds / totalMicroseconds
+          : 0.0;
+    });
+    _exitController.duration = Duration(microseconds: totalMicroseconds);
+    _exitController.forward(from: 0.0);
+  }
+
   /// Toggles the expanded state of the task's subtask checklist.
   void _toggleExpanded() {
+    if (_exitAction != null) {
+      return;
+    }
     setState(() {
       _isExpanded = !_isExpanded;
     });
+    if (_isExpanded) {
+      _subtaskController.forward();
+    } else {
+      _subtaskController.reverse();
+    }
   }
 }

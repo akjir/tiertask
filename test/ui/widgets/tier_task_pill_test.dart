@@ -625,12 +625,69 @@ task manualOkD2 {
         equals('Unteraufgaben'),
       );
 
+      final firstTaskFinder = find.byKey(
+        const ValueKey('tier_pill_focus_auto00OkD2'),
+      );
+      final secondTaskFinder = find.byKey(
+        const ValueKey('tier_pill_focus_manualOkD2'),
+      );
+      final initialFirstTaskTop = tester.getTopLeft(firstTaskFinder).dy;
+      final collapsedSecondTaskTop = tester.getTopLeft(secondTaskFinder).dy;
+
       await tester.tap(find.text('Auto Finish Checklist Task'));
       await tester.pumpAndSettle();
 
+      final expandedSecondTaskTop = tester.getTopLeft(secondTaskFinder).dy;
+      expect(expandedSecondTaskTop > collapsedSecondTaskTop, isTrue);
+
       await tester.tap(find.byKey(const ValueKey('subtask_step_auto00OkD2_0')));
       await tester.pumpAndSettle();
+
       await tester.tap(find.byKey(const ValueKey('subtask_step_auto00OkD2_1')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 110));
+
+      final midSubgroupCollapseTop = tester.getTopLeft(secondTaskFinder).dy;
+      expect(
+        midSubgroupCollapseTop < expandedSecondTaskTop &&
+            midSubgroupCollapseTop > collapsedSecondTaskTop,
+        isTrue,
+        reason: 'Stage 1 of subtask auto-finish must collapse the subtask subgroup first while shifting lower tasks upward',
+      );
+      expect(
+        find.byKey(const ValueKey('subtask_step_auto00OkD2_1')),
+        findsOneWidget,
+        reason: 'Subtask rows must still be visible while the subgroup is collapsing during Stage 1',
+      );
+
+      await tester.pump(const Duration(milliseconds: 110));
+
+      expect(
+        find.byKey(const ValueKey('subtask_step_auto00OkD2_0')),
+        findsNothing,
+        reason: 'Subtask subgroup must be completely closed before Stage 2 task removal starts',
+      );
+      expect(
+        firstTaskFinder,
+        findsOneWidget,
+        reason: 'Parent task pill must still be present when Stage 2 task removal begins',
+      );
+      expect(
+        tester.getTopLeft(secondTaskFinder).dy,
+        closeTo(collapsedSecondTaskTop, 0.5),
+        reason: 'Lower task must reach the collapsed-subgroup offset right as Stage 1 finishes',
+      );
+
+      await tester.pump(const Duration(milliseconds: 130));
+
+      final midRemovalSecondTaskTop = tester.getTopLeft(secondTaskFinder).dy;
+      expect(
+        midRemovalSecondTaskTop < collapsedSecondTaskTop &&
+            midRemovalSecondTaskTop > initialFirstTaskTop,
+        isTrue,
+        reason: 'Stage 2 task removal animation must progressively slide lower tasks upward into the removed task slot',
+      );
+
       await tester.pumpAndSettle();
 
       final board = container.read(taskNotifierProvider).value!;
@@ -643,6 +700,265 @@ task manualOkD2 {
         board.blocked.map((task) => task.id),
         equals(['auto00OkD2']),
         reason: 'Auto-finished recurring task must move to Blocked',
+      );
+      expect(
+        tester.getTopLeft(secondTaskFinder).dy,
+        closeTo(initialFirstTaskTop, 0.01),
+        reason: 'After task removal completes, the lower task must rest at the exact top position of the removed task',
+      );
+    },
+  );
+
+  testWidgets(
+    'Closing, downgrading, and restoring tasks animate directionally, slide lower tasks upward, and animate auto-pulled upgraded tasks into the tier',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.4.0
+
+task f10000OkD2 {
+  name "Focus Task 1"
+  created 2026-11-01 08:00
+  queued 2026-11-01 08:00
+}
+task f20000OkD2 {
+  name "Focus Task 2"
+  created 2026-11-01 08:05
+  queued 2026-11-01 08:05
+  subtasks {
+    step false "Subtask inside Focus 2"
+  }
+}
+task f30000OkD2 {
+  name "Focus Task 3"
+  created 2026-11-01 08:10
+  queued 2026-11-01 08:10
+}
+task r10000OkD2 {
+  name "Ready Task 1"
+  created 2026-11-01 08:15
+  queued 2026-11-01 08:15
+}
+task c10000OkD2 {
+  name "Completed Task 1"
+  created 2026-10-30 08:00
+  queued 2026-10-30 08:00
+  finished 2026-10-31 09:00
+}
+task c20000OkD2 {
+  name "Completed Task 2"
+  created 2026-10-29 08:00
+  queued 2026-10-29 08:00
+  finished 2026-10-30 09:00
+}
+''';
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: seededTdf,
+            ),
+          ),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 1, 12, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final f1Finder = find.byKey(const ValueKey('tier_pill_focus_f10000OkD2'));
+      final f2Finder = find.byKey(const ValueKey('tier_pill_focus_f20000OkD2'));
+      final f3Finder = find.byKey(const ValueKey('tier_pill_focus_f30000OkD2'));
+      final r1InFocusFinder = find.byKey(
+        const ValueKey('tier_pill_focus_r10000OkD2'),
+      );
+
+      final slot1Top = tester.getTopLeft(f1Finder).dy;
+      final slot2Top = tester.getTopLeft(f2Finder).dy;
+      final initialF1MaterialLeft = tester
+          .getTopLeft(
+            find
+                .descendant(of: f1Finder, matching: find.byType(Material))
+                .first,
+          )
+          .dx;
+
+      await tester.tap(
+        find.byKey(const ValueKey('downgrade_task_button_f10000OkD2')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 130));
+
+      final midDowngradeF1Left = tester
+          .getTopLeft(
+            find
+                .descendant(of: f1Finder, matching: find.byType(Material))
+                .first,
+          )
+          .dx;
+      final midDowngradeF2Top = tester.getTopLeft(f2Finder).dy;
+
+      expect(
+        midDowngradeF1Left > initialF1MaterialLeft,
+        isTrue,
+        reason:
+            'Downgrading a task via > must slide the task pill to the right',
+      );
+      expect(
+        midDowngradeF2Top < slot2Top && midDowngradeF2Top > slot1Top,
+        isTrue,
+        reason:
+            'Downgrading a task must progressively slide lower tasks upward',
+      );
+
+      await tester.pump(const Duration(milliseconds: 140));
+      await tester.pump(const Duration(milliseconds: 120));
+
+      expect(
+        r1InFocusFinder,
+        findsOneWidget,
+        reason: 'Auto-pulled Ready task must upgrade into Focus when a slot vacates',
+      );
+      final r1EntryOpacity = tester
+          .widget<Opacity>(
+            find.descendant(
+              of: r1InFocusFinder,
+              matching: find.byType(Opacity),
+            ),
+          )
+          .opacity;
+      expect(
+        r1EntryOpacity > 0.0 && r1EntryOpacity < 1.0,
+        isTrue,
+        reason: 'Upgraded auto-pulled task must animate its entry opacity from 0 to 1',
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getTopLeft(f2Finder).dy,
+        closeTo(slot1Top, 0.01),
+        reason: 'Second task must settle into slot 1 after downgrade completes',
+      );
+
+      await tester.tap(find.text('Focus Task 2'));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('subtask_step_f20000OkD2_0')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_f20000OkD2')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 110));
+
+      expect(
+        find.byKey(const ValueKey('subtask_step_f20000OkD2_0')),
+        findsOneWidget,
+        reason: 'Closing a task directly while its subtasks are expanded must collapse the subgroup first',
+      );
+
+      await tester.pump(const Duration(milliseconds: 110));
+      expect(
+        find.byKey(const ValueKey('subtask_step_f20000OkD2_0')),
+        findsNothing,
+        reason: 'Expanded subgroup must finish collapsing before Stage 2 direct task removal starts',
+      );
+
+      await tester.pump(const Duration(milliseconds: 130));
+
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('complete_task_button_f20000OkD2')),
+          matching: find.byIcon(Icons.check_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Closing a task directly must display the completion checkmark during the removal animation',
+      );
+      final midCompleteF3Top = tester.getTopLeft(f3Finder).dy;
+      expect(
+        midCompleteF3Top < slot2Top && midCompleteF3Top > slot1Top,
+        isTrue,
+        reason:
+            'Direct task completion animation must slide lower tasks upward',
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getTopLeft(f3Finder).dy,
+        closeTo(slot1Top, 0.01),
+        reason: 'Third task must settle into slot 1 after second task closes',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_completed')),
+      );
+      await tester.pumpAndSettle();
+
+      final c1Finder = find.byKey(
+        const ValueKey('tier_pill_completed_c10000OkD2'),
+      );
+      final c2Finder = find.byKey(
+        const ValueKey('tier_pill_completed_c20000OkD2'),
+      );
+      final c1InitialLeft = tester
+          .getTopLeft(
+            find
+                .descendant(of: c1Finder, matching: find.byType(Material))
+                .first,
+          )
+          .dx;
+      final c1InitialTop = tester.getTopLeft(c1Finder).dy;
+      final c2InitialTop = tester.getTopLeft(c2Finder).dy;
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_c10000OkD2')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 130));
+
+      final midRestoreC1Left = tester
+          .getTopLeft(
+            find
+                .descendant(of: c1Finder, matching: find.byType(Material))
+                .first,
+          )
+          .dx;
+      final midRestoreC2Top = tester.getTopLeft(c2Finder).dy;
+
+      expect(
+        midRestoreC1Left < c1InitialLeft,
+        isTrue,
+        reason: 'Restoring (upgrading) a task from Completed must slide the pill to the left',
+      );
+      expect(
+        midRestoreC2Top < c2InitialTop && midRestoreC2Top > c1InitialTop,
+        isTrue,
+        reason: 'Restoring a completed task must slide lower completed tasks upward',
+      );
+
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.getTopLeft(c2Finder).dy,
+        closeTo(c1InitialTop, 0.01),
+        reason: 'Remaining completed task must settle into the top slot after restore',
       );
     },
   );
