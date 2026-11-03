@@ -178,5 +178,11 @@
   "timeZoneSectionDescription": "Wählen Sie, ob die lokale Zeitzone automatisch vom Gerät übernommen oder manuell für Aufgabenbedingungen und Anzeige festgelegt wird.",
   "timeZoneModeAutomatic": "Automatisch",
   "timeZoneModeManual": "Manuell",
-  "timeZoneOffsetLabel": "UTC-Verschiebung"
+  "timeZoneOffsetLabel": "UTC-Verschiebung",
+  "repeatFlagLabel": "Wiederholen",
+  "repeatIntervalLabel": "Wiederhole alle",
+  "repeatUnitDays": "Tage",
+  "repeatUnitWeeks": "Wochen",
+  "repeatUnitMonths": "Monate",
+  "repeatErrorInvalid": "Bitte ein Intervall zwischen 1 und 3650 eingeben."
 }

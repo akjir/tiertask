@@ -770,5 +770,29 @@
   "timeZoneOffsetLabel": "UTC Offset",
   "@timeZoneOffsetLabel": {
     "description": "Dropdown label for selecting the manual UTC offset."
+  },
+  "repeatFlagLabel": "Repeat",
+  "@repeatFlagLabel": {
+    "description": "Toggle chip label for enabling task recurrence in the task editor."
+  },
+  "repeatIntervalLabel": "Repeat every",
+  "@repeatIntervalLabel": {
+    "description": "Input label for the numeric recurrence interval count."
+  },
+  "repeatUnitDays": "Days",
+  "@repeatUnitDays": {
+    "description": "Label for daily recurrence unit."
+  },
+  "repeatUnitWeeks": "Weeks",
+  "@repeatUnitWeeks": {
+    "description": "Label for weekly recurrence unit."
+  },
+  "repeatUnitMonths": "Months",
+  "@repeatUnitMonths": {
+    "description": "Label for monthly recurrence unit."
+  },
+  "repeatErrorInvalid": "Please enter an interval between 1 and 3650.",
+  "@repeatErrorInvalid": {
+    "description": "Validation error shown when the repeat interval count is outside 1..3650."
   }
 }

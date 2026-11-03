@@ -391,17 +391,22 @@ class TaskEditorDetailsCard extends StatelessWidget {
   }
 }
 
-/// Row of Priority, Someday, and Suspended chips inside the task editor.
+/// Row of Priority, Someday, Suspended, and Repeat chips inside the task editor.
 class TaskEditorModeRow extends StatelessWidget {
   /// Creates a [TaskEditorModeRow].
   const TaskEditorModeRow({
     super.key,
+    required this.isRepeating,
     required this.isSuspended,
     required this.mode,
     required this.onTogglePriority,
+    required this.onToggleRepeat,
     required this.onToggleSomeday,
     required this.onToggleSuspended,
   });
+
+  /// Whether the task has recurrence enabled.
+  final bool isRepeating;
 
   /// Whether the task is marked as suspended.
   final bool isSuspended;
@@ -411,6 +416,9 @@ class TaskEditorModeRow extends StatelessWidget {
 
   /// Callback invoked when Priority is tapped.
   final VoidCallback onTogglePriority;
+
+  /// Callback invoked when Repeat is tapped.
+  final VoidCallback onToggleRepeat;
 
   /// Callback invoked when Someday is tapped.
   final VoidCallback onToggleSomeday;
@@ -449,6 +457,14 @@ class TaskEditorModeRow extends StatelessWidget {
           isSelected: isSuspended,
           accentColor: appTheme.warningAccent,
           onTap: onToggleSuspended,
+        ),
+        TaskEditorChip(
+          chipKey: const ValueKey('task_editor_repeat_button'),
+          icon: Icons.repeat_rounded,
+          label: localizations.repeatFlagLabel,
+          isSelected: isRepeating,
+          accentColor: appTheme.tertiaryAccent,
+          onTap: onToggleRepeat,
         ),
       ],
     );
@@ -505,26 +521,138 @@ class TaskEditorNoteField extends StatelessWidget {
   }
 }
 
-/// Card grouping the scheduling mode chips and optional `suspended` timestamp field.
+/// Recurrence interval (`repeat <count> <days|weeks|months>`) input row inside the task editor.
+class TaskEditorRepeatField extends StatelessWidget {
+  /// Creates a [TaskEditorRepeatField].
+  const TaskEditorRepeatField({
+    super.key,
+    required this.countController,
+    required this.errorMessage,
+    required this.onSelectUnit,
+    required this.selectedUnit,
+  });
+
+  /// Controller for the numeric repeat interval count (`1..3650`).
+  final TextEditingController countController;
+
+  /// Optional validation error message for the repeat interval count.
+  final String? errorMessage;
+
+  /// Callback invoked when a [RepeatUnit] chip is selected.
+  final ValueChanged<RepeatUnit> onSelectUnit;
+
+  /// Currently selected recurrence unit.
+  final RepeatUnit selectedUnit;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
+    final borderRadius = BorderRadius.circular(14);
+    final defaultBorder = OutlineInputBorder(
+      borderRadius: borderRadius,
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
+    );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          key: const ValueKey('task_editor_repeat_count_input'),
+          controller: countController,
+          keyboardType: TextInputType.number,
+          cursorColor: appTheme.tertiaryAccent,
+          style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
+          decoration: InputDecoration(
+            labelText: localizations.repeatIntervalLabel,
+            labelStyle: TextStyle(color: appTheme.mutedTextColor),
+            errorText: errorMessage,
+            isDense: true,
+            filled: true,
+            fillColor: appTheme.canvasColor,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            border: defaultBorder,
+            enabledBorder: defaultBorder,
+            focusedBorder: OutlineInputBorder(
+              borderRadius: borderRadius,
+              borderSide: BorderSide(
+                color: appTheme.tertiaryAccent,
+                width: 1.6,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            TaskEditorChip(
+              chipKey: const ValueKey('task_editor_repeat_unit_days'),
+              icon: Icons.today_rounded,
+              label: localizations.repeatUnitDays,
+              isSelected: selectedUnit == RepeatUnit.days,
+              accentColor: appTheme.tertiaryAccent,
+              onTap: () => onSelectUnit(RepeatUnit.days),
+            ),
+            TaskEditorChip(
+              chipKey: const ValueKey('task_editor_repeat_unit_weeks'),
+              icon: Icons.date_range_rounded,
+              label: localizations.repeatUnitWeeks,
+              isSelected: selectedUnit == RepeatUnit.weeks,
+              accentColor: appTheme.tertiaryAccent,
+              onTap: () => onSelectUnit(RepeatUnit.weeks),
+            ),
+            TaskEditorChip(
+              chipKey: const ValueKey('task_editor_repeat_unit_months'),
+              icon: Icons.calendar_view_month_rounded,
+              label: localizations.repeatUnitMonths,
+              isSelected: selectedUnit == RepeatUnit.months,
+              accentColor: appTheme.tertiaryAccent,
+              onTap: () => onSelectUnit(RepeatUnit.months),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Card grouping the scheduling mode chips, optional `suspended` timestamp field, and optional `repeat` rule.
 class TaskEditorSchedulingCard extends StatelessWidget {
   /// Creates a [TaskEditorSchedulingCard].
   const TaskEditorSchedulingCard({
     super.key,
     required this.hasSuspendedText,
+    required this.isRepeating,
     required this.isSuspended,
     required this.mode,
+    required this.repeatCountController,
+    required this.repeatErrorMessage,
+    required this.repeatUnit,
     required this.suspendedController,
     required this.suspendedErrorMessage,
     required this.onClearSuspended,
     required this.onPickSuspendedDate,
     required this.onPickSuspendedTime,
+    required this.onSelectRepeatUnit,
     required this.onTogglePriority,
+    required this.onToggleRepeat,
     required this.onToggleSomeday,
     required this.onToggleSuspended,
   });
 
   /// Whether the suspended timestamp field currently contains non-empty text.
   final bool hasSuspendedText;
+
+  /// Whether the task has recurrence enabled.
+  final bool isRepeating;
 
   /// Whether the task is marked as suspended.
   final bool isSuspended;
@@ -541,14 +669,29 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Callback invoked to open the time picker for the suspended timestamp.
   final VoidCallback onPickSuspendedTime;
 
+  /// Callback invoked when a [RepeatUnit] is selected.
+  final ValueChanged<RepeatUnit> onSelectRepeatUnit;
+
   /// Callback invoked when Priority is tapped.
   final VoidCallback onTogglePriority;
+
+  /// Callback invoked when Repeat is tapped.
+  final VoidCallback onToggleRepeat;
 
   /// Callback invoked when Someday is tapped.
   final VoidCallback onToggleSomeday;
 
   /// Callback invoked when Suspended is tapped.
   final VoidCallback onToggleSuspended;
+
+  /// Controller for the numeric repeat interval count.
+  final TextEditingController repeatCountController;
+
+  /// Optional validation error message for the repeat interval count.
+  final String? repeatErrorMessage;
+
+  /// Selected recurrence unit.
+  final RepeatUnit repeatUnit;
 
   /// Controller for the optional `suspended` timestamp input.
   final TextEditingController suspendedController;
@@ -568,9 +711,11 @@ class TaskEditorSchedulingCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           TaskEditorModeRow(
+            isRepeating: isRepeating,
             isSuspended: isSuspended,
             mode: mode,
             onTogglePriority: onTogglePriority,
+            onToggleRepeat: onToggleRepeat,
             onToggleSomeday: onToggleSomeday,
             onToggleSuspended: onToggleSuspended,
           ),
@@ -583,6 +728,15 @@ class TaskEditorSchedulingCard extends StatelessWidget {
               onClear: onClearSuspended,
               onPickDate: onPickSuspendedDate,
               onPickTime: onPickSuspendedTime,
+            ),
+          ],
+          if (isRepeating) ...[
+            const SizedBox(height: 8),
+            TaskEditorRepeatField(
+              countController: repeatCountController,
+              errorMessage: repeatErrorMessage,
+              selectedUnit: repeatUnit,
+              onSelectUnit: onSelectRepeatUnit,
             ),
           ],
         ],

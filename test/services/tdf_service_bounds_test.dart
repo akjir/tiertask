@@ -344,6 +344,46 @@ void main() {
         TdfErrorKind.invalidCondition,
         expectedLine: 5,
       );
+      expectTdfError(
+        'task t001 {\n  name "Duplicate repeat"\n  created 2026-11-01\n  repeat 1 days\n  repeat 2 weeks\n}',
+        TdfErrorKind.duplicateDirective,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat missing unit"\n  created 2026-11-01\n  repeat 1\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat extra arg"\n  created 2026-11-01\n  repeat 1 days extra\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat unknown unit"\n  created 2026-11-01\n  repeat 1 years\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat zero count"\n  created 2026-11-01\n  repeat 0 days\n}',
+        TdfErrorKind.invalidNumber,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat negative count"\n  created 2026-11-01\n  repeat -3 weeks\n}',
+        TdfErrorKind.invalidNumber,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat non-integer count"\n  created 2026-11-01\n  repeat abc months\n}',
+        TdfErrorKind.invalidNumber,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task t001 {\n  name "Repeat exceeds maxRepeatCount"\n  created 2026-11-01\n  repeat 3651 days\n}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 4,
+      );
     });
 
     test('enforces all Section 7 resource bounds before allocation', () {

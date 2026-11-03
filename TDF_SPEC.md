@@ -11,7 +11,7 @@ The TierTask Data Format (`TDF`) is a deterministic, line-oriented, block-based 
 
 ### 1.1 Core Philosophy: Data vs. View Separation
 
-A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `modified`, `suspended`), dependencies (`blocked`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
+A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `modified`, `suspended`), recurrence rules (`repeat`), dependencies (`blocked`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
 
 1. **No Explicit Tier Storage:** Unlike positional list formats, a `.tdf` document does NOT store an explicit tier assignment (`[1]` through `[6]`) on any task.
 2. **Dynamic Derivation ($O(N)$ Pipeline):** The six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed`) are derived deterministically from the stored task and label attributes via a single-pass $O(N)$ filtering, sorting, and slicing pipeline (see Section 5).
@@ -106,6 +106,7 @@ At the semantic validation layer, directive and header arguments map to the foll
   - Optional seconds precision (`:SS`) allows rapid successive mutations, step-down downgrades (Section 6.3), and per-entity synchronization timestamps (`modified`, Section 6.7) to sort and compare deterministically without reordering blocks in the file.
 - **Floating-Point / Numeric (`<number>`):** Standard ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`) used for geographic latitude (`-90.0` to `90.0`), longitude (`-180.0` to `180.0`), and radius values in meters (`> 0`).
 - **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` (or single-quoted `'#RRGGBB'`; canonical serialization emits double-quoted `"#RRGGBB"`) where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`. Because `#` outside quotes starts a comment (Section 2.4), `<color>` values MUST be quoted.
+- **Recurrence Rule (`<repeat>`):** Two whitespace-separated bare-word tokens `<count> <unit>`, where `<count>` is a positive ASCII decimal integer in `1..MAX_REPEAT_COUNT` (`1..3650`) and `<unit>` is an exact case-sensitive lowercase bare word from the set `days`, `weeks`, `months`.
 
 ## 3. Structural Grammar
 
@@ -144,7 +145,7 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 - **Scope:** Except for the mandatory initial `tdf 0.3.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
 - **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line inside a block without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
 - **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a block directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
-- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`) MUST NOT appear more than once per block (`DuplicateDirective`).
+- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`, `repeat`) MUST NOT appear more than once per block (`DuplicateDirective`).
 
 ### 3.4 Formal Grammar (EBNF)
 
@@ -250,6 +251,7 @@ task <id> [priority] {
 | `labels` | No | `0..1` | `<id1> [<id2> ...]` | One or more space-separated `label` `<id>`s assigned to the task. Every referenced `<id>` MUST match a declared `label` block in the document (`UnknownLabelReference`). **When present**, associates the task with the referenced labels for context filtering and group-level condition inheritance. **When omitted**, the task has no label assignment. |
 | `blocked` | No | `0..1` | `<task_id1> [<task_id2> ...]` | One or more space-separated `<id>`s of prerequisite tasks. **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive (non-existent, pruned, or already completed task IDs do not block the task). Dependency references MUST NOT form a direct or indirect cycle (`CircularDependency`). **When omitted**, no task-dependency block applies. |
 | `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local wall-clock deferral / snooze timestamp. **When present**, while the timestamp lies strictly in the future relative to the local wall-clock evaluation timestamp (`suspended > localNow`), the task is classified immediately as `Blocked` (`Tier 4`) and evaluation of all other conditions (`blocked` prerequisites and `condition` rules) is disabled. **When omitted** (or `<= localNow`), no time-deferral block applies. |
+| `repeat` | No | `0..1` | `<count> <days\|weeks\|months>` | Completion-relative recurrence rule (`1..3650` `days`, `weeks`, or `months`). **When present**, completing the task does NOT set `finished`; instead, the task remains open, resets all `subtasks` steps to `false`, adds the `priority` header flag, sets `suspended` to `<next_due_local>` (`localNow + <count> <unit>`, defaulting to `00:00` local time on the target date or preserving the existing `<HH:MM[:SS]>` time of day from `suspended` when previously set), sets `queued` to `<next_due_utc>` (`<next_due_local>` converted to UTC), and advances `modified` so the task enters `Blocked` (`Tier 4`) until `<next_due_local>` and wakes up directly into `Focus` (`Tier 1`, or the top of `Ready` if `Focus` already holds `3` earlier-queued priority tasks). **When omitted**, completing the task sets `finished` and moves it to `Completed` (`Tier 6`). |
 | `condition` | No | `0..N` | `<type> <args...>`, `<type> any`, `any`, or `{ ... }` | Task-level activation condition(s) (`day`, `time`, `location`, group resets `day any`, `time any`, `location any`, or global reset `condition any`) written either as an inline directive or a `condition { ... }` sub-block (see Section 4.3). **When present**, `condition any` disables all inherited `label` conditions, whereas a group-specific rule (`day`, `time`, or `location`) or group reset (`<type> any`) overrides only that specific rule group from assigned labels while preserving all other inherited label condition groups and keeping the task's `labels` assignment intact. |
 
 #### 4.1.3 Sub-Block `subtasks` (Checklists)
@@ -263,8 +265,8 @@ subtasks [auto-finish] {
 ```
 
 - `auto-finish` (**Optional Header Flag**):
-  - **When present:** As soon as all contained `step` directives have the value `true`, the enclosing `task` automatically transitions to completed (`finished` is set to the current UTC timestamp).
-  - **When omitted:** Completing all `step` directives does not automatically set `finished` on the enclosing `task`.
+  - **When present:** As soon as all contained `step` directives have the value `true`, the enclosing `task` automatically triggers completion (setting `finished` to the current UTC timestamp for standard tasks, or executing the recurring reschedule into `suspended` with reset `step false` items when a `repeat` directive is present per Section 6.4).
+  - **When omitted:** Completing all `step` directives does not automatically complete or reschedule the enclosing `task`.
   - Any unknown or extra header argument on `subtasks` MUST be rejected with `InvalidBlockHeader`.
 - `step <bool> "<text>"` (**Repeatable Directive**): Defines a single checklist step where `false` indicates open and `true` indicates completed (`"<text>"` up to `MAX_TEXT_LENGTH` characters). The top-to-bottom declaration order of `step` directives is preserved. A `subtasks` block MUST contain at least one `step` directive (`MissingRequiredDirective`).
 
@@ -447,8 +449,13 @@ State transitions mutate the task directives (`queued`, `finished`, `modified`) 
 - **Downgrade from `Planned` to `Someday`:** Removes the `priority` header flag if present, omits the `queued` directive, and advances `modified` so the task leaves the active pull cycle and is classified as `Someday` (`Tier 5`).
 
 ### 6.4 Completing a Task (From Any Open Tier)
-- Any open task—regardless of whether it is currently derived in `Focus`, `Ready`, `Planned`, `Blocked`, or `Someday`—can be completed directly by adding the `finished` directive set to the current UTC timestamp (`now`) and advancing `modified` (or automatically when all `step` directives in a `subtasks auto-finish` sub-block become `true`).
-- The completed task transitions into `Completed` (`Tier 6`), unblocking any dependent tasks whose `blocked` directive waited exclusively on this task. If the completed task occupied a slot in `Focus` or `Ready` (or if a newly unblocked task enters the active pull cycle), re-running the Section 5 pipeline automatically refills `Focus` (up to `3`) and `Ready` (up to `5`) in queue order.
+- **Standard Task (`repeat` Omitted):** Any open task without a `repeat` directive—regardless of whether it is currently derived in `Focus`, `Ready`, `Planned`, `Blocked`, or `Someday`—can be completed directly by adding the `finished` directive set to the current UTC timestamp (`now`) and advancing `modified` (or automatically when all `step` directives in a `subtasks auto-finish` sub-block become `true`). The completed task transitions into `Completed` (`Tier 6`), unblocking any dependent tasks whose `blocked` directive waited exclusively on this task. If the completed task occupied a slot in `Focus` or `Ready` (or if a newly unblocked task enters the active pull cycle), re-running the Section 5 pipeline automatically refills `Focus` (up to `3`) and `Ready` (up to `5`) in queue order.
+- **Recurring Task (`repeat <count> <days|weeks|months>` Present):** Completing an open task that possesses a `repeat` directive (either explicitly or via `subtasks auto-finish`) does NOT set `finished` and does NOT move the task to `Completed` (`Tier 6`):
+  1. **Remain Open:** The `finished` directive remains omitted so the task stays open and is never subject to 30-day garbage collection.
+  2. **Reset Subtasks:** If the task contains a `subtasks` sub-block, every contained `step` directive is reset to `step false "<text>"`.
+  3. **Ensure Priority on Wake-Up:** The `priority` flag is added to the `task <id> priority {` block header (if not already present).
+  4. **Calculate Next Due Timestamp (`<next_due_local>` and `<next_due_utc>`):** Relative to the local wall-clock completion timestamp (`localNow`), the next target calendar date is computed by adding `<count>` days, `<count> * 7` days (for `weeks`), or `<count>` calendar months (for `months`, clamping the day of the month to the last valid calendar day of the target month when the source day exceeds the target month's length, e.g., `2026-01-31 + 1 months -> 2026-02-28`). If the task previously had a `suspended` directive with an explicit non-midnight `<HH:MM[:SS]>` time of day (excluding the indefinite sentinel `9999-12-31 23:59`), that time of day is preserved on `<next_due_local>`; otherwise `<next_due_local>` defaults to `00:00` local time (`<YYYY-MM-DD>`) so late-evening completions do not cause time-of-day drift.
+  5. **Defer into `Blocked` & Advance `modified`:** Sets `suspended` to `<next_due_local>` (local wall-clock time), sets `queued` to `<next_due_utc>` (`<next_due_local>` converted to UTC using the active UTC offset `localNow - now`), and advances `modified` via `nextModifiedTimestamp(now, prevModifiedAt)`. Because `suspended > localNow`, the task immediately enters `Blocked` (`Tier 4`). Once `localNow >= suspended` (and any `blocked` prerequisites or `condition` rules are satisfied), the task automatically leaves `Blocked` with the `priority` flag and `queued = <next_due_utc>`, sorting directly into `Focus` (`Tier 1`, or the top of `Ready` if `Focus` already holds `3` earlier-queued priority tasks).
 
 ### 6.5 Restoring a Task from `Completed`
 - Removes the `finished` directive, advances `modified`, and applies the chosen target state:
@@ -456,8 +463,9 @@ State transitions mutate the task directives (`queued`, `finished`, `modified`) 
   - **Restore to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current UTC timestamp (`now`).
   - **Restore to `Focus`:** Adds the `priority` header flag to the `task` block and sets `queued` to the current UTC timestamp (`now`).
 
-### 6.6 Setting Task Deferral (`suspended`), Prerequisites (`blocked`), and Activation Conditions (`condition`)
-- **Setting `suspended`:** Sets the `suspended` directive on an open task to a future local wall-clock timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date), ensures `queued` is set in UTC, and advances `modified`. While `suspended > localNow`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive and re-evaluates the task's remaining conditions.
+### 6.6 Setting Task Deferral (`suspended`), Recurrence (`repeat`), Prerequisites (`blocked`), and Activation Conditions (`condition`)
+- **Setting `suspended`:** Sets the `suspended` directive on an open task to a future local wall-clock timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date), ensures `queued` is set in UTC, and advances `modified`. While `suspended > localNow`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive, resets `queued` to `now` (in UTC) if `queued` was previously in the future (`queued > now`, e.g., when manually unblocking a deferred recurring task ahead of `<next_due_utc>`), and re-evaluates the task's remaining conditions.
+- **Setting `repeat`:** Sets or updates the `repeat <count> <days|weeks|months>` directive (`1..3650`) on a task block (or omits `repeat` when cleared) and advances `modified`.
 - **Setting `blocked`:** Sets or updates the space-separated prerequisite `<id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle) and advances `modified`.
 - **Setting `condition`:** Sets or updates task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or the global reset (`condition any`) and advances `modified`.
 
@@ -488,6 +496,7 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 | `MAX_ARGS_PER_STMT` | `64` | Maximum arguments allowed on a single block header or directive. |
 | `MAX_TEXT_LENGTH` | `500` | Maximum character length (after unescaping) of a `name` or `step` text value. |
 | `MAX_NOTE_LENGTH` | `2000` | Maximum character length (after unescaping) of a `note` text value. |
+| `MAX_REPEAT_COUNT` | `3_650` | Maximum recurrence interval count `<count>` in `repeat <count> <unit>`. |
 
 ## 8. Mandatory Error Conditions
 
@@ -499,7 +508,7 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 - **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (e.g., `queued` with no timestamp value).
 - **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" t001 {` or `"name" "Mow the lawn"`), a block/directive identifier starts with an invalid character (e.g., `123task {` or `-flag val`), or an `<id>` argument does not match `[a-zA-Z0-9_-]+`.
 - **Malformed Block Header or Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task t001{` or `condition{`), a required header `<id>` is missing (e.g., `task {` or `label {`), or an unknown/extra header argument is provided (e.g., `task t001 urgent {`, `label home extra {`, `subtasks urgent {`, or `condition arg {`).
-- **Unexpected Token, Control Character, or Trailing Tokens (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` or after `}`, a quote opens or closes in the middle of a token without separating whitespace (e.g., `foo"bar"` or `"foo"bar`), a directive has an invalid argument count, or the input contains invalid UTF-8 bytes, null bytes (`U+0000`), disallowed control characters, standalone `CR` without `LF`, or non-ASCII whitespace outside quotes.
+- **Unexpected Token, Control Character, or Trailing Tokens (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` or after `}`, a quote opens or closes in the middle of a token without separating whitespace (e.g., `foo"bar"` or `"foo"bar`), a directive has an invalid argument count, a `repeat` directive specifies an unknown unit other than `days`, `weeks`, or `months`, or the input contains invalid UTF-8 bytes, null bytes (`U+0000`), disallowed control characters, standalone `CR` without `LF`, or non-ASCII whitespace outside quotes.
 - **Unclosed Block (`UnclosedBlock`):** `EOF` is reached while nesting depth $> 0$.
 - **Unmatched Closing Brace (`UnexpectedClosingBrace`):** `}` is encountered at nesting depth `0`.
 - **Unterminated Quote (`UnterminatedString`):** A `"` or `'` string reaches `\r`, `\n`, or `EOF` before its matching closing quote.
@@ -508,12 +517,12 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
   - `UnknownBlockType`: Root block is not `task` or `label`; nested block inside `task` is not `subtasks` or `condition`; nested block inside `label` is not `condition`; or a block appears inside `subtasks` or `condition`.
   - `UnknownDirective`: A directive name is not valid for its enclosing block (`task`, `label`, `subtasks`, or `condition`), or a `condition` rule type is not `day`, `time`, or `location`.
   - `MissingRequiredDirective`: A required directive (`name` or `created` in `task`; `name` in `label`) is missing, or a `subtasks` or `condition` sub-block contains zero directives.
-  - `DuplicateDirective`: A single-valued directive (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`) appears more than once in the same block, or more than one `subtasks` sub-block appears in a `task`.
+  - `DuplicateDirective`: A single-valued directive (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`, `repeat`) appears more than once in the same block, or more than one `subtasks` sub-block appears in a `task`.
   - `DuplicateIdentifier`: Two root blocks in the same namespace (`task` or `label`) share an identical `<id>`.
   - `UnknownLabelReference`: A `labels` directive in a `task` block references a label `<id>` that does not match any declared `label` block in the document (whereas `blocked` task `<id>`s referencing non-existent or pruned completed tasks remain valid and non-blocking).
   - `CircularDependency`: Task dependency references in `blocked` directives form a direct cycle (self-dependency) or an indirect cycle across two or more `task` blocks.
-  - `InvalidTimestamp` / `InvalidBoolean` / `InvalidNumber` / `InvalidCondition` / `InvalidColor`: A directive argument fails semantic validation (invalid ISO-8601 `<YYYY-MM-DD> [<HH:MM[:SS]>]` date/time, invalid `<HH:MM>` time window or identical start and end times `start == end`, unknown weekday token, latitude outside `[-90.0, 90.0]`, longitude outside `[-180.0, 180.0]`, radius $\le 0$, `any` or `<type> any` used inside a `label` condition, `condition any` combined with other condition rules on a `task`, `<type> any` combined with other rules of the same `<type>` group on a `task`, or a `color` argument not matching `"#RRGGBB"`).
-- **Limit Exceeded (`LimitExceeded`):** Any resource bound defined in Section 7 is exceeded.
+  - `InvalidTimestamp` / `InvalidBoolean` / `InvalidNumber` / `InvalidCondition` / `InvalidColor`: A directive argument fails semantic validation (invalid ISO-8601 `<YYYY-MM-DD> [<HH:MM[:SS]>]` date/time, invalid `<HH:MM>` time window or identical start and end times `start == end`, unknown weekday token, latitude outside `[-90.0, 90.0]`, longitude outside `[-180.0, 180.0]`, radius $\le 0$, `repeat` `<count>` not a positive integer $\ge 1$, `any` or `<type> any` used inside a `label` condition, `condition any` combined with other condition rules on a `task`, `<type> any` combined with other rules of the same `<type>` group on a `task`, or a `color` argument not matching `"#RRGGBB"`).
+- **Limit Exceeded (`LimitExceeded`):** Any resource bound defined in Section 7 is exceeded (including `repeat` `<count>` $> 3650$).
 
 ## 9. Canonical Complete Example (`tiertask.tdf`)
 
@@ -580,13 +589,14 @@ task t002 {
 # Task assigned to multiple labels without task-level overrides (in global view,
 # evaluates each label context independently and is active if all condition groups
 # of 'home' OR all condition groups of 'it' are satisfied; when filtered by 'home'
-# or 'it', evaluates only the selected label's conditions):
+# or 'it', evaluates only the selected label's conditions; repeats every 30 days):
 task t003 {
     name     "Clean dust filters on home NAS server"
     created  2026-11-01 10:00
     queued   2026-11-01 10:00
     modified 2026-11-01 10:00
     labels   home it
+    repeat   30 days
 }
 
 # Task in "Someday" (no 'queued' directive present)

@@ -590,4 +590,23 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timeZoneOffsetLabel => 'UTC Offset';
+
+  @override
+  String get repeatFlagLabel => 'Repeat';
+
+  @override
+  String get repeatIntervalLabel => 'Repeat every';
+
+  @override
+  String get repeatUnitDays => 'Days';
+
+  @override
+  String get repeatUnitWeeks => 'Weeks';
+
+  @override
+  String get repeatUnitMonths => 'Months';
+
+  @override
+  String get repeatErrorInvalid =>
+      'Please enter an interval between 1 and 3650.';
 }

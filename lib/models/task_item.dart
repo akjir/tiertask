@@ -17,6 +17,34 @@ import 'package:flutter/foundation.dart';
 
 import 'tdf_metadata.dart';
 
+/// Supported time units for a TDF `repeat <count> <unit>` directive.
+enum RepeatUnit {
+  /// Daily recurrence (`days`).
+  days('days'),
+
+  /// Weekly recurrence (`weeks`).
+  weeks('weeks'),
+
+  /// Monthly recurrence (`months`).
+  months('months');
+
+  /// Creates a [RepeatUnit] with its canonical [tdfToken].
+  const RepeatUnit(this.tdfToken);
+
+  /// Canonical bare-word token emitted in `.tdf` documents.
+  final String tdfToken;
+
+  /// Parses a canonical TDF unit token (`days`, `weeks`, `months`), or returns `null`.
+  static RepeatUnit? tryParseToken(String token) {
+    return switch (token) {
+      'days' => RepeatUnit.days,
+      'weeks' => RepeatUnit.weeks,
+      'months' => RepeatUnit.months,
+      _ => null,
+    };
+  }
+}
+
 /// Immutable representation of a single subtask step (`step <bool> "<text>"`) belonging to a [TaskItem].
 @immutable
 class SubtaskItem {
@@ -52,6 +80,137 @@ class SubtaskItem {
   String toString() => 'step $isCompleted "$title"';
 }
 
+/// Immutable representation of a TDF `repeat <count> <days|weeks|months>` rule.
+@immutable
+class TaskRepeatRule {
+  /// Creates a [TaskRepeatRule] with positive [count] and [unit].
+  const TaskRepeatRule({required this.count, required this.unit});
+
+  /// Maximum allowed recurrence interval count (`3650`).
+  static const int maxRepeatCount = 3650;
+
+  /// Number of units between recurrence cycles (`1..3650`).
+  final int count;
+
+  /// Time unit (`days`, `weeks`, or `months`) for the recurrence interval.
+  final RepeatUnit unit;
+
+  /// Computes the next local due timestamp relative to [completionLocalTime],
+  /// preserving a non-midnight `<HH:MM[:SS]>` from [previousSuspendedAt] when present.
+  DateTime nextLocalDueDate(
+    DateTime completionLocalTime, {
+    DateTime? previousSuspendedAt,
+  }) {
+    final hasExplicitSuspendedTime =
+        previousSuspendedAt != null &&
+        previousSuspendedAt != TaskItem.defaultSuspendedAt &&
+        (previousSuspendedAt.hour != 0 ||
+            previousSuspendedAt.minute != 0 ||
+            previousSuspendedAt.second != 0);
+    final targetHour = hasExplicitSuspendedTime ? previousSuspendedAt.hour : 0;
+    final targetMinute = hasExplicitSuspendedTime
+        ? previousSuspendedAt.minute
+        : 0;
+    final targetSecond = hasExplicitSuspendedTime
+        ? previousSuspendedAt.second
+        : 0;
+
+    return switch (unit) {
+      RepeatUnit.days => _addDays(
+        completionLocalTime,
+        count,
+        targetHour,
+        targetMinute,
+        targetSecond,
+      ),
+      RepeatUnit.weeks => _addDays(
+        completionLocalTime,
+        count * 7,
+        targetHour,
+        targetMinute,
+        targetSecond,
+      ),
+      RepeatUnit.months => _addMonths(
+        completionLocalTime,
+        count,
+        targetHour,
+        targetMinute,
+        targetSecond,
+      ),
+    };
+  }
+
+  /// Formats this rule as canonical TDF directive arguments (`<count> <unit>`).
+  String toTdfDirectiveArgs() => '$count ${unit.tdfToken}';
+
+  /// Adds [daysToAdd] calendar days to [baseDate] with the given time-of-day components.
+  static DateTime _addDays(
+    DateTime baseDate,
+    int daysToAdd,
+    int hour,
+    int minute,
+    int second,
+  ) {
+    final targetDate = DateTime.utc(
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
+    ).add(Duration(days: daysToAdd));
+    return DateTime.utc(
+      targetDate.year,
+      targetDate.month,
+      targetDate.day,
+      hour,
+      minute,
+      second,
+    );
+  }
+
+  /// Adds [monthsToAdd] calendar months to [baseDate], clamping the day to the target month's length.
+  static DateTime _addMonths(
+    DateTime baseDate,
+    int monthsToAdd,
+    int hour,
+    int minute,
+    int second,
+  ) {
+    final totalMonths =
+        (baseDate.year * 12) + (baseDate.month - 1) + monthsToAdd;
+    final targetYear = totalMonths ~/ 12;
+    final targetMonth = (totalMonths % 12) + 1;
+    final maxDayInTargetMonth = DateTime.utc(
+      targetYear,
+      targetMonth + 1,
+      0,
+    ).day;
+    final clampedDay = baseDate.day <= maxDayInTargetMonth
+        ? baseDate.day
+        : maxDayInTargetMonth;
+    return DateTime.utc(
+      targetYear,
+      targetMonth,
+      clampedDay,
+      hour,
+      minute,
+      second,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskRepeatRule &&
+        other.count == count &&
+        other.unit == unit;
+  }
+
+  @override
+  int get hashCode => Object.hash(count, unit);
+
+  @override
+  String toString() => 'repeat $count ${unit.tdfToken}';
+}
+
 /// Immutable representation of a single TDF `task` block in TierTask.
 @immutable
 class TaskItem {
@@ -67,6 +226,7 @@ class TaskItem {
     this.completedAt,
     this.modifiedAt,
     this.suspendedAt,
+    this.repeatRule,
     List<String> labelIds = const [],
     List<String> blockedByTaskIds = const [],
     List<TaskCondition> conditions = const [],
@@ -120,6 +280,9 @@ class TaskItem {
   /// Active pull-cycle queue timestamp (`queued` directive), or `null` when in `Someday`.
   final DateTime? queuedAt;
 
+  /// Optional recurrence rule (`repeat` directive).
+  final TaskRepeatRule? repeatRule;
+
   /// Ordered checklist steps (`subtasks` sub-block).
   final List<SubtaskItem> subtasks;
 
@@ -148,6 +311,7 @@ class TaskItem {
     DateTime? completedAt,
     DateTime? modifiedAt,
     DateTime? suspendedAt,
+    TaskRepeatRule? repeatRule,
     List<String>? labelIds,
     List<String>? blockedByTaskIds,
     List<TaskCondition>? conditions,
@@ -158,6 +322,7 @@ class TaskItem {
     bool clearCompletedAt = false,
     bool clearModifiedAt = false,
     bool clearSuspendedAt = false,
+    bool clearRepeatRule = false,
   }) {
     return TaskItem(
       id: id ?? this.id,
@@ -170,6 +335,7 @@ class TaskItem {
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
+      repeatRule: clearRepeatRule ? null : (repeatRule ?? this.repeatRule),
       labelIds: labelIds ?? this.labelIds,
       blockedByTaskIds: blockedByTaskIds ?? this.blockedByTaskIds,
       conditions: conditions ?? this.conditions,
@@ -428,6 +594,7 @@ class TaskItem {
         other.completedAt == completedAt &&
         other.modifiedAt == modifiedAt &&
         other.suspendedAt == suspendedAt &&
+        other.repeatRule == repeatRule &&
         other.subtasksAutoFinish == subtasksAutoFinish &&
         listEquals(other.labelIds, labelIds) &&
         listEquals(other.blockedByTaskIds, blockedByTaskIds) &&
@@ -447,6 +614,7 @@ class TaskItem {
     completedAt,
     modifiedAt,
     suspendedAt,
+    repeatRule,
     subtasksAutoFinish,
     Object.hashAll(labelIds),
     Object.hashAll(blockedByTaskIds),

@@ -600,4 +600,23 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get timeZoneOffsetLabel => 'UTC-Verschiebung';
+
+  @override
+  String get repeatFlagLabel => 'Wiederholen';
+
+  @override
+  String get repeatIntervalLabel => 'Wiederhole alle';
+
+  @override
+  String get repeatUnitDays => 'Tage';
+
+  @override
+  String get repeatUnitWeeks => 'Wochen';
+
+  @override
+  String get repeatUnitMonths => 'Monate';
+
+  @override
+  String get repeatErrorInvalid =>
+      'Bitte ein Intervall zwischen 1 und 3650 eingeben.';
 }

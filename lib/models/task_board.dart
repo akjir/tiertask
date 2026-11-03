@@ -219,6 +219,7 @@ class TaskBoard {
     String? note,
     List<String> labelIds = const [],
     DateTime? suspendedAt,
+    TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
     List<TaskCondition> conditions = const [],
   }) {
@@ -244,7 +245,11 @@ class TaskBoard {
         subtasksAutoFinish &&
         cleanSubtasks.isNotEmpty &&
         cleanSubtasks.every((step) => step.isCompleted);
-    final isDone = targetTier == TaskTier.completed || autoCompleted;
+    final isRecurringAutoCompletion =
+        autoCompleted && targetTier != TaskTier.completed && repeatRule != null;
+    final isDone =
+        targetTier == TaskTier.completed ||
+        (autoCompleted && !isRecurringAutoCompletion);
     final isBlocked = targetTier == TaskTier.blocked && !isDone;
     final effectiveSuspendedAt = isDone
         ? null
@@ -260,23 +265,36 @@ class TaskBoard {
         ? TaskItem.normalizeTimestamp(modifiedAt)
         : now;
 
-    final newTask = TaskItem(
+    final baseTask = TaskItem(
       id: taskId,
       title: trimmed,
       note: effectiveNote,
       isCompleted: isDone,
-      isPriority: effectivePriority && !isSomeday && !isBlocked,
+      isPriority:
+          effectivePriority &&
+          !isSomeday &&
+          (!isBlocked || isActivelySuspended || repeatRule != null),
       createdAt: now,
       queuedAt: isSomeday ? null : now,
       completedAt: isDone ? now : null,
       modifiedAt: resolvedModifiedAt,
       suspendedAt: effectiveSuspendedAt,
+      repeatRule: repeatRule,
       blockedByTaskIds: cleanBlockedBy,
       labelIds: labelIds,
       conditions: cleanConditions,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: cleanSubtasks,
     );
+    final newTask = isRecurringAutoCompletion
+        ? _rescheduleRecurringTask(
+            baseTask,
+            repeatRule,
+            now,
+            localNow,
+            preserveModifiedAt: resolvedModifiedAt,
+          )
+        : baseTask;
 
     if (isDone) {
       return copyWith(completed: [newTask, ...completed])
@@ -313,6 +331,7 @@ class TaskBoard {
     final nextReady = List<TaskItem>.from(ready);
     final nextPlanned = List<TaskItem>.from(planned);
     final nextBlocked = <TaskItem>[];
+    var unblockedPriorityTask = false;
 
     for (final task in blocked) {
       if (_isTaskBlocked(
@@ -326,6 +345,9 @@ class TaskBoard {
       )) {
         nextBlocked.add(task);
       } else {
+        if (task.isPriority) {
+          unblockedPriorityTask = true;
+        }
         final nextModified = task.queuedAt == null
             ? TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt)
             : task.modifiedAt;
@@ -338,11 +360,19 @@ class TaskBoard {
       }
     }
 
-    _cascadeQueues(
-      nextFocus: nextFocus,
-      nextReady: nextReady,
-      nextPlanned: nextPlanned,
-    );
+    if (unblockedPriorityTask) {
+      _sortAndSliceActiveLists(
+        nextFocus: nextFocus,
+        nextReady: nextReady,
+        nextPlanned: nextPlanned,
+      );
+    } else {
+      _cascadeQueues(
+        nextFocus: nextFocus,
+        nextReady: nextReady,
+        nextPlanned: nextPlanned,
+      );
+    }
 
     return copyWith(
       focus: nextFocus,
@@ -390,10 +420,10 @@ class TaskBoard {
         .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
   }
 
-  /// Marks an active task as done per `TDF_SPEC.md` Section 6.5:
-  /// 1. Sets `finished` to [currentDate] and places it at the top of Tier 6 (`Completed`).
-  /// 2. Prunes items in Tier 6 older than 30 days.
-  /// 3. Unblocks any tasks waiting on [taskId] and refills Tier 1 and Tier 2.
+  /// Marks an active task as done per `TDF_SPEC.md` Section 6.4:
+  /// 1. Standard tasks: sets `finished` to [currentDate] and places it at the top of Tier 6 (`Completed`).
+  /// 2. Recurring tasks (`repeat` present): reschedules into Tier 4 (`Blocked`) with `priority`, UTC `queued`, local `suspended`, and reset `subtasks`.
+  /// 3. Prunes items in Tier 6 older than 30 days and refills Tier 1 and Tier 2.
   TaskBoard completeTask(
     String taskId, {
     DateTime? currentDate,
@@ -413,6 +443,22 @@ class TaskBoard {
     final task = findTask(taskId);
     if (task == null) {
       return this;
+    }
+
+    if (task.repeatRule case final repeatRule?) {
+      final rescheduledTask = _rescheduleRecurringTask(
+        task,
+        repeatRule,
+        now,
+        localNow,
+      );
+      final updated = _removeTaskFromTier(
+        taskId,
+        sourceTier,
+      ).copyWith(blocked: [...blocked, rescheduledTask]);
+      return updated
+          .pruneCompletedTasks(currentDate: now)
+          .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
     }
 
     final completedTask = task.toCompleted(now);
@@ -736,18 +782,20 @@ class TaskBoard {
               )
             : task.subtasks[i],
     ];
-    final updatedTask = task.copyWith(
-      subtasks: updatedSubtasks,
-      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
-    );
-    final replacedBoard = _replaceTaskInTier(tier, updatedTask);
-
     final allStepsDone =
         updatedSubtasks.isNotEmpty &&
         updatedSubtasks.every((step) => step.isCompleted);
-    if (updatedTask.subtasksAutoFinish &&
-        allStepsDone &&
-        tier != TaskTier.completed) {
+    final willAutoComplete =
+        task.subtasksAutoFinish && allStepsDone && tier != TaskTier.completed;
+    final updatedTask = task.copyWith(
+      subtasks: updatedSubtasks,
+      modifiedAt: willAutoComplete
+          ? task.modifiedAt
+          : TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+    );
+    final replacedBoard = _replaceTaskInTier(tier, updatedTask);
+
+    if (willAutoComplete) {
       return replacedBoard.completeTask(
         taskId,
         currentDate: now,
@@ -761,7 +809,7 @@ class TaskBoard {
   /// and ignores empty or duplicate task titles.
   TaskBoard updateTask(
     String taskId, {
-    required String title,
+    String? title,
     String? note,
     TaskTier? targetTier,
     bool? isPriority,
@@ -770,18 +818,20 @@ class TaskBoard {
     List<String>? labelIds,
     DateTime? suspendedAt,
     bool clearSuspendedAt = false,
+    TaskRepeatRule? repeatRule,
+    bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
   }) {
-    final trimmed = title.trim();
-    if (trimmed.isEmpty ||
-        hasDuplicateTaskTitle(trimmed, excludingTaskId: taskId)) {
-      return this;
-    }
     final existing = findTask(taskId);
     if (existing == null) {
+      return this;
+    }
+    final trimmed = (title ?? existing.title).trim();
+    if (trimmed.isEmpty ||
+        hasDuplicateTaskTitle(trimmed, excludingTaskId: taskId)) {
       return this;
     }
 
@@ -809,6 +859,8 @@ class TaskBoard {
       labelIds: labelIds,
       suspendedAt: suspendedAt,
       clearSuspendedAt: clearSuspendedAt,
+      repeatRule: repeatRule,
+      clearRepeatRule: clearRepeatRule,
       blockedByTaskIds: sanitizedBlockedBy,
       conditions: sanitizedConditions,
       now: now,
@@ -906,6 +958,8 @@ class TaskBoard {
     required List<String>? labelIds,
     required DateTime? suspendedAt,
     required bool clearSuspendedAt,
+    required TaskRepeatRule? repeatRule,
+    required bool clearRepeatRule,
     required List<String>? blockedByTaskIds,
     required List<TaskCondition>? conditions,
     required DateTime now,
@@ -919,14 +973,21 @@ class TaskBoard {
     final cleanSubtasks = subtasks != null
         ? _cleanSubtasks(subtasks)
         : existing.subtasks;
+    final effectiveRepeatRule = clearRepeatRule
+        ? null
+        : (repeatRule ?? existing.repeatRule);
     final autoCompleted =
         !isRestoringCompleted &&
         effectiveAutoFinish &&
         cleanSubtasks.isNotEmpty &&
         cleanSubtasks.every((step) => step.isCompleted);
+    final isRecurringAutoCompletion =
+        autoCompleted &&
+        targetTier != TaskTier.completed &&
+        effectiveRepeatRule != null;
     final isDone =
         targetTier == TaskTier.completed ||
-        autoCompleted ||
+        (autoCompleted && !isRecurringAutoCompletion) ||
         (targetTier == null && wasCompleted);
     final isBlocked = !isDone && targetTier == TaskTier.blocked;
     final effectiveSuspendedAt = isDone || clearSuspendedAt
@@ -947,14 +1008,20 @@ class TaskBoard {
         : (isPriority ?? existing.isPriority);
     final effectivePriority =
         !isSomeday &&
-        !isBlocked &&
+        (!isBlocked || isActivelySuspended || effectiveRepeatRule != null) &&
         (preservedPriority || targetTier == TaskTier.focus);
+    final hasFutureQueuedToReset =
+        !isActivelySuspended &&
+        existing.queuedAt != null &&
+        existing.queuedAt!.isAfter(now);
     final effectiveQueuedAt = isSomeday
         ? null
-        : (isRestoringCompleted ? now : (existing.queuedAt ?? now));
+        : ((isRestoringCompleted || hasFutureQueuedToReset)
+              ? now
+              : (existing.queuedAt ?? now));
     final trimmedNote = note?.trim();
 
-    return existing.copyWith(
+    final baseUpdated = existing.copyWith(
       title: title,
       note: (trimmedNote != null && trimmedNote.isNotEmpty)
           ? trimmedNote
@@ -968,6 +1035,8 @@ class TaskBoard {
       clearQueuedAt: isSomeday,
       suspendedAt: effectiveSuspendedAt,
       clearSuspendedAt: effectiveSuspendedAt == null,
+      repeatRule: effectiveRepeatRule,
+      clearRepeatRule: effectiveRepeatRule == null,
       blockedByTaskIds: blockedByTaskIds,
       labelIds: labelIds,
       conditions: conditions,
@@ -978,6 +1047,16 @@ class TaskBoard {
         existing.effectiveModifiedAt,
       ),
     );
+    if (isRecurringAutoCompletion) {
+      return _rescheduleRecurringTask(
+        baseUpdated,
+        effectiveRepeatRule,
+        now,
+        localNow,
+        preserveModifiedAt: baseUpdated.modifiedAt,
+      );
+    }
+    return baseUpdated;
   }
 
   /// Executes the two-stage pull cascade across mutable queue lists in linear order.
@@ -1625,6 +1704,39 @@ class TaskBoard {
     };
   }
 
+  /// Reschedules a completed recurring [task] for its next cycle per `TDF_SPEC.md` Section 6.4.
+  static TaskItem _rescheduleRecurringTask(
+    TaskItem task,
+    TaskRepeatRule repeatRule,
+    DateTime now,
+    DateTime localNow, {
+    DateTime? preserveModifiedAt,
+  }) {
+    final nextDueLocal = repeatRule.nextLocalDueDate(
+      localNow,
+      previousSuspendedAt: task.suspendedAt,
+    );
+    final localOffset = localNow.difference(now);
+    final nextDueUtc = nextDueLocal.subtract(localOffset);
+    final resetSubtasks = <SubtaskItem>[
+      for (final step in task.subtasks)
+        step.isCompleted ? step.copyWith(isCompleted: false) : step,
+    ];
+    final nextModified =
+        preserveModifiedAt ??
+        TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt);
+    return task.copyWith(
+      isCompleted: false,
+      clearCompletedAt: true,
+      isPriority: true,
+      queuedAt: nextDueUtc,
+      suspendedAt: nextDueLocal,
+      repeatRule: repeatRule,
+      subtasks: resetSubtasks,
+      modifiedAt: nextModified,
+    );
+  }
+
   /// Resolves the `queued` timestamp for placing a downgraded task at the end of the regular FIFO queue.
   static DateTime _resolveEndOfRegularQueueTimestamp(
     DateTime now,
@@ -1839,6 +1951,29 @@ class TaskBoard {
       return '${prefix}001';
     }
     return '${prefix}_$slug';
+  }
+
+  /// Sorts active tasks across [nextFocus], [nextReady], and [nextPlanned] by Section 5.5 priority/FIFO order and re-slices them.
+  static void _sortAndSliceActiveLists({
+    required List<TaskItem> nextFocus,
+    required List<TaskItem> nextReady,
+    required List<TaskItem> nextPlanned,
+  }) {
+    final combined = <TaskItem>[...nextFocus, ...nextReady, ...nextPlanned];
+    final indexed = <_IndexedTask>[
+      for (var i = 0; i < combined.length; i++)
+        _IndexedTask(index: i, task: combined[i].toActive()),
+    ];
+    indexed.sort(_compareActiveCandidates);
+    nextFocus.clear();
+    nextReady.clear();
+    nextPlanned.clear();
+    _sliceActiveCandidates(
+      indexed,
+      focusList: nextFocus,
+      readyList: nextReady,
+      plannedList: nextPlanned,
+    );
   }
 
   /// Removes [labelId] from every task in [tasks].

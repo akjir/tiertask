@@ -67,6 +67,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late bool _conditionLocationAny;
   late bool _conditionTimeAny;
   String? _errorMessage;
+  late bool _isRepeating;
   late bool _isSuspended;
   String? _locationErrorMessage;
   final TextEditingController _locationLatController = TextEditingController();
@@ -76,6 +77,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final List<LocationTaskCondition> _locationRules;
   late QuickAddMode _mode;
   late final TextEditingController _noteController;
+  late final TextEditingController _repeatCountController;
+  String? _repeatErrorMessage;
+  late RepeatUnit _repeatUnit;
   late final Set<String> _selectedLabelIds;
   late final Set<int> _selectedWeekdays;
   final TextEditingController _subtaskController = TextEditingController();
@@ -116,11 +120,17 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _suspendedController = TextEditingController(
       text: _formatInitialSuspendedText(task?.suspendedAt),
     );
+    _isRepeating = task?.repeatRule != null;
+    _repeatCountController = TextEditingController(
+      text: (task?.repeatRule?.count ?? 1).toString(),
+    );
+    _repeatUnit = task?.repeatRule?.unit ?? RepeatUnit.days;
     _initializeConditions(task?.conditions ?? const []);
 
     _titleController.addListener(_handleTitleChanged);
     _subtaskController.addListener(_handleInputStateChanged);
     _suspendedController.addListener(_handleInputStateChanged);
+    _repeatCountController.addListener(_handleRepeatCountChanged);
     _blockedSearchController.addListener(_handleInputStateChanged);
   }
 
@@ -129,11 +139,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _titleController.removeListener(_handleTitleChanged);
     _subtaskController.removeListener(_handleInputStateChanged);
     _suspendedController.removeListener(_handleInputStateChanged);
+    _repeatCountController.removeListener(_handleRepeatCountChanged);
     _blockedSearchController.removeListener(_handleInputStateChanged);
     _titleController.dispose();
     _noteController.dispose();
     _subtaskController.dispose();
     _suspendedController.dispose();
+    _repeatCountController.dispose();
     _blockedSearchController.dispose();
     _timeStartController.dispose();
     _timeEndController.dispose();
@@ -307,14 +319,20 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         const SizedBox(height: 10),
         TaskEditorSchedulingCard(
           hasSuspendedText: _hasSuspendedText,
+          isRepeating: _isRepeating,
           isSuspended: _isSuspended,
           mode: _mode,
+          repeatCountController: _repeatCountController,
+          repeatErrorMessage: _repeatErrorMessage,
+          repeatUnit: _repeatUnit,
           suspendedController: _suspendedController,
           suspendedErrorMessage: _suspendedErrorMessage,
           onClearSuspended: _clearSuspendedTimestamp,
           onPickSuspendedDate: _pickSuspendedDate,
           onPickSuspendedTime: _pickSuspendedTime,
+          onSelectRepeatUnit: _selectRepeatUnit,
           onTogglePriority: _togglePriority,
+          onToggleRepeat: _toggleRepeat,
           onToggleSomeday: _toggleSomeday,
           onToggleSuspended: _toggleSuspended,
         ),
@@ -489,6 +507,16 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     setState(() {});
   }
 
+  /// Clears any repeat interval validation error when the user edits the repeat count field.
+  void _handleRepeatCountChanged() {
+    if (_repeatErrorMessage == null) {
+      return;
+    }
+    setState(() {
+      _repeatErrorMessage = null;
+    });
+  }
+
   /// Clears any validation error when the user edits the title field.
   void _handleTitleChanged() {
     if (_errorMessage == null) {
@@ -537,6 +565,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     String title,
     List<SubtaskItem> subtasks,
     DateTime? suspendedAt,
+    TaskRepeatRule? repeatRule,
   ) async {
     final labelIds = _collectOrderedLabelIds(board);
     final blockedByIds = _collectOrderedBlockedByIds(board);
@@ -556,6 +585,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         labelIds: labelIds,
         suspendedAt: suspendedAt,
         clearSuspendedAt: !_isSuspended,
+        repeatRule: repeatRule,
+        clearRepeatRule: !_isRepeating,
         blockedByTaskIds: blockedByIds,
         conditions: conditions,
       );
@@ -571,6 +602,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       subtasks: subtasks,
       labelIds: labelIds,
       suspendedAt: suspendedAt,
+      repeatRule: repeatRule,
       blockedByTaskIds: blockedByIds,
       conditions: conditions,
     );
@@ -715,6 +747,20 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     return DateTime.utc(fallback.year, fallback.month, fallback.day);
   }
 
+  /// Resolves the `repeat` rule when [_isRepeating] is enabled, or `null` when disabled or invalid.
+  TaskRepeatRule? _resolveRepeatRule() {
+    if (!_isRepeating) {
+      return null;
+    }
+    final parsedCount = int.tryParse(_repeatCountController.text.trim());
+    if (parsedCount == null ||
+        parsedCount < 1 ||
+        parsedCount > TaskRepeatRule.maxRepeatCount) {
+      return null;
+    }
+    return TaskRepeatRule(count: parsedCount, unit: _repeatUnit);
+  }
+
   /// Resolves the `suspendedAt` timestamp when [_isSuspended] is enabled, or `null` when disabled.
   DateTime? _resolveSuspendedTimestamp() {
     if (!_isSuspended) {
@@ -725,6 +771,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       return TaskItem.defaultSuspendedAt;
     }
     return TaskItem.tryParseTdfTimestampInput(rawText);
+  }
+
+  /// Selects [unit] as the recurrence interval unit.
+  void _selectRepeatUnit(RepeatUnit unit) {
+    setState(() {
+      _repeatUnit = unit;
+    });
   }
 
   /// Validates the task inputs and saves the created or updated task.
@@ -748,6 +801,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       return;
     }
 
+    final repeatRule = _resolveRepeatRule();
+    if (_isRepeating && repeatRule == null) {
+      setState(() {
+        _repeatErrorMessage = localizations.repeatErrorInvalid;
+      });
+      return;
+    }
+
     final pendingSubtask = _subtaskController.text.trim();
     final effectiveSubtasks = <SubtaskItem>[
       ..._subtasks,
@@ -759,6 +820,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       _titleController.text.trim(),
       effectiveSubtasks,
       suspendedTimestamp,
+      repeatRule,
     );
     if (!mounted) {
       return;
@@ -848,6 +910,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       _mode = _mode == QuickAddMode.priority
           ? QuickAddMode.standard
           : QuickAddMode.priority;
+    });
+  }
+
+  /// Toggles `repeat` state on or off.
+  void _toggleRepeat() {
+    setState(() {
+      _isRepeating = !_isRepeating;
+      _repeatErrorMessage = null;
     });
   }
 

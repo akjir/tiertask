@@ -1325,6 +1325,15 @@ class _TierTaskPillContent extends StatelessWidget {
               ),
             ),
           ),
+          if (task.repeatRule != null) ...[
+            const SizedBox(width: 8),
+            Icon(
+              Icons.repeat_rounded,
+              key: ValueKey('repeat_task_indicator_${task.id}'),
+              size: 16,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
         ],
       ),
     );

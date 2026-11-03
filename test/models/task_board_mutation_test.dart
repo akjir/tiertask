@@ -478,5 +478,72 @@ label office {
         reason: 'renameLabel must ignore empty or whitespace-only names',
       );
     });
+
+    test('toggleSubtask with subtasksAutoFinish on a recurring task reschedules it into Blocked and resets steps', () {
+      var board = TaskBoard.empty().addTask(
+        'Weekly server maintenance',
+        currentDate: fixedDate,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.weeks),
+        subtasksAutoFinish: true,
+        subtasks: const [
+          SubtaskItem(title: 'Check disk health', isCompleted: true),
+          SubtaskItem(title: 'Rotate logs', isCompleted: false),
+        ],
+      );
+      final taskId = board.focus.single.id;
+
+      final toggleTime = fixedDate.add(const Duration(hours: 2));
+      board = board.toggleSubtask(taskId, 1, currentDate: toggleTime);
+
+      expect(
+        board.completed,
+        isEmpty,
+        reason: 'subtasks auto-finish on recurring task must not move task to Completed',
+      );
+      expect(
+        board.blocked.map((task) => task.id),
+        equals([taskId]),
+        reason: 'subtasks auto-finish on recurring task must reschedule task into Blocked',
+      );
+      final rescheduled = board.findTask(taskId)!;
+      expect(rescheduled.isCompleted, isFalse);
+      expect(rescheduled.isPriority, isTrue);
+      expect(
+        rescheduled.suspendedAt,
+        equals(DateTime.utc(2026, 11, 8, 0, 0)),
+        reason: '2026-11-01 + 1 week must set suspendedAt to 2026-11-08 00:00',
+      );
+      expect(rescheduled.queuedAt, equals(DateTime.utc(2026, 11, 8, 0, 0)));
+      expect(
+        rescheduled.modifiedAt,
+        equals(toggleTime),
+        reason: 'toggleSubtask auto-finish on recurring task must advance modifiedAt',
+      );
+      expect(
+        rescheduled.subtasks.every((step) => !step.isCompleted),
+        isTrue,
+        reason:
+            'All subtasks must be reset to false after auto-finish recurrence',
+      );
+
+      final manualUnblockTime = DateTime.utc(2026, 11, 3, 10, 0);
+      board = board.updateTask(
+        taskId,
+        clearSuspendedAt: true,
+        currentDate: manualUnblockTime,
+      );
+      final unblocked = board.findTask(taskId)!;
+      expect(unblocked.suspendedAt, isNull);
+      expect(
+        unblocked.queuedAt,
+        equals(manualUnblockTime),
+        reason: 'Manually unblocking a deferred recurring task early must reset future queuedAt to now',
+      );
+      expect(
+        board.focus.map((task) => task.id),
+        equals([taskId]),
+        reason: 'Early unblocked recurring task must immediately enter Focus',
+      );
+    });
   });
 }

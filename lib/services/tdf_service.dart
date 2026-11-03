@@ -146,6 +146,9 @@ class TdfService {
   /// Maximum character length of a `note` text value (`MAX_NOTE_LENGTH`).
   static const int maxNoteLength = 2000;
 
+  /// Maximum recurrence interval count `<count>` in `repeat <count> <unit>` (`MAX_REPEAT_COUNT`).
+  static const int maxRepeatCount = TaskRepeatRule.maxRepeatCount;
+
   /// Maximum directives or sub-blocks inside a single block (`MAX_STMTS_PER_BLOCK`).
   static const int maxStmtsPerBlock = 512;
 
@@ -481,6 +484,11 @@ class TdfService {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.suspendedAt = _requireTimestampArgs(args, lineNumber);
+      case 'repeat':
+        if (builder.repeatRule != null) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.repeatRule = _requireRepeatRuleArgs(args, lineNumber);
       case 'labels':
         if (builder.canonicalLabelIds != null) {
           _throwDuplicateDirective(directive, lineNumber);
@@ -1559,6 +1567,56 @@ class TdfService {
     return parsed;
   }
 
+  /// Validates and parses `repeat <count> <days|weeks|months>` arguments (`1..maxRepeatCount`).
+  static TaskRepeatRule _requireRepeatRuleArgs(
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    if (args.length != 2) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Directive "repeat" requires <count> and <days|weeks|months> arguments.',
+      );
+    }
+    final countToken = args[0];
+    final unitToken = args[1];
+    if (countToken.kind != _TokenKind.bareWord) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidNumber,
+        line: lineNumber,
+        message: 'Invalid repeat count "${countToken.value}".',
+      );
+    }
+    final parsedCount = int.tryParse(countToken.value);
+    if (parsedCount == null || parsedCount < 1) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidNumber,
+        line: lineNumber,
+        message: 'Repeat count must be a positive integer >= 1.',
+      );
+    }
+    if (parsedCount > maxRepeatCount) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Repeat count exceeds maximum of $maxRepeatCount.',
+      );
+    }
+    final parsedUnit = unitToken.kind == _TokenKind.bareWord
+        ? RepeatUnit.tryParseToken(unitToken.value)
+        : null;
+    if (parsedUnit == null) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message:
+            'Unknown repeat unit "${unitToken.value}" (expected days, weeks, or months).',
+      );
+    }
+    return TaskRepeatRule(count: parsedCount, unit: parsedUnit);
+  }
+
   /// Validates and parses `<YYYY-MM-DD> [<HH:MM[:SS]>]` timestamp arguments.
   static DateTime _requireTimestampArgs(
     List<_ScannedToken> args,
@@ -2025,6 +2083,11 @@ class TdfService {
       buffer.write(TaskItem.formatTdfTimestamp(suspendedAt));
       buffer.write('\n');
     }
+    if (task.repeatRule case final repeatRule?) {
+      buffer.write('    repeat ');
+      buffer.write(repeatRule.toTdfDirectiveArgs());
+      buffer.write('\n');
+    }
     _writeConditions(buffer, task.conditions);
     if (task.subtasks.isNotEmpty || task.subtasksAutoFinish) {
       buffer.write('    subtasks');
@@ -2284,6 +2347,9 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Optional `queued` timestamp.
   DateTime? queuedAt;
 
+  /// Optional `repeat` rule.
+  TaskRepeatRule? repeatRule;
+
   /// Parsed checklist steps from `subtasks`.
   List<SubtaskItem> subtasks = const <SubtaskItem>[];
 
@@ -2330,6 +2396,7 @@ final class _TaskBuilder extends _BlockBuilder {
       completedAt: completedAt,
       modifiedAt: modifiedAt,
       suspendedAt: suspendedAt,
+      repeatRule: repeatRule,
       labelIds: mergedLabelIds,
       blockedByTaskIds: blockedByTaskIds ?? const <String>[],
       conditions: conditions,

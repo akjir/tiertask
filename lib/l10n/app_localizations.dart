@@ -1171,6 +1171,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'UTC Offset'**
   String get timeZoneOffsetLabel;
+
+  /// Toggle chip label for enabling task recurrence in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat'**
+  String get repeatFlagLabel;
+
+  /// Input label for the numeric recurrence interval count.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeat every'**
+  String get repeatIntervalLabel;
+
+  /// Label for daily recurrence unit.
+  ///
+  /// In en, this message translates to:
+  /// **'Days'**
+  String get repeatUnitDays;
+
+  /// Label for weekly recurrence unit.
+  ///
+  /// In en, this message translates to:
+  /// **'Weeks'**
+  String get repeatUnitWeeks;
+
+  /// Label for monthly recurrence unit.
+  ///
+  /// In en, this message translates to:
+  /// **'Months'**
+  String get repeatUnitMonths;
+
+  /// Validation error shown when the repeat interval count is outside 1..3650.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter an interval between 1 and 3650.'**
+  String get repeatErrorInvalid;
 }
 
 class _AppLocalizationsDelegate

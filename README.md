@@ -7,10 +7,11 @@
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.3.0`, `label`, `task`, `modified`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
+`TierTask` stores objective task facts (`tdf 0.3.0`, `label`, `task`, `modified`, `repeat`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
 * **Dynamic $O(N)$ 6-Tier Derivation:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (`blocked`, future `suspended`, or unmet `condition` across `day`, `time`, and `location` rule groups with label inheritance), and slices active tasks by `priority` and ascending `queued` FIFO timestamp into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
+* **Recurring Tasks (`repeat <count> <days|weeks|months>`):** Completing a recurring task (or completing all steps of its `subtasks auto-finish` checklist) reschedules it directly into `Blocked` (`suspended` set to `localNow + <count> <unit>` at `00:00` local time or preserving an explicit suspended time-of-day, `queued` set to the UTC equivalent, `priority` flag added, `modified` advanced, and all `subtasks` reset to `false`) without entering `Completed`, waking up directly into `Focus` on its next due date.
 * **UTC Storage & Local Wall-Clock Conditions:** Stores and compares point-in-time directives (`created`, `queued`, `finished`, `modified`) and 30-day completed task pruning strictly in UTC while evaluating `condition day`, `condition time`, and `suspended` against the user's device or manually configured local time zone (`Automatic` / `Manual` UTC offset).
 * **Two-Stage Entity-Level Synchronization (`In-Memory <-> Local File <-> WebDAV`):** Compares individual `task` and `label` blocks via monotonic `modified` timestamps (`TaskBoardSync.merge`) on every save and manual sync, resolving offline sequential task ID collisions (`tNNN`) and rewriting `blocked` references automatically.
 * **Anti-Ping-Pong Downgrade & Auto-Finish Checklists:** Updates `queued` timestamps and strips `priority` when downgrading tasks, and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.

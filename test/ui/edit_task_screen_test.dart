@@ -17,6 +17,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -563,6 +564,68 @@ task t001 {
       );
       expect(board.focus.single.id, equals(rotateTaskId));
       expect(board.focus.single.isPriority, isTrue);
+
+      await tester.tap(find.byKey(const ValueKey('tier_indicator_item_focus')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(ValueKey('repeat_task_indicator_$rotateTaskId')),
+        findsNothing,
+        reason: 'Non-recurring task must not display repeat indicator icon on task card',
+      );
+
+      await tester.tap(find.byKey(ValueKey('edit_task_button_$rotateTaskId')));
+      await tester.pumpAndSettle();
+
+      final repeatChipFinder = find.byKey(
+        const ValueKey('task_editor_repeat_button'),
+      );
+      expect(
+        repeatChipFinder,
+        findsOneWidget,
+        reason: 'EditTaskScreen must render Repeat toggle chip in Scheduling section',
+      );
+      await tester.tap(repeatChipFinder);
+      await tester.pumpAndSettle();
+
+      final repeatCountFinder = find.byKey(
+        const ValueKey('task_editor_repeat_count_input'),
+      );
+      expect(
+        repeatCountFinder,
+        findsOneWidget,
+        reason: 'Enabling Repeat must reveal the repeat interval count input',
+      );
+      await tester.enterText(repeatCountFinder, '0');
+      await tester.pump();
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Please enter an interval between 1 and 3650.'),
+        findsOneWidget,
+        reason: 'EditTaskScreen must reject invalid repeat interval counts (< 1 or > 3650)',
+      );
+
+      await tester.enterText(repeatCountFinder, '2');
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_repeat_unit_weeks')),
+      );
+      await tester.pump();
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.focus.single.repeatRule,
+        equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
+        reason: 'Saving task with Repeat 2 Weeks must persist TaskRepeatRule on the task',
+      );
+      expect(
+        find.byKey(ValueKey('repeat_task_indicator_$rotateTaskId')),
+        findsOneWidget,
+        reason: 'Recurring task must display repeat indicator icon on its task card in HomeScreen',
+      );
     },
   );
 }

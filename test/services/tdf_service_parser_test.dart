@@ -480,5 +480,78 @@ task t_fallback {
         reason: 'Invalid modified timestamp must throw invalidTimestamp',
       );
     });
+
+    test(
+      'parses and serializes repeat directives across days, weeks, and months',
+      () {
+        const tdfWithRepeat = '''
+tdf 0.3.0
+
+task t_days {
+    name    "Daily standup"
+    created 2026-11-01 08:00
+    queued  2026-11-01 08:00
+    repeat  1 days
+}
+
+task t_weeks {
+    name    "Weekly review"
+    created 2026-11-01 09:00
+    queued  2026-11-01 09:00
+    repeat  2 weeks
+}
+
+task t_months {
+    name    "Monthly billing"
+    created 2026-11-01 10:00
+    queued  2026-11-01 10:00
+    repeat  3 months
+}
+''';
+
+        final board = tdfService.parse(
+          tdfWithRepeat,
+          evaluationTime: fixedDate,
+        );
+        expect(
+          board.findTask('t_days')!.repeatRule,
+          equals(const TaskRepeatRule(count: 1, unit: RepeatUnit.days)),
+          reason: 'repeat 1 days must parse to RepeatUnit.days with count 1',
+        );
+        expect(
+          board.findTask('t_weeks')!.repeatRule,
+          equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
+          reason: 'repeat 2 weeks must parse to RepeatUnit.weeks with count 2',
+        );
+        expect(
+          board.findTask('t_months')!.repeatRule,
+          equals(const TaskRepeatRule(count: 3, unit: RepeatUnit.months)),
+          reason:
+              'repeat 3 months must parse to RepeatUnit.months with count 3',
+        );
+
+        final serialized = tdfService.serialize(board);
+        expect(serialized, contains('    repeat 1 days\n'));
+        expect(serialized, contains('    repeat 2 weeks\n'));
+        expect(serialized, contains('    repeat 3 months\n'));
+
+        final reparsed = tdfService.parse(
+          serialized,
+          evaluationTime: fixedDate,
+        );
+        expect(
+          reparsed.findTask('t_days')!.repeatRule,
+          equals(const TaskRepeatRule(count: 1, unit: RepeatUnit.days)),
+        );
+        expect(
+          reparsed.findTask('t_weeks')!.repeatRule,
+          equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
+        );
+        expect(
+          reparsed.findTask('t_months')!.repeatRule,
+          equals(const TaskRepeatRule(count: 3, unit: RepeatUnit.months)),
+        );
+      },
+    );
   });
 }
