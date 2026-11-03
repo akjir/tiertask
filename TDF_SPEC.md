@@ -1,6 +1,6 @@
 # TierTask Data Format (TDF) Specification
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Status:** Specification
 **File Extension:** `.tdf`
 **Character Encoding:** UTF-8
@@ -18,10 +18,10 @@ A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`l
 
 ### 1.2 Core Design Principles
 
-1. **Mandatory Version Header & Strict Root Block Enforcement:** Every valid `.tdf` document MUST begin with the single-line version header `tdf 0.3.0` (or legacy `tdf 0.2.0` on input) at nesting depth `0` before any root block, making it the only directive allowed at depth `0`. Following the version header, every top-level statement at nesting depth `0` MUST be a root block (`task` or `label`); all other standalone directives at the root level are forbidden.
+1. **Mandatory Version Header, Strict Root Block Enforcement & No Pre-1.0 Backward Compatibility:** Every valid `.tdf` document MUST begin with the single-line version header `tdf 0.4.0` at nesting depth `0` before any root block, making it the only directive allowed at depth `0`. Until version `1.0.0`, the specification defines only the current strict `0.4.0` format without backward-compatibility guarantees or legacy fallbacks for prior versions. Following the version header, every top-level statement at nesting depth `0` MUST be a root block (`task` or `label`); all other standalone directives at the root level are forbidden.
 2. **No Empty Directives:** Optional directives that have no value (such as an unset `finished` or `queued` timestamp) MUST be omitted entirely from the block rather than written with empty arguments.
 3. **Single-Pass Linear Grammar:** TDF is designed to be tokenized and parsed in a single $O(N)$ linear pass without regular expressions or backtracking.
-4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (format version header, ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
+4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (format version header, mandatory 13-character Base62 `<task-id>` and `<label-id>` entity identifiers, ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
 
 ## 2. Lexical Elements
 
@@ -49,7 +49,7 @@ TDF is a line-oriented format. Directives and block headers are terminated by a 
 ### 2.4 Comments
 - A comment starts with the hash character (`#`, `U+0023`) outside of a quoted string.
 - All characters from `#` up to (but not including) the next newline (`LF`, `CRLF`) or End-Of-File (`EOF`) are ignored by the parser.
-- A `#` character immediately following a bare word (e.g., `t001#comment`) is NOT part of the bare word; it immediately terminates the token (`t001`) and starts an inline comment (`#comment`). Hash characters inside quoted strings (e.g., `"#4CAF50"`) are literal characters.
+- A `#` character immediately following a bare word (e.g., `t_8jKaCd_OkD2#comment`) is NOT part of the bare word; it immediately terminates the token (`t_8jKaCd_OkD2`) and starts an inline comment (`#comment`). Hash characters inside quoted strings (e.g., `"#4CAF50"`) are literal characters.
 - Multi-line block comments are not supported.
 
 ### 2.5 Delimiters & Reserved Punctuation
@@ -71,7 +71,7 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 #### A. Bare Word (Unquoted Token)
 - A contiguous sequence of one or more valid UTF-8 characters excluding horizontal whitespace (`' '`, `'\t'`), newlines (`\r`, `\n`), ASCII control characters (`U+0000`–`U+001F`, `U+007F`), non-ASCII Unicode whitespace, and reserved punctuation (`{`, `}`, `#`, `"`, `'`).
-- Bare words are used for single-word values without spaces, including entity IDs (`t001`, `taxes2026`, `home`, `it`), header flags (`priority`, `auto-finish`), condition rule keywords (`day`, `time`, `location`, `any`), weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), boolean literals (`true`, `false`), numbers (`50.9787`, `11.0328`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:00`, `19:30:05`).
+- Bare words are used for single-word values without spaces, including 13-character Base62 entity IDs (`t_8jKaCd_OkD2`, `l_4x9p2m_OkD2`), header flags (`priority`, `auto-finish`), condition rule keywords (`day`, `time`, `location`, `any`), weekday tokens (`mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`), boolean literals (`true`, `false`), numbers (`50.9787`, `11.0328`, `150`), and ISO-8601 date/time tokens (`2026-11-01`, `08:00`, `19:30:05`).
 
 #### B. Double-Quoted String (`"..."`)
 - Begins and ends with `"` (`U+0022`).
@@ -93,8 +93,20 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 ### 2.8 Primitive Domain Value Types
 At the semantic validation layer, directive and header arguments map to the following primitive types:
-- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.3.0` for this specification; `0.2.0` is accepted for backwards-compatible parsing and upgraded to `0.3.0` upon serialization).
-- **Entity ID (`<id>`):** A bare word matching `[a-zA-Z0-9_-]+`. Unlike block and directive identifiers (Section 2.6), an `<id>` argument may start with a digit (`0-9`) or hyphen (`-`). Automated writers typically generate sequential IDs (`t001`, `t002`, `t003`, ...), while descriptive single-word IDs (e.g., `taxes2026`, `home`, `it`) are equally valid when authored manually.
+- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.4.0` for this specification).
+- **Base62 Alphabet (`<base62-char>`):** The 62 ASCII alphanumeric characters `0-9` (`U+0030`–`U+0039`), `A-Z` (`U+0041`–`U+005A`), and `a-z` (`U+0061`–`U+007A`) in canonical index order (`0`..`61`):
+  `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`
+- **Task Entity ID (`<task-id>`):** Mandatory 13-character bare word identifying a `task` block or referenced in a `blocked` directive, strictly matching `t_<6xBase62Random>_<4xBase62Time>` (`t_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}`, e.g., `t_8jKaCd_OkD2`):
+  - **Prefix:** Literal `t_` (`2` characters).
+  - **Random Segment (`<6xBase62Random>`):** Exactly `6` Base62 characters (`[0-9A-Za-z]{6}`).
+  - **Separator:** Literal `_` (`1` character).
+  - **Time Segment (`<4xBase62Time>`):** Exactly `4` Base62 characters (`[0-9A-Za-z]{4}`).
+- **Label Entity ID (`<label-id>`):** Mandatory 13-character bare word identifying a `label` block or referenced in a `labels` directive, strictly matching `l_<6xBase62Random>_<4xBase62Time>` (`l_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}`, e.g., `l_4x9p2m_OkD2`):
+  - **Prefix:** Literal `l_` (`2` characters).
+  - **Random Segment (`<6xBase62Random>`):** Exactly `6` Base62 characters (`[0-9A-Za-z]{6}`).
+  - **Separator:** Literal `_` (`1` character).
+  - **Time Segment (`<4xBase62Time>`):** Exactly `4` Base62 characters (`[0-9A-Za-z]{4}`).
+- **Strict Entity ID Validation:** Arbitrary bare words are invalid as entity IDs. Any `task` block header, `label` block header, `labels` argument, or `blocked` argument whose identifier does not match the exact `t_<6xBase62>_<4xBase62>` or `l_<6xBase62>_<4xBase62>` pattern for its entity type MUST be rejected with `InvalidIdentifier` (Section 8).
 - **Boolean (`<bool>`):** Exact case-sensitive bare word `true` or `false`.
 - **Weekday (`<weekday>`):** Exact case-sensitive lowercase bare word from the set `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`.
 - **Time of Day (`<time>`):** 24-hour minute-precision local wall-clock time written as `<HH:MM>` (e.g., `08:00`, `18:00`), where `HH` is `00..23` and `MM` is `00..59`.
@@ -108,15 +120,26 @@ At the semantic validation layer, directive and header arguments map to the foll
 - **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` (or single-quoted `'#RRGGBB'`; canonical serialization emits double-quoted `"#RRGGBB"`) where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`. Because `#` outside quotes starts a comment (Section 2.4), `<color>` values MUST be quoted.
 - **Recurrence Rule (`<repeat>`):** Two whitespace-separated bare-word tokens `<count> <unit>`, where `<count>` is a positive ASCII decimal integer in `1..MAX_REPEAT_COUNT` (`1..3650`) and `<unit>` is an exact case-sensitive lowercase bare word from the set `days`, `weeks`, `months`.
 
+### 2.9 Mandatory Entity ID Generation & Identity Rules
+Whenever a new `task` or `label` entity is created, its 13-character identifier (`<task-id>` or `<label-id>`) MUST be generated using the following algorithm:
+1. **Entity Prefix:** Use `t_` for tasks and `l_` for labels.
+2. **6-Character Cryptographic Random Segment (`<6xBase62Random>`):** Generate `6` independent random characters uniformly from the 62-character Base62 alphabet (`0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`) using a cryptographically secure random number generator ($62^6 = 56,800,235,584$ combinations).
+3. **4-Character Rolling UTC Seconds Segment (`<4xBase62Time>`):**
+   - Take the current UTC timestamp in whole Unix seconds (`unixUtcSeconds = floor(nowUtcMilliseconds / 1000)`).
+   - Compute the rolling modulo value: `timeValue = unixUtcSeconds mod 14776336` (where $62^4 = 14,776,336$, covering a rolling ~171-day cycle at 1-second resolution).
+   - Encode `timeValue` into Base62 as exactly `4` characters (most significant digit first, left-padded with `0` if fewer than `4` characters).
+4. **In-Memory Uniqueness Check:** Before assigning the generated ID, verify that it does not collide with any existing ID currently loaded in the document (regenerating if a collision is detected).
+5. **Immutability & Sync Identity:** Once generated, an entity ID is immutable for the lifetime of that `task` or `label`. During synchronization (Section 6.7), identical IDs unconditionally represent the same entity (resolved via `modified` Last-Write-Wins), and distinct IDs unconditionally represent distinct entities.
+
 ## 3. Structural Grammar
 
 ### 3.1 Document Structure & Nesting Depth
-A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.3.0`) followed by a sequence of zero or more root-level **Blocks**.
+A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.4.0`) followed by a sequence of zero or more root-level **Blocks**.
 - **Nesting Depth Definition:** Nesting depth equals the number of currently open `{ ... }` blocks:
-  - Depth `0` (document root): Only the mandatory initial version header (`tdf 0.3.0`), root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
+  - Depth `0` (document root): Only the mandatory initial version header (`tdf 0.4.0`), root block headers (`task`, `label`), blank lines, and `#` comments are permitted.
   - Depth `1` (inside a `task` or `label` block body): Block directives and nested sub-block headers (`subtasks`, `condition`) are permitted.
   - Depth `2` (inside a `subtasks` or `condition` sub-block body): Only sub-block directives (`step`, `day`, `time`, `location`) are permitted; no further nested blocks are allowed (`MAX_NESTING_DEPTH = 2`).
-- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.3.0` (or legacy `tdf 0.2.0`) at nesting depth `0` before any root block (preceded only by optional blank lines and `#` comments). A file with no statements (empty or containing only whitespace and `#` comments) or whose first statement is not `tdf <version>` MUST be rejected with `MissingVersionHeader`. A file containing `tdf 0.3.0` and zero root blocks is a valid empty TDF document.
+- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.4.0` at nesting depth `0` before any root block (preceded only by optional blank lines and `#` comments). A file with no statements (empty or containing only whitespace and `#` comments) or whose first statement is not `tdf <version>` MUST be rejected with `MissingVersionHeader`. A file containing `tdf 0.4.0` and zero root blocks is a valid empty TDF document.
 - **Root-Level Directive Prohibition:** Aside from the initial `tdf` version header, any directive appearing at nesting depth `0` (outside of a `{ ... }` block), including a duplicate `tdf` directive later in the file, MUST be rejected as a syntax error (`UnexpectedRootDirective`).
 
 ### 3.2 Blocks
@@ -129,7 +152,7 @@ A **Block** groups related directives and optional nested sub-blocks under a nam
 ```
 
 - **Block Header:** Consists of an Identifier, followed by one or more whitespace-separated Arguments (or zero arguments for parameterless sub-blocks such as `subtasks {` and `condition {`), followed by the opening brace `{`.
-- **Opening Brace Placement:** The opening brace `{` MUST appear on the same line as the block Identifier and its arguments, separated from the preceding token by at least one horizontal whitespace character (e.g., `task t001 {`, `task t001 priority {`, `label home {`, `subtasks auto-finish {`, or `condition {`).
+- **Opening Brace Placement:** The opening brace `{` MUST appear on the same line as the block Identifier and its arguments, separated from the preceding token by at least one horizontal whitespace character (e.g., `task t_8jKaCd_OkD2 {`, `task t_8jKaCd_OkD2 priority {`, `label l_4x9p2m_OkD2 {`, `subtasks auto-finish {`, or `condition {`).
 - **After Opening Brace:** Only optional horizontal whitespace and an optional `#` comment may follow `{` before the line terminator (`\n` or `\r\n`).
 - **Block Body:** Contains zero or more statements (Directives or nested Blocks), each on its own logical line.
 - **Closing Brace Placement:** Every block is closed by `}` on its own logical line (preceded only by optional horizontal whitespace and followed only by optional horizontal whitespace, an optional `#` comment, and a newline or `EOF`). Inline empty blocks (`{}`) on a single line are not permitted.
@@ -142,7 +165,7 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 <identifier> <argument> [<argument> ...]
 ```
 
-- **Scope:** Except for the mandatory initial `tdf 0.3.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
+- **Scope:** Except for the mandatory initial `tdf 0.4.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
 - **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line inside a block without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
 - **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a block directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
 - **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`, `repeat`) MUST NOT appear more than once per block (`DuplicateDirective`).
@@ -153,11 +176,20 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 (* Document Root: Mandatory Version Header followed by Blocks, Comments, and Blank Lines *)
 document        = { empty-line } version-header { empty-line | root-block } [ trailing-empty ] ;
 
-version-header  = ws* "tdf" ws+ bare-word ws* [ comment ] newline ;
+version-header  = ws* "tdf" ws+ "0.4.0" ws* [ comment ] newline ;
 
-root-block      = block ;
+root-block      = task-block
+                | label-block ;
 
-(* Blocks *)
+(* Root & Sub-Blocks *)
+task-block      = ws* "task" ws+ task-id [ ws+ "priority" ] ws+ "{" ws* [ comment ] newline
+                  { block-item }
+                  ws* "}" ws* [ comment ] ( newline | eof ) ;
+
+label-block     = ws* "label" ws+ label-id ws+ "{" ws* [ comment ] newline
+                  { block-item }
+                  ws* "}" ws* [ comment ] ( newline | eof ) ;
+
 block           = ws* identifier { ws+ argument } ws+ "{" ws* [ comment ] newline
                   { block-item }
                   ws* "}" ws* [ comment ] ( newline | eof ) ;
@@ -167,9 +199,21 @@ block-item      = empty-line
                 | directive ;
 
 (* Directives: Must contain at least one argument and end with a newline *)
-directive       = ws* identifier ws+ argument { ws+ argument } ws* [ comment ] newline ;
+directive       = labels-dir
+                | blocked-dir
+                | ws* identifier ws+ argument { ws+ argument } ws* [ comment ] newline ;
 
-(* Tokens *)
+labels-dir      = ws* "labels" ws+ label-id { ws+ label-id } ws* [ comment ] newline ;
+blocked-dir     = ws* "blocked" ws+ task-id { ws+ task-id } ws* [ comment ] newline ;
+
+(* Entity Identifiers: Mandatory 13-Character Base62 Format *)
+task-id         = "t_" base62-random "_" base62-time ;
+label-id        = "l_" base62-random "_" base62-time ;
+base62-random   = base62-char base62-char base62-char base62-char base62-char base62-char ;
+base62-time     = base62-char base62-char base62-char base62-char ;
+base62-char     = "0".."9" | "A".."Z" | "a".."z" ;
+
+(* Lexical Tokens *)
 identifier      = id-start { id-continue } ;
 id-start        = "a".."z" | "A".."Z" | "_" ;
 id-continue     = id-start | "0".."9" | "-" ;
@@ -209,34 +253,34 @@ At nesting depth `0`, every TDF document MUST start with the `tdf` version heade
 Every `.tdf` document MUST begin with a single-line `tdf` version header at nesting depth `0` before any root block:
 
 ```text
-tdf 0.3.0
+tdf 0.4.0
 ```
 
-- **First Statement Requirement:** `tdf 0.3.0` (or legacy `tdf 0.2.0` on input) MUST be the first statement of every `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at nesting depth `0`.
-- **Version Argument:** Takes a single bare-word `<version>` argument formatted as `<MAJOR>.<MINOR>.<PATCH>` and equal to `0.3.0` (or `0.2.0` for legacy input migration).
+- **First Statement Requirement:** `tdf 0.4.0` MUST be the first statement of every `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at nesting depth `0`.
+- **Version Argument:** Takes a single bare-word `<version>` argument formatted as `<MAJOR>.<MINOR>.<PATCH>` and strictly equal to `0.4.0`. Until version `1.0.0`, no prior draft versions or legacy fallbacks are supported.
 - **Validation Rules:**
   - If the file contains no statements or its first statement is not `tdf <version>`, the parser MUST fail with `MissingVersionHeader`.
-  - If `<version>` is not `0.3.0` (or legacy `0.2.0`), is quoted, or is followed by extra arguments on the header line, the parser MUST fail with `UnsupportedVersion`.
+  - If `<version>` is not `0.4.0`, is quoted, or is followed by extra arguments on the header line, the parser MUST fail with `UnsupportedVersion`.
   - If a duplicate `tdf` directive appears anywhere later in the file at nesting depth `0`, the parser MUST fail with `UnexpectedRootDirective`.
-- **Serializer Output:** A conforming TDF serializer MUST always emit `tdf 0.3.0` as the first statement of every output document (including an empty board with zero `label` and `task` blocks).
+- **Serializer Output:** A conforming TDF serializer MUST always emit `tdf 0.4.0` as the first statement of every output document (including an empty board with zero `label` and `task` blocks).
 
 ### 4.1 The `task` Block (Tasks)
 
 Every task is represented as an independent `task` block at the root level (header at nesting depth `0`, body at nesting depth `1`).
 
 ```text
-task <id> [priority] {
+task <task-id> [priority] {
     ...
 }
 ```
 
 #### 4.1.1 Header Parameters
-1. `<id>` (**Required**, Bare Word `<id>`): Unique identifier for the task across all `task` blocks in the document.
-   - Sequential IDs (`t001`, `t002`, `t003`, ...) or descriptive single-word IDs (`taxes2026`, `backup_check`) are permitted.
+1. `<task-id>` (**Required**, Bare Word `<task-id>`): Unique 13-character Base62 task identifier across all `task` blocks in the document, strictly matching `t_<6xBase62Random>_<4xBase62Time>` (`t_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}`, e.g., `t_8jKaCd_OkD2`; see Sections 2.8 and 2.9).
+   - Arbitrary bare words or `<label-id>` values (`l_...`) are invalid and MUST be rejected with `InvalidIdentifier`.
 2. `priority` (**Optional**, Bare Word Flag): Controls sorting precedence within the active pull cycle (see Section 5.5):
    - **When present:** Marks the task as prioritized so that it sorts ahead of all regular tasks in the active cycle (ordered chronologically by `queued` among prioritized tasks).
    - **When omitted:** The task is treated as a regular task and sorts strictly in ascending chronological order by its `queued` timestamp (FIFO) after any prioritized tasks.
-- Any missing `<id>`, extra header argument, or unknown header flag MUST be rejected with `InvalidBlockHeader`.
+- Any missing `<task-id>`, extra header argument, or unknown header flag MUST be rejected with `InvalidBlockHeader`. Any `<task-id>` token that is quoted or does not match `t_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}` MUST be rejected with `InvalidIdentifier`.
 
 #### 4.1.2 Directives in `task`
 
@@ -246,10 +290,10 @@ task <id> [priority] {
 | `created` | Yes | `1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Creation timestamp of the task in UTC. Required in every `task` block. |
 | `queued` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC timestamp governing ascending FIFO ordering in the active cycle. **When omitted** (and `finished` is omitted), the task is classified as `Someday` and excluded from the active cycle. |
 | `finished` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC completion timestamp. **When present**, the task is classified as `Completed` and subject to garbage collection once older than $30$ days in UTC. **When omitted**, the task is open. |
-| `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC per-entity modification timestamp used for entity-level synchronization (Section 6.7). **When omitted**, effective modification time falls back to $\max(\text{created}, \text{queued}, \text{finished})$ in UTC. |
+| `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC per-entity modification timestamp used for entity-level synchronization (Section 6.7). **When omitted**, effective modification time is derived from $\max(\text{created}, \text{queued}, \text{finished})$ in UTC. |
 | `note` | No | `0..1` | `"<text>"` | Optional extended description or note (`1..MAX_NOTE_LENGTH` characters). **When omitted**, the task has no extended note. |
-| `labels` | No | `0..1` | `<id1> [<id2> ...]` | One or more space-separated `label` `<id>`s assigned to the task. Every referenced `<id>` MUST match a declared `label` block in the document (`UnknownLabelReference`). **When present**, associates the task with the referenced labels for context filtering and group-level condition inheritance. **When omitted**, the task has no label assignment. |
-| `blocked` | No | `0..1` | `<task_id1> [<task_id2> ...]` | One or more space-separated `<id>`s of prerequisite tasks. **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive (non-existent, pruned, or already completed task IDs do not block the task). Dependency references MUST NOT form a direct or indirect cycle (`CircularDependency`). **When omitted**, no task-dependency block applies. |
+| `labels` | No | `0..1` | `<label-id1> [<label-id2> ...]` | One or more space-separated 13-character Base62 `<label-id>`s (`l_<6xBase62Random>_<4xBase62Time>`) assigned to the task. Every argument MUST match `l_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}` (`InvalidIdentifier` if quoted or malformed) and MUST match a declared `label` block in the document (`UnknownLabelReference`). **When present**, associates the task with the referenced labels for context filtering and group-level condition inheritance. **When omitted**, the task has no label assignment. |
+| `blocked` | No | `0..1` | `<task-id1> [<task-id2> ...]` | One or more space-separated 13-character Base62 `<task-id>`s (`t_<6xBase62Random>_<4xBase62Time>`) of prerequisite tasks. Every argument MUST match `t_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}` (`InvalidIdentifier` if quoted or malformed). **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive (non-existent, pruned, or already completed task IDs do not block the task). Dependency references MUST NOT form a direct or indirect cycle (`CircularDependency`). **When omitted**, no task-dependency block applies. |
 | `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local wall-clock deferral / snooze timestamp. **When present**, while the timestamp lies strictly in the future relative to the local wall-clock evaluation timestamp (`suspended > localNow`), the task is classified immediately as `Blocked` (`Tier 4`) and evaluation of all other conditions (`blocked` prerequisites and `condition` rules) is disabled. **When omitted** (or `<= localNow`), no time-deferral block applies. |
 | `repeat` | No | `0..1` | `<count> <days\|weeks\|months>` | Completion-relative recurrence rule (`1..3650` `days`, `weeks`, or `months`). **When present**, completing the task does NOT set `finished`; instead, the task remains open, resets all `subtasks` steps to `false`, adds the `priority` header flag, sets `suspended` to `<next_due_local>` (`localNow + <count> <unit>`, defaulting to `00:00` local time on the target date or preserving the existing `<HH:MM[:SS]>` time of day from `suspended` when previously set), sets `queued` to `<next_due_utc>` (`<next_due_local>` converted to UTC), and advances `modified` so the task enters `Blocked` (`Tier 4`) until `<next_due_local>` and wakes up directly into `Focus` (`Tier 1`, or the top of `Ready` if `Focus` already holds `3` earlier-queued priority tasks). **When omitted**, completing the task sets `finished` and moves it to `Completed` (`Tier 6`). |
 | `condition` | No | `0..N` | `<type> <args...>`, `<type> any`, `any`, or `{ ... }` | Task-level activation condition(s) (`day`, `time`, `location`, group resets `day any`, `time any`, `location any`, or global reset `condition any`) written either as an inline directive or a `condition { ... }` sub-block (see Section 4.3). **When present**, `condition any` disables all inherited `label` conditions, whereas a group-specific rule (`day`, `time`, or `location`) or group reset (`<type> any`) overrides only that specific rule group from assigned labels while preserving all other inherited label condition groups and keeping the task's `labels` assignment intact. |
@@ -272,10 +316,10 @@ subtasks [auto-finish] {
 
 ### 4.2 The `label` Block (Labels & Context Profiles)
 
-Defines a named label (work context and reusable condition profile) at the root level (header at nesting depth `0`, body at nesting depth `1`) that tasks can reference via the `labels` directive. A `label` block header requires exactly one `<id>` argument (`InvalidBlockHeader` if missing or if extra header arguments are present).
+Defines a named label (work context and reusable condition profile) at the root level (header at nesting depth `0`, body at nesting depth `1`) that tasks can reference via the `labels` directive. A `label` block header requires exactly one 13-character Base62 `<label-id>` argument matching `l_<6xBase62Random>_<4xBase62Time>` (`InvalidBlockHeader` if missing or if extra header arguments are present; `InvalidIdentifier` if quoted or not matching `l_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}`).
 
 ```text
-label <id> {
+label <label-id> {
     name     "<display_name>"
     color    "<hex_color_code>"
     note     "<optional_description>"
@@ -294,7 +338,7 @@ label <id> {
 | `name` | Yes | `1` | `"<text>"` | Human-readable display name of the label (`1..MAX_TEXT_LENGTH` characters, e.g., `"Home & Garden"`). |
 | `color` | No | `0..1` | `"#RRGGBB"` | Optional hexadecimal color code associated with the label. |
 | `note` | No | `0..1` | `"<text>"` | Optional description of the label (`1..MAX_NOTE_LENGTH` characters). |
-| `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Optional UTC per-entity modification timestamp used for entity-level synchronization (Section 6.7). **When omitted**, effective modification time falls back to `2026-11-01 08:00:00` UTC. |
+| `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC per-entity modification timestamp used for entity-level synchronization (Section 6.7). **When present**, records the label's last UTC modification timestamp. **When omitted**, the label has no stored modification timestamp until stamped with the current UTC timestamp (`now`) on mutation or synchronization. |
 | `condition` | No | `0..N` | `<type> <args...>` or `{ ... }` | Optional activation conditions (`day`, `time`, `location`) inherited by rule group for tasks carrying this label unless overridden for that group or cleared globally via `condition any` on the task (see Section 4.3). |
 
 ### 4.3 Activation Conditions (`condition`)
@@ -362,7 +406,7 @@ Task-level condition rules operate at the granularity of individual rule groups 
      - **Task Group Reset (`G any`):** If the `task` specifies `day any`, `time any`, or `location any` for group $G$, effective group $G$ is cleared to empty (`0` rules, unrestricted), ignoring the `label`'s rules for group $G$.
      - **Task Group Override (`G <args...>`):** If the `task` defines one or more rules for group $G$, the `task`'s rules for group $G$ replace only the `label`'s rules for group $G$.
      - **Label Group Inheritance (No Task Rule for $G$):** If the `task` defines no rule or reset for group $G$, effective group $G$ inherits the rules defined for group $G$ on the `label` (or is empty if the `label` defines no rules for $G$).
-   - Consequently, a task assigned to `label home` (`day sat sun`, `time 08:00 20:00`, `location ...`) that specifies `condition time 09:00 18:00` overrides only the `time` group (`09:00..18:00`) while still inheriting `day sat sun` and `location` from `home`. To also allow execution on weekdays while still requiring `home`'s GPS location, the task can specify `day any` alongside `time 09:00 18:00`.
+   - Consequently, a task assigned to `label l_4x9p2m_OkD2` (`day sat sun`, `time 08:00 20:00`, `location ...`) that specifies `condition time 09:00 18:00` overrides only the `time` group (`09:00..18:00`) while still inheriting `day sat sun` and `location` from `l_4x9p2m_OkD2`. To also allow execution on weekdays while still requiring `l_4x9p2m_OkD2`'s GPS location, the task can specify `day any` alongside `time 09:00 18:00`.
 2. **Unlabeled Task (`labels` Omitted):**
    - If a `task` has no `labels` directive, it has a single effective condition context consisting exclusively of the task's own `day`, `time`, and `location` groups (any group omitted or set to `<type> any` is empty/unrestricted).
 3. **Active `label` Context Filter Selected:**
@@ -394,7 +438,7 @@ To minimize computational cost, each effective condition context $C$ is evaluate
 When evaluating a `.tdf` document against a UTC reference timestamp (`now`) and effective local wall-clock timestamp (`localNow`), optional device GPS coordinates, and an optional active `label` context filter, the six tiers are derived deterministically in a single $O(N)$ pipeline across all `task` blocks. Point-in-time ordering (`created`, `queued`, `finished`, `modified`) and 30-day completed task retention pruning are evaluated in **UTC** relative to `now`, whereas recurring calendar/wall-clock rules (`condition day`, `condition time`, and `suspended`) are evaluated against the effective **local wall-clock time** (`localNow`):
 
 ### 5.1 Pre-Filtering — Active `label` Context Filter
-- **When an active `label` context filter is selected:** Only tasks whose `labels` directive contains the active `label` `<id>` enter the tier classification steps (Sections 5.2 through 5.5). All 6 tiers (`Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, `Planned`) are scoped to that label context.
+- **When an active `label` context filter is selected:** Only tasks whose `labels` directive contains the active `label` `<label-id>` enter the tier classification steps (Sections 5.2 through 5.5). All 6 tiers (`Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, `Planned`) are scoped to that label context.
 - **When no `label` context filter is selected (global view):** All `task` blocks in the document enter the tier classification steps.
 
 ### 5.2 Tier 6 — `Completed`
@@ -429,8 +473,9 @@ All remaining retained scheduled, unblocked, open tasks (`queued` is present, `f
 
 State transitions mutate the task directives (`queued`, `finished`, `modified`) and header flags (`priority`) in the `.tdf` document rather than moving task blocks between static tier sections. Tier membership is always derived deterministically from the resulting task attributes via Section 5:
 
-### 6.1 Creating a New Task
-- **For `Planned` (Default):** Sets `created`, `queued`, and `modified` to the current UTC timestamp (`now`). If `Focus` or `Ready` has open capacity ($< 3$ or $< 5$ tasks) and all effective conditions are satisfied, the slicing pipeline (Section 5.5) places the task into the corresponding higher tier automatically.
+### 6.1 Creating a New Task or Label
+- **Entity ID Generation:** Generates an immutable 13-character Base62 `<task-id>` (`t_<6xBase62Random>_<4xBase62Time>`) for a new `task` or `<label-id>` (`l_<6xBase62Random>_<4xBase62Time>`) for a new `label` per Section 2.9, verified unique against all existing IDs in the document.
+- **For `Planned` (Default Task):** Sets `created`, `queued`, and `modified` to the current UTC timestamp (`now`). If `Focus` or `Ready` has open capacity ($< 3$ or $< 5$ tasks) and all effective conditions are satisfied, the slicing pipeline (Section 5.5) places the task into the corresponding higher tier automatically.
 - **For `Someday`:** Sets `created` and `modified` to the current UTC timestamp (`now`) and omits `queued`.
 - **With `priority` Flag (For `Focus`):** Sets `created`, `queued`, and `modified` to `now` in UTC and adds the `priority` flag to the `task` block header so that the task sorts ahead of regular tasks in the active pull cycle (Section 5.5).
 
@@ -453,9 +498,9 @@ State transitions mutate the task directives (`queued`, `finished`, `modified`) 
 - **Recurring Task (`repeat <count> <days|weeks|months>` Present):** Completing an open task that possesses a `repeat` directive (either explicitly or via `subtasks auto-finish`) does NOT set `finished` and does NOT move the task to `Completed` (`Tier 6`):
   1. **Remain Open:** The `finished` directive remains omitted so the task stays open and is never subject to 30-day garbage collection.
   2. **Reset Subtasks:** If the task contains a `subtasks` sub-block, every contained `step` directive is reset to `step false "<text>"`.
-  3. **Ensure Priority on Wake-Up:** The `priority` flag is added to the `task <id> priority {` block header (if not already present).
+  3. **Ensure Priority on Wake-Up:** The `priority` flag is added to the `task <task-id> priority {` block header (if not already present).
   4. **Calculate Next Due Timestamp (`<next_due_local>` and `<next_due_utc>`):** Relative to the local wall-clock completion timestamp (`localNow`), the next target calendar date is computed by adding `<count>` days, `<count> * 7` days (for `weeks`), or `<count>` calendar months (for `months`, clamping the day of the month to the last valid calendar day of the target month when the source day exceeds the target month's length, e.g., `2026-01-31 + 1 months -> 2026-02-28`). If the task previously had a `suspended` directive with an explicit non-midnight `<HH:MM[:SS]>` time of day (excluding the indefinite sentinel `9999-12-31 23:59`), that time of day is preserved on `<next_due_local>`; otherwise `<next_due_local>` defaults to `00:00` local time (`<YYYY-MM-DD>`) so late-evening completions do not cause time-of-day drift.
-  5. **Defer into `Blocked` & Advance `modified`:** Sets `suspended` to `<next_due_local>` (local wall-clock time), sets `queued` to `<next_due_utc>` (`<next_due_local>` converted to UTC using the active UTC offset `localNow - now`), and advances `modified` via `nextModifiedTimestamp(now, prevModifiedAt)`. Because `suspended > localNow`, the task immediately enters `Blocked` (`Tier 4`). Once `localNow >= suspended` (and any `blocked` prerequisites or `condition` rules are satisfied), the task automatically leaves `Blocked` with the `priority` flag and `queued = <next_due_utc>`, sorting directly into `Focus` (`Tier 1`, or the top of `Ready` if `Focus` already holds `3` earlier-queued priority tasks).
+  5. **Defer into `Blocked` & Advance `modified`:** Sets `suspended` to `<next_due_local>` (local wall-clock time), sets `queued` to `<next_due_utc>` (`<next_due_local>` converted to UTC using the active UTC offset `localNow - now`), and advances `modified` per Section 6.7. Because `suspended > localNow`, the task immediately enters `Blocked` (`Tier 4`). Once `localNow >= suspended` (and any `blocked` prerequisites or `condition` rules are satisfied), the task automatically leaves `Blocked` with the `priority` flag and `queued = <next_due_utc>`, sorting directly into `Focus` (`Tier 1`, or the top of `Ready` if `Focus` already holds `3` earlier-queued priority tasks).
 
 ### 6.5 Restoring a Task from `Completed`
 - Removes the `finished` directive, advances `modified`, and applies the chosen target state:
@@ -466,21 +511,20 @@ State transitions mutate the task directives (`queued`, `finished`, `modified`) 
 ### 6.6 Setting Task Deferral (`suspended`), Recurrence (`repeat`), Prerequisites (`blocked`), and Activation Conditions (`condition`)
 - **Setting `suspended`:** Sets the `suspended` directive on an open task to a future local wall-clock timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date), ensures `queued` is set in UTC, and advances `modified`. While `suspended > localNow`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive, resets `queued` to `now` (in UTC) if `queued` was previously in the future (`queued > now`, e.g., when manually unblocking a deferred recurring task ahead of `<next_due_utc>`), and re-evaluates the task's remaining conditions.
 - **Setting `repeat`:** Sets or updates the `repeat <count> <days|weeks|months>` directive (`1..3650`) on a task block (or omits `repeat` when cleared) and advances `modified`.
-- **Setting `blocked`:** Sets or updates the space-separated prerequisite `<id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle) and advances `modified`.
+- **Setting `blocked`:** Sets or updates the space-separated prerequisite `<task-id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle) and advances `modified`.
 - **Setting `condition`:** Sets or updates task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or the global reset (`condition any`) and advances `modified`.
 
 ### 6.7 Per-Entity Synchronization & Monotonic Modification Timestamps (`modified`)
 To support entity-level merging across in-memory state, local `.tdf` files, and WebDAV remote `.tdf` files without whole-file overwrites:
 1. **Effective Modification Timestamp (`effectiveModifiedAt`):**
    - For a `task` block, `effectiveModifiedAt` equals `modified` if present, or $\max(\text{created}, \text{queued}, \text{finished})$ in UTC if `modified` is omitted.
-   - For a `label` block, `effectiveModifiedAt` equals `modified` if present, or `2026-11-01 08:00:00` UTC if `modified` is omitted.
+   - For a `label` block, `effectiveModifiedAt` equals `modified` if present, or the current UTC synchronization timestamp (`now`) when `modified` is omitted on a newly introduced label.
 2. **Monotonic Hybrid Logical Clock (HLC) Advancement:**
    - Whenever an existing `task` or `label` is mutated at UTC timestamp $\text{now}$ (truncated to second precision), its new `modified` timestamp is $\max(\text{now}, \text{prevModifiedAt} + 1\text{s})$.
 3. **Entity-Level Merge Rules:**
-   - **Last-Write-Wins (LWW) & External Edit Tie-Breaking:** For matching `<id>` entities, the entity with the strictly newer `effectiveModifiedAt` wins. If both sides have identical `effectiveModifiedAt` values but differing content, the incoming file (`secondary`) wins and its `modified` timestamp is advanced by $+1\text{s}$.
-   - **Offline Sequential Task ID Collisions & Dependency Rewriting:** If two tasks share the same `<id>` (e.g., `t006`) but have different `created` timestamps and distinct `name` values, both are preserved by assigning the next free sequential `tNNN` ID to the later-created task and rewriting any intra-board `blocked` references on that same incoming board for tasks created on or after the reassigned task.
+   - **Immutable Entity Identity:** Once generated (Section 2.9), an entity ID (`<task-id>` or `<label-id>`) is immutable for the lifetime of that `task` or `label`. During synchronization, identical IDs unconditionally represent the same entity, and distinct IDs unconditionally represent distinct entities.
+   - **Last-Write-Wins (LWW) & External Edit Tie-Breaking:** For matching `<task-id>` or `<label-id>` entities, the entity with the strictly newer `effectiveModifiedAt` wins. If both sides have identical `effectiveModifiedAt` values but differing content, the incoming file (`secondary`) wins and its `modified` timestamp is advanced by $+1\text{s}$.
    - **Baseline-Aware External Task & Label Deletions:** If a task or label existed in the last-synced baseline, was unmodified on the primary side (`primary == baseline`), and is absent from the incoming secondary file, it is recognized as an intentional external deletion and omitted.
-   - **Handwritten Labels Without `modified`:** If an incoming file contains a `label` block without an explicit `modified` directive (`modified` omitted) that was not present in the last-synced baseline, it is treated as newly added/re-added in an external text editor and preserved (stamping `modified` to `now` UTC) even if an older label deletion timestamp exists.
 
 ## 7. Conformance & Resource Bounds
 
@@ -502,12 +546,12 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 
 A conforming TDF parser MUST report a structured error (including the 1-based line number) and MUST fail deterministically on any of the following inputs:
 
-- **Missing Version Header (`MissingVersionHeader`):** The file contains no statements (empty or only whitespace and `#` comments), or the first statement at nesting depth `0` is not `tdf <version>` (e.g., the file starts directly with `label home {` or `task t001 {`, or bare `tdf` without a version argument).
-- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies a `<version>` other than `0.3.0` (or legacy `0.2.0`) (e.g., `tdf 0.1.0` or `tdf 1.0.0`), quotes the version token, or has extra arguments (e.g., `tdf 0.3.0 extra`).
+- **Missing Version Header (`MissingVersionHeader`):** The file contains no statements (empty or only whitespace and `#` comments), or the first statement at nesting depth `0` is not `tdf <version>` (e.g., the file starts directly with `label l_4x9p2m_OkD2 {` or `task t_8jKaCd_OkD2 {`, or bare `tdf` without a version argument).
+- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies any `<version>` other than `0.4.0` (e.g., `tdf 0.1.0` or `tdf 1.0.0`), quotes the version token, or has extra arguments (e.g., `tdf 0.4.0 extra`).
 - **Root Directive (`UnexpectedRootDirective`):** Any root-level directive other than the initial `tdf` version header appears at nesting depth `0` outside of any `{ ... }` block (e.g., `name "Mow the lawn"` at root level, or a duplicate `tdf` directive later in the file).
 - **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (e.g., `queued` with no timestamp value).
-- **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" t001 {` or `"name" "Mow the lawn"`), a block/directive identifier starts with an invalid character (e.g., `123task {` or `-flag val`), or an `<id>` argument does not match `[a-zA-Z0-9_-]+`.
-- **Malformed Block Header or Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task t001{` or `condition{`), a required header `<id>` is missing (e.g., `task {` or `label {`), or an unknown/extra header argument is provided (e.g., `task t001 urgent {`, `label home extra {`, `subtasks urgent {`, or `condition arg {`).
+- **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" t_8jKaCd_OkD2 {` or `"name" "Mow the lawn"`), a block/directive identifier starts with an invalid character (e.g., `123task {` or `-flag val`), a `task` block header `<task-id>` or `blocked` directive argument is quoted or does not strictly match `t_<6xBase62Random>_<4xBase62Time>` (`t_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}`), or a `label` block header `<label-id>` or `labels` directive argument is quoted or does not strictly match `l_<6xBase62Random>_<4xBase62Time>` (`l_[0-9A-Za-z]{6}_[0-9A-Za-z]{4}`).
+- **Malformed Block Header or Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task t_8jKaCd_OkD2{` or `condition{`), a required header `<task-id>` or `<label-id>` is missing (e.g., `task {` or `label {`), or an unknown/extra header argument is provided (e.g., `task t_8jKaCd_OkD2 urgent {`, `label l_4x9p2m_OkD2 extra {`, `subtasks urgent {`, or `condition arg {`).
 - **Unexpected Token, Control Character, or Trailing Tokens (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` or after `}`, a quote opens or closes in the middle of a token without separating whitespace (e.g., `foo"bar"` or `"foo"bar`), a directive has an invalid argument count, a `repeat` directive specifies an unknown unit other than `days`, `weeks`, or `months`, or the input contains invalid UTF-8 bytes, null bytes (`U+0000`), disallowed control characters, standalone `CR` without `LF`, or non-ASCII whitespace outside quotes.
 - **Unclosed Block (`UnclosedBlock`):** `EOF` is reached while nesting depth $> 0$.
 - **Unmatched Closing Brace (`UnexpectedClosingBrace`):** `}` is encountered at nesting depth `0`.
@@ -518,8 +562,8 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
   - `UnknownDirective`: A directive name is not valid for its enclosing block (`task`, `label`, `subtasks`, or `condition`), or a `condition` rule type is not `day`, `time`, or `location`.
   - `MissingRequiredDirective`: A required directive (`name` or `created` in `task`; `name` in `label`) is missing, or a `subtasks` or `condition` sub-block contains zero directives.
   - `DuplicateDirective`: A single-valued directive (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`, `repeat`) appears more than once in the same block, or more than one `subtasks` sub-block appears in a `task`.
-  - `DuplicateIdentifier`: Two root blocks in the same namespace (`task` or `label`) share an identical `<id>`.
-  - `UnknownLabelReference`: A `labels` directive in a `task` block references a label `<id>` that does not match any declared `label` block in the document (whereas `blocked` task `<id>`s referencing non-existent or pruned completed tasks remain valid and non-blocking).
+  - `DuplicateIdentifier`: Two root blocks in the same namespace (`task` or `label`) share an identical `<task-id>` or `<label-id>`.
+  - `UnknownLabelReference`: A `labels` directive in a `task` block references a `<label-id>` that does not match any declared `label` block in the document (whereas `blocked` `<task-id>`s referencing non-existent or pruned completed tasks remain valid and non-blocking).
   - `CircularDependency`: Task dependency references in `blocked` directives form a direct cycle (self-dependency) or an indirect cycle across two or more `task` blocks.
   - `InvalidTimestamp` / `InvalidBoolean` / `InvalidNumber` / `InvalidCondition` / `InvalidColor`: A directive argument fails semantic validation (invalid ISO-8601 `<YYYY-MM-DD> [<HH:MM[:SS]>]` date/time, invalid `<HH:MM>` time window or identical start and end times `start == end`, unknown weekday token, latitude outside `[-90.0, 90.0]`, longitude outside `[-180.0, 180.0]`, radius $\le 0$, `repeat` `<count>` not a positive integer $\ge 1$, `any` or `<type> any` used inside a `label` condition, `condition any` combined with other condition rules on a `task`, `<type> any` combined with other rules of the same `<type>` group on a `task`, or a `color` argument not matching `"#RRGGBB"`).
 - **Limit Exceeded (`LimitExceeded`):** Any resource bound defined in Section 7 is exceeded (including `repeat` `<count>` $> 3650$).
@@ -531,9 +575,9 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-tdf 0.3.0
+tdf 0.4.0
 
-label home {
+label l_4x9p2m_OkD2 {
     name     "Home & Garden"
     modified 2026-11-01 08:00
 
@@ -544,7 +588,7 @@ label home {
     }
 }
 
-label it {
+label l_9kLm2P_0aBc {
     name     "IT & Servers"
     color    "#2196F3"
     modified 2026-11-01 08:00
@@ -556,16 +600,16 @@ label it {
     }
 }
 
-# Prioritized task in 'home' overriding only the 'time' condition group
-# (narrowed to 09:00..18:00 while inheriting 'day sat sun' and 'location' from 'home'):
-task t001 priority {
+# Prioritized task in 'l_4x9p2m_OkD2' overriding only the 'time' condition group
+# (narrowed to 09:00..18:00 while inheriting 'day sat sun' and 'location' from 'l_4x9p2m_OkD2'):
+task t_8jKaCd_OkD2 priority {
     name      "Mow the lawn"
     note      "Check fuel level before starting"
     created   2026-11-01 19:30
     queued    2026-11-01 19:30
     modified  2026-11-01 19:30
-    labels    home
-    blocked   t002
+    labels    l_4x9p2m_OkD2
+    blocked   t_3nQp7R_OkB8
     suspended 2026-11-05
     condition time 09:00 18:00
 
@@ -575,45 +619,45 @@ task t001 priority {
     }
 }
 
-# Prerequisite task in 'home' using 'condition any' to disable all inherited
+# Prerequisite task in 'l_4x9p2m_OkD2' using 'condition any' to disable all inherited
 # label conditions (can be ordered online on any day, at any time, from anywhere):
-task t002 {
+task t_3nQp7R_OkB8 {
     name      "Order replacement lawnmower blades online"
     created   2026-11-01 18:00
     queued    2026-11-01 18:00
     modified  2026-11-01 18:00
-    labels    home
+    labels    l_4x9p2m_OkD2
     condition any
 }
 
 # Task assigned to multiple labels without task-level overrides (in global view,
 # evaluates each label context independently and is active if all condition groups
-# of 'home' OR all condition groups of 'it' are satisfied; when filtered by 'home'
-# or 'it', evaluates only the selected label's conditions; repeats every 30 days):
-task t003 {
+# of 'l_4x9p2m_OkD2' OR all condition groups of 'l_9kLm2P_0aBc' are satisfied; when filtered by
+# 'l_4x9p2m_OkD2' or 'l_9kLm2P_0aBc', evaluates only the selected label's conditions; repeats every 30 days):
+task t_5vWx9Z_Ok91 {
     name     "Clean dust filters on home NAS server"
     created  2026-11-01 10:00
     queued   2026-11-01 10:00
     modified 2026-11-01 10:00
-    labels   home it
+    labels   l_4x9p2m_OkD2 l_9kLm2P_0aBc
     repeat   30 days
 }
 
 # Task in "Someday" (no 'queued' directive present)
-task t004 {
+task t_2bDf6H_OkA4 {
     name     "Design 3D-printed enclosure for backup NAS"
     created  2026-11-01 12:00
     modified 2026-11-01 12:00
-    labels   it
+    labels   l_9kLm2P_0aBc
 }
 
 # Completed task ('finished' is set -> deleted after 30 days)
-task t005 {
+task t_7mPr4T_09xY {
     name     "Mount winter tires"
     created  2026-10-20 14:00
     queued   2026-10-21 08:00
     finished 2026-10-29 16:45
     modified 2026-10-29 16:45
-    labels   home
+    labels   l_4x9p2m_OkD2
 }
 ```
