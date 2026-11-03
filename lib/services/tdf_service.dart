@@ -20,6 +20,7 @@ import 'package:flutter/foundation.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/tdf_metadata.dart';
+import 'app_logger.dart';
 
 /// Mandatory lexical, structural, and semantic error categories defined in `TDF_SPEC.md` Section 8.
 enum TdfErrorKind {
@@ -183,71 +184,39 @@ class TdfService {
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
   }) {
-    _validateByteLimit(tdfContent);
-    final state = _ParserState();
-    var offset = 0;
-    var lineNumber = 0;
-
-    while (offset < tdfContent.length) {
-      lineNumber++;
-      if (lineNumber > maxLineCount) {
-        throw TdfException(
-          kind: TdfErrorKind.limitExceeded,
-          line: lineNumber,
-          message: 'TDF document exceeds maximum line count of $maxLineCount.',
-        );
-      }
-      final span = _findLineSpan(tdfContent, offset, lineNumber);
-      _processLogicalLine(
+    final stopwatch = Stopwatch()..start();
+    try {
+      final board = _parseInternal(
         tdfContent,
-        span.lineStart,
-        span.lineEnd,
-        lineNumber,
-        state,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+        pruneExpiredCompleted: pruneExpiredCompleted,
       );
-      offset = span.nextOffset;
-    }
-
-    if (!state.hasSeenFirstStatement) {
-      throw const TdfException(
-        kind: TdfErrorKind.missingVersionHeader,
-        line: 1,
-        message: 'TDF document is missing required "tdf 0.4.0" version header.',
+      AppLogger.info(
+        LogTag.tdf,
+        'TdfService.parse v$supportedVersion tasks=${board.allTasks.length} labels=${board.labels.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
       );
-    }
-
-    if (state.blockStack.isNotEmpty) {
-      throw TdfException(
-        kind: TdfErrorKind.unclosedBlock,
-        line: lineNumber == 0 ? 1 : lineNumber,
-        message: 'Reached end of file with unclosed block.',
+      return board;
+    } on TdfException catch (error) {
+      AppLogger.error(
+        LogTag.tdf,
+        'TdfService.parse failed (${error.kind.name} at line ${error.line}): ${error.message}',
       );
+      rethrow;
     }
-
-    _validateAndResolveLabelReferences(state);
-    _validateDependencyCycles(state.taskEntries);
-    final resolvedActiveLabelId = _migrateLegacyIds(
-      state,
-      activeLabelId: activeLabelId,
-    );
-
-    final tasks = <TaskItem>[for (final entry in state.taskEntries) entry.task];
-
-    return TaskBoard.evaluate(
-      tasks: tasks,
-      evaluationTime: evaluationTime,
-      localEvaluationTime: localEvaluationTime,
-      labels: state.labels,
-      activeLabelId: resolvedActiveLabelId,
-      currentLatitude: currentLatitude,
-      currentLongitude: currentLongitude,
-      pruneExpiredCompleted: pruneExpiredCompleted,
-    );
   }
 
   /// Serializes [board] into a canonical `LF`-terminated (`.tdf`) document string.
   String serialize(TaskBoard board) {
+    final stopwatch = Stopwatch()..start();
     if (board.labels.isEmpty && board.allTasks.isEmpty) {
+      AppLogger.info(
+        LogTag.tdf,
+        'TdfService.serialize v$supportedVersion tasks=0 labels=0 elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
       return 'tdf $supportedVersion\n';
     }
     final buffer = StringBuffer('tdf $supportedVersion\n\n');
@@ -257,7 +226,12 @@ class TdfService {
     for (final task in board.allTasks) {
       _writeTaskBlock(buffer, task);
     }
-    return buffer.toString();
+    final output = buffer.toString();
+    AppLogger.info(
+      LogTag.tdf,
+      'TdfService.serialize v$supportedVersion tasks=${board.allTasks.length} labels=${board.labels.length} bytes=${output.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+    );
+    return output;
   }
 
   /// Adds [rule] to [builder] after verifying Section 4.3 reset conflict constraints.
@@ -1302,6 +1276,78 @@ class TdfService {
       args.sublist(1),
       allowResets: allowResets,
       lineNumber: lineNumber,
+    );
+  }
+
+  /// Internal single-pass TDF scanner and parser implementation called by [parse].
+  TaskBoard _parseInternal(
+    String tdfContent, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    bool pruneExpiredCompleted = false,
+  }) {
+    _validateByteLimit(tdfContent);
+    final state = _ParserState();
+    var offset = 0;
+    var lineNumber = 0;
+
+    while (offset < tdfContent.length) {
+      lineNumber++;
+      if (lineNumber > maxLineCount) {
+        throw TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: lineNumber,
+          message: 'TDF document exceeds maximum line count of $maxLineCount.',
+        );
+      }
+      final span = _findLineSpan(tdfContent, offset, lineNumber);
+      _processLogicalLine(
+        tdfContent,
+        span.lineStart,
+        span.lineEnd,
+        lineNumber,
+        state,
+      );
+      offset = span.nextOffset;
+    }
+
+    if (!state.hasSeenFirstStatement) {
+      throw const TdfException(
+        kind: TdfErrorKind.missingVersionHeader,
+        line: 1,
+        message: 'TDF document is missing required "tdf 0.4.0" version header.',
+      );
+    }
+
+    if (state.blockStack.isNotEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.unclosedBlock,
+        line: lineNumber == 0 ? 1 : lineNumber,
+        message: 'Reached end of file with unclosed block.',
+      );
+    }
+
+    _validateAndResolveLabelReferences(state);
+    _validateDependencyCycles(state.taskEntries);
+    final resolvedActiveLabelId = _migrateLegacyIds(
+      state,
+      activeLabelId: activeLabelId,
+    );
+
+    final tasks = <TaskItem>[for (final entry in state.taskEntries) entry.task];
+
+    return TaskBoard.evaluate(
+      tasks: tasks,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      labels: state.labels,
+      activeLabelId: resolvedActiveLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
     );
   }
 

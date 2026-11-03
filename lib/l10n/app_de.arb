@@ -252,5 +252,15 @@
   "tooltipIndicatorLinks": "Hat Links",
   "linkErrorInvalid": "Bitte sowohl einen Link-Titel als auch eine gültige URI mit Schema eingeben (z. B. https://...).",
   "linkErrorMaxExceeded": "Maximal 20 Links pro Aufgabe erreicht.",
-  "errorOpenLinkFailed": "Link konnte nicht geöffnet werden."
+  "errorOpenLinkFailed": "Link konnte nicht geöffnet werden.",
+  "diagnosticsSectionTitle": "Diagnoseprotokoll aktivieren",
+  "diagnosticsSectionDescription": "Zeichnet Laufzeitereignisse auf und sichert Absturzprotokolle lokal in tiertask.log zur Fehlersuche.",
+  "diagnosticLogButton": "Diagnoseprotokoll",
+  "diagnosticLogTitle": "Diagnoseprotokoll",
+  "emptyLogHint": "Noch keine Einträge im Diagnoseprotokoll vorhanden.",
+  "tooltipCopyLog": "Alles kopieren",
+  "tooltipScrollToBottom": "Nach unten scrollen",
+  "tooltipClearLog": "Protokoll leeren",
+  "logCopiedSnackBar": "Diagnoseprotokoll in die Zwischenablage kopiert.",
+  "logClearedSnackBar": "Diagnoseprotokoll geleert."
 }

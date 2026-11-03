@@ -1136,5 +1136,45 @@
   "errorOpenLinkFailed": "Could not open link.",
   "@errorOpenLinkFailed": {
     "description": "Error message shown when opening a task link URI fails."
+  },
+  "diagnosticsSectionTitle": "Enable Diagnostic Log",
+  "@diagnosticsSectionTitle": {
+    "description": "Settings section card title for the opt-in diagnostic logging toggle."
+  },
+  "diagnosticsSectionDescription": "Record runtime events and preserve crash traces locally in tiertask.log for debugging.",
+  "@diagnosticsSectionDescription": {
+    "description": "Settings section card description explaining opt-in diagnostic logging and crash preservation."
+  },
+  "diagnosticLogButton": "Diagnostic Log",
+  "@diagnosticLogButton": {
+    "description": "Navigation drawer button label that opens the diagnostic log viewer."
+  },
+  "diagnosticLogTitle": "Diagnostic Log",
+  "@diagnosticLogTitle": {
+    "description": "Dialog title for the diagnostic log viewer."
+  },
+  "emptyLogHint": "No diagnostic log entries recorded yet.",
+  "@emptyLogHint": {
+    "description": "Placeholder text shown in the diagnostic log viewer when the log buffer is empty."
+  },
+  "tooltipCopyLog": "Copy All",
+  "@tooltipCopyLog": {
+    "description": "Tooltip for the Copy All button in the diagnostic log viewer."
+  },
+  "tooltipScrollToBottom": "Scroll to Bottom",
+  "@tooltipScrollToBottom": {
+    "description": "Tooltip for the Scroll to Bottom button in the diagnostic log viewer."
+  },
+  "tooltipClearLog": "Clear Log",
+  "@tooltipClearLog": {
+    "description": "Tooltip for the Clear Log button in the diagnostic log viewer."
+  },
+  "logCopiedSnackBar": "Diagnostic log copied to clipboard.",
+  "@logCopiedSnackBar": {
+    "description": "SnackBar confirmation message shown after copying the diagnostic log to the clipboard."
+  },
+  "logClearedSnackBar": "Diagnostic log cleared.",
+  "@logClearedSnackBar": {
+    "description": "SnackBar confirmation message shown after clearing the diagnostic log."
   }
 }

@@ -19,6 +19,7 @@
 * **30-Day Completed Task Pruning:** Removes `Completed` tasks whose `finished` timestamp is strictly older than `30` days (UTC) on save.
 * **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only `.tdf` persistence (`LocalFileRepository` defaulting to `tiertask.tdf`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
 * **Encrypted Configuration Persistence:** Stores storage mode, local and remote `.tdf` file names, WebDAV credentials, language, theme, and time zone settings via `flutter_secure_storage`.
+* **Opt-In Diagnostic Logging & Crash Preservation (`enableLogging`):** Optional setting (`Enable Diagnostic Log`, default `Off`) that records sanitized runtime events across `LIFECYCLE`, `TDF`, `DOMAIN`, `SYNC`, `STORAGE`, and `UI` into `tiertask.log` with a 5,000-line ring buffer, preserves crash logs across unclean exits while truncating `tiertask.log` on clean shutdown, deletes `tiertask.log` immediately when disabled, and exposes an in-app sidepanel `Diagnostic Log` viewer (`Copy All`, `Scroll to Bottom`, `Clear Log`).
 
 ## Requirements
 

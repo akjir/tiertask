@@ -28,10 +28,12 @@ import '../models/webdav_config.dart';
 import '../providers/location_providers.dart';
 import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
+import '../services/app_logger.dart';
 import 'edit_labels_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/app_logo.dart';
 import 'widgets/location_status_dialog.dart';
+import 'widgets/log_viewer_dialog.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/tier_page_indicator.dart';
 import 'widgets/tier_task_pill.dart';
@@ -166,14 +168,22 @@ class _DrawerActionTile extends StatelessWidget {
   }
 }
 
-/// Footer actions inside [_LandingDrawer] for synchronization, preview, and settings.
+/// Footer actions inside [_LandingDrawer] for synchronization, preview, diagnostic log, and settings.
 class _DrawerFooterSection extends StatelessWidget {
   /// Creates a [_DrawerFooterSection].
   const _DrawerFooterSection({
+    required this.enableLogging,
+    required this.onOpenDiagnosticLog,
     required this.onOpenMarkdownPreview,
     required this.onOpenSettings,
     required this.onSyncRemote,
   });
+
+  /// Whether opt-in diagnostic logging is enabled and the log viewer button should be shown.
+  final bool enableLogging;
+
+  /// Callback to open the [LogViewerDialog].
+  final VoidCallback onOpenDiagnosticLog;
 
   /// Callback to open the raw TDF preview dialog.
   final VoidCallback onOpenMarkdownPreview;
@@ -200,6 +210,13 @@ class _DrawerFooterSection extends StatelessWidget {
           title: localizations.tooltipMarkdownPreview,
           onAction: onOpenMarkdownPreview,
         ),
+        if (enableLogging)
+          _DrawerActionTile(
+            tileKey: const ValueKey('drawer_diagnostic_log_tile'),
+            icon: Icons.bug_report_outlined,
+            title: localizations.diagnosticLogButton,
+            onAction: onOpenDiagnosticLog,
+          ),
         _DrawerActionTile(
           icon: Icons.settings_outlined,
           title: localizations.tooltipSettings,
@@ -647,6 +664,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Pushes [EditLabelsScreen] onto the navigation stack.
   void _openEditLabels(BuildContext context, {required bool autofocusCreate}) {
+    AppLogger.info(LogTag.ui, 'Opened EditLabelsScreen');
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => EditLabelsScreen(autofocusCreate: autofocusCreate),
@@ -663,6 +681,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Pushes [SettingsScreen] onto the navigation stack.
   void _openSettings(BuildContext context) {
+    AppLogger.info(LogTag.ui, 'Opened SettingsScreen');
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
@@ -707,6 +726,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// Displays a dialog containing the serialized `.tdf` representation of the board.
   void _showMarkdownPreviewDialog(BuildContext context) {
+    AppLogger.info(LogTag.ui, 'Opened Raw TDF preview dialog');
     final board =
         ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
@@ -935,6 +955,8 @@ class _LandingDrawer extends StatelessWidget {
             ),
             const Divider(height: 8),
             _DrawerFooterSection(
+              enableLogging: activeWorkspace.config.enableLogging,
+              onOpenDiagnosticLog: () => showLogViewerDialog(context),
               onOpenMarkdownPreview: onOpenMarkdownPreview,
               onOpenSettings: onOpenSettings,
               onSyncRemote: onSyncRemote,

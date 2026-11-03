@@ -254,6 +254,7 @@ class AppWorkspace {
     final tzWord =
         ((config.timeZoneMode.id & 0x01) << 15) |
         ((config.locationEnabled ? 1 : 0) << 14) |
+        ((config.diagnosticsEnabled ? 1 : 0) << 13) |
         ((config.manualTimeZoneOffsetMinutes -
                 WebDavConfig.minUtcOffsetMinutes) &
             0x07FF);
@@ -321,6 +322,7 @@ class AppWorkspace {
         timeZoneMode: AppTimeZoneMode.fromId((tzWord >> 15) & 0x01),
         manualTimeZoneOffsetMinutes:
             (tzWord & 0x07FF) + WebDavConfig.minUtcOffsetMinutes,
+        diagnosticsEnabled: ((tzWord >> 13) & 0x01) == 1,
       ),
     );
     if (workspace.id.isEmpty ||

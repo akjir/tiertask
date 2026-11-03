@@ -17,6 +17,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
+import '../services/app_logger.dart';
 import 'task_providers.dart';
 
 /// Provides the single currently loaded [AppWorkspace] in memory.
@@ -121,6 +122,10 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     final nextWorkspace = await repository.activateWorkspace(workspaceId);
     _replaceLoadedWorkspace(nextWorkspace);
     ref.read(_workspaceListRevisionProvider.notifier).bump();
+    AppLogger.info(
+      LogTag.lifecycle,
+      'Switched active workspace to id=${nextWorkspace.id} name="${nextWorkspace.name}"',
+    );
     return nextWorkspace;
   }
 

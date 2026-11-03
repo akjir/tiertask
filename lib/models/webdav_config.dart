@@ -182,6 +182,7 @@ class WebDavConfig {
     this.locationEnabled = false,
     this.timeZoneMode = AppTimeZoneMode.automatic,
     int manualTimeZoneOffsetMinutes = 0,
+    this.diagnosticsEnabled = false,
   }) : storageMode =
            storageMode ??
            (serverUrl != '' && username != '' && password != ''
@@ -282,6 +283,12 @@ class WebDavConfig {
   /// Manually configured UTC offset in minutes (`-720..840`) when [timeZoneMode] is [AppTimeZoneMode.manual].
   final int manualTimeZoneOffsetMinutes;
 
+  /// Whether opt-in diagnostic logging (`tiertask.log`) is enabled.
+  final bool diagnosticsEnabled;
+
+  /// Whether opt-in diagnostic logging is enabled (alias for [diagnosticsEnabled]).
+  bool get enableLogging => diagnosticsEnabled;
+
   /// Whether at least one storage backend required by [storageMode] is ready for I/O.
   bool get hasActiveStorage {
     return switch (storageMode) {
@@ -324,6 +331,7 @@ class WebDavConfig {
     bool? locationEnabled,
     AppTimeZoneMode? timeZoneMode,
     int? manualTimeZoneOffsetMinutes,
+    bool? diagnosticsEnabled,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -339,6 +347,7 @@ class WebDavConfig {
       timeZoneMode: timeZoneMode ?? this.timeZoneMode,
       manualTimeZoneOffsetMinutes:
           manualTimeZoneOffsetMinutes ?? this.manualTimeZoneOffsetMinutes,
+      diagnosticsEnabled: diagnosticsEnabled ?? this.diagnosticsEnabled,
     );
   }
 
@@ -478,7 +487,8 @@ class WebDavConfig {
         other.themePalette == themePalette &&
         other.locationEnabled == locationEnabled &&
         other.timeZoneMode == timeZoneMode &&
-        other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes;
+        other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes &&
+        other.diagnosticsEnabled == diagnosticsEnabled;
   }
 
   @override
@@ -495,5 +505,6 @@ class WebDavConfig {
     locationEnabled,
     timeZoneMode,
     manualTimeZoneOffsetMinutes,
+    diagnosticsEnabled,
   );
 }

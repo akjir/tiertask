@@ -864,4 +864,37 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get errorOpenLinkFailed => 'Link konnte nicht geöffnet werden.';
+
+  @override
+  String get diagnosticsSectionTitle => 'Diagnoseprotokoll aktivieren';
+
+  @override
+  String get diagnosticsSectionDescription =>
+      'Zeichnet Laufzeitereignisse auf und sichert Absturzprotokolle lokal in tiertask.log zur Fehlersuche.';
+
+  @override
+  String get diagnosticLogButton => 'Diagnoseprotokoll';
+
+  @override
+  String get diagnosticLogTitle => 'Diagnoseprotokoll';
+
+  @override
+  String get emptyLogHint =>
+      'Noch keine Einträge im Diagnoseprotokoll vorhanden.';
+
+  @override
+  String get tooltipCopyLog => 'Alles kopieren';
+
+  @override
+  String get tooltipScrollToBottom => 'Nach unten scrollen';
+
+  @override
+  String get tooltipClearLog => 'Protokoll leeren';
+
+  @override
+  String get logCopiedSnackBar =>
+      'Diagnoseprotokoll in die Zwischenablage kopiert.';
+
+  @override
+  String get logClearedSnackBar => 'Diagnoseprotokoll geleert.';
 }

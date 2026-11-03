@@ -18,6 +18,7 @@ import 'dart:typed_data' show BytesBuilder, Uint8List;
 
 import 'package:flutter/foundation.dart';
 
+import '../services/app_logger.dart';
 import 'task_board.dart';
 import 'task_item.dart';
 import 'tdf_metadata.dart';
@@ -60,13 +61,18 @@ class TaskBoardSync {
       validLabelIds: validLabelIds,
     );
 
-    return TaskBoard.evaluate(
+    final mergedBoard = TaskBoard.evaluate(
       tasks: sanitizedTasks,
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
       labels: mergedLabels,
       pruneExpiredCompleted: true,
     );
+    AppLogger.info(
+      LogTag.sync,
+      'TaskBoardSync.merge completed: primary=(tasks=${primary.allTasks.length}, labels=${primary.labels.length}), secondary=(tasks=${secondary.allTasks.length}, labels=${secondary.labels.length}) -> merged=(tasks=${mergedBoard.allTasks.length}, labels=${mergedBoard.labels.length})',
+    );
+    return mergedBoard;
   }
 
   /// Ensures every [TdfLabel] and [TaskItem] in [board] carries an explicit UTC `modifiedAt`
@@ -237,6 +243,10 @@ class TaskBoardSync {
       if (primaryLabel == secondaryLabel) {
         return primaryLabel.copyWith(modifiedAt: pMod);
       }
+      AppLogger.debug(
+        LogTag.sync,
+        'Label $id tie-breaker triggered (external edit wins)',
+      );
       return secondaryLabel.copyWith(
         modifiedAt: TaskItem.nextModifiedTimestamp(now, sMod),
       );
@@ -245,10 +255,15 @@ class TaskBoardSync {
     if (primaryLabel != null) {
       final pMod = primaryLabel.effectiveModifiedAt;
       if (deletedAt != null && !pMod.isAfter(deletedAt)) {
+        AppLogger.debug(
+          LogTag.sync,
+          'Label $id deleted via tombstone ($deletedAt)',
+        );
         return null;
       }
       if (baselineLabel != null &&
           !pMod.isAfter(baselineLabel.effectiveModifiedAt)) {
+        AppLogger.debug(LogTag.sync, 'Label $id deleted relative to baseline');
         return null;
       }
       return primaryLabel.copyWith(modifiedAt: pMod);
@@ -263,10 +278,15 @@ class TaskBoardSync {
     }
     final sMod = secondaryLabel.effectiveModifiedAt;
     if (deletedAt != null && !sMod.isAfter(deletedAt)) {
+      AppLogger.debug(
+        LogTag.sync,
+        'Label $id deleted via tombstone ($deletedAt)',
+      );
       return null;
     }
     if (baselineLabel != null &&
         !sMod.isAfter(baselineLabel.effectiveModifiedAt)) {
+      AppLogger.debug(LogTag.sync, 'Label $id deleted relative to baseline');
       return null;
     }
     return secondaryLabel.copyWith(
@@ -293,6 +313,10 @@ class TaskBoardSync {
       if (_tasksContentEqual(primaryTask, secondaryTask)) {
         return primaryTask.copyWith(modifiedAt: pMod);
       }
+      AppLogger.debug(
+        LogTag.sync,
+        'Task ${primaryTask.id} tie-breaker triggered (external edit wins)',
+      );
       return secondaryTask.copyWith(
         modifiedAt: TaskItem.nextModifiedTimestamp(now, sMod),
       );

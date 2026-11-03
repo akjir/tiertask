@@ -39,6 +39,39 @@ class SettingsScreen extends ConsumerStatefulWidget {
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+/// Card for enabling or disabling the opt-in diagnostic log (`tiertask.log`).
+class _DiagnosticsSelectionCard extends StatelessWidget {
+  /// Creates a [_DiagnosticsSelectionCard].
+  const _DiagnosticsSelectionCard({
+    required this.diagnosticsEnabled,
+    required this.onDiagnosticsEnabledChanged,
+  });
+
+  /// Whether opt-in diagnostic logging is currently enabled.
+  final bool diagnosticsEnabled;
+
+  /// Callback invoked when the user toggles the diagnostic logging switch.
+  final ValueChanged<bool> onDiagnosticsEnabledChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return _SettingsSectionCard(
+      icon: Icons.bug_report_outlined,
+      title: localizations.diagnosticsSectionTitle,
+      description: localizations.diagnosticsSectionDescription,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Switch(
+          key: const ValueKey('settings_diagnostics_switch'),
+          value: diagnosticsEnabled,
+          onChanged: onDiagnosticsEnabledChanged,
+        ),
+      ),
+    );
+  }
+}
+
 /// Card for choosing the application display language (`System`, `English`, or `Deutsch`).
 class _LanguageSelectionCard extends StatelessWidget {
   /// Creates a [_LanguageSelectionCard].
@@ -364,11 +397,12 @@ class _SettingsFormFields extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, color palette, time zone, location, and storage mode preference cards on [SettingsScreen].
+/// Groups the language, theme, color palette, time zone, location, diagnostics, and storage mode preference cards on [SettingsScreen].
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
     required this.config,
+    required this.onDiagnosticsEnabledChanged,
     required this.onLanguageChanged,
     required this.onLocationEnabledChanged,
     required this.onThemeModeChanged,
@@ -380,6 +414,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
 
   /// Current [WebDavConfig] holding the selected preference states.
   final WebDavConfig config;
+
+  /// Callback when `diagnosticsEnabled` changes.
+  final ValueChanged<bool> onDiagnosticsEnabledChanged;
 
   /// Callback when [AppLanguage] changes.
   final ValueChanged<AppLanguage> onLanguageChanged;
@@ -434,6 +471,11 @@ class _SettingsPreferenceCards extends StatelessWidget {
           onLocationEnabledChanged: onLocationEnabledChanged,
         ),
         const SizedBox(height: 10),
+        _DiagnosticsSelectionCard(
+          diagnosticsEnabled: config.diagnosticsEnabled,
+          onDiagnosticsEnabledChanged: onDiagnosticsEnabledChanged,
+        ),
+        const SizedBox(height: 10),
         _StorageModeSelectionCard(
           selectedStorageMode: config.storageMode,
           onStorageModeChanged: onStorageModeChanged,
@@ -459,6 +501,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _isTesting = false;
   int _manualTimeZoneOffsetMinutes = 0;
   bool _obscurePassword = true;
+  bool _selectedDiagnosticsEnabled = false;
   AppLanguage _selectedLanguage = AppLanguage.system;
   bool _selectedLocationEnabled = false;
   StorageMode _selectedStorageMode = StorageMode.local;
@@ -583,6 +626,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       timeZoneMode: _selectedTimeZoneMode,
       manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
       locationEnabled: _selectedLocationEnabled,
+      diagnosticsEnabled: _selectedDiagnosticsEnabled,
     );
   }
 
@@ -593,6 +637,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       children: [
         _SettingsPreferenceCards(
           config: currentConfig,
+          onDiagnosticsEnabledChanged: _handleDiagnosticsEnabledChanged,
           onLanguageChanged: _handleLanguageChanged,
           onLocationEnabledChanged: _handleLocationEnabledChanged,
           onThemeModeChanged: _handleThemeModeChanged,
@@ -707,6 +752,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  /// Updates [_selectedDiagnosticsEnabled], synchronizes [AppLogger], and persists it immediately.
+  Future<void> _handleDiagnosticsEnabledChanged(bool diagnosticsEnabled) async {
+    setState(() {
+      _selectedDiagnosticsEnabled = diagnosticsEnabled;
+      _clearStatusBanner();
+    });
+    await ref
+        .read(webDavConfigProvider.notifier)
+        .updateDiagnosticsEnabled(diagnosticsEnabled);
+  }
+
   /// Clears stale status banners and refreshes previews when form inputs change.
   void _handleFormChanged() {
     setState(_clearStatusBanner);
@@ -805,6 +861,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _selectedTimeZoneMode = config.timeZoneMode;
     _manualTimeZoneOffsetMinutes = config.manualTimeZoneOffsetMinutes;
     _selectedLocationEnabled = config.locationEnabled;
+    _selectedDiagnosticsEnabled = config.diagnosticsEnabled;
     _selectedStorageMode = config.storageMode;
     if (_initialized) {
       return;

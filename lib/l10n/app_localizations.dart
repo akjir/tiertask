@@ -1615,6 +1615,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Could not open link.'**
   String get errorOpenLinkFailed;
+
+  /// Settings section card title for the opt-in diagnostic logging toggle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable Diagnostic Log'**
+  String get diagnosticsSectionTitle;
+
+  /// Settings section card description explaining opt-in diagnostic logging and crash preservation.
+  ///
+  /// In en, this message translates to:
+  /// **'Record runtime events and preserve crash traces locally in tiertask.log for debugging.'**
+  String get diagnosticsSectionDescription;
+
+  /// Navigation drawer button label that opens the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostic Log'**
+  String get diagnosticLogButton;
+
+  /// Dialog title for the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostic Log'**
+  String get diagnosticLogTitle;
+
+  /// Placeholder text shown in the diagnostic log viewer when the log buffer is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No diagnostic log entries recorded yet.'**
+  String get emptyLogHint;
+
+  /// Tooltip for the Copy All button in the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy All'**
+  String get tooltipCopyLog;
+
+  /// Tooltip for the Scroll to Bottom button in the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Scroll to Bottom'**
+  String get tooltipScrollToBottom;
+
+  /// Tooltip for the Clear Log button in the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear Log'**
+  String get tooltipClearLog;
+
+  /// SnackBar confirmation message shown after copying the diagnostic log to the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostic log copied to clipboard.'**
+  String get logCopiedSnackBar;
+
+  /// SnackBar confirmation message shown after clearing the diagnostic log.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostic log cleared.'**
+  String get logClearedSnackBar;
 }
 
 class _AppLocalizationsDelegate

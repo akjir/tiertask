@@ -15,6 +15,7 @@
 
 import 'package:flutter/foundation.dart';
 
+import '../services/app_logger.dart';
 import 'task_item.dart';
 import 'task_tier.dart';
 import 'tdf_metadata.dart';
@@ -222,7 +223,8 @@ class TaskBoard {
       modifiedAt: resolvedModifiedAt,
       conditions: _sanitizeLabelConditions(conditions),
     );
-    return copyWith(labels: [...labels, newLabel]);
+    return copyWith(labels: [...labels, newLabel])
+        ._logDomainMutation('addLabel id=$labelId name="$trimmed"');
   }
 
   /// Adds a new task per `TDF_SPEC.md` Section 6.1, prunes expired completed tasks,
@@ -328,7 +330,8 @@ class TaskBoard {
     if (isDone) {
       return copyWith(completed: [newTask, ...completed])
           .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
+          .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
+          ._logDomainMutation('addTask id=$taskId title="$trimmed"');
     }
 
     return TaskBoard.evaluate(
@@ -337,7 +340,7 @@ class TaskBoard {
       localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
-    );
+    )._logDomainMutation('addTask id=$taskId title="$trimmed"');
   }
 
   /// Evaluates the active pull cycle and unblocks any tasks whose prerequisites or deferrals cleared.
@@ -450,7 +453,8 @@ class TaskBoard {
     return _removeTaskFromTier(taskId, sourceTier)
         .copyWith(blocked: [...blocked, blockedTask])
         .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
+        .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
+        ._logDomainMutation('blockTask id=$taskId');
   }
 
   /// Marks an active task as done per `TDF_SPEC.md` Section 6.4:
@@ -491,7 +495,8 @@ class TaskBoard {
       ).copyWith(blocked: [...blocked, rescheduledTask]);
       return updated
           .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
+          .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
+          ._logDomainMutation('completeTask (recurring) id=$taskId');
     }
 
     final completedTask = task.toCompleted(now);
@@ -502,7 +507,8 @@ class TaskBoard {
 
     return updated
         .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now, localEvaluationTime: localNow);
+        .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
+        ._logDomainMutation('completeTask id=$taskId');
   }
 
   /// Returns a copy of this [TaskBoard] with the specified collections replaced.
@@ -546,7 +552,7 @@ class TaskBoard {
       someday: _stripLabelFromTasks(someday, labelId, now),
       completed: _stripLabelFromTasks(completed, labelId, now),
       labels: nextLabels,
-    );
+    )._logDomainMutation('deleteLabel id=$labelId');
   }
 
   /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
@@ -564,13 +570,22 @@ class TaskBoard {
     }
 
     if (sourceTier == TaskTier.focus) {
-      return _downgradeFromFocus(task, now);
+      return _downgradeFromFocus(
+        task,
+        now,
+      )._logDomainMutation('downgradeTask id=$taskId from=Focus');
     }
     if (sourceTier == TaskTier.ready) {
-      return _downgradeToPlanned(task, now);
+      return _downgradeToPlanned(
+        task,
+        now,
+      )._logDomainMutation('downgradeTask id=$taskId from=Ready');
     }
     if (sourceTier == TaskTier.planned) {
-      return _downgradeToSomeday(task, now);
+      return _downgradeToSomeday(
+        task,
+        now,
+      )._logDomainMutation('downgradeTask id=$taskId from=Planned');
     }
     return this;
   }
@@ -592,6 +607,8 @@ class TaskBoard {
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
+    )._logDomainMutation(
+      'evaluateForContext activeLabel=${activeLabelId ?? "all"}',
     );
   }
 
@@ -670,6 +687,13 @@ class TaskBoard {
       for (final task in completed)
         if (_isWithinRetention(task, normalizedNow)) task,
     ];
+    final prunedCount = completed.length - retained.length;
+    if (prunedCount > 0) {
+      AppLogger.info(
+        LogTag.domain,
+        'pruneCompletedTasks pruned=$prunedCount expired tasks (>30 days)',
+      );
+    }
 
     return copyWith(completed: retained);
   }
@@ -721,6 +745,8 @@ class TaskBoard {
       localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
+    )._logDomainMutation(
+      'restoreTask id=$taskId targetTier=${targetTier.name}',
     );
   }
 
@@ -767,7 +793,7 @@ class TaskBoard {
       localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
-    );
+    )._logDomainMutation('scheduleTask id=$taskId');
   }
 
   /// Returns the task list for a given [tier].
@@ -828,13 +854,19 @@ class TaskBoard {
     final replacedBoard = _replaceTaskInTier(tier, updatedTask);
 
     if (willAutoComplete) {
-      return replacedBoard.completeTask(
-        taskId,
-        currentDate: now,
-        localEvaluationTime: localEvaluationTime,
-      );
+      return replacedBoard
+          .completeTask(
+            taskId,
+            currentDate: now,
+            localEvaluationTime: localEvaluationTime,
+          )
+          ._logDomainMutation(
+            'toggleSubtask id=$taskId step=$stepIndex (auto-completed)',
+          );
     }
-    return replacedBoard;
+    return replacedBoard._logDomainMutation(
+      'toggleSubtask id=$taskId step=$stepIndex',
+    );
   }
 
   /// Updates an existing label with [labelId], re-evaluates the 6-tier pipeline,
@@ -885,6 +917,8 @@ class TaskBoard {
       localEvaluationTime: localNow,
       labels: nextLabels,
       pruneExpiredCompleted: true,
+    )._logDomainMutation(
+      'updateLabel/renameLabel id=$labelId name="$trimmedName"',
     );
   }
 
@@ -962,7 +996,7 @@ class TaskBoard {
       localEvaluationTime: localNow,
       labels: labels,
       pruneExpiredCompleted: true,
-    );
+    )._logDomainMutation('updateTask id=$taskId title="$trimmed"');
   }
 
   /// Returns whether adding [candidateBlockerId] as a prerequisite (`blocked`) of [taskId]
@@ -1694,6 +1728,15 @@ class TaskBoard {
         completedRetentionDays;
   }
 
+  /// Logs [action] with the resulting 6-tier task distribution under [LogTag.domain] and returns `this`.
+  TaskBoard _logDomainMutation(String action) {
+    AppLogger.info(
+      LogTag.domain,
+      '$action | tiers: Focus=${focus.length}, Ready=${ready.length}, Planned=${planned.length}, Blocked=${blocked.length}, Someday=${someday.length}, Completed=${completed.length}',
+    );
+    return this;
+  }
+
   /// Normalizes active tasks across `[focus, ready, planned]` so `queuedAt` is always populated and ordered.
   static void _normalizeActiveLists(
     List<TaskItem> focusList,
@@ -1907,6 +1950,10 @@ class TaskBoard {
     final nextModified =
         preserveModifiedAt ??
         TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt);
+    AppLogger.info(
+      LogTag.domain,
+      'Rescheduled recurring task id=${task.id} repeat -> nextDue=${nextDueLocal.toIso8601String()}',
+    );
     return task.copyWith(
       isCompleted: false,
       clearCompletedAt: true,

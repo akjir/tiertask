@@ -850,4 +850,35 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorOpenLinkFailed => 'Could not open link.';
+
+  @override
+  String get diagnosticsSectionTitle => 'Enable Diagnostic Log';
+
+  @override
+  String get diagnosticsSectionDescription =>
+      'Record runtime events and preserve crash traces locally in tiertask.log for debugging.';
+
+  @override
+  String get diagnosticLogButton => 'Diagnostic Log';
+
+  @override
+  String get diagnosticLogTitle => 'Diagnostic Log';
+
+  @override
+  String get emptyLogHint => 'No diagnostic log entries recorded yet.';
+
+  @override
+  String get tooltipCopyLog => 'Copy All';
+
+  @override
+  String get tooltipScrollToBottom => 'Scroll to Bottom';
+
+  @override
+  String get tooltipClearLog => 'Clear Log';
+
+  @override
+  String get logCopiedSnackBar => 'Diagnostic log copied to clipboard.';
+
+  @override
+  String get logClearedSnackBar => 'Diagnostic log cleared.';
 }

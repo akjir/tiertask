@@ -13,13 +13,17 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 
 import 'test_helpers.dart';
 
@@ -645,6 +649,188 @@ task t004 {
         find.text('UTC Offset'),
         findsOneWidget,
         reason: 'Manual time zone mode must reveal the UTC Offset selector',
+      );
+    },
+  );
+
+  testWidgets(
+    'SettingsScreen toggle enables and disables Diagnostic Log, reveals and hides the sidepanel Log button, and LogViewerDialog supports Copy, Scroll to Bottom, and Clear',
+    (WidgetTester tester) async {
+      final tempDir = Directory.systemTemp.createTempSync(
+        'tiertask_ui_logger_',
+      );
+      addTearDown(() {
+        AppLogger.resetForTesting();
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+
+      String? copiedClipboardText;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (MethodCall methodCall) async {
+          if (methodCall.method == 'Clipboard.setData') {
+            final args = methodCall.arguments;
+            if (args is Map<Object?, Object?>) {
+              final text = args['text'];
+              if (text is String) {
+                copiedClipboardText = text;
+              }
+            }
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+      });
+
+      final settingsRepository = InMemorySettingsRepository(
+        const WebDavConfig(language: AppLanguage.english),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 3, 22, 5, 14, 128),
+            ),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('drawer_diagnostic_log_tile')),
+        findsNothing,
+        reason: 'Diagnostic Log drawer button must be hidden when disabled',
+      );
+      await tester.tap(find.byIcon(Icons.settings_outlined));
+      await tester.pumpAndSettle();
+
+      final switchFinder = find.byKey(
+        const ValueKey('settings_diagnostics_switch'),
+      );
+      await tester.ensureVisible(switchFinder);
+      await tester.tap(switchFinder);
+      await tester.pumpAndSettle();
+
+      final logFile = File(
+        '${tempDir.path}${Platform.pathSeparator}tiertask.log',
+      );
+      expect(
+        logFile.existsSync(),
+        isTrue,
+        reason: 'Enabling Diagnostic Log in Settings must create tiertask.log',
+      );
+
+      AppLogger.warn(LogTag.sync, 'Simulated warning entry');
+      AppLogger.error(LogTag.storage, 'Simulated error entry');
+      AppLogger.crash(
+        StateError('Simulated crash entry'),
+        StackTrace.fromString('#0 crashFrame (main.dart:1)'),
+      );
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+
+      final drawerLogTile = find.byKey(
+        const ValueKey('drawer_diagnostic_log_tile'),
+      );
+      expect(
+        drawerLogTile,
+        findsOneWidget,
+        reason:
+            'Diagnostic Log drawer button must appear when logging is enabled',
+      );
+
+      await tester.tap(drawerLogTile);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Diagnostic Log'),
+        findsOneWidget,
+        reason: 'LogViewerDialog must display the Diagnostic Log title',
+      );
+      expect(
+        find.textContaining('Simulated warning entry'),
+        findsOneWidget,
+        reason: 'LogViewerDialog must display WARN entries',
+      );
+      expect(
+        find.textContaining('Simulated error entry'),
+        findsOneWidget,
+        reason: 'LogViewerDialog must display ERROR entries',
+      );
+      expect(
+        find.textContaining('Simulated crash entry'),
+        findsOneWidget,
+        reason: 'LogViewerDialog must display CRASH entries',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('log_viewer_scroll_bottom_button')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('log_viewer_copy_button')));
+      await tester.pumpAndSettle();
+      expect(
+        copiedClipboardText,
+        contains('Simulated warning entry'),
+        reason: 'Copy All button must copy the log text to the clipboard',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('log_viewer_clear_button')));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('No diagnostic log entries recorded yet.'),
+        findsOneWidget,
+        reason:
+            'Clear Log button must empty the log buffer and show empty hint',
+      );
+      expect(
+        logFile.readAsStringSync(),
+        isEmpty,
+        reason: 'Clear Log button must truncate tiertask.log to 0 bytes',
+      );
+
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
+      await openSettingsFromMenu(tester);
+      await tester.ensureVisible(switchFinder);
+      await tester.tap(switchFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        logFile.existsSync(),
+        isFalse,
+        reason:
+            'Toggling Diagnostic Log OFF in Settings must delete tiertask.log',
+      );
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('drawer_diagnostic_log_tile')),
+        findsNothing,
+        reason:
+            'Toggling Diagnostic Log OFF must hide the sidepanel Log button',
       );
     },
   );

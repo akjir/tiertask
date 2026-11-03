@@ -20,6 +20,7 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
+import '../services/app_logger.dart';
 import 'widgets/clearable_text_field.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_sections.dart';
@@ -527,6 +528,7 @@ Future<void> openEditLabelScreen(
   BuildContext context, {
   required TdfLabel label,
 }) {
+  AppLogger.info(LogTag.ui, 'Opened EditLabelScreen label=${label.id}');
   return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(builder: (_) => EditLabelScreen(label: label)),
   );

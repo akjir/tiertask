@@ -22,6 +22,7 @@ import '../models/task_item.dart';
 import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import '../repositories/link_launcher_repository.dart';
+import '../services/app_logger.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_links_section.dart';
@@ -843,6 +844,10 @@ Future<void> openEditTaskScreen(
   Set<String> initialLabelIds = const <String>{},
   VoidCallback? onSubmitted,
 }) {
+  AppLogger.info(
+    LogTag.ui,
+    'Opened EditTaskScreen task=${initialTask?.id ?? "new"}',
+  );
   return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(
       builder: (_) => EditTaskScreen(

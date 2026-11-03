@@ -21,6 +21,7 @@ import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
+import '../services/app_logger.dart';
 
 /// Custom domain exception thrown when local TDF file operations fail.
 class LocalFileException implements Exception {
@@ -102,6 +103,30 @@ class LocalFileRepository {
     return '$cleanDir$separator$cleanName';
   }
 
+  /// Resolves the default filesystem path for `tiertask.log` inside [baseDirectoryPath] or the user data directory.
+  static String defaultLogFilePath({String? baseDirectoryPath}) {
+    final separator = Platform.pathSeparator;
+    if (baseDirectoryPath case final explicitBase?
+        when explicitBase.trim().isNotEmpty) {
+      final cleanBase = _trimTrailingSeparators(explicitBase.trim());
+      return '$cleanBase$separator${AppLogger.defaultLogFileName}';
+    }
+    final defaultBase = _trimTrailingSeparators(_defaultBaseDirectoryPath());
+    return '$defaultBase$separator${AppLogger.defaultLogFileName}';
+  }
+
+  /// Synchronously deletes the diagnostic log file at [path] if it exists.
+  static void deleteLogFileSync(String path) {
+    try {
+      final file = File(path);
+      if (file.existsSync()) {
+        file.deleteSync();
+      }
+    } on FileSystemException {
+      // Ignore deletion failures on missing or locked diagnostic files.
+    }
+  }
+
   /// Extracts the trailing `.tdf` file name segment from [ config.localFilePath ].
   String extractFileName() => extractFileNameFromPath(config.localFilePath);
 
@@ -120,16 +145,26 @@ class LocalFileRepository {
 
   /// Reads the local `.tdf` file and returns its contents, or an empty string if the file does not exist.
   Future<String> loadTdf() async {
+    final stopwatch = Stopwatch()..start();
     final localizations = _localizations;
     final filePath = resolveFilePath();
 
     if (_useInMemoryFallback) {
-      return inMemoryStore?[filePath] ?? '';
+      final content = inMemoryStore?[filePath] ?? '';
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.loadTdf (in-memory) path=$filePath bytes=${content.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
+      return content;
     }
 
     try {
       final file = File(filePath);
       if (!file.existsSync()) {
+        AppLogger.info(
+          LogTag.storage,
+          'LocalFileRepository.loadTdf file not found path=$filePath elapsed=${stopwatch.elapsedMilliseconds}ms',
+        );
         return '';
       }
       final fileLength = file.lengthSync();
@@ -140,15 +175,32 @@ class LocalFileRepository {
       if (bytes.length > maxFileBytes) {
         throw LocalFileException(localizations.errorLocalFileTooLarge);
       }
-      return utf8.decode(bytes);
-    } on LocalFileException {
+      final decoded = utf8.decode(bytes);
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.loadTdf path=$filePath bytes=${bytes.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
+      return decoded;
+    } on LocalFileException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.loadTdf failed path=$filePath: $error',
+      );
       rethrow;
     } on FileSystemException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.loadTdf filesystem error path=$filePath: ${error.message}',
+      );
       throw LocalFileException(
         localizations.errorLoadLocalFileFailed(error.message),
         cause: error,
       );
     } on Object catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.loadTdf unexpected error path=$filePath: $error',
+      );
       throw LocalFileException(
         localizations.errorLoadLocalFileFailed(error.toString()),
         cause: error,
@@ -219,6 +271,10 @@ class LocalFileRepository {
       case FileSystemEntityType.unixDomainSock:
         _performFileMove(sourcePath, targetPath);
     }
+    AppLogger.info(
+      LogTag.storage,
+      'LocalFileRepository.moveTdfFile moved $sourcePath -> $targetPath',
+    );
   }
 
   /// Opens the native desktop directory selection dialog and returns the chosen path, or `null` if cancelled.
@@ -239,6 +295,26 @@ class LocalFileRepository {
       );
     } on MissingPluginException {
       return null;
+    }
+  }
+
+  /// Synchronously reads up to [maxBytes] from the diagnostic log file at [path].
+  static String readLogFileSync(String path, {required int maxBytes}) {
+    try {
+      final file = File(path);
+      if (!file.existsSync()) {
+        return '';
+      }
+      final bytes = file.readAsBytesSync();
+      if (bytes.isEmpty) {
+        return '';
+      }
+      final slice = bytes.length > maxBytes
+          ? bytes.sublist(bytes.length - maxBytes)
+          : bytes;
+      return utf8.decode(slice, allowMalformed: true);
+    } on FileSystemException {
+      return '';
     }
   }
 
@@ -288,15 +364,24 @@ class LocalFileRepository {
 
   /// Writes [tdfContent] to the configured local `.tdf` file.
   Future<void> saveTdf(String tdfContent) async {
+    final stopwatch = Stopwatch()..start();
     final localizations = _localizations;
     final filePath = resolveFilePath();
     final bytes = utf8.encode(tdfContent);
     if (bytes.length > maxFileBytes) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.saveTdf failed (exceeds maxFileBytes) path=$filePath bytes=${bytes.length}',
+      );
       throw LocalFileException(localizations.errorLocalFileTooLarge);
     }
 
     if (_useInMemoryFallback) {
       inMemoryStore?[filePath] = tdfContent;
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.saveTdf (in-memory) path=$filePath bytes=${bytes.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
       return;
     }
 
@@ -304,14 +389,30 @@ class LocalFileRepository {
       final file = File(filePath);
       file.parent.createSync(recursive: true);
       file.writeAsBytesSync(bytes, flush: true);
-    } on LocalFileException {
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.saveTdf path=$filePath bytes=${bytes.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
+    } on LocalFileException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.saveTdf failed path=$filePath: $error',
+      );
       rethrow;
     } on FileSystemException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.saveTdf filesystem error path=$filePath: ${error.message}',
+      );
       throw LocalFileException(
         localizations.errorSaveLocalFileFailed(error.message),
         cause: error,
       );
     } on Object catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.saveTdf unexpected error path=$filePath: $error',
+      );
       throw LocalFileException(
         localizations.errorSaveLocalFileFailed(error.toString()),
         cause: error,
@@ -334,6 +435,25 @@ class LocalFileRepository {
       return resolveFilePath();
     } on LocalFileException {
       return null;
+    }
+  }
+
+  /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
+  static void writeLogFileSync(
+    String path,
+    String content, {
+    required bool append,
+  }) {
+    try {
+      final file = File(path);
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(
+        content,
+        mode: append ? FileMode.append : FileMode.write,
+        flush: true,
+      );
+    } on FileSystemException {
+      // Never propagate diagnostic log I/O errors into user workflows.
     }
   }
 

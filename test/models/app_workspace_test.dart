@@ -169,6 +169,7 @@ void main() {
           themePalette: AppThemePalette.navy,
           timeZoneMode: AppTimeZoneMode.manual,
           manualTimeZoneOffsetMinutes: 120,
+          diagnosticsEnabled: true,
         ),
       );
       final encodedBytes = updated.toBytes();
@@ -193,6 +194,16 @@ void main() {
         reason: 'Updated workspace binary encoding must be 63 bytes',
       );
       final roundTrip = AppWorkspace.fromBytes(encodedBytes);
+      expect(
+        roundTrip.config.diagnosticsEnabled,
+        isTrue,
+        reason: 'Binary round-trip must preserve diagnosticsEnabled',
+      );
+      expect(
+        roundTrip.config.enableLogging,
+        isTrue,
+        reason: 'enableLogging getter must mirror diagnosticsEnabled',
+      );
       expect(
         roundTrip,
         equals(updated),

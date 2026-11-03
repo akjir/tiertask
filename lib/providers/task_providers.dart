@@ -30,6 +30,7 @@ import '../repositories/link_launcher_repository.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../repositories/webdav_repository.dart';
+import '../services/app_logger.dart';
 import '../services/tdf_service.dart';
 import '../ui/app_theme.dart';
 import 'workspace_providers.dart';
@@ -58,6 +59,31 @@ final appThemeProvider = NotifierProvider<AppThemeNotifier, AppThemeSet>(
 /// Injectable clock function for deterministic date handling in unit tests.
 final clockProvider = Provider<DateTime Function()>((ref) {
   return DateTime.now;
+});
+
+/// Provides whether opt-in diagnostic logging is enabled and synchronizes [AppLogger].
+final diagnosticsEnabledProvider = Provider<bool>((ref) {
+  final clock = ref.watch(clockProvider);
+  final baseDirectoryPath = ref.watch(localStorageDirectoryPathProvider);
+  final configAsync = ref.watch(webDavConfigProvider);
+  final workspaceAsync = ref.watch(activeWorkspaceProvider);
+  final resolvedConfig =
+      configAsync.asData?.value ?? workspaceAsync.asData?.value.config;
+  AppLogger.clock = () => clock().toUtc();
+  if (resolvedConfig == null) {
+    return false;
+  }
+  final logFilePath = LocalFileRepository.defaultLogFilePath(
+    baseDirectoryPath: baseDirectoryPath,
+  );
+  if (resolvedConfig.diagnosticsEnabled || AppLogger.isEnabled) {
+    AppLogger.setEnabled(
+      resolvedConfig.diagnosticsEnabled,
+      logFilePath: logFilePath,
+      secretToRedact: resolvedConfig.password,
+    );
+  }
+  return resolvedConfig.diagnosticsEnabled;
 });
 
 /// Provides the native directory picker function, overridable in widget tests.
@@ -640,6 +666,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(null);
     final workspace = await ref.read(activeWorkspaceProvider.future);
+    AppLogger.info(
+      LogTag.sync,
+      'Starting two-stage sync pipeline workspace=${workspace.id} mode=${config.storageMode.name} initial=$isInitialLoad',
+    );
     final settingsRepo = ref.read(settingsRepositoryProvider);
     var syncState = await settingsRepo.loadWorkspaceSyncState(workspace.id);
     final deletedLabels = <String, DateTime>{
@@ -758,6 +788,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       deletedLabelTimestamps: const <String, DateTime>{},
     );
     await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
+    AppLogger.info(
+      LogTag.sync,
+      'Completed two-stage sync pipeline workspace=${workspace.id} tasks=${workingBoard.allTasks.length} labels=${workingBoard.labels.length}',
+    );
     return workingBoard;
   }
 
@@ -841,6 +875,30 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
         .read(activeWorkspaceProvider.notifier)
         .updateActiveConfig(newConfig);
     state = AsyncData(newConfig);
+  }
+
+  /// Updates the [diagnosticsEnabled] preference, synchronizes [AppLogger], and persists it immediately.
+  Future<void> updateDiagnosticsEnabled(bool diagnosticsEnabled) async {
+    final current = state.asData?.value ?? await future;
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final logFilePath = LocalFileRepository.defaultLogFilePath(
+      baseDirectoryPath: baseDirectoryPath,
+    );
+    final clock = ref.read(clockProvider);
+    AppLogger.clock = () => clock().toUtc();
+    AppLogger.setEnabled(
+      diagnosticsEnabled,
+      logFilePath: logFilePath,
+      secretToRedact: current.password,
+    );
+    if (diagnosticsEnabled) {
+      AppLogger.info(
+        LogTag.lifecycle,
+        'Diagnostic logging enabled in Settings (file=$logFilePath)',
+      );
+    }
+    final updated = current.copyWith(diagnosticsEnabled: diagnosticsEnabled);
+    await updateConfig(updated);
   }
 
   /// Updates only the display [language] preference and persists it immediately.

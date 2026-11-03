@@ -20,6 +20,7 @@ import 'dart:ui';
 
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
+import '../services/app_logger.dart';
 
 /// Custom domain exception thrown when WebDAV HTTP operations fail.
 class WebDavException implements Exception {
@@ -44,7 +45,11 @@ class WebDavRepository {
     required this.config,
     HttpClient Function()? clientFactory,
     this.timeout = const Duration(seconds: 15),
-  }) : _clientFactory = clientFactory ?? HttpClient.new;
+  }) : _clientFactory = clientFactory ?? HttpClient.new {
+    if (config.password.isNotEmpty) {
+      AppLogger.registerSecret(config.password);
+    }
+  }
 
   /// Active WebDAV connection and language configuration.
   final WebDavConfig config;
@@ -75,6 +80,7 @@ class WebDavRepository {
   /// Returns an empty string when the remote file does not exist (`HTTP 404`)
   /// so a new 6-tier board can be initialized on first save.
   Future<String> fetchTdf() async {
+    final stopwatch = Stopwatch()..start();
     final localizations = _localizations;
     final uri = _requireUri(localizations);
     final client = _clientFactory();
@@ -93,9 +99,17 @@ class WebDavRepository {
           .timeout(timeout);
 
       if (status >= 200 && status < 300) {
+        AppLogger.info(
+          LogTag.storage,
+          'WebDavRepository.fetchTdf GET $uri status=$status bytes=${body.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+        );
         return body;
       }
       if (status == HttpStatus.notFound) {
+        AppLogger.info(
+          LogTag.storage,
+          'WebDavRepository.fetchTdf GET $uri status=404 (not found) elapsed=${stopwatch.elapsedMilliseconds}ms',
+        );
         return '';
       }
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
@@ -108,17 +122,37 @@ class WebDavRepository {
         localizations.errorLoadMarkdownFailed,
         statusCode: status,
       );
-    } on WebDavException {
+    } on WebDavException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.fetchTdf GET $uri failed: $error',
+      );
       rethrow;
     } on SocketException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.fetchTdf GET $uri socket error: ${error.message}',
+      );
       throw WebDavException(
         localizations.errorNetworkUnreachable(error.message),
       );
     } on TimeoutException {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.fetchTdf GET $uri timed out after ${timeout.inMilliseconds}ms',
+      );
       throw WebDavException(localizations.errorTimeoutLoad);
     } on HandshakeException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.fetchTdf GET $uri TLS error: ${error.message}',
+      );
       throw WebDavException(localizations.errorTlsLoad(error.message));
     } on Object catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.fetchTdf GET $uri unexpected error: $error',
+      );
       throw WebDavException(
         localizations.errorUnexpectedLoad(error.toString()),
       );
@@ -129,6 +163,7 @@ class WebDavRepository {
 
   /// Overwrites the remote TDF file on the WebDAV server via HTTP PUT.
   Future<void> saveTdf(String tdfContent) async {
+    final stopwatch = Stopwatch()..start();
     final localizations = _localizations;
     final uri = _requireUri(localizations);
     final client = _clientFactory();
@@ -151,6 +186,10 @@ class WebDavRepository {
 
       final status = response.statusCode;
       if (status >= 200 && status < 300) {
+        AppLogger.info(
+          LogTag.storage,
+          'WebDavRepository.saveTdf PUT $uri status=$status bytes=${bytes.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+        );
         return;
       }
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
@@ -163,15 +202,35 @@ class WebDavRepository {
         localizations.errorSaveMarkdownFailed,
         statusCode: status,
       );
-    } on WebDavException {
+    } on WebDavException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.saveTdf PUT $uri failed: $error',
+      );
       rethrow;
     } on SocketException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.saveTdf PUT $uri socket error: ${error.message}',
+      );
       throw WebDavException(localizations.errorNetworkSave(error.message));
     } on TimeoutException {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.saveTdf PUT $uri timed out after ${timeout.inMilliseconds}ms',
+      );
       throw WebDavException(localizations.errorTimeoutSave);
     } on HandshakeException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.saveTdf PUT $uri TLS error: ${error.message}',
+      );
       throw WebDavException(localizations.errorTlsSave(error.message));
     } on Object catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'WebDavRepository.saveTdf PUT $uri unexpected error: $error',
+      );
       throw WebDavException(
         localizations.errorUnexpectedSave(error.toString()),
       );
