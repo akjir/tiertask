@@ -21,6 +21,7 @@ import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
 import '../../models/tdf_metadata.dart';
 import '../app_theme.dart';
+import 'clearable_text_field.dart';
 import 'quick_add_bar.dart';
 
 /// Footer row inside the task editor containing Cancel and Save actions.
@@ -73,7 +74,6 @@ class TaskEditorBlockedBySection extends StatelessWidget {
     super.key,
     required this.candidateTasks,
     required this.disabledTaskIds,
-    required this.hasSearchText,
     required this.searchController,
     required this.searchQuery,
     required this.selectedBlockedByIds,
@@ -86,9 +86,6 @@ class TaskEditorBlockedBySection extends StatelessWidget {
 
   /// Task IDs that cannot be selected because they would create a dependency cycle.
   final Set<String> disabledTaskIds;
-
-  /// Whether the search input currently contains non-empty text.
-  final bool hasSearchText;
 
   /// Callback invoked to clear the prerequisite search field.
   final VoidCallback onClearSearch;
@@ -144,7 +141,6 @@ class TaskEditorBlockedBySection extends StatelessWidget {
           ],
           _TaskEditorBlockedSearchField(
             controller: searchController,
-            hasText: hasSearchText,
             onClear: onClearSearch,
           ),
           if (trimmedQuery.isNotEmpty)
@@ -491,10 +487,11 @@ class TaskEditorNoteField extends StatelessWidget {
       ),
     );
 
-    return TextField(
-      key: const ValueKey('task_editor_note_input'),
+    return ClearableTextField(
+      fieldKey: const ValueKey('task_editor_note_input'),
       controller: controller,
       cursorColor: appTheme.tertiaryAccent,
+      clearIconColor: appTheme.mutedTextColor,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
       minLines: 1,
       maxLines: 3,
@@ -560,11 +557,12 @@ class TaskEditorRepeatField extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextField(
-          key: const ValueKey('task_editor_repeat_count_input'),
+        ClearableTextField(
+          fieldKey: const ValueKey('task_editor_repeat_count_input'),
           controller: countController,
           keyboardType: TextInputType.number,
           cursorColor: appTheme.tertiaryAccent,
+          clearIconColor: appTheme.mutedTextColor,
           style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
           decoration: InputDecoration(
             labelText: localizations.repeatIntervalLabel,
@@ -629,7 +627,6 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Creates a [TaskEditorSchedulingCard].
   const TaskEditorSchedulingCard({
     super.key,
-    required this.hasSuspendedText,
     required this.isRepeating,
     required this.isSuspended,
     required this.mode,
@@ -647,9 +644,6 @@ class TaskEditorSchedulingCard extends StatelessWidget {
     required this.onToggleSomeday,
     required this.onToggleSuspended,
   });
-
-  /// Whether the suspended timestamp field currently contains non-empty text.
-  final bool hasSuspendedText;
 
   /// Whether the task has recurrence enabled.
   final bool isRepeating;
@@ -724,7 +718,6 @@ class TaskEditorSchedulingCard extends StatelessWidget {
             TaskEditorSuspendedField(
               controller: suspendedController,
               errorMessage: suspendedErrorMessage,
-              hasText: hasSuspendedText,
               onClear: onClearSuspended,
               onPickDate: onPickSuspendedDate,
               onPickTime: onPickSuspendedTime,
@@ -913,7 +906,6 @@ class TaskEditorSuspendedField extends StatelessWidget {
     super.key,
     required this.controller,
     required this.errorMessage,
-    required this.hasText,
     required this.onClear,
     required this.onPickDate,
     required this.onPickTime,
@@ -924,9 +916,6 @@ class TaskEditorSuspendedField extends StatelessWidget {
 
   /// Optional validation error message.
   final String? errorMessage;
-
-  /// Whether the input field currently contains text.
-  final bool hasText;
 
   /// Callback invoked to clear the timestamp input.
   final VoidCallback onClear;
@@ -949,8 +938,13 @@ class TaskEditorSuspendedField extends StatelessWidget {
       ),
     );
 
-    return TextField(
-      key: const ValueKey('task_editor_suspended_input'),
+    return ClearableTextField(
+      fieldKey: const ValueKey('task_editor_suspended_input'),
+      clearButtonKey: const ValueKey('task_editor_suspended_clear_button'),
+      clearTooltip: localizations.tooltipClearDate,
+      clearIconColor: appTheme.mutedTextColor,
+      showClearWhenUnfocused: true,
+      onCleared: onClear,
       controller: controller,
       cursorColor: appTheme.warningAccent,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
@@ -978,7 +972,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
     );
   }
 
-  /// Builds the trailing clear, date picker, and time picker icon buttons.
+  /// Builds the trailing date picker and time picker icon buttons.
   Widget _buildPickerSuffixActions(
     AppLocalizations localizations,
     AppTheme appTheme,
@@ -986,18 +980,6 @@ class TaskEditorSuspendedField extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (hasText)
-          IconButton(
-            key: const ValueKey('task_editor_suspended_clear_button'),
-            visualDensity: VisualDensity.compact,
-            tooltip: localizations.tooltipClearDate,
-            icon: Icon(
-              Icons.close_rounded,
-              size: 18,
-              color: appTheme.mutedTextColor,
-            ),
-            onPressed: onClear,
-          ),
         IconButton(
           key: const ValueKey('task_editor_suspended_date_picker_button'),
           visualDensity: VisualDensity.compact,
@@ -1056,11 +1038,12 @@ class TaskEditorTitleField extends StatelessWidget {
       ),
     );
 
-    return TextField(
-      key: const ValueKey('task_editor_title_input'),
+    return ClearableTextField(
+      fieldKey: const ValueKey('task_editor_title_input'),
       controller: controller,
       autofocus: true,
       cursorColor: appTheme.primaryAccent,
+      clearIconColor: appTheme.mutedTextColor,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 15),
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => onSubmit(),
@@ -1091,15 +1074,11 @@ class _TaskEditorBlockedSearchField extends StatelessWidget {
   /// Creates a [_TaskEditorBlockedSearchField].
   const _TaskEditorBlockedSearchField({
     required this.controller,
-    required this.hasText,
     required this.onClear,
   });
 
   /// Controller for the prerequisite search query.
   final TextEditingController controller;
-
-  /// Whether the search query is currently non-empty.
-  final bool hasText;
 
   /// Callback invoked when the clear button is tapped.
   final VoidCallback onClear;
@@ -1116,8 +1095,13 @@ class _TaskEditorBlockedSearchField extends StatelessWidget {
       ),
     );
 
-    return TextField(
-      key: const ValueKey('task_editor_blocked_search_input'),
+    return ClearableTextField(
+      fieldKey: const ValueKey('task_editor_blocked_search_input'),
+      clearButtonKey: const ValueKey('task_editor_blocked_search_clear_button'),
+      clearTooltip: localizations.tooltipClearSearch,
+      clearIconColor: appTheme.mutedTextColor,
+      showClearWhenUnfocused: true,
+      onCleared: onClear,
       controller: controller,
       cursorColor: appTheme.warningAccent,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
@@ -1129,19 +1113,6 @@ class _TaskEditorBlockedSearchField extends StatelessWidget {
           size: 18,
           color: appTheme.mutedTextColor,
         ),
-        suffixIcon: hasText
-            ? IconButton(
-                key: const ValueKey('task_editor_blocked_search_clear_button'),
-                visualDensity: VisualDensity.compact,
-                tooltip: localizations.tooltipClearSearch,
-                icon: Icon(
-                  Icons.close_rounded,
-                  size: 18,
-                  color: appTheme.mutedTextColor,
-                ),
-                onPressed: onClear,
-              )
-            : null,
         isDense: true,
         filled: true,
         fillColor: appTheme.canvasColor,
@@ -1193,10 +1164,11 @@ class _TaskEditorSubtaskInputRow extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: TextField(
-            key: const ValueKey('task_editor_subtask_input'),
+          child: ClearableTextField(
+            fieldKey: const ValueKey('task_editor_subtask_input'),
             controller: controller,
             cursorColor: appTheme.tertiaryAccent,
+            clearIconColor: appTheme.mutedTextColor,
             style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => onAddSubtask(),

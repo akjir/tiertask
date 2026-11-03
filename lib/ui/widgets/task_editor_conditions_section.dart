@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/tdf_metadata.dart';
 import '../app_theme.dart';
+import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
 
 /// Activation conditions (`condition`) editor card inside the task editor.
@@ -599,9 +600,11 @@ class _TaskEditorLocationInputRow extends StatelessWidget {
         color: appTheme.mutedTextColor.withValues(alpha: 0.35),
       ),
     );
-    return TextField(
-      key: fieldKey,
+    return ClearableTextField(
+      fieldKey: fieldKey,
       controller: controller,
+      clearIconColor: appTheme.mutedTextColor,
+      clearIconSize: 16,
       cursorColor: appTheme.tertiaryAccent,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 13),
       decoration: InputDecoration(
@@ -787,9 +790,11 @@ class _TaskEditorTimeInputRow extends StatelessWidget {
         color: appTheme.mutedTextColor.withValues(alpha: 0.35),
       ),
     );
-    return TextField(
-      key: fieldKey,
+    return ClearableTextField(
+      fieldKey: fieldKey,
       controller: controller,
+      clearIconColor: appTheme.mutedTextColor,
+      clearIconSize: 16,
       cursorColor: appTheme.tertiaryAccent,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 13),
       decoration: InputDecoration(

@@ -22,6 +22,7 @@ import '../../models/task_tier.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/task_providers.dart';
 import '../edit_task_screen.dart';
+import 'clearable_text_field.dart';
 
 const double _pixel9ProAspectRatio = 1280.0 / 2856.0;
 const double _pixel9ProLogicalWidth = 488.0;
@@ -636,8 +637,8 @@ class _QuickAddTextField extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final heading = localizations.tierName(effectiveTier);
 
-    return TextField(
-      key: const ValueKey('quick_add_input'),
+    return ClearableTextField(
+      fieldKey: const ValueKey('quick_add_input'),
       controller: controller,
       autofocus: true,
       cursorColor: colorScheme.primary,

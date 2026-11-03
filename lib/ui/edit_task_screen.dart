@@ -93,11 +93,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   final TextEditingController _timeStartController = TextEditingController();
   late final TextEditingController _titleController;
 
-  bool get _hasBlockedSearchText => _blockedSearchController.text.isNotEmpty;
-
   bool get _hasSubtaskText => _subtaskController.text.trim().isNotEmpty;
-
-  bool get _hasSuspendedText => _suspendedController.text.isNotEmpty;
 
   bool get _isEditMode => widget.initialTask != null;
 
@@ -318,7 +314,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         ),
         const SizedBox(height: 10),
         TaskEditorSchedulingCard(
-          hasSuspendedText: _hasSuspendedText,
           isRepeating: _isRepeating,
           isSuspended: _isSuspended,
           mode: _mode,
@@ -360,7 +355,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           TaskEditorBlockedBySection(
             candidateTasks: candidateTasks,
             disabledTaskIds: disabledIds,
-            hasSearchText: _hasBlockedSearchText,
             searchController: _blockedSearchController,
             searchQuery: _blockedSearchController.text,
             selectedBlockedByIds: _blockedByTaskIds,

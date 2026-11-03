@@ -609,4 +609,7 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get repeatErrorInvalid =>
       'Please enter an interval between 1 and 3650.';
+
+  @override
+  String get tooltipClearInput => 'Clear text';
 }

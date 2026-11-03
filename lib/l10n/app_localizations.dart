@@ -1207,6 +1207,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Please enter an interval between 1 and 3650.'**
   String get repeatErrorInvalid;
+
+  /// Tooltip for the button that clears the text in a focused input field.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear text'**
+  String get tooltipClearInput;
 }
 
 class _AppLocalizationsDelegate

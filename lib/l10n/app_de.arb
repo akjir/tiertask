@@ -184,5 +184,6 @@
   "repeatUnitDays": "Tage",
   "repeatUnitWeeks": "Wochen",
   "repeatUnitMonths": "Monate",
-  "repeatErrorInvalid": "Bitte ein Intervall zwischen 1 und 3650 eingeben."
+  "repeatErrorInvalid": "Bitte ein Intervall zwischen 1 und 3650 eingeben.",
+  "tooltipClearInput": "Text löschen"
 }

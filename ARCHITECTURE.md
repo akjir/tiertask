@@ -72,6 +72,7 @@ tiertask/
 │       ├── settings_screen.dart
 │       └── widgets/
 │           ├── app_logo.dart
+│           ├── clearable_text_field.dart
 │           ├── quick_add_bar.dart
 │           ├── task_editor_conditions_section.dart
 │           ├── task_editor_sections.dart
@@ -100,6 +101,7 @@ tiertask/
         ├── test_helpers.dart
         └── widgets/
             ├── app_logo_test.dart
+            ├── clearable_text_field_test.dart
             ├── quick_add_bar_test.dart
             ├── task_editor_conditions_test.dart
             └── tier_page_indicator_test.dart
@@ -171,6 +173,7 @@ tiertask/
 | `lib/ui/home_screen.dart` | Primary landing page screen displaying a top navigation bar (`_LandingTopBar`) with the menu button on the left, the active label name centered in the middle when a label filter is selected (smoothly animating to the left next to the menu button with the inline search field expanding between the label name and the search/close button when search is opened), and the search toggle on the right; a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the centered uppercase tier section heading, minimalist task pill cards (`_TierTaskPill` with a uniform leading Material 3 `primaryContainer` rounded square containing a white completion circle or white circle with checkmark when completed, a compact repeat indicator icon for recurring tasks, a right-chevron `>` downgrade button on `Focus`, `Ready`, and `Planned` tasks, and a three-dots edit button on the right) or empty-state card (`_EmptyTierCard`); a bottom `TierPageIndicator`; floating action buttons (`_LandingFloatingButtons`) with a smaller conditional WebDAV sync button (`_FloatingSyncButton` in `WebDAV` / `Both` mode) right-aligned above the circular task-add button that both hide when the task-add button transforms into the inline bottom `QuickAddBar`; and a top-left navigation drawer (`_LandingDrawer`) featuring a Google Keep style `Labels` section (top `Edit` button, selectable label filter pills with open task count badges, and `+ Create new label` entry) alongside synchronization, TDF preview, and settings actions without tier navigation items. |
 | `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), Material 3 color palette (`Slate`, `Navy`), local time zone (`Automatic` or `Manual` UTC offset), open task count visibility (`Off` by default, `On`), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name, WebDAV endpoint parameters, and synchronization testing. |
 | `lib/ui/widgets/app_logo.dart` | Vector application logo widget (`AppLogo` and `_AppLogoPainter`) rendering the stacked tier bars and completion checkmark badge in the navigation drawer header. |
+| `lib/ui/widgets/clearable_text_field.dart` | Reusable text input widget (`ClearableTextField`) wrapping `TextField` or `TextFormField` that displays a right-side clear icon button (`Icons.close_rounded`) when focused, composes with any existing `InputDecoration.suffixIcon`, clears the `TextEditingController`, notifies `onChanged` and `onCleared`, and keeps focus on the input. |
 | `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, a `Labels` icon button that expands a multi-select menu upward above the bar, an `Advanced` icon button opening `EditTaskScreen`, and a `Cancel` icon button, and automatically stacking the title input above the action buttons when the viewport width is at or below the Pixel 9 Pro width/aspect-ratio threshold. |
 | `lib/ui/widgets/task_editor_conditions_section.dart` | Activation conditions card (`TaskEditorConditionsSection`) for `EditTaskScreen`, rendering global `condition any`, weekday (`day`), time window (`time` with 24-hour Material 3 time picker buttons), and GPS location (`location`) controls. |
 | `lib/ui/widgets/task_editor_sections.dart` | Reusable `SettingsScreen`-style section card (`TaskEditorSectionCard`), form cards (`TaskEditorDetailsCard`, `TaskEditorSchedulingCard`, `TaskEditorContextSection`, `TaskEditorSubtasksSection`, `TaskEditorBlockedBySection`), date/time and recurrence fields (`TaskEditorSuspendedField`, `TaskEditorRepeatField`), prerequisite name search, and action widgets (`TaskEditorTitleField`, `TaskEditorNoteField`, `TaskEditorModeRow`, `TaskEditorActionsRow`, `TaskEditorChip`) for `EditTaskScreen`. |

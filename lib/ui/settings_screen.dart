@@ -22,6 +22,7 @@ import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import '../repositories/local_file_repository.dart';
+import 'widgets/clearable_text_field.dart';
 
 /// Settings screen for language, color theme, storage mode, local file name, and WebDAV parameters.
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -114,7 +115,8 @@ class _LocalStorageSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextFormField(
+          ClearableTextField(
+            useFormField: true,
             controller: localFilePathController,
             autocorrect: false,
             decoration: InputDecoration(
@@ -328,7 +330,8 @@ class _SettingsFormFields extends StatelessWidget {
           onToggleObscurePassword: onToggleObscurePassword,
         ),
         const SizedBox(height: 16),
-        TextFormField(
+        ClearableTextField(
+          useFormField: true,
           controller: filePathController,
           autocorrect: false,
           decoration: InputDecoration(
@@ -1224,7 +1227,8 @@ class _WebDavCredentialsFields extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TextFormField(
+        ClearableTextField(
+          useFormField: true,
           controller: serverUrlController,
           keyboardType: TextInputType.url,
           autocorrect: false,
@@ -1239,7 +1243,8 @@ class _WebDavCredentialsFields extends StatelessWidget {
               : null,
         ),
         const SizedBox(height: 16),
-        TextFormField(
+        ClearableTextField(
+          useFormField: true,
           controller: usernameController,
           autocorrect: false,
           decoration: InputDecoration(
@@ -1284,7 +1289,8 @@ class _WebDavPasswordField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return TextFormField(
+    return ClearableTextField(
+      useFormField: true,
       controller: controller,
       obscureText: obscurePassword,
       autocorrect: false,

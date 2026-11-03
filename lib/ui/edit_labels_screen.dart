@@ -20,6 +20,7 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
+import 'widgets/clearable_text_field.dart';
 
 /// Dedicated Google Keep style screen for creating, renaming, and deleting labels while displaying open task counts.
 class EditLabelsScreen extends ConsumerStatefulWidget {
@@ -80,13 +81,14 @@ class _CreateLabelRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              key: const ValueKey('create_label_input'),
+            child: ClearableTextField(
+              fieldKey: const ValueKey('create_label_input'),
               controller: controller,
               autofocus: autofocus,
               cursorColor: colorScheme.primary,
               style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
               textInputAction: TextInputAction.done,
+              onCleared: onClear,
               onSubmitted: (_) => onSubmit(),
               decoration: InputDecoration(
                 filled: false,
@@ -355,7 +357,7 @@ class _EditableLabelRow extends StatelessWidget {
   }
 }
 
-/// Renders either the static label name or an inline [TextField] when renaming inside [_EditableLabelRow].
+/// Renders either the static label name or an inline [ClearableTextField] when renaming inside [_EditableLabelRow].
 class _EditableLabelTitle extends StatelessWidget {
   /// Creates an [_EditableLabelTitle].
   const _EditableLabelTitle({
@@ -380,23 +382,25 @@ class _EditableLabelTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    if (isEditing && renameController != null) {
-      return TextField(
-        key: ValueKey('rename_label_input_${label.id}'),
-        controller: renameController,
-        autofocus: true,
-        cursorColor: colorScheme.primary,
-        style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => onSaveRename(),
-        decoration: const InputDecoration(
-          filled: false,
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          isDense: true,
-        ),
-      );
+    if (isEditing) {
+      if (renameController case final controller?) {
+        return ClearableTextField(
+          fieldKey: ValueKey('rename_label_input_${label.id}'),
+          controller: controller,
+          autofocus: true,
+          cursorColor: colorScheme.primary,
+          style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => onSaveRename(),
+          decoration: const InputDecoration(
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            isDense: true,
+          ),
+        );
+      }
     }
     return Text(
       label.name,
