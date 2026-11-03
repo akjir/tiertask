@@ -88,7 +88,6 @@ void main() {
             language: AppLanguage.german,
             themeMode: AppThemeMode.dark,
             themePalette: AppThemePalette.slate,
-            showOpenTaskCount: true,
           ),
         ),
       ];

@@ -230,8 +230,7 @@ class AppWorkspace {
       (config.storageMode.id & 0x03) |
           ((config.language.id & 0x03) << 2) |
           ((config.themeMode.id & 0x03) << 4) |
-          ((config.themePalette.id & 0x01) << 6) |
-          ((config.showOpenTaskCount ? 1 : 0) << 7),
+          ((config.themePalette.id & 0x01) << 6),
     );
     for (final rawField in <String>[
       workspace.id.trim(),
@@ -317,7 +316,6 @@ class AppWorkspace {
         language: AppLanguage.fromId((flags >> 2) & 0x03),
         themeMode: AppThemeMode.fromId((flags >> 4) & 0x03),
         themePalette: AppThemePalette.fromId((flags >> 6) & 0x01),
-        showOpenTaskCount: ((flags >> 7) & 0x01) == 1,
         timeZoneMode: AppTimeZoneMode.fromId((tzWord >> 15) & 0x01),
         manualTimeZoneOffsetMinutes:
             (tzWord & 0x07FF) + WebDavConfig.minUtcOffsetMinutes,

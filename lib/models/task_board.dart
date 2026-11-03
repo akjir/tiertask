@@ -52,7 +52,10 @@ class TaskBoard {
        blocked = List<TaskItem>.unmodifiable(slices.blocked),
        someday = List<TaskItem>.unmodifiable(slices.someday),
        completed = List<TaskItem>.unmodifiable(slices.completed),
-       labels = List<TdfLabel>.unmodifiable(labels);
+       labels = List<TdfLabel>.unmodifiable(labels),
+       openTaskCountsByLabel = Map<String, int>.unmodifiable(
+         slices.openTaskCountsByLabel,
+       );
 
   /// Creates an empty [TaskBoard] across all 6 tiers.
   factory TaskBoard.empty() => TaskBoard();
@@ -148,6 +151,9 @@ class TaskBoard {
 
   /// Defined TDF `label` blocks in declaration order.
   final List<TdfLabel> labels;
+
+  /// Precomputed map of open (non-completed) task counts across tiers `1` to `5` keyed by label ID.
+  final Map<String, int> openTaskCountsByLabel;
 
   /// Tier 3 (`Planned`) task items.
   final List<TaskItem> planned;
@@ -597,18 +603,9 @@ class TaskBoard {
     return false;
   }
 
-  /// Counts how many open (non-completed) tasks across tiers `1` to `5` reference [labelId].
-  int openTaskCountForLabel(String labelId) {
-    var count = 0;
-    for (final task in allTasks) {
-      if (!task.isCompleted &&
-          task.completedAt == null &&
-          task.labelIds.contains(labelId)) {
-        count++;
-      }
-    }
-    return count;
-  }
+  /// Returns the precomputed count of open (non-completed) tasks across tiers `1` to `5` referencing [labelId].
+  int openTaskCountForLabel(String labelId) =>
+      openTaskCountsByLabel[labelId] ?? 0;
 
   /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (UTC) per `TDF_SPEC.md` Section 5.1.
   TaskBoard pruneCompletedTasks({DateTime? currentDate}) {
@@ -898,6 +895,26 @@ class TaskBoard {
       targetTaskId: trimmedTaskId,
       taskMap: taskMap,
     );
+  }
+
+  /// Increments open task counters in [counts] for all [tasks] in a tier slice.
+  static void _accumulateListLabelCounts(
+    List<TaskItem> tasks,
+    Map<String, int> counts,
+  ) {
+    for (final task in tasks) {
+      _accumulateTaskLabelCounts(task, counts);
+    }
+  }
+
+  /// Increments the open task counter in [counts] for each label ID referenced by [task].
+  static void _accumulateTaskLabelCounts(
+    TaskItem task,
+    Map<String, int> counts,
+  ) {
+    for (final labelId in task.labelIds) {
+      counts[labelId] = (counts[labelId] ?? 0) + 1;
+    }
   }
 
   /// Evaluates whether [task]'s effective condition groups are satisfied per `TDF_SPEC.md` Section 4.3.
@@ -1606,6 +1623,13 @@ class TaskBoard {
       for (final task in completed) task.copyWith(isCompleted: true),
     ];
 
+    final openCountsByLabel = <String, int>{};
+    _accumulateListLabelCounts(nextFocus, openCountsByLabel);
+    _accumulateListLabelCounts(nextReady, openCountsByLabel);
+    _accumulateListLabelCounts(nextPlanned, openCountsByLabel);
+    _accumulateListLabelCounts(nextBlocked, openCountsByLabel);
+    _accumulateListLabelCounts(nextSomeday, openCountsByLabel);
+
     return _NormalizedTierSlices(
       focus: nextFocus,
       ready: nextReady,
@@ -1613,6 +1637,7 @@ class TaskBoard {
       blocked: nextBlocked,
       someday: nextSomeday,
       completed: nextCompleted,
+      openTaskCountsByLabel: openCountsByLabel,
     );
   }
 
@@ -2010,6 +2035,7 @@ class _NormalizedTierSlices {
     required this.blocked,
     required this.someday,
     required this.completed,
+    required this.openTaskCountsByLabel,
   });
 
   /// Normalized Tier 4 (`Blocked`) tasks.
@@ -2020,6 +2046,9 @@ class _NormalizedTierSlices {
 
   /// Normalized Tier 1 (`Focus`) tasks.
   final List<TaskItem> focus;
+
+  /// Precomputed open task counts across tiers `1` to `5` keyed by label ID.
+  final Map<String, int> openTaskCountsByLabel;
 
   /// Normalized Tier 3 (`Planned`) tasks.
   final List<TaskItem> planned;

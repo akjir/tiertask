@@ -24,10 +24,10 @@ import 'package:tiertask/repositories/settings_repository.dart';
 import 'test_helpers.dart';
 
 void main() {
-  testWidgets(
-    'SettingsScreen defaults open task count display to Off and persists open task count preference',
-    (WidgetTester tester) async {
-      const seededTdf = '''
+  testWidgets('SettingsScreen does not display Open Task Count section', (
+    WidgetTester tester,
+  ) async {
+    const seededTdf = '''
 tdf 0.2.0
 
 label home {
@@ -69,72 +69,52 @@ task t004 {
   labels business office
 }
 ''';
-      final settingsRepository = InMemorySettingsRepository(
-        const WebDavConfig(language: AppLanguage.english),
-      );
-      final fakeLocalRepo = FakeLocalFileRepository(
-        config: const WebDavConfig(language: AppLanguage.english),
-        initialTdf: seededTdf,
-      );
+    final settingsRepository = InMemorySettingsRepository(
+      const WebDavConfig(language: AppLanguage.english),
+    );
+    final fakeLocalRepo = FakeLocalFileRepository(
+      config: const WebDavConfig(language: AppLanguage.english),
+      initialTdf: seededTdf,
+    );
 
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            settingsRepositoryProvider.overrideWithValue(settingsRepository),
-            localFileRepositoryProvider.overrideWithValue(fakeLocalRepo),
-            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
-          ],
-          child: const TierTaskApp(),
-        ),
-      );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          localFileRepositoryProvider.overrideWithValue(fakeLocalRepo),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+        ],
+        child: const TierTaskApp(),
+      ),
+    );
 
-      await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
 
-      expect(find.text('FOCUS TASKS'), findsOneWidget);
-      expect(
-        find.text('CATEGORIES'),
-        findsNothing,
-        reason: 'Categories section must not appear on the landing page',
-      );
-      expect(
-        find.text('LOCATIONS'),
-        findsNothing,
-        reason: 'Locations section must not appear on the landing page',
-      );
+    expect(find.text('FOCUS TASKS'), findsOneWidget);
+    expect(
+      find.text('CATEGORIES'),
+      findsNothing,
+      reason: 'Categories section must not appear on the landing page',
+    );
+    expect(
+      find.text('LOCATIONS'),
+      findsNothing,
+      reason: 'Locations section must not appear on the landing page',
+    );
 
-      await openSettingsFromMenu(tester);
+    await openSettingsFromMenu(tester);
 
-      expect(
-        find.text('Open Task Count'),
-        findsOneWidget,
-        reason: 'Settings must display the Open Task Count section',
-      );
-      expect(find.text('Off'), findsOneWidget);
-      expect(find.text('On'), findsOneWidget);
-
-      await tester.ensureVisible(find.text('On'));
-      await tester.tap(find.text('On'));
-      await tester.pumpAndSettle();
-
-      var savedConfig = await settingsRepository.loadConfig();
-      expect(
-        savedConfig.showOpenTaskCount,
-        isTrue,
-        reason: 'Selecting On must persist showOpenTaskCount as true',
-      );
-
-      await tester.ensureVisible(find.text('Off'));
-      await tester.tap(find.text('Off'));
-      await tester.pumpAndSettle();
-
-      savedConfig = await settingsRepository.loadConfig();
-      expect(
-        savedConfig.showOpenTaskCount,
-        isFalse,
-        reason: 'Selecting Off must persist showOpenTaskCount as false',
-      );
-    },
-  );
+    expect(
+      find.text('Open Task Count'),
+      findsNothing,
+      reason: 'Settings must not display the removed Open Task Count section',
+    );
+    expect(
+      find.text('Gesamtzahl offener Aufgaben'),
+      findsNothing,
+      reason: 'Settings must not display the German Open Task Count section',
+    );
+  });
 
   testWidgets(
     'SettingsScreen switches display language between English and German via top-left menu',

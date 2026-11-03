@@ -188,19 +188,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get themeDark => 'Dunkel';
 
   @override
-  String get openTaskCountSectionTitle => 'Gesamtzahl offener Aufgaben';
-
-  @override
-  String get openTaskCountSectionDescription =>
-      'Gesamtzahl der offenen Aufgaben auf Label-Karten ein- oder ausblenden.';
-
-  @override
-  String get openTaskCountOff => 'Aus';
-
-  @override
-  String get openTaskCountOn => 'An';
-
-  @override
   String get storageModeSectionTitle => 'Speichermodus';
 
   @override
@@ -388,11 +375,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get sectionLabels => 'LABELS';
-
-  @override
-  String taskCountLabel(int count) {
-    return '$count Aufgaben';
-  }
 
   @override
   String get tooltipMenu => 'Menü öffnen';

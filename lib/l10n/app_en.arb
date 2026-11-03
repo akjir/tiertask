@@ -234,22 +234,6 @@
   "@themeDark": {
     "description": "Option label for the dark color theme."
   },
-  "openTaskCountSectionTitle": "Open Task Count",
-  "@openTaskCountSectionTitle": {
-    "description": "Section heading for open task count visibility selection in settings."
-  },
-  "openTaskCountSectionDescription": "Show or hide the total number of open tasks on label cards.",
-  "@openTaskCountSectionDescription": {
-    "description": "Helper description explaining the open task count visibility setting."
-  },
-  "openTaskCountOff": "Off",
-  "@openTaskCountOff": {
-    "description": "Option label to hide the total open task count on label cards."
-  },
-  "openTaskCountOn": "On",
-  "@openTaskCountOn": {
-    "description": "Option label to show the total open task count on label cards."
-  },
   "storageModeSectionTitle": "Storage Mode",
   "@storageModeSectionTitle": {
     "description": "Section heading for storage mode selection in settings."
@@ -497,15 +481,6 @@
   "sectionLabels": "LABELS",
   "@sectionLabels": {
     "description": "Uppercase section label above the label chips or summary cards."
-  },
-  "taskCountLabel": "{count} tasks",
-  "@taskCountLabel": {
-    "description": "Total task counter label displayed at the top of label cards.",
-    "placeholders": {
-      "count": {
-        "type": "int"
-      }
-    }
   },
   "tooltipMenu": "Open menu",
   "@tooltipMenu": {

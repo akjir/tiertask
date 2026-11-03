@@ -167,12 +167,16 @@ void main() {
           language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
           themePalette: AppThemePalette.navy,
-          showOpenTaskCount: true,
           timeZoneMode: AppTimeZoneMode.manual,
           manualTimeZoneOffsetMinutes: 120,
         ),
       );
       final encodedBytes = updated.toBytes();
+      expect(
+        encodedBytes[6] & 0x80,
+        equals(0),
+        reason: 'Unused bit 7 in workspace flags byte must remain 0',
+      );
       expect(
         encodedBytes.sublist(0, 4),
         equals(<int>[0x54, 0x54, 0x57, 0x01]),
@@ -538,7 +542,6 @@ void main() {
         const WebDavConfig(
           language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
-          showOpenTaskCount: true,
         ),
       );
 
@@ -771,7 +774,6 @@ void main() {
           language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
           themePalette: AppThemePalette.navy,
-          showOpenTaskCount: true,
         ),
       );
 
@@ -823,11 +825,6 @@ void main() {
         reloaded.config.themePalette,
         equals(AppThemePalette.navy),
         reason: 'Reloaded themePalette must preserve AppThemePalette.navy',
-      );
-      expect(
-        reloaded.config.showOpenTaskCount,
-        isTrue,
-        reason: 'Reloaded showOpenTaskCount must preserve true',
       );
 
       await reloadedRepository.createWorkspace('Arbeit', activate: true);

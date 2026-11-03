@@ -142,52 +142,6 @@ class _LocalStorageSection extends StatelessWidget {
   }
 }
 
-/// Card for choosing whether the total open task count is shown on label cards.
-class _OpenTaskCountSelectionCard extends StatelessWidget {
-  /// Creates an [_OpenTaskCountSelectionCard].
-  const _OpenTaskCountSelectionCard({
-    required this.showOpenTaskCount,
-    required this.onShowOpenTaskCountChanged,
-  });
-
-  /// Callback invoked when the user toggles open task count visibility.
-  final ValueChanged<bool> onShowOpenTaskCountChanged;
-
-  /// Whether the open task count is currently shown.
-  final bool showOpenTaskCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.numbers_rounded,
-      title: localizations.openTaskCountSectionTitle,
-      description: localizations.openTaskCountSectionDescription,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<bool>(
-          segments: [
-            ButtonSegment(
-              value: false,
-              label: Text(localizations.openTaskCountOff),
-            ),
-            ButtonSegment(
-              value: true,
-              label: Text(localizations.openTaskCountOn),
-            ),
-          ],
-          selected: {showOpenTaskCount},
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              onShowOpenTaskCountChanged(selection.first);
-            }
-          },
-        ),
-      ),
-    );
-  }
-}
-
 /// Monospace preview box displaying a resolved local file path or WebDAV endpoint URI.
 class _ResolvedPathPreview extends StatelessWidget {
   /// Creates a [_ResolvedPathPreview].
@@ -346,7 +300,7 @@ class _SettingsFormFields extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, color palette, time zone, open task count, and storage mode preference cards on [SettingsScreen].
+/// Groups the language, theme, color palette, time zone, and storage mode preference cards on [SettingsScreen].
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
@@ -355,14 +309,12 @@ class _SettingsPreferenceCards extends StatelessWidget {
     required this.selectedThemePalette,
     required this.selectedTimeZoneMode,
     required this.manualTimeZoneOffsetMinutes,
-    required this.showOpenTaskCount,
     required this.selectedStorageMode,
     required this.onLanguageChanged,
     required this.onThemeModeChanged,
     required this.onThemePaletteChanged,
     required this.onTimeZoneModeChanged,
     required this.onManualTimeZoneOffsetChanged,
-    required this.onShowOpenTaskCountChanged,
     required this.onStorageModeChanged,
   });
 
@@ -374,9 +326,6 @@ class _SettingsPreferenceCards extends StatelessWidget {
 
   /// Callback when the manual UTC offset in minutes changes.
   final ValueChanged<int> onManualTimeZoneOffsetChanged;
-
-  /// Callback when open task count visibility changes.
-  final ValueChanged<bool> onShowOpenTaskCountChanged;
 
   /// Callback when [StorageMode] changes.
   final ValueChanged<StorageMode> onStorageModeChanged;
@@ -405,9 +354,6 @@ class _SettingsPreferenceCards extends StatelessWidget {
   /// Currently selected local time zone mode.
   final AppTimeZoneMode selectedTimeZoneMode;
 
-  /// Whether the open task count is shown on category and location cards.
-  final bool showOpenTaskCount;
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -433,11 +379,6 @@ class _SettingsPreferenceCards extends StatelessWidget {
           manualOffsetMinutes: manualTimeZoneOffsetMinutes,
           onTimeZoneModeChanged: onTimeZoneModeChanged,
           onManualOffsetChanged: onManualTimeZoneOffsetChanged,
-        ),
-        const SizedBox(height: 16),
-        _OpenTaskCountSelectionCard(
-          showOpenTaskCount: showOpenTaskCount,
-          onShowOpenTaskCountChanged: onShowOpenTaskCountChanged,
         ),
         const SizedBox(height: 16),
         _StorageModeSelectionCard(
@@ -469,7 +410,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   AppThemeMode _selectedThemeMode = AppThemeMode.system;
   AppThemePalette _selectedThemePalette = AppThemePalette.slate;
   AppTimeZoneMode _selectedTimeZoneMode = AppTimeZoneMode.automatic;
-  bool _showOpenTaskCount = false;
   String? _statusBannerMessage;
   _StatusBannerTone _statusTone = _StatusBannerTone.success;
 
@@ -525,7 +465,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 selectedThemePalette: _selectedThemePalette,
                 selectedTimeZoneMode: _selectedTimeZoneMode,
                 manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
-                showOpenTaskCount: _showOpenTaskCount,
                 selectedStorageMode: _selectedStorageMode,
                 onLanguageChanged: _handleLanguageChanged,
                 onThemeModeChanged: _handleThemeModeChanged,
@@ -533,7 +472,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 onTimeZoneModeChanged: _handleTimeZoneModeChanged,
                 onManualTimeZoneOffsetChanged:
                     _handleManualTimeZoneOffsetChanged,
-                onShowOpenTaskCountChanged: _handleShowOpenTaskCountChanged,
                 onStorageModeChanged: _handleStorageModeChanged,
               ),
               if (_selectedStorageMode.usesLocal) ...[
@@ -604,7 +542,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       language: _selectedLanguage,
       themeMode: _selectedThemeMode,
       themePalette: _selectedThemePalette,
-      showOpenTaskCount: _showOpenTaskCount,
       timeZoneMode: _selectedTimeZoneMode,
       manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
     );
@@ -671,17 +608,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         .updateManualTimeZoneOffsetMinutes(newOffsetMinutes);
   }
 
-  /// Updates [_showOpenTaskCount] and persists the preference immediately.
-  Future<void> _handleShowOpenTaskCountChanged(bool showOpenTaskCount) async {
-    setState(() {
-      _showOpenTaskCount = showOpenTaskCount;
-      _clearStatusBanner();
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateShowOpenTaskCount(showOpenTaskCount);
-  }
-
   /// Removes the status banner from the widget tree once its fade-out animation finishes.
   void _handleStatusBannerFadeEnd() {
     if (!mounted || _isBannerVisible) {
@@ -743,7 +669,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _selectedThemePalette = config.themePalette;
     _selectedTimeZoneMode = config.timeZoneMode;
     _manualTimeZoneOffsetMinutes = config.manualTimeZoneOffsetMinutes;
-    _showOpenTaskCount = config.showOpenTaskCount;
     _selectedStorageMode = config.storageMode;
     if (_initialized) {
       return;

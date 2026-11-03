@@ -463,6 +463,11 @@ label office {
         equals(0),
         reason: 'openTaskCountForLabel must return 0 when no open tasks reference the label',
       );
+      expect(
+        board.openTaskCountsByLabel,
+        equals(<String, int>{'l_home_office': 1}),
+        reason: 'Precomputed openTaskCountsByLabel map must expose O(1) counts for open tasks',
+      );
 
       board = board.renameLabel('l_home_office', '  Remote Work  ');
       expect(

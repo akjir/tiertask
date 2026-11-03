@@ -165,7 +165,7 @@ enum StorageMode {
   }
 }
 
-/// Immutable configuration for local TDF file storage, WebDAV synchronization, language, theme, time zone, and task count visibility.
+/// Immutable configuration for local TDF file storage, WebDAV synchronization, language, theme, and time zone.
 @immutable
 class WebDavConfig {
   /// Creates a [WebDavConfig] instance.
@@ -179,7 +179,6 @@ class WebDavConfig {
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
     this.themePalette = AppThemePalette.slate,
-    this.showOpenTaskCount = false,
     this.timeZoneMode = AppTimeZoneMode.automatic,
     int manualTimeZoneOffsetMinutes = 0,
   }) : storageMode =
@@ -273,9 +272,6 @@ class WebDavConfig {
   /// Selected Material 3 color palette (`slate` or `navy`).
   final AppThemePalette themePalette;
 
-  /// Whether to display the total open task count on category and location cards.
-  final bool showOpenTaskCount;
-
   /// Selected time zone resolution mode (`automatic` or `manual`).
   final AppTimeZoneMode timeZoneMode;
 
@@ -321,7 +317,6 @@ class WebDavConfig {
     AppLanguage? language,
     AppThemeMode? themeMode,
     AppThemePalette? themePalette,
-    bool? showOpenTaskCount,
     AppTimeZoneMode? timeZoneMode,
     int? manualTimeZoneOffsetMinutes,
   }) {
@@ -335,7 +330,6 @@ class WebDavConfig {
       language: language ?? this.language,
       themeMode: themeMode ?? this.themeMode,
       themePalette: themePalette ?? this.themePalette,
-      showOpenTaskCount: showOpenTaskCount ?? this.showOpenTaskCount,
       timeZoneMode: timeZoneMode ?? this.timeZoneMode,
       manualTimeZoneOffsetMinutes:
           manualTimeZoneOffsetMinutes ?? this.manualTimeZoneOffsetMinutes,
@@ -476,7 +470,6 @@ class WebDavConfig {
         other.language == language &&
         other.themeMode == themeMode &&
         other.themePalette == themePalette &&
-        other.showOpenTaskCount == showOpenTaskCount &&
         other.timeZoneMode == timeZoneMode &&
         other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes;
   }
@@ -492,7 +485,6 @@ class WebDavConfig {
     language,
     themeMode,
     themePalette,
-    showOpenTaskCount,
     timeZoneMode,
     manualTimeZoneOffsetMinutes,
   );

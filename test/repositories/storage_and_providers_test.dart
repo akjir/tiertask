@@ -212,6 +212,11 @@ task b1 {
       expect(enMessageKeys, isNot(contains('sectionLocations')));
       expect(enMessageKeys, isNot(contains('moveTaskTitle')));
       expect(enMessageKeys, isNot(contains('menuMoveTo')));
+      expect(enMessageKeys, isNot(contains('openTaskCountSectionTitle')));
+      expect(enMessageKeys, isNot(contains('openTaskCountSectionDescription')));
+      expect(enMessageKeys, isNot(contains('openTaskCountOff')));
+      expect(enMessageKeys, isNot(contains('openTaskCountOn')));
+      expect(enMessageKeys, isNot(contains('taskCountLabel')));
       expect(deMessageKeys, equals(enMessageKeys));
 
       for (final key in enMessageKeys) {
@@ -273,7 +278,6 @@ task b1 {
         equals('tasks.tdf'),
         reason: 'Default remote filePath must be tasks.tdf',
       );
-      expect(defaultConfig.showOpenTaskCount, isFalse);
       expect(defaultConfig.isConfigured, isTrue);
     });
   });

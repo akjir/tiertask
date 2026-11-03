@@ -708,13 +708,6 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     await updateConfig(updated);
   }
 
-  /// Updates only the [showOpenTaskCount] preference and persists it immediately.
-  Future<void> updateShowOpenTaskCount(bool showOpenTaskCount) async {
-    final current = state.asData?.value ?? await future;
-    final updated = current.copyWith(showOpenTaskCount: showOpenTaskCount);
-    await updateConfig(updated);
-  }
-
   /// Updates only the [storageMode] preference and persists it immediately.
   Future<void> updateStorageMode(StorageMode storageMode) async {
     final current = state.asData?.value ?? await future;

@@ -434,30 +434,6 @@ abstract class AppLocalizations {
   /// **'Dark'**
   String get themeDark;
 
-  /// Section heading for open task count visibility selection in settings.
-  ///
-  /// In en, this message translates to:
-  /// **'Open Task Count'**
-  String get openTaskCountSectionTitle;
-
-  /// Helper description explaining the open task count visibility setting.
-  ///
-  /// In en, this message translates to:
-  /// **'Show or hide the total number of open tasks on label cards.'**
-  String get openTaskCountSectionDescription;
-
-  /// Option label to hide the total open task count on label cards.
-  ///
-  /// In en, this message translates to:
-  /// **'Off'**
-  String get openTaskCountOff;
-
-  /// Option label to show the total open task count on label cards.
-  ///
-  /// In en, this message translates to:
-  /// **'On'**
-  String get openTaskCountOn;
-
   /// Section heading for storage mode selection in settings.
   ///
   /// In en, this message translates to:
@@ -769,12 +745,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'LABELS'**
   String get sectionLabels;
-
-  /// Total task counter label displayed at the top of label cards.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} tasks'**
-  String taskCountLabel(int count);
 
   /// Tooltip for the top-left navigation menu button.
   ///
