@@ -333,11 +333,17 @@ class _QuickAddBarLayout extends StatelessWidget {
 /// State for [QuickAddBar].
 class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   final TextEditingController _controller = TextEditingController();
-  bool _isLabelsPopupOpen = false;
+  final LayerLink _labelsLayerLink = LayerLink();
+  final OverlayPortalController _labelsPopupController =
+      OverlayPortalController();
   QuickAddMode _mode = QuickAddMode.standard;
   final Set<String> _selectedLabelIds = <String>{};
 
+  /// Whether the task title input contains non-whitespace text.
   bool get _hasTaskText => _controller.text.trim().isNotEmpty;
+
+  /// Whether the upward Labels popup menu is currently open.
+  bool get _isLabelsPopupOpen => _labelsPopupController.isShowing;
 
   @override
   void initState() {
@@ -354,66 +360,40 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final labels = ref.watch(
       taskNotifierProvider.select(
         (boardAsync) => boardAsync.asData?.value.labels ?? const <TdfLabel>[],
       ),
     );
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_isLabelsPopupOpen)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Align(
-              alignment: Alignment.bottomRight,
-              child: TapRegion(
-                groupId: _popupTapRegionGroupId,
-                onTapOutside: (_) => _dismissPopup(),
-                child: _UpwardLabelsMenu(
-                  labels: labels,
-                  selectedLabelIds: _selectedLabelIds,
-                  onToggleLabel: _toggleLabel,
-                ),
-              ),
-            ),
-          ),
-        Material(
-          key: const ValueKey('quick_add_bar'),
-          elevation: 8,
-          color: theme.cardColor,
-          child: SafeArea(
-            top: false,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: theme.scaffoldBackgroundColor,
-                    width: 1.5,
-                  ),
-                ),
-              ),
-              child: _QuickAddBarLayout(
-                controller: _controller,
-                effectiveTier: _mode.targetTier,
-                hasSelectedLabels: _selectedLabelIds.isNotEmpty,
-                hasTaskText: _hasTaskText,
-                isLabelsPopupOpen: _isLabelsPopupOpen,
-                mode: _mode,
-                onAdvanced: _openAdvancedDialog,
-                onCancel: _cancel,
-                onSubmit: _submit,
-                onToggleLabelsPopup: _toggleLabelsPopup,
-                onTogglePriority: _togglePriority,
-                onToggleSomeday: _toggleSomeday,
-              ),
-            ),
+    return CompositedTransformTarget(
+      link: _labelsLayerLink,
+      child: OverlayPortal(
+        controller: _labelsPopupController,
+        overlayChildBuilder: (_) => _QuickAddLabelsOverlay(
+          labels: labels,
+          layerLink: _labelsLayerLink,
+          selectedLabelIds: _selectedLabelIds,
+          onDismiss: _dismissPopup,
+          onToggleLabel: _toggleLabel,
+        ),
+        child: _QuickAddBarSurface(
+          child: _QuickAddBarLayout(
+            controller: _controller,
+            effectiveTier: _mode.targetTier,
+            hasSelectedLabels: _selectedLabelIds.isNotEmpty,
+            hasTaskText: _hasTaskText,
+            isLabelsPopupOpen: _isLabelsPopupOpen,
+            mode: _mode,
+            onAdvanced: _openAdvancedDialog,
+            onCancel: _cancel,
+            onSubmit: _submit,
+            onToggleLabelsPopup: _toggleLabelsPopup,
+            onTogglePriority: _togglePriority,
+            onToggleSomeday: _toggleSomeday,
           ),
         ),
-      ],
+      ),
     );
   }
 
@@ -421,7 +401,9 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   void _cancel() {
     _controller.clear();
     setState(() {
-      _isLabelsPopupOpen = false;
+      if (_labelsPopupController.isShowing) {
+        _labelsPopupController.hide();
+      }
       _selectedLabelIds.clear();
       _mode = QuickAddMode.standard;
     });
@@ -430,11 +412,11 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
   /// Closes the upward labels popup menu when open.
   void _dismissPopup() {
-    if (!_isLabelsPopupOpen) {
+    if (!_labelsPopupController.isShowing) {
       return;
     }
     setState(() {
-      _isLabelsPopupOpen = false;
+      _labelsPopupController.hide();
     });
   }
 
@@ -457,7 +439,9 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
         }
         _controller.clear();
         setState(() {
-          _isLabelsPopupOpen = false;
+          if (_labelsPopupController.isShowing) {
+            _labelsPopupController.hide();
+          }
           _selectedLabelIds.clear();
           _mode = QuickAddMode.standard;
         });
@@ -486,7 +470,9 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
 
     _controller.clear();
     setState(() {
-      _isLabelsPopupOpen = false;
+      if (_labelsPopupController.isShowing) {
+        _labelsPopupController.hide();
+      }
       _selectedLabelIds.clear();
       _mode = QuickAddMode.standard;
     });
@@ -514,7 +500,11 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   /// Toggles the upward Labels selection menu.
   void _toggleLabelsPopup() {
     setState(() {
-      _isLabelsPopupOpen = !_isLabelsPopupOpen;
+      if (_labelsPopupController.isShowing) {
+        _labelsPopupController.hide();
+      } else {
+        _labelsPopupController.show();
+      }
     });
   }
 
@@ -534,6 +524,86 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
           ? QuickAddMode.standard
           : QuickAddMode.someday;
     });
+  }
+}
+
+/// Elevated bottom surface container for [QuickAddBar].
+class _QuickAddBarSurface extends StatelessWidget {
+  /// Creates a [_QuickAddBarSurface].
+  const _QuickAddBarSurface({required this.child});
+
+  /// Inner layout displayed inside the surface.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      key: const ValueKey('quick_add_bar'),
+      elevation: 8,
+      color: theme.cardColor,
+      child: SafeArea(
+        top: false,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: theme.scaffoldBackgroundColor, width: 1.5),
+            ),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Floating overlay wrapper that anchors [_UpwardLabelsMenu] above [QuickAddBar].
+class _QuickAddLabelsOverlay extends StatelessWidget {
+  /// Creates a [_QuickAddLabelsOverlay].
+  const _QuickAddLabelsOverlay({
+    required this.labels,
+    required this.layerLink,
+    required this.selectedLabelIds,
+    required this.onDismiss,
+    required this.onToggleLabel,
+  });
+
+  /// Available labels on the board.
+  final List<TdfLabel> labels;
+
+  /// Layer link connected to the [QuickAddBar] surface.
+  final LayerLink layerLink;
+
+  /// Callback invoked when the user taps outside the popup region.
+  final VoidCallback onDismiss;
+
+  /// Callback invoked when a label option is tapped.
+  final ValueChanged<String> onToggleLabel;
+
+  /// Currently selected label IDs.
+  final Set<String> selectedLabelIds;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.topLeft,
+      child: CompositedTransformFollower(
+        link: layerLink,
+        showWhenUnlinked: false,
+        targetAnchor: Alignment.topRight,
+        followerAnchor: Alignment.bottomRight,
+        offset: const Offset(-16, -8),
+        child: TapRegion(
+          groupId: _popupTapRegionGroupId,
+          onTapOutside: (_) => onDismiss(),
+          child: _UpwardLabelsMenu(
+            labels: labels,
+            selectedLabelIds: selectedLabelIds,
+            onToggleLabel: onToggleLabel,
+          ),
+        ),
+      ),
+    );
   }
 }
 

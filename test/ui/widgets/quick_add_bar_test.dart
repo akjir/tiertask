@@ -286,10 +286,13 @@ label c_hr {
       await tester.pumpAndSettle();
 
       final barFinder = find.byKey(const ValueKey('quick_add_bar'));
+      final indicatorFinder = find.byKey(const ValueKey('tier_page_indicator'));
       final labelsButton = find.byKey(
         const ValueKey('quick_add_labels_button'),
       );
       final labelsMenu = find.byKey(const ValueKey('quick_add_labels_menu'));
+      final indicatorRectBefore = tester.getRect(indicatorFinder);
+      final barRectBefore = tester.getRect(barFinder);
 
       expect(
         labelsMenu,
@@ -304,6 +307,17 @@ label c_hr {
         labelsMenu,
         findsOneWidget,
         reason: 'Tapping Labels button must expand the labels menu upward',
+      );
+      expect(
+        tester.getRect(indicatorFinder),
+        equals(indicatorRectBefore),
+        reason:
+            'Opening the Labels popup must not push TierPageIndicator upward',
+      );
+      expect(
+        tester.getRect(barFinder),
+        equals(barRectBefore),
+        reason: 'Opening the Labels popup must not shift QuickAddBar',
       );
       expect(
         tester.getBottomLeft(labelsMenu).dy <=

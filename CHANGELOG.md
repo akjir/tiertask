@@ -67,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Removed Markdown (`.md`) parsing, serialization, and `MarkdownService` in favor of the TierTask Data Format (`.tdf`).
 
 ### Fixed
+- Fixed the `QuickAddBar` label selection popup (`_UpwardLabelsMenu` in `lib/ui/widgets/quick_add_bar.dart`) pushing `TierPageIndicator` upward when opened by rendering the popup inside an `OverlayPortal` anchored above `QuickAddBar` via `CompositedTransformTarget` and `CompositedTransformFollower`.
 - Fixed workspace and storage mode (`StorageMode.both` / `StorageMode.webdav`) settings resetting to `StorageMode.local` after restarting on Linux by persisting all workspaces and the active workspace index in a single atomic Base64-encoded `TTW\x01` binary entry (`t2_settings_v1`) in `SecureSettingsRepository` (`lib/repositories/settings_repository.dart`) via `Base64Service` so `gnome-keyring-daemon` (`GKeyFile`) never rejects `\"` escape sequences in plaintext keyrings.
 - Fixed Linux and Windows native window, header bar, and taskbar titles to display `TierTask` instead of `tiertask`.
 - Fixed Settings to disable the `Test Connection / Sync Now` button in `Local` storage mode and clear stale status banners so WebDAV connection success is never displayed when WebDAV is unconfigured or invalid.
