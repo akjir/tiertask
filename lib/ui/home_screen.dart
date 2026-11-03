@@ -40,6 +40,88 @@ class HomeScreen extends ConsumerStatefulWidget {
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
+/// Scrollable search view displaying all tasks across tiers `1` to `6` (`Focus` through `Completed`) under `ALL TASKS`.
+class _AllTasksSearchView extends StatelessWidget {
+  /// Creates an [_AllTasksSearchView].
+  const _AllTasksSearchView({required this.board, required this.searchQuery});
+
+  /// Current task board snapshot (already evaluated for the active label context if one is selected).
+  final TaskBoard board;
+
+  /// Active search query string for filtering tasks.
+  final String searchQuery;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final entries = _collectFilteredEntries(board, searchQuery);
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 96),
+      itemCount: entries.isEmpty ? 2 : entries.length + 1,
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 16, bottom: 36),
+            child: _LandingSectionLabel(title: localizations.sectionAllTasks),
+          );
+        }
+        if (entries.isEmpty) {
+          return _EmptyTierCard(
+            message: localizations.emptySectionEntries(
+              localizations.sectionAllTasks,
+            ),
+          );
+        }
+        final entry = entries[index - 1];
+        final tier = entry.tier;
+        return _TierTaskPill(
+          key: ValueKey('tier_pill_${tier.name}_${entry.task.id}'),
+          task: entry.task,
+          canDowngrade:
+              tier == TaskTier.focus ||
+              tier == TaskTier.ready ||
+              tier == TaskTier.planned,
+          isCompleted: tier == TaskTier.completed,
+        );
+      },
+    );
+  }
+
+  /// Appends tasks from [tasks] matching [normalizedQuery] to [entries] tagged with [tier].
+  void _appendMatchingTierEntries({
+    required List<({TaskItem task, TaskTier tier})> entries,
+    required List<TaskItem> tasks,
+    required TaskTier tier,
+    required String normalizedQuery,
+  }) {
+    for (final task in tasks) {
+      if (normalizedQuery.isEmpty ||
+          task.title.toLowerCase().contains(normalizedQuery)) {
+        entries.add((task: task, tier: tier));
+      }
+    }
+  }
+
+  /// Collects all tasks across tiers `1` to `6` (`Focus` through `Completed`) filtered by [query].
+  List<({TaskItem task, TaskTier tier})> _collectFilteredEntries(
+    TaskBoard board,
+    String query,
+  ) {
+    final trimmed = query.trim().toLowerCase();
+    final entries = <({TaskItem task, TaskTier tier})>[];
+    for (final tier in TaskTier.values) {
+      _appendMatchingTierEntries(
+        entries: entries,
+        tasks: board.tasksForTier(tier),
+        tier: tier,
+        normalizedQuery: trimmed,
+      );
+    }
+    return entries;
+  }
+}
+
 /// Action tile inside [_LandingDrawer] that closes the drawer before invoking [onAction].
 class _DrawerActionTile extends StatelessWidget {
   /// Creates a [_DrawerActionTile].
@@ -427,7 +509,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   TaskTier _activeTier = TaskTier.focus;
   bool _isQuickAddOpen = false;
   bool _isSearching = false;
-  final PageController _pageController = PageController();
+  PageController _pageController = PageController();
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -577,6 +659,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _selectTierPane(TaskTier tier) {
     setState(() {
       _activeTier = tier;
+      if (_isSearching) {
+        _isSearching = false;
+        _searchController.clear();
+        _searchQuery = '';
+        _pageController.dispose();
+        _pageController = PageController(initialPage: tier.index);
+      }
     });
     if (_pageController.hasClients) {
       _pageController.jumpToPage(tier.index);
@@ -620,6 +709,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       if (!_isSearching) {
         _searchController.clear();
         _searchQuery = '';
+        _pageController.dispose();
+        _pageController = PageController(initialPage: _activeTier.index);
       }
     });
   }
@@ -632,13 +723,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// Switches between loading, error, and the horizontal 6-tier [PageView].
+/// Switches between loading, error, the all-tasks search view, and the horizontal 6-tier [PageView].
 class _LandingContentSwitcher extends StatelessWidget {
   /// Creates a [_LandingContentSwitcher].
   const _LandingContentSwitcher({
     required this.activeLabel,
     required this.boardAsync,
     required this.evaluationTime,
+    required this.isSearching,
     required this.localEvaluationTime,
     required this.pageController,
     required this.searchQuery,
@@ -655,6 +747,9 @@ class _LandingContentSwitcher extends StatelessWidget {
 
   /// Reference UTC evaluation time for active label context derivation.
   final DateTime evaluationTime;
+
+  /// Whether the all-tasks search view is active.
+  final bool isSearching;
 
   /// Reference local wall-clock evaluation time for recurring conditions and `suspended`.
   final DateTime localEvaluationTime;
@@ -694,13 +789,18 @@ class _LandingContentSwitcher extends StatelessWidget {
                 localEvaluationTime: localEvaluationTime,
               )
             : board;
+        if (isSearching) {
+          return _AllTasksSearchView(
+            board: effectiveBoard,
+            searchQuery: searchQuery,
+          );
+        }
         return PageView.builder(
           controller: pageController,
           itemCount: TaskTier.values.length,
           onPageChanged: onPageChanged,
           itemBuilder: (context, index) => _TierScrollView(
             board: effectiveBoard,
-            searchQuery: searchQuery,
             tier: TaskTier.values[index],
           ),
         );
@@ -923,6 +1023,7 @@ class _LandingScaffoldBody extends StatelessWidget {
             activeLabel: activeLabel,
             boardAsync: boardAsync,
             evaluationTime: evaluationTime,
+            isSearching: isSearching,
             localEvaluationTime: localEvaluationTime,
             pageController: pageController,
             searchQuery: searchQuery,
@@ -1082,17 +1183,10 @@ class _TierPaneHeader extends StatelessWidget {
 /// Scrollable tier pane body rendering the uppercase section label and minimalist task pills.
 class _TierScrollView extends StatelessWidget {
   /// Creates a [_TierScrollView].
-  const _TierScrollView({
-    required this.board,
-    required this.searchQuery,
-    required this.tier,
-  });
+  const _TierScrollView({required this.board, required this.tier});
 
   /// Current task board snapshot.
   final TaskBoard board;
-
-  /// Active search query string for filtering tasks.
-  final String searchQuery;
 
   /// [TaskTier] displayed on this pane.
   final TaskTier tier;
@@ -1100,7 +1194,7 @@ class _TierScrollView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final tasks = _filterTasks(board.tasksForTier(tier), searchQuery);
+    final tasks = board.tasksForTier(tier);
     final isCompletedTier = tier == TaskTier.completed;
 
     return ListView.builder(
@@ -1126,18 +1220,6 @@ class _TierScrollView extends StatelessWidget {
         );
       },
     );
-  }
-
-  /// Filters [tasks] by a case-insensitive substring match against [query].
-  List<TaskItem> _filterTasks(List<TaskItem> tasks, String query) {
-    final trimmed = query.trim().toLowerCase();
-    if (trimmed.isEmpty) {
-      return tasks;
-    }
-    return [
-      for (final task in tasks)
-        if (task.title.toLowerCase().contains(trimmed)) task,
-    ];
   }
 }
 

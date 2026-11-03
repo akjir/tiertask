@@ -364,6 +364,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sectionCompletedTasks => 'COMPLETED TASKS';
 
   @override
+  String get sectionAllTasks => 'ALL TASKS';
+
+  @override
   String get sectionLabels => 'LABELS';
 
   @override
@@ -373,7 +376,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipSearch => 'Search tasks';
 
   @override
-  String get searchHint => 'Search focus tasks...';
+  String get searchHint => 'Search tasks...';
 
   @override
   String get drawerLabels => 'Labels';

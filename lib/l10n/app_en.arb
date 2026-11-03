@@ -478,6 +478,10 @@
   "@sectionCompletedTasks": {
     "description": "Uppercase section label above the Completed tasks list on the Completed tier panel."
   },
+  "sectionAllTasks": "ALL TASKS",
+  "@sectionAllTasks": {
+    "description": "Uppercase section label above the All Tasks list in the search view."
+  },
   "sectionLabels": "LABELS",
   "@sectionLabels": {
     "description": "Uppercase section label above the label chips or summary cards."
@@ -490,7 +494,7 @@
   "@tooltipSearch": {
     "description": "Tooltip for the top-right search button."
   },
-  "searchHint": "Search focus tasks...",
+  "searchHint": "Search tasks...",
   "@searchHint": {
     "description": "Placeholder hint inside the landing page search field."
   },

@@ -219,6 +219,18 @@ void main() {
       await tester.tap(find.byIcon(Icons.search_rounded));
       await tester.pumpAndSettle();
 
+      expect(
+        find.text('ALL TASKS'),
+        findsOneWidget,
+        reason:
+            'Opening search must display ALL TASKS where FOCUS TASKS was shown',
+      );
+      expect(
+        find.text('FOCUS TASKS'),
+        findsNothing,
+        reason: 'FOCUS TASKS heading must be replaced by ALL TASKS in search',
+      );
+
       final searchFieldRect = tester.getRect(find.byType(TextField));
       final closeSearchButtonRect = tester.getRect(
         find.byIcon(Icons.close_rounded),
@@ -240,11 +252,16 @@ void main() {
       expect(
         find.text('Daily meeting with team'),
         findsNothing,
-        reason: 'Search query must filter Focus tasks on the landing page',
+        reason: 'Search query must filter tasks on the All Tasks search screen',
       );
 
       await tester.tap(find.byIcon(Icons.close_rounded));
       await tester.pumpAndSettle();
+      expect(
+        find.text('FOCUS TASKS'),
+        findsOneWidget,
+        reason: 'Closing search must restore the FOCUS TASKS heading',
+      );
       expect(
         find.text('Daily meeting with team'),
         findsOneWidget,
@@ -293,6 +310,16 @@ void main() {
       expect(find.text('Was steht an!'), findsNothing);
       expect(find.byKey(const ValueKey('top_bar_title')), findsNothing);
       expect(find.textContaining('Olivia'), findsNothing);
+      expect(find.text('FOKUSAUFGABEN'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.search_rounded));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('ALLE AUFGABEN'),
+        findsOneWidget,
+        reason: 'German search screen must display ALLE AUFGABEN',
+      );
+      await tester.tap(find.byIcon(Icons.close_rounded));
+      await tester.pumpAndSettle();
       expect(find.text('FOKUSAUFGABEN'), findsOneWidget);
       expect(
         find.text('KATEGORIEN'),
@@ -903,6 +930,314 @@ task p1 {
         find.byKey(const ValueKey('downgrade_task_button_r2')),
         findsNothing,
         reason: 'Someday task pill must not display a downgrade button',
+      );
+    },
+  );
+
+  testWidgets(
+    'Search view displays ALL TASKS, orders all tasks from Focus through Completed, applies active label filter, and restores the previous tier screen on close',
+    (WidgetTester tester) async {
+      const searchTdf = '''
+tdf 0.2.0
+
+label work {
+  name "Work"
+}
+label home {
+  name "Home"
+}
+task f1 {
+  name "Alpha Focus Match"
+  created 2026-11-01 07:00
+  queued 2026-11-01 07:00
+  labels work
+}
+task f2 {
+  name "Focus Two"
+  created 2026-11-01 07:05
+  queued 2026-11-01 07:05
+  labels home
+}
+task f3 {
+  name "Focus Three"
+  created 2026-11-01 07:10
+  queued 2026-11-01 07:10
+  labels home
+}
+task r1 {
+  name "Bravo Ready Match"
+  created 2026-11-01 07:15
+  queued 2026-11-01 07:15
+  labels work
+}
+task r2 {
+  name "Ready Two"
+  created 2026-11-01 07:20
+  queued 2026-11-01 07:20
+  labels home
+}
+task r3 {
+  name "Ready Three"
+  created 2026-11-01 07:25
+  queued 2026-11-01 07:25
+  labels home
+}
+task r4 {
+  name "Ready Four"
+  created 2026-11-01 07:30
+  queued 2026-11-01 07:30
+  labels home
+}
+task r5 {
+  name "Ready Five"
+  created 2026-11-01 07:35
+  queued 2026-11-01 07:35
+  labels home
+}
+task p1 {
+  name "Charlie Planned Match"
+  created 2026-11-01 07:40
+  queued 2026-11-01 07:40
+  labels work
+}
+task b1 {
+  name "Delta Blocked Match"
+  created 2026-11-01 07:45
+  queued 2026-11-01 07:45
+  suspended 2026-11-05 09:00
+  labels home
+}
+task s1 {
+  name "Echo Someday Match"
+  created 2026-11-01 07:50
+  labels work
+}
+task c1 {
+  name "Foxtrot Completed Match"
+  created 2026-10-28 08:00
+  queued 2026-10-28 08:00
+  finished 2026-10-29 10:00
+  labels work
+}
+task c2 {
+  name "Home Completed Only"
+  created 2026-10-28 09:00
+  queued 2026-10-28 09:00
+  finished 2026-10-29 11:00
+  labels home
+}
+''';
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: searchTdf,
+              ),
+            ),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 1, 12, 0),
+            ),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_blocked')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('BLOCKED TASKS'),
+        findsOneWidget,
+        reason: 'Must navigate to Blocked screen before opening search',
+      );
+
+      await tester.tap(find.byIcon(Icons.search_rounded));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('ALL TASKS'),
+        findsOneWidget,
+        reason: 'Search screen must display ALL TASKS as section heading',
+      );
+      expect(
+        find.text('BLOCKED TASKS'),
+        findsNothing,
+        reason: 'Previous tier heading must be replaced while searching',
+      );
+
+      await tester.enterText(find.byType(TextField), 'Match');
+      await tester.pumpAndSettle();
+
+      final focusY = tester.getTopLeft(find.text('Alpha Focus Match')).dy;
+      final readyY = tester.getTopLeft(find.text('Bravo Ready Match')).dy;
+      final plannedY = tester.getTopLeft(find.text('Charlie Planned Match')).dy;
+      final blockedY = tester.getTopLeft(find.text('Delta Blocked Match')).dy;
+      final somedayY = tester.getTopLeft(find.text('Echo Someday Match')).dy;
+      final completedY = tester
+          .getTopLeft(find.text('Foxtrot Completed Match'))
+          .dy;
+
+      expect(
+        focusY < readyY &&
+            readyY < plannedY &&
+            plannedY < blockedY &&
+            blockedY < somedayY &&
+            somedayY < completedY,
+        isTrue,
+        reason: 'Filtered tasks in search view must be ordered: Focus, Ready, Planned, Blocked, Someday, Completed',
+      );
+      expect(
+        find.text('Focus Two'),
+        findsNothing,
+        reason: 'Non-matching tasks must be filtered out',
+      );
+
+      await tester.tap(find.byIcon(Icons.close_rounded));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('BLOCKED TASKS'),
+        findsOneWidget,
+        reason: 'Closing search must return to the previous Blocked screen',
+      );
+      expect(
+        find.text('Delta Blocked Match'),
+        findsOneWidget,
+        reason:
+            'Blocked task must be visible after returning to Blocked screen',
+      );
+      expect(
+        find.text('ALL TASKS'),
+        findsNothing,
+        reason: 'ALL TASKS heading must disappear when search closes',
+      );
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('drawer_label_tile_work')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_planned')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('PLANNED TASKS'),
+        findsOneWidget,
+        reason:
+            'Must be on Planned screen before opening label-filtered search',
+      );
+
+      await tester.tap(find.byIcon(Icons.search_rounded));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('ALL TASKS'),
+        findsOneWidget,
+        reason: 'Label-filtered search must still display ALL TASKS heading',
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('top_bar_title')),
+          matching: find.text('Work'),
+        ),
+        findsOneWidget,
+        reason: 'Selected Work label title must remain visible in the top bar',
+      );
+      expect(
+        find.text('Alpha Focus Match'),
+        findsOneWidget,
+        reason: 'Work label task in Focus must appear in search',
+      );
+      expect(
+        find.text('Bravo Ready Match'),
+        findsOneWidget,
+        reason: 'Work label task in Ready/Focus context must appear in search',
+      );
+      expect(
+        find.text('Charlie Planned Match'),
+        findsOneWidget,
+        reason:
+            'Work label task in Planned/Focus context must appear in search',
+      );
+      expect(
+        find.text('Echo Someday Match'),
+        findsOneWidget,
+        reason: 'Work label task in Someday must appear in search',
+      );
+      expect(
+        find.text('Foxtrot Completed Match'),
+        findsOneWidget,
+        reason: 'Completed task with Work label must appear in search',
+      );
+      expect(
+        find.text('Focus Two'),
+        findsNothing,
+        reason:
+            'Home-only open task must be excluded when Work label is active',
+      );
+      expect(
+        find.text('Delta Blocked Match'),
+        findsNothing,
+        reason:
+            'Home-only blocked task must be excluded when Work label is active',
+      );
+      expect(
+        find.text('Home Completed Only'),
+        findsNothing,
+        reason: 'Home-only completed task must be excluded when Work label is active',
+      );
+
+      final workAlphaY = tester.getTopLeft(find.text('Alpha Focus Match')).dy;
+      final workBravoY = tester.getTopLeft(find.text('Bravo Ready Match')).dy;
+      final workCharlieY = tester
+          .getTopLeft(find.text('Charlie Planned Match'))
+          .dy;
+      final workEchoY = tester.getTopLeft(find.text('Echo Someday Match')).dy;
+      final workFoxtrotY = tester
+          .getTopLeft(find.text('Foxtrot Completed Match'))
+          .dy;
+
+      expect(
+        workAlphaY < workBravoY &&
+            workBravoY < workCharlieY &&
+            workCharlieY < workEchoY &&
+            workEchoY < workFoxtrotY,
+        isTrue,
+        reason: 'Label-filtered search tasks must maintain tier order through Completed',
+      );
+
+      await tester.enterText(find.byType(TextField), 'Foxtrot');
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Foxtrot Completed Match'),
+        findsOneWidget,
+        reason:
+            'Search query must match completed tasks within the active label',
+      );
+      expect(
+        find.text('Alpha Focus Match'),
+        findsNothing,
+        reason: 'Non-matching tasks in the active label must be filtered out',
+      );
+
+      await tester.tap(find.byIcon(Icons.close_rounded));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('PLANNED TASKS'),
+        findsOneWidget,
+        reason: 'Closing search must return to the Planned screen',
       );
     },
   );

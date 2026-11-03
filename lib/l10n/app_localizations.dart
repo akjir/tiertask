@@ -740,6 +740,12 @@ abstract class AppLocalizations {
   /// **'COMPLETED TASKS'**
   String get sectionCompletedTasks;
 
+  /// Uppercase section label above the All Tasks list in the search view.
+  ///
+  /// In en, this message translates to:
+  /// **'ALL TASKS'**
+  String get sectionAllTasks;
+
   /// Uppercase section label above the label chips or summary cards.
   ///
   /// In en, this message translates to:
@@ -761,7 +767,7 @@ abstract class AppLocalizations {
   /// Placeholder hint inside the landing page search field.
   ///
   /// In en, this message translates to:
-  /// **'Search focus tasks...'**
+  /// **'Search tasks...'**
   String get searchHint;
 
   /// Button tooltip and sheet title for managing labels.
