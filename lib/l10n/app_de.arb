@@ -120,7 +120,6 @@
   "actionEdit": "Bearbeiten",
   "createNewLabel": "Neues Label erstellen",
   "editLabelsTitle": "Labels bearbeiten",
-  "tooltipRenameLabel": "Label umbenennen",
   "taskSuspendedLabel": "Zurückgestellt",
   "taskSuspendedUntilLabel": "Zurückgestellt bis (optional)",
   "taskSuspendedUntilHint": "JJJJ-MM-TT [HH:MM] (leer = unbegrenzt)",
@@ -233,5 +232,15 @@
   "locationSourceGps": "GPS",
   "locationSourceSystem": "System / Netzwerk",
   "locationSourceInternet": "Internet (GeoIP)",
-  "actionRefresh": "Aktualisieren"
+  "actionRefresh": "Aktualisieren",
+  "editLabelTitle": "Label bearbeiten",
+  "tooltipEditLabel": "Label bearbeiten",
+  "labelDetailsSectionTitle": "Labeldetails",
+  "labelNameLabel": "Labelname",
+  "labelNameErrorEmpty": "Bitte einen Labelnamen eingeben.",
+  "labelNameErrorDuplicate": "Ein Label mit diesem Namen existiert bereits.",
+  "labelColorSectionTitle": "Farbe",
+  "labelColorHint": "#RRGGBB (optional)",
+  "labelColorErrorInvalid": "Bitte eine gültige Hex-Farbe eingeben (#RRGGBB).",
+  "labelConditionsSectionDescription": "Schränke ein, wann und wo Aufgaben mit diesem Label standardmäßig aktiv sind."
 }

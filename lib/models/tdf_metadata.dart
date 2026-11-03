@@ -633,7 +633,9 @@ class TdfLabel {
     String? id,
     String? name,
     String? color,
+    bool clearColor = false,
     String? note,
+    bool clearNote = false,
     DateTime? modifiedAt,
     bool clearModifiedAt = false,
     List<TaskCondition>? conditions,
@@ -641,8 +643,8 @@ class TdfLabel {
     return TdfLabel(
       id: id ?? this.id,
       name: name ?? this.name,
-      color: color ?? this.color,
-      note: note ?? this.note,
+      color: clearColor ? null : (color ?? this.color),
+      note: clearNote ? null : (note ?? this.note),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       conditions: conditions != null
           ? List<TaskCondition>.unmodifiable(conditions)

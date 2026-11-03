@@ -818,12 +818,6 @@ abstract class AppLocalizations {
   /// **'Edit labels'**
   String get editLabelsTitle;
 
-  /// Tooltip for the button that renames or saves a label.
-  ///
-  /// In en, this message translates to:
-  /// **'Rename label'**
-  String get tooltipRenameLabel;
-
   /// Toggle chip label for marking a task as suspended in the task editor.
   ///
   /// In en, this message translates to:
@@ -1501,6 +1495,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Refresh'**
   String get actionRefresh;
+
+  /// Header title when editing a label in the label editor screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit Label'**
+  String get editLabelTitle;
+
+  /// Tooltip for the edit button on a label row.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit label'**
+  String get tooltipEditLabel;
+
+  /// Section card title for label name and note in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Label Details'**
+  String get labelDetailsSectionTitle;
+
+  /// Input label for the label name field in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Label Name'**
+  String get labelNameLabel;
+
+  /// Validation error shown when the label name is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a label name.'**
+  String get labelNameErrorEmpty;
+
+  /// Validation error shown when another label already uses the same name.
+  ///
+  /// In en, this message translates to:
+  /// **'A label with this name already exists.'**
+  String get labelNameErrorDuplicate;
+
+  /// Section card title for the optional hexadecimal color in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Color'**
+  String get labelColorSectionTitle;
+
+  /// Placeholder hint inside the hexadecimal color input field.
+  ///
+  /// In en, this message translates to:
+  /// **'#RRGGBB (optional)'**
+  String get labelColorHint;
+
+  /// Validation error shown when the hexadecimal color input is malformed.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid hex color (#RRGGBB).'**
+  String get labelColorErrorInvalid;
+
+  /// Section card description for activation conditions in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Restrict when and where tasks with this label become active by default.'**
+  String get labelConditionsSectionDescription;
 }
 
 class _AppLocalizationsDelegate

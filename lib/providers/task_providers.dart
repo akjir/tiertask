@@ -365,21 +365,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Updates the display [name] of the label with [labelId] and persists to storage.
-  Future<void> renameLabel(
-    String labelId,
-    String name, {
-    DateTime? currentDate,
-  }) async {
-    final (utcNow, _) = _resolveTimestamps(currentDate);
-    final updated = _currentBoard.renameLabel(
-      labelId,
-      name,
-      currentDate: utcNow,
-    );
-    await _commitMutation(updated);
-  }
-
   /// Restores a completed task to [targetTier] (defaulting to [TaskTier.planned]) per
   /// `TDF_SPEC.md` Section 6.5 and persists to storage.
   Future<void> restoreTask(
@@ -450,6 +435,32 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final updated = _currentBoard.toggleSubtask(
       taskId,
       stepIndex,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+    );
+    await _commitMutation(updated);
+  }
+
+  /// Updates an existing label with [labelId] and persists the updated board to storage.
+  Future<void> updateLabel(
+    String labelId, {
+    String? name,
+    String? color,
+    bool clearColor = false,
+    String? note,
+    bool clearNote = false,
+    List<TaskCondition>? conditions,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final updated = _currentBoard.updateLabel(
+      labelId,
+      name: name,
+      color: color,
+      clearColor: clearColor,
+      note: note,
+      clearNote: clearNote,
+      conditions: conditions,
       currentDate: utcNow,
       localEvaluationTime: localNow,
     );

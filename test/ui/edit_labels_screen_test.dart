@@ -160,6 +160,12 @@ task 000002OkD2 {
       expect(businessTileFinder, findsOneWidget);
       expect(createLabelTileFinder, findsOneWidget);
       expect(find.text('Create new label'), findsOneWidget);
+      expect(
+        tester.getTopLeft(businessTileFinder).dy <
+            tester.getTopLeft(homeTileFinder).dy,
+        isTrue,
+        reason: 'Labels in the side panel must be sorted alphabetically (Business before Home)',
+      );
 
       expect(
         find.descendant(of: homeTileFinder, matching: find.text('2')),
@@ -280,19 +286,25 @@ task 000002OkD2 {
         reason: 'Clicking Edit at the top of the Labels section must open EditLabelsScreen',
       );
       expect(find.text('Edit labels'), findsOneWidget);
+      final homeRowFinder = find.byKey(
+        const ValueKey('edit_label_row_home00OkD2'),
+      );
+      final businessRowFinder = find.byKey(
+        const ValueKey('edit_label_row_busin0OkD2'),
+      );
       expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('edit_label_row_home00OkD2')),
-          matching: find.text('2'),
-        ),
+        tester.getTopLeft(businessRowFinder).dy <
+            tester.getTopLeft(homeRowFinder).dy,
+        isTrue,
+        reason: 'Labels in EditLabelsScreen must be sorted alphabetically (Business before Home)',
+      );
+      expect(
+        find.descendant(of: homeRowFinder, matching: find.text('2')),
         findsOneWidget,
         reason: 'EditLabelsScreen must keep the task count on Home label',
       );
       expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('edit_label_row_busin0OkD2')),
-          matching: find.text('1'),
-        ),
+        find.descendant(of: businessRowFinder, matching: find.text('1')),
         findsOneWidget,
         reason: 'EditLabelsScreen must keep the task count on Business label',
       );
@@ -315,35 +327,180 @@ task 000002OkD2 {
       expect(
         isValidLabelId(campingLabel.id),
         isTrue,
-        reason: 'Created label must have a valid 13-character Base62 label ID',
+        reason: 'Created label must have a valid 10-character Base62 label ID',
+      );
+      final campingRowFinder = find.byKey(
+        ValueKey('edit_label_row_${campingLabel.id}'),
       );
       expect(
-        find.byKey(ValueKey('edit_label_row_${campingLabel.id}')),
+        campingRowFinder,
         findsOneWidget,
         reason:
             'Creating a new label in EditLabelsScreen must add it to the list',
       );
-      expect(find.text('Camping'), findsOneWidget);
+      expect(
+        tester.getTopLeft(businessRowFinder).dy <
+                tester.getTopLeft(campingRowFinder).dy &&
+            tester.getTopLeft(campingRowFinder).dy <
+                tester.getTopLeft(homeRowFinder).dy,
+        isTrue,
+        reason: 'Newly created Camping label must be positioned alphabetically between Business and Home',
+      );
+      expect(
+        find.byKey(ValueKey('rename_label_input_${campingLabel.id}')),
+        findsNothing,
+        reason: 'Inline rename field must not exist in the overview panel',
+      );
 
       await tester.tap(
-        find.byKey(ValueKey('rename_label_button_${campingLabel.id}')),
-      );
-      await tester.pump();
-      await tester.enterText(
-        find.byKey(ValueKey('rename_label_input_${campingLabel.id}')),
-        'Outdoor Camping',
-      );
-      await tester.tap(
-        find.byKey(ValueKey('rename_label_button_${campingLabel.id}')),
+        find.byKey(ValueKey('edit_label_button_${campingLabel.id}')),
       );
       await tester.pumpAndSettle();
 
+      final editLabelScreenFinder = find.byKey(
+        const ValueKey('edit_label_screen'),
+      );
+      expect(
+        editLabelScreenFinder,
+        findsOneWidget,
+        reason:
+            'Clicking the edit button on a label row must open EditLabelScreen',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_condition_any_toggle')),
+        findsNothing,
+        reason: 'EditLabelScreen must not render task-only condition any reset toggles',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_condition_day_any_toggle')),
+        findsNothing,
+        reason:
+            'EditLabelScreen must not render task-only day any reset toggles',
+      );
+
+      final titleInputFinder = find.byKey(
+        const ValueKey('task_editor_title_input'),
+      );
+      final noteInputFinder = find.byKey(
+        const ValueKey('task_editor_note_input'),
+      );
+      final colorInputFinder = find.byKey(
+        const ValueKey('label_editor_color_input'),
+      );
+      final saveButtonFinder = find.byKey(
+        const ValueKey('task_editor_save_button'),
+      );
+
+      await tester.enterText(titleInputFinder, '   ');
+      await tester.pump();
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Please enter a label name.'),
+        findsOneWidget,
+        reason:
+            'Empty label name in EditLabelScreen must show validation error',
+      );
+
+      await tester.enterText(titleInputFinder, '  home  ');
+      await tester.pump();
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('A label with this name already exists.'),
+        findsOneWidget,
+        reason: 'Duplicate label name in EditLabelScreen must show validation error',
+      );
+
+      await tester.enterText(titleInputFinder, 'Outdoor Camping');
+      await tester.enterText(noteInputFinder, 'Weekend gear & tents');
+      await tester.enterText(colorInputFinder, 'not-a-color');
+      await tester.pump();
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Enter a valid hex color (#RRGGBB).'),
+        findsOneWidget,
+        reason: 'Invalid hex color must show validation error',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('label_editor_color_preset_#4CAF50')),
+      );
+      await tester.pump();
+
+      final satChip = find.byKey(
+        const ValueKey('task_editor_condition_day_sat'),
+      );
+      await tester.ensureVisible(satChip);
+      await tester.tap(satChip);
+      await tester.pump();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_time_start_input')),
+        '08:00',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_time_end_input')),
+        '20:00',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_add_time_condition_button')),
+      );
+      await tester.pump();
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('task_editor_location_lat_input')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_location_lat_input')),
+        '50.9787',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_location_lon_input')),
+        '11.0328',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_location_radius_input')),
+        '250',
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_add_location_condition_button')),
+      );
+      await tester.pump();
+
+      await tester.ensureVisible(saveButtonFinder);
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        editLabelScreenFinder,
+        findsNothing,
+        reason: 'Saving valid label changes must close EditLabelScreen',
+      );
       expect(
         find.text('Outdoor Camping'),
         findsOneWidget,
         reason:
-            'Renaming a label in EditLabelsScreen must update its display name',
+            'Updated label name must be displayed in EditLabelsScreen overview',
       );
+      expect(
+        tester.getTopLeft(homeRowFinder).dy <
+            tester.getTopLeft(campingRowFinder).dy,
+        isTrue,
+        reason: 'Renamed Outdoor Camping label must resort alphabetically after Home',
+      );
+
+      final updatedCamping = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findLabel(campingLabel.id)!;
+      expect(updatedCamping.name, equals('Outdoor Camping'));
+      expect(updatedCamping.note, equals('Weekend gear & tents'));
+      expect(updatedCamping.color, equals('#4CAF50'));
+      expect(updatedCamping.conditions.length, equals(3));
 
       await tester.tap(
         find.byKey(ValueKey('delete_label_button_${campingLabel.id}')),
@@ -353,8 +510,7 @@ task 000002OkD2 {
       expect(
         find.text('Outdoor Camping'),
         findsNothing,
-        reason:
-            'Deleting a label in EditLabelsScreen must remove it from the list',
+        reason: 'Quick delete button in EditLabelsScreen must remove the label immediately',
       );
 
       await tester.tap(find.byType(BackButton));

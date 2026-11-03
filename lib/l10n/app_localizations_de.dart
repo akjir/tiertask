@@ -412,9 +412,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get editLabelsTitle => 'Labels bearbeiten';
 
   @override
-  String get tooltipRenameLabel => 'Label umbenennen';
-
-  @override
   String get taskSuspendedLabel => 'Zurückgestellt';
 
   @override
@@ -803,4 +800,37 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get actionRefresh => 'Aktualisieren';
+
+  @override
+  String get editLabelTitle => 'Label bearbeiten';
+
+  @override
+  String get tooltipEditLabel => 'Label bearbeiten';
+
+  @override
+  String get labelDetailsSectionTitle => 'Labeldetails';
+
+  @override
+  String get labelNameLabel => 'Labelname';
+
+  @override
+  String get labelNameErrorEmpty => 'Bitte einen Labelnamen eingeben.';
+
+  @override
+  String get labelNameErrorDuplicate =>
+      'Ein Label mit diesem Namen existiert bereits.';
+
+  @override
+  String get labelColorSectionTitle => 'Farbe';
+
+  @override
+  String get labelColorHint => '#RRGGBB (optional)';
+
+  @override
+  String get labelColorErrorInvalid =>
+      'Bitte eine gültige Hex-Farbe eingeben (#RRGGBB).';
+
+  @override
+  String get labelConditionsSectionDescription =>
+      'Schränke ein, wann und wo Aufgaben mit diesem Label standardmäßig aktiv sind.';
 }

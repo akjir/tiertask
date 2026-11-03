@@ -530,10 +530,6 @@
   "@editLabelsTitle": {
     "description": "Screen title for the label management screen."
   },
-  "tooltipRenameLabel": "Rename label",
-  "@tooltipRenameLabel": {
-    "description": "Tooltip for the button that renames or saves a label."
-  },
   "taskSuspendedLabel": "Suspended",
   "@taskSuspendedLabel": {
     "description": "Toggle chip label for marking a task as suspended in the task editor."
@@ -1060,5 +1056,45 @@
   "actionRefresh": "Refresh",
   "@actionRefresh": {
     "description": "Button label to manually refresh the current location."
+  },
+  "editLabelTitle": "Edit Label",
+  "@editLabelTitle": {
+    "description": "Header title when editing a label in the label editor screen."
+  },
+  "tooltipEditLabel": "Edit label",
+  "@tooltipEditLabel": {
+    "description": "Tooltip for the edit button on a label row."
+  },
+  "labelDetailsSectionTitle": "Label Details",
+  "@labelDetailsSectionTitle": {
+    "description": "Section card title for label name and note in the label editor."
+  },
+  "labelNameLabel": "Label Name",
+  "@labelNameLabel": {
+    "description": "Input label for the label name field in the label editor."
+  },
+  "labelNameErrorEmpty": "Please enter a label name.",
+  "@labelNameErrorEmpty": {
+    "description": "Validation error shown when the label name is empty."
+  },
+  "labelNameErrorDuplicate": "A label with this name already exists.",
+  "@labelNameErrorDuplicate": {
+    "description": "Validation error shown when another label already uses the same name."
+  },
+  "labelColorSectionTitle": "Color",
+  "@labelColorSectionTitle": {
+    "description": "Section card title for the optional hexadecimal color in the label editor."
+  },
+  "labelColorHint": "#RRGGBB (optional)",
+  "@labelColorHint": {
+    "description": "Placeholder hint inside the hexadecimal color input field."
+  },
+  "labelColorErrorInvalid": "Enter a valid hex color (#RRGGBB).",
+  "@labelColorErrorInvalid": {
+    "description": "Validation error shown when the hexadecimal color input is malformed."
+  },
+  "labelConditionsSectionDescription": "Restrict when and where tasks with this label become active by default.",
+  "@labelConditionsSectionDescription": {
+    "description": "Section card description for activation conditions in the label editor."
   }
 }

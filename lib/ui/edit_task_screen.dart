@@ -19,7 +19,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
-import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import 'widgets/quick_add_bar.dart';
@@ -62,35 +61,21 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final Set<String> _blockedByTaskIds;
   final TextEditingController _blockedSearchController =
       TextEditingController();
-  late bool _conditionAny;
-  late bool _conditionDayAny;
-  late bool _conditionLocationAny;
-  late bool _conditionTimeAny;
+  late final ConditionEditorController _conditionController;
   String? _errorMessage;
   late bool _isRepeating;
   late bool _isSuspended;
-  String? _locationErrorMessage;
-  final TextEditingController _locationLatController = TextEditingController();
-  final TextEditingController _locationLonController = TextEditingController();
-  final TextEditingController _locationRadiusController =
-      TextEditingController();
-  late final List<LocationTaskCondition> _locationRules;
   late QuickAddMode _mode;
   late final TextEditingController _noteController;
   late final TextEditingController _repeatCountController;
   String? _repeatErrorMessage;
   late RepeatUnit _repeatUnit;
   late final Set<String> _selectedLabelIds;
-  late final Set<int> _selectedWeekdays;
   final TextEditingController _subtaskController = TextEditingController();
   late final List<SubtaskItem> _subtasks;
   late bool _subtasksAutoFinish;
   late final TextEditingController _suspendedController;
   String? _suspendedErrorMessage;
-  final TextEditingController _timeEndController = TextEditingController();
-  String? _timeErrorMessage;
-  late final List<TimeWindowTaskCondition> _timeRules;
-  final TextEditingController _timeStartController = TextEditingController();
   late final TextEditingController _titleController;
 
   /// Whether the subtask input field currently contains non-whitespace text.
@@ -131,7 +116,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       text: (task?.repeatRule?.count ?? 1).toString(),
     );
     _repeatUnit = task?.repeatRule?.unit ?? RepeatUnit.days;
-    _initializeConditions(task?.conditions ?? const []);
+    _conditionController = ConditionEditorController(
+      initialConditions: task?.conditions ?? const [],
+    );
 
     _titleController.addListener(_handleTitleChanged);
     _subtaskController.addListener(_handleInputStateChanged);
@@ -153,11 +140,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _suspendedController.dispose();
     _repeatCountController.dispose();
     _blockedSearchController.dispose();
-    _timeStartController.dispose();
-    _timeEndController.dispose();
-    _locationLatController.dispose();
-    _locationLonController.dispose();
-    _locationRadiusController.dispose();
+    _conditionController.dispose();
     super.dispose();
   }
 
@@ -198,36 +181,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     );
   }
 
-  /// Validates and appends a GPS location condition from the location input controllers.
-  void _addLocationCondition() {
-    if (_isSuspended) {
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    final parsed = LocationTaskCondition.tryParse(
-      _locationLatController.text,
-      _locationLonController.text,
-      _locationRadiusController.text,
-    );
-    if (parsed == null) {
-      setState(() {
-        _locationErrorMessage = localizations.conditionLocationErrorInvalid;
-      });
-      return;
-    }
-    setState(() {
-      _conditionAny = false;
-      _conditionLocationAny = false;
-      if (!_locationRules.contains(parsed)) {
-        _locationRules.add(parsed);
-      }
-      _locationLatController.clear();
-      _locationLonController.clear();
-      _locationRadiusController.clear();
-      _locationErrorMessage = null;
-    });
-  }
-
   /// Appends the current non-empty subtask text to [_subtasks].
   void _addSubtask() {
     final text = _subtaskController.text.trim();
@@ -240,71 +193,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Validates and appends a time window condition from the time input controllers.
-  void _addTimeCondition() {
-    if (_isSuspended) {
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    final parsed = TimeWindowTaskCondition.tryParse(
-      _timeStartController.text,
-      _timeEndController.text,
-    );
-    if (parsed == null) {
-      setState(() {
-        _timeErrorMessage = localizations.conditionTimeErrorInvalid;
-      });
-      return;
-    }
-    setState(() {
-      _conditionAny = false;
-      _conditionTimeAny = false;
-      if (!_timeRules.contains(parsed)) {
-        _timeRules.add(parsed);
-      }
-      _timeStartController.clear();
-      _timeEndController.clear();
-      _timeErrorMessage = null;
-    });
-  }
-
   /// Wraps a [showTimePicker] dialog in a 24-hour [MediaQuery] configuration.
   static Widget _build24HourTimePicker(BuildContext context, Widget? child) {
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
       child: child ?? const SizedBox.shrink(),
-    );
-  }
-
-  /// Builds the [TaskEditorConditionsSection] for the current state.
-  Widget _buildConditionsSection() {
-    return TaskEditorConditionsSection(
-      conditionAny: _conditionAny,
-      conditionDayAny: _conditionDayAny,
-      conditionLocationAny: _conditionLocationAny,
-      conditionTimeAny: _conditionTimeAny,
-      isSuspended: _isSuspended,
-      locationErrorMessage: _locationErrorMessage,
-      locationLatController: _locationLatController,
-      locationLonController: _locationLonController,
-      locationRadiusController: _locationRadiusController,
-      locationRules: _locationRules,
-      selectedWeekdays: _selectedWeekdays,
-      timeEndController: _timeEndController,
-      timeErrorMessage: _timeErrorMessage,
-      timeRules: _timeRules,
-      timeStartController: _timeStartController,
-      onAddLocationCondition: _addLocationCondition,
-      onAddTimeCondition: _addTimeCondition,
-      onPickEndTime: _pickEndTime,
-      onPickStartTime: _pickStartTime,
-      onRemoveLocationCondition: _removeLocationCondition,
-      onRemoveTimeCondition: _removeTimeCondition,
-      onToggleConditionAny: _toggleConditionAny,
-      onToggleDayAny: _toggleDayAny,
-      onToggleLocationAny: _toggleLocationAny,
-      onToggleTimeAny: _toggleTimeAny,
-      onToggleWeekday: _toggleWeekday,
     );
   }
 
@@ -341,10 +234,10 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           onToggleSomeday: _toggleSomeday,
           onToggleSuspended: _toggleSuspended,
         ),
-        if (board.labels.isNotEmpty) ...[
+        if (board.sortedLabels.isNotEmpty) ...[
           const SizedBox(height: 10),
           TaskEditorContextSection(
-            labels: board.labels,
+            labels: board.sortedLabels,
             selectedLabelIds: _selectedLabelIds,
             onToggleLabel: _toggleLabel,
           ),
@@ -373,7 +266,10 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           ),
         ],
         const SizedBox(height: 10),
-        _buildConditionsSection(),
+        TaskEditorConditionsSection(
+          controller: _conditionController,
+          isSuspended: _isSuspended,
+        ),
       ],
     );
   }
@@ -432,27 +328,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     return <String>[
       for (final label in board.labels)
         if (_selectedLabelIds.contains(label.id)) label.id,
-    ];
-  }
-
-  /// Assembles the ordered [TaskCondition] list from the editor state.
-  List<TaskCondition> _collectTaskConditions() {
-    if (_conditionAny) {
-      return const <TaskCondition>[GlobalResetTaskCondition()];
-    }
-    return <TaskCondition>[
-      if (_conditionDayAny)
-        const GroupResetTaskCondition(targetGroup: ConditionGroup.day)
-      else if (_selectedWeekdays.isNotEmpty)
-        DayTaskCondition.fromWeekdays(_selectedWeekdays),
-      if (_conditionTimeAny)
-        const GroupResetTaskCondition(targetGroup: ConditionGroup.time)
-      else
-        ..._timeRules,
-      if (_conditionLocationAny)
-        const GroupResetTaskCondition(targetGroup: ConditionGroup.location)
-      else
-        ..._locationRules,
     ];
   }
 
@@ -531,38 +406,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Initializes the condition state fields from [initialConditions].
-  void _initializeConditions(List<TaskCondition> initialConditions) {
-    _conditionAny = false;
-    _conditionDayAny = false;
-    _conditionTimeAny = false;
-    _conditionLocationAny = false;
-    _selectedWeekdays = <int>{};
-    _timeRules = <TimeWindowTaskCondition>[];
-    _locationRules = <LocationTaskCondition>[];
-
-    for (final condition in initialConditions) {
-      switch (condition) {
-        case GlobalResetTaskCondition():
-          _conditionAny = true;
-        case GroupResetTaskCondition(:final targetGroup):
-          if (targetGroup == ConditionGroup.day) {
-            _conditionDayAny = true;
-          } else if (targetGroup == ConditionGroup.time) {
-            _conditionTimeAny = true;
-          } else {
-            _conditionLocationAny = true;
-          }
-        case DayTaskCondition(:final weekdays):
-          _selectedWeekdays.addAll(weekdays);
-        case TimeWindowTaskCondition():
-          _timeRules.add(condition);
-        case LocationTaskCondition():
-          _locationRules.add(condition);
-      }
-    }
-  }
-
   /// Persists the created or edited task through [TaskNotifier].
   Future<void> _persistTask(
     TaskBoard board,
@@ -573,7 +416,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   ) async {
     final labelIds = _collectOrderedLabelIds(board);
     final blockedByIds = _collectOrderedBlockedByIds(board);
-    final conditions = _collectTaskConditions();
+    final conditions = _conditionController.buildConditions();
     final noteText = _noteController.text.trim();
     final notifier = ref.read(taskNotifierProvider.notifier);
 
@@ -609,22 +452,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       repeatRule: repeatRule,
       blockedByTaskIds: blockedByIds,
       conditions: conditions,
-    );
-  }
-
-  /// Opens the Material 3 time picker for the condition end time field (`17:00` default).
-  Future<void> _pickEndTime() async {
-    await _pickTimeIntoController(
-      _timeEndController,
-      defaultTime: const TimeOfDay(hour: 17, minute: 0),
-    );
-  }
-
-  /// Opens the Material 3 time picker for the condition start time field (`09:00` default).
-  Future<void> _pickStartTime() async {
-    await _pickTimeIntoController(
-      _timeStartController,
-      defaultTime: const TimeOfDay(hour: 9, minute: 0),
     );
   }
 
@@ -681,47 +508,10 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Opens a 24-hour Material 3 time picker and writes `HH:MM` into [controller].
-  Future<void> _pickTimeIntoController(
-    TextEditingController controller, {
-    required TimeOfDay defaultTime,
-  }) async {
-    if (_isSuspended) {
-      return;
-    }
-    final initialTime = _extractTimeOfDay(controller.text, defaultTime);
-    final pickedTime = await showTimePicker(
-      context: context,
-      initialTime: initialTime,
-      builder: _build24HourTimePicker,
-    );
-    if (!mounted || pickedTime == null) {
-      return;
-    }
-    setState(() {
-      controller.text = _formatTimeOfDay(pickedTime);
-      _timeErrorMessage = null;
-    });
-  }
-
-  /// Removes the GPS location condition at [index].
-  void _removeLocationCondition(int index) {
-    setState(() {
-      _locationRules.removeAt(index);
-    });
-  }
-
   /// Removes the subtask step at [index].
   void _removeSubtask(int index) {
     setState(() {
       _subtasks.removeAt(index);
-    });
-  }
-
-  /// Removes the time window condition at [index].
-  void _removeTimeCondition(int index) {
-    setState(() {
-      _timeRules.removeAt(index);
     });
   }
 
@@ -854,57 +644,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Toggles the global `condition any` reset directive.
-  void _toggleConditionAny() {
-    if (_isSuspended) {
-      return;
-    }
-    setState(() {
-      _conditionAny = !_conditionAny;
-      if (_conditionAny) {
-        _conditionDayAny = false;
-        _conditionTimeAny = false;
-        _conditionLocationAny = false;
-        _selectedWeekdays.clear();
-        _timeRules.clear();
-        _locationRules.clear();
-      }
-    });
-  }
-
-  /// Toggles the `condition day any` group reset directive.
-  void _toggleDayAny() {
-    if (_isSuspended) {
-      return;
-    }
-    setState(() {
-      _conditionDayAny = !_conditionDayAny;
-      if (_conditionDayAny) {
-        _conditionAny = false;
-        _selectedWeekdays.clear();
-      }
-    });
-  }
-
   /// Toggles selection of [labelId].
   void _toggleLabel(String labelId) {
     setState(() {
       if (!_selectedLabelIds.remove(labelId)) {
         _selectedLabelIds.add(labelId);
-      }
-    });
-  }
-
-  /// Toggles the `condition location any` group reset directive.
-  void _toggleLocationAny() {
-    if (_isSuspended) {
-      return;
-    }
-    setState(() {
-      _conditionLocationAny = !_conditionLocationAny;
-      if (_conditionLocationAny) {
-        _conditionAny = false;
-        _locationRules.clear();
       }
     });
   }
@@ -951,34 +695,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     setState(() {
       _isSuspended = !_isSuspended;
       _suspendedErrorMessage = null;
-    });
-  }
-
-  /// Toggles the `condition time any` group reset directive.
-  void _toggleTimeAny() {
-    if (_isSuspended) {
-      return;
-    }
-    setState(() {
-      _conditionTimeAny = !_conditionTimeAny;
-      if (_conditionTimeAny) {
-        _conditionAny = false;
-        _timeRules.clear();
-      }
-    });
-  }
-
-  /// Toggles ISO [weekday] (`1..7`) in `condition day`.
-  void _toggleWeekday(int weekday) {
-    if (_isSuspended) {
-      return;
-    }
-    setState(() {
-      _conditionAny = false;
-      _conditionDayAny = false;
-      if (!_selectedWeekdays.remove(weekday)) {
-        _selectedWeekdays.add(weekday);
-      }
     });
   }
 

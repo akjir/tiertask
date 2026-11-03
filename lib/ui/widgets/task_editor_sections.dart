@@ -24,6 +24,127 @@ import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'quick_add_bar.dart';
 
+/// Card inside `EditLabelScreen` for editing a label's optional `#RRGGBB` color via hex text input or preset swatches.
+class LabelEditorColorCard extends StatelessWidget {
+  /// Creates a [LabelEditorColorCard].
+  const LabelEditorColorCard({
+    super.key,
+    required this.colorController,
+    required this.errorMessage,
+    required this.onSelectPreset,
+  });
+
+  /// Preset `#RRGGBB` color swatches offered for quick selection.
+  static const List<String> presetHexColors = <String>[
+    '#2196F3',
+    '#4CAF50',
+    '#FF9100',
+    '#E91E63',
+    '#9C27B0',
+    '#00BCD4',
+    '#EB06FF',
+    '#00E5FF',
+  ];
+
+  /// Controller for the `#RRGGBB` hexadecimal color input field.
+  final TextEditingController colorController;
+
+  /// Optional validation error message for the color input field.
+  final String? errorMessage;
+
+  /// Callback invoked when a preset color chip is tapped.
+  final ValueChanged<String> onSelectPreset;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
+    final normalizedCurrent = TdfColor.normalizeHex(colorController.text);
+    final previewColor = _resolveHexColor(
+      normalizedCurrent,
+      appTheme.mutedTextColor,
+    );
+
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('label_editor_color_card'),
+      icon: Icons.palette_outlined,
+      title: localizations.labelColorSectionTitle,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildColorTextField(localizations, appTheme, previewColor),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final hex in presetHexColors)
+                TaskEditorChip(
+                  chipKey: ValueKey('label_editor_color_preset_$hex'),
+                  icon: Icons.palette_rounded,
+                  label: hex,
+                  isSelected: normalizedCurrent == hex,
+                  accentColor: _resolveHexColor(hex, appTheme.primaryAccent),
+                  onTap: () => onSelectPreset(hex),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Builds the clearable hexadecimal color input field.
+  Widget _buildColorTextField(
+    AppLocalizations localizations,
+    AppTheme appTheme,
+    Color previewColor,
+  ) {
+    final borderRadius = BorderRadius.circular(14);
+    final defaultBorder = OutlineInputBorder(
+      borderRadius: borderRadius,
+      borderSide: BorderSide(
+        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+      ),
+    );
+    return ClearableTextField(
+      fieldKey: const ValueKey('label_editor_color_input'),
+      controller: colorController,
+      cursorColor: appTheme.primaryAccent,
+      clearIconColor: appTheme.mutedTextColor,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
+      decoration: InputDecoration(
+        labelText: localizations.labelColorSectionTitle,
+        labelStyle: TextStyle(color: appTheme.mutedTextColor),
+        hintText: localizations.labelColorHint,
+        hintStyle: TextStyle(color: appTheme.mutedTextColor),
+        errorText: errorMessage,
+        prefixIcon: Icon(Icons.circle_rounded, size: 16, color: previewColor),
+        isDense: true,
+        filled: true,
+        fillColor: appTheme.canvasColor,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        border: defaultBorder,
+        enabledBorder: defaultBorder,
+        focusedBorder: OutlineInputBorder(
+          borderRadius: borderRadius,
+          borderSide: BorderSide(color: appTheme.primaryAccent, width: 1.6),
+        ),
+      ),
+    );
+  }
+
+  /// Resolves a `#RRGGBB` color string or falls back to [fallback].
+  static Color _resolveHexColor(String? rawHex, Color fallback) {
+    final parsed = TdfColor.tryParseArgb(rawHex);
+    return parsed != null ? Color(parsed) : fallback;
+  }
+}
+
 /// Footer row inside the task editor containing Cancel and Save actions.
 class TaskEditorActionsRow extends StatelessWidget {
   /// Creates a [TaskEditorActionsRow].
@@ -340,7 +461,7 @@ class TaskEditorContextSection extends StatelessWidget {
   }
 }
 
-/// Card grouping the task title and optional note fields inside the task editor.
+/// Card grouping the title/name and optional note fields inside the task and label editors.
 class TaskEditorDetailsCard extends StatelessWidget {
   /// Creates a [TaskEditorDetailsCard].
   const TaskEditorDetailsCard({
@@ -349,19 +470,27 @@ class TaskEditorDetailsCard extends StatelessWidget {
     required this.noteController,
     required this.titleController,
     required this.onSubmit,
+    this.sectionTitle,
+    this.titleLabel,
   });
 
-  /// Optional validation error message for the task title.
+  /// Optional validation error message for the title/name field.
   final String? errorMessage;
 
-  ///Controller for the optional task note input.
+  /// Controller for the optional note input.
   final TextEditingController noteController;
 
   /// Callback invoked when submitting from the title input field.
   final VoidCallback onSubmit;
 
-  /// Controller for the task title input.
+  /// Optional custom section card title (defaults to [AppLocalizations.taskDetailsSectionTitle]).
+  final String? sectionTitle;
+
+  /// Controller for the title/name input.
   final TextEditingController titleController;
+
+  /// Optional custom label text for the title field (defaults to [AppLocalizations.taskNameLabel]).
+  final String? titleLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -369,7 +498,7 @@ class TaskEditorDetailsCard extends StatelessWidget {
     return TaskEditorSectionCard(
       cardKey: const ValueKey('task_editor_details_card'),
       icon: Icons.edit_note_rounded,
-      title: localizations.taskDetailsSectionTitle,
+      title: sectionTitle ?? localizations.taskDetailsSectionTitle,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -377,6 +506,7 @@ class TaskEditorDetailsCard extends StatelessWidget {
           TaskEditorTitleField(
             controller: titleController,
             errorMessage: errorMessage,
+            titleLabel: titleLabel,
             onSubmit: onSubmit,
           ),
           const SizedBox(height: 8),
@@ -1008,7 +1138,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
   }
 }
 
-/// Task title input field with inline validation error display inside the task editor.
+/// Title/name input field with inline validation error display inside the task and label editors.
 class TaskEditorTitleField extends StatelessWidget {
   /// Creates a [TaskEditorTitleField].
   const TaskEditorTitleField({
@@ -1016,9 +1146,10 @@ class TaskEditorTitleField extends StatelessWidget {
     required this.controller,
     required this.errorMessage,
     required this.onSubmit,
+    this.titleLabel,
   });
 
-  /// Controller for the task title input.
+  /// Controller for the title/name input.
   final TextEditingController controller;
 
   /// Optional validation error message.
@@ -1026,6 +1157,9 @@ class TaskEditorTitleField extends StatelessWidget {
 
   /// Callback invoked when the user submits from the keyboard.
   final VoidCallback onSubmit;
+
+  /// Optional custom label text (defaults to [AppLocalizations.taskNameLabel]).
+  final String? titleLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -1049,7 +1183,7 @@ class TaskEditorTitleField extends StatelessWidget {
       textInputAction: TextInputAction.done,
       onSubmitted: (_) => onSubmit(),
       decoration: InputDecoration(
-        labelText: localizations.taskNameLabel,
+        labelText: titleLabel ?? localizations.taskNameLabel,
         labelStyle: TextStyle(color: appTheme.mutedTextColor),
         errorText: errorMessage,
         isDense: true,

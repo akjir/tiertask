@@ -403,9 +403,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get editLabelsTitle => 'Edit labels';
 
   @override
-  String get tooltipRenameLabel => 'Rename label';
-
-  @override
   String get taskSuspendedLabel => 'Suspended';
 
   @override
@@ -790,4 +787,36 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get actionRefresh => 'Refresh';
+
+  @override
+  String get editLabelTitle => 'Edit Label';
+
+  @override
+  String get tooltipEditLabel => 'Edit label';
+
+  @override
+  String get labelDetailsSectionTitle => 'Label Details';
+
+  @override
+  String get labelNameLabel => 'Label Name';
+
+  @override
+  String get labelNameErrorEmpty => 'Please enter a label name.';
+
+  @override
+  String get labelNameErrorDuplicate =>
+      'A label with this name already exists.';
+
+  @override
+  String get labelColorSectionTitle => 'Color';
+
+  @override
+  String get labelColorHint => '#RRGGBB (optional)';
+
+  @override
+  String get labelColorErrorInvalid => 'Enter a valid hex color (#RRGGBB).';
+
+  @override
+  String get labelConditionsSectionDescription =>
+      'Restrict when and where tasks with this label become active by default.';
 }

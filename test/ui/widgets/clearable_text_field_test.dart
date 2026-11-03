@@ -354,29 +354,50 @@ task 000001OkD2 {
       await tester.pumpAndSettle();
 
       await tester.tap(
-        find.byKey(const ValueKey('rename_label_button_officeOkD2')),
+        find.byKey(const ValueKey('edit_label_button_officeOkD2')),
       );
       await tester.pumpAndSettle();
 
-      final renameInput = find.byKey(
-        const ValueKey('rename_label_input_officeOkD2'),
+      final labelNameInput = find.byKey(
+        const ValueKey('task_editor_title_input'),
       );
-      final renameClearBtn = find.descendant(
-        of: renameInput,
+      final labelNameClearBtn = find.descendant(
+        of: labelNameInput,
         matching: find.byIcon(Icons.close_rounded),
       );
       expect(
-        renameClearBtn,
+        labelNameClearBtn,
         findsOneWidget,
-        reason: 'Focused inline label rename input must display a clear button',
+        reason: 'Focused label name input in EditLabelScreen must display a clear button',
       );
-      await tester.tap(renameClearBtn);
+      await tester.tap(labelNameClearBtn);
       await tester.pump();
       expect(
-        tester.widget<TextField>(renameInput).controller?.text,
+        tester.widget<TextField>(labelNameInput).controller?.text,
         isEmpty,
-        reason:
-            'Clicking clear on inline label rename input must delete its text',
+        reason: 'Clicking clear on label name input in EditLabelScreen must delete its text',
+      );
+
+      final labelColorInput = find.byKey(
+        const ValueKey('label_editor_color_input'),
+      );
+      await tester.tap(labelColorInput);
+      await tester.pump();
+      final labelColorClearBtn = find.descendant(
+        of: labelColorInput,
+        matching: find.byIcon(Icons.close_rounded),
+      );
+      expect(
+        labelColorClearBtn,
+        findsOneWidget,
+        reason: 'Focused label color input in EditLabelScreen must display a clear button',
+      );
+      await tester.tap(labelColorClearBtn);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(labelColorInput).controller?.text,
+        isEmpty,
+        reason: 'Clicking clear on label color input in EditLabelScreen must delete its text',
       );
     },
   );

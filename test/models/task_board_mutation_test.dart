@@ -518,17 +518,104 @@ label officeOkD2 {
         reason: 'Precomputed openTaskCountsByLabel map must expose O(1) counts for open tasks',
       );
 
-      board = board.renameLabel(thirdLabelId, '  Remote Work  ');
       expect(
-        board.labels.map((label) => label.name),
-        equals(['IT & Servers', 'Remote Work']),
-        reason: 'renameLabel must update the trimmed display name of the matching label',
+        board.sortedLabels.map((label) => label.name),
+        equals(['Home Office', 'IT & Servers']),
+        reason: 'sortedLabels must order labels alphabetically by display name',
+      );
+      expect(
+        board.findLabel(thirdLabelId)?.name,
+        equals('Home Office'),
+        reason: 'findLabel must return the matching TdfLabel by ID',
+      );
+      expect(
+        board.hasDuplicateLabelName('  home office  '),
+        isTrue,
+        reason: 'hasDuplicateLabelName must detect case-insensitive duplicate names',
+      );
+      expect(
+        board.hasDuplicateLabelName(
+          '  home office  ',
+          excludingLabelId: thirdLabelId,
+        ),
+        isFalse,
+        reason: 'hasDuplicateLabelName must ignore excludingLabelId',
       );
 
-      board = board.renameLabel(thirdLabelId, '   ');
+      final updateTime = fixedDate.add(const Duration(minutes: 10));
+      board = board.updateLabel(
+        thirdLabelId,
+        name: '  Remote Work  ',
+        color: '4caf50',
+        note: '  Home desk setup  ',
+        conditions: [
+          DayTaskCondition.fromWeekdays(const [DateTime.saturday]),
+          const GlobalResetTaskCondition(),
+        ],
+        currentDate: updateTime,
+        localEvaluationTime: updateTime,
+      );
+      final updatedLabel = board.findLabel(thirdLabelId)!;
       expect(
-        board.labels.map((label) => label.name),
-        equals(['IT & Servers', 'Remote Work']),
+        updatedLabel.name,
+        equals('Remote Work'),
+        reason: 'updateLabel must update the trimmed display name',
+      );
+      expect(
+        updatedLabel.color,
+        equals('#4CAF50'),
+        reason: 'updateLabel must normalize hex color to #RRGGBB',
+      );
+      expect(
+        updatedLabel.note,
+        equals('Home desk setup'),
+        reason: 'updateLabel must store trimmed note text',
+      );
+      expect(
+        updatedLabel.conditions,
+        equals([
+          DayTaskCondition.fromWeekdays(const [DateTime.saturday]),
+        ]),
+        reason: 'updateLabel must store label conditions and strip task-only resets',
+      );
+      expect(
+        updatedLabel.modifiedAt,
+        equals(updateTime),
+        reason: 'updateLabel must advance modifiedAt monotonically',
+      );
+      expect(
+        board.blocked.map((task) => task.id),
+        equals([createdTask.id]),
+        reason: 'Updating a label with an unmet condition must re-evaluate referencing tasks into Blocked',
+      );
+
+      board = board.updateLabel(
+        thirdLabelId,
+        name: '   ',
+        currentDate: updateTime,
+      );
+      expect(
+        board.findLabel(thirdLabelId)?.name,
+        equals('Remote Work'),
+        reason: 'updateLabel must ignore empty or whitespace-only names',
+      );
+
+      board = board.updateLabel(
+        thirdLabelId,
+        clearColor: true,
+        clearNote: true,
+        conditions: const [],
+        currentDate: updateTime.add(const Duration(seconds: 5)),
+        localEvaluationTime: updateTime.add(const Duration(seconds: 5)),
+      );
+      final clearedLabel = board.findLabel(thirdLabelId)!;
+      expect(clearedLabel.color, isNull);
+      expect(clearedLabel.note, isNull);
+      expect(clearedLabel.conditions, isEmpty);
+      expect(
+        board.focus.map((task) => task.id),
+        equals([createdTask.id]),
+        reason: 'Clearing unmet conditions on a label must re-evaluate referencing tasks back into Focus',
       );
     });
 

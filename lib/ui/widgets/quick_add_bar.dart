@@ -362,7 +362,8 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   Widget build(BuildContext context) {
     final labels = ref.watch(
       taskNotifierProvider.select(
-        (boardAsync) => boardAsync.asData?.value.labels ?? const <TdfLabel>[],
+        (boardAsync) =>
+            boardAsync.asData?.value.sortedLabels ?? const <TdfLabel>[],
       ),
     );
 

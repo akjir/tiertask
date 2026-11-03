@@ -21,8 +21,22 @@ import '../models/task_board.dart';
 import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
 import 'widgets/clearable_text_field.dart';
+import 'widgets/task_editor_conditions_section.dart';
+import 'widgets/task_editor_sections.dart';
 
-/// Dedicated Google Keep style screen for creating, renaming, and deleting labels while displaying open task counts.
+/// Dedicated panel screen for editing all properties of an existing TDF `label` block (`name`, `color`, `note`, and `condition`).
+class EditLabelScreen extends ConsumerStatefulWidget {
+  /// Creates an [EditLabelScreen].
+  const EditLabelScreen({super.key, required this.label});
+
+  /// Label block to edit.
+  final TdfLabel label;
+
+  @override
+  ConsumerState<EditLabelScreen> createState() => _EditLabelScreenState();
+}
+
+/// Overview screen for creating, deleting, and opening the editor panel for labels while displaying open task counts in alphabetical order.
 class EditLabelsScreen extends ConsumerStatefulWidget {
   /// Creates an [EditLabelsScreen] widget.
   const EditLabelsScreen({super.key, this.autofocusCreate = false});
@@ -118,12 +132,189 @@ class _CreateLabelRow extends StatelessWidget {
   }
 }
 
+/// State for [EditLabelScreen].
+class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
+  late final TextEditingController _colorController;
+  String? _colorErrorMessage;
+  late final ConditionEditorController _conditionController;
+  late final TextEditingController _nameController;
+  String? _nameErrorMessage;
+  late final TextEditingController _noteController;
+
+  @override
+  void initState() {
+    super.initState();
+    final label = widget.label;
+    _nameController = TextEditingController(text: label.name);
+    _noteController = TextEditingController(text: label.note ?? '');
+    _colorController = TextEditingController(text: label.color ?? '');
+    _conditionController = ConditionEditorController(
+      initialConditions: label.conditions,
+      allowResets: false,
+    );
+    _nameController.addListener(_handleNameChanged);
+    _colorController.addListener(_handleColorChanged);
+  }
+
+  @override
+  void dispose() {
+    _nameController.removeListener(_handleNameChanged);
+    _colorController.removeListener(_handleColorChanged);
+    _nameController.dispose();
+    _noteController.dispose();
+    _colorController.dispose();
+    _conditionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final localizations = AppLocalizations.of(context);
+
+    return Scaffold(
+      key: const ValueKey('edit_label_screen'),
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(title: Text(localizations.editLabelTitle)),
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: _buildFormColumn(localizations),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: TaskEditorActionsRow(
+                onCancel: () => Navigator.of(context).pop(),
+                onSave: _submit,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Builds the Settings-style card column inside [EditLabelScreen].
+  Widget _buildFormColumn(AppLocalizations localizations) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TaskEditorDetailsCard(
+          sectionTitle: localizations.labelDetailsSectionTitle,
+          titleLabel: localizations.labelNameLabel,
+          titleController: _nameController,
+          noteController: _noteController,
+          errorMessage: _nameErrorMessage,
+          onSubmit: _submit,
+        ),
+        const SizedBox(height: 10),
+        LabelEditorColorCard(
+          colorController: _colorController,
+          errorMessage: _colorErrorMessage,
+          onSelectPreset: _selectPresetColor,
+        ),
+        const SizedBox(height: 10),
+        TaskEditorConditionsSection(
+          controller: _conditionController,
+          descriptionOverride: localizations.labelConditionsSectionDescription,
+        ),
+      ],
+    );
+  }
+
+  /// Rebuilds preview state and clears any color validation error when [_colorController] changes.
+  void _handleColorChanged() {
+    setState(() {
+      _colorErrorMessage = null;
+    });
+  }
+
+  /// Clears any name validation error when [_nameController] changes.
+  void _handleNameChanged() {
+    if (_nameErrorMessage == null) {
+      return;
+    }
+    setState(() {
+      _nameErrorMessage = null;
+    });
+  }
+
+  /// Populates or clears [hex] in [_colorController] when a preset color chip is tapped.
+  void _selectPresetColor(String hex) {
+    final normalizedCurrent = TdfColor.normalizeHex(_colorController.text);
+    setState(() {
+      _colorController.text = normalizedCurrent == hex ? '' : hex;
+      _colorErrorMessage = null;
+    });
+  }
+
+  /// Validates the label inputs and persists the updated [TdfLabel].
+  Future<void> _submit() async {
+    final board =
+        ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+    final localizations = AppLocalizations.of(context);
+    final nameError = _validateName(board, localizations);
+    if (nameError != null) {
+      setState(() {
+        _nameErrorMessage = nameError;
+      });
+      return;
+    }
+
+    final rawColor = _colorController.text.trim();
+    final normalizedColor = TdfColor.normalizeHex(rawColor);
+    if (rawColor.isNotEmpty && normalizedColor == null) {
+      setState(() {
+        _colorErrorMessage = localizations.labelColorErrorInvalid;
+      });
+      return;
+    }
+
+    final trimmedNote = _noteController.text.trim();
+    await ref
+        .read(taskNotifierProvider.notifier)
+        .updateLabel(
+          widget.label.id,
+          name: _nameController.text.trim(),
+          color: normalizedColor,
+          clearColor: rawColor.isEmpty,
+          note: trimmedNote.isEmpty ? null : trimmedNote,
+          clearNote: trimmedNote.isEmpty,
+          conditions: _conditionController.buildConditions(),
+        );
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(context).pop();
+  }
+
+  /// Validates the entered label name against empty and duplicate constraints.
+  String? _validateName(TaskBoard board, AppLocalizations localizations) {
+    final trimmed = _nameController.text.trim();
+    if (trimmed.isEmpty) {
+      return localizations.labelNameErrorEmpty;
+    }
+    if (board.hasDuplicateLabelName(
+      trimmed,
+      excludingLabelId: widget.label.id,
+    )) {
+      return localizations.labelNameErrorDuplicate;
+    }
+    return null;
+  }
+}
+
 /// State for [EditLabelsScreen].
 class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
   final TextEditingController _createController = TextEditingController();
-  String? _editingLabelId;
-  final TextEditingController _renameController = TextEditingController();
 
+  /// Whether the create-label input field currently contains non-whitespace text.
   bool get _hasCreateText => _createController.text.trim().isNotEmpty;
 
   @override
@@ -136,7 +327,6 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
   void dispose() {
     _createController.removeListener(_handleCreateInputChanged);
     _createController.dispose();
-    _renameController.dispose();
     super.dispose();
   }
 
@@ -146,6 +336,7 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
     final board =
         ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
+    final sortedLabels = board.sortedLabels;
 
     return Scaffold(
       key: const ValueKey('edit_labels_screen'),
@@ -166,25 +357,20 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
             ),
             Divider(height: 1, color: theme.scaffoldBackgroundColor),
             Expanded(
-              child: board.labels.isEmpty
+              child: sortedLabels.isEmpty
                   ? _EmptyLabelsView(message: localizations.emptyLabelsHint)
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: board.labels.length,
+                      itemCount: sortedLabels.length,
                       itemBuilder: (context, index) {
-                        final label = board.labels[index];
-                        final isEditing = _editingLabelId == label.id;
+                        final label = sortedLabels[index];
                         return _EditableLabelRow(
                           key: ValueKey('edit_label_row_${label.id}'),
-                          isEditing: isEditing,
                           label: label,
                           openTaskCount: board.openTaskCountForLabel(label.id),
-                          renameController: isEditing
-                              ? _renameController
-                              : null,
                           onDelete: () => _deleteLabel(label.id),
-                          onSaveRename: () => _saveRename(label.id),
-                          onStartRename: () => _startRename(label),
+                          onEdit: () =>
+                              openEditLabelScreen(context, label: label),
                         );
                       },
                     ),
@@ -200,44 +386,14 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
     _createController.clear();
   }
 
-  /// Deletes the label with [labelId] and clears edit state if it was being renamed.
+  /// Deletes the label with [labelId].
   Future<void> _deleteLabel(String labelId) async {
-    if (_editingLabelId == labelId) {
-      setState(() {
-        _editingLabelId = null;
-        _renameController.clear();
-      });
-    }
     await ref.read(taskNotifierProvider.notifier).deleteLabel(labelId);
   }
 
   /// Rebuilds when the create-label text changes.
   void _handleCreateInputChanged() {
     setState(() {});
-  }
-
-  /// Saves the updated name for [labelId] and exits inline rename mode.
-  Future<void> _saveRename(String labelId) async {
-    final trimmed = _renameController.text.trim();
-    setState(() {
-      _editingLabelId = null;
-      _renameController.clear();
-    });
-    if (trimmed.isEmpty) {
-      return;
-    }
-    await ref.read(taskNotifierProvider.notifier).renameLabel(labelId, trimmed);
-  }
-
-  /// Enters inline rename mode for [label].
-  void _startRename(TdfLabel label) {
-    setState(() {
-      _editingLabelId = label.id;
-      _renameController.value = TextEditingValue(
-        text: label.name,
-        selection: TextSelection.collapsed(offset: label.name.length),
-      );
-    });
   }
 
   /// Creates a new label from [_createController] and clears the input field.
@@ -251,22 +407,16 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
   }
 }
 
-/// Single existing label row inside [EditLabelsScreen] with icon, title or rename field, task count badge, rename button, and delete button.
+/// Single existing label row inside [EditLabelsScreen] with quick delete button, colored icon, title, open task count badge, and edit button.
 class _EditableLabelRow extends StatelessWidget {
   /// Creates an [_EditableLabelRow].
   const _EditableLabelRow({
     super.key,
-    required this.isEditing,
     required this.label,
     required this.openTaskCount,
-    required this.renameController,
     required this.onDelete,
-    required this.onSaveRename,
-    required this.onStartRename,
+    required this.onEdit,
   });
-
-  /// Whether this row is currently in inline rename mode.
-  final bool isEditing;
 
   /// Label displayed by this row.
   final TdfLabel label;
@@ -274,17 +424,11 @@ class _EditableLabelRow extends StatelessWidget {
   /// Callback invoked when the delete icon button is tapped.
   final VoidCallback onDelete;
 
-  /// Callback invoked when the inline rename is saved.
-  final VoidCallback onSaveRename;
-
   /// Callback invoked when the edit icon button is tapped.
-  final VoidCallback onStartRename;
+  final VoidCallback onEdit;
 
   /// Number of open tasks referencing [label].
   final int openTaskCount;
-
-  /// Controller used when [isEditing] is true, or `null` otherwise.
-  final TextEditingController? renameController;
 
   @override
   Widget build(BuildContext context) {
@@ -317,11 +461,13 @@ class _EditableLabelRow extends StatelessWidget {
               Icon(Icons.label_outline_rounded, color: iconColor, size: 20),
               const SizedBox(width: 12),
               Expanded(
-                child: _EditableLabelTitle(
-                  isEditing: isEditing,
-                  label: label,
-                  renameController: renameController,
-                  onSaveRename: onSaveRename,
+                child: Text(
+                  label.name,
+                  style: TextStyle(
+                    color: colorScheme.onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -331,17 +477,13 @@ class _EditableLabelRow extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               IconButton(
-                key: ValueKey('rename_label_button_${label.id}'),
-                tooltip: isEditing
-                    ? localizations.actionSave
-                    : localizations.tooltipRenameLabel,
+                key: ValueKey('edit_label_button_${label.id}'),
+                tooltip: localizations.tooltipEditLabel,
                 icon: Icon(
-                  isEditing ? Icons.check_rounded : Icons.edit_outlined,
-                  color: isEditing
-                      ? colorScheme.primary
-                      : colorScheme.onSurfaceVariant,
+                  Icons.edit_outlined,
+                  color: colorScheme.onSurfaceVariant,
                 ),
-                onPressed: isEditing ? onSaveRename : onStartRename,
+                onPressed: onEdit,
               ),
             ],
           ),
@@ -354,62 +496,6 @@ class _EditableLabelRow extends StatelessWidget {
   static Color _resolveLabelColor(String? rawHex, Color fallback) {
     final parsed = TdfColor.tryParseArgb(rawHex);
     return parsed != null ? Color(parsed) : fallback;
-  }
-}
-
-/// Renders either the static label name or an inline [ClearableTextField] when renaming inside [_EditableLabelRow].
-class _EditableLabelTitle extends StatelessWidget {
-  /// Creates an [_EditableLabelTitle].
-  const _EditableLabelTitle({
-    required this.isEditing,
-    required this.label,
-    required this.renameController,
-    required this.onSaveRename,
-  });
-
-  /// Whether inline editing is active.
-  final bool isEditing;
-
-  /// Label entry to display.
-  final TdfLabel label;
-
-  /// Callback invoked when the user submits the inline text field.
-  final VoidCallback onSaveRename;
-
-  /// Active text controller when [isEditing] is true.
-  final TextEditingController? renameController;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    if (isEditing) {
-      if (renameController case final controller?) {
-        return ClearableTextField(
-          fieldKey: ValueKey('rename_label_input_${label.id}'),
-          controller: controller,
-          autofocus: true,
-          cursorColor: colorScheme.primary,
-          style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => onSaveRename(),
-          decoration: const InputDecoration(
-            filled: false,
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            isDense: true,
-          ),
-        );
-      }
-    }
-    return Text(
-      label.name,
-      style: TextStyle(
-        color: colorScheme.onSurface,
-        fontSize: 16,
-        fontWeight: FontWeight.w500,
-      ),
-    );
   }
 }
 
@@ -434,4 +520,14 @@ class _EmptyLabelsView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Pushes [EditLabelScreen] onto the navigation stack to edit [label].
+Future<void> openEditLabelScreen(
+  BuildContext context, {
+  required TdfLabel label,
+}) {
+  return Navigator.of(context).push<void>(
+    MaterialPageRoute<void>(builder: (_) => EditLabelScreen(label: label)),
+  );
 }

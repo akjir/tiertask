@@ -39,6 +39,7 @@ class TaskBoard {
            blocked: blocked,
            someday: someday,
            completed: completed,
+           labels: labels,
          ),
          labels: labels,
        );
@@ -55,7 +56,8 @@ class TaskBoard {
        labels = List<TdfLabel>.unmodifiable(labels),
        openTaskCountsByLabel = Map<String, int>.unmodifiable(
          slices.openTaskCountsByLabel,
-       );
+       ),
+       sortedLabels = _sortLabelsAlphabetically(labels);
 
   /// Creates an empty [TaskBoard] across all 6 tiers.
   factory TaskBoard.empty() => TaskBoard();
@@ -164,6 +166,9 @@ class TaskBoard {
   /// Tier 5 (`Someday`) task items.
   final List<TaskItem> someday;
 
+  /// Defined TDF `label` blocks sorted alphabetically by display name.
+  final List<TdfLabel> sortedLabels;
+
   /// Returns all tasks across all 6 tiers in canonical document order.
   List<TaskItem> get allTasks => List<TaskItem>.unmodifiable([
     ...focus,
@@ -205,13 +210,17 @@ class TaskBoard {
       return this;
     }
     final normalizedColor = TdfColor.normalizeHex(color);
+    final trimmedNote = note?.trim();
+    final effectiveNote = (trimmedNote != null && trimmedNote.isNotEmpty)
+        ? trimmedNote
+        : null;
     final newLabel = TdfLabel(
       id: labelId,
       name: trimmed,
       color: normalizedColor,
-      note: note,
+      note: effectiveNote,
       modifiedAt: resolvedModifiedAt,
-      conditions: List<TaskCondition>.unmodifiable(conditions),
+      conditions: _sanitizeLabelConditions(conditions),
     );
     return copyWith(labels: [...labels, newLabel]);
   }
@@ -583,6 +592,16 @@ class TaskBoard {
     );
   }
 
+  /// Finds the [TdfLabel] with [labelId], or `null` if not found.
+  TdfLabel? findLabel(String labelId) {
+    for (final label in labels) {
+      if (label.id == labelId) {
+        return label;
+      }
+    }
+    return null;
+  }
+
   /// Finds the [TaskItem] with [taskId], or `null` if not found.
   TaskItem? findTask(String taskId) {
     for (final tier in TaskTier.values) {
@@ -601,6 +620,21 @@ class TaskBoard {
       }
     }
     return null;
+  }
+
+  /// Returns whether any label on the board (excluding [excludingLabelId]) already uses [name].
+  bool hasDuplicateLabelName(String name, {String? excludingLabelId}) {
+    final normalized = name.trim().toLowerCase();
+    if (normalized.isEmpty) {
+      return false;
+    }
+    for (final label in labels) {
+      if (label.id != excludingLabelId &&
+          label.name.trim().toLowerCase() == normalized) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Returns whether any task on the board (excluding [excludingTaskId]) already uses [title].
@@ -635,32 +669,6 @@ class TaskBoard {
     ];
 
     return copyWith(completed: retained);
-  }
-
-  /// Updates the display [name] of the label with [labelId], ignoring empty names.
-  TaskBoard renameLabel(String labelId, String name, {DateTime? currentDate}) {
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) {
-      return this;
-    }
-    final now = currentDate != null
-        ? TaskItem.normalizeTimestamp(currentDate)
-        : null;
-    final nextLabels = <TdfLabel>[
-      for (final label in labels)
-        label.id == labelId
-            ? label.copyWith(
-                name: trimmed,
-                modifiedAt: now != null
-                    ? TaskItem.nextModifiedTimestamp(
-                        now,
-                        label.effectiveModifiedAt,
-                      )
-                    : label.modifiedAt,
-              )
-            : label,
-    ];
-    return copyWith(labels: nextLabels);
   }
 
   /// Restores a completed task back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
@@ -826,6 +834,57 @@ class TaskBoard {
     return replacedBoard;
   }
 
+  /// Updates an existing label with [labelId], re-evaluates the 6-tier pipeline,
+  /// and ignores empty or duplicate label names.
+  TaskBoard updateLabel(
+    String labelId, {
+    String? name,
+    String? color,
+    bool clearColor = false,
+    String? note,
+    bool clearNote = false,
+    List<TaskCondition>? conditions,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+  }) {
+    final existing = findLabel(labelId);
+    if (existing == null) {
+      return this;
+    }
+    final trimmedName = (name ?? existing.name).trim();
+    if (trimmedName.isEmpty ||
+        hasDuplicateLabelName(trimmedName, excludingLabelId: labelId)) {
+      return this;
+    }
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
+    final updatedLabel = _buildUpdatedLabel(
+      existing: existing,
+      name: trimmedName,
+      color: color,
+      clearColor: clearColor,
+      note: note,
+      clearNote: clearNote,
+      conditions: conditions,
+      now: now,
+    );
+    final nextLabels = <TdfLabel>[
+      for (final label in labels) label.id == labelId ? updatedLabel : label,
+    ];
+    return TaskBoard.evaluate(
+      tasks: allTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      labels: nextLabels,
+      pruneExpiredCompleted: true,
+    );
+  }
+
   /// Updates an existing task with [taskId], re-evaluates the 6-tier pipeline,
   /// and ignores empty or duplicate task titles.
   TaskBoard updateTask(
@@ -985,6 +1044,43 @@ class TaskBoard {
       }
     }
     return false;
+  }
+
+  /// Builds an updated [TdfLabel] from [existing] with normalized color, note, and condition fields.
+  static TdfLabel _buildUpdatedLabel({
+    required TdfLabel existing,
+    required String name,
+    required String? color,
+    required bool clearColor,
+    required String? note,
+    required bool clearNote,
+    required List<TaskCondition>? conditions,
+    required DateTime now,
+  }) {
+    final normalizedColor = TdfColor.normalizeHex(color);
+    final shouldClearColor =
+        clearColor || (color != null && normalizedColor == null);
+    final trimmedNote = note?.trim();
+    final shouldClearNote =
+        clearNote || (trimmedNote != null && trimmedNote.isEmpty);
+    final effectiveNote = (trimmedNote != null && trimmedNote.isNotEmpty)
+        ? trimmedNote
+        : null;
+    final sanitizedConditions = conditions != null
+        ? _sanitizeLabelConditions(conditions)
+        : null;
+    return existing.copyWith(
+      name: name,
+      color: normalizedColor,
+      clearColor: shouldClearColor,
+      note: effectiveNote,
+      clearNote: shouldClearNote,
+      conditions: sanitizedConditions,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        now,
+        existing.effectiveModifiedAt,
+      ),
+    );
   }
 
   /// Builds an updated [TaskItem] from [existing] with normalized scheduling and subtask fields.
@@ -1240,6 +1336,21 @@ class TaskBoard {
     return first.index.compareTo(second.index);
   }
 
+  /// Compares two [TdfLabel] instances alphabetically (case-insensitive, then case-sensitive, then by ID).
+  static int _compareLabelsAlphabetically(TdfLabel first, TdfLabel second) {
+    final lowerCompare = first.name.toLowerCase().compareTo(
+      second.name.toLowerCase(),
+    );
+    if (lowerCompare != 0) {
+      return lowerCompare;
+    }
+    final exactCompare = first.name.compareTo(second.name);
+    if (exactCompare != 0) {
+      return exactCompare;
+    }
+    return first.id.compareTo(second.id);
+  }
+
   /// Downgrades [task] from Tier 1 (`Focus`) to Tier 2 (`Ready`) per `TDF_SPEC.md` Section 6.3.
   TaskBoard _downgradeFromFocus(TaskItem task, DateTime now) {
     final totalActiveCount = focus.length + ready.length + planned.length;
@@ -1455,6 +1566,22 @@ class TaskBoard {
     return false;
   }
 
+  /// Checks whether [task] references at least one label ID present in [labelIdsWithConditions].
+  static bool _hasInheritedLabelConditions(
+    TaskItem task,
+    Set<String> labelIdsWithConditions,
+  ) {
+    if (labelIdsWithConditions.isEmpty || task.labelIds.isEmpty) {
+      return false;
+    }
+    for (final labelId in task.labelIds) {
+      if (labelIdsWithConditions.contains(labelId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Checks whether [taskRules] defines at least one override or reset for [group].
   static bool _hasTaskRuleForGroup(
     List<TaskCondition> taskRules,
@@ -1589,11 +1716,16 @@ class TaskBoard {
     required List<TaskItem> blocked,
     required List<TaskItem> someday,
     required List<TaskItem> completed,
+    required List<TdfLabel> labels,
   }) {
     final nextFocus = List<TaskItem>.from(focus);
     final nextReady = List<TaskItem>.from(ready);
     final nextPlanned = List<TaskItem>.from(planned);
     _normalizeActiveLists(nextFocus, nextReady, nextPlanned);
+    final labelIdsWithConditions = <String>{
+      for (final label in labels)
+        if (label.conditions.isNotEmpty) label.id,
+    };
 
     final nextBlocked = <TaskItem>[
       for (final task in blocked)
@@ -1604,6 +1736,7 @@ class TaskBoard {
           suspendedAt:
               (task.blockedByTaskIds.isEmpty &&
                   task.conditions.isEmpty &&
+                  !_hasInheritedLabelConditions(task, labelIdsWithConditions) &&
                   task.suspendedAt == null)
               ? TaskItem.defaultSuspendedAt
               : task.suspendedAt,
@@ -1844,6 +1977,42 @@ class TaskBoard {
     return List<String>.unmodifiable(sanitized);
   }
 
+  /// Deduplicates and canonicalizes [conditions] for a `label` block, stripping task-only reset directives (`TDF_SPEC.md` Section 4.3).
+  static List<TaskCondition> _sanitizeLabelConditions(
+    List<TaskCondition> conditions,
+  ) {
+    if (conditions.isEmpty) {
+      return const [];
+    }
+    final mergedDays = <int>{};
+    final timeRules = <TimeWindowTaskCondition>[];
+    final locationRules = <LocationTaskCondition>[];
+
+    for (final condition in conditions) {
+      switch (condition) {
+        case GlobalResetTaskCondition():
+        case GroupResetTaskCondition():
+          break;
+        case DayTaskCondition(:final weekdays):
+          mergedDays.addAll(weekdays);
+        case TimeWindowTaskCondition():
+          if (!timeRules.contains(condition)) {
+            timeRules.add(condition);
+          }
+        case LocationTaskCondition():
+          if (!locationRules.contains(condition)) {
+            locationRules.add(condition);
+          }
+      }
+    }
+
+    return List<TaskCondition>.unmodifiable([
+      if (mergedDays.isNotEmpty) DayTaskCondition.fromWeekdays(mergedDays),
+      ...timeRules,
+      ...locationRules,
+    ]);
+  }
+
   /// Deduplicates and canonicalizes [conditions] while enforcing `TDF_SPEC.md` Section 4.3 reset rules:
   /// - `condition any` supersedes all other task condition directives.
   /// - `day any`, `time any`, and `location any` supersede specific rules in their respective group.
@@ -1988,6 +2157,16 @@ class TaskBoard {
       readyList: nextReady,
       plannedList: nextPlanned,
     );
+  }
+
+  /// Returns an unmodifiable copy of [labels] sorted alphabetically by display name.
+  static List<TdfLabel> _sortLabelsAlphabetically(List<TdfLabel> labels) {
+    if (labels.isEmpty) {
+      return const [];
+    }
+    final sorted = List<TdfLabel>.from(labels)
+      ..sort(_compareLabelsAlphabetically);
+    return List<TdfLabel>.unmodifiable(sorted);
   }
 
   /// Removes [labelId] from every task in [tasks].

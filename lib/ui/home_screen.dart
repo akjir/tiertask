@@ -918,7 +918,7 @@ class _LandingDrawer extends StatelessWidget {
             ),
             const Divider(height: 8),
             _DrawerLabelsHeader(onEditLabels: () => onOpenEditLabels(false)),
-            for (final label in board.labels)
+            for (final label in board.sortedLabels)
               _DrawerLabelTile(
                 key: ValueKey('drawer_label_tile_${label.id}'),
                 count: board.openTaskCountForLabel(label.id),
