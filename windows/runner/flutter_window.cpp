@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <locationapi.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 #include <wlanapi.h>
 #include <wrl/client.h>
@@ -265,6 +266,52 @@ bool FlutterWindow::OnCreate() {
         }
       });
 
+  link_launcher_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "de.akjir.tiertask/link_launcher",
+          &flutter::StandardMethodCodec::GetInstance());
+  link_launcher_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() != "openLink") {
+          result->NotImplemented();
+          return;
+        }
+        std::string uri;
+        if (const auto* arguments =
+                std::get_if<flutter::EncodableMap>(call.arguments())) {
+          auto it = arguments->find(flutter::EncodableValue("uri"));
+          if (it != arguments->end()) {
+            if (const auto* uri_str = std::get_if<std::string>(&it->second)) {
+              uri = *uri_str;
+            }
+          }
+        }
+        if (uri.empty()) {
+          result->Error("INVALID_URI", "URI is empty.");
+          return;
+        }
+        int wide_len = MultiByteToWideChar(CP_UTF8, 0, uri.c_str(), -1,
+                                           nullptr, 0);
+        if (wide_len <= 0) {
+          result->Error("INVALID_URI", "Failed to convert URI to UTF-16.");
+          return;
+        }
+        std::wstring wide_uri(static_cast<size_t>(wide_len), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, uri.c_str(), -1, &wide_uri[0],
+                            wide_len);
+        HINSTANCE instance = ShellExecuteW(
+            GetHandle(), L"open", wide_uri.c_str(), nullptr, nullptr,
+            SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(instance) > 32) {
+          result->Success(flutter::EncodableValue(true));
+        } else {
+          result->Error("LAUNCH_FAILED", "Failed to open URI.");
+        }
+      });
+
   location_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(),
@@ -295,6 +342,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   directory_picker_channel_ = nullptr;
+  link_launcher_channel_ = nullptr;
   location_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

@@ -765,5 +765,80 @@ task monthsOkD2 {
         );
       },
     );
+
+    test('parses and serializes repeatable link directives in canonical order with escaped characters', () {
+      const tdfWithLinks = '''
+tdf 0.4.0
+
+task link01OkD2 {
+    name    "Upgrade database"
+    created 2026-11-01 08:00
+    queued  2026-11-01 08:30
+    repeat  1 weeks
+    link    "Runbook \\"Prod\\"" "https://example.com/docs/db?env=prod&v=1"
+    link    'Local Notes' 'obsidian://open?vault=Ops&file=DB'
+    link    "Mail Team" "mailto:dba@example.com"
+    condition day mon
+    subtasks {
+        step false "Backup snapshot"
+    }
+}
+''';
+
+      final board = tdfService.parse(tdfWithLinks, evaluationTime: fixedDate);
+      final task = board.findTask('link01OkD2')!;
+      expect(
+        task.links,
+        equals(const [
+          TaskLink(
+            title: 'Runbook "Prod"',
+            uri: 'https://example.com/docs/db?env=prod&v=1',
+          ),
+          TaskLink(
+            title: 'Local Notes',
+            uri: 'obsidian://open?vault=Ops&file=DB',
+          ),
+          TaskLink(title: 'Mail Team', uri: 'mailto:dba@example.com'),
+        ]),
+        reason:
+            'Multiple link directives must parse in exact declaration order',
+      );
+
+      final serialized = tdfService.serialize(board);
+      final repeatIndex = serialized.indexOf('    repeat 1 weeks\n');
+      final firstLinkIndex = serialized.indexOf(
+        '    link "Runbook \\"Prod\\"" "https://example.com/docs/db?env=prod&v=1"\n',
+      );
+      final secondLinkIndex = serialized.indexOf(
+        '    link "Local Notes" "obsidian://open?vault=Ops&file=DB"\n',
+      );
+      final thirdLinkIndex = serialized.indexOf(
+        '    link "Mail Team" "mailto:dba@example.com"\n',
+      );
+      final conditionIndex = serialized.indexOf('    condition day mon\n');
+      final subtasksIndex = serialized.indexOf('    subtasks {\n');
+
+      expect(repeatIndex, greaterThan(0));
+      expect(
+        firstLinkIndex,
+        greaterThan(repeatIndex),
+        reason: 'link directives must be serialized after repeat',
+      );
+      expect(secondLinkIndex, greaterThan(firstLinkIndex));
+      expect(thirdLinkIndex, greaterThan(secondLinkIndex));
+      expect(
+        conditionIndex,
+        greaterThan(thirdLinkIndex),
+        reason: 'link directives must be serialized before condition',
+      );
+      expect(subtasksIndex, greaterThan(conditionIndex));
+
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(
+        reparsed.findTask('link01OkD2')!.links,
+        equals(task.links),
+        reason: 'Round-trip parse/serialize must preserve all task links',
+      );
+    });
   });
 }

@@ -1555,6 +1555,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Restrict when and where tasks with this label become active by default.'**
   String get labelConditionsSectionDescription;
+
+  /// Section card title for task links in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Links'**
+  String get linksSectionTitle;
+
+  /// Placeholder hint for the link title input field.
+  ///
+  /// In en, this message translates to:
+  /// **'Link title (e.g. Documentation)'**
+  String get linkTitleHint;
+
+  /// Placeholder hint for the link URI input field.
+  ///
+  /// In en, this message translates to:
+  /// **'URI (e.g. https://example.com)'**
+  String get linkUriHint;
+
+  /// Tooltip for the button that adds a link to a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Add link'**
+  String get tooltipAddLink;
+
+  /// Tooltip for the button that removes a link from a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove link'**
+  String get tooltipRemoveLink;
+
+  /// Tooltip for the button that opens a task link URI.
+  ///
+  /// In en, this message translates to:
+  /// **'Open link'**
+  String get tooltipOpenLink;
+
+  /// Tooltip for the passive link indicator icon on a task pill.
+  ///
+  /// In en, this message translates to:
+  /// **'Has links'**
+  String get tooltipIndicatorLinks;
+
+  /// Validation error shown when a link title or URI is empty or invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter both a link title and a valid URI with scheme (e.g. https://...).'**
+  String get linkErrorInvalid;
+
+  /// Validation error shown when attempting to add more than 20 links to a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum of 20 links per task reached.'**
+  String get linkErrorMaxExceeded;
+
+  /// Error message shown when opening a task link URI fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open link.'**
+  String get errorOpenLinkFailed;
 }
 
 class _AppLocalizationsDelegate

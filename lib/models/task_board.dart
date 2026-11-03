@@ -242,6 +242,7 @@ class TaskBoard {
     DateTime? suspendedAt,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
+    List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
   }) {
     final trimmed = title.trim();
@@ -286,6 +287,7 @@ class TaskBoard {
     final taskId =
         id ?? generateTaskId(timestamp: now, existingIds: existingIds);
     final cleanBlockedBy = _sanitizeBlockedByForTask(taskId, blockedByTaskIds);
+    final cleanLinks = _cleanLinks(links);
     final cleanConditions = _sanitizeTaskConditions(conditions);
     final resolvedModifiedAt = modifiedAt != null
         ? TaskItem.normalizeTimestamp(modifiedAt)
@@ -308,6 +310,7 @@ class TaskBoard {
       repeatRule: repeatRule,
       blockedByTaskIds: cleanBlockedBy,
       labelIds: labelIds,
+      links: cleanLinks,
       conditions: cleanConditions,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: effectiveSubtasks,
@@ -901,6 +904,7 @@ class TaskBoard {
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
+    List<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
@@ -925,6 +929,7 @@ class TaskBoard {
     final sanitizedBlockedBy = blockedByTaskIds != null
         ? _sanitizeBlockedByForTask(taskId, blockedByTaskIds)
         : null;
+    final sanitizedLinks = links != null ? _cleanLinks(links) : null;
     final sanitizedConditions = conditions != null
         ? _sanitizeTaskConditions(conditions)
         : null;
@@ -942,6 +947,7 @@ class TaskBoard {
       repeatRule: repeatRule,
       clearRepeatRule: clearRepeatRule,
       blockedByTaskIds: sanitizedBlockedBy,
+      links: sanitizedLinks,
       conditions: sanitizedConditions,
       now: now,
       localNow: localNow,
@@ -1098,6 +1104,7 @@ class TaskBoard {
     required TaskRepeatRule? repeatRule,
     required bool clearRepeatRule,
     required List<String>? blockedByTaskIds,
+    required List<TaskLink>? links,
     required List<TaskCondition>? conditions,
     required DateTime now,
     required DateTime localNow,
@@ -1181,6 +1188,7 @@ class TaskBoard {
       clearRepeatRule: effectiveRepeatRule == null,
       blockedByTaskIds: blockedByTaskIds,
       labelIds: labelIds,
+      links: links,
       conditions: conditions,
       subtasksAutoFinish: effectiveAutoFinish,
       subtasks: effectiveSubtasks,
@@ -1300,6 +1308,21 @@ class TaskBoard {
     }
 
     activeCandidates.add(_IndexedTask(index: index, task: task));
+  }
+
+  /// Trims, validates, and caps [links] at [TaskLink.maxLinksPerTask] while preserving order.
+  static List<TaskLink> _cleanLinks(List<TaskLink> links) {
+    final cleaned = <TaskLink>[];
+    for (final link in links) {
+      if (cleaned.length >= TaskLink.maxLinksPerTask) {
+        break;
+      }
+      final parsed = TaskLink.tryParse(rawTitle: link.title, rawUri: link.uri);
+      if (parsed != null) {
+        cleaned.add(parsed);
+      }
+    }
+    return cleaned;
   }
 
   /// Trims and filters out empty subtask entries.

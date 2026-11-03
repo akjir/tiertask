@@ -833,4 +833,35 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get labelConditionsSectionDescription =>
       'Schränke ein, wann und wo Aufgaben mit diesem Label standardmäßig aktiv sind.';
+
+  @override
+  String get linksSectionTitle => 'Links';
+
+  @override
+  String get linkTitleHint => 'Link-Titel (z. B. Dokumentation)';
+
+  @override
+  String get linkUriHint => 'URI (z. B. https://example.com)';
+
+  @override
+  String get tooltipAddLink => 'Link hinzufügen';
+
+  @override
+  String get tooltipRemoveLink => 'Link entfernen';
+
+  @override
+  String get tooltipOpenLink => 'Link öffnen';
+
+  @override
+  String get tooltipIndicatorLinks => 'Hat Links';
+
+  @override
+  String get linkErrorInvalid =>
+      'Bitte sowohl einen Link-Titel als auch eine gültige URI mit Schema eingeben (z. B. https://...).';
+
+  @override
+  String get linkErrorMaxExceeded => 'Maximal 20 Links pro Aufgabe erreicht.';
+
+  @override
+  String get errorOpenLinkFailed => 'Link konnte nicht geöffnet werden.';
 }

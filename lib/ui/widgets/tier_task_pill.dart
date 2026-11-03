@@ -22,6 +22,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
 import '../../providers/task_providers.dart';
+import '../../repositories/link_launcher_repository.dart';
 import '../edit_task_screen.dart';
 
 /// Animation duration for expanding and collapsing task subtasks.
@@ -60,22 +61,30 @@ class TierTaskPill extends ConsumerStatefulWidget {
   ConsumerState<TierTaskPill> createState() => _TierTaskPillState();
 }
 
-/// Animated container that glides the subtask checklist downward or upward driven by [controller].
+/// Animated container that glides the task links and subtask checklist downward or upward driven by [controller].
 class _AnimatedSubtasksSection extends StatelessWidget {
   /// Creates an [_AnimatedSubtasksSection].
   const _AnimatedSubtasksSection({
     required this.controller,
     required this.isExpanded,
+    required this.links,
     required this.subtasks,
     required this.taskId,
+    required this.onOpenLink,
     required this.onToggleSubtask,
   });
 
   /// Animation controller driving the expansion progress between `0.0` and `1.0`.
   final Animation<double> controller;
 
-  /// Whether the subtask list is currently expanded.
+  /// Whether the subtask and link list is currently expanded.
   final bool isExpanded;
+
+  /// Resource links belonging to [taskId].
+  final List<TaskLink> links;
+
+  /// Callback invoked when a link row is tapped.
+  final ValueChanged<String> onOpenLink;
 
   /// Callback invoked with the zero-based step index when a subtask row is tapped, or `null` when locked.
   final ValueChanged<int>? onToggleSubtask;
@@ -88,7 +97,7 @@ class _AnimatedSubtasksSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (subtasks.isEmpty) {
+    if (subtasks.isEmpty && links.isEmpty) {
       return const SizedBox.shrink();
     }
     return AnimatedBuilder(
@@ -108,8 +117,10 @@ class _AnimatedSubtasksSection extends StatelessWidget {
         );
       },
       child: _SubtaskStepsColumn(
+        links: links,
         subtasks: subtasks,
         taskId: taskId,
+        onOpenLink: onOpenLink,
         onToggleSubtask: onToggleSubtask,
       ),
     );
@@ -254,14 +265,22 @@ final class _SubtaskCompleteTaskExit extends _TaskExitAction {
   final int stepIndex;
 }
 
-/// Column of interactive subtask rows rendered below the main task pill header.
+/// Column of interactive link and subtask rows rendered below the main task pill header.
 class _SubtaskStepsColumn extends StatelessWidget {
   /// Creates a [_SubtaskStepsColumn].
   const _SubtaskStepsColumn({
+    required this.links,
     required this.subtasks,
     required this.taskId,
+    required this.onOpenLink,
     required this.onToggleSubtask,
   });
+
+  /// Resource links belonging to [taskId].
+  final List<TaskLink> links;
+
+  /// Callback invoked when a link row is tapped.
+  final ValueChanged<String> onOpenLink;
 
   /// Callback invoked with the zero-based step index when a subtask row is tapped, or `null` when locked.
   final ValueChanged<int>? onToggleSubtask;
@@ -286,6 +305,12 @@ class _SubtaskStepsColumn extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            for (var i = 0; i < links.length; i++)
+              _TierLinkRow(
+                linkKey: ValueKey('task_link_${taskId}_$i'),
+                link: links[i],
+                onTap: () => onOpenLink(links[i].uri),
+              ),
             for (var i = 0; i < subtasks.length; i++)
               _TierSubtaskStepRow(
                 stepKey: ValueKey('subtask_step_${taskId}_$i'),
@@ -303,6 +328,60 @@ class _SubtaskStepsColumn extends StatelessWidget {
 sealed class _TaskExitAction {
   /// Creates a [_TaskExitAction].
   const _TaskExitAction();
+}
+
+/// Interactive row representing a single [TaskLink] inside [_SubtaskStepsColumn].
+class _TierLinkRow extends StatelessWidget {
+  /// Creates a [_TierLinkRow].
+  const _TierLinkRow({
+    required this.link,
+    required this.linkKey,
+    required this.onTap,
+  });
+
+  /// Link item to render.
+  final TaskLink link;
+
+  /// Deterministic widget key for the link row.
+  final Key linkKey;
+
+  /// Callback invoked when the link row is tapped to open its URI.
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: link.uri,
+      child: InkWell(
+        key: linkKey,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 8, 20, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.open_in_new_rounded,
+                size: 18,
+                color: colorScheme.primary,
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Text(
+                  link.title,
+                  style: TextStyle(
+                    color: colorScheme.primary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Compact circular check indicator rendered at the leading edge of [_TierSubtaskStepRow].
@@ -519,7 +598,7 @@ class _TierTaskIndicatorIcon extends StatelessWidget {
   }
 }
 
-/// Passive right-side status indicator icons for priority, repeating, and subtask-bearing tasks.
+/// Passive right-side status indicator icons for priority, repeating, link-bearing, and subtask-bearing tasks.
 class _TierTaskIndicators extends StatelessWidget {
   /// Creates a [_TierTaskIndicators] row.
   const _TierTaskIndicators({required this.task});
@@ -531,8 +610,9 @@ class _TierTaskIndicators extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasPriority = task.isPriority;
     final hasRepeat = task.repeatRule != null;
+    final hasLinks = task.links.isNotEmpty;
     final hasSubtasks = task.subtasks.isNotEmpty;
-    if (!hasPriority && !hasRepeat && !hasSubtasks) {
+    if (!hasPriority && !hasRepeat && !hasLinks && !hasSubtasks) {
       return const SizedBox.shrink();
     }
 
@@ -556,6 +636,13 @@ class _TierTaskIndicators extends StatelessWidget {
             icon: Icons.repeat_rounded,
             indicatorKey: ValueKey('repeat_task_indicator_${task.id}'),
             tooltip: localizations.tooltipIndicatorRepeat,
+          ),
+        if (hasLinks)
+          _TierTaskIndicatorIcon(
+            color: indicatorColor,
+            icon: Icons.link_rounded,
+            indicatorKey: ValueKey('links_task_indicator_${task.id}'),
+            tooltip: localizations.tooltipIndicatorLinks,
           ),
         if (hasSubtasks)
           _TierTaskIndicatorIcon(
@@ -729,7 +816,9 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
   @override
   void didUpdateWidget(covariant TierTaskPill oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.task.subtasks.isEmpty && _isExpanded) {
+    if (widget.task.subtasks.isEmpty &&
+        widget.task.links.isEmpty &&
+        _isExpanded) {
       _isExpanded = false;
       _subtaskController.value = 0.0;
     }
@@ -747,7 +836,8 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final task = widget.task;
-    final hasSubtasks = task.subtasks.isNotEmpty;
+    final hasExpandableDetails =
+        task.subtasks.isNotEmpty || task.links.isNotEmpty;
     final effectiveSubtasks = _resolveDisplayedSubtasks(task.subtasks);
 
     return _AnimatedTaskTransitionWrapper(
@@ -774,14 +864,16 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
                       ? _handleDowngradePressed
                       : null,
                   onEdit: () => openEditTaskScreen(context, initialTask: task),
-                  onToggleExpand: hasSubtasks ? _toggleExpanded : null,
+                  onToggleExpand: hasExpandableDetails ? _toggleExpanded : null,
                 ),
               ),
               _AnimatedSubtasksSection(
                 controller: _subtaskController,
-                isExpanded: _isExpanded && hasSubtasks,
+                isExpanded: _isExpanded && hasExpandableDetails,
+                links: task.links,
                 subtasks: effectiveSubtasks,
                 taskId: task.id,
+                onOpenLink: _handleOpenLink,
                 onToggleSubtask: widget.isCompleted
                     ? null
                     : _handleToggleSubtask,
@@ -865,6 +957,19 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
         notifier.restoreTask(taskId);
       case _SubtaskCompleteTaskExit(:final stepIndex):
         notifier.toggleSubtask(taskId, stepIndex);
+    }
+  }
+
+  /// Opens [uri] via [linkLauncherRepositoryProvider] and displays a SnackBar if launching fails.
+  Future<void> _handleOpenLink(String uri) async {
+    try {
+      await ref.read(linkLauncherRepositoryProvider).openLink(uri);
+    } on LinkLaunchException {
+      if (!mounted) return;
+      final localizations = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(localizations.errorOpenLinkFailed)),
+      );
     }
   }
 

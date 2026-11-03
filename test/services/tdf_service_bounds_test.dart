@@ -384,6 +384,61 @@ void main() {
         TdfErrorKind.limitExceeded,
         expectedLine: 4,
       );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "   "\n  created 2026-11-01\n}',
+        TdfErrorKind.emptyText,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  subtasks {\n    step false "   "\n  }\n}',
+        TdfErrorKind.emptyText,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link bare title"\n  created 2026-11-01\n  link Docs "https://example.com"\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link bare uri"\n  created 2026-11-01\n  link "Docs" https://example.com\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link 1 arg"\n  created 2026-11-01\n  link "Docs"\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link 3 args"\n  created 2026-11-01\n  link "Docs" "https://example.com" "extra"\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link empty title"\n  created 2026-11-01\n  link "   " "https://example.com"\n}',
+        TdfErrorKind.emptyText,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link empty uri"\n  created 2026-11-01\n  link "Docs" "   "\n}',
+        TdfErrorKind.emptyText,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link missing scheme"\n  created 2026-11-01\n  link "Docs" "www.example.com"\n}',
+        TdfErrorKind.invalidUri,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link digit scheme"\n  created 2026-11-01\n  link "Docs" "1http://example.com"\n}',
+        TdfErrorKind.invalidUri,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Link control char in uri"\n  created 2026-11-01\n  link "Docs" "https://example.com/\\npath"\n}',
+        TdfErrorKind.invalidUri,
+        expectedLine: 4,
+      );
     });
 
     test('enforces all Section 7 resource bounds before allocation', () {
@@ -496,6 +551,111 @@ void main() {
           ),
         ),
         reason: 'Document exceeding MAX_FILE_BYTES (1 MiB) must throw LimitExceeded',
+      );
+
+      final maxTitleLink = 't' * TdfService.maxTextLength;
+      final overTitleLink = 't' * (TdfService.maxTextLength + 1);
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.4.0\ntask 000001OkD2 {\n  name "Valid"\n  created 2026-11-01\n  link "$maxTitleLink" "https://example.com"\n}',
+              evaluationTime: fixedDate,
+            )
+            .someday
+            .single
+            .links
+            .single
+            .title
+            .length,
+        equals(TdfService.maxTextLength),
+        reason: 'Link title of exactly MAX_TEXT_LENGTH (500) must succeed',
+      );
+      expect(
+        () => tdfService.parse(
+          'tdf 0.4.0\ntask 000001OkD2 {\n  name "Valid"\n  created 2026-11-01\n  link "$overTitleLink" "https://example.com"\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Link title exceeding MAX_TEXT_LENGTH (500) must throw LimitExceeded',
+      );
+
+      const uriPrefix = 'https://example.com/';
+      final maxUri =
+          '$uriPrefix${'u' * (TdfService.maxUriLength - uriPrefix.length)}';
+      final overUri =
+          '$maxUri'
+          'x';
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.4.0\ntask 000001OkD2 {\n  name "Valid"\n  created 2026-11-01\n  link "Docs" "$maxUri"\n}',
+              evaluationTime: fixedDate,
+            )
+            .someday
+            .single
+            .links
+            .single
+            .uri
+            .length,
+        equals(TdfService.maxUriLength),
+        reason: 'Link URI of exactly MAX_URI_LENGTH (2048) must succeed',
+      );
+      expect(
+        () => tdfService.parse(
+          'tdf 0.4.0\ntask 000001OkD2 {\n  name "Valid"\n  created 2026-11-01\n  link "Docs" "$overUri"\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason:
+            'Link URI exceeding MAX_URI_LENGTH (2048) must throw LimitExceeded',
+      );
+
+      for (final count in [
+        TdfService.maxLinksPerTask - 1,
+        TdfService.maxLinksPerTask,
+      ]) {
+        final linksBlock = List.generate(
+          count,
+          (index) => '  link "L$index" "https://example.com/$index"',
+        ).join('\n');
+        final parsed = tdfService.parse(
+          'tdf 0.4.0\ntask 000001OkD2 {\n  name "Valid"\n  created 2026-11-01\n$linksBlock\n}',
+          evaluationTime: fixedDate,
+        );
+        expect(
+          parsed.someday.single.links.length,
+          equals(count),
+          reason: 'Task with $count links (<= MAX_LINKS_PER_TASK) must succeed',
+        );
+      }
+
+      final overLinksBlock = List.generate(
+        TdfService.maxLinksPerTask + 1,
+        (index) => '  link "L$index" "https://example.com/$index"',
+      ).join('\n');
+      expect(
+        () => tdfService.parse(
+          'tdf 0.4.0\ntask 000001OkD2 {\n  name "Valid"\n  created 2026-11-01\n$overLinksBlock\n}',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason:
+            'Task exceeding MAX_LINKS_PER_TASK (20) must throw LimitExceeded',
       );
     });
   });

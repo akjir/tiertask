@@ -2,12 +2,15 @@ package de.akjir.tiertask
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
@@ -23,6 +26,7 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL_NAME = "de.akjir.tiertask/location"
+        private const val LINK_LAUNCHER_CHANNEL_NAME = "de.akjir.tiertask/link_launcher"
         private const val PERMISSION_REQUEST_CODE = 4102
         private const val MAX_CACHE_AGE_NANOS = 5L * 60L * 1_000_000_000L
         private const val ACTIVE_FIX_TIMEOUT_MS = 8_000L
@@ -44,6 +48,29 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 if (call.method == "getLocation") {
                     handleGetLocation(result)
+                } else {
+                    result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, LINK_LAUNCHER_CHANNEL_NAME)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "openLink") {
+                    val uri = call.argument<String>("uri")
+                    if (uri.isNullOrBlank()) {
+                        result.error("INVALID_URI", "URI is empty.", null)
+                        return@setMethodCallHandler
+                    }
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (error: ActivityNotFoundException) {
+                        result.error("LAUNCH_FAILED", error.message ?: "No activity found to handle URI.", null)
+                    } catch (error: SecurityException) {
+                        result.error("LAUNCH_FAILED", error.message ?: "Security exception launching URI.", null)
+                    }
                 } else {
                     result.notImplemented()
                 }

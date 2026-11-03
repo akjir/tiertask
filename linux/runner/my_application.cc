@@ -12,6 +12,7 @@ struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   FlMethodChannel* directory_picker_channel;
+  FlMethodChannel* link_launcher_channel;
   FlMethodChannel* location_channel;
   GtkWindow* main_window;
 };
@@ -298,6 +299,45 @@ static FlValue* query_geoclue2_location() {
   return map;
 }
 
+static void on_link_launcher_method_call(FlMethodChannel* channel,
+                                         FlMethodCall* method_call,
+                                         gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(method, "openLink") != 0) {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  FlValue* args = fl_method_call_get_args(method_call);
+  const gchar* uri = nullptr;
+  if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+    FlValue* uri_val = fl_value_lookup_string(args, "uri");
+    if (uri_val != nullptr &&
+        fl_value_get_type(uri_val) == FL_VALUE_TYPE_STRING) {
+      uri = fl_value_get_string(uri_val);
+    }
+  }
+  if (uri == nullptr || uri[0] == '\0') {
+    response = FL_METHOD_RESPONSE(
+        fl_method_error_response_new("INVALID_URI", "URI is empty.", nullptr));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  g_autoptr(GError) error = nullptr;
+  if (g_app_info_launch_default_for_uri(uri, nullptr, &error)) {
+    g_autoptr(FlValue) result = fl_value_new_bool(TRUE);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_error_response_new(
+        "LAUNCH_FAILED",
+        error != nullptr ? error->message : "Failed to launch URI.", nullptr));
+  }
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
 static void on_location_method_call(FlMethodChannel* channel,
                                     FlMethodCall* method_call,
                                     gpointer user_data) {
@@ -392,6 +432,10 @@ static void my_application_activate(GApplication* application) {
   fl_method_channel_set_method_call_handler(
       self->directory_picker_channel, on_directory_picker_method_call, self,
       nullptr);
+  self->link_launcher_channel = fl_method_channel_new(
+      messenger, "de.akjir.tiertask/link_launcher", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->link_launcher_channel, on_link_launcher_method_call, self, nullptr);
   self->location_channel = fl_method_channel_new(
       messenger, "de.akjir.tiertask/location", FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(
@@ -443,6 +487,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_object(&self->directory_picker_channel);
+  g_clear_object(&self->link_launcher_channel);
   g_clear_object(&self->location_channel);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);

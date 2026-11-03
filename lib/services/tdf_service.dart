@@ -32,6 +32,9 @@ enum TdfErrorKind {
   /// Two blocks in the same namespace share an identical `<id>`.
   duplicateIdentifier,
 
+  /// A required text argument (`name`, `step` `<text>`, or `link` `<title>` / `<uri>`) is empty or whitespace-only after unescaping.
+  emptyText,
+
   /// A block header is malformed or missing whitespace before `{`.
   invalidBlockHeader,
 
@@ -55,6 +58,9 @@ enum TdfErrorKind {
 
   /// A timestamp or time-window argument fails ISO-8601 calendar or 24-hour clock validation.
   invalidTimestamp,
+
+  /// A `link` `<uri>` argument does not start with a valid scheme (`[a-zA-Z][a-zA-Z0-9+.-]*:`) or contains control characters.
+  invalidUri,
 
   /// A resource bound defined in `TDF_SPEC.md` Section 7 was exceeded.
   limitExceeded,
@@ -143,6 +149,9 @@ class TdfService {
   /// Maximum logical lines per `.tdf` document (`MAX_LINE_COUNT`).
   static const int maxLineCount = 16384;
 
+  /// Maximum `link` directives per `task` block (`MAX_LINKS_PER_TASK`).
+  static const int maxLinksPerTask = TaskLink.maxLinksPerTask;
+
   /// Maximum `{ ... }` block nesting depth (`MAX_NESTING_DEPTH`).
   static const int maxNestingDepth = 2;
 
@@ -157,6 +166,9 @@ class TdfService {
 
   /// Maximum character length of a `name` or `step` text value (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = 500;
+
+  /// Maximum character length of a `link` `<uri>` value (`MAX_URI_LENGTH`).
+  static const int maxUriLength = TaskLink.maxUriLength;
 
   /// Canonical TDF specification version string (`tdf 0.4.0`).
   static const String supportedVersion = '0.4.0';
@@ -398,6 +410,61 @@ class TdfService {
     }
   }
 
+  /// Validates and appends a `link "<title>" "<uri>"` directive to [builder].
+  static void _applyLinkDirective(
+    _TaskBuilder builder,
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    if (args.length != 2 ||
+        args[0].kind != _TokenKind.quotedString ||
+        args[1].kind != _TokenKind.quotedString) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Directive "link" requires two quoted arguments: "<title>" and "<uri>".',
+      );
+    }
+    if (builder.links.length >= maxLinksPerTask) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Task exceeds maximum of $maxLinksPerTask links.',
+      );
+    }
+    final title = args[0].value;
+    final uri = args[1].value;
+    if (title.trim().isEmpty || uri.trim().isEmpty) {
+      throw TdfException(
+        kind: TdfErrorKind.emptyText,
+        line: lineNumber,
+        message: 'Link title and URI must not be empty or whitespace-only.',
+      );
+    }
+    if (title.length > maxTextLength) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Link title exceeds maximum length of $maxTextLength.',
+      );
+    }
+    if (uri.length > maxUriLength) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Link URI exceeds maximum length of $maxUriLength.',
+      );
+    }
+    if (!TaskLink.isValidUri(uri)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidUri,
+        line: lineNumber,
+        message: 'Invalid link URI "$uri".',
+      );
+    }
+    builder.links.add(TaskLink(title: title, uri: uri));
+  }
+
   /// Applies a directive inside a `subtasks` sub-block.
   static void _applySubtasksDirective(
     _SubtasksBuilder builder,
@@ -429,11 +496,11 @@ class TdfService {
       );
     }
     final textValue = args[1].value;
-    if (textValue.isEmpty) {
+    if (textValue.trim().isEmpty) {
       throw TdfException(
-        kind: TdfErrorKind.unexpectedToken,
+        kind: TdfErrorKind.emptyText,
         line: lineNumber,
-        message: 'Step text must not be empty.',
+        message: 'Step text must not be empty or whitespace-only.',
       );
     }
     if (textValue.length > maxTextLength) {
@@ -520,6 +587,8 @@ class TdfService {
         }
         builder.blockedByTaskIds = _requireIdListArgs(args, lineNumber);
         builder.blockedLine = lineNumber;
+      case 'link':
+        _applyLinkDirective(builder, args, lineNumber);
       case 'condition':
         final rule = _parseInlineConditionArgs(
           args,
@@ -1588,11 +1657,11 @@ class TdfService {
       );
     }
     final value = args[0].value;
-    if (value.isEmpty) {
+    if (value.trim().isEmpty) {
       throw TdfException(
-        kind: TdfErrorKind.unexpectedToken,
+        kind: TdfErrorKind.emptyText,
         line: lineNumber,
-        message: 'Text argument must not be empty.',
+        message: 'Text argument must not be empty or whitespace-only.',
       );
     }
     if (value.length > maxTextLength) {
@@ -2216,6 +2285,13 @@ class TdfService {
       buffer.write(repeatRule.toTdfDirectiveArgs());
       buffer.write('\n');
     }
+    for (final link in task.links) {
+      buffer.write('    link ');
+      buffer.write(_escapeQuotedString(link.title));
+      buffer.write(' ');
+      buffer.write(_escapeQuotedString(link.uri));
+      buffer.write('\n');
+    }
     _writeConditions(buffer, task.conditions);
     if (task.subtasks.isNotEmpty || task.subtasksAutoFinish) {
       buffer.write('    subtasks');
@@ -2433,6 +2509,9 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Legacy `categories` and `locations` IDs in declaration order.
   final List<String> legacyLabelIds = <String>[];
 
+  /// Repeatable `link` directives in declaration order.
+  final List<TaskLink> links = <TaskLink>[];
+
   /// Optional `blocked` task IDs.
   List<String>? blockedByTaskIds;
 
@@ -2527,6 +2606,7 @@ final class _TaskBuilder extends _BlockBuilder {
       repeatRule: repeatRule,
       labelIds: mergedLabelIds,
       blockedByTaskIds: blockedByTaskIds ?? const <String>[],
+      links: links,
       conditions: conditions,
       subtasksAutoFinish: subtasksAutoFinish,
       subtasks: subtasks,

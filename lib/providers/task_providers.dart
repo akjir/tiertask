@@ -26,6 +26,7 @@ import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
+import '../repositories/link_launcher_repository.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../repositories/webdav_repository.dart';
@@ -66,6 +67,11 @@ final directoryPickerProvider =
           .read(localFileRepositoryProvider)
           .pickDirectory(initialDirectory: initialDirectory);
     });
+
+/// Provides the [LinkLauncherRepository] for opening task link URIs via the OS handler.
+final linkLauncherRepositoryProvider = Provider<LinkLauncherRepository>((ref) {
+  return const PlatformLinkLauncherRepository();
+});
 
 /// Provides a [LocalFileRepository] configured with the current [WebDavConfig].
 final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
@@ -268,6 +274,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? suspendedAt,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
+    List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
     DateTime? currentDate,
     String? id,
@@ -284,6 +291,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       suspendedAt: suspendedAt,
       repeatRule: repeatRule,
       blockedByTaskIds: blockedByTaskIds,
+      links: links,
       conditions: conditions,
       currentDate: utcNow,
       localEvaluationTime: localNow,
@@ -482,6 +490,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
+    List<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) async {
@@ -500,6 +509,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       repeatRule: repeatRule,
       clearRepeatRule: clearRepeatRule,
       blockedByTaskIds: blockedByTaskIds,
+      links: links,
       conditions: conditions,
       currentDate: utcNow,
       localEvaluationTime: localNow,

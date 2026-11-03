@@ -7,7 +7,7 @@
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.4.0`, `label`, `task`, `modified`, `repeat`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
+`TierTask` stores objective task facts (`tdf 0.4.0`, `label`, `task`, `modified`, `repeat`, `link`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
 * **Dynamic $O(N)$ 6-Tier Derivation:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (`blocked`, future `suspended`, or unmet `condition` across `day`, `time`, and `location` rule groups with label inheritance), and slices active tasks by `priority` and ascending `queued` FIFO timestamp into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.

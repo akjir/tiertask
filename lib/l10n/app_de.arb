@@ -242,5 +242,15 @@
   "labelColorSectionTitle": "Farbe",
   "labelColorHint": "#RRGGBB (optional)",
   "labelColorErrorInvalid": "Bitte eine gültige Hex-Farbe eingeben (#RRGGBB).",
-  "labelConditionsSectionDescription": "Schränke ein, wann und wo Aufgaben mit diesem Label standardmäßig aktiv sind."
+  "labelConditionsSectionDescription": "Schränke ein, wann und wo Aufgaben mit diesem Label standardmäßig aktiv sind.",
+  "linksSectionTitle": "Links",
+  "linkTitleHint": "Link-Titel (z. B. Dokumentation)",
+  "linkUriHint": "URI (z. B. https://example.com)",
+  "tooltipAddLink": "Link hinzufügen",
+  "tooltipRemoveLink": "Link entfernen",
+  "tooltipOpenLink": "Link öffnen",
+  "tooltipIndicatorLinks": "Hat Links",
+  "linkErrorInvalid": "Bitte sowohl einen Link-Titel als auch eine gültige URI mit Schema eingeben (z. B. https://...).",
+  "linkErrorMaxExceeded": "Maximal 20 Links pro Aufgabe erreicht.",
+  "errorOpenLinkFailed": "Link konnte nicht geöffnet werden."
 }

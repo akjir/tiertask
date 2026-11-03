@@ -80,6 +80,107 @@ class SubtaskItem {
   String toString() => 'step $isCompleted "$title"';
 }
 
+/// Immutable representation of a TDF `link "<title>" "<uri>"` directive belonging to a [TaskItem].
+@immutable
+class TaskLink {
+  /// Creates a [TaskLink] with [title] and [uri].
+  const TaskLink({required this.title, required this.uri});
+
+  /// Maximum number of `link` directives permitted on a single task (`20`).
+  static const int maxLinksPerTask = 20;
+
+  /// Maximum character length of a link `<uri>` (`2048`).
+  static const int maxUriLength = 2048;
+
+  /// Human-readable display title (`<title>`).
+  final String title;
+
+  /// Target resource URI (`<uri>`).
+  final String uri;
+
+  /// Returns a copy of this link with updated fields.
+  TaskLink copyWith({String? title, String? uri}) {
+    return TaskLink(title: title ?? this.title, uri: uri ?? this.uri);
+  }
+
+  /// Validates that [rawUri] is non-empty, within [maxUriLength], free of ASCII control characters,
+  /// and begins with a valid URI scheme matching `[a-zA-Z][a-zA-Z0-9+.-]*:`.
+  static bool isValidUri(String rawUri) {
+    if (rawUri.isEmpty || rawUri.length > maxUriLength) {
+      return false;
+    }
+    var colonIndex = -1;
+    var hasNonWhitespace = false;
+    for (var i = 0; i < rawUri.length; i++) {
+      final unit = rawUri.codeUnitAt(i);
+      if (unit <= 0x1F || unit == 0x7F) {
+        return false;
+      }
+      if (unit != 0x20) {
+        hasNonWhitespace = true;
+      }
+      if (colonIndex == -1 && unit == 0x3A) {
+        colonIndex = i;
+      }
+    }
+    if (!hasNonWhitespace || colonIndex <= 0) {
+      return false;
+    }
+    if (!_isAlphaChar(rawUri.codeUnitAt(0))) {
+      return false;
+    }
+    for (var i = 1; i < colonIndex; i++) {
+      if (!_isSchemeContinueChar(rawUri.codeUnitAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Trims and validates [rawTitle] and [rawUri], returning a [TaskLink] or `null` if invalid.
+  static TaskLink? tryParse({
+    required String rawTitle,
+    required String rawUri,
+    int maxTextLength = 500,
+  }) {
+    final trimmedTitle = rawTitle.trim();
+    final trimmedUri = rawUri.trim();
+    if (trimmedTitle.isEmpty || trimmedTitle.length > maxTextLength) {
+      return null;
+    }
+    if (!isValidUri(trimmedUri)) {
+      return null;
+    }
+    return TaskLink(title: trimmedTitle, uri: trimmedUri);
+  }
+
+  /// Checks whether [unit] is an ASCII letter (`[a-zA-Z]`).
+  static bool _isAlphaChar(int unit) {
+    return (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A);
+  }
+
+  /// Checks whether [unit] is a valid URI scheme continuation character (`[a-zA-Z0-9+.-]`).
+  static bool _isSchemeContinueChar(int unit) {
+    return _isAlphaChar(unit) ||
+        (unit >= 0x30 && unit <= 0x39) ||
+        unit == 0x2B ||
+        unit == 0x2D ||
+        unit == 0x2E;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskLink && other.title == title && other.uri == uri;
+  }
+
+  @override
+  int get hashCode => Object.hash(title, uri);
+
+  @override
+  String toString() => 'link "$title" "$uri"';
+}
+
 /// Immutable representation of a TDF `repeat <count> <days|weeks|months>` rule.
 @immutable
 class TaskRepeatRule {
@@ -229,6 +330,7 @@ class TaskItem {
     this.repeatRule,
     List<String> labelIds = const [],
     List<String> blockedByTaskIds = const [],
+    List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
     this.subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
@@ -236,6 +338,7 @@ class TaskItem {
        createdAt = createdAt ?? defaultCreatedAt,
        labelIds = List<String>.unmodifiable(labelIds),
        blockedByTaskIds = List<String>.unmodifiable(blockedByTaskIds),
+       links = List<TaskLink>.unmodifiable(links),
        conditions = List<TaskCondition>.unmodifiable(conditions),
        subtasks = List<SubtaskItem>.unmodifiable(subtasks);
 
@@ -268,6 +371,9 @@ class TaskItem {
 
   /// Associated label IDs (`labels` directive).
   final List<String> labelIds;
+
+  /// External or internal resource links (`link` directives).
+  final List<TaskLink> links;
 
   /// Optional UTC modification timestamp (`modified` directive).
   final DateTime? modifiedAt;
@@ -312,6 +418,7 @@ class TaskItem {
     TaskRepeatRule? repeatRule,
     List<String>? labelIds,
     List<String>? blockedByTaskIds,
+    List<TaskLink>? links,
     List<TaskCondition>? conditions,
     bool? subtasksAutoFinish,
     List<SubtaskItem>? subtasks,
@@ -336,6 +443,7 @@ class TaskItem {
       repeatRule: clearRepeatRule ? null : (repeatRule ?? this.repeatRule),
       labelIds: labelIds ?? this.labelIds,
       blockedByTaskIds: blockedByTaskIds ?? this.blockedByTaskIds,
+      links: links ?? this.links,
       conditions: conditions ?? this.conditions,
       subtasksAutoFinish: subtasksAutoFinish ?? this.subtasksAutoFinish,
       subtasks: subtasks ?? this.subtasks,
@@ -598,6 +706,7 @@ class TaskItem {
         other.subtasksAutoFinish == subtasksAutoFinish &&
         listEquals(other.labelIds, labelIds) &&
         listEquals(other.blockedByTaskIds, blockedByTaskIds) &&
+        listEquals(other.links, links) &&
         listEquals(other.conditions, conditions) &&
         listEquals(other.subtasks, subtasks);
   }
@@ -618,6 +727,7 @@ class TaskItem {
     subtasksAutoFinish,
     Object.hashAll(labelIds),
     Object.hashAll(blockedByTaskIds),
+    Object.hashAll(links),
     Object.hashAll(conditions),
     Object.hashAll(subtasks),
   );

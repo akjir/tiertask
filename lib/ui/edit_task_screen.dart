@@ -21,8 +21,10 @@ import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
+import '../repositories/link_launcher_repository.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/task_editor_conditions_section.dart';
+import 'widgets/task_editor_links_section.dart';
 import 'widgets/task_editor_sections.dart';
 
 /// Dedicated panel screen used for both extended task creation and editing an existing task.
@@ -65,6 +67,10 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   String? _errorMessage;
   late bool _isRepeating;
   late bool _isSuspended;
+  String? _linkErrorMessage;
+  final TextEditingController _linkTitleController = TextEditingController();
+  final TextEditingController _linkUriController = TextEditingController();
+  late final List<TaskLink> _links;
   late QuickAddMode _mode;
   late final TextEditingController _noteController;
   late final TextEditingController _repeatCountController;
@@ -77,6 +83,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final TextEditingController _suspendedController;
   String? _suspendedErrorMessage;
   late final TextEditingController _titleController;
+
+  /// Whether the add-link button is currently enabled.
+  bool get _canAddLink =>
+      _links.length < TaskLink.maxLinksPerTask &&
+      (_linkTitleController.text.trim().isNotEmpty ||
+          _linkUriController.text.trim().isNotEmpty);
 
   /// Whether the subtask input field currently contains non-whitespace text.
   bool get _hasSubtaskText => _subtaskController.text.trim().isNotEmpty;
@@ -106,6 +118,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     };
     _subtasksAutoFinish = task?.subtasksAutoFinish ?? false;
     _subtasks = <SubtaskItem>[if (task != null) ...task.subtasks];
+    _links = <TaskLink>[if (task != null) ...task.links];
     _blockedByTaskIds = <String>{if (task != null) ...task.blockedByTaskIds};
     _isSuspended = task?.suspendedAt != null;
     _suspendedController = TextEditingController(
@@ -122,6 +135,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
     _titleController.addListener(_handleTitleChanged);
     _subtaskController.addListener(_handleInputStateChanged);
+    _linkTitleController.addListener(_handleLinkInputChanged);
+    _linkUriController.addListener(_handleLinkInputChanged);
     _suspendedController.addListener(_handleInputStateChanged);
     _repeatCountController.addListener(_handleRepeatCountChanged);
     _blockedSearchController.addListener(_handleInputStateChanged);
@@ -131,12 +146,16 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   void dispose() {
     _titleController.removeListener(_handleTitleChanged);
     _subtaskController.removeListener(_handleInputStateChanged);
+    _linkTitleController.removeListener(_handleLinkInputChanged);
+    _linkUriController.removeListener(_handleLinkInputChanged);
     _suspendedController.removeListener(_handleInputStateChanged);
     _repeatCountController.removeListener(_handleRepeatCountChanged);
     _blockedSearchController.removeListener(_handleInputStateChanged);
     _titleController.dispose();
     _noteController.dispose();
     _subtaskController.dispose();
+    _linkTitleController.dispose();
+    _linkUriController.dispose();
     _suspendedController.dispose();
     _repeatCountController.dispose();
     _blockedSearchController.dispose();
@@ -179,6 +198,33 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         ),
       ),
     );
+  }
+
+  /// Validates and appends the current link title and URI to [_links].
+  void _addLink() {
+    final localizations = AppLocalizations.of(context);
+    if (_links.length >= TaskLink.maxLinksPerTask) {
+      setState(() {
+        _linkErrorMessage = localizations.linkErrorMaxExceeded;
+      });
+      return;
+    }
+    final parsed = TaskLink.tryParse(
+      rawTitle: _linkTitleController.text,
+      rawUri: _linkUriController.text,
+    );
+    if (parsed == null) {
+      setState(() {
+        _linkErrorMessage = localizations.linkErrorInvalid;
+      });
+      return;
+    }
+    setState(() {
+      _links.add(parsed);
+      _linkTitleController.clear();
+      _linkUriController.clear();
+      _linkErrorMessage = null;
+    });
   }
 
   /// Appends the current non-empty subtask text to [_subtasks].
@@ -252,6 +298,17 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           onRemoveSubtask: _removeSubtask,
           onToggleAutoFinish: _toggleAutoFinish,
           onToggleSubtaskStep: _isCompletedTask ? null : _toggleSubtaskStep,
+        ),
+        const SizedBox(height: 10),
+        TaskEditorLinksSection(
+          canAddLink: _canAddLink,
+          errorMessage: _linkErrorMessage,
+          links: _links,
+          titleController: _linkTitleController,
+          uriController: _linkUriController,
+          onAddLink: _addLink,
+          onOpenLink: _openLink,
+          onRemoveLink: _removeLink,
         ),
         if (candidateTasks.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -386,6 +443,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     setState(() {});
   }
 
+  /// Rebuilds and clears link validation errors when the link title or URI input changes.
+  void _handleLinkInputChanged() {
+    setState(() {
+      _linkErrorMessage = null;
+    });
+  }
+
   /// Clears any repeat interval validation error when the user edits the repeat count field.
   void _handleRepeatCountChanged() {
     if (_repeatErrorMessage == null) {
@@ -406,11 +470,25 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Opens [uri] via [linkLauncherRepositoryProvider] and displays a SnackBar if launching fails.
+  Future<void> _openLink(String uri) async {
+    try {
+      await ref.read(linkLauncherRepositoryProvider).openLink(uri);
+    } on LinkLaunchException {
+      if (!mounted) return;
+      final localizations = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(localizations.errorOpenLinkFailed)),
+      );
+    }
+  }
+
   /// Persists the created or edited task through [TaskNotifier].
   Future<void> _persistTask(
     TaskBoard board,
     String title,
     List<SubtaskItem> subtasks,
+    List<TaskLink> links,
     DateTime? suspendedAt,
     TaskRepeatRule? repeatRule,
   ) async {
@@ -435,6 +513,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         repeatRule: repeatRule,
         clearRepeatRule: !_isRepeating,
         blockedByTaskIds: blockedByIds,
+        links: links,
         conditions: conditions,
       );
       return;
@@ -451,6 +530,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       suspendedAt: suspendedAt,
       repeatRule: repeatRule,
       blockedByTaskIds: blockedByIds,
+      links: links,
       conditions: conditions,
     );
   }
@@ -508,11 +588,45 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Removes the link at [index].
+  void _removeLink(int index) {
+    setState(() {
+      _links.removeAt(index);
+      _linkErrorMessage = null;
+    });
+  }
+
   /// Removes the subtask step at [index].
   void _removeSubtask(int index) {
     setState(() {
       _subtasks.removeAt(index);
     });
+  }
+
+  /// Resolves the final list of [TaskLink]s on save, validating any pending link input.
+  List<TaskLink>? _resolveEffectiveLinks(AppLocalizations localizations) {
+    final pendingTitle = _linkTitleController.text.trim();
+    final pendingUri = _linkUriController.text.trim();
+    if (pendingTitle.isEmpty && pendingUri.isEmpty) {
+      return _links;
+    }
+    if (_links.length >= TaskLink.maxLinksPerTask) {
+      setState(() {
+        _linkErrorMessage = localizations.linkErrorMaxExceeded;
+      });
+      return null;
+    }
+    final parsed = TaskLink.tryParse(
+      rawTitle: pendingTitle,
+      rawUri: pendingUri,
+    );
+    if (parsed == null) {
+      setState(() {
+        _linkErrorMessage = localizations.linkErrorInvalid;
+      });
+      return null;
+    }
+    return <TaskLink>[..._links, parsed];
   }
 
   /// Derives the initial [QuickAddMode] for an existing [task].
@@ -603,6 +717,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       return;
     }
 
+    final effectiveLinks = _resolveEffectiveLinks(localizations);
+    if (effectiveLinks == null) {
+      return;
+    }
+
     final pendingSubtask = _subtaskController.text.trim();
     final effectiveSubtasks = <SubtaskItem>[
       ..._subtasks,
@@ -614,6 +733,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       board,
       _titleController.text.trim(),
       effectiveSubtasks,
+      effectiveLinks,
       suspendedTimestamp,
       repeatRule,
     );

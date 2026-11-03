@@ -685,5 +685,90 @@ label officeOkD2 {
         reason: 'Early unblocked recurring task must immediately enter Focus',
       );
     });
+
+    test('TaskLink validates URI schemes and TaskBoard addTask/updateTask manage links and advance modifiedAt', () {
+      expect(TaskLink.isValidUri('https://example.com/docs'), isTrue);
+      expect(TaskLink.isValidUri('mailto:ops@example.com'), isTrue);
+      expect(TaskLink.isValidUri('obsidian://open?vault=Notes'), isTrue);
+      expect(TaskLink.isValidUri('custom+scheme-1.0://resource'), isTrue);
+      expect(TaskLink.isValidUri(''), isFalse);
+      expect(TaskLink.isValidUri('   '), isFalse);
+      expect(TaskLink.isValidUri('example.com/no-scheme'), isFalse);
+      expect(TaskLink.isValidUri('://missing-scheme'), isFalse);
+      expect(TaskLink.isValidUri('1http://digit-start'), isFalse);
+      expect(TaskLink.isValidUri('ht_tp://underscore-in-scheme'), isFalse);
+      expect(TaskLink.isValidUri('https://example.com/bad\nchar'), isFalse);
+      expect(TaskLink.isValidUri('https://example.com/bad\x7Fchar'), isFalse);
+
+      expect(
+        TaskLink.tryParse(
+          rawTitle: '  Runbook  ',
+          rawUri: '  https://example.com/runbook  ',
+        ),
+        equals(
+          const TaskLink(title: 'Runbook', uri: 'https://example.com/runbook'),
+        ),
+      );
+      expect(
+        TaskLink.tryParse(rawTitle: '   ', rawUri: 'https://example.com'),
+        isNull,
+      );
+      expect(TaskLink.tryParse(rawTitle: 'Docs', rawUri: 'not-a-uri'), isNull);
+
+      var board = TaskBoard.empty().addTask(
+        'Deploy release',
+        currentDate: fixedDate,
+        links: const [
+          TaskLink(title: 'Runbook', uri: 'https://example.com/runbook'),
+          TaskLink(title: 'Ticket', uri: 'https://example.com/issues/42'),
+        ],
+      );
+      final taskId = board.focus.single.id;
+      expect(
+        board.focus.single.links,
+        equals(const [
+          TaskLink(title: 'Runbook', uri: 'https://example.com/runbook'),
+          TaskLink(title: 'Ticket', uri: 'https://example.com/issues/42'),
+        ]),
+        reason: 'addTask must preserve task links in declaration order',
+      );
+
+      final updateTime = fixedDate.add(const Duration(minutes: 15));
+      board = board.updateTask(
+        taskId,
+        currentDate: updateTime,
+        links: const [
+          TaskLink(title: 'Runbook', uri: 'https://example.com/runbook-v2'),
+        ],
+      );
+      final updated = board.findTask(taskId)!;
+      expect(
+        updated.links,
+        equals(const [
+          TaskLink(title: 'Runbook', uri: 'https://example.com/runbook-v2'),
+        ]),
+      );
+      expect(
+        updated.modifiedAt,
+        equals(updateTime),
+        reason: 'Changing task links must advance modifiedAt',
+      );
+
+      final overLimitLinks = List<TaskLink>.generate(
+        TaskLink.maxLinksPerTask + 5,
+        (index) =>
+            TaskLink(title: 'Link $index', uri: 'https://example.com/$index'),
+      );
+      board = board.updateTask(
+        taskId,
+        currentDate: updateTime.add(const Duration(minutes: 5)),
+        links: overLimitLinks,
+      );
+      expect(
+        board.findTask(taskId)!.links.length,
+        equals(TaskLink.maxLinksPerTask),
+        reason: 'TaskBoard must cap links at TaskLink.maxLinksPerTask (20)',
+      );
+    });
   });
 }

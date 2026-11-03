@@ -819,4 +819,35 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get labelConditionsSectionDescription =>
       'Restrict when and where tasks with this label become active by default.';
+
+  @override
+  String get linksSectionTitle => 'Links';
+
+  @override
+  String get linkTitleHint => 'Link title (e.g. Documentation)';
+
+  @override
+  String get linkUriHint => 'URI (e.g. https://example.com)';
+
+  @override
+  String get tooltipAddLink => 'Add link';
+
+  @override
+  String get tooltipRemoveLink => 'Remove link';
+
+  @override
+  String get tooltipOpenLink => 'Open link';
+
+  @override
+  String get tooltipIndicatorLinks => 'Has links';
+
+  @override
+  String get linkErrorInvalid =>
+      'Enter both a link title and a valid URI with scheme (e.g. https://...).';
+
+  @override
+  String get linkErrorMaxExceeded => 'Maximum of 20 links per task reached.';
+
+  @override
+  String get errorOpenLinkFailed => 'Could not open link.';
 }

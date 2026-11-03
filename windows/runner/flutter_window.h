@@ -35,6 +35,10 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       directory_picker_channel_;
 
+  // Channel for launching task link URIs via ShellExecuteW.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      link_launcher_channel_;
+
   // Channel for querying the Windows Location API.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       location_channel_;

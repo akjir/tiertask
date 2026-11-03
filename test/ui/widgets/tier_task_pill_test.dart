@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 
 import '../test_helpers.dart';
@@ -959,6 +960,97 @@ task c20000OkD2 {
         tester.getTopLeft(c2Finder).dy,
         closeTo(c1InitialTop, 0.01),
         reason: 'Remaining completed task must settle into the top slot after restore',
+      );
+    },
+  );
+
+  testWidgets(
+    'Task pill displays passive link indicator, expands link rows on tap, launches URIs via LinkLauncherRepository, and shows SnackBar on launch failure',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.4.0
+
+task lnk001OkD2 {
+  name "Review architecture docs"
+  created 2026-11-01 08:00
+  queued 2026-11-01 08:00
+  link "Architecture Spec" "https://example.com/arch"
+  link "Issue Tracker" "https://example.com/issues/10"
+}
+''';
+      final fakeLauncher = FakeLinkLauncherRepository();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: seededTdf,
+            ),
+          ),
+          linkLauncherRepositoryProvider.overrideWithValue(fakeLauncher),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 1, 12, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final linksIndicatorFinder = find.byKey(
+        const ValueKey('links_task_indicator_lnk001OkD2'),
+      );
+      expect(
+        linksIndicatorFinder,
+        findsOneWidget,
+        reason: 'Task with links must display the passive link indicator icon',
+      );
+      final linksIcon = tester.widget<Icon>(linksIndicatorFinder);
+      expect(linksIcon.icon, equals(Icons.link_rounded));
+
+      final link0Finder = find.byKey(const ValueKey('task_link_lnk001OkD2_0'));
+      final link1Finder = find.byKey(const ValueKey('task_link_lnk001OkD2_1'));
+      expect(
+        link0Finder,
+        findsNothing,
+        reason: 'Task links must be collapsed initially',
+      );
+
+      await tester.tap(find.text('Review architecture docs'));
+      await tester.pumpAndSettle();
+
+      expect(link0Finder, findsOneWidget);
+      expect(link1Finder, findsOneWidget);
+      expect(find.text('Architecture Spec'), findsOneWidget);
+      expect(find.text('Issue Tracker'), findsOneWidget);
+
+      await tester.tap(link0Finder);
+      await tester.pumpAndSettle();
+      expect(
+        fakeLauncher.launchedUris,
+        equals(['https://example.com/arch']),
+        reason:
+            'Tapping a link row must launch its URI via LinkLauncherRepository',
+      );
+
+      fakeLauncher.shouldThrow = true;
+      await tester.tap(link1Finder);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Could not open link.'),
+        findsOneWidget,
+        reason: 'Failed link launch must display a localized error SnackBar',
       );
     },
   );

@@ -20,6 +20,7 @@ import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 
 import 'test_helpers.dart';
@@ -718,6 +719,155 @@ task 000001OkD2 {
         find.byKey(ValueKey('repeat_task_indicator_$rotateTaskId')),
         findsOneWidget,
         reason: 'Recurring task must display repeat indicator icon on its task card in HomeScreen',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen adds, validates, opens, removes, and saves task links including pending link input on save',
+    (WidgetTester tester) async {
+      final fixedNow = DateTime.utc(2026, 11, 1, 10, 0);
+      final fakeLauncher = FakeLinkLauncherRepository();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: 'tdf 0.4.0\n',
+            ),
+          ),
+          linkLauncherRepositoryProvider.overrideWithValue(fakeLauncher),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Upgrade Kubernetes cluster',
+      );
+      await tester.pump();
+
+      final linkTitleFinder = find.byKey(
+        const ValueKey('editor_link_title_input'),
+      );
+      final linkUriFinder = find.byKey(const ValueKey('editor_link_uri_input'));
+      final addLinkButtonFinder = find.byKey(
+        const ValueKey('editor_add_link_button'),
+      );
+
+      await tester.ensureVisible(addLinkButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.enterText(linkTitleFinder, 'Runbook');
+      await tester.enterText(linkUriFinder, 'not-a-valid-uri');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(addLinkButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(addLinkButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor_link_error_text')),
+        findsOneWidget,
+        reason: 'Invalid link URI must display inline validation error',
+      );
+
+      await tester.enterText(linkUriFinder, 'https://example.com/k8s-runbook');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(addLinkButtonFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(addLinkButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('editor_link_error_text')),
+        findsNothing,
+        reason: 'Adding a valid link must clear validation error',
+      );
+      expect(
+        find.byKey(const ValueKey('editor_link_item_0')),
+        findsOneWidget,
+        reason: 'Added link must appear in the Links section list',
+      );
+
+      final openLink0Finder = find.byKey(const ValueKey('editor_open_link_0'));
+      await tester.ensureVisible(openLink0Finder);
+      await tester.pumpAndSettle();
+      await tester.tap(openLink0Finder);
+      await tester.pumpAndSettle();
+      expect(
+        fakeLauncher.launchedUris,
+        equals(['https://example.com/k8s-runbook']),
+        reason: 'Tapping open on an editor link row must launch its URI',
+      );
+
+      await tester.enterText(linkTitleFinder, 'Release Notes');
+      await tester.enterText(
+        linkUriFinder,
+        'https://example.com/k8s-release-notes',
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('task_editor_save_button')));
+      await tester.pumpAndSettle();
+
+      var board = container.read(taskNotifierProvider).value!;
+      final createdTask = board.focus.single;
+      expect(
+        createdTask.links,
+        equals(const [
+          TaskLink(title: 'Runbook', uri: 'https://example.com/k8s-runbook'),
+          TaskLink(
+            title: 'Release Notes',
+            uri: 'https://example.com/k8s-release-notes',
+          ),
+        ]),
+        reason: 'Saving must persist added links and any valid pending link in the input fields',
+      );
+
+      await tester.tap(
+        find.byKey(ValueKey('edit_task_button_${createdTask.id}')),
+      );
+      await tester.pumpAndSettle();
+
+      final removeLink0Finder = find.byKey(
+        const ValueKey('editor_remove_link_0'),
+      );
+      await tester.ensureVisible(removeLink0Finder);
+      await tester.tap(removeLink0Finder);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('task_editor_save_button')));
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.focus.single.links,
+        equals(const [
+          TaskLink(
+            title: 'Release Notes',
+            uri: 'https://example.com/k8s-release-notes',
+          ),
+        ]),
+        reason: 'Removing the first link and saving must update the task links',
       );
     },
   );
