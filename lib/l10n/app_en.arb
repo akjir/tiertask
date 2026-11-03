@@ -906,5 +906,21 @@
   "errorDuplicateWorkspaceFilePath": "Another workspace already uses this TDF file path.",
   "@errorDuplicateWorkspaceFilePath": {
     "description": "Error message shown when the target TDF file path collides with another workspace."
+  },
+  "tooltipIndicatorPriority": "Priority",
+  "@tooltipIndicatorPriority": {
+    "description": "Tooltip for the passive priority indicator icon on a task card."
+  },
+  "tooltipIndicatorRepeat": "Repeating task",
+  "@tooltipIndicatorRepeat": {
+    "description": "Tooltip for the passive repeat indicator icon on a task card."
+  },
+  "tooltipIndicatorSubtasks": "Subtasks",
+  "@tooltipIndicatorSubtasks": {
+    "description": "Tooltip for the passive subtasks indicator icon on a task card when auto-finish is disabled."
+  },
+  "tooltipIndicatorSubtasksAutoFinish": "Subtasks (auto-finish)",
+  "@tooltipIndicatorSubtasksAutoFinish": {
+    "description": "Tooltip for the passive subtasks indicator icon on a task card when auto-finish is enabled."
   }
 }

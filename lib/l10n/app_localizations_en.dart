@@ -672,4 +672,16 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get errorDuplicateWorkspaceFilePath =>
       'Another workspace already uses this TDF file path.';
+
+  @override
+  String get tooltipIndicatorPriority => 'Priority';
+
+  @override
+  String get tooltipIndicatorRepeat => 'Repeating task';
+
+  @override
+  String get tooltipIndicatorSubtasks => 'Subtasks';
+
+  @override
+  String get tooltipIndicatorSubtasksAutoFinish => 'Subtasks (auto-finish)';
 }

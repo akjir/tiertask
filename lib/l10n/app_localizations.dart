@@ -1285,6 +1285,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Another workspace already uses this TDF file path.'**
   String get errorDuplicateWorkspaceFilePath;
+
+  /// Tooltip for the passive priority indicator icon on a task card.
+  ///
+  /// In en, this message translates to:
+  /// **'Priority'**
+  String get tooltipIndicatorPriority;
+
+  /// Tooltip for the passive repeat indicator icon on a task card.
+  ///
+  /// In en, this message translates to:
+  /// **'Repeating task'**
+  String get tooltipIndicatorRepeat;
+
+  /// Tooltip for the passive subtasks indicator icon on a task card when auto-finish is disabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Subtasks'**
+  String get tooltipIndicatorSubtasks;
+
+  /// Tooltip for the passive subtasks indicator icon on a task card when auto-finish is enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Subtasks (auto-finish)'**
+  String get tooltipIndicatorSubtasksAutoFinish;
 }
 
 class _AppLocalizationsDelegate

@@ -682,4 +682,17 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get errorDuplicateWorkspaceFilePath =>
       'Ein anderer Arbeitsbereich verwendet diesen TDF-Dateipfad bereits.';
+
+  @override
+  String get tooltipIndicatorPriority => 'Priorität';
+
+  @override
+  String get tooltipIndicatorRepeat => 'Wiederkehrende Aufgabe';
+
+  @override
+  String get tooltipIndicatorSubtasks => 'Unteraufgaben';
+
+  @override
+  String get tooltipIndicatorSubtasksAutoFinish =>
+      'Unteraufgaben (automatisch abschließen)';
 }

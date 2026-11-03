@@ -25,11 +25,11 @@ import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import 'edit_labels_screen.dart';
-import 'edit_task_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/app_logo.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/tier_page_indicator.dart';
+import 'widgets/tier_task_pill.dart';
 
 /// Primary landing page screen for TierTask across Linux, Android, and Windows.
 class HomeScreen extends ConsumerStatefulWidget {
@@ -75,7 +75,7 @@ class _AllTasksSearchView extends StatelessWidget {
         }
         final entry = entries[index - 1];
         final tier = entry.tier;
-        return _TierTaskPill(
+        return TierTaskPill(
           key: ValueKey('tier_pill_${tier.name}_${entry.task.id}'),
           task: entry.task,
           canDowngrade:
@@ -1209,7 +1209,7 @@ class _TierScrollView extends StatelessWidget {
         }
         final taskIndex = index - 1;
         final task = tasks[taskIndex];
-        return _TierTaskPill(
+        return TierTaskPill(
           key: ValueKey('tier_pill_${tier.name}_${task.id}'),
           task: task,
           canDowngrade:
@@ -1219,263 +1219,6 @@ class _TierScrollView extends StatelessWidget {
           isCompleted: isCompletedTier,
         );
       },
-    );
-  }
-}
-
-/// Compact icon button rendered on the right side of [_TierTaskPillRow].
-class _TierTaskActionButton extends StatelessWidget {
-  /// Creates a [_TierTaskActionButton].
-  const _TierTaskActionButton({
-    required this.buttonKey,
-    required this.icon,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  /// Deterministic widget key for the icon button.
-  final Key buttonKey;
-
-  /// Icon displayed inside the button.
-  final IconData icon;
-
-  /// Callback invoked when the button is tapped, or `null` when disabled.
-  final VoidCallback? onPressed;
-
-  /// Localized tooltip message.
-  final String tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Center(
-        child: IconButton(
-          key: buttonKey,
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          tooltip: tooltip,
-          icon: Icon(icon, size: 22, color: mutedColor),
-          onPressed: onPressed,
-        ),
-      ),
-    );
-  }
-}
-
-/// Rounded square button at the leading edge of [_TierTaskPillRow] containing a white circle to complete or restore a task.
-class _TierTaskCompletionCircle extends StatelessWidget {
-  /// Creates a [_TierTaskCompletionCircle].
-  const _TierTaskCompletionCircle({
-    required this.buttonKey,
-    required this.isCompleted,
-    required this.onComplete,
-  });
-
-  /// Deterministic widget key for the completion button.
-  final Key buttonKey;
-
-  /// Whether the task is already completed.
-  final bool isCompleted;
-
-  /// Callback invoked when the completion button is tapped.
-  final VoidCallback onComplete;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return InkWell(
-      key: buttonKey,
-      borderRadius: BorderRadius.circular(10),
-      onTap: onComplete,
-      child: Container(
-        width: 36,
-        height: 36,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Container(
-          width: 20,
-          height: 20,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-          ),
-          child: isCompleted
-              ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
-              : null,
-        ),
-      ),
-    );
-  }
-}
-
-/// Minimal pill card representing a single task entry across all 6 [TaskTier] panes.
-class _TierTaskPill extends ConsumerWidget {
-  /// Creates a [_TierTaskPill].
-  const _TierTaskPill({
-    super.key,
-    required this.canDowngrade,
-    required this.isCompleted,
-    required this.task,
-  });
-
-  /// Whether the task belongs to a downgradable tier (`Focus`, `Ready`, or `Planned`).
-  final bool canDowngrade;
-
-  /// Whether the task belongs to the completed archive tier.
-  final bool isCompleted;
-
-  /// Task item to display.
-  final TaskItem task;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Material(
-        color: theme.cardColor,
-        clipBehavior: Clip.antiAlias,
-        borderRadius: BorderRadius.circular(16),
-        child: IntrinsicHeight(
-          child: _TierTaskPillRow(
-            isCompleted: isCompleted,
-            task: task,
-            onComplete: () => isCompleted
-                ? ref.read(taskNotifierProvider.notifier).restoreTask(task.id)
-                : ref.read(taskNotifierProvider.notifier).completeTask(task.id),
-            onDowngrade: canDowngrade
-                ? () => ref
-                      .read(taskNotifierProvider.notifier)
-                      .downgradeTask(task.id)
-                : null,
-            onEdit: () => openEditTaskScreen(context, initialTask: task),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Left-hand content area inside [_TierTaskPillRow] containing the completion square and task title.
-class _TierTaskPillContent extends StatelessWidget {
-  /// Creates a [_TierTaskPillContent].
-  const _TierTaskPillContent({
-    required this.isCompleted,
-    required this.task,
-    required this.onComplete,
-  });
-
-  /// Whether the task is completed.
-  final bool isCompleted;
-
-  /// Callback invoked when the leading completion square is pressed.
-  final VoidCallback onComplete;
-
-  /// Task item displayed in this content section.
-  final TaskItem task;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
-      child: Row(
-        children: [
-          _TierTaskCompletionCircle(
-            buttonKey: ValueKey('complete_task_button_${task.id}'),
-            isCompleted: isCompleted,
-            onComplete: onComplete,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              task.title,
-              style: TextStyle(
-                color: isCompleted
-                    ? colorScheme.onSurfaceVariant
-                    : colorScheme.onSurface,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                decoration: isCompleted ? TextDecoration.lineThrough : null,
-              ),
-            ),
-          ),
-          if (task.repeatRule != null) ...[
-            const SizedBox(width: 8),
-            Icon(
-              Icons.repeat_rounded,
-              key: ValueKey('repeat_task_indicator_${task.id}'),
-              size: 16,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// Row layout inside [_TierTaskPill] combining the task content area, right-chevron downgrade button, and three-dots edit button.
-class _TierTaskPillRow extends StatelessWidget {
-  /// Creates a [_TierTaskPillRow].
-  const _TierTaskPillRow({
-    required this.isCompleted,
-    required this.task,
-    required this.onComplete,
-    required this.onDowngrade,
-    required this.onEdit,
-  });
-
-  /// Whether the task is completed.
-  final bool isCompleted;
-
-  /// Callback invoked when the leading completion square is pressed.
-  final VoidCallback onComplete;
-
-  /// Callback invoked when the downgrade button is pressed, or `null` when omitted.
-  final VoidCallback? onDowngrade;
-
-  /// Callback invoked when the edit button is pressed.
-  final VoidCallback onEdit;
-
-  /// Task item displayed in this pill row.
-  final TaskItem task;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: _TierTaskPillContent(
-            isCompleted: isCompleted,
-            task: task,
-            onComplete: onComplete,
-          ),
-        ),
-        if (onDowngrade != null)
-          _TierTaskActionButton(
-            buttonKey: ValueKey('downgrade_task_button_${task.id}'),
-            icon: Icons.chevron_right_rounded,
-            tooltip: localizations.tooltipDowngradeTask,
-            onPressed: onDowngrade,
-          ),
-        _TierTaskActionButton(
-          buttonKey: ValueKey('edit_task_button_${task.id}'),
-          icon: Icons.more_vert_rounded,
-          tooltip: localizations.tooltipEditTask,
-          onPressed: onEdit,
-        ),
-        const SizedBox(width: 6),
-      ],
     );
   }
 }

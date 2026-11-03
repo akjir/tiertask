@@ -197,5 +197,9 @@
   "errorMoveFileLocked": "TDF-Datei kann nicht verschoben werden: Die Datei ist gesperrt oder wird von einem anderen Prozess verwendet ({path}).",
   "errorMovePathTooLong": "TDF-Datei kann nicht verschoben werden: Der Dateipfad oder Dateiname ist zu lang ({path}).",
   "errorMoveLocalFileFailed": "TDF-Datei kann nicht verschoben werden ({details}).",
-  "errorDuplicateWorkspaceFilePath": "Ein anderer Arbeitsbereich verwendet diesen TDF-Dateipfad bereits."
+  "errorDuplicateWorkspaceFilePath": "Ein anderer Arbeitsbereich verwendet diesen TDF-Dateipfad bereits.",
+  "tooltipIndicatorPriority": "Priorität",
+  "tooltipIndicatorRepeat": "Wiederkehrende Aufgabe",
+  "tooltipIndicatorSubtasks": "Unteraufgaben",
+  "tooltipIndicatorSubtasksAutoFinish": "Unteraufgaben (automatisch abschließen)"
 }
