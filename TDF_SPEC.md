@@ -11,7 +11,7 @@ The TierTask Data Format (`TDF`) is a deterministic, line-oriented, block-based 
 
 ### 1.1 Core Philosophy: Data vs. View Separation
 
-A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `modified`, `suspended`), recurrence rules (`repeat`), dependencies (`blocked`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
+A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`label`), timestamps (`created`, `queued`, `finished`, `modified`, `suspended`), recurrence rules (`repeat`), dependencies (`blocked`), external or local links (`link`), checklists (`subtasks`), and activation conditions (`condition` rules for `day`, `time`, and `location`).
 
 1. **No Explicit Tier Storage:** Unlike positional list formats, a `.tdf` document does NOT store an explicit tier assignment (`[1]` through `[6]`) on any task.
 2. **Dynamic Derivation ($O(N)$ Pipeline):** The six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed`) are derived deterministically from the stored task and label attributes via a single-pass $O(N)$ filtering, sorting, and slicing pipeline (see Section 5).
@@ -21,7 +21,7 @@ A `.tdf` document stores exclusively objective facts: tasks (`task`), labels (`l
 1. **Mandatory Version Header, Strict Root Block Enforcement & No Pre-1.0 Backward Compatibility:** Every valid `.tdf` document MUST begin with the single-line version header `tdf 0.4.0` at nesting depth `0` before any root block, making it the only directive allowed at depth `0`. Until version `1.0.0`, the specification defines only the current strict `0.4.0` format without backward-compatibility guarantees or legacy fallbacks for prior versions. Following the version header, every top-level statement at nesting depth `0` MUST be a root block (`task` or `label`); all other standalone directives at the root level are forbidden.
 2. **No Empty Directives:** Optional directives that have no value (such as an unset `finished` or `queued` timestamp) MUST be omitted entirely from the block rather than written with empty arguments.
 3. **Single-Pass Linear Grammar:** TDF is designed to be tokenized and parsed in a single $O(N)$ linear pass without regular expressions or backtracking.
-4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (format version header, mandatory 10-character Base62 `<task-id>` and `<label-id>` entity identifiers, ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, and cross-block identifier references) is enforced deterministically by the domain schema layer.
+4. **Two-Layer Validation (Syntax vs. Domain Semantics):** At the lexical and structural layer, all identifiers and arguments are scanned as UTF-8 string tokens. Semantic validation (format version header, mandatory 10-character Base62 `<task-id>` and `<label-id>` entity identifiers, ISO-8601 timestamps, 24-hour time windows, weekday tokens, boolean literals, geographic coordinates and radii, hexadecimal color codes, scheme-prefixed URIs, and cross-block identifier references) is enforced deterministically by the domain schema layer.
 
 ## 2. Lexical Elements
 
@@ -75,7 +75,7 @@ An **Argument** represents a parameter passed to a block header or a directive. 
 
 #### B. Double-Quoted String (`"..."`)
 - Begins and ends with `"` (`U+0022`).
-- Used for text containing spaces or special characters, such as task and label titles (`name`), descriptions (`note`), and hexadecimal color codes (`"#4CAF50"`).
+- Used for text containing spaces or special characters, such as task and label titles (`name`), descriptions (`note`), link titles and URIs (`link`), and hexadecimal color codes (`"#4CAF50"`).
 - May contain horizontal whitespace, `#`, `{`, `}`, and `'`.
 - **Single-line constraint:** Unescaped raw newlines (`\r` or `\n`) inside a double-quoted string are forbidden and MUST trigger an `UnterminatedString` error.
 - **Escape sequences:** Backslash (`\`, `U+005C`) escapes the immediately following character:
@@ -114,6 +114,9 @@ At the semantic validation layer, directive and header arguments map to the foll
   - Optional seconds precision (`:SS`) allows rapid successive mutations, step-down downgrades (Section 6.3), and per-entity synchronization timestamps (`modified`, Section 6.7) to sort and compare deterministically without reordering blocks in the file.
 - **Floating-Point / Numeric (`<number>`):** Standard ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`) used for geographic latitude (`-90.0` to `90.0`), longitude (`-180.0` to `180.0`), and radius values in meters (`> 0`).
 - **Hexadecimal Color (`<color>`):** Quoted 7-character string `"#RRGGBB"` (or single-quoted `'#RRGGBB'`; canonical serialization emits double-quoted `"#RRGGBB"`) where each hexadecimal digit is in `0-9`, `a-f`, or `A-F`. Because `#` outside quotes starts a comment (Section 2.4), `<color>` values MUST be quoted.
+- **URI (`<uri>`):** Strictly quoted string (`<quoted-string>`, enclosed in `"..."`) containing a non-empty URI (`1..MAX_URI_LENGTH` characters after unescaping, not blank or whitespace-only) with an explicit scheme prefix matching `[a-zA-Z][a-zA-Z0-9+.-]*:` (for example `https://...`, `http://...`, `file://...`, or `mailto:...`):
+  - Because `<uri>` is enclosed in double quotes (`"..."`), characters such as `#` (URI fragments) and spaces in file paths are treated as literal string characters rather than comments or token delimiters.
+  - No filesystem existence check or network reachability check is performed during parsing so that platform-specific links (`file://...`) remain portable across Linux, Windows, and Android; how a `<uri>` is opened, resolved, or converted on Linux, Windows, and Android is the responsibility of the consuming application.
 - **Recurrence Rule (`<repeat>`):** Two whitespace-separated bare-word tokens `<count> <unit>`, where `<count>` is a positive ASCII decimal integer in `1..MAX_REPEAT_COUNT` (`1..3650`) and `<unit>` is an exact case-sensitive lowercase bare word from the set `days`, `weeks`, `months`.
 
 ### 2.9 Mandatory Entity ID Generation & Identity Rules
@@ -165,7 +168,7 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 - **Scope:** Except for the mandatory initial `tdf 0.4.0` version header at nesting depth `0` (Section 4.0), every directive MUST reside inside a block (nesting depth `1` or `2`). Any other directive at nesting depth `0` is rejected with `UnexpectedRootDirective`.
 - **Minimum Arity (No Empty Directives):** A directive MUST have an Identifier followed by at least one Argument separated by horizontal whitespace. A standalone identifier on a line inside a block without arguments and without `{` is a syntax error (`MissingDirectiveArgument`). If an optional property has no value, the entire directive line MUST be omitted.
 - **Termination:** A directive is terminated by a newline (`LF` or `CRLF`). Because every enclosing block MUST be closed by `}` on a subsequent line, reaching `EOF` directly on a block directive line results in an `UnclosedBlock` error. Semicolons (`;`) are NOT used as statement terminators; a trailing `;` on an unquoted token is treated as part of that bare word.
-- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) are evaluated in declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`, `repeat`) MUST NOT appear more than once per block (`DuplicateDirective`).
+- **Ordering & Multiplicity:** The parser MUST preserve the exact top-to-bottom declaration order of blocks and directives. Repeatable directives (`link` inside `task`, `condition` inside `label` or `task`, `day`, `time`, and `location` inside `condition`, and `step` inside `subtasks`) may appear multiple times within their enclosing block without triggering `DuplicateDirective` and preserve their declaration order; single-valued directives (`name`, `created`, `queued`, `finished`, `modified`, `note`, `color`, `labels`, `blocked`, `suspended`, `repeat`) MUST NOT appear more than once per block (`DuplicateDirective`).
 
 ### 3.4 Formal Grammar (EBNF)
 
@@ -198,10 +201,12 @@ block-item      = empty-line
 (* Directives: Must contain at least one argument and end with a newline *)
 directive       = labels-dir
                 | blocked-dir
+                | ws* link-directive ws* [ comment ] newline
                 | ws* identifier ws+ argument { ws+ argument } ws* [ comment ] newline ;
 
 labels-dir      = ws* "labels" ws+ label-id { ws+ label-id } ws* [ comment ] newline ;
 blocked-dir     = ws* "blocked" ws+ task-id { ws+ task-id } ws* [ comment ] newline ;
+link-directive  = "link" ws+ quoted-string ws+ quoted-string ;
 
 (* Entity Identifiers: Mandatory 10-Character Base62 Format *)
 task-id         = base62-random base62-time ;
@@ -293,7 +298,16 @@ task <task-id> [priority] {
 | `blocked` | No | `0..1` | `<task-id1> [<task-id2> ...]` | One or more space-separated 10-character Base62 `<task-id>`s (`<6xBase62Random><4xBase62Time>`) of prerequisite tasks. Every argument MUST be an unquoted bare word (`[A-Za-z0-9_-]+`, `InvalidIdentifier` if quoted or malformed) and is automatically rewritten to the prerequisite task's normalized 10-character Base62 ID when normalized on load. **When present**, the task is classified as `Blocked` if at least one referenced task exists in the document without a `finished` directive (non-existent, pruned, or already completed task IDs do not block the task). Dependency references MUST NOT form a direct or indirect cycle (`CircularDependency`). **When omitted**, no task-dependency block applies. |
 | `suspended` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Local wall-clock deferral / snooze timestamp. **When present**, while the timestamp lies strictly in the future relative to the local wall-clock evaluation timestamp (`suspended > localNow`), the task is classified immediately as `Blocked` (`Tier 4`) and evaluation of all other conditions (`blocked` prerequisites and `condition` rules) is disabled. **When omitted** (or `<= localNow`), no time-deferral block applies. |
 | `repeat` | No | `0..1` | `<count> <days\|weeks\|months>` | Completion-relative recurrence rule (`1..3650` `days`, `weeks`, or `months`). **When present**, completing the task does NOT set `finished`; instead, the task remains open, resets all `subtasks` steps to `false`, adds the `priority` header flag, sets `suspended` to `<next_due_local>` (`localNow + <count> <unit>`, defaulting to `00:00` local time on the target date or preserving the existing `<HH:MM[:SS]>` time of day from `suspended` when previously set), sets `queued` to `<next_due_utc>` (`<next_due_local>` converted to UTC), and advances `modified` so the task enters `Blocked` (`Tier 4`) until `<next_due_local>` and wakes up directly into `Focus` (`Tier 1`, or the top of `Ready` if `Focus` already holds `3` earlier-queued priority tasks). **When omitted**, completing the task sets `finished` and moves it to `Completed` (`Tier 6`). |
+| `link` | No | `0..MAX_LINKS_PER_TASK` | `"<title>" "<uri>"` | Optional repeatable external or local URI link (`0..20` per `task` block). `<title>` is a non-empty `<quoted-string>` (after unescaping, not blank/whitespace-only) up to `MAX_TEXT_LENGTH` characters representing the human-readable display label; `<uri>` is a non-empty `<quoted-string>` up to `MAX_URI_LENGTH` (`2048` characters) containing a valid scheme-prefixed URI (`[a-zA-Z][a-zA-Z0-9+.-]*:`). **When present**, attaches one or more labeled links to the task in declaration order. **When omitted**, the task has no links. |
 | `condition` | No | `0..N` | `<type> <args...>`, `<type> any`, `any`, or `{ ... }` | Task-level activation condition(s) (`day`, `time`, `location`, group resets `day any`, `time any`, `location any`, or global reset `condition any`) written either as an inline directive or a `condition { ... }` sub-block (see Section 4.3). **When present**, `condition any` disables all inherited `label` conditions, whereas a group-specific rule (`day`, `time`, or `location`) or group reset (`<type> any`) overrides only that specific rule group from assigned labels while preserving all other inherited label condition groups and keeping the task's `labels` assignment intact. |
+
+Additional `link` semantics and canonical serialization rules inside `task` blocks:
+- **Arguments (`link <title> <uri>`):**
+  - `<title>`: A non-empty `<quoted-string>` (after unescaping, not blank or whitespace-only) with a maximum length of `MAX_TEXT_LENGTH` representing the human-readable display label.
+  - `<uri>`: A non-empty `<quoted-string>` (after unescaping, not blank or whitespace-only) with a maximum length of `MAX_URI_LENGTH` (`2048` characters) containing a valid scheme-prefixed URI (`[a-zA-Z][a-zA-Z0-9+.-]*:`, Section 2.8).
+- **Preserved Ordering:** Multiple `link` directives within a `task` block preserve their exact declaration order in memory and during serialization.
+- **Canonical Serializer Position:** A canonical serializer MUST emit `link` directives after single-valued scalar and reference directives (`name`, `note`, `created`, `queued`, `finished`, `modified`, `repeat`, `labels`, `blocked`, `suspended`) and before `condition` and `subtasks`.
+- **Tier Derivation & Sync:** `link` directives are pure task metadata and have no effect on tier derivation (Section 5). Adding, modifying, reordering, or removing a `link` is a task mutation that updates the task's `modified` timestamp (Sections 6.6 and 6.7).
 
 #### 4.1.3 Sub-Block `subtasks` (Checklists)
 
@@ -506,10 +520,11 @@ State transitions mutate the task directives (`queued`, `finished`, `modified`) 
   - **Restore to `Planned`:** Removes the `priority` header flag if present and sets `queued` to the current UTC timestamp (`now`).
   - **Restore to `Focus`:** Adds the `priority` header flag to the `task` block and sets `queued` to the current UTC timestamp (`now`).
 
-### 6.6 Setting Task Deferral (`suspended`), Recurrence (`repeat`), Prerequisites (`blocked`), and Activation Conditions (`condition`)
+### 6.6 Setting Task Deferral (`suspended`), Recurrence (`repeat`), Prerequisites (`blocked`), Links (`link`), and Activation Conditions (`condition`)
 - **Setting `suspended`:** Sets the `suspended` directive on an open task to a future local wall-clock timestamp (or `9999-12-31 23:59` when suspended indefinitely without a specific date), ensures `queued` is set in UTC, and advances `modified`. While `suspended > localNow`, evaluation of all other conditions (`blocked` and `condition`) is disabled and the task is classified immediately into `Blocked` (`Tier 4`). Clearing `suspended` omits the `suspended` directive, resets `queued` to `now` (in UTC) if `queued` was previously in the future (`queued > now`, e.g., when manually unblocking a deferred recurring task ahead of `<next_due_utc>`), and re-evaluates the task's remaining conditions.
 - **Setting `repeat`:** Sets or updates the `repeat <count> <days|weeks|months>` directive (`1..3650`) on a task block (or omits `repeat` when cleared) and advances `modified`.
 - **Setting `blocked`:** Sets or updates the space-separated prerequisite `<task-id>` list on the `blocked` directive (excluding self-dependencies and any reference that would introduce a dependency cycle) and advances `modified`.
+- **Setting `link`:** Adds, modifies, reorders, or removes `link <title> <uri>` directives (`0..MAX_LINKS_PER_TASK`) on a task block in preserved declaration order and advances `modified`.
 - **Setting `condition`:** Sets or updates task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or the global reset (`condition any`) and advances `modified`.
 
 ### 6.7 Per-Entity Synchronization & Monotonic Modification Timestamps (`modified`)
@@ -536,8 +551,10 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 | `MAX_BLOCKS_PER_DOC` | `4_096` | Maximum total blocks (`task`, `label`, `subtasks`, `condition`) per document. |
 | `MAX_STMTS_PER_BLOCK` | `512` | Maximum directives or sub-blocks inside a single block. |
 | `MAX_ARGS_PER_STMT` | `64` | Maximum arguments allowed on a single block header or directive. |
-| `MAX_TEXT_LENGTH` | `500` | Maximum character length (after unescaping) of a `name` or `step` text value. |
+| `MAX_TEXT_LENGTH` | `500` | Maximum character length (after unescaping) of a `name`, `step`, or `link` `<title>` text value. |
 | `MAX_NOTE_LENGTH` | `2000` | Maximum character length (after unescaping) of a `note` text value. |
+| `MAX_URI_LENGTH` | `2048` | Maximum character length (after unescaping) of a `<uri>` string in `link <title> <uri>`. |
+| `MAX_LINKS_PER_TASK` | `20` | Maximum number of `link` directives permitted in a single `task` block. |
 | `MAX_REPEAT_COUNT` | `3_650` | Maximum recurrence interval count `<count>` in `repeat <count> <unit>`. |
 
 ## 8. Mandatory Error Conditions
@@ -550,7 +567,7 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
 - **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (e.g., `queued` with no timestamp value).
 - **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name is quoted (e.g., `"task" 8jKaCdOkD2 {` or `"name" "Mow the lawn"`), a block/directive identifier starts with an invalid character (e.g., `123task {` or `-flag val`), or a `task` header `<task-id>`, `label` header `<label-id>`, `labels` argument, or `blocked` argument is quoted or contains characters outside `[A-Za-z0-9_-]` (whereas unquoted `[A-Za-z0-9_-]+` identifiers that do not yet match `[0-9A-Za-z]{10}` are automatically normalized into 10-character Base62 IDs per Section 2.9).
 - **Malformed Block Header or Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` is attached directly to the identifier or argument without whitespace (e.g., `task 8jKaCdOkD2{` or `condition{`), a required header `<task-id>` or `<label-id>` is missing (e.g., `task {` or `label {`), or an unknown/extra header argument is provided (e.g., `task 8jKaCdOkD2 urgent {`, `label 4x9p2mOkD2 extra {`, `subtasks urgent {`, or `condition arg {`).
-- **Unexpected Token, Control Character, or Trailing Tokens (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` or after `}`, a quote opens or closes in the middle of a token without separating whitespace (e.g., `foo"bar"` or `"foo"bar`), a directive has an invalid argument count, a `repeat` directive specifies an unknown unit other than `days`, `weeks`, or `months`, or the input contains invalid UTF-8 bytes, null bytes (`U+0000`), disallowed control characters, standalone `CR` without `LF`, or non-ASCII whitespace outside quotes.
+- **Unexpected Token, Control Character, or Trailing Tokens (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` or after `}`, a quote opens or closes in the middle of a token without separating whitespace (e.g., `foo"bar"` or `"foo"bar`), a directive has an invalid argument count (including `link` with fewer or more than `2` arguments), either `<title>` or `<uri>` in `link <title> <uri>` is provided as an unquoted `bare-word` instead of a `<quoted-string>`, a `repeat` directive specifies an unknown unit other than `days`, `weeks`, or `months`, or the input contains invalid UTF-8 bytes, null bytes (`U+0000`), disallowed control characters, standalone `CR` without `LF`, or non-ASCII whitespace outside quotes.
 - **Unclosed Block (`UnclosedBlock`):** `EOF` is reached while nesting depth $> 0$.
 - **Unmatched Closing Brace (`UnexpectedClosingBrace`):** `}` is encountered at nesting depth `0`.
 - **Unterminated Quote (`UnterminatedString`):** A `"` or `'` string reaches `\r`, `\n`, or `EOF` before its matching closing quote.
@@ -563,8 +580,10 @@ A conforming TDF parser MUST report a structured error (including the 1-based li
   - `DuplicateIdentifier`: Two root blocks in the same namespace (`task` or `label`) share an identical `<task-id>` or `<label-id>`.
   - `UnknownLabelReference`: A `labels` directive in a `task` block references a `<label-id>` that does not match any declared `label` block in the document (whereas `blocked` `<task-id>`s referencing non-existent or pruned completed tasks remain valid and non-blocking).
   - `CircularDependency`: Task dependency references in `blocked` directives form a direct cycle (self-dependency) or an indirect cycle across two or more `task` blocks.
+  - `EmptyText`: `<title>` or `<uri>` in `link <title> <uri>` is empty or contains only whitespace after unescaping.
+  - `InvalidUri`: `<uri>` in `link <title> <uri>` does not begin with a valid URI scheme (`[a-zA-Z][a-zA-Z0-9+.-]*:`) or contains control characters (including escaped control characters such as `\n`, `\r`, or `\t`).
   - `InvalidTimestamp` / `InvalidBoolean` / `InvalidNumber` / `InvalidCondition` / `InvalidColor`: A directive argument fails semantic validation (invalid ISO-8601 `<YYYY-MM-DD> [<HH:MM[:SS]>]` date/time, invalid `<HH:MM>` time window or identical start and end times `start == end`, unknown weekday token, latitude outside `[-90.0, 90.0]`, longitude outside `[-180.0, 180.0]`, radius $\le 0$, `repeat` `<count>` not a positive integer $\ge 1$, `any` or `<type> any` used inside a `label` condition, `condition any` combined with other condition rules on a `task`, `<type> any` combined with other rules of the same `<type>` group on a `task`, or a `color` argument not matching `"#RRGGBB"`).
-- **Limit Exceeded (`LimitExceeded`):** Any resource bound defined in Section 7 is exceeded (including `repeat` `<count>` $> 3650$).
+- **Limit Exceeded (`LimitExceeded`):** Any resource bound defined in Section 7 is exceeded (including `<title>` exceeding `MAX_TEXT_LENGTH`, `<uri>` exceeding `MAX_URI_LENGTH`, a `task` block containing more than `MAX_LINKS_PER_TASK` `link` directives, or `repeat` `<count>` $> 3650$).
 
 ## 9. Canonical Complete Example (`tiertask.tdf`)
 
@@ -625,6 +644,8 @@ task 3nQp7ROkB8 {
     queued    2026-11-01 18:00
     modified  2026-11-01 18:00
     labels    4x9p2mOkD2
+    link      "Portal Login" "https://example.com/portal#login"
+    link      "Local Folder" "file:///home/user/documents/tax2026"
     condition any
 }
 
