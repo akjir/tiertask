@@ -10,9 +10,71 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* directory_picker_channel;
+  GtkWindow* main_window;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+// Handles the asynchronous response from the native GTK folder chooser dialog.
+static void on_directory_dialog_response(GtkNativeDialog* dialog,
+                                         gint response_id,
+                                         gpointer user_data) {
+  g_autoptr(FlMethodCall) method_call = FL_METHOD_CALL(user_data);
+  g_autoptr(FlMethodResponse) response = nullptr;
+
+  if (response_id == GTK_RESPONSE_ACCEPT) {
+    g_autofree gchar* folder_path =
+        gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+    if (folder_path != nullptr) {
+      g_autoptr(FlValue) result = fl_value_new_string(folder_path);
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+    } else {
+      response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    }
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+  }
+
+  fl_method_call_respond(method_call, response, nullptr);
+  gtk_native_dialog_destroy(dialog);
+  g_object_unref(dialog);
+}
+
+// Handles method calls on the de.akjir.tiertask/directory_picker channel.
+static void on_directory_picker_method_call(FlMethodChannel* channel,
+                                            FlMethodCall* method_call,
+                                            gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  const gchar* method = fl_method_call_get_name(method_call);
+
+  if (g_strcmp0(method, "pickDirectory") != 0) {
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  GtkFileChooserNative* dialog = gtk_file_chooser_native_new(
+      "Select Directory", self->main_window,
+      GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Open", "_Cancel");
+
+  FlValue* args = fl_method_call_get_args(method_call);
+  if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
+    FlValue* initial_dir = fl_value_lookup_string(args, "initialDirectory");
+    if (initial_dir != nullptr &&
+        fl_value_get_type(initial_dir) == FL_VALUE_TYPE_STRING) {
+      const gchar* dir_str = fl_value_get_string(initial_dir);
+      if (dir_str != nullptr && dir_str[0] != '\0') {
+        gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), dir_str);
+      }
+    }
+  }
+
+  g_signal_connect(dialog, "response", G_CALLBACK(on_directory_dialog_response),
+                   g_object_ref(method_call));
+  gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));
+}
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
@@ -85,6 +147,15 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  self->main_window = window;
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->directory_picker_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "de.akjir.tiertask/directory_picker", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->directory_picker_channel, on_directory_picker_method_call, self,
+      nullptr);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -130,6 +201,7 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
+  g_clear_object(&self->directory_picker_channel);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }

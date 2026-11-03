@@ -594,4 +594,80 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipClearInput => 'Clear text';
+
+  @override
+  String get actionChangeDirectory => 'Change Directory';
+
+  @override
+  String get localDirectoryMovedBanner =>
+      'Local TDF directory updated and file moved.';
+
+  @override
+  String errorMoveTargetFileExists(String path) {
+    return 'Cannot move TDF file: A file already exists at the target path ($path).';
+  }
+
+  @override
+  String errorMoveTargetDirectoryExists(String path) {
+    return 'Cannot move TDF file: A directory with this name already exists at the target path ($path).';
+  }
+
+  @override
+  String errorMoveTargetSymlinkExists(String path) {
+    return 'Cannot move TDF file: A symbolic link already exists at the target path ($path).';
+  }
+
+  @override
+  String errorMoveSourceIsSymlink(String path) {
+    return 'Cannot move TDF file: The source path is a symbolic link ($path).';
+  }
+
+  @override
+  String errorMoveSourceIsDirectory(String path) {
+    return 'Cannot move TDF file: The source path is a directory ($path).';
+  }
+
+  @override
+  String errorMoveTargetDirectoryNotFound(String path) {
+    return 'Cannot move TDF file: The target directory does not exist ($path).';
+  }
+
+  @override
+  String errorMoveTargetNotADirectory(String path) {
+    return 'Cannot move TDF file: The selected target path is not a directory ($path).';
+  }
+
+  @override
+  String errorMovePermissionDenied(String path) {
+    return 'Cannot move TDF file: Permission denied ($path).';
+  }
+
+  @override
+  String errorMoveReadOnlyFileSystem(String path) {
+    return 'Cannot move TDF file: The file system is read-only ($path).';
+  }
+
+  @override
+  String errorMoveDiskFull(String path) {
+    return 'Cannot move TDF file: Not enough free disk space ($path).';
+  }
+
+  @override
+  String errorMoveFileLocked(String path) {
+    return 'Cannot move TDF file: The file is locked or in use by another process ($path).';
+  }
+
+  @override
+  String errorMovePathTooLong(String path) {
+    return 'Cannot move TDF file: The file path or name is too long ($path).';
+  }
+
+  @override
+  String errorMoveLocalFileFailed(String details) {
+    return 'Cannot move TDF file ($details).';
+  }
+
+  @override
+  String get errorDuplicateWorkspaceFilePath =>
+      'Another workspace already uses this TDF file path.';
 }

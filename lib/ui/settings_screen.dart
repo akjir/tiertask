@@ -95,10 +95,14 @@ class _LocalStorageSection extends StatelessWidget {
   const _LocalStorageSection({
     required this.localFilePathController,
     required this.resolvedLocalPath,
+    this.onChangeDirectory,
   });
 
   /// Controller for the local Markdown file name or path field.
   final TextEditingController localFilePathController;
+
+  /// Optional callback to open the native desktop directory picker on Linux and Windows.
+  final VoidCallback? onChangeDirectory;
 
   /// Resolved local filesystem path preview, or `null` if invalid.
   final String? resolvedLocalPath;
@@ -129,6 +133,14 @@ class _LocalStorageSection extends StatelessWidget {
                 ? localizations.localFilePathErrorEmpty
                 : null,
           ),
+          if (onChangeDirectory != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onChangeDirectory,
+              icon: const Icon(Icons.folder_open_outlined),
+              label: Text(localizations.actionChangeDirectory),
+            ),
+          ],
           if (previewPath != null) ...[
             const SizedBox(height: 12),
             _ResolvedPathPreview(
@@ -210,31 +222,36 @@ class _SettingsActionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
 
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: isTesting ? null : onSaveOnly,
-            icon: const Icon(Icons.save_outlined),
-            label: Text(localizations.actionSave),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: isTesting ? null : onSaveOnly,
+              icon: const Icon(Icons.save_outlined),
+              label: Text(localizations.actionSave),
+            ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          flex: 2,
-          child: FilledButton.icon(
-            onPressed: (canTestConnection && !isTesting) ? onTestAndSync : null,
-            icon: isTesting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync_rounded),
-            label: Text(localizations.actionTestConnectionAndSync),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: FilledButton.icon(
+              onPressed: (canTestConnection && !isTesting)
+                  ? onTestAndSync
+                  : null,
+              icon: isTesting
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sync_rounded),
+              label: Text(localizations.actionTestConnectionAndSync),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -304,12 +321,7 @@ class _SettingsFormFields extends StatelessWidget {
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
-    required this.selectedLanguage,
-    required this.selectedThemeMode,
-    required this.selectedThemePalette,
-    required this.selectedTimeZoneMode,
-    required this.manualTimeZoneOffsetMinutes,
-    required this.selectedStorageMode,
+    required this.config,
     required this.onLanguageChanged,
     required this.onThemeModeChanged,
     required this.onThemePaletteChanged,
@@ -318,8 +330,8 @@ class _SettingsPreferenceCards extends StatelessWidget {
     required this.onStorageModeChanged,
   });
 
-  /// Currently selected manual UTC offset in minutes.
-  final int manualTimeZoneOffsetMinutes;
+  /// Current [WebDavConfig] holding the selected preference states.
+  final WebDavConfig config;
 
   /// Callback when [AppLanguage] changes.
   final ValueChanged<AppLanguage> onLanguageChanged;
@@ -339,50 +351,35 @@ class _SettingsPreferenceCards extends StatelessWidget {
   /// Callback when [AppTimeZoneMode] changes.
   final ValueChanged<AppTimeZoneMode> onTimeZoneModeChanged;
 
-  /// Currently selected display language.
-  final AppLanguage selectedLanguage;
-
-  /// Currently selected storage mode.
-  final StorageMode selectedStorageMode;
-
-  /// Currently selected theme mode.
-  final AppThemeMode selectedThemeMode;
-
-  /// Currently selected Material 3 color palette.
-  final AppThemePalette selectedThemePalette;
-
-  /// Currently selected local time zone mode.
-  final AppTimeZoneMode selectedTimeZoneMode;
-
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _LanguageSelectionCard(
-          selectedLanguage: selectedLanguage,
+          selectedLanguage: config.language,
           onLanguageChanged: onLanguageChanged,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         _ThemeSelectionCard(
-          selectedThemeMode: selectedThemeMode,
+          selectedThemeMode: config.themeMode,
           onThemeModeChanged: onThemeModeChanged,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         _ThemePaletteSelectionCard(
-          selectedThemePalette: selectedThemePalette,
+          selectedThemePalette: config.themePalette,
           onThemePaletteChanged: onThemePaletteChanged,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         _TimeZoneSelectionCard(
-          selectedTimeZoneMode: selectedTimeZoneMode,
-          manualOffsetMinutes: manualTimeZoneOffsetMinutes,
+          selectedTimeZoneMode: config.timeZoneMode,
+          manualOffsetMinutes: config.manualTimeZoneOffsetMinutes,
           onTimeZoneModeChanged: onTimeZoneModeChanged,
           onManualOffsetChanged: onManualTimeZoneOffsetChanged,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 10),
         _StorageModeSelectionCard(
-          selectedStorageMode: selectedStorageMode,
+          selectedStorageMode: config.storageMode,
           onStorageModeChanged: onStorageModeChanged,
         ),
       ],
@@ -393,6 +390,7 @@ class _SettingsPreferenceCards extends StatelessWidget {
 /// State for [SettingsScreen].
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Timer? _bannerTimer;
+  String? _customDirectoryPath;
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _filePathController;
   late final TextEditingController _localFilePathController;
@@ -451,58 +449,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(title: Text(localizations.settingsTitle)),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+      body: SafeArea(
         child: Form(
           key: _formKey,
           onChanged: _handleFormChanged,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _SettingsPreferenceCards(
-                selectedLanguage: _selectedLanguage,
-                selectedThemeMode: _selectedThemeMode,
-                selectedThemePalette: _selectedThemePalette,
-                selectedTimeZoneMode: _selectedTimeZoneMode,
-                manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
-                selectedStorageMode: _selectedStorageMode,
-                onLanguageChanged: _handleLanguageChanged,
-                onThemeModeChanged: _handleThemeModeChanged,
-                onThemePaletteChanged: _handleThemePaletteChanged,
-                onTimeZoneModeChanged: _handleTimeZoneModeChanged,
-                onManualTimeZoneOffsetChanged:
-                    _handleManualTimeZoneOffsetChanged,
-                onStorageModeChanged: _handleStorageModeChanged,
+              Expanded(
+                child: Stack(
+                  children: [
+                    SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: _buildFormColumn(currentConfig),
+                    ),
+                    if (bannerMessage != null)
+                      _SettingsStatusBanner(
+                        isVisible: _isBannerVisible,
+                        message: bannerMessage,
+                        onFadeOutComplete: _handleStatusBannerFadeEnd,
+                        tone: _statusTone,
+                      ),
+                  ],
+                ),
               ),
-              if (_selectedStorageMode.usesLocal) ...[
-                const SizedBox(height: 16),
-                _LocalStorageSection(
-                  localFilePathController: _localFilePathController,
-                  resolvedLocalPath: _resolvePreviewLocalPath(currentConfig),
-                ),
-              ],
-              if (_selectedStorageMode.usesWebDav) ...[
-                const SizedBox(height: 16),
-                _WebDavStorageSection(
-                  serverUrlController: _serverUrlController,
-                  usernameController: _usernameController,
-                  passwordController: _passwordController,
-                  filePathController: _filePathController,
-                  obscurePassword: _obscurePassword,
-                  resolvedUri: currentConfig.resolveEndpointUri(),
-                  onToggleObscurePassword: _toggleObscurePassword,
-                ),
-              ],
-              const SizedBox(height: 20),
-              if (bannerMessage != null) ...[
-                _SettingsStatusBanner(
-                  isVisible: _isBannerVisible,
-                  message: bannerMessage,
-                  onFadeOutComplete: _handleStatusBannerFadeEnd,
-                  tone: _statusTone,
-                ),
-                const SizedBox(height: 16),
-              ],
               _SettingsActionRow(
                 canTestConnection: _selectedStorageMode.usesWebDav,
                 isTesting: _isTesting,
@@ -527,7 +497,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// Constructs a [WebDavConfig] from the current form field values.
-  WebDavConfig _buildCurrentConfig() {
+  WebDavConfig _buildCurrentConfig({String? directoryOverride}) {
+    final rawLocalInput = _localFilePathController.text.trim().isEmpty
+        ? WebDavConfig.defaultFileName
+        : _localFilePathController.text.trim();
+    final effectiveDir = directoryOverride ?? _customDirectoryPath;
+    final hasExplicitPath =
+        rawLocalInput.contains('/') || rawLocalInput.contains(r'\');
+    final resolvedLocalFilePath = (effectiveDir != null && !hasExplicitPath)
+        ? LocalFileRepository.combineDirectoryAndFileName(
+            effectiveDir,
+            rawLocalInput,
+          )
+        : rawLocalInput;
+
     return WebDavConfig(
       serverUrl: _serverUrlController.text.trim(),
       username: _usernameController.text.trim(),
@@ -535,15 +518,53 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       filePath: _filePathController.text.trim().isEmpty
           ? WebDavConfig.defaultFileName
           : _filePathController.text.trim(),
-      localFilePath: _localFilePathController.text.trim().isEmpty
-          ? WebDavConfig.defaultFileName
-          : _localFilePathController.text.trim(),
+      localFilePath: resolvedLocalFilePath,
       storageMode: _selectedStorageMode,
       language: _selectedLanguage,
       themeMode: _selectedThemeMode,
       themePalette: _selectedThemePalette,
       timeZoneMode: _selectedTimeZoneMode,
       manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
+    );
+  }
+
+  /// Builds the scrollable preference and storage section card column for [currentConfig].
+  Widget _buildFormColumn(WebDavConfig currentConfig) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _SettingsPreferenceCards(
+          config: currentConfig,
+          onLanguageChanged: _handleLanguageChanged,
+          onThemeModeChanged: _handleThemeModeChanged,
+          onThemePaletteChanged: _handleThemePaletteChanged,
+          onTimeZoneModeChanged: _handleTimeZoneModeChanged,
+          onManualTimeZoneOffsetChanged: _handleManualTimeZoneOffsetChanged,
+          onStorageModeChanged: _handleStorageModeChanged,
+        ),
+        if (_selectedStorageMode.usesLocal) ...[
+          const SizedBox(height: 10),
+          _LocalStorageSection(
+            localFilePathController: _localFilePathController,
+            resolvedLocalPath: _resolvePreviewLocalPath(currentConfig),
+            onChangeDirectory: ref.watch(supportsDirectoryPickerProvider)
+                ? _handleChangeDirectory
+                : null,
+          ),
+        ],
+        if (_selectedStorageMode.usesWebDav) ...[
+          const SizedBox(height: 10),
+          _WebDavStorageSection(
+            serverUrlController: _serverUrlController,
+            usernameController: _usernameController,
+            passwordController: _passwordController,
+            filePathController: _filePathController,
+            obscurePassword: _obscurePassword,
+            resolvedUri: currentConfig.resolveEndpointUri(),
+            onToggleObscurePassword: _toggleObscurePassword,
+          ),
+        ],
+      ],
     );
   }
 
@@ -579,6 +600,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         return;
       }
       _isTesting = false;
+      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+    }
+  }
+
+  /// Opens the native directory picker, moves the `.tdf` file to the chosen directory, and updates state or displays an error.
+  Future<void> _handleChangeDirectory() async {
+    setState(_clearStatusBanner);
+    final currentConfig = _buildCurrentConfig();
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final currentDirectory = LocalFileRepository(
+      config: currentConfig,
+      baseDirectoryPath: baseDirectoryPath,
+    ).tryResolveDirectoryPath();
+    final selectedDirectory = await ref.read(directoryPickerProvider)(
+      initialDirectory: currentDirectory,
+    );
+    if (!mounted ||
+        selectedDirectory == null ||
+        selectedDirectory.trim().isEmpty ||
+        selectedDirectory == currentDirectory) {
+      return;
+    }
+    final candidateConfig = _buildCurrentConfig(
+      directoryOverride: selectedDirectory,
+    );
+    try {
+      await ref
+          .read(webDavConfigProvider.notifier)
+          .changeLocalFileLocation(candidateConfig);
+      if (!mounted) {
+        return;
+      }
+      final localizations = AppLocalizations.of(context);
+      setState(() {
+        _customDirectoryPath = selectedDirectory;
+      });
+      _showStatusBanner(
+        localizations.localDirectoryMovedBanner,
+        _StatusBannerTone.success,
+      );
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
       _showStatusBanner(error.toString(), _StatusBannerTone.error);
     }
   }
@@ -680,9 +745,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _filePathController.text = config.filePath.isEmpty
         ? WebDavConfig.defaultFileName
         : config.filePath;
-    _localFilePathController.text = config.localFilePath.isEmpty
-        ? WebDavConfig.defaultFileName
-        : config.localFilePath;
+    final rawLocal = config.localFilePath.trim();
+    if (rawLocal.contains('/') || rawLocal.contains(r'\')) {
+      final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+      _customDirectoryPath = LocalFileRepository(
+        config: config,
+        baseDirectoryPath: baseDirectoryPath,
+      ).tryResolveDirectoryPath();
+      _localFilePathController.text =
+          LocalFileRepository.extractFileNameFromPath(rawLocal);
+    } else {
+      _localFilePathController.text = rawLocal.isEmpty
+          ? WebDavConfig.defaultFileName
+          : rawLocal;
+    }
   }
 
   /// Resolves the preview local file path for [config], or `null` if invalid.
@@ -704,7 +780,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
     final config = _buildCurrentConfig();
-    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    try {
+      await ref
+          .read(webDavConfigProvider.notifier)
+          .changeLocalFileLocation(config);
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+      return;
+    }
     if (!mounted) {
       return;
     }
@@ -786,9 +872,10 @@ class _SettingsSectionCard extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Card(
+      margin: EdgeInsets.zero,
       color: theme.cardColor,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -806,14 +893,14 @@ class _SettingsSectionCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               description,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             child,
           ],
         ),
@@ -822,7 +909,7 @@ class _SettingsSectionCard extends StatelessWidget {
   }
 }
 
-/// Status banner displaying save confirmation or synchronization messages that fade out.
+/// Floating status banner displaying save confirmation or synchronization messages above the bottom action row.
 class _SettingsStatusBanner extends StatelessWidget {
   /// Creates a [_SettingsStatusBanner].
   const _SettingsStatusBanner({
@@ -852,32 +939,41 @@ class _SettingsStatusBanner extends StatelessWidget {
         ? colorScheme.onErrorContainer
         : colorScheme.onPrimaryContainer;
 
-    return AnimatedOpacity(
-      opacity: isVisible ? 1.0 : 0.0,
-      duration: SettingsScreen.statusBannerFadeDuration,
-      curve: Curves.easeOut,
-      onEnd: onFadeOutComplete,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 8,
+      child: AnimatedOpacity(
+        opacity: isVisible ? 1.0 : 0.0,
+        duration: SettingsScreen.statusBannerFadeDuration,
+        curve: Curves.easeOut,
+        onEnd: onFadeOutComplete,
+        child: Material(
+          elevation: 4,
           color: isError
               ? colorScheme.errorContainer
               : colorScheme.primaryContainer,
           borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isError
-                  ? Icons.error_outline_rounded
-                  : Icons.check_circle_outline_rounded,
-              color: foregroundColor,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Icon(
+                  isError
+                      ? Icons.error_outline_rounded
+                      : Icons.check_circle_outline_rounded,
+                  color: foregroundColor,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(color: foregroundColor),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(message, style: TextStyle(color: foregroundColor)),
-            ),
-          ],
+          ),
         ),
       ),
     );

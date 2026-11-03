@@ -773,5 +773,134 @@
   "tooltipClearInput": "Clear text",
   "@tooltipClearInput": {
     "description": "Tooltip for the button that clears the text in a focused input field."
+  },
+  "actionChangeDirectory": "Change Directory",
+  "@actionChangeDirectory": {
+    "description": "Button label to select a different local TDF directory on desktop platforms."
+  },
+  "localDirectoryMovedBanner": "Local TDF directory updated and file moved.",
+  "@localDirectoryMovedBanner": {
+    "description": "Status message shown when the local TDF directory is changed and the file is moved."
+  },
+  "errorMoveTargetFileExists": "Cannot move TDF file: A file already exists at the target path ({path}).",
+  "@errorMoveTargetFileExists": {
+    "description": "Error message shown when a regular file already exists at the destination TDF path.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveTargetDirectoryExists": "Cannot move TDF file: A directory with this name already exists at the target path ({path}).",
+  "@errorMoveTargetDirectoryExists": {
+    "description": "Error message shown when a directory already exists at the destination TDF path.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveTargetSymlinkExists": "Cannot move TDF file: A symbolic link already exists at the target path ({path}).",
+  "@errorMoveTargetSymlinkExists": {
+    "description": "Error message shown when a symbolic link already exists at the destination TDF path.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveSourceIsSymlink": "Cannot move TDF file: The source path is a symbolic link ({path}).",
+  "@errorMoveSourceIsSymlink": {
+    "description": "Error message shown when the current TDF source path is a symbolic link.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveSourceIsDirectory": "Cannot move TDF file: The source path is a directory ({path}).",
+  "@errorMoveSourceIsDirectory": {
+    "description": "Error message shown when the current TDF source path is a directory.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveTargetDirectoryNotFound": "Cannot move TDF file: The target directory does not exist ({path}).",
+  "@errorMoveTargetDirectoryNotFound": {
+    "description": "Error message shown when the selected target directory does not exist.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveTargetNotADirectory": "Cannot move TDF file: The selected target path is not a directory ({path}).",
+  "@errorMoveTargetNotADirectory": {
+    "description": "Error message shown when the selected target directory path is a file or symlink instead of a directory.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMovePermissionDenied": "Cannot move TDF file: Permission denied ({path}).",
+  "@errorMovePermissionDenied": {
+    "description": "Error message shown when filesystem permissions prevent moving the TDF file.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveReadOnlyFileSystem": "Cannot move TDF file: The file system is read-only ({path}).",
+  "@errorMoveReadOnlyFileSystem": {
+    "description": "Error message shown when the target or source filesystem is read-only.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveDiskFull": "Cannot move TDF file: Not enough free disk space ({path}).",
+  "@errorMoveDiskFull": {
+    "description": "Error message shown when there is insufficient disk space to move the TDF file.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveFileLocked": "Cannot move TDF file: The file is locked or in use by another process ({path}).",
+  "@errorMoveFileLocked": {
+    "description": "Error message shown when the TDF file is locked by another process.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMovePathTooLong": "Cannot move TDF file: The file path or name is too long ({path}).",
+  "@errorMovePathTooLong": {
+    "description": "Error message shown when the destination TDF path exceeds OS length limits.",
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "errorMoveLocalFileFailed": "Cannot move TDF file ({details}).",
+  "@errorMoveLocalFileFailed": {
+    "description": "Fallback error message shown when moving the local TDF file fails for another reason.",
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "errorDuplicateWorkspaceFilePath": "Another workspace already uses this TDF file path.",
+  "@errorDuplicateWorkspaceFilePath": {
+    "description": "Error message shown when the target TDF file path collides with another workspace."
   }
 }

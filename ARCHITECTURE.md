@@ -86,6 +86,7 @@ tiertask/
     │   ├── task_board_mutation_test.dart
     │   └── task_board_sync_test.dart
     ├── repositories/
+    │   ├── local_directory_migration_test.dart
     │   ├── storage_and_providers_test.dart
     │   └── sync_merge_test.dart
     ├── services/
@@ -97,6 +98,7 @@ tiertask/
         ├── edit_labels_screen_test.dart
         ├── edit_task_screen_test.dart
         ├── home_screen_test.dart
+        ├── local_directory_picker_test.dart
         ├── settings_screen_test.dart
         ├── test_helpers.dart
         └── widgets/
@@ -151,7 +153,7 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/repositories/local_file_repository.dart` | Native `dart:io` `File` repository reading (`loadTdf`) and writing (`saveTdf`) the local `.tdf` file (`localFilePath`) with path traversal validation and `maxFileBytes` bounds checking. |
+| `lib/repositories/local_file_repository.dart` | Native `dart:io` `File` repository reading (`loadTdf`), writing (`saveTdf`), and safely migrating (`moveTdfFile`) the local `.tdf` file (`localFilePath`) with path traversal validation, `maxFileBytes` bounds checking, non-destructive target conflict inspection (rejecting existing files, directories, or symbolic links), Linux/Windows OS error mapping, and native desktop directory selection (`pickDirectory` via `de.akjir.tiertask/directory_picker`). |
 | `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting workspaces and the active workspace in a single atomic Base64-encoded `TTW\x01` binary key (`t2_settings_v1`) and persisting per-workspace sync baselines (`WorkspaceSyncState` in `t2_sync_v1_<id>`) via `Base64Service`. |
 | `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository executing authenticated HTTP `GET` (`fetchTdf`) and `PUT` (`saveTdf`) operations with localized `WebDavException` error mapping. |
 
@@ -159,7 +161,7 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `appThemeProvider`, `localFileRepositoryProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme/palette resolution, runtime theme replacement, board loading/unloading, mutations, and local/WebDAV `.tdf` persistence for the active workspace. |
+| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `appThemeProvider`, `directoryPickerProvider`, `localFileRepositoryProvider`, `supportsDirectoryPickerProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme/palette resolution, runtime theme replacement, atomic local `.tdf` directory migration (`changeLocalFileLocation`), board loading/unloading, mutations, and local/WebDAV `.tdf` persistence for the active workspace. |
 | `lib/providers/workspace_providers.dart` | Defines `activeWorkspaceProvider` and `ActiveWorkspaceNotifier`, holding only the single active `AppWorkspace` in memory and orchestrating runtime workspace unload/load switching (`switchWorkspace`), creation (`createWorkspace`), renaming (`renameWorkspace`), deletion (`deleteWorkspace`), and active configuration updates (`updateActiveConfig`). |
 
 ## User Interface
@@ -171,7 +173,7 @@ tiertask/
 | `lib/ui/edit_labels_screen.dart` | Dedicated Google Keep style label management screen (`EditLabelsScreen`) opened from the navigation drawer's `Edit` button or `+ Create new label` entry, supporting new label creation, open task count badges (`Badge.count`) per label, inline label renaming, and label deletion. |
 | `lib/ui/edit_task_screen.dart` | Dedicated panel screen (`EditTaskScreen` and `openEditTaskScreen`) grouped into `SettingsScreen`-style Material 3 section cards, used for both extended task creation (`QuickAddBar` `Advanced` button) and editing an existing task (`_TierTaskPill` edit button), enforcing non-empty and non-duplicate task names and editing notes, scheduling mode (`Priority`, `Someday`, `Suspended` with optional timestamp and Material 3 date/time pickers, and `Repeat` with interval count and `days`/`weeks`/`months` unit selection), labels, subtasks (`auto-finish`), search-based multi-select prerequisite tasks (`blocked` with cycle prevention), and activation conditions (`condition any`, `day`, `time` with 24-hour time pickers, and `location` rules). |
 | `lib/ui/home_screen.dart` | Primary landing page screen displaying a top navigation bar (`_LandingTopBar`) with the menu button on the left, the active label name centered in the middle when a label filter is selected (smoothly animating to the left next to the menu button with the inline search field expanding between the label name and the search/close button when search is opened), and the search toggle on the right; a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the centered uppercase tier section heading, minimalist task pill cards (`_TierTaskPill` with a uniform leading Material 3 `primaryContainer` rounded square containing a white completion circle or white circle with checkmark when completed, a compact repeat indicator icon for recurring tasks, a right-chevron `>` downgrade button on `Focus`, `Ready`, and `Planned` tasks, and a three-dots edit button on the right) or empty-state card (`_EmptyTierCard`); a bottom `TierPageIndicator`; floating action buttons (`_LandingFloatingButtons`) with a smaller conditional WebDAV sync button (`_FloatingSyncButton` in `WebDAV` / `Both` mode) right-aligned above the circular task-add button that both hide when the task-add button transforms into the inline bottom `QuickAddBar`; and a top-left navigation drawer (`_LandingDrawer`) featuring a Google Keep style `Labels` section (top `Edit` button, selectable label filter pills with open task count badges, and `+ Create new label` entry) alongside synchronization, TDF preview, and settings actions without tier navigation items. |
-| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), Material 3 color palette (`Slate`, `Navy`), local time zone (`Automatic` or `Manual` UTC offset), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name, WebDAV endpoint parameters, and synchronization testing. |
+| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), Material 3 color palette (`Slate`, `Navy`), local time zone (`Automatic` or `Manual` UTC offset), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name and desktop directory selection (`Change Directory` on Linux and Windows), and WebDAV endpoint parameters, with a fixed bottom action footer (`Save` and `Test Connection / Sync Now` matching `EditTaskScreen`) and a floating status/error banner (`_SettingsStatusBanner`) positioned directly above the footer. |
 | `lib/ui/widgets/app_logo.dart` | Vector application logo widget (`AppLogo` and `_AppLogoPainter`) rendering the stacked tier bars and completion checkmark badge in the navigation drawer header. |
 | `lib/ui/widgets/clearable_text_field.dart` | Reusable text input widget (`ClearableTextField`) wrapping `TextField` or `TextFormField` that displays a right-side clear icon button (`Icons.close_rounded`) when focused, composes with any existing `InputDecoration.suffixIcon`, clears the `TextEditingController`, notifies `onChanged` and `onCleared`, and keeps focus on the input. |
 | `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, a `Labels` icon button that expands a multi-select menu upward above the bar, an `Advanced` icon button opening `EditTaskScreen`, and a `Cancel` icon button, and automatically stacking the title input above the action buttons when the viewport width is at or below the Pixel 9 Pro width/aspect-ratio threshold. |

@@ -1183,6 +1183,102 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Clear text'**
   String get tooltipClearInput;
+
+  /// Button label to select a different local TDF directory on desktop platforms.
+  ///
+  /// In en, this message translates to:
+  /// **'Change Directory'**
+  String get actionChangeDirectory;
+
+  /// Status message shown when the local TDF directory is changed and the file is moved.
+  ///
+  /// In en, this message translates to:
+  /// **'Local TDF directory updated and file moved.'**
+  String get localDirectoryMovedBanner;
+
+  /// Error message shown when a regular file already exists at the destination TDF path.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: A file already exists at the target path ({path}).'**
+  String errorMoveTargetFileExists(String path);
+
+  /// Error message shown when a directory already exists at the destination TDF path.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: A directory with this name already exists at the target path ({path}).'**
+  String errorMoveTargetDirectoryExists(String path);
+
+  /// Error message shown when a symbolic link already exists at the destination TDF path.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: A symbolic link already exists at the target path ({path}).'**
+  String errorMoveTargetSymlinkExists(String path);
+
+  /// Error message shown when the current TDF source path is a symbolic link.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The source path is a symbolic link ({path}).'**
+  String errorMoveSourceIsSymlink(String path);
+
+  /// Error message shown when the current TDF source path is a directory.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The source path is a directory ({path}).'**
+  String errorMoveSourceIsDirectory(String path);
+
+  /// Error message shown when the selected target directory does not exist.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The target directory does not exist ({path}).'**
+  String errorMoveTargetDirectoryNotFound(String path);
+
+  /// Error message shown when the selected target directory path is a file or symlink instead of a directory.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The selected target path is not a directory ({path}).'**
+  String errorMoveTargetNotADirectory(String path);
+
+  /// Error message shown when filesystem permissions prevent moving the TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: Permission denied ({path}).'**
+  String errorMovePermissionDenied(String path);
+
+  /// Error message shown when the target or source filesystem is read-only.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The file system is read-only ({path}).'**
+  String errorMoveReadOnlyFileSystem(String path);
+
+  /// Error message shown when there is insufficient disk space to move the TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: Not enough free disk space ({path}).'**
+  String errorMoveDiskFull(String path);
+
+  /// Error message shown when the TDF file is locked by another process.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The file is locked or in use by another process ({path}).'**
+  String errorMoveFileLocked(String path);
+
+  /// Error message shown when the destination TDF path exceeds OS length limits.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file: The file path or name is too long ({path}).'**
+  String errorMovePathTooLong(String path);
+
+  /// Fallback error message shown when moving the local TDF file fails for another reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot move TDF file ({details}).'**
+  String errorMoveLocalFileFailed(String details);
+
+  /// Error message shown when the target TDF file path collides with another workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Another workspace already uses this TDF file path.'**
+  String get errorDuplicateWorkspaceFilePath;
 }
 
 class _AppLocalizationsDelegate

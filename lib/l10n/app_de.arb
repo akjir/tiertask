@@ -180,5 +180,21 @@
   "repeatUnitWeeks": "Wochen",
   "repeatUnitMonths": "Monate",
   "repeatErrorInvalid": "Bitte ein Intervall zwischen 1 und 3650 eingeben.",
-  "tooltipClearInput": "Text löschen"
+  "tooltipClearInput": "Text löschen",
+  "actionChangeDirectory": "Verzeichnis ändern",
+  "localDirectoryMovedBanner": "Lokales TDF-Verzeichnis geändert und Datei verschoben.",
+  "errorMoveTargetFileExists": "TDF-Datei kann nicht verschoben werden: Am Zielpfad existiert bereits eine Datei ({path}).",
+  "errorMoveTargetDirectoryExists": "TDF-Datei kann nicht verschoben werden: Am Zielpfad existiert bereits ein Ordner mit diesem Namen ({path}).",
+  "errorMoveTargetSymlinkExists": "TDF-Datei kann nicht verschoben werden: Am Zielpfad existiert bereits ein symbolischer Link ({path}).",
+  "errorMoveSourceIsSymlink": "TDF-Datei kann nicht verschoben werden: Der Quellpfad ist ein symbolischer Link ({path}).",
+  "errorMoveSourceIsDirectory": "TDF-Datei kann nicht verschoben werden: Der Quellpfad ist ein Ordner ({path}).",
+  "errorMoveTargetDirectoryNotFound": "TDF-Datei kann nicht verschoben werden: Das Zielverzeichnis existiert nicht ({path}).",
+  "errorMoveTargetNotADirectory": "TDF-Datei kann nicht verschoben werden: Der ausgewählte Zielpfad ist kein Ordner ({path}).",
+  "errorMovePermissionDenied": "TDF-Datei kann nicht verschoben werden: Keine Berechtigung ({path}).",
+  "errorMoveReadOnlyFileSystem": "TDF-Datei kann nicht verschoben werden: Das Dateisystem ist schreibgeschützt ({path}).",
+  "errorMoveDiskFull": "TDF-Datei kann nicht verschoben werden: Nicht genügend freier Speicherplatz ({path}).",
+  "errorMoveFileLocked": "TDF-Datei kann nicht verschoben werden: Die Datei ist gesperrt oder wird von einem anderen Prozess verwendet ({path}).",
+  "errorMovePathTooLong": "TDF-Datei kann nicht verschoben werden: Der Dateipfad oder Dateiname ist zu lang ({path}).",
+  "errorMoveLocalFileFailed": "TDF-Datei kann nicht verschoben werden ({details}).",
+  "errorDuplicateWorkspaceFilePath": "Ein anderer Arbeitsbereich verwendet diesen TDF-Dateipfad bereits."
 }

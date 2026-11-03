@@ -604,4 +604,80 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get tooltipClearInput => 'Text löschen';
+
+  @override
+  String get actionChangeDirectory => 'Verzeichnis ändern';
+
+  @override
+  String get localDirectoryMovedBanner =>
+      'Lokales TDF-Verzeichnis geändert und Datei verschoben.';
+
+  @override
+  String errorMoveTargetFileExists(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Am Zielpfad existiert bereits eine Datei ($path).';
+  }
+
+  @override
+  String errorMoveTargetDirectoryExists(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Am Zielpfad existiert bereits ein Ordner mit diesem Namen ($path).';
+  }
+
+  @override
+  String errorMoveTargetSymlinkExists(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Am Zielpfad existiert bereits ein symbolischer Link ($path).';
+  }
+
+  @override
+  String errorMoveSourceIsSymlink(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Der Quellpfad ist ein symbolischer Link ($path).';
+  }
+
+  @override
+  String errorMoveSourceIsDirectory(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Der Quellpfad ist ein Ordner ($path).';
+  }
+
+  @override
+  String errorMoveTargetDirectoryNotFound(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Das Zielverzeichnis existiert nicht ($path).';
+  }
+
+  @override
+  String errorMoveTargetNotADirectory(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Der ausgewählte Zielpfad ist kein Ordner ($path).';
+  }
+
+  @override
+  String errorMovePermissionDenied(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Keine Berechtigung ($path).';
+  }
+
+  @override
+  String errorMoveReadOnlyFileSystem(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Das Dateisystem ist schreibgeschützt ($path).';
+  }
+
+  @override
+  String errorMoveDiskFull(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Nicht genügend freier Speicherplatz ($path).';
+  }
+
+  @override
+  String errorMoveFileLocked(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Die Datei ist gesperrt oder wird von einem anderen Prozess verwendet ($path).';
+  }
+
+  @override
+  String errorMovePathTooLong(String path) {
+    return 'TDF-Datei kann nicht verschoben werden: Der Dateipfad oder Dateiname ist zu lang ($path).';
+  }
+
+  @override
+  String errorMoveLocalFileFailed(String details) {
+    return 'TDF-Datei kann nicht verschoben werden ($details).';
+  }
+
+  @override
+  String get errorDuplicateWorkspaceFilePath =>
+      'Ein anderer Arbeitsbereich verwendet diesen TDF-Dateipfad bereits.';
 }

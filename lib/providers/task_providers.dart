@@ -15,9 +15,11 @@
 
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/app_workspace.dart';
 import '../models/task_board.dart';
 import '../models/task_board_sync.dart';
 import '../models/task_item.dart';
@@ -57,6 +59,14 @@ final clockProvider = Provider<DateTime Function()>((ref) {
   return DateTime.now;
 });
 
+/// Provides the native directory picker function, overridable in widget tests.
+final directoryPickerProvider =
+    Provider<Future<String?> Function({String? initialDirectory})>((ref) {
+      return ({String? initialDirectory}) => ref
+          .read(localFileRepositoryProvider)
+          .pickDirectory(initialDirectory: initialDirectory);
+    });
+
 /// Provides a [LocalFileRepository] configured with the current [WebDavConfig].
 final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
   final config = _resolveCurrentConfig(ref);
@@ -77,6 +87,12 @@ final localStorageDirectoryPathProvider = Provider<String?>((ref) {
 /// Provides the [SettingsRepository] for loading and saving application settings.
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   return SecureSettingsRepository();
+});
+
+/// Whether the host platform supports changing the local `.tdf` directory via a native picker (`true` on Linux and Windows, `false` on Android).
+final supportsDirectoryPickerProvider = Provider<bool>((ref) {
+  return defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.windows;
 });
 
 /// Provides the current [SyncState] for local and WebDAV persistence operations.
@@ -684,6 +700,55 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     return activeWorkspace.config;
   }
 
+  /// Moves the local `.tdf` file when its resolved path changes and persists [newConfig] atomically.
+  Future<void> changeLocalFileLocation(WebDavConfig newConfig) async {
+    final current = state.asData?.value ?? await future;
+    final localizations = lookupAppLocalizations(
+      newConfig.language.resolveLocale(PlatformDispatcher.instance.locale),
+    );
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final inMemoryStore = ref.read(_inMemoryLocalStoreProvider);
+    final sourceRepo = LocalFileRepository(
+      config: current,
+      baseDirectoryPath: baseDirectoryPath,
+      inMemoryStore: inMemoryStore,
+    );
+    final targetRepo = LocalFileRepository(
+      config: newConfig,
+      baseDirectoryPath: baseDirectoryPath,
+      inMemoryStore: inMemoryStore,
+    );
+
+    final sourcePath = sourceRepo.resolveFilePath();
+    final targetPath = targetRepo.resolveFilePath();
+    final shouldMove =
+        newConfig.storageMode.usesLocal && sourcePath != targetPath;
+    if (shouldMove) {
+      await sourceRepo.moveTdfFile(targetRepo);
+    }
+
+    try {
+      await updateConfig(newConfig);
+    } on WorkspaceException catch (error) {
+      if (shouldMove) {
+        await _tryRollbackMove(targetRepo, sourceRepo);
+      }
+      final message = switch (error.kind) {
+        WorkspaceErrorKind.duplicateFilePath =>
+          localizations.errorDuplicateWorkspaceFilePath,
+        WorkspaceErrorKind.invalidFilePath =>
+          localizations.errorInvalidLocalFilePath,
+        _ => error.message,
+      };
+      throw LocalFileException(message, cause: error);
+    } on Object {
+      if (shouldMove) {
+        await _tryRollbackMove(targetRepo, sourceRepo);
+      }
+      rethrow;
+    }
+  }
+
   /// Persists [newConfig] to the active workspace and updates provider state.
   Future<void> updateConfig(WebDavConfig newConfig) async {
     await ref
@@ -734,6 +799,18 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(timeZoneMode: timeZoneMode);
     await updateConfig(updated);
+  }
+
+  /// Attempts to move the `.tdf` file back from [movedRepo] to [originalRepo] if config persistence fails.
+  Future<void> _tryRollbackMove(
+    LocalFileRepository movedRepo,
+    LocalFileRepository originalRepo,
+  ) async {
+    try {
+      await movedRepo.moveTdfFile(originalRepo);
+    } on Object {
+      // Preserve primary persistence exception.
+    }
   }
 }
 
