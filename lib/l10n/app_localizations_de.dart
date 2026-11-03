@@ -853,6 +853,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tooltipOpenLink => 'Link öffnen';
 
   @override
+  String get tooltipIndicatorNote => 'Notiz';
+
+  @override
   String get tooltipIndicatorLinks => 'Hat Links';
 
   @override

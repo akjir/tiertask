@@ -1592,6 +1592,12 @@ abstract class AppLocalizations {
   /// **'Open link'**
   String get tooltipOpenLink;
 
+  /// Tooltip for the passive note indicator icon on a task pill.
+  ///
+  /// In en, this message translates to:
+  /// **'Note'**
+  String get tooltipIndicatorNote;
+
   /// Tooltip for the passive link indicator icon on a task pill.
   ///
   /// In en, this message translates to:

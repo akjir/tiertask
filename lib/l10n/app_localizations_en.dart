@@ -839,6 +839,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipOpenLink => 'Open link';
 
   @override
+  String get tooltipIndicatorNote => 'Note';
+
+  @override
   String get tooltipIndicatorLinks => 'Has links';
 
   @override

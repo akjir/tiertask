@@ -1054,4 +1054,198 @@ task lnk001OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'Task pill displays passive note indicator, expands note-only tasks, and renders expanded note above links and subtasks with leading icon',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.4.0
+
+task not001OkD2 {
+  name "Note Only Task"
+  note "Standalone note content"
+  created 2026-11-01 08:00
+  queued 2026-11-01 08:00
+}
+task all001OkD2 priority {
+  name "Full Details Task"
+  note "Top level task note"
+  created 2026-11-01 08:05
+  queued 2026-11-01 08:05
+  repeat 1 days
+  link "Design Doc" "https://example.com/design"
+  subtasks {
+    step false "First checklist item"
+  }
+}
+task plain1OkD2 {
+  name "No Note Task"
+  created 2026-11-01 08:10
+  queued 2026-11-01 08:10
+}
+''';
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: seededTdf,
+            ),
+          ),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 1, 12, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final noteOnlyIndicatorFinder = find.byKey(
+        const ValueKey('note_task_indicator_not001OkD2'),
+      );
+      final fullNoteIndicatorFinder = find.byKey(
+        const ValueKey('note_task_indicator_all001OkD2'),
+      );
+      final plainNoteIndicatorFinder = find.byKey(
+        const ValueKey('note_task_indicator_plain1OkD2'),
+      );
+
+      expect(
+        noteOnlyIndicatorFinder,
+        findsOneWidget,
+        reason: 'Task with note must display the passive note indicator icon',
+      );
+      expect(
+        fullNoteIndicatorFinder,
+        findsOneWidget,
+        reason: 'Task with note, links, and subtasks must display the passive note indicator icon',
+      );
+      expect(
+        plainNoteIndicatorFinder,
+        findsNothing,
+        reason: 'Task without a note must not display the note indicator icon',
+      );
+
+      final noteIndicatorIcon = tester.widget<Icon>(noteOnlyIndicatorFinder);
+      expect(noteIndicatorIcon.icon, equals(Icons.notes_rounded));
+
+      final noteTooltip = tester.widget<Tooltip>(
+        find.ancestor(
+          of: noteOnlyIndicatorFinder,
+          matching: find.byType(Tooltip),
+        ),
+      );
+      expect(noteTooltip.message, equals('Note'));
+
+      final priorityLeft = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('priority_task_indicator_all001OkD2')),
+          )
+          .dx;
+      final repeatLeft = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('repeat_task_indicator_all001OkD2')),
+          )
+          .dx;
+      final noteLeft = tester.getTopLeft(fullNoteIndicatorFinder).dx;
+      final linksLeft = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('links_task_indicator_all001OkD2')),
+          )
+          .dx;
+      final subtasksLeft = tester
+          .getTopLeft(
+            find.byKey(const ValueKey('subtasks_task_indicator_all001OkD2')),
+          )
+          .dx;
+
+      expect(
+        priorityLeft < repeatLeft &&
+            repeatLeft < noteLeft &&
+            noteLeft < linksLeft &&
+            linksLeft < subtasksLeft,
+        isTrue,
+        reason: 'Passive indicators must be ordered Priority, Repeat, Note, Links, then Subtasks',
+      );
+
+      final noteOnlyRowFinder = find.byKey(
+        const ValueKey('task_note_not001OkD2'),
+      );
+      expect(
+        noteOnlyRowFinder,
+        findsNothing,
+        reason: 'Note row must be collapsed initially',
+      );
+
+      await tester.tap(find.text('Note Only Task'));
+      await tester.pumpAndSettle();
+
+      expect(
+        noteOnlyRowFinder,
+        findsOneWidget,
+        reason: 'Tapping a note-only task pill must expand its note row',
+      );
+      expect(find.text('Standalone note content'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: noteOnlyRowFinder,
+          matching: find.byIcon(Icons.notes_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Expanded note row must display a leading note icon',
+      );
+
+      await tester.tap(find.text('Note Only Task'));
+      await tester.pumpAndSettle();
+      expect(
+        noteOnlyRowFinder,
+        findsNothing,
+        reason: 'Tapping an expanded note-only task pill must collapse it',
+      );
+
+      final fullNoteRowFinder = find.byKey(
+        const ValueKey('task_note_all001OkD2'),
+      );
+      final fullLinkRowFinder = find.byKey(
+        const ValueKey('task_link_all001OkD2_0'),
+      );
+      final fullSubtaskRowFinder = find.byKey(
+        const ValueKey('subtask_step_all001OkD2_0'),
+      );
+
+      await tester.tap(find.text('Full Details Task'));
+      await tester.pumpAndSettle();
+
+      expect(fullNoteRowFinder, findsOneWidget);
+      expect(fullLinkRowFinder, findsOneWidget);
+      expect(fullSubtaskRowFinder, findsOneWidget);
+
+      final noteTop = tester.getTopLeft(fullNoteRowFinder).dy;
+      final linkTop = tester.getTopLeft(fullLinkRowFinder).dy;
+      final subtaskTop = tester.getTopLeft(fullSubtaskRowFinder).dy;
+
+      expect(
+        noteTop < linkTop,
+        isTrue,
+        reason: 'Expanded note row must always be rendered above links',
+      );
+      expect(
+        linkTop < subtaskTop,
+        isTrue,
+        reason: 'Expanded links must always be rendered above subtasks',
+      );
+    },
+  );
 }

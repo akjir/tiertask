@@ -1121,6 +1121,10 @@
   "@tooltipOpenLink": {
     "description": "Tooltip for the button that opens a task link URI."
   },
+  "tooltipIndicatorNote": "Note",
+  "@tooltipIndicatorNote": {
+    "description": "Tooltip for the passive note indicator icon on a task pill."
+  },
   "tooltipIndicatorLinks": "Has links",
   "@tooltipIndicatorLinks": {
     "description": "Tooltip for the passive link indicator icon on a task pill."

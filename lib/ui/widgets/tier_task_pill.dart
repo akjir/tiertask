@@ -23,6 +23,7 @@ import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
 import '../../providers/task_providers.dart';
 import '../../repositories/link_launcher_repository.dart';
+import '../../services/app_logger.dart';
 import '../edit_task_screen.dart';
 
 /// Animation duration for expanding and collapsing task subtasks.
@@ -61,13 +62,14 @@ class TierTaskPill extends ConsumerStatefulWidget {
   ConsumerState<TierTaskPill> createState() => _TierTaskPillState();
 }
 
-/// Animated container that glides the task links and subtask checklist downward or upward driven by [controller].
+/// Animated container that glides the task note, links, and subtask checklist downward or upward driven by [controller].
 class _AnimatedSubtasksSection extends StatelessWidget {
   /// Creates an [_AnimatedSubtasksSection].
   const _AnimatedSubtasksSection({
     required this.controller,
     required this.isExpanded,
     required this.links,
+    required this.note,
     required this.subtasks,
     required this.taskId,
     required this.onOpenLink,
@@ -77,11 +79,14 @@ class _AnimatedSubtasksSection extends StatelessWidget {
   /// Animation controller driving the expansion progress between `0.0` and `1.0`.
   final Animation<double> controller;
 
-  /// Whether the subtask and link list is currently expanded.
+  /// Whether the note, link, and subtask list is currently expanded.
   final bool isExpanded;
 
   /// Resource links belonging to [taskId].
   final List<TaskLink> links;
+
+  /// Optional task note belonging to [taskId].
+  final String? note;
 
   /// Callback invoked when a link row is tapped.
   final ValueChanged<String> onOpenLink;
@@ -97,7 +102,9 @@ class _AnimatedSubtasksSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (subtasks.isEmpty && links.isEmpty) {
+    final activeNote = note;
+    final hasNote = activeNote != null && activeNote.isNotEmpty;
+    if (!hasNote && subtasks.isEmpty && links.isEmpty) {
       return const SizedBox.shrink();
     }
     return AnimatedBuilder(
@@ -118,6 +125,7 @@ class _AnimatedSubtasksSection extends StatelessWidget {
       },
       child: _SubtaskStepsColumn(
         links: links,
+        note: activeNote,
         subtasks: subtasks,
         taskId: taskId,
         onOpenLink: onOpenLink,
@@ -265,11 +273,12 @@ final class _SubtaskCompleteTaskExit extends _TaskExitAction {
   final int stepIndex;
 }
 
-/// Column of interactive link and subtask rows rendered below the main task pill header.
+/// Column of note, interactive link, and subtask rows rendered below the main task pill header.
 class _SubtaskStepsColumn extends StatelessWidget {
   /// Creates a [_SubtaskStepsColumn].
   const _SubtaskStepsColumn({
     required this.links,
+    required this.note,
     required this.subtasks,
     required this.taskId,
     required this.onOpenLink,
@@ -278,6 +287,9 @@ class _SubtaskStepsColumn extends StatelessWidget {
 
   /// Resource links belonging to [taskId].
   final List<TaskLink> links;
+
+  /// Optional task note belonging to [taskId].
+  final String? note;
 
   /// Callback invoked when a link row is tapped.
   final ValueChanged<String> onOpenLink;
@@ -294,6 +306,7 @@ class _SubtaskStepsColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dividerColor = Theme.of(context).dividerColor;
+    final activeNote = note;
     final toggleCallback = onToggleSubtask;
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -305,6 +318,11 @@ class _SubtaskStepsColumn extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (activeNote != null && activeNote.isNotEmpty)
+              _TierNoteRow(
+                noteKey: ValueKey('task_note_$taskId'),
+                note: activeNote,
+              ),
             for (var i = 0; i < links.length; i++)
               _TierLinkRow(
                 linkKey: ValueKey('task_link_${taskId}_$i'),
@@ -379,6 +397,47 @@ class _TierLinkRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Row displaying the task [note] with a leading note icon inside [_SubtaskStepsColumn].
+class _TierNoteRow extends StatelessWidget {
+  /// Creates a [_TierNoteRow].
+  const _TierNoteRow({required this.note, required this.noteKey});
+
+  /// Note text to render.
+  final String note;
+
+  /// Deterministic widget key for the note row.
+  final Key noteKey;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      key: noteKey,
+      padding: const EdgeInsets.fromLTRB(22, 8, 20, 8),
+      child: Row(
+        children: [
+          Icon(
+            Icons.notes_rounded,
+            size: 18,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 18),
+          Expanded(
+            child: Text(
+              note,
+              style: TextStyle(
+                color: colorScheme.onSurfaceVariant,
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -598,7 +657,7 @@ class _TierTaskIndicatorIcon extends StatelessWidget {
   }
 }
 
-/// Passive right-side status indicator icons for priority, repeating, link-bearing, and subtask-bearing tasks.
+/// Passive right-side status indicator icons for priority, repeating, note-bearing, link-bearing, and subtask-bearing tasks.
 class _TierTaskIndicators extends StatelessWidget {
   /// Creates a [_TierTaskIndicators] row.
   const _TierTaskIndicators({required this.task});
@@ -606,57 +665,78 @@ class _TierTaskIndicators extends StatelessWidget {
   /// Task item whose passive indicators are displayed.
   final TaskItem task;
 
+  /// Whether [task] carries at least one passive status indicator.
+  bool get _hasAnyIndicator {
+    final note = task.note;
+    return task.isPriority ||
+        task.repeatRule != null ||
+        (note != null && note.isNotEmpty) ||
+        task.links.isNotEmpty ||
+        task.subtasks.isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final hasPriority = task.isPriority;
-    final hasRepeat = task.repeatRule != null;
-    final hasLinks = task.links.isNotEmpty;
-    final hasSubtasks = task.subtasks.isNotEmpty;
-    if (!hasPriority && !hasRepeat && !hasLinks && !hasSubtasks) {
+    if (!_hasAnyIndicator) {
       return const SizedBox.shrink();
     }
-
     final localizations = AppLocalizations.of(context);
-    final indicatorColor = Theme.of(context).colorScheme.onSurfaceVariant
+    final color = Theme.of(context).colorScheme.onSurfaceVariant
         .withValues(alpha: 0.55);
-
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (hasPriority)
+        for (final spec in _resolveIndicatorSpecs(localizations))
           _TierTaskIndicatorIcon(
-            color: indicatorColor,
-            icon: Icons.bolt_rounded,
-            indicatorKey: ValueKey('priority_task_indicator_${task.id}'),
-            tooltip: localizations.tooltipIndicatorPriority,
-          ),
-        if (hasRepeat)
-          _TierTaskIndicatorIcon(
-            color: indicatorColor,
-            icon: Icons.repeat_rounded,
-            indicatorKey: ValueKey('repeat_task_indicator_${task.id}'),
-            tooltip: localizations.tooltipIndicatorRepeat,
-          ),
-        if (hasLinks)
-          _TierTaskIndicatorIcon(
-            color: indicatorColor,
-            icon: Icons.link_rounded,
-            indicatorKey: ValueKey('links_task_indicator_${task.id}'),
-            tooltip: localizations.tooltipIndicatorLinks,
-          ),
-        if (hasSubtasks)
-          _TierTaskIndicatorIcon(
-            color: indicatorColor,
-            icon: task.subtasksAutoFinish
-                ? Icons.fact_check_outlined
-                : Icons.checklist_rounded,
-            indicatorKey: ValueKey('subtasks_task_indicator_${task.id}'),
-            tooltip: task.subtasksAutoFinish
-                ? localizations.tooltipIndicatorSubtasksAutoFinish
-                : localizations.tooltipIndicatorSubtasks,
+            color: color,
+            icon: spec.icon,
+            indicatorKey: ValueKey('${spec.keyPrefix}_${task.id}'),
+            tooltip: spec.tooltip,
           ),
       ],
     );
+  }
+
+  /// Resolves the ordered passive indicator specifications for [task].
+  List<({IconData icon, String keyPrefix, String tooltip})>
+  _resolveIndicatorSpecs(AppLocalizations localizations) {
+    final note = task.note;
+    return [
+      if (task.isPriority)
+        (
+          icon: Icons.bolt_rounded,
+          keyPrefix: 'priority_task_indicator',
+          tooltip: localizations.tooltipIndicatorPriority,
+        ),
+      if (task.repeatRule != null)
+        (
+          icon: Icons.repeat_rounded,
+          keyPrefix: 'repeat_task_indicator',
+          tooltip: localizations.tooltipIndicatorRepeat,
+        ),
+      if (note != null && note.isNotEmpty)
+        (
+          icon: Icons.notes_rounded,
+          keyPrefix: 'note_task_indicator',
+          tooltip: localizations.tooltipIndicatorNote,
+        ),
+      if (task.links.isNotEmpty)
+        (
+          icon: Icons.link_rounded,
+          keyPrefix: 'links_task_indicator',
+          tooltip: localizations.tooltipIndicatorLinks,
+        ),
+      if (task.subtasks.isNotEmpty)
+        (
+          icon: task.subtasksAutoFinish
+              ? Icons.fact_check_outlined
+              : Icons.checklist_rounded,
+          keyPrefix: 'subtasks_task_indicator',
+          tooltip: task.subtasksAutoFinish
+              ? localizations.tooltipIndicatorSubtasksAutoFinish
+              : localizations.tooltipIndicatorSubtasks,
+        ),
+    ];
   }
 }
 
@@ -792,6 +872,14 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
   bool _isExpanded = false;
   late final AnimationController _subtaskController;
 
+  /// Whether [widget.task] has a non-empty note, links, or subtasks that can be expanded.
+  bool get _hasExpandableDetails {
+    final note = widget.task.note;
+    return (note != null && note.isNotEmpty) ||
+        widget.task.links.isNotEmpty ||
+        widget.task.subtasks.isNotEmpty;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -816,9 +904,7 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
   @override
   void didUpdateWidget(covariant TierTaskPill oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.task.subtasks.isEmpty &&
-        widget.task.links.isEmpty &&
-        _isExpanded) {
+    if (!_hasExpandableDetails && _isExpanded) {
       _isExpanded = false;
       _subtaskController.value = 0.0;
     }
@@ -836,8 +922,7 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final task = widget.task;
-    final hasExpandableDetails =
-        task.subtasks.isNotEmpty || task.links.isNotEmpty;
+    final hasExpandableDetails = _hasExpandableDetails;
     final effectiveSubtasks = _resolveDisplayedSubtasks(task.subtasks);
 
     return _AnimatedTaskTransitionWrapper(
@@ -871,6 +956,7 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
                 controller: _subtaskController,
                 isExpanded: _isExpanded && hasExpandableDetails,
                 links: task.links,
+                note: task.note,
                 subtasks: effectiveSubtasks,
                 taskId: task.id,
                 onOpenLink: _handleOpenLink,
@@ -1041,7 +1127,7 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
     _exitController.forward(from: 0.0);
   }
 
-  /// Toggles the expanded state of the task's subtask checklist.
+  /// Toggles the expanded state of the task's details section.
   void _toggleExpanded() {
     if (_exitAction != null) {
       return;
@@ -1049,6 +1135,10 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
     setState(() {
       _isExpanded = !_isExpanded;
     });
+    AppLogger.debug(
+      LogTag.ui,
+      'Toggled task details task=${widget.task.id} expanded=$_isExpanded',
+    );
     if (_isExpanded) {
       _subtaskController.forward();
     } else {
