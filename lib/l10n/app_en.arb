@@ -992,5 +992,73 @@
   "errorWorkspaceMaxExceeded": "Maximum number of workspaces (32) reached.",
   "@errorWorkspaceMaxExceeded": {
     "description": "Validation error shown when attempting to create more than 32 workspaces."
+  },
+  "locationSectionTitle": "Location Determination",
+  "@locationSectionTitle": {
+    "description": "Section heading for foreground location determination settings."
+  },
+  "locationSectionDescription": "Determine your current place and GPS coordinates while the app is running to evaluate location conditions.",
+  "@locationSectionDescription": {
+    "description": "Helper description explaining foreground-only location determination."
+  },
+  "locationOff": "Off",
+  "@locationOff": {
+    "description": "Option label to disable location determination."
+  },
+  "locationOn": "On",
+  "@locationOn": {
+    "description": "Option label to enable foreground location determination."
+  },
+  "tooltipLocationStatus": "Location status",
+  "@tooltipLocationStatus": {
+    "description": "Tooltip for the top bar button that opens the location status popup."
+  },
+  "locationDialogTitle": "Location Status",
+  "@locationDialogTitle": {
+    "description": "Title of the popup dialog displaying the current location status."
+  },
+  "locationStatusSearching": "Searching for location...",
+  "@locationStatusSearching": {
+    "description": "Status message shown while foreground location determination is in progress."
+  },
+  "locationStatusFound": "Location found",
+  "@locationStatusFound": {
+    "description": "Status message shown when the current location has been determined."
+  },
+  "locationStatusUnavailable": "No location information available",
+  "@locationStatusUnavailable": {
+    "description": "Status message shown when location determination is active but no location could be determined."
+  },
+  "locationPlaceLabel": "Place",
+  "@locationPlaceLabel": {
+    "description": "Label above the determined place name in the location status popup."
+  },
+  "locationCoordinatesLabel": "GPS Coordinates",
+  "@locationCoordinatesLabel": {
+    "description": "Label above the GPS coordinates in the location status popup."
+  },
+  "locationPlaceUnknown": "Unknown place",
+  "@locationPlaceUnknown": {
+    "description": "Fallback label shown when GPS coordinates are found without a resolved place name."
+  },
+  "locationSourceLabel": "Source",
+  "@locationSourceLabel": {
+    "description": "Label above the location source in the location status popup."
+  },
+  "locationSourceGps": "GPS",
+  "@locationSourceGps": {
+    "description": "Source label for hardware GPS or GNSS satellite location fixes."
+  },
+  "locationSourceSystem": "System / Network",
+  "@locationSourceSystem": {
+    "description": "Source label for OS or network location services (Wi-Fi, cell, GeoClue2, or Windows Location API)."
+  },
+  "locationSourceInternet": "Internet (GeoIP)",
+  "@locationSourceInternet": {
+    "description": "Source label for IP-based GeoIP fallback location fixes."
+  },
+  "actionRefresh": "Refresh",
+  "@actionRefresh": {
+    "description": "Button label to manually refresh the current location."
   }
 }

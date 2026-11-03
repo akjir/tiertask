@@ -154,6 +154,53 @@ class _LocalStorageSection extends StatelessWidget {
   }
 }
 
+/// Card for enabling or disabling foreground location determination.
+class _LocationSelectionCard extends StatelessWidget {
+  /// Creates a [_LocationSelectionCard].
+  const _LocationSelectionCard({
+    required this.locationEnabled,
+    required this.onLocationEnabledChanged,
+  });
+
+  /// Whether foreground location determination is currently enabled.
+  final bool locationEnabled;
+
+  /// Callback invoked when the user toggles location determination.
+  final ValueChanged<bool> onLocationEnabledChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return _SettingsSectionCard(
+      icon: Icons.location_on_outlined,
+      title: localizations.locationSectionTitle,
+      description: localizations.locationSectionDescription,
+      child: SizedBox(
+        width: double.infinity,
+        child: SegmentedButton<bool>(
+          key: const ValueKey('settings_location_segmented_button'),
+          segments: [
+            ButtonSegment<bool>(
+              value: false,
+              label: Text(localizations.locationOff),
+            ),
+            ButtonSegment<bool>(
+              value: true,
+              label: Text(localizations.locationOn),
+            ),
+          ],
+          selected: <bool>{locationEnabled},
+          onSelectionChanged: (selection) {
+            if (selection.isNotEmpty) {
+              onLocationEnabledChanged(selection.first);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
 /// Monospace preview box displaying a resolved local file path or WebDAV endpoint URI.
 class _ResolvedPathPreview extends StatelessWidget {
   /// Creates a [_ResolvedPathPreview].
@@ -317,12 +364,13 @@ class _SettingsFormFields extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, color palette, time zone, and storage mode preference cards on [SettingsScreen].
+/// Groups the language, theme, color palette, time zone, location, and storage mode preference cards on [SettingsScreen].
 class _SettingsPreferenceCards extends StatelessWidget {
   /// Creates [_SettingsPreferenceCards].
   const _SettingsPreferenceCards({
     required this.config,
     required this.onLanguageChanged,
+    required this.onLocationEnabledChanged,
     required this.onThemeModeChanged,
     required this.onThemePaletteChanged,
     required this.onTimeZoneModeChanged,
@@ -335,6 +383,9 @@ class _SettingsPreferenceCards extends StatelessWidget {
 
   /// Callback when [AppLanguage] changes.
   final ValueChanged<AppLanguage> onLanguageChanged;
+
+  /// Callback when `locationEnabled` changes.
+  final ValueChanged<bool> onLocationEnabledChanged;
 
   /// Callback when the manual UTC offset in minutes changes.
   final ValueChanged<int> onManualTimeZoneOffsetChanged;
@@ -378,6 +429,11 @@ class _SettingsPreferenceCards extends StatelessWidget {
           onManualOffsetChanged: onManualTimeZoneOffsetChanged,
         ),
         const SizedBox(height: 10),
+        _LocationSelectionCard(
+          locationEnabled: config.locationEnabled,
+          onLocationEnabledChanged: onLocationEnabledChanged,
+        ),
+        const SizedBox(height: 10),
         _StorageModeSelectionCard(
           selectedStorageMode: config.storageMode,
           onStorageModeChanged: onStorageModeChanged,
@@ -404,6 +460,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   int _manualTimeZoneOffsetMinutes = 0;
   bool _obscurePassword = true;
   AppLanguage _selectedLanguage = AppLanguage.system;
+  bool _selectedLocationEnabled = false;
   StorageMode _selectedStorageMode = StorageMode.local;
   AppThemeMode _selectedThemeMode = AppThemeMode.system;
   AppThemePalette _selectedThemePalette = AppThemePalette.slate;
@@ -525,6 +582,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       themePalette: _selectedThemePalette,
       timeZoneMode: _selectedTimeZoneMode,
       manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
+      locationEnabled: _selectedLocationEnabled,
     );
   }
 
@@ -536,6 +594,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _SettingsPreferenceCards(
           config: currentConfig,
           onLanguageChanged: _handleLanguageChanged,
+          onLocationEnabledChanged: _handleLocationEnabledChanged,
           onThemeModeChanged: _handleThemeModeChanged,
           onThemePaletteChanged: _handleThemePaletteChanged,
           onTimeZoneModeChanged: _handleTimeZoneModeChanged,
@@ -662,6 +721,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(webDavConfigProvider.notifier).updateLanguage(newLanguage);
   }
 
+  /// Updates [_selectedLocationEnabled] and persists it immediately.
+  Future<void> _handleLocationEnabledChanged(bool locationEnabled) async {
+    setState(() {
+      _selectedLocationEnabled = locationEnabled;
+      _clearStatusBanner();
+    });
+    await ref
+        .read(webDavConfigProvider.notifier)
+        .updateLocationEnabled(locationEnabled);
+  }
+
   /// Updates [_manualTimeZoneOffsetMinutes] and persists it immediately.
   Future<void> _handleManualTimeZoneOffsetChanged(int newOffsetMinutes) async {
     setState(() {
@@ -734,6 +804,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _selectedThemePalette = config.themePalette;
     _selectedTimeZoneMode = config.timeZoneMode;
     _manualTimeZoneOffsetMinutes = config.manualTimeZoneOffsetMinutes;
+    _selectedLocationEnabled = config.locationEnabled;
     _selectedStorageMode = config.storageMode;
     if (_initialized) {
       return;

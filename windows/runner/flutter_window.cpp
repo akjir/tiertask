@@ -1,7 +1,11 @@
 #include "flutter_window.h"
 
+#include <locationapi.h>
 #include <shobjidl.h>
+#include <wlanapi.h>
+#include <wrl/client.h>
 
+#include <cstdio>
 #include <optional>
 #include <string>
 
@@ -9,6 +13,134 @@
 #include "utils.h"
 
 namespace {
+
+flutter::EncodableList QueryWindowsWifiAccessPoints() {
+  flutter::EncodableList ap_list;
+  HANDLE client_handle = nullptr;
+  DWORD negotiated_version = 0;
+  if (WlanOpenHandle(2, nullptr, &negotiated_version, &client_handle) !=
+          ERROR_SUCCESS ||
+      client_handle == nullptr) {
+    return ap_list;
+  }
+
+  PWLAN_INTERFACE_INFO_LIST interface_list = nullptr;
+  if (WlanEnumInterfaces(client_handle, nullptr, &interface_list) ==
+          ERROR_SUCCESS &&
+      interface_list != nullptr) {
+    for (DWORD i = 0;
+         i < interface_list->dwNumberOfItems && ap_list.size() < 20; ++i) {
+      PWLAN_BSS_LIST bss_list = nullptr;
+      if (WlanGetNetworkBssList(client_handle,
+                                &interface_list->InterfaceInfo[i].InterfaceGuid,
+                                nullptr, dot11_BSS_type_any, FALSE, nullptr,
+                                &bss_list) == ERROR_SUCCESS &&
+          bss_list != nullptr) {
+        for (DWORD j = 0;
+             j < bss_list->dwNumberOfItems && ap_list.size() < 20; ++j) {
+          const WLAN_BSS_ENTRY& entry = bss_list->wlanBssEntries[j];
+          char mac_buf[20];
+          std::snprintf(mac_buf, sizeof(mac_buf),
+                        "%02x:%02x:%02x:%02x:%02x:%02x", entry.dot11Bssid[0],
+                        entry.dot11Bssid[1], entry.dot11Bssid[2],
+                        entry.dot11Bssid[3], entry.dot11Bssid[4],
+                        entry.dot11Bssid[5]);
+          flutter::EncodableMap ap_map{
+              {flutter::EncodableValue("macAddress"),
+               flutter::EncodableValue(std::string(mac_buf))},
+              {flutter::EncodableValue("signalStrength"),
+               flutter::EncodableValue(static_cast<int64_t>(entry.lRssi))},
+          };
+          ap_list.push_back(flutter::EncodableValue(ap_map));
+        }
+        WlanFreeMemory(bss_list);
+      }
+    }
+    WlanFreeMemory(interface_list);
+  }
+
+  WlanCloseHandle(client_handle, nullptr);
+  return ap_list;
+}
+
+flutter::EncodableMap BuildUnavailableWithWifiMap() {
+  flutter::EncodableMap map{
+      {flutter::EncodableValue("status"),
+       flutter::EncodableValue("unavailable")},
+  };
+  flutter::EncodableList wifi_aps = QueryWindowsWifiAccessPoints();
+  if (!wifi_aps.empty()) {
+    map[flutter::EncodableValue("wifiAccessPoints")] =
+        flutter::EncodableValue(wifi_aps);
+  }
+  return map;
+}
+
+flutter::EncodableMap QueryWindowsLocation() {
+  Microsoft::WRL::ComPtr<ILocation> location;
+  HRESULT hr = CoCreateInstance(CLSID_Location, nullptr, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&location));
+  if (FAILED(hr) || !location) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  location->SetDesiredAccuracy(IID_ILatLongReport,
+                               LOCATION_DESIRED_ACCURACY_HIGH);
+
+  IID report_types[] = {IID_ILatLongReport};
+  LOCATION_REPORT_STATUS status = REPORT_NOT_SUPPORTED;
+  hr = location->GetReportStatus(IID_ILatLongReport, &status);
+  if (FAILED(hr) || status == REPORT_NOT_SUPPORTED ||
+      status == REPORT_ACCESS_DENIED) {
+    location->RequestPermissions(nullptr, report_types, 1, TRUE);
+  }
+
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    hr = location->GetReportStatus(IID_ILatLongReport, &status);
+    if (SUCCEEDED(hr) && status == REPORT_RUNNING) {
+      break;
+    }
+    if (status != REPORT_INITIALIZING) {
+      break;
+    }
+    Sleep(120);
+  }
+
+  Microsoft::WRL::ComPtr<ILocationReport> base_report;
+  hr = location->GetReport(IID_ILatLongReport, &base_report);
+  if (FAILED(hr) || !base_report) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  Microsoft::WRL::ComPtr<ILatLongReport> lat_long_report;
+  hr = base_report.As(&lat_long_report);
+  if (FAILED(hr) || !lat_long_report) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  DOUBLE latitude = 0.0;
+  DOUBLE longitude = 0.0;
+  if (FAILED(lat_long_report->GetLatitude(&latitude)) ||
+      FAILED(lat_long_report->GetLongitude(&longitude))) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  DOUBLE error_radius = 0.0;
+  if (SUCCEEDED(lat_long_report->GetErrorRadius(&error_radius)) &&
+      error_radius > 5000.0) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  const char* source =
+      (error_radius > 0.0 && error_radius <= 50.0) ? "gps" : "system";
+  return {
+      {flutter::EncodableValue("status"), flutter::EncodableValue("found")},
+      {flutter::EncodableValue("latitude"), flutter::EncodableValue(latitude)},
+      {flutter::EncodableValue("longitude"),
+       flutter::EncodableValue(longitude)},
+      {flutter::EncodableValue("source"), flutter::EncodableValue(source)},
+  };
+}
 
 std::wstring Utf16FromUtf8(const std::string& utf8_string) {
   if (utf8_string.empty()) {
@@ -133,6 +265,22 @@ bool FlutterWindow::OnCreate() {
         }
       });
 
+  location_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "de.akjir.tiertask/location",
+          &flutter::StandardMethodCodec::GetInstance());
+  location_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        if (call.method_name() == "getLocation") {
+          result->Success(flutter::EncodableValue(QueryWindowsLocation()));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -147,6 +295,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   directory_picker_channel_ = nullptr;
+  location_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

@@ -179,6 +179,7 @@ class WebDavConfig {
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
     this.themePalette = AppThemePalette.slate,
+    this.locationEnabled = false,
     this.timeZoneMode = AppTimeZoneMode.automatic,
     int manualTimeZoneOffsetMinutes = 0,
   }) : storageMode =
@@ -272,6 +273,9 @@ class WebDavConfig {
   /// Selected Material 3 color palette (`slate` or `navy`).
   final AppThemePalette themePalette;
 
+  /// Whether foreground location determination is enabled while the application is running.
+  final bool locationEnabled;
+
   /// Selected time zone resolution mode (`automatic` or `manual`).
   final AppTimeZoneMode timeZoneMode;
 
@@ -317,6 +321,7 @@ class WebDavConfig {
     AppLanguage? language,
     AppThemeMode? themeMode,
     AppThemePalette? themePalette,
+    bool? locationEnabled,
     AppTimeZoneMode? timeZoneMode,
     int? manualTimeZoneOffsetMinutes,
   }) {
@@ -330,6 +335,7 @@ class WebDavConfig {
       language: language ?? this.language,
       themeMode: themeMode ?? this.themeMode,
       themePalette: themePalette ?? this.themePalette,
+      locationEnabled: locationEnabled ?? this.locationEnabled,
       timeZoneMode: timeZoneMode ?? this.timeZoneMode,
       manualTimeZoneOffsetMinutes:
           manualTimeZoneOffsetMinutes ?? this.manualTimeZoneOffsetMinutes,
@@ -470,6 +476,7 @@ class WebDavConfig {
         other.language == language &&
         other.themeMode == themeMode &&
         other.themePalette == themePalette &&
+        other.locationEnabled == locationEnabled &&
         other.timeZoneMode == timeZoneMode &&
         other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes;
   }
@@ -485,6 +492,7 @@ class WebDavConfig {
     language,
     themeMode,
     themePalette,
+    locationEnabled,
     timeZoneMode,
     manualTimeZoneOffsetMinutes,
   );

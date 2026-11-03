@@ -216,5 +216,22 @@
   "errorWorkspaceNameEmpty": "Bitte einen gültigen Namen eingeben (1–128 Zeichen).",
   "errorWorkspaceNameDuplicate": "Ein Arbeitsbereich mit diesem Namen existiert bereits.",
   "errorWorkspaceCannotDeleteLast": "Der letzte verbleibende Arbeitsbereich kann nicht gelöscht werden.",
-  "errorWorkspaceMaxExceeded": "Die maximale Anzahl an Arbeitsbereichen (32) ist erreicht."
+  "errorWorkspaceMaxExceeded": "Die maximale Anzahl an Arbeitsbereichen (32) ist erreicht.",
+  "locationSectionTitle": "Standortbestimmung",
+  "locationSectionDescription": "Bestimmt den aktuellen Ort und die GPS-Koordinaten, solange die App läuft, um Standortbedingungen auszuwerten.",
+  "locationOff": "Aus",
+  "locationOn": "An",
+  "tooltipLocationStatus": "Standortstatus",
+  "locationDialogTitle": "Standortstatus",
+  "locationStatusSearching": "Standort wird gesucht...",
+  "locationStatusFound": "Standort gefunden",
+  "locationStatusUnavailable": "Keine Standortinformationen verfügbar",
+  "locationPlaceLabel": "Ort",
+  "locationCoordinatesLabel": "GPS-Koordinaten",
+  "locationPlaceUnknown": "Unbekannter Ort",
+  "locationSourceLabel": "Quelle",
+  "locationSourceGps": "GPS",
+  "locationSourceSystem": "System / Netzwerk",
+  "locationSourceInternet": "Internet (GeoIP)",
+  "actionRefresh": "Aktualisieren"
 }

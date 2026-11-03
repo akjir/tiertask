@@ -750,4 +750,57 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get errorWorkspaceMaxExceeded =>
       'Die maximale Anzahl an Arbeitsbereichen (32) ist erreicht.';
+
+  @override
+  String get locationSectionTitle => 'Standortbestimmung';
+
+  @override
+  String get locationSectionDescription =>
+      'Bestimmt den aktuellen Ort und die GPS-Koordinaten, solange die App läuft, um Standortbedingungen auszuwerten.';
+
+  @override
+  String get locationOff => 'Aus';
+
+  @override
+  String get locationOn => 'An';
+
+  @override
+  String get tooltipLocationStatus => 'Standortstatus';
+
+  @override
+  String get locationDialogTitle => 'Standortstatus';
+
+  @override
+  String get locationStatusSearching => 'Standort wird gesucht...';
+
+  @override
+  String get locationStatusFound => 'Standort gefunden';
+
+  @override
+  String get locationStatusUnavailable =>
+      'Keine Standortinformationen verfügbar';
+
+  @override
+  String get locationPlaceLabel => 'Ort';
+
+  @override
+  String get locationCoordinatesLabel => 'GPS-Koordinaten';
+
+  @override
+  String get locationPlaceUnknown => 'Unbekannter Ort';
+
+  @override
+  String get locationSourceLabel => 'Quelle';
+
+  @override
+  String get locationSourceGps => 'GPS';
+
+  @override
+  String get locationSourceSystem => 'System / Netzwerk';
+
+  @override
+  String get locationSourceInternet => 'Internet (GeoIP)';
+
+  @override
+  String get actionRefresh => 'Aktualisieren';
 }

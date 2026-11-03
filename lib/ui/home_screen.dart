@@ -19,16 +19,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
+import '../models/location_state.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
+import '../providers/location_providers.dart';
 import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
 import 'edit_labels_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/app_logo.dart';
+import 'widgets/location_status_dialog.dart';
 import 'widgets/quick_add_bar.dart';
 import 'widgets/tier_page_indicator.dart';
 import 'widgets/tier_task_pill.dart';
@@ -754,7 +757,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 }
 
 /// Switches between loading, error, the all-tasks search view, and the horizontal 6-tier [PageView].
-class _LandingContentSwitcher extends StatelessWidget {
+class _LandingContentSwitcher extends ConsumerWidget {
   /// Creates a [_LandingContentSwitcher].
   const _LandingContentSwitcher({
     required this.activeLabel,
@@ -800,8 +803,13 @@ class _LandingContentSwitcher extends StatelessWidget {
   final String searchQuery;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final activeFix = ref.watch(
+      locationStateProvider.select(
+        (state) => state.status == LocationStatus.found ? state.fix : null,
+      ),
+    );
     return boardAsync.when(
       loading: () =>
           Center(child: CircularProgressIndicator(color: colorScheme.primary)),
@@ -812,9 +820,15 @@ class _LandingContentSwitcher extends StatelessWidget {
       ),
       data: (board) {
         final label = activeLabel;
-        final effectiveBoard = label != null
+        final currentLatitude = activeFix?.latitude;
+        final currentLongitude = activeFix?.longitude;
+        final hasCoordinates =
+            currentLatitude != null && currentLongitude != null;
+        final effectiveBoard = (label != null || hasCoordinates)
             ? board.evaluateForContext(
-                activeLabelId: label.id,
+                activeLabelId: label?.id,
+                currentLatitude: currentLatitude,
+                currentLongitude: currentLongitude,
                 evaluationTime: evaluationTime,
                 localEvaluationTime: localEvaluationTime,
               )
@@ -1154,6 +1168,7 @@ class _LandingTopBar extends StatelessWidget {
             isSearching: isSearching,
             onPressed: onToggleSearch,
           ),
+          const TopBarLocationButton(),
         ],
       ),
     );
@@ -1478,6 +1493,7 @@ class _TopBarSearchButton extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return IconButton(
+      key: const ValueKey('top_bar_search_button'),
       tooltip: isSearching
           ? localizations.actionClose
           : localizations.tooltipSearch,

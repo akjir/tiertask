@@ -829,6 +829,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     await updateConfig(updated);
   }
 
+  /// Updates only the [locationEnabled] preference and persists it immediately.
+  Future<void> updateLocationEnabled(bool locationEnabled) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(locationEnabled: locationEnabled);
+    await updateConfig(updated);
+  }
+
   /// Updates only the [manualTimeZoneOffsetMinutes] preference and persists it immediately.
   Future<void> updateManualTimeZoneOffsetMinutes(int offsetMinutes) async {
     final current = state.asData?.value ?? await future;

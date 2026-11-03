@@ -8,10 +8,10 @@
 | Layer | Path | Responsibility |
 | :--- | :--- | :--- |
 | Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, and `TaskTier` localization mappings. |
-| Models | `lib/models/` | Immutable domain data structures (`AppWorkspace`, `WorkspaceSummary`, `WorkspaceException`, `WorkspaceErrorKind`, `TaskTier`, `TaskItem`, `SubtaskItem`, `RepeatUnit`, `TaskRepeatRule`, `ConditionGroup`, `TaskCondition`, `TdfLabel`, `TdfColor`, `TaskBoard`, `TaskBoardSync`, `WorkspaceSyncState`, `AppLanguage`, `AppThemeMode`, `AppThemePalette`, `AppTimeZoneMode`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation, mutation, and entity-level synchronization pipeline. |
+| Models | `lib/models/` | Immutable domain data structures (`AppWorkspace`, `WorkspaceSummary`, `WorkspaceException`, `WorkspaceErrorKind`, `LocationFix`, `LocationSource`, `LocationState`, `LocationStatus`, `TaskTier`, `TaskItem`, `SubtaskItem`, `RepeatUnit`, `TaskRepeatRule`, `ConditionGroup`, `TaskCondition`, `TdfLabel`, `TdfColor`, `TaskBoard`, `TaskBoardSync`, `WorkspaceSyncState`, `AppLanguage`, `AppThemeMode`, `AppThemePalette`, `AppTimeZoneMode`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation, mutation, and entity-level synchronization pipeline. |
 | Services | `lib/services/` | Stateless single-pass $O(N)$ RFC 4648 Base64 codec (`Base64Service`, `Base64Exception`, `Base64ErrorKind`) and TDF lexical scanner, structural parser, and canonical `LF` serializer (`TdfService`, `TdfException`, `TdfErrorKind`). |
-| Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local `.tdf` file reads/writes (`dart:io` `File`), and encrypted workspace and settings persistence (`flutter_secure_storage`). |
-| Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating single-active-workspace unload/load transitions, locale and theme resolution, domain mutations, and repository synchronization. |
+| Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), local `.tdf` file reads/writes (`dart:io` `File`), foreground location channel and bounded reverse-geocoding/GeoIP lookup (`MethodChannel` and `HttpClient`), and encrypted workspace and settings persistence (`flutter_secure_storage`). |
+| Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) coordinating single-active-workspace unload/load transitions, foreground lifecycle-aware location determination, locale and theme resolution, domain mutations, and repository synchronization. |
 | UI | `lib/ui/` | Localized Material 3 screens and modular leaf widgets for Linux, Android, and Windows. |
 
 > [!NOTE]
@@ -48,6 +48,7 @@ tiertask/
 │   │   └── tier_localization_extension.dart
 │   ├── models/
 │   │   ├── app_workspace.dart
+│   │   ├── location_state.dart
 │   │   ├── task_board.dart
 │   │   ├── task_board_sync.dart
 │   │   ├── task_item.dart
@@ -55,10 +56,12 @@ tiertask/
 │   │   ├── tdf_metadata.dart
 │   │   └── webdav_config.dart
 │   ├── providers/
+│   │   ├── location_providers.dart
 │   │   ├── task_providers.dart
 │   │   └── workspace_providers.dart
 │   ├── repositories/
 │   │   ├── local_file_repository.dart
+│   │   ├── location_repository.dart
 │   │   ├── settings_repository.dart
 │   │   └── webdav_repository.dart
 │   ├── services/
@@ -73,6 +76,7 @@ tiertask/
 │       └── widgets/
 │           ├── app_logo.dart
 │           ├── clearable_text_field.dart
+│           ├── location_status_dialog.dart
 │           ├── quick_add_bar.dart
 │           ├── task_editor_conditions_section.dart
 │           ├── task_editor_sections.dart
@@ -82,6 +86,7 @@ tiertask/
 └── test/
     ├── models/
     │   ├── app_workspace_test.dart
+    │   ├── location_state_test.dart
     │   ├── task_board_downgrade_test.dart
     │   ├── task_board_evaluation_test.dart
     │   ├── task_board_lifecycle_test.dart
@@ -89,6 +94,7 @@ tiertask/
     │   └── task_board_sync_test.dart
     ├── repositories/
     │   ├── local_directory_migration_test.dart
+    │   ├── location_repository_test.dart
     │   ├── storage_and_providers_test.dart
     │   └── sync_merge_test.dart
     ├── services/
@@ -101,6 +107,7 @@ tiertask/
         ├── edit_task_screen_test.dart
         ├── home_screen_test.dart
         ├── local_directory_picker_test.dart
+        ├── location_ui_test.dart
         ├── settings_screen_test.dart
         ├── test_helpers.dart
         └── widgets/
@@ -138,7 +145,8 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations and `.tdf` files, defaulting to `Tasks` (`tasks.tdf`), deriving suggested lowercase `.tdf` filenames (`AppWorkspace.suggestFileName`), enforcing unique workspace names and `.tdf` file paths, and serializing workspaces and the active workspace index into a compact `TTW\x01` binary `Uint8List` format (`encodePersistedState`, `decodePersistedState`, `toBytes`, `fromBytes`) with bit-packed enum flags and 16-bit length-prefixed UTF-8 strings. |
+| `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations and `.tdf` files, defaulting to `Tasks` (`tasks.tdf`), deriving suggested lowercase `.tdf` filenames (`AppWorkspace.suggestFileName`), enforcing unique workspace names and `.tdf` file paths, and serializing workspaces and the active workspace index into a compact `TTW\x01` binary `Uint8List` format (`encodePersistedState`, `decodePersistedState`, `toBytes`, `fromBytes`) with bit-packed enum flags, `locationEnabled` bit, and 16-bit length-prefixed UTF-8 strings. |
+| `lib/models/location_state.dart` | Defines immutable `LocationFix`, `LocationSource` (`gps`, `system`, `internet`), `LocationState`, and `LocationStatus` (`disabled`, `searching`, `found`, `unavailable`) for foreground location determination, including 5-decimal WGS-84 coordinate formatting (`formattedCoordinates`), 100-meter Haversine displacement gating (`isWithinDisplacementThreshold`), and 5-minute resume refresh cooldown evaluation (`shouldRefreshOnResume`). |
 | `lib/models/task_tier.dart` | Defines the `TaskTier` enum for the 6 derived tiers (`1` `focus`, `2` `ready`, `3` `planned`, `4` `blocked`, `5` `someday`, `6` `completed`) and WIP soft limits. |
 | `lib/models/tdf_metadata.dart` | Immutable `ConditionGroup` (`day`, `time`, `location`), `TaskCondition` (`DayTaskCondition`, `GlobalResetTaskCondition`, `GroupResetTaskCondition`, `LocationTaskCondition`, `TimeWindowTaskCondition`), `TdfLabel` (including `modifiedAt` and `effectiveModifiedAt`), `TdfColor` hex color utilities, and 10-character Base62 entity identifier generation, validation, and non-conforming ID conversion helpers (`tdfBase62Alphabet`, `tdfBase62TimeModulo`, `encodeTdfBase62Time`, `isValidTaskId`, `isValidLabelId`, `generateTaskId`, `generateLabelId`, `convertLegacyEntityId`) from `TDF_SPEC.md` Sections 2.9 and 4. |
 | `lib/models/task_item.dart` | Immutable `TaskItem`, `SubtaskItem`, `RepeatUnit`, and `TaskRepeatRule` value classes with 10-character Base62 TDF `<task-id>` (`<6xBase62Random><4xBase62Time>`), `priority` flag, UTC `created` / `queued` / `finished` / `modified` timestamps (`modifiedAt`, `effectiveModifiedAt`, `nextModifiedTimestamp`), wall-clock `suspended` timestamp, completion-relative `repeat <count> <days\|weeks\|months>` rule, `labels`, `blocked` dependencies, `conditions`, `subtasks auto-finish`, subtask completion synchronization (`toCompleted`), and strict ISO-8601 date/time helpers. |
@@ -158,6 +166,7 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 | `lib/repositories/local_file_repository.dart` | Native `dart:io` `File` repository reading (`loadTdf`), writing (`saveTdf`), and safely migrating (`moveTdfFile`) the local `.tdf` file (`localFilePath`) with path traversal validation, `maxFileBytes` bounds checking, non-destructive target conflict inspection (rejecting existing files, directories, or symbolic links), Linux/Windows OS error mapping, and native desktop directory selection (`pickDirectory` via `de.akjir.tiertask/directory_picker`). |
+| `lib/repositories/location_repository.dart` | Abstract `LocationRepository`, `PlatformLocationRepository`, and `FakeLocationRepository` isolating native `de.akjir.tiertask/location` `MethodChannel` queries (Android foreground `LocationManager` cache-first lookup with 5-minute freshness and `Geocoder`, Linux `GeoClue2` D-Bus client, and Windows `ILocation` `IID_ILatLongReport`), 100-meter Haversine displacement-gated HTTPS reverse geocoding, and 30-minute cached HTTPS GeoIP desktop fallback. |
 | `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (`flutter_secure_storage`), and `InMemorySettingsRepository` for persisting workspaces and the active workspace in a single atomic Base64-encoded `TTW\x01` binary key (`t2_settings_v1`), loading lightweight `WorkspaceSummary` items (`loadWorkspaceSummaries`), and persisting per-workspace sync baselines (`WorkspaceSyncState` in `t2_sync_v1_<id>`) via `Base64Service`. |
 | `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository executing authenticated HTTP `GET` (`fetchTdf`) and `PUT` (`saveTdf`) operations with localized `WebDavException` error mapping. |
 
@@ -165,7 +174,8 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `appThemeProvider`, `directoryPickerProvider`, `localFileRepositoryProvider`, `supportsDirectoryPickerProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme/palette resolution, runtime theme replacement, atomic local `.tdf` directory migration (`changeLocalFileLocation`), lossless pre-unload flushing (`prepareForWorkspaceUnload`), board loading/unloading, mutations, and local/WebDAV `.tdf` persistence for the active workspace. |
+| `lib/providers/location_providers.dart` | Defines `locationEnabledProvider`, `locationRepositoryProvider`, `locationStateProvider`, and `LocationNotifier` managing foreground-only location determination with startup/enable triggers, 5-minute app-resume cooldown (`minResumeRefreshInterval`), 15-minute passive foreground refresh (`passiveRefreshInterval`), immediate timer cancellation on app pause/hide/detach, and manual refresh (`refreshLocation`). |
+| `lib/providers/task_providers.dart` | Riverpod providers and notifiers (`appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `appThemeProvider`, `directoryPickerProvider`, `localFileRepositoryProvider`, `supportsDirectoryPickerProvider`, `tdfServiceProvider`, `AppThemeNotifier`, `SyncStateNotifier`, `WebDavConfigNotifier`, `TaskNotifier`) orchestrating locale/theme/palette/location preference updates, runtime theme replacement, atomic local `.tdf` directory migration (`changeLocalFileLocation`), lossless pre-unload flushing (`prepareForWorkspaceUnload`), board loading/unloading, mutations, and local/WebDAV `.tdf` persistence for the active workspace. |
 | `lib/providers/workspace_providers.dart` | Defines `activeWorkspaceProvider`, `workspaceSummariesProvider`, `workspaceUnloadCoordinatorProvider` (`WorkspaceUnloadCoordinator`), and `ActiveWorkspaceNotifier`, holding only the single active `AppWorkspace` in memory and orchestrating lossless runtime workspace unload/load switching (`switchWorkspace`), creation (`createWorkspace`), renaming (`renameWorkspace`), deletion (`deleteWorkspace`), and active configuration updates (`updateActiveConfig`). |
 
 ## User Interface
@@ -176,10 +186,11 @@ tiertask/
 | `lib/ui/app_theme.dart` | Single unified application theme definition (`AppTheme` and `AppThemeSet`) implementing `ThemeExtension<AppTheme>` and `toThemeData()` for both the default Chromium-inspired Material 3 `Slate` palette (`AppTheme.slateDark` / `AppTheme.dark`, `AppTheme.slateLight` / `AppTheme.light`, `AppThemeSet.slate`) and the `Navy` palette (`AppTheme.navyDark`, `AppTheme.navyLight`, `AppThemeSet.navy`), providing all semantic surface, accent, tonal container (`primaryContainer`, `onPrimaryContainer`, `secondaryContainer`, `onSecondaryContainer`), text, indicator, and logo gradient tokens consumed across the UI and replaceable at runtime via `appThemeProvider`. |
 | `lib/ui/edit_labels_screen.dart` | Dedicated Google Keep style label management screen (`EditLabelsScreen`) opened from the navigation drawer's `Edit` button or `+ Create new label` entry, supporting new label creation, open task count badges (`Badge.count`) per label, inline label renaming, and label deletion. |
 | `lib/ui/edit_task_screen.dart` | Dedicated panel screen (`EditTaskScreen` and `openEditTaskScreen`) grouped into `SettingsScreen`-style Material 3 section cards, used for both extended task creation (`QuickAddBar` `Advanced` button) and editing an existing task (`TierTaskPill` edit button), enforcing non-empty and non-duplicate task names and editing notes, scheduling mode (`Priority`, `Someday`, `Suspended` with optional timestamp and Material 3 date/time pickers, and `Repeat` with interval count and `days`/`weeks`/`months` unit selection), labels, subtasks (`auto-finish`, locking completed subtasks against toggling when editing a completed task while allowing subtask deletion and immediately locking newly added subtasks as completed), search-based multi-select prerequisite tasks (`blocked` with cycle prevention), and activation conditions (`condition any`, `day`, `time` with 24-hour time pickers, and `location` rules). |
-| `lib/ui/home_screen.dart` | Primary landing page screen displaying a top navigation bar (`_LandingTopBar`) with the menu button on the left, the active label name centered in the middle when a label filter is selected (smoothly animating to the left next to the menu button with the inline search field expanding between the label name and the search/close button when search is opened), and the search toggle on the right; a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) with the centered uppercase tier section heading, an all-tasks search view (`_AllTasksSearchView` displaying `ALL TASKS` / `ALLE AUFGABEN` and listing all tasks across `Focus` through `Completed` in tier order filtered by the active label and search query before returning to the previous tier pane when search closes), minimalist task pill cards (`TierTaskPill`) or empty-state card (`_EmptyTierCard`); a bottom `TierPageIndicator`; floating action buttons (`_LandingFloatingButtons`) with a smaller conditional WebDAV sync button (`_FloatingSyncButton` in `WebDAV` / `Both` mode) right-aligned above the circular task-add button that both hide when the task-add button transforms into the inline bottom `QuickAddBar`; and a top-left navigation drawer (`_LandingDrawer`) featuring the active workspace switcher card (`DrawerWorkspaceCard` between `Divider`s beneath `_DrawerHeader`), a Google Keep style `Labels` section (top `Edit` button, selectable label filter pills with open task count badges, and `+ Create new label` entry) alongside synchronization, TDF preview, and settings actions without tier navigation items. |
-| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), Material 3 color palette (`Slate`, `Navy`), local time zone (`Automatic` or `Manual` UTC offset), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name and desktop directory selection (`Change Directory` on Linux and Windows), and WebDAV endpoint parameters, with a fixed bottom action footer (`Save` and `Test Connection / Sync Now` matching `EditTaskScreen`) and a floating status/error banner (`_SettingsStatusBanner`) positioned directly above the footer. |
+| `lib/ui/home_screen.dart` | Primary landing page screen displaying a top navigation bar (`_LandingTopBar`) with the menu button on the left, the active label name centered in the middle when a label filter is selected (smoothly animating to the left next to the menu button with the inline search field expanding between the label name and the search/close button when search is opened), the search toggle on the right, and the conditional location status icon (`TopBarLocationButton`) immediately to the right of the search icon when `locationEnabled` is `true`; a unified layout across all 6 horizontal `PageView` tier panels (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) dynamically evaluated with live foreground GPS coordinates (`board.evaluateForContext`), with the centered uppercase tier section heading, an all-tasks search view (`_AllTasksSearchView` displaying `ALL TASKS` / `ALLE AUFGABEN` and listing all tasks across `Focus` through `Completed` in tier order filtered by the active label and search query before returning to the previous tier pane when search closes), minimalist task pill cards (`TierTaskPill`) or empty-state card (`_EmptyTierCard`); a bottom `TierPageIndicator`; floating action buttons (`_LandingFloatingButtons`) with a smaller conditional WebDAV sync button (`_FloatingSyncButton` in `WebDAV` / `Both` mode) right-aligned above the circular task-add button that both hide when the task-add button transforms into the inline bottom `QuickAddBar`; and a top-left navigation drawer (`_LandingDrawer`) featuring the active workspace switcher card (`DrawerWorkspaceCard` between `Divider`s beneath `_DrawerHeader`), a Google Keep style `Labels` section (top `Edit` button, selectable label filter pills with open task count badges, and `+ Create new label` entry) alongside synchronization, TDF preview, and settings actions without tier navigation items. |
+| `lib/ui/settings_screen.dart` | Configuration screen for display language (`System`, `English`, `Deutsch`), color theme (`System`, `Light`, `Dark`), Material 3 color palette (`Slate`, `Navy`), local time zone (`Automatic` or `Manual` UTC offset), foreground location determination (`Off` / `On`, default `Off`), storage mode (`Local`, `WebDAV`, `Both`), local `.tdf` file name and desktop directory selection (`Change Directory` on Linux and Windows), and WebDAV endpoint parameters, with a fixed bottom action footer (`Save` and `Test Connection / Sync Now` matching `EditTaskScreen`) and a floating status/error banner (`_SettingsStatusBanner`) positioned directly above the footer. |
 | `lib/ui/widgets/app_logo.dart` | Vector application logo widget (`AppLogo` and `_AppLogoPainter`) rendering the stacked tier bars and completion checkmark badge in the navigation drawer header. |
 | `lib/ui/widgets/clearable_text_field.dart` | Reusable text input widget (`ClearableTextField`) wrapping `TextField` or `TextFormField` that displays a right-side clear icon button (`Icons.close_rounded`) when focused, composes with any existing `InputDecoration.suffixIcon`, clears the `TextEditingController`, notifies `onChanged` and `onCleared`, and keeps focus on the input. |
+| `lib/ui/widgets/location_status_dialog.dart` | Header location status icon button (`TopBarLocationButton` rendering `searching`, `found`, and `unavailable` states) and popup status dialog (`LocationStatusDialog` and `showLocationStatusDialog`) displaying the current location status, determined place name, GPS coordinates, location source (`GPS`, `System / Network`, `Internet (GeoIP)`), and a `Refresh` button. |
 | `lib/ui/widgets/quick_add_bar.dart` | Inline bottom task creation bar (`QuickAddBar`) replacing the add button when opened, featuring a borderless title input field, mutually exclusive `Priority` and `Someday` icon buttons, a `Labels` icon button that expands a multi-select floating overlay menu (`OverlayPortal` and `CompositedTransformFollower`) upward above the bar without shifting `TierPageIndicator`, an `Advanced` icon button opening `EditTaskScreen`, and a `Cancel` icon button, and automatically stacking the title input above the action buttons when the viewport width is at or below the Pixel 9 Pro width/aspect-ratio threshold. |
 | `lib/ui/widgets/task_editor_conditions_section.dart` | Activation conditions card (`TaskEditorConditionsSection`) for `EditTaskScreen`, rendering global `condition any`, weekday (`day`), time window (`time` with 24-hour Material 3 time picker buttons), and GPS location (`location`) controls. |
 | `lib/ui/widgets/task_editor_sections.dart` | Reusable `SettingsScreen`-style section card (`TaskEditorSectionCard`), form cards (`TaskEditorDetailsCard`, `TaskEditorSchedulingCard`, `TaskEditorContextSection`, `TaskEditorSubtasksSection`, `TaskEditorBlockedBySection`), date/time and recurrence fields (`TaskEditorSuspendedField`, `TaskEditorRepeatField`), prerequisite name search, and action widgets (`TaskEditorTitleField`, `TaskEditorNoteField`, `TaskEditorModeRow`, `TaskEditorActionsRow`, `TaskEditorChip`) for `EditTaskScreen`. |

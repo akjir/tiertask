@@ -1399,6 +1399,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Maximum number of workspaces (32) reached.'**
   String get errorWorkspaceMaxExceeded;
+
+  /// Section heading for foreground location determination settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Location Determination'**
+  String get locationSectionTitle;
+
+  /// Helper description explaining foreground-only location determination.
+  ///
+  /// In en, this message translates to:
+  /// **'Determine your current place and GPS coordinates while the app is running to evaluate location conditions.'**
+  String get locationSectionDescription;
+
+  /// Option label to disable location determination.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get locationOff;
+
+  /// Option label to enable foreground location determination.
+  ///
+  /// In en, this message translates to:
+  /// **'On'**
+  String get locationOn;
+
+  /// Tooltip for the top bar button that opens the location status popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Location status'**
+  String get tooltipLocationStatus;
+
+  /// Title of the popup dialog displaying the current location status.
+  ///
+  /// In en, this message translates to:
+  /// **'Location Status'**
+  String get locationDialogTitle;
+
+  /// Status message shown while foreground location determination is in progress.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching for location...'**
+  String get locationStatusSearching;
+
+  /// Status message shown when the current location has been determined.
+  ///
+  /// In en, this message translates to:
+  /// **'Location found'**
+  String get locationStatusFound;
+
+  /// Status message shown when location determination is active but no location could be determined.
+  ///
+  /// In en, this message translates to:
+  /// **'No location information available'**
+  String get locationStatusUnavailable;
+
+  /// Label above the determined place name in the location status popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Place'**
+  String get locationPlaceLabel;
+
+  /// Label above the GPS coordinates in the location status popup.
+  ///
+  /// In en, this message translates to:
+  /// **'GPS Coordinates'**
+  String get locationCoordinatesLabel;
+
+  /// Fallback label shown when GPS coordinates are found without a resolved place name.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown place'**
+  String get locationPlaceUnknown;
+
+  /// Label above the location source in the location status popup.
+  ///
+  /// In en, this message translates to:
+  /// **'Source'**
+  String get locationSourceLabel;
+
+  /// Source label for hardware GPS or GNSS satellite location fixes.
+  ///
+  /// In en, this message translates to:
+  /// **'GPS'**
+  String get locationSourceGps;
+
+  /// Source label for OS or network location services (Wi-Fi, cell, GeoClue2, or Windows Location API).
+  ///
+  /// In en, this message translates to:
+  /// **'System / Network'**
+  String get locationSourceSystem;
+
+  /// Source label for IP-based GeoIP fallback location fixes.
+  ///
+  /// In en, this message translates to:
+  /// **'Internet (GeoIP)'**
+  String get locationSourceInternet;
+
+  /// Button label to manually refresh the current location.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get actionRefresh;
 }
 
 class _AppLocalizationsDelegate

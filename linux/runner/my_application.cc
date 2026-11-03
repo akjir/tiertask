@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <gio/gio.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -11,6 +12,7 @@ struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
   FlMethodChannel* directory_picker_channel;
+  FlMethodChannel* location_channel;
   GtkWindow* main_window;
 };
 
@@ -74,6 +76,240 @@ static void on_directory_picker_method_call(FlMethodChannel* channel,
   g_signal_connect(dialog, "response", G_CALLBACK(on_directory_dialog_response),
                    g_object_ref(method_call));
   gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));
+}
+
+static FlValue* build_unavailable_location_map() {
+  FlValue* map = fl_value_new_map();
+  fl_value_set_string_take(map, "status", fl_value_new_string("unavailable"));
+  return map;
+}
+
+static gboolean read_geoclue_double_property(GDBusConnection* bus,
+                                             const gchar* object_path,
+                                             const gchar* property_name,
+                                             gdouble* out_value) {
+  g_autoptr(GVariant) reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", object_path,
+      "org.freedesktop.DBus.Properties", "Get",
+      g_variant_new("(ss)", "org.freedesktop.GeoClue2.Location", property_name),
+      G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  if (reply == nullptr) {
+    return FALSE;
+  }
+  g_autoptr(GVariant) boxed = nullptr;
+  g_variant_get(reply, "(v)", &boxed);
+  if (boxed == nullptr ||
+      !g_variant_is_of_type(boxed, G_VARIANT_TYPE_DOUBLE)) {
+    return FALSE;
+  }
+  *out_value = g_variant_get_double(boxed);
+  return TRUE;
+}
+
+static FlValue* query_network_manager_wifi_aps(GDBusConnection* bus) {
+  FlValue* ap_list = fl_value_new_list();
+  g_autoptr(GVariant) dev_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager",
+      "org.freedesktop.NetworkManager", "GetDevices", nullptr,
+      G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  if (dev_reply == nullptr) {
+    return ap_list;
+  }
+
+  g_autoptr(GVariantIter) dev_iter = nullptr;
+  g_variant_get(dev_reply, "(ao)", &dev_iter);
+  const gchar* dev_path = nullptr;
+  while (g_variant_iter_loop(dev_iter, "&o", &dev_path) &&
+         fl_value_get_length(ap_list) < 20) {
+    g_autoptr(GVariant) ap_reply = g_dbus_connection_call_sync(
+        bus, "org.freedesktop.NetworkManager", dev_path,
+        "org.freedesktop.NetworkManager.Device.Wireless", "GetAllAccessPoints",
+        nullptr, G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE, 1000, nullptr,
+        nullptr);
+    if (ap_reply == nullptr) {
+      continue;
+    }
+    g_autoptr(GVariantIter) ap_iter = nullptr;
+    g_variant_get(ap_reply, "(ao)", &ap_iter);
+    const gchar* ap_path = nullptr;
+    while (g_variant_iter_loop(ap_iter, "&o", &ap_path) &&
+           fl_value_get_length(ap_list) < 20) {
+      g_autoptr(GVariant) hw_reply = g_dbus_connection_call_sync(
+          bus, "org.freedesktop.NetworkManager", ap_path,
+          "org.freedesktop.DBus.Properties", "Get",
+          g_variant_new("(ss)", "org.freedesktop.NetworkManager.AccessPoint",
+                        "HwAddress"),
+          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, nullptr);
+      if (hw_reply == nullptr) {
+        continue;
+      }
+      g_autoptr(GVariant) hw_boxed = nullptr;
+      g_variant_get(hw_reply, "(v)", &hw_boxed);
+      if (hw_boxed == nullptr ||
+          !g_variant_is_of_type(hw_boxed, G_VARIANT_TYPE_STRING)) {
+        continue;
+      }
+      const gchar* bssid = g_variant_get_string(hw_boxed, nullptr);
+      if (bssid == nullptr || bssid[0] == '\0') {
+        continue;
+      }
+
+      gint64 dbm = -70;
+      g_autoptr(GVariant) str_reply = g_dbus_connection_call_sync(
+          bus, "org.freedesktop.NetworkManager", ap_path,
+          "org.freedesktop.DBus.Properties", "Get",
+          g_variant_new("(ss)", "org.freedesktop.NetworkManager.AccessPoint",
+                        "Strength"),
+          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, nullptr);
+      if (str_reply != nullptr) {
+        g_autoptr(GVariant) str_boxed = nullptr;
+        g_variant_get(str_reply, "(v)", &str_boxed);
+        if (str_boxed != nullptr &&
+            g_variant_is_of_type(str_boxed, G_VARIANT_TYPE_BYTE)) {
+          guint8 pct = g_variant_get_byte(str_boxed);
+          dbm = static_cast<gint64>(pct / 2) - 100;
+        }
+      }
+
+      FlValue* ap_map = fl_value_new_map();
+      fl_value_set_string_take(ap_map, "macAddress",
+                               fl_value_new_string(bssid));
+      fl_value_set_string_take(ap_map, "signalStrength",
+                               fl_value_new_int(dbm));
+      fl_value_append_take(ap_list, ap_map);
+    }
+  }
+  return ap_list;
+}
+
+static FlValue* build_unavailable_with_wifi_map(GDBusConnection* bus) {
+  FlValue* map = build_unavailable_location_map();
+  if (bus != nullptr) {
+    FlValue* wifi_aps = query_network_manager_wifi_aps(bus);
+    if (fl_value_get_length(wifi_aps) > 0) {
+      fl_value_set_string_take(map, "wifiAccessPoints", wifi_aps);
+    } else {
+      fl_value_unref(wifi_aps);
+    }
+  }
+  return map;
+}
+
+static FlValue* query_geoclue2_location() {
+  g_autoptr(GDBusConnection) bus =
+      g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, nullptr);
+  if (bus == nullptr) {
+    return build_unavailable_location_map();
+  }
+
+  g_autoptr(GVariant) client_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", "/org/freedesktop/GeoClue2/Manager",
+      "org.freedesktop.GeoClue2.Manager", "GetClient", nullptr,
+      G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  if (client_reply == nullptr) {
+    return build_unavailable_with_wifi_map(bus);
+  }
+
+  const gchar* client_path = nullptr;
+  g_variant_get(client_reply, "(&o)", &client_path);
+  if (client_path == nullptr || g_strcmp0(client_path, "/") == 0) {
+    return build_unavailable_with_wifi_map(bus);
+  }
+
+  g_autoptr(GVariant) desktop_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.DBus.Properties", "Set",
+      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client", "DesktopId",
+                    g_variant_new_string(APPLICATION_ID)),
+      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  g_autoptr(GVariant) acc_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.DBus.Properties", "Set",
+      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client",
+                    "RequestedAccuracyLevel", g_variant_new_uint32(8)),
+      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  g_autoptr(GVariant) dist_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.DBus.Properties", "Set",
+      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client",
+                    "DistanceThreshold", g_variant_new_uint32(100)),
+      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  g_autoptr(GVariant) time_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.DBus.Properties", "Set",
+      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client",
+                    "TimeThreshold", g_variant_new_uint32(300)),
+      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+
+  g_autoptr(GVariant) start_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.GeoClue2.Client", "Start", nullptr, nullptr,
+      G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+  if (start_reply == nullptr) {
+    return build_unavailable_with_wifi_map(bus);
+  }
+
+  gdouble latitude = 0.0;
+  gdouble longitude = 0.0;
+  gdouble accuracy = 100000.0;
+  gboolean has_coords = FALSE;
+
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    g_autoptr(GVariant) loc_prop_reply = g_dbus_connection_call_sync(
+        bus, "org.freedesktop.GeoClue2", client_path,
+        "org.freedesktop.DBus.Properties", "Get",
+        g_variant_new("(ss)", "org.freedesktop.GeoClue2.Client", "Location"),
+        G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+    const gchar* location_path = nullptr;
+    g_autoptr(GVariant) loc_boxed = nullptr;
+    if (loc_prop_reply != nullptr) {
+      g_variant_get(loc_prop_reply, "(v)", &loc_boxed);
+      if (loc_boxed != nullptr &&
+          g_variant_is_of_type(loc_boxed, G_VARIANT_TYPE_OBJECT_PATH)) {
+        location_path = g_variant_get_string(loc_boxed, nullptr);
+      }
+    }
+    if (location_path != nullptr && g_strcmp0(location_path, "/") != 0 &&
+        read_geoclue_double_property(bus, location_path, "Latitude",
+                                     &latitude) &&
+        read_geoclue_double_property(bus, location_path, "Longitude",
+                                     &longitude)) {
+      read_geoclue_double_property(bus, location_path, "Accuracy", &accuracy);
+      has_coords = (accuracy <= 5000.0);
+      break;
+    }
+    g_usleep(120000);
+  }
+
+  g_autoptr(GVariant) stop_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.GeoClue2.Client", "Stop", nullptr, nullptr,
+      G_DBUS_CALL_FLAGS_NONE, 1000, nullptr, nullptr);
+
+  if (!has_coords) {
+    return build_unavailable_with_wifi_map(bus);
+  }
+
+  FlValue* map = fl_value_new_map();
+  fl_value_set_string_take(map, "status", fl_value_new_string("found"));
+  fl_value_set_string_take(map, "latitude", fl_value_new_float(latitude));
+  fl_value_set_string_take(map, "longitude", fl_value_new_float(longitude));
+  fl_value_set_string_take(map, "source", fl_value_new_string("system"));
+  return map;
+}
+
+static void on_location_method_call(FlMethodChannel* channel,
+                                    FlMethodCall* method_call,
+                                    gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(method, "getLocation") == 0) {
+    g_autoptr(FlValue) result = query_geoclue2_location();
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  fl_method_call_respond(method_call, response, nullptr);
 }
 
 // Called when first Flutter frame received.
@@ -149,12 +385,17 @@ static void my_application_activate(GApplication* application) {
 
   self->main_window = window;
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  FlBinaryMessenger* messenger =
+      fl_engine_get_binary_messenger(fl_view_get_engine(view));
   self->directory_picker_channel = fl_method_channel_new(
-      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
-      "de.akjir.tiertask/directory_picker", FL_METHOD_CODEC(codec));
+      messenger, "de.akjir.tiertask/directory_picker", FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(
       self->directory_picker_channel, on_directory_picker_method_call, self,
       nullptr);
+  self->location_channel = fl_method_channel_new(
+      messenger, "de.akjir.tiertask/location", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->location_channel, on_location_method_call, self, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -202,6 +443,7 @@ static void my_application_shutdown(GApplication* application) {
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_object(&self->directory_picker_channel);
+  g_clear_object(&self->location_channel);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
