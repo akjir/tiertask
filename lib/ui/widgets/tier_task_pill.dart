@@ -63,8 +63,8 @@ class _AnimatedSubtasksSection extends StatelessWidget {
   /// Whether the subtask list is currently expanded.
   final bool isExpanded;
 
-  /// Callback invoked with the zero-based step index when a subtask row is tapped.
-  final ValueChanged<int> onToggleSubtask;
+  /// Callback invoked with the zero-based step index when a subtask row is tapped, or `null` when locked.
+  final ValueChanged<int>? onToggleSubtask;
 
   /// Ordered checklist steps belonging to [taskId].
   final List<SubtaskItem> subtasks;
@@ -111,8 +111,8 @@ class _SubtaskStepsColumn extends StatelessWidget {
     required this.onToggleSubtask,
   });
 
-  /// Callback invoked with the zero-based step index when a subtask row is tapped.
-  final ValueChanged<int> onToggleSubtask;
+  /// Callback invoked with the zero-based step index when a subtask row is tapped, or `null` when locked.
+  final ValueChanged<int>? onToggleSubtask;
 
   /// Ordered checklist steps belonging to [taskId].
   final List<SubtaskItem> subtasks;
@@ -123,6 +123,7 @@ class _SubtaskStepsColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dividerColor = Theme.of(context).dividerColor;
+    final toggleCallback = onToggleSubtask;
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: dividerColor, width: 1)),
@@ -137,7 +138,7 @@ class _SubtaskStepsColumn extends StatelessWidget {
               _TierSubtaskStepRow(
                 stepKey: ValueKey('subtask_step_${taskId}_$i'),
                 subtask: subtasks[i],
-                onTap: () => onToggleSubtask(i),
+                onTap: toggleCallback != null ? () => toggleCallback(i) : null,
               ),
           ],
         ),
@@ -191,8 +192,8 @@ class _TierSubtaskStepRow extends StatelessWidget {
     required this.onTap,
   });
 
-  /// Callback invoked when the subtask row is tapped to check or uncheck it.
-  final VoidCallback onTap;
+  /// Callback invoked when the subtask row is tapped to check or uncheck it, or `null` when locked.
+  final VoidCallback? onTap;
 
   /// Deterministic widget key for the subtask row.
   final Key stepKey;
@@ -587,9 +588,11 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill> {
               isExpanded: _isExpanded && hasSubtasks,
               subtasks: task.subtasks,
               taskId: task.id,
-              onToggleSubtask: (stepIndex) => ref
-                  .read(taskNotifierProvider.notifier)
-                  .toggleSubtask(task.id, stepIndex),
+              onToggleSubtask: widget.isCompleted
+                  ? null
+                  : (stepIndex) => ref
+                        .read(taskNotifierProvider.notifier)
+                        .toggleSubtask(task.id, stepIndex),
             ),
           ],
         ),

@@ -262,6 +262,9 @@ class TaskBoard {
     final isDone =
         targetTier == TaskTier.completed ||
         (autoCompleted && !isRecurringAutoCompletion);
+    final effectiveSubtasks = isDone
+        ? _setAllSubtasksCompleted(cleanSubtasks, isCompleted: true)
+        : cleanSubtasks;
     final isBlocked = targetTier == TaskTier.blocked && !isDone;
     final effectiveSuspendedAt = isDone
         ? null
@@ -298,7 +301,7 @@ class TaskBoard {
       labelIds: labelIds,
       conditions: cleanConditions,
       subtasksAutoFinish: subtasksAutoFinish,
-      subtasks: cleanSubtasks,
+      subtasks: effectiveSubtasks,
     );
     final newTask = isRecurringAutoCompletion
         ? _rescheduleRecurringTask(
@@ -419,12 +422,16 @@ class TaskBoard {
       return this;
     }
 
+    final wasCompleted = task.isCompleted || task.completedAt != null;
     final blockedTask = task.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
       isPriority: false,
       queuedAt: task.queuedAt ?? now,
       suspendedAt: suspendedUntil ?? TaskItem.defaultSuspendedAt,
+      subtasks: wasCompleted
+          ? _setAllSubtasksCompleted(task.subtasks, isCompleted: false)
+          : task.subtasks,
       modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
 
@@ -687,6 +694,7 @@ class TaskBoard {
       queuedAt: isSomeday ? null : now,
       clearQueuedAt: isSomeday,
       isPriority: isFocus,
+      subtasks: _setAllSubtasksCompleted(existing.subtasks, isCompleted: false),
       modifiedAt: TaskItem.nextModifiedTimestamp(
         now,
         existing.effectiveModifiedAt,
@@ -724,11 +732,15 @@ class TaskBoard {
       return this;
     }
 
+    final wasCompleted = existing.isCompleted || existing.completedAt != null;
     final scheduled = existing.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
       queuedAt: now,
       isPriority: isPriority || existing.isPriority,
+      subtasks: wasCompleted
+          ? _setAllSubtasksCompleted(existing.subtasks, isCompleted: false)
+          : existing.subtasks,
       modifiedAt: TaskItem.nextModifiedTimestamp(
         now,
         existing.effectiveModifiedAt,
@@ -772,7 +784,11 @@ class TaskBoard {
     );
     final tier = findTierOfTask(taskId);
     final task = findTask(taskId);
-    if (tier == null || task == null) {
+    if (tier == null ||
+        task == null ||
+        tier == TaskTier.completed ||
+        task.isCompleted ||
+        task.completedAt != null) {
       return this;
     }
     if (stepIndex < 0 || stepIndex >= task.subtasks.length) {
@@ -1014,6 +1030,11 @@ class TaskBoard {
         targetTier == TaskTier.completed ||
         (autoCompleted && !isRecurringAutoCompletion) ||
         (targetTier == null && wasCompleted);
+    final effectiveSubtasks = isRestoringCompleted
+        ? _setAllSubtasksCompleted(cleanSubtasks, isCompleted: false)
+        : (isDone
+              ? _setAllSubtasksCompleted(cleanSubtasks, isCompleted: true)
+              : cleanSubtasks);
     final isBlocked = !isDone && targetTier == TaskTier.blocked;
     final effectiveSuspendedAt = isDone || clearSuspendedAt
         ? null
@@ -1066,7 +1087,7 @@ class TaskBoard {
       labelIds: labelIds,
       conditions: conditions,
       subtasksAutoFinish: effectiveAutoFinish,
-      subtasks: cleanSubtasks,
+      subtasks: effectiveSubtasks,
       modifiedAt: TaskItem.nextModifiedTimestamp(
         now,
         existing.effectiveModifiedAt,
@@ -1723,10 +1744,10 @@ class TaskBoard {
     );
     final localOffset = localNow.difference(now);
     final nextDueUtc = nextDueLocal.subtract(localOffset);
-    final resetSubtasks = <SubtaskItem>[
-      for (final step in task.subtasks)
-        step.isCompleted ? step.copyWith(isCompleted: false) : step,
-    ];
+    final resetSubtasks = _setAllSubtasksCompleted(
+      task.subtasks,
+      isCompleted: false,
+    );
     final nextModified =
         preserveModifiedAt ??
         TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt);
@@ -1879,6 +1900,22 @@ class TaskBoard {
       else
         ...locationRules,
     ]);
+  }
+
+  /// Returns a list of [subtasks] with every step's `isCompleted` state set to [isCompleted].
+  static List<SubtaskItem> _setAllSubtasksCompleted(
+    List<SubtaskItem> subtasks, {
+    required bool isCompleted,
+  }) {
+    if (subtasks.isEmpty) {
+      return subtasks;
+    }
+    return <SubtaskItem>[
+      for (final step in subtasks)
+        step.isCompleted == isCompleted
+            ? step
+            : step.copyWith(isCompleted: isCompleted),
+    ];
   }
 
   /// Shifts colliding tasks in [plannedList] belonging to [isPriorityGroup] forward by `+00:00:01` per Section 6.3 Step 3.

@@ -849,8 +849,8 @@ class TaskEditorSubtasksSection extends StatelessWidget {
   /// Callback to toggle `subtasks auto-finish`.
   final VoidCallback onToggleAutoFinish;
 
-  /// Callback to toggle completion of the subtask step at the given index.
-  final ValueChanged<int> onToggleSubtaskStep;
+  /// Callback to toggle completion of the subtask step at the given index, or `null` when locked.
+  final ValueChanged<int>? onToggleSubtaskStep;
 
   /// Controller for the subtask input field.
   final TextEditingController subtaskController;
@@ -865,6 +865,7 @@ class TaskEditorSubtasksSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final appTheme = AppTheme.of(context);
+    final toggleCallback = onToggleSubtaskStep;
     return TaskEditorSectionCard(
       cardKey: const ValueKey('task_editor_subtasks_card'),
       icon: Icons.checklist_rounded,
@@ -886,7 +887,7 @@ class TaskEditorSubtasksSection extends StatelessWidget {
               index: i,
               subtask: subtasks[i],
               onRemove: () => onRemoveSubtask(i),
-              onToggle: () => onToggleSubtaskStep(i),
+              onToggle: toggleCallback != null ? () => toggleCallback(i) : null,
             ),
           _TaskEditorSubtaskInputRow(
             controller: subtaskController,
@@ -1232,8 +1233,8 @@ class _TaskEditorSubtaskRow extends StatelessWidget {
   /// Callback to remove this subtask.
   final VoidCallback onRemove;
 
-  /// Callback to toggle completion of this subtask.
-  final VoidCallback onToggle;
+  /// Callback to toggle completion of this subtask, or `null` when locked.
+  final VoidCallback? onToggle;
 
   /// Subtask item to display.
   final SubtaskItem subtask;

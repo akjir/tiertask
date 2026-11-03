@@ -534,6 +534,83 @@ task 000001OkD2 {
         reason: 'Editing a completed task must default to Planned (Someday unselected) per Section 6.5',
       );
 
+      final editorToggleSubtask0 = find.byKey(
+        const ValueKey('task_editor_toggle_subtask_0'),
+      );
+      expect(
+        find.descendant(
+          of: editorToggleSubtask0,
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Completed subtask must appear checked in EditTaskScreen',
+      );
+      await tester.tap(editorToggleSubtask0);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: editorToggleSubtask0,
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Completed subtask of a completed task cannot be unlocked in EditTaskScreen',
+      );
+
+      final subtaskInputFinder = find.byKey(
+        const ValueKey('task_editor_subtask_input'),
+      );
+      await tester.ensureVisible(subtaskInputFinder);
+      await tester.pumpAndSettle();
+      await tester.tap(subtaskInputFinder);
+      await tester.pumpAndSettle();
+      await tester.enterText(subtaskInputFinder, 'Verify backup key');
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('task_editor_subtask_add_button')),
+      );
+      await tester.pumpAndSettle();
+
+      final editorToggleSubtask1 = find.byKey(
+        const ValueKey('task_editor_toggle_subtask_1'),
+      );
+      expect(
+        find.descendant(
+          of: editorToggleSubtask1,
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Adding a new subtask to a completed task in EditTaskScreen must immediately mark it as completed and locked',
+      );
+      await tester.tap(editorToggleSubtask1);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: editorToggleSubtask1,
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Newly added subtask in a completed task must also be locked and cannot be unlocked in EditTaskScreen',
+      );
+
+      final removeSubtask0Finder = find.byKey(
+        const ValueKey('task_editor_remove_subtask_0'),
+      );
+      await tester.ensureVisible(removeSubtask0Finder);
+      await tester.pumpAndSettle();
+      await tester.tap(removeSubtask0Finder);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Generate keypair'),
+        findsNothing,
+        reason: 'Deleting a subtask on a completed task in EditTaskScreen must be allowed',
+      );
+      expect(
+        find.text('Verify backup key'),
+        findsOneWidget,
+        reason:
+            'Newly added subtask must remain after deleting the first subtask',
+      );
+
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
 
@@ -545,6 +622,16 @@ task 000001OkD2 {
       );
       expect(board.focus.single.id, equals(rotateTaskId));
       expect(board.focus.single.isPriority, isFalse);
+      expect(
+        board.focus.single.subtasks.map((step) => step.title),
+        equals(['Verify backup key']),
+      );
+      expect(
+        board.focus.single.subtasks.single.isCompleted,
+        isFalse,
+        reason:
+            'Restoring the completed task must unlock its remaining subtasks',
+      );
 
       await container
           .read(taskNotifierProvider.notifier)

@@ -93,8 +93,18 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   final TextEditingController _timeStartController = TextEditingController();
   late final TextEditingController _titleController;
 
+  /// Whether the subtask input field currently contains non-whitespace text.
   bool get _hasSubtaskText => _subtaskController.text.trim().isNotEmpty;
 
+  /// Whether [EditTaskScreen] is currently editing a completed task.
+  bool get _isCompletedTask {
+    if (widget.initialTask case final task?) {
+      return task.isCompleted || task.completedAt != null;
+    }
+    return false;
+  }
+
+  /// Whether [EditTaskScreen] is editing an existing task rather than creating a new task.
   bool get _isEditMode => widget.initialTask != null;
 
   @override
@@ -225,7 +235,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       return;
     }
     setState(() {
-      _subtasks.add(SubtaskItem(title: text));
+      _subtasks.add(SubtaskItem(title: text, isCompleted: _isCompletedTask));
       _subtaskController.clear();
     });
   }
@@ -348,7 +358,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           onAddSubtask: _addSubtask,
           onRemoveSubtask: _removeSubtask,
           onToggleAutoFinish: _toggleAutoFinish,
-          onToggleSubtaskStep: _toggleSubtaskStep,
+          onToggleSubtaskStep: _isCompletedTask ? null : _toggleSubtaskStep,
         ),
         if (candidateTasks.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -806,7 +816,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final pendingSubtask = _subtaskController.text.trim();
     final effectiveSubtasks = <SubtaskItem>[
       ..._subtasks,
-      if (pendingSubtask.isNotEmpty) SubtaskItem(title: pendingSubtask),
+      if (pendingSubtask.isNotEmpty)
+        SubtaskItem(title: pendingSubtask, isCompleted: _isCompletedTask),
     ];
 
     await _persistTask(
@@ -926,6 +937,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
   /// Toggles completion state of the subtask step at [index].
   void _toggleSubtaskStep(int index) {
+    if (_isCompletedTask) {
+      return;
+    }
     final current = _subtasks[index];
     setState(() {
       _subtasks[index] = current.copyWith(isCompleted: !current.isCompleted);

@@ -408,12 +408,20 @@ class TaskItem {
     );
   }
 
-  /// Creates a completed task stamped with [completionDate] (`finished` and `modified` directives).
+  /// Creates a completed task stamped with [completionDate] (`finished` and `modified` directives)
+  /// and marks all subtasks as completed.
   TaskItem toCompleted(DateTime completionDate) {
     final normalized = normalizeTimestamp(completionDate);
+    final completedSubtasks = subtasks.isEmpty
+        ? subtasks
+        : <SubtaskItem>[
+            for (final step in subtasks)
+              step.isCompleted ? step : step.copyWith(isCompleted: true),
+          ];
     return copyWith(
       isCompleted: true,
       completedAt: normalized,
+      subtasks: completedSubtasks,
       modifiedAt: nextModifiedTimestamp(normalized, effectiveModifiedAt),
     );
   }

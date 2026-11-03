@@ -374,6 +374,72 @@ task 000002OkD2 {
         closeTo(initialSecondTaskTop, 0.01),
         reason: 'Collapsing subtasks must shift subsequent tasks back to their initial position',
       );
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_000001OkD2')),
+      );
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.completed.map((task) => task.id),
+        equals(['000001OkD2']),
+        reason: 'Completing 000001OkD2 must move it to Completed',
+      );
+      expect(
+        board
+            .findTask('000001OkD2')!
+            .subtasks
+            .every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Completing a task with subtasks must mark all subtasks as completed',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_completed')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Deploy release candidate'));
+      await tester.pumpAndSettle();
+
+      expect(
+        step0Finder,
+        findsOneWidget,
+        reason: 'Completed task must still allow viewing its subtasks',
+      );
+      await tester.tap(step0Finder);
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board
+            .findTask('000001OkD2')!
+            .subtasks
+            .every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Tapping a subtask of a completed task must not unlock or uncheck the subtask',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_000001OkD2')),
+      );
+      await tester.pumpAndSettle();
+
+      board = container.read(taskNotifierProvider).value!;
+      expect(
+        board.completed,
+        isEmpty,
+        reason: 'Tapping the completion button in Completed must restore 000001OkD2',
+      );
+      expect(
+        board
+            .findTask('000001OkD2')!
+            .subtasks
+            .every((step) => !step.isCompleted),
+        isTrue,
+        reason: 'Reopening a completed task must reopen all of its subtasks',
+      );
     },
   );
 

@@ -169,7 +169,14 @@ task manualOkD2 {
     test('completes active task, unblocks dependent tasks, prunes >30d completed tasks (29, 30, 31 day bounds), schedules Someday tasks (Section 6.2), and restores tasks (Section 6.5)', () {
       final board = TaskBoard(
         focus: [
-          TaskItem(id: 'f1', title: 'Finish spec'),
+          TaskItem(
+            id: 'f1',
+            title: 'Finish spec',
+            subtasks: const [
+              SubtaskItem(title: 'Draft section 1', isCompleted: true),
+              SubtaskItem(title: 'Draft section 2', isCompleted: false),
+            ],
+          ),
           TaskItem(id: 'f2', title: 'Task 2'),
           TaskItem(id: 'f3', title: 'Task 3'),
         ],
@@ -223,6 +230,50 @@ task manualOkD2 {
         reason:
             '29 and 30 day old tasks must be kept while 31 day old is pruned',
       );
+      expect(
+        afterComplete
+            .findTask('f1')!
+            .subtasks
+            .every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Completing a task with subtasks must mark all subtasks as completed',
+      );
+
+      final toggleOnCompleted = afterComplete.toggleSubtask(
+        'f1',
+        0,
+        currentDate: fixedDate.add(const Duration(minutes: 1)),
+      );
+      expect(
+        toggleOnCompleted,
+        same(afterComplete),
+        reason: 'Completed subtasks of a completed task must be locked and cannot be unlocked individually',
+      );
+      expect(
+        toggleOnCompleted
+            .findTask('f1')!
+            .subtasks
+            .every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Attempting to toggle a subtask on a completed task must keep all subtasks completed',
+      );
+
+      final updatedCompletedInPlace = afterComplete.updateTask(
+        'f1',
+        subtasks: const [
+          SubtaskItem(title: 'Step 1', isCompleted: true),
+          SubtaskItem(title: 'Step 3', isCompleted: false),
+        ],
+        currentDate: fixedDate.add(const Duration(minutes: 2)),
+      );
+      expect(
+        updatedCompletedInPlace
+            .findTask('f1')!
+            .subtasks
+            .every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Adding a subtask to a completed task without restoring it must immediately lock the new subtask as completed',
+      );
 
       final afterSchedule = afterComplete.scheduleTask(
         's1',
@@ -251,6 +302,14 @@ task manualOkD2 {
       );
       expect(restoredToSomeday.someday.single.queuedAt, isNull);
       expect(restoredToSomeday.someday.single.isPriority, isFalse);
+      expect(
+        restoredToSomeday.someday.single.subtasks.every(
+          (step) => !step.isCompleted,
+        ),
+        isTrue,
+        reason:
+            'Restoring a completed task to Someday must reopen all subtasks',
+      );
 
       final restoredToFocus = afterSchedule.restoreTask(
         'f1',
@@ -263,6 +322,11 @@ task manualOkD2 {
         reason: 'Restoring to Focus must set priority and place task at the top of Focus',
       );
       expect(restoredToFocus.focus.first.isPriority, isTrue);
+      expect(
+        restoredToFocus.focus.first.subtasks.every((step) => !step.isCompleted),
+        isTrue,
+        reason: 'Restoring a completed task to Focus must reopen all subtasks',
+      );
 
       final noopRestoreOnOpen = afterSchedule.restoreTask(
         's1',
@@ -307,6 +371,11 @@ task manualOkD2 {
       expect(plannedRestored.isCompleted, isFalse);
       expect(plannedRestored.completedAt, isNull);
       expect(
+        plannedRestored.subtasks.every((step) => !step.isCompleted),
+        isTrue,
+        reason: 'Restoring to Planned via updateTask must reopen all subtasks',
+      );
+      expect(
         plannedRestored.isPriority,
         isFalse,
         reason: 'Restoring to Planned via updateTask must remove priority per Section 6.5',
@@ -315,6 +384,21 @@ task manualOkD2 {
         plannedRestored.queuedAt,
         equals(restoreTime),
         reason: 'Restoring to Planned via updateTask must replace the old queued timestamp with now per Section 6.5',
+      );
+
+      final recompletedViaUpdate = updatedToPlanned.updateTask(
+        'done_prio',
+        title: 'Completed Priority Auto-Finish',
+        targetTier: TaskTier.completed,
+        currentDate: restoreTime.add(const Duration(minutes: 5)),
+      );
+      expect(
+        recompletedViaUpdate
+            .findTask('done_prio')!
+            .subtasks
+            .every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Closing a task via updateTask to Completed must mark all subtasks as completed',
       );
 
       final updatedToFocus = completedPriorityAutoFinish.updateTask(
@@ -327,6 +411,11 @@ task manualOkD2 {
       final focusRestored = updatedToFocus.findTask('done_prio')!;
       expect(focusRestored.isCompleted, isFalse);
       expect(focusRestored.completedAt, isNull);
+      expect(
+        focusRestored.subtasks.every((step) => !step.isCompleted),
+        isTrue,
+        reason: 'Restoring to Focus via updateTask must reopen all subtasks',
+      );
       expect(
         focusRestored.isPriority,
         isTrue,
@@ -348,6 +437,11 @@ task manualOkD2 {
       final somedayRestored = updatedToSomeday.findTask('done_prio')!;
       expect(somedayRestored.isCompleted, isFalse);
       expect(somedayRestored.completedAt, isNull);
+      expect(
+        somedayRestored.subtasks.every((step) => !step.isCompleted),
+        isTrue,
+        reason: 'Restoring to Someday via updateTask must reopen all subtasks',
+      );
       expect(
         somedayRestored.isPriority,
         isFalse,
