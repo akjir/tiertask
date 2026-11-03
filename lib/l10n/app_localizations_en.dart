@@ -67,7 +67,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipSettings => 'Settings';
 
   @override
-  String get markdownPreviewTitle => 'Raw TDF (Single Source of Truth)';
+  String get markdownPreviewTitle => 'Raw TDF';
 
   @override
   String get actionClose => 'Close';
@@ -221,8 +221,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get resolvedLocalPathLabel => 'Resolved Local File Path:';
 
   @override
-  String get webdavSectionTitle =>
-      'WebDAV Synchronization (Single Source of Truth)';
+  String get webdavSectionTitle => 'WebDAV Synchronization';
 
   @override
   String get webdavSectionDescription =>

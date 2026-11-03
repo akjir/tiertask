@@ -77,7 +77,7 @@
   "@tooltipSettings": {
     "description": "Tooltip for the settings button in the app bar."
   },
-  "markdownPreviewTitle": "Raw TDF (Single Source of Truth)",
+  "markdownPreviewTitle": "Raw TDF",
   "@markdownPreviewTitle": {
     "description": "Dialog title for the raw TDF preview dialog."
   },
@@ -278,7 +278,7 @@
   "@resolvedLocalPathLabel": {
     "description": "Label above the resolved local TDF file path preview."
   },
-  "webdavSectionTitle": "WebDAV Synchronization (Single Source of Truth)",
+  "webdavSectionTitle": "WebDAV Synchronization",
   "@webdavSectionTitle": {
     "description": "Section heading for WebDAV synchronization settings."
   },

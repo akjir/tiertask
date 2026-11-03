@@ -250,6 +250,24 @@ void main() {
         findsOneWidget,
         reason: 'Closing search must restore all Focus tasks',
       );
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Show TDF preview'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Raw TDF'),
+        findsOneWidget,
+        reason: 'English Raw TDF preview dialog must display Raw TDF without Single Source of Truth',
+      );
+      expect(
+        find.textContaining('Single Source of Truth'),
+        findsNothing,
+        reason: 'English Raw TDF preview dialog must not mention Single Source of Truth',
+      );
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
     },
   );
 
@@ -299,6 +317,23 @@ void main() {
       expect(find.text('Bearbeiten'), findsOneWidget);
       expect(find.text('Neues Label erstellen'), findsOneWidget);
       expect(find.text('Einstellungen'), findsOneWidget);
+
+      await tester.tap(find.text('TDF-Vorschau anzeigen'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Raw TDF'),
+        findsOneWidget,
+        reason: 'Raw TDF preview dialog must display Raw TDF without Single Source of Truth',
+      );
+      expect(
+        find.textContaining('Single Source of Truth'),
+        findsNothing,
+        reason:
+            'Raw TDF preview dialog must not mention Single Source of Truth',
+      );
+      await tester.tap(find.text('Schließen'));
+      await tester.pumpAndSettle();
     },
   );
 

@@ -124,7 +124,10 @@ task t004 {
           overrides: [
             settingsRepositoryProvider.overrideWithValue(
               InMemorySettingsRepository(
-                const WebDavConfig(language: AppLanguage.english),
+                const WebDavConfig(
+                  language: AppLanguage.english,
+                  storageMode: StorageMode.both,
+                ),
               ),
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
@@ -138,10 +141,32 @@ task t004 {
       await openSettingsFromMenu(tester);
 
       expect(find.text('Language'), findsOneWidget);
+      expect(
+        find.text('WebDAV Synchronization'),
+        findsOneWidget,
+        reason: 'English WebDAV section title must display WebDAV Synchronization without Single Source of Truth',
+      );
+      expect(
+        find.textContaining('Single Source of Truth'),
+        findsNothing,
+        reason:
+            'English settings screen must not mention Single Source of Truth',
+      );
       await tester.tap(find.text('Deutsch'));
       await tester.pumpAndSettle();
 
       expect(find.text('Sprache'), findsOneWidget);
+      expect(
+        find.text('WebDAV-Synchronisation'),
+        findsOneWidget,
+        reason: 'German WebDAV section title must display WebDAV-Synchronisation without Single Source of Truth',
+      );
+      expect(
+        find.textContaining('Single Source of Truth'),
+        findsNothing,
+        reason:
+            'German settings screen must not mention Single Source of Truth',
+      );
 
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
@@ -257,7 +282,7 @@ task t004 {
       );
 
       final webdavSectionCard = find.ancestor(
-        of: find.text('WebDAV Synchronization (Single Source of Truth)'),
+        of: find.text('WebDAV Synchronization'),
         matching: find.byType(Card),
       );
       expect(
@@ -497,7 +522,7 @@ task t004 {
       await openSettingsFromMenu(tester);
 
       final webdavSectionCard = find.ancestor(
-        of: find.text('WebDAV Synchronization (Single Source of Truth)'),
+        of: find.text('WebDAV Synchronization'),
         matching: find.byType(Card),
       );
       expect(

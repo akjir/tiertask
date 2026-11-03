@@ -209,7 +209,7 @@ abstract class AppLocalizations {
   /// Dialog title for the raw TDF preview dialog.
   ///
   /// In en, this message translates to:
-  /// **'Raw TDF (Single Source of Truth)'**
+  /// **'Raw TDF'**
   String get markdownPreviewTitle;
 
   /// Button label to close a dialog.
@@ -503,7 +503,7 @@ abstract class AppLocalizations {
   /// Section heading for WebDAV synchronization settings.
   ///
   /// In en, this message translates to:
-  /// **'WebDAV Synchronization (Single Source of Truth)'**
+  /// **'WebDAV Synchronization'**
   String get webdavSectionTitle;
 
   /// Helper description explaining WebDAV TDF synchronization.
