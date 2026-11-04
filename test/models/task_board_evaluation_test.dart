@@ -26,7 +26,20 @@ void main() {
   group('TDF Section 4.3 & Section 5 Dynamic 6-Tier Derivation, Condition Inheritance & Context Filtering', () {
     test('evaluates blocking conditions, group-level label condition inheritance, task overrides, group resets, global resets, Haversine GPS, and cohesive per-label OR logic', () {
       const tdfWithConditions = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 08:35:00
+    task preopnOkD2
+    task wtopenOkD2
+    task wtdoneOkD2
+    task susfutOkD2
+    task multorOkD2
+    task ovrdayOkD2
+    task rstdayOkD2
+    task rstglbOkD2
+    task offstrOkD2
+}
 
 label officeOkD2 {
     name "Office"
@@ -55,6 +68,7 @@ task predonOkD2 {
     created 2026-11-01 07:00
     queued 2026-11-01 07:00
     finished 2026-11-01 07:30
+    completions 1
 }
 
 task wtopenOkD2 {
@@ -212,7 +226,12 @@ task offstrOkD2 {
 
     test('does not evaluate conditions, prerequisites, or suspension for completed tasks in Section 5.2 and evaluates them upon restoration', () {
       const completedWithUnmetConditionsTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 08:00:00
+    task opnpreOkD2
+}
 
 label officeOkD2 {
     name "Office"
@@ -234,6 +253,7 @@ task donunmOkD2 priority {
     created 2026-10-25 08:00
     queued 2026-10-25 08:00
     finished 2026-11-01 09:00
+    completions 1
     suspended 2026-11-05 09:00
     blocked opnpreOkD2
     labels officeOkD2
@@ -321,7 +341,16 @@ task donunmOkD2 priority {
 
     test('sorts priority tasks ahead of regular FIFO tasks and preserves declaration order on ties', () {
       const sortingTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 10:00:00
+    task reg200OkD2
+    task reg300OkD2
+    task reg100OkD2
+    task prio20OkD2
+    task prio10OkD2
+}
 
 task reg100OkD2 {
     name "Regular 1 (09:00)"
@@ -366,7 +395,20 @@ task prio20OkD2 priority {
 
     test('evaluateForContext derives top 3 Focus tasks for an active label while preserving all other filters', () {
       const multiLabelTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 11:00:00
+    task hsreg0OkD2
+    task it1st0OkD2
+    task itblkdOkD2
+    task itsuspOkD2
+    task itwdayOkD2
+    task it2nd0OkD2
+    task itprioOkD2
+    task it4th0OkD2
+    task hsprioOkD2
+}
 
 label chouseOkD2 {
     name "Household"
@@ -442,6 +484,7 @@ task itdoneOkD2 {
     created 2026-10-25 08:00
     queued 2026-10-25 08:00
     finished 2026-10-26 10:00
+    completions 1
     labels cit000OkD2
 }
 ''';
@@ -522,7 +565,13 @@ task itdoneOkD2 {
       );
 
       const wallClockTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 20:05:00
+    task monmrnOkD2
+    task suslocOkD2
+}
 
 task monmrnOkD2 {
     name "Monday Early Task"
@@ -560,8 +609,12 @@ task suslocOkD2 {
       );
       expect(
         boardInPlusTwo.focus.map((task) => task.id),
-        equals(['monmrnOkD2', 'suslocOkD2']),
-        reason: 'At the same UTC instant (23:30 Sunday UTC), local wall-clock in UTC+02:00 is 01:30 Monday so both tasks become active in Focus',
+        equals(['monmrnOkD2']),
+        reason: 'At 23:30 Sunday UTC, local wall-clock in UTC+02:00 is 01:30 Monday so monmrnOkD2 becomes active in Focus while suslocOkD2 (UTC 01:00 Monday) remains Blocked in UTC',
+      );
+      expect(
+        boardInPlusTwo.blocked.map((task) => task.id),
+        equals(['suslocOkD2']),
       );
     });
   });

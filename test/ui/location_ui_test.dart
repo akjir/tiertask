@@ -223,9 +223,14 @@ void main() {
     'evaluates task location conditions dynamically using determined GPS coordinates',
     (WidgetTester tester) async {
       const tdfWithLocationTask = '''
-tdf 0.4.0
+tdf 0.5.0
 
-task loc1 priority {
+queue {
+    modified 2026-03-29 08:00:00
+    task loc100OkD2
+}
+
+task loc100OkD2 priority {
     name "Buy local specialty in Erfurt"
     created 2026-03-29 08:00
     queued 2026-03-29 08:00

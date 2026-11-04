@@ -7,16 +7,16 @@
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.4.0`, `label`, `task`, `modified`, `repeat`, `link`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
+`TierTask` stores objective task facts (`tdf 0.5.0`, `queue`, `deleted`, `label`, `task`, `modified`, `completions`, `repeat`, `link`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
 
 * **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
-* **Dynamic $O(N)$ 6-Tier Derivation:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (`blocked`, future `suspended`, or unmet `condition` across `day`, `time`, and `location` rule groups with label inheritance), and slices active tasks by `priority` and ascending `queued` FIFO timestamp into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
-* **Recurring Tasks (`repeat <count> <days|weeks|months>`):** Completing a recurring task (or completing all steps of its `subtasks auto-finish` checklist) reschedules it directly into `Blocked` (`suspended` set to `localNow + <count> <unit>` at `00:00` local time or preserving an explicit suspended time-of-day, `queued` set to the UTC equivalent, `priority` flag added, `modified` advanced, and all `subtasks` reset to `false`) without entering `Completed`, waking up directly into `Focus` on its next due date.
-* **UTC Storage & Local Wall-Clock Conditions:** Stores and compares point-in-time directives (`created`, `queued`, `finished`, `modified`) and 30-day completed task pruning strictly in UTC while evaluating `condition day`, `condition time`, and `suspended` against the user's device or manually configured local time zone (`Automatic` / `Manual` UTC offset).
+* **Dynamic $O(N)$ 6-Tier Derivation & Shared Queue:** Derives `Completed` (`finished`), `Someday` (no `queued`), `Blocked` (unsatisfied `blocked <task-id>[:<required-completion>]` dependencies, `suspended forever` or future UTC `suspended`, or unmet `condition` across `day`, `time`, and `location` rule groups with label inheritance), and slices active tasks in `queue` block order into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
+* **Recurring Tasks (`repeat <count> <days|weeks|months> [<repeat-time>]`):** Completing a recurring task (or completing all steps of its `subtasks auto-finish` checklist) increments `completions`, resets all `subtasks` to `false`, computes the next local calendar target (`localNow + <count> <unit>` at `<repeat-time>` or `00:00:00` local time), converts it to a UTC `suspended` timestamp, sets `queued` to the completion timestamp, adds `priority`, and moves the task to the front of `queue` so it wakes up directly into `Focus`.
+* **UTC Instant Storage & Local Wall-Clock Conditions:** Stores and compares point-in-time directives (`created`, `queued`, `finished`, `modified`, and timed `suspended`) and 30-day completed task and deletion record pruning strictly in UTC while evaluating `condition day`, `condition time`, and `repeat` calendar progression in the active local time zone (`Automatic` / `Manual` UTC offset).
 * **Foreground-Only Location Determination (`locationEnabled`):** Optional setting (default `Off`) that determines the current place name and GPS coordinates on Android (`LocationManager` + `Geocoder`), Linux (`GeoClue2` D-Bus), and Windows (`Windows.Devices.Geolocation.Geolocator`) with 100-meter Haversine displacement reverse-geocoding gating, 30-minute cached GeoIP desktop fallback, and 5-minute app-resume cooldown only while the application is running in the foreground, displaying a 3-state status icon (`searching`, `found`, `unavailable`) and status popup in the top bar and dynamically evaluating `condition location` rules.
-* **Two-Stage Entity-Level Synchronization (`In-Memory <-> Local File <-> WebDAV`):** Uses 10-character Base62 entity identifiers (`<6xBase62Random><4xBase62Time>`), compares individual `task` and `label` blocks via monotonic `modified` timestamps (`TaskBoardSync.merge`) on every save and manual sync, and immediately converts and syncs back legacy `tdf 0.2.0` / `0.3.0` identifiers when loading older files.
-* **Anti-Ping-Pong Downgrade & Auto-Finish Checklists:** Updates `queued` timestamps and strips `priority` when downgrading tasks, and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.
-* **30-Day Completed Task Pruning:** Removes `Completed` tasks whose `finished` timestamp is strictly older than `30` days (UTC) on save.
+* **Two-Stage Three-Way Synchronization & Version Import (`In-Memory <-> Local File <-> WebDAV`):** Uses 10-character Base62 entity identifiers (`<6xBase62Random><4xBase62Time>`), reconciles `task`, `label`, `queue`, and `deleted` (`generation`, `task`, `label`) blocks via three-way baseline comparison and monotonic UTC `modified` timestamps (`TaskBoardSync.merge`), rejects cross-version runtime sync (`VersionMismatch`), and provides an explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0` migration pipeline (`TdfImporter`) with deterministic SHA-256 Base62 legacy ID migration (`TdfIdMigration`).
+* **Anti-Ping-Pong Queue Downgrade & Auto-Finish Checklists:** Repositions downgraded tasks inside `queue` (`Focus -> Ready -> Planned`) or removes them from `queue` (`Planned -> Someday`), and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.
+* **30-Day Completed Task & Tombstone Pruning:** Removes `Completed` tasks whose `finished` timestamp and `deleted` records whose `timestamp` are strictly older than `30` days (UTC) on save (advancing `deleted.generation` when tombstones expire).
 * **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only `.tdf` persistence (`LocalFileRepository` defaulting to `tiertask.tdf`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
 * **Encrypted Configuration Persistence:** Stores storage mode, local and remote `.tdf` file names, WebDAV credentials, language, theme, and time zone settings via `flutter_secure_storage`.
 * **Opt-In Diagnostic Logging & Crash Preservation (`enableLogging`):** Optional setting (`Enable Diagnostic Log`, default `Off`) that records sanitized runtime events across `LIFECYCLE`, `TDF`, `DOMAIN`, `SYNC`, `STORAGE`, and `UI` into `tiertask.log` with a 5,000-line ring buffer, preserves crash logs across unclean exits while truncating `tiertask.log` on clean shutdown, deletes `tiertask.log` immediately when disabled, and exposes an in-app sidepanel `Diagnostic Log` viewer (`Copy All`, `Scroll to Bottom`, `Clear Log`).
@@ -62,17 +62,23 @@ See [`TDF_SPEC.md`](TDF_SPEC.md) for the complete grammar and evaluation pipelin
 
 | Tier | English (`en`) | German (`de`) | Soft Limit | Derivation Rule |
 | :--- | :--- | :--- | :--- | :--- |
-| `1` | `Focus` | `Fokus` | `3` | Active sorted tasks at positions `1..3` (`priority` first, then `queued` FIFO) |
-| `2` | `Ready` | `Bereit` | `5` | Active sorted tasks at positions `4..8` |
-| `3` | `Planned` | `Geplant` | None | Active sorted tasks from position `9` onward |
-| `4` | `Blocked` | `Blockiert` | None | Open scheduled tasks with unfinished `blocked` IDs, future `suspended`, or unmet `condition` |
+| `1` | `Focus` | `Fokus` | `3` | Active tasks at positions `1..3` in `queue` block order |
+| `2` | `Ready` | `Bereit` | `5` | Active tasks at positions `4..8` in `queue` block order |
+| `3` | `Planned` | `Geplant` | None | Active tasks from position `9` onward in `queue` block order |
+| `4` | `Blocked` | `Blockiert` | None | Open scheduled tasks with unsatisfied `blocked` dependencies, `suspended forever` or future UTC `suspended`, or unmet `condition` |
 | `5` | `Someday` | `Irgendwann` | None | Open tasks without a `queued` directive |
 | `6` | `Completed` | `Erledigt` | None | Tasks with a `finished` directive (pruned after `30` days) |
 
 Canonical `tiertask.tdf` example:
 
 ```text
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 09:15:00
+    task 8jKaCdOkD2
+    task 3nR8vWOkD8
+}
 
 label 4x9p2mOkD2 {
     name     "Home"

@@ -25,12 +25,15 @@ import '../models/task_board_sync.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
+import '../models/tdf_sync_metadata.dart';
+import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
 import '../repositories/link_launcher_repository.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
 import '../repositories/webdav_repository.dart';
 import '../services/app_logger.dart';
+import '../services/tdf_importer.dart';
 import '../services/tdf_service.dart';
 import '../ui/app_theme.dart';
 import 'workspace_providers.dart';
@@ -298,8 +301,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<SubtaskItem> subtasks = const [],
     List<String> labelIds = const [],
     DateTime? suspendedAt,
+    bool isSuspendedForever = false,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
+    List<TdfTaskDependency>? dependencies,
     List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
     DateTime? currentDate,
@@ -315,8 +320,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       subtasks: subtasks,
       labelIds: labelIds,
       suspendedAt: suspendedAt,
+      isSuspendedForever: isSuspendedForever,
       repeatRule: repeatRule,
       blockedByTaskIds: blockedByTaskIds,
+      dependencies: dependencies,
       links: links,
       conditions: conditions,
       currentDate: utcNow,
@@ -328,10 +335,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Marks an active task as done in Tier 6 ([TaskTier.completed]), prunes expired tasks,
   /// triggers the Auto-Pull Cascade, and persists to storage.
-  Future<void> completeTask(String taskId, {DateTime? currentDate}) async {
+  Future<void> completeTask(
+    String taskId, {
+    int? expectedCompletions,
+    DateTime? currentDate,
+  }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.completeTask(
       taskId,
+      expectedCompletions: expectedCompletions,
       currentDate: utcNow,
       localEvaluationTime: localNow,
     );
@@ -345,8 +357,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         .where((label) => label.id == labelId)
         .firstOrNull;
     final deleteTimestamp = TaskItem.nextModifiedTimestamp(
-      existingLabel?.effectiveModifiedAt ?? TdfLabel.defaultModifiedAt,
       utcNow,
+      existingLabel?.effectiveModifiedAt ?? TdfLabel.defaultModifiedAt,
     );
     _pendingDeletedLabelTimestamps[labelId] = deleteTimestamp;
     await _persistPendingLabelDeletion(labelId, deleteTimestamp);
@@ -359,6 +371,55 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final (utcNow, _) = _resolveTimestamps(currentDate);
     final updated = _currentBoard.downgradeTask(taskId, currentDate: utcNow);
     await _commitMutation(updated);
+  }
+
+  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.4.0`) or `0.5.0` [rawTdf]
+  /// document into `tdf 0.5.0`, invalidates any earlier synchronization baseline per
+  /// `TDF_SPEC.md` Section 10.1, and persists the migrated document to active storage.
+  Future<TdfImportResult> importLegacyTdf(
+    String rawTdf, {
+    TdfTimeZoneContext? sourceTimeZone,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final config = _resolveCurrentConfig(ref);
+    final resolvedZone =
+        sourceTimeZone ??
+        TdfTimeZoneContext.fixedOffset(
+          config.timeZoneMode == AppTimeZoneMode.manual
+              ? Duration(minutes: config.manualTimeZoneOffsetMinutes)
+              : utcNow.toLocal().timeZoneOffset,
+        );
+    final importResult = TdfImporter.importDocument(
+      rawTdf,
+      sourceTimeZone: resolvedZone,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    if (config.storageMode.usesLocal && config.isLocalConfigured) {
+      await ref
+          .read(localFileRepositoryProvider)
+          .saveTdf(importResult.migratedTdfContent);
+    }
+    if (config.storageMode.usesWebDav && config.isWebDavConfigured) {
+      await ref
+          .read(webDavRepositoryProvider)
+          .saveTdf(importResult.migratedTdfContent);
+    }
+    await settingsRepo.saveWorkspaceSyncState(
+      workspace.id,
+      WorkspaceSyncState(
+        lastSyncedLocalTdf: importResult.migratedTdfContent,
+        lastSyncedRemoteTdf: importResult.migratedTdfContent,
+        acknowledgedLocalGeneration: importResult.board.deletedBlock.generation,
+        acknowledgedRemoteGeneration:
+            importResult.board.deletedBlock.generation,
+      ),
+    );
+    state = AsyncData(importResult.board);
+    return importResult;
   }
 
   /// Awaits any in-flight synchronization and flushes the outgoing [TaskBoard] to local storage if populated before switching workspaces.
@@ -512,10 +573,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
     DateTime? suspendedAt,
+    bool? isSuspendedForever,
     bool clearSuspendedAt = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
+    List<TdfTaskDependency>? dependencies,
     List<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
@@ -531,10 +594,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       subtasks: subtasks,
       labelIds: labelIds,
       suspendedAt: suspendedAt,
+      isSuspendedForever: isSuspendedForever,
       clearSuspendedAt: clearSuspendedAt,
       repeatRule: repeatRule,
       clearRepeatRule: clearRepeatRule,
       blockedByTaskIds: blockedByTaskIds,
+      dependencies: dependencies,
       links: links,
       conditions: conditions,
       currentDate: utcNow,
@@ -695,6 +760,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           primary: hasWorkingBoard ? workingBoard : localBoard,
           secondary: localBoard,
           baseline: localBaseline ?? (hasWorkingBoard ? null : localBoard),
+          acknowledgedGeneration: localBaseline != null
+              ? syncState.acknowledgedLocalGeneration
+              : null,
           deletedLabelTimestamps: deletedLabels,
           evaluationTime: utcNow,
           localEvaluationTime: localNow,
@@ -716,6 +784,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         syncState = syncState.copyWith(
           lastSyncedLocalTdf: serializedLocal,
           deletedLabelTimestamps: deletedLabels,
+          acknowledgedLocalGeneration: workingBoard.deletedBlock.generation,
         );
         await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
         if (candidateBoard != null &&
@@ -741,6 +810,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           primary: hasWorkingBoard ? workingBoard : remoteBoard,
           secondary: remoteBoard,
           baseline: remoteBaseline ?? (hasWorkingBoard ? null : remoteBoard),
+          acknowledgedGeneration: remoteBaseline != null
+              ? syncState.acknowledgedRemoteGeneration
+              : null,
           deletedLabelTimestamps: deletedLabels,
           evaluationTime: utcNow,
           localEvaluationTime: localNow,
@@ -760,7 +832,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             rawRemote.trim() != serializedFinal.trim()) {
           await ref.read(webDavRepositoryProvider).saveTdf(serializedFinal);
         }
-        syncState = syncState.copyWith(lastSyncedRemoteTdf: serializedFinal);
+        syncState = syncState.copyWith(
+          lastSyncedRemoteTdf: serializedFinal,
+          acknowledgedRemoteGeneration: workingBoard.deletedBlock.generation,
+        );
         if (config.storageMode.usesLocal &&
             (requireTargets || config.isLocalConfigured)) {
           if (requireTargets ||
@@ -770,7 +845,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
                 .read(localFileRepositoryProvider)
                 .saveTdf(serializedFinal);
           }
-          syncState = syncState.copyWith(lastSyncedLocalTdf: serializedFinal);
+          syncState = syncState.copyWith(
+            lastSyncedLocalTdf: serializedFinal,
+            acknowledgedLocalGeneration: workingBoard.deletedBlock.generation,
+          );
         }
       }
     }

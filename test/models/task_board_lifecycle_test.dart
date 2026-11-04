@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -122,7 +123,13 @@ void main() {
 
     test('completes enclosing task automatically when subtasks has auto-finish and all steps become true', () {
       const autoFinishTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 09:05:00
+    task auto00OkD2
+    task manualOkD2
+}
 
 task auto00OkD2 {
     name "Auto-finish task"
@@ -195,19 +202,19 @@ task manualOkD2 {
             id: 'e_keep_29',
             title: '29 Days Ago',
             isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 3),
+            completedAt: DateTime.utc(2026, 10, 3, 12, 0),
           ),
           TaskItem(
             id: 'e_keep_30',
             title: '30 Days Ago',
             isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 2),
+            completedAt: DateTime.utc(2026, 10, 2, 12, 0),
           ),
           TaskItem(
             id: 'e_prune_31',
             title: '31 Days Ago',
             isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 1),
+            completedAt: DateTime.utc(2026, 10, 1, 12, 0),
           ),
         ],
       );
@@ -517,8 +524,8 @@ task manualOkD2 {
       );
       expect(
         rescheduled.suspendedAt,
-        equals(DateTime.utc(2026, 11, 3, 0, 0)),
-        reason: 'localCompletion (2026-11-02 00:30) + 1 day must set suspendedAt to 2026-11-03 00:00 local time',
+        equals(DateTime.utc(2026, 11, 2, 22, 0)),
+        reason: 'localCompletion (2026-11-02 00:30) + 1 day at 00:00 local (UTC+2) must set suspendedAt to 2026-11-02 22:00 UTC per Section 6.10.3',
       );
       expect(
         rescheduled.queuedAt,
@@ -563,7 +570,11 @@ task manualOkD2 {
         createdAt: DateTime.utc(2026, 1, 1, 8, 0),
         queuedAt: DateTime.utc(2026, 1, 1, 8, 0),
         suspendedAt: DateTime.utc(2026, 1, 31, 9, 30),
-        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.months),
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.months,
+          clock: TdfRepeatClock(hour: 9, minute: 30),
+        ),
       );
 
       final board = TaskBoard.evaluate(
@@ -579,7 +590,10 @@ task manualOkD2 {
       );
 
       final leapJan31 = DateTime.utc(2028, 1, 31, 14, 0);
-      final leapTask = monthlyTask.copyWith(clearSuspendedAt: true);
+      final leapTask = monthlyTask.copyWith(
+        clearSuspendedAt: true,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.months),
+      );
       final leapBoard = TaskBoard.evaluate(
         tasks: [leapTask],
         evaluationTime: leapJan31,

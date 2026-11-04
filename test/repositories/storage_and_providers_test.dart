@@ -72,29 +72,38 @@ void main() {
 
     setUp(() async {
       remoteTdfStore = '''
-tdf 0.2.0
+tdf 0.5.0
 
-task f1 {
+queue {
+    modified 2026-11-01 08:20:00
+    task 000001OkD2
+    task 000002OkD2
+    task 000003OkD2
+    task 000004OkD2
+    task 000005OkD2
+}
+
+task 000001OkD2 {
     name "Remote Focus 1"
     created 2026-11-01 08:00
     queued 2026-11-01 08:00
 }
-task f2 {
+task 000002OkD2 {
     name "Remote Focus 2"
     created 2026-11-01 08:05
     queued 2026-11-01 08:05
 }
-task f3 {
+task 000003OkD2 {
     name "Remote Focus 3"
     created 2026-11-01 08:10
     queued 2026-11-01 08:10
 }
-task r1 {
+task 000004OkD2 {
     name "Remote Ready 1"
     created 2026-11-01 08:15
     queued 2026-11-01 08:15
 }
-task b1 {
+task 000005OkD2 {
     name "Remote Backlog 1"
     created 2026-11-01 08:20
     queued 2026-11-01 08:20
@@ -175,7 +184,7 @@ task b1 {
       expect(updatedBoard.completed.first.title, equals('Remote Focus 1'));
 
       expect(putCount, greaterThanOrEqualTo(1));
-      expect(remoteTdfStore, contains('tdf 0.4.0'));
+      expect(remoteTdfStore, contains('tdf 0.5.0'));
       expect(remoteTdfStore, contains('task $firstFocusId {'));
       expect(remoteTdfStore, contains('finished 2026-11-01 12:00'));
     });
@@ -399,7 +408,7 @@ task b1 {
         reason: 'Local mode must persist local_only.tdf on disk',
       );
       final savedDiskContent = await localFile.readAsString();
-      expect(savedDiskContent, contains('tdf 0.4.0'));
+      expect(savedDiskContent, contains('tdf 0.5.0'));
       expect(savedDiskContent, contains('name "Persistent Local Task"'));
       expect(savedDiskContent, contains('step false "First step"'));
       expect(remotePutCount, equals(0));

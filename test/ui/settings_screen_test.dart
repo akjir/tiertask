@@ -32,45 +32,53 @@ void main() {
     WidgetTester tester,
   ) async {
     const seededTdf = '''
-tdf 0.2.0
+tdf 0.5.0
 
-label home {
+queue {
+  modified 2026-11-01 10:00:00
+  task 000001OkD2
+  task 000002OkD2
+  task 000003OkD2
+}
+
+label home00OkD2 {
   name "Home"
 }
-label office {
+label officeOkD2 {
   name "Office"
 }
-label business {
+label busin0OkD2 {
   name "Business"
   color "#EB06FF"
 }
-label personal {
+label persn0OkD2 {
   name "Personal"
 }
-task t001 {
+task 000001OkD2 {
   name "Prepare quarterly report"
   created 2026-11-01 08:00
   queued 2026-11-01 08:00
-  labels business office
+  labels busin0OkD2 officeOkD2
 }
-task t002 {
+task 000002OkD2 {
   name "Review client contract"
   created 2026-11-01 09:00
   queued 2026-11-01 09:00
-  labels business office
+  labels busin0OkD2 officeOkD2
 }
-task t003 {
+task 000003OkD2 {
   name "Water plants"
   created 2026-11-01 10:00
   queued 2026-11-01 10:00
-  labels personal home
+  labels persn0OkD2 home00OkD2
 }
-task t004 {
+task 000004OkD2 {
   name "Archived invoice"
   created 2026-10-28 10:00
   queued 2026-10-28 10:00
   finished 2026-10-29 12:00
-  labels business office
+  completions 1
+  labels busin0OkD2 officeOkD2
 }
 ''';
     final settingsRepository = InMemorySettingsRepository(

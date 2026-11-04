@@ -533,7 +533,22 @@ void main() {
     'Navigation drawer opens secondary tier sheets for Ready, Planned, Blocked (including suspended), Someday, and Completed without a bottom navigation bar',
     (WidgetTester tester) async {
       const secondaryTiersTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 07:50:00
+  task f10000OkD2
+  task f20000OkD2
+  task f30000OkD2
+  task r10000OkD2
+  task r20000OkD2
+  task r30000OkD2
+  task r40000OkD2
+  task r50000OkD2
+  task p10000OkD2
+  task blkdepOkD2
+  task blksusOkD2
+}
 
 task f10000OkD2 {
   name "Focus Task 1"
@@ -601,6 +616,7 @@ task cmp100OkD2 {
   created 2026-10-28 08:00
   queued 2026-10-28 08:00
   finished 2026-10-29 10:00
+  completions 1
 }
 ''';
 
@@ -737,7 +753,20 @@ task cmp100OkD2 {
     'Task pills display identical primaryContainer squares with white circles across all tasks and downgrade via the > button per TDF_SPEC.md Section 6.3',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 09:00:01
+  task f10000OkD2
+  task f20000OkD2
+  task f30000OkD2
+  task r10000OkD2
+  task r20000OkD2
+  task r30000OkD2
+  task r40000OkD2
+  task r50000OkD2
+  task p10000OkD2
+}
 
 task f10000OkD2 priority {
   name "Focus 1"
@@ -874,11 +903,15 @@ task p10000OkD2 {
       );
       expect(
         board.findTask('f10000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 9, 0, 1)),
+        equals(DateTime.utc(2026, 11, 1, 8, 0, 0)),
       );
       expect(
         board.findTask('p10000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 9, 0, 2)),
+        equals(DateTime.utc(2026, 11, 1, 9, 0, 1)),
+      );
+      expect(
+        board.queueBlock.taskIds.indexOf('f10000OkD2'),
+        equals(board.queueBlock.taskIds.indexOf('r50000OkD2') + 1),
       );
 
       await tester.drag(find.byType(PageView), const Offset(-500, 0));
@@ -960,7 +993,21 @@ task p10000OkD2 {
     'Search view displays ALL TASKS, orders all tasks from Focus through Completed, applies active label filter, and restores the previous tier screen on close',
     (WidgetTester tester) async {
       const searchTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 07:45:00
+  task f10000OkD2
+  task f20000OkD2
+  task f30000OkD2
+  task r10000OkD2
+  task r20000OkD2
+  task r30000OkD2
+  task r40000OkD2
+  task r50000OkD2
+  task p10000OkD2
+  task b10000OkD2
+}
 
 label work00OkD2 {
   name "Work"
@@ -1039,6 +1086,7 @@ task c10000OkD2 {
   created 2026-10-28 08:00
   queued 2026-10-28 08:00
   finished 2026-10-29 10:00
+  completions 1
   labels work00OkD2
 }
 task c20000OkD2 {
@@ -1046,6 +1094,7 @@ task c20000OkD2 {
   created 2026-10-28 09:00
   queued 2026-10-28 09:00
   finished 2026-10-29 11:00
+  completions 1
   labels home00OkD2
 }
 ''';

@@ -16,6 +16,8 @@
 import 'package:flutter/foundation.dart';
 
 import 'tdf_metadata.dart';
+import 'tdf_sync_metadata.dart';
+import 'tdf_timezone.dart';
 
 /// Supported time units for a TDF `repeat <count> <unit>` directive.
 enum RepeatUnit {
@@ -181,14 +183,21 @@ class TaskLink {
   String toString() => 'link "$title" "$uri"';
 }
 
-/// Immutable representation of a TDF `repeat <count> <days|weeks|months>` rule.
+/// Immutable representation of a TDF `repeat <count> <days|weeks|months> [<repeat-time>]` rule.
 @immutable
 class TaskRepeatRule {
-  /// Creates a [TaskRepeatRule] with positive [count] and [unit].
-  const TaskRepeatRule({required this.count, required this.unit});
+  /// Creates a [TaskRepeatRule] with positive [count], [unit], and optional local [clock].
+  const TaskRepeatRule({
+    required this.count,
+    required this.unit,
+    this.clock = TdfRepeatClock.midnight,
+  });
 
   /// Maximum allowed recurrence interval count (`3650`).
   static const int maxRepeatCount = 3650;
+
+  /// Intended local wall-clock time (`00:00:00` default) for recurring occurrences.
+  final TdfRepeatClock clock;
 
   /// Number of units between recurrence cycles (`1..3650`).
   final int count;
@@ -196,25 +205,78 @@ class TaskRepeatRule {
   /// Time unit (`days`, `weeks`, or `months`) for the recurrence interval.
   final RepeatUnit unit;
 
+  /// Computes the next UTC due timestamp per `TDF_SPEC.md` Section 6.10.3:
+  /// 1. Converts [completedAtUtc] into `localNow` in [timeZone].
+  /// 2. Adds the interval to `localNow`'s calendar date.
+  /// 3. Combines the target local date with [clock] and resolves to UTC via Section 6.10.2.
+  /// 4. Requires the resulting UTC instant to be strictly later than [completedAtUtc].
+  DateTime nextDueUtc({
+    required DateTime completedAtUtc,
+    required TdfTimeZoneContext timeZone,
+  }) {
+    final normalizedCompletionUtc = TaskItem.normalizeTimestamp(completedAtUtc);
+    final localNow = timeZone.toLocalWallClock(normalizedCompletionUtc);
+    final targetLocal = switch (unit) {
+      RepeatUnit.days => _addDays(
+        localNow,
+        count,
+        clock.hour,
+        clock.minute,
+        clock.second,
+      ),
+      RepeatUnit.weeks => _addDays(
+        localNow,
+        count * 7,
+        clock.hour,
+        clock.minute,
+        clock.second,
+      ),
+      RepeatUnit.months => _addMonths(
+        localNow,
+        count,
+        clock.hour,
+        clock.minute,
+        clock.second,
+      ),
+    };
+    final resolvedUtc = timeZone.resolveLocalToUtc(
+      targetLocal.year,
+      targetLocal.month,
+      targetLocal.day,
+      targetLocal.hour,
+      targetLocal.minute,
+      targetLocal.second,
+    );
+    if (!resolvedUtc.isAfter(normalizedCompletionUtc)) {
+      throw const FormatException('InvalidTimestamp');
+    }
+    return resolvedUtc;
+  }
+
   /// Computes the next local due timestamp relative to [completionLocalTime],
-  /// preserving a non-midnight `<HH:MM[:SS]>` from [previousSuspendedAt] when present.
+  /// using [clock] (or preserving a non-midnight `<HH:MM[:SS]>` from [previousSuspendedAt] when [clock] is midnight).
   DateTime nextLocalDueDate(
     DateTime completionLocalTime, {
     DateTime? previousSuspendedAt,
   }) {
-    final hasExplicitSuspendedTime =
-        previousSuspendedAt != null &&
-        previousSuspendedAt != TaskItem.defaultSuspendedAt &&
-        (previousSuspendedAt.hour != 0 ||
-            previousSuspendedAt.minute != 0 ||
-            previousSuspendedAt.second != 0);
-    final targetHour = hasExplicitSuspendedTime ? previousSuspendedAt.hour : 0;
-    final targetMinute = hasExplicitSuspendedTime
-        ? previousSuspendedAt.minute
-        : 0;
-    final targetSecond = hasExplicitSuspendedTime
-        ? previousSuspendedAt.second
-        : 0;
+    final int targetHour;
+    final int targetMinute;
+    final int targetSecond;
+    if (!clock.isMidnight) {
+      targetHour = clock.hour;
+      targetMinute = clock.minute;
+      targetSecond = clock.second;
+    } else {
+      final hasExplicitSuspendedTime =
+          previousSuspendedAt != null &&
+          previousSuspendedAt != TaskItem.defaultSuspendedAt &&
+          (previousSuspendedAt.hour != 0 ||
+              previousSuspendedAt.minute != 0 ||
+              previousSuspendedAt.second != 0);
+      targetHour = hasExplicitSuspendedTime ? previousSuspendedAt.hour : 0;
+      targetMinute = hasExplicitSuspendedTime ? previousSuspendedAt.minute : 0;
+      targetSecond = hasExplicitSuspendedTime ? previousSuspendedAt.second : 0;
+    }
 
     return switch (unit) {
       RepeatUnit.days => _addDays(
@@ -241,8 +303,14 @@ class TaskRepeatRule {
     };
   }
 
-  /// Formats this rule as canonical TDF directive arguments (`<count> <unit>`).
-  String toTdfDirectiveArgs() => '$count ${unit.tdfToken}';
+  /// Formats this rule as canonical TDF directive arguments (`<count> <unit> [<repeat-time>]`).
+  String toTdfDirectiveArgs() {
+    final clockText = clock.formatCanonical();
+    if (clockText.isEmpty) {
+      return '$count ${unit.tdfToken}';
+    }
+    return '$count ${unit.tdfToken} $clockText';
+  }
 
   /// Adds [daysToAdd] calendar days to [baseDate] with the given time-of-day components.
   static DateTime _addDays(
@@ -279,11 +347,10 @@ class TaskRepeatRule {
         (baseDate.year * 12) + (baseDate.month - 1) + monthsToAdd;
     final targetYear = totalMonths ~/ 12;
     final targetMonth = (totalMonths % 12) + 1;
-    final maxDayInTargetMonth = DateTime.utc(
+    final maxDayInTargetMonth = TdfCalendar.daysInMonth(
       targetYear,
-      targetMonth + 1,
-      0,
-    ).day;
+      targetMonth,
+    );
     final clampedDay = baseDate.day <= maxDayInTargetMonth
         ? baseDate.day
         : maxDayInTargetMonth;
@@ -302,14 +369,15 @@ class TaskRepeatRule {
     if (identical(this, other)) return true;
     return other is TaskRepeatRule &&
         other.count == count &&
-        other.unit == unit;
+        other.unit == unit &&
+        other.clock == clock;
   }
 
   @override
-  int get hashCode => Object.hash(count, unit);
+  int get hashCode => Object.hash(count, unit, clock);
 
   @override
-  String toString() => 'repeat $count ${unit.tdfToken}';
+  String toString() => 'repeat ${toTdfDirectiveArgs()}';
 }
 
 /// Immutable representation of a single TDF `task` block in TierTask.
@@ -322,22 +390,35 @@ class TaskItem {
     this.note,
     this.isCompleted = false,
     this.isPriority = false,
+    int? completions,
     DateTime? createdAt,
     this.queuedAt,
     this.completedAt,
     this.modifiedAt,
     this.suspendedAt,
+    this.isSuspendedForever = false,
     this.repeatRule,
     List<String> labelIds = const [],
-    List<String> blockedByTaskIds = const [],
+    List<String>? blockedByTaskIds,
+    List<TdfTaskDependency>? dependencies,
     List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
     this.subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
   }) : id = id ?? generateTaskId(timestamp: createdAt ?? defaultCreatedAt),
        createdAt = createdAt ?? defaultCreatedAt,
+       completions =
+           completions ?? ((isCompleted || completedAt != null) ? 1 : 0),
        labelIds = List<String>.unmodifiable(labelIds),
-       blockedByTaskIds = List<String>.unmodifiable(blockedByTaskIds),
+       dependencies = dependencies != null
+           ? List<TdfTaskDependency>.unmodifiable(dependencies)
+           : TdfTaskDependency.fromTaskIds(blockedByTaskIds ?? const []),
+       blockedByTaskIds = blockedByTaskIds != null
+           ? List<String>.unmodifiable(blockedByTaskIds)
+           : List<String>.unmodifiable(<String>[
+               if (dependencies != null)
+                 for (final dep in dependencies) dep.taskId,
+             ]),
        links = List<TaskLink>.unmodifiable(links),
        conditions = List<TaskCondition>.unmodifiable(conditions),
        subtasks = List<SubtaskItem>.unmodifiable(subtasks);
@@ -345,7 +426,7 @@ class TaskItem {
   /// Fallback UTC creation timestamp when none is provided explicitly.
   static final DateTime defaultCreatedAt = DateTime.utc(2026, 11, 1, 8, 0);
 
-  /// Far-future UTC deferral timestamp used when a task is manually blocked without a specific date.
+  /// Far-future UTC deferral timestamp sentinel retained for legacy compatibility.
   static final DateTime defaultSuspendedAt = DateTime.utc(9999, 12, 31, 23, 59);
 
   /// Prerequisite task IDs (`blocked` directive).
@@ -354,11 +435,17 @@ class TaskItem {
   /// Completion timestamp (`finished` directive) when located in Tier 6 (`Completed`).
   final DateTime? completedAt;
 
+  /// Cumulative completion counter (`completions` directive, `0..999,999,999`).
+  final int completions;
+
   /// Dynamic activation conditions (`condition` directives).
   final List<TaskCondition> conditions;
 
   /// Creation timestamp (`created` directive).
   final DateTime createdAt;
+
+  /// Prerequisite task dependencies with required completion counts (`blocked <task-id>[:<n>]`).
+  final List<TdfTaskDependency> dependencies;
 
   /// Unique TDF task entity identifier (`<id>`).
   final String id;
@@ -368,6 +455,9 @@ class TaskItem {
 
   /// Whether the task carries the `priority` header flag.
   final bool isPriority;
+
+  /// Whether the task carries an indefinite deferral (`suspended forever`).
+  final bool isSuspendedForever;
 
   /// Associated label IDs (`labels` directive).
   final List<String> labelIds;
@@ -393,7 +483,7 @@ class TaskItem {
   /// Whether the `subtasks` sub-block carries the `auto-finish` header flag.
   final bool subtasksAutoFinish;
 
-  /// Optional deferral timestamp (`suspended` directive).
+  /// Optional finite UTC deferral timestamp (`suspended <timestamp>` directive).
   final DateTime? suspendedAt;
 
   /// Human-readable task title (`name` directive).
@@ -410,14 +500,17 @@ class TaskItem {
     String? note,
     bool? isCompleted,
     bool? isPriority,
+    int? completions,
     DateTime? createdAt,
     DateTime? queuedAt,
     DateTime? completedAt,
     DateTime? modifiedAt,
     DateTime? suspendedAt,
+    bool? isSuspendedForever,
     TaskRepeatRule? repeatRule,
     List<String>? labelIds,
     List<String>? blockedByTaskIds,
+    List<TdfTaskDependency>? dependencies,
     List<TaskLink>? links,
     List<TaskCondition>? conditions,
     bool? subtasksAutoFinish,
@@ -429,20 +522,34 @@ class TaskItem {
     bool clearSuspendedAt = false,
     bool clearRepeatRule = false,
   }) {
+    final resolvedDependencies = _resolveCopyWithDependencies(
+      currentDependencies: this.dependencies,
+      newDependencies: dependencies,
+      newBlockedByTaskIds: blockedByTaskIds,
+    );
+    final resolvedBlockedIds =
+        blockedByTaskIds ??
+        <String>[for (final dep in resolvedDependencies) dep.taskId];
     return TaskItem(
       id: id ?? this.id,
       title: title ?? this.title,
       note: clearNote ? null : (note ?? this.note),
       isCompleted: isCompleted ?? this.isCompleted,
       isPriority: isPriority ?? this.isPriority,
+      completions: completions ?? this.completions,
       createdAt: createdAt ?? this.createdAt,
       queuedAt: clearQueuedAt ? null : (queuedAt ?? this.queuedAt),
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
+      isSuspendedForever: clearSuspendedAt
+          ? (isSuspendedForever ?? false)
+          : (isSuspendedForever ??
+                (suspendedAt != null ? false : this.isSuspendedForever)),
       repeatRule: clearRepeatRule ? null : (repeatRule ?? this.repeatRule),
       labelIds: labelIds ?? this.labelIds,
-      blockedByTaskIds: blockedByTaskIds ?? this.blockedByTaskIds,
+      blockedByTaskIds: resolvedBlockedIds,
+      dependencies: resolvedDependencies,
       links: links ?? this.links,
       conditions: conditions ?? this.conditions,
       subtasksAutoFinish: subtasksAutoFinish ?? this.subtasksAutoFinish,
@@ -470,9 +577,23 @@ class TaskItem {
     return '$datePart $hour:$minute';
   }
 
+  /// Formats [timestamp] with explicit seconds (`YYYY-MM-DD HH:MM:SS`) for `deleted`, `queue.modified`, and finite `suspended` directives.
+  static String formatTdfTimestampWithSeconds(DateTime timestamp) {
+    final datePart = formatIsoDate(timestamp);
+    final hour = timestamp.hour.toString().padLeft(2, '0');
+    final minute = timestamp.minute.toString().padLeft(2, '0');
+    final second = timestamp.second.toString().padLeft(2, '0');
+    return '$datePart $hour:$minute:$second';
+  }
+
   /// Computes a strictly advancing UTC modification timestamp (`max(normalize(now), normalize(previous) + 1s)`).
+  ///
+  /// Throws [FormatException] (`InvalidTimestamp`) if the resulting timestamp exceeds `9999-12-31 23:59:59` UTC.
   static DateTime nextModifiedTimestamp(DateTime now, DateTime? previous) {
     final normalizedNow = normalizeTimestamp(now);
+    if (!TdfCalendar.isWithinTimestampBounds(normalizedNow)) {
+      throw const FormatException('InvalidTimestamp');
+    }
     if (previous == null) {
       return normalizedNow;
     }
@@ -480,7 +601,11 @@ class TaskItem {
     if (normalizedNow.isAfter(normalizedPrevious)) {
       return normalizedNow;
     }
-    return normalizedPrevious.add(const Duration(seconds: 1));
+    final advanced = normalizedPrevious.add(const Duration(seconds: 1));
+    if (!TdfCalendar.isWithinTimestampBounds(advanced)) {
+      throw const FormatException('InvalidTimestamp');
+    }
+    return advanced;
   }
 
   /// Normalizes [timestamp] to UTC at second precision (truncating milliseconds and microseconds).
@@ -512,6 +637,7 @@ class TaskItem {
       isPriority: isPriority,
       clearSuspendedAt: clearBlocking,
       blockedByTaskIds: clearBlocking ? const [] : null,
+      dependencies: clearBlocking ? const [] : null,
       modifiedAt: modifiedAt,
     );
   }
@@ -526,16 +652,18 @@ class TaskItem {
             for (final step in subtasks)
               step.isCompleted ? step : step.copyWith(isCompleted: true),
           ];
+    final nextCompletions = isCompleted ? completions : completions + 1;
     return copyWith(
       isCompleted: true,
       completedAt: normalized,
+      completions: nextCompletions,
       subtasks: completedSubtasks,
       modifiedAt: nextModifiedTimestamp(normalized, effectiveModifiedAt),
     );
   }
 
-  /// Parses a strict ISO-8601 date string (`YYYY-MM-DD`) into a UTC [DateTime],
-  /// returning `null` if the format or calendar date is invalid.
+  /// Parses a strict ISO-8601 date string (`YYYY-MM-DD`) in `0001-01-01..9999-12-31` into a UTC [DateTime],
+  /// returning `null` if the format or proleptic Gregorian calendar date is invalid.
   static DateTime? tryParseIsoDate(String rawDate) {
     if (rawDate.length != 10 ||
         rawDate.codeUnitAt(4) != 0x2D ||
@@ -548,16 +676,10 @@ class TaskItem {
     if (year == null || month == null || day == null) {
       return null;
     }
-    if (month < 1 || month > 12 || day < 1 || day > 31) {
+    if (!TdfCalendar.isValidGregorianDate(year, month, day)) {
       return null;
     }
-    final candidate = DateTime.utc(year, month, day);
-    if (candidate.year != year ||
-        candidate.month != month ||
-        candidate.day != day) {
-      return null;
-    }
-    return candidate;
+    return DateTime.utc(year, month, day);
   }
 
   /// Parses a strict TDF `<timestamp>` (`<YYYY-MM-DD>` and optional `<HH:MM[:SS]>`) into a UTC [DateTime].
@@ -688,6 +810,36 @@ class TaskItem {
     return result;
   }
 
+  /// Resolves the updated [TdfTaskDependency] list during [copyWith], preserving existing required completion counts when only [newBlockedByTaskIds] is provided.
+  static List<TdfTaskDependency> _resolveCopyWithDependencies({
+    required List<TdfTaskDependency> currentDependencies,
+    required List<TdfTaskDependency>? newDependencies,
+    required List<String>? newBlockedByTaskIds,
+  }) {
+    if (newDependencies != null) {
+      return newDependencies;
+    }
+    if (newBlockedByTaskIds == null) {
+      return currentDependencies;
+    }
+    final existingMap = <String, int>{
+      for (final dep in currentDependencies) dep.taskId: dep.requiredCompletion,
+    };
+    final result = <TdfTaskDependency>[];
+    final seen = <String>{};
+    for (final id in newBlockedByTaskIds) {
+      if (seen.add(id)) {
+        result.add(
+          TdfTaskDependency(
+            taskId: id,
+            requiredCompletion: existingMap[id] ?? 1,
+          ),
+        );
+      }
+    }
+    return result;
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -697,15 +849,18 @@ class TaskItem {
         other.note == note &&
         other.isCompleted == isCompleted &&
         other.isPriority == isPriority &&
+        other.completions == completions &&
         other.createdAt == createdAt &&
         other.queuedAt == queuedAt &&
         other.completedAt == completedAt &&
         other.modifiedAt == modifiedAt &&
         other.suspendedAt == suspendedAt &&
+        other.isSuspendedForever == isSuspendedForever &&
         other.repeatRule == repeatRule &&
         other.subtasksAutoFinish == subtasksAutoFinish &&
         listEquals(other.labelIds, labelIds) &&
         listEquals(other.blockedByTaskIds, blockedByTaskIds) &&
+        listEquals(other.dependencies, dependencies) &&
         listEquals(other.links, links) &&
         listEquals(other.conditions, conditions) &&
         listEquals(other.subtasks, subtasks);
@@ -718,15 +873,18 @@ class TaskItem {
     note,
     isCompleted,
     isPriority,
+    completions,
     createdAt,
     queuedAt,
     completedAt,
     modifiedAt,
     suspendedAt,
+    isSuspendedForever,
     repeatRule,
     subtasksAutoFinish,
     Object.hashAll(labelIds),
     Object.hashAll(blockedByTaskIds),
+    Object.hashAll(dependencies),
     Object.hashAll(links),
     Object.hashAll(conditions),
     Object.hashAll(subtasks),

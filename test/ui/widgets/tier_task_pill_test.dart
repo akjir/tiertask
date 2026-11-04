@@ -30,7 +30,14 @@ void main() {
     'Task pill displays darker right-side indicators for priority, repeat, and subtasks regardless of subtask completion state, distinct from action button icons',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:10:00
+  task all000OkD2
+  task donesbOkD2
+  task plain0OkD2
+}
 
 task all000OkD2 priority {
   name "Priority Repeating Checklist Task"
@@ -215,7 +222,13 @@ task plain0OkD2 {
     'Tapping a task pill with subtasks animates subtasks downward, shifts subsequent tasks down, toggles subtasks on and off, and collapses on second tap',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:05:00
+  task 000001OkD2
+  task 000002OkD2
+}
 
 task 000001OkD2 {
   name "Deploy release candidate"
@@ -448,7 +461,13 @@ task 000002OkD2 {
     'Checking all expanded subtasks on a task with subtasks auto-finish completes the task automatically and differentiates subtask indicator icons and hover tooltips',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:05:00
+  task auto00OkD2
+  task manualOkD2
+}
 
 task auto00OkD2 priority {
   name "Auto Finish Checklist Task"
@@ -714,7 +733,15 @@ task manualOkD2 {
     'Closing, downgrading, and restoring tasks animate directionally, slide lower tasks upward, and animate auto-pulled upgraded tasks into the tier',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:15:00
+  task f10000OkD2
+  task f20000OkD2
+  task f30000OkD2
+  task r10000OkD2
+}
 
 task f10000OkD2 {
   name "Focus Task 1"
@@ -744,12 +771,14 @@ task c10000OkD2 {
   created 2026-10-30 08:00
   queued 2026-10-30 08:00
   finished 2026-10-31 09:00
+  completions 1
 }
 task c20000OkD2 {
   name "Completed Task 2"
   created 2026-10-29 08:00
   queued 2026-10-29 08:00
   finished 2026-10-30 09:00
+  completions 1
 }
 ''';
       final container = ProviderContainer(
@@ -968,7 +997,12 @@ task c20000OkD2 {
     'Task pill displays passive link indicator, expands link rows on tap, launches URIs via LinkLauncherRepository, and shows SnackBar on launch failure',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task lnk001OkD2
+}
 
 task lnk001OkD2 {
   name "Review architecture docs"
@@ -1059,7 +1093,14 @@ task lnk001OkD2 {
     'Task pill displays passive note indicator, expands note-only tasks, and renders expanded note above links and subtasks with leading icon',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:10:00
+  task all001OkD2
+  task not001OkD2
+  task plain1OkD2
+}
 
 task not001OkD2 {
   name "Note Only Task"

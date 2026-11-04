@@ -29,7 +29,13 @@ void main() {
     'Side panel removes tier items, displays Google Keep style Labels with Edit at top, task counts, label filtering, and Create new label opening EditLabelsScreen',
     (WidgetTester tester) async {
       const labelsTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:30:00
+  task 000001OkD2
+  task 000002OkD2
+}
 
 label home00OkD2 {
   name "Home"

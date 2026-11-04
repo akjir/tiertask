@@ -233,7 +233,11 @@ void main() {
     'QuickAddBar Labels button expands upward menu to select multiple labels',
     (WidgetTester tester) async {
       const seededLabelsTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 00:00:00
+}
 
 label home00OkD2 {
   name "Home"

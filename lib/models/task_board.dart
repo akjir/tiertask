@@ -19,6 +19,8 @@ import '../services/app_logger.dart';
 import 'task_item.dart';
 import 'task_tier.dart';
 import 'tdf_metadata.dart';
+import 'tdf_sync_metadata.dart';
+import 'tdf_timezone.dart';
 
 /// Immutable domain model representing the TierTask board across all 6 derived tiers (`1` to `6`).
 @immutable
@@ -32,6 +34,8 @@ class TaskBoard {
     List<TaskItem> someday = const [],
     List<TaskItem> completed = const [],
     List<TdfLabel> labels = const [],
+    TdfDeletedBlock? deletedBlock,
+    TdfQueueBlock? queueBlock,
   }) : this._normalized(
          _normalizeTierSlices(
            focus: focus,
@@ -41,13 +45,16 @@ class TaskBoard {
            someday: someday,
            completed: completed,
            labels: labels,
+           explicitQueueBlock: queueBlock,
          ),
          labels: labels,
+         deletedBlock: deletedBlock ?? TdfDeletedBlock.empty,
        );
 
   TaskBoard._normalized(
     _NormalizedTierSlices slices, {
     required List<TdfLabel> labels,
+    required this.deletedBlock,
   }) : focus = List<TaskItem>.unmodifiable(slices.focus),
        ready = List<TaskItem>.unmodifiable(slices.ready),
        planned = List<TaskItem>.unmodifiable(slices.planned),
@@ -55,6 +62,7 @@ class TaskBoard {
        someday = List<TaskItem>.unmodifiable(slices.someday),
        completed = List<TaskItem>.unmodifiable(slices.completed),
        labels = List<TdfLabel>.unmodifiable(labels),
+       queueBlock = slices.queueBlock,
        openTaskCountsByLabel = Map<String, int>.unmodifiable(
          slices.openTaskCountsByLabel,
        ),
@@ -68,7 +76,10 @@ class TaskBoard {
     required Iterable<TaskItem> tasks,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     List<TdfLabel> labels = const [],
+    TdfDeletedBlock? deletedBlock,
+    TdfQueueBlock? queueBlock,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -77,13 +88,13 @@ class TaskBoard {
     final now = TaskItem.normalizeTimestamp(
       evaluationTime ?? DateTime.now().toUtc(),
     );
-    final localNow = _resolveLocalEvaluationTime(
-      evaluationTime,
-      localEvaluationTime,
-    );
-    final normalizedNow = DateTime.utc(now.year, now.month, now.day);
+    final localNow = (timeZone != null && timeZone.isAvailable)
+        ? timeZone.toLocalWallClock(now)
+        : _resolveLocalEvaluationTime(evaluationTime, localEvaluationTime);
     final taskList = List<TaskItem>.from(tasks);
-    final unfinishedIds = _collectUnfinishedIds(taskList);
+    final taskMap = <String, TaskItem>{
+      for (final task in taskList) task.id: task,
+    };
     final labelMap = <String, TdfLabel>{
       for (final label in labels) label.id: label,
     };
@@ -91,15 +102,15 @@ class TaskBoard {
     final completedList = <TaskItem>[];
     final somedayList = <TaskItem>[];
     final blockedList = <TaskItem>[];
-    final activeCandidates = <_IndexedTask>[];
+    final eligibleById = <String, TaskItem>{};
+    final prunedTaskRecords = <TdfDeletedTaskRecord>[];
 
     for (var i = 0; i < taskList.length; i++) {
       _classifyTaskIntoPipeline(
         task: taskList[i],
-        index: i,
+        nowUtc: now,
         localNow: localNow,
-        normalizedNow: normalizedNow,
-        unfinishedIds: unfinishedIds,
+        taskMap: taskMap,
         labelMap: labelMap,
         activeLabelId: activeLabelId,
         currentLatitude: currentLatitude,
@@ -108,16 +119,26 @@ class TaskBoard {
         completedList: completedList,
         somedayList: somedayList,
         blockedList: blockedList,
-        activeCandidates: activeCandidates,
+        eligibleById: eligibleById,
+        prunedTaskRecords: prunedTaskRecords,
       );
     }
 
-    activeCandidates.sort(_compareActiveCandidates);
+    final resolvedDeletedBlock = _mergePrunedTasksIntoDeletedBlock(
+      deletedBlock ?? TdfDeletedBlock.empty,
+      prunedTaskRecords,
+    );
+    final resolvedQueueBlock = queueBlock ?? _deriveDefaultQueueBlock(taskList);
+
+    final orderedEligible = _orderEligibleByQueue(
+      eligibleById: eligibleById,
+      queueTaskIds: resolvedQueueBlock.taskIds,
+    );
     final focusList = <TaskItem>[];
     final readyList = <TaskItem>[];
     final plannedList = <TaskItem>[];
-    _sliceActiveCandidates(
-      activeCandidates,
+    _sliceEligibleTasks(
+      orderedEligible,
       focusList: focusList,
       readyList: readyList,
       plannedList: plannedList,
@@ -131,11 +152,16 @@ class TaskBoard {
       someday: somedayList,
       completed: completedList,
       labels: labels,
+      deletedBlock: resolvedDeletedBlock,
+      queueBlock: resolvedQueueBlock,
     );
   }
 
-  /// Retention period in days for completed tasks in Tier 6 (`Completed`).
+  /// Retention period in days for completed tasks in Tier 6 (`Completed`) and deletion records.
   static const int completedRetentionDays = 30;
+
+  /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC.md` Section 6.8.
+  static const int completedRetentionSeconds = 2592000;
 
   /// Soft WIP limit for Tier 1 (`Focus`).
   static const int focusSoftLimit = 3;
@@ -149,6 +175,9 @@ class TaskBoard {
   /// Tier 6 (`Completed`) task items.
   final List<TaskItem> completed;
 
+  /// Root `deleted` block storing deletion history generation and active task/label deletion records.
+  final TdfDeletedBlock deletedBlock;
+
   /// Tier 1 (`Focus`) task items.
   final List<TaskItem> focus;
 
@@ -160,6 +189,9 @@ class TaskBoard {
 
   /// Tier 3 (`Planned`) task items.
   final List<TaskItem> planned;
+
+  /// Root `queue` block storing the shared queue modification timestamp and ordered scheduled open task IDs.
+  final TdfQueueBlock queueBlock;
 
   /// Tier 2 (`Ready`) task items.
   final List<TaskItem> ready;
@@ -180,6 +212,12 @@ class TaskBoard {
     ...completed,
   ]);
 
+  /// UTC timestamp of the last shared queue order modification (`queue.modified`).
+  DateTime get queueModifiedAt => queueBlock.modifiedAt;
+
+  /// Ordered list of scheduled open task IDs in the shared `queue` block.
+  List<String> get queueTaskIds => queueBlock.taskIds;
+
   /// Adds a new TDF `label` block with a unique identifier and optional `#RRGGBB` [color].
   TaskBoard addLabel(
     String name, {
@@ -194,7 +232,7 @@ class TaskBoard {
     if (trimmed.isEmpty) {
       return this;
     }
-    final existingIds = <String>{for (final label in labels) label.id};
+    final existingIds = _collectAllUsedEntityIds();
     final resolvedModifiedAt = modifiedAt != null
         ? TaskItem.normalizeTimestamp(modifiedAt)
         : (currentDate != null
@@ -207,7 +245,8 @@ class TaskBoard {
             timestamp: resolvedModifiedAt,
             existingIds: existingIds,
           );
-    if (existingIds.contains(labelId)) {
+    if (labels.any((label) => label.id == labelId) ||
+        deletedBlock.findLabelRecord(labelId) != null) {
       return this;
     }
     final normalizedColor = TdfColor.normalizeHex(color);
@@ -237,13 +276,16 @@ class TaskBoard {
     List<SubtaskItem> subtasks = const [],
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     DateTime? modifiedAt,
     String? id,
     String? note,
     List<String> labelIds = const [],
     DateTime? suspendedAt,
+    bool? isSuspendedForever,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
+    List<TdfTaskDependency>? dependencies,
     List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
   }) {
@@ -258,6 +300,11 @@ class TaskBoard {
     final localNow = _resolveLocalEvaluationTime(
       currentDate,
       localEvaluationTime,
+    );
+    final resolvedTimeZone = _resolveEffectiveTimeZone(
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
     );
     final trimmedNote = note?.trim();
     final effectiveNote = (trimmedNote != null && trimmedNote.isNotEmpty)
@@ -277,18 +324,29 @@ class TaskBoard {
     final effectiveSubtasks = isDone
         ? _setAllSubtasksCompleted(cleanSubtasks, isCompleted: true)
         : cleanSubtasks;
-    final isBlocked = targetTier == TaskTier.blocked && !isDone;
-    final effectiveSuspendedAt = isDone
+    final isBlockedTarget = targetTier == TaskTier.blocked && !isDone;
+    final resolvedForever =
+        !isDone &&
+        (isSuspendedForever ??
+            (suspendedAt == TaskItem.defaultSuspendedAt ||
+                (isBlockedTarget && suspendedAt == null)));
+    final effectiveSuspendedAt = (isDone || resolvedForever)
         ? null
-        : (suspendedAt ?? (isBlocked ? TaskItem.defaultSuspendedAt : null));
+        : suspendedAt;
     final isActivelySuspended =
-        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(localNow);
+        resolvedForever ||
+        (effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(now));
     final isSomeday =
         targetTier == TaskTier.someday && !isDone && !isActivelySuspended;
-    final existingIds = <String>{for (final task in allTasks) task.id};
+    final existingIds = _collectAllUsedEntityIds();
     final taskId =
         id ?? generateTaskId(timestamp: now, existingIds: existingIds);
-    final cleanBlockedBy = _sanitizeBlockedByForTask(taskId, blockedByTaskIds);
+    final armedDependencies = _armDependenciesForTask(
+      taskId: taskId,
+      candidateBlockedByIds: blockedByTaskIds,
+      explicitDependencies: dependencies,
+      existingDependencies: const [],
+    );
     final cleanLinks = _cleanLinks(links);
     final cleanConditions = _sanitizeTaskConditions(conditions);
     final resolvedModifiedAt = modifiedAt != null
@@ -300,17 +358,19 @@ class TaskBoard {
       title: trimmed,
       note: effectiveNote,
       isCompleted: isDone,
+      completions: isDone ? 1 : 0,
       isPriority:
           effectivePriority &&
           !isSomeday &&
-          (!isBlocked || isActivelySuspended || repeatRule != null),
+          (!isBlockedTarget || isActivelySuspended || repeatRule != null),
       createdAt: now,
       queuedAt: isSomeday ? null : now,
       completedAt: isDone ? now : null,
       modifiedAt: resolvedModifiedAt,
       suspendedAt: effectiveSuspendedAt,
+      isSuspendedForever: resolvedForever,
       repeatRule: repeatRule,
-      blockedByTaskIds: cleanBlockedBy,
+      dependencies: armedDependencies,
       labelIds: labelIds,
       links: cleanLinks,
       conditions: cleanConditions,
@@ -322,7 +382,7 @@ class TaskBoard {
             baseTask,
             repeatRule,
             now,
-            localNow,
+            resolvedTimeZone,
             preserveModifiedAt: resolvedModifiedAt,
           )
         : baseTask;
@@ -330,15 +390,26 @@ class TaskBoard {
     if (isDone) {
       return copyWith(completed: [newTask, ...completed])
           .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
+          .applyAutoPull(
+            currentDate: now,
+            localEvaluationTime: localNow,
+            timeZone: timeZone,
+          )
           ._logDomainMutation('addTask id=$taskId title="$trimmed"');
     }
+
+    final nextQueueBlock = newTask.queuedAt != null
+        ? _appendTaskToQueue(queueBlock, newTask.id, now)
+        : queueBlock;
 
     return TaskBoard.evaluate(
       tasks: [...allTasks, newTask],
       evaluationTime: now,
       localEvaluationTime: localNow,
+      timeZone: timeZone,
       labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
       pruneExpiredCompleted: true,
     )._logDomainMutation('addTask id=$taskId title="$trimmed"');
   }
@@ -347,70 +418,65 @@ class TaskBoard {
   TaskBoard applyAutoPull({
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
   }) {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
     );
-    final localNow = _resolveLocalEvaluationTime(
-      currentDate,
-      localEvaluationTime,
-    );
-    final unfinishedIds = _collectUnfinishedIds(allTasks);
+    final localNow = (timeZone != null && timeZone.isAvailable)
+        ? timeZone.toLocalWallClock(now)
+        : _resolveLocalEvaluationTime(currentDate, localEvaluationTime);
+    final taskList = allTasks;
+    final taskMap = <String, TaskItem>{
+      for (final task in taskList) task.id: task,
+    };
     final labelMap = <String, TdfLabel>{
       for (final label in labels) label.id: label,
     };
-    final nextFocus = List<TaskItem>.from(focus);
-    final nextReady = List<TaskItem>.from(ready);
-    final nextPlanned = List<TaskItem>.from(planned);
-    final nextBlocked = <TaskItem>[];
-    var unblockedPriorityTask = false;
+    final normalizedTasks = <TaskItem>[];
+    var nextQueueBlock = queueBlock;
 
-    for (final task in blocked) {
-      if (_isTaskBlocked(
-        task: task,
-        unfinishedIds: unfinishedIds,
-        labelMap: labelMap,
-        evaluationTime: localNow,
-        activeLabelId: null,
-        currentLatitude: null,
-        currentLongitude: null,
-      )) {
-        nextBlocked.add(task);
-      } else {
-        if (task.isPriority) {
-          unblockedPriorityTask = true;
-        }
-        final nextModified = task.queuedAt == null
-            ? TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt)
-            : task.modifiedAt;
-        nextPlanned.add(
-          task.copyWith(
-            queuedAt: task.queuedAt ?? now,
-            modifiedAt: nextModified,
+    for (final task in taskList) {
+      if (!task.isCompleted &&
+          task.completedAt == null &&
+          task.queuedAt == null &&
+          findTierOfTask(task.id) == TaskTier.blocked &&
+          !_isTaskBlocked(
+            task: task,
+            taskMap: taskMap,
+            labelMap: labelMap,
+            nowUtc: now,
+            localNow: localNow,
+            activeLabelId: null,
+            currentLatitude: null,
+            currentLongitude: null,
+          )) {
+        final scheduledTask = task.copyWith(
+          queuedAt: now,
+          modifiedAt: TaskItem.nextModifiedTimestamp(
+            now,
+            task.effectiveModifiedAt,
           ),
         );
+        normalizedTasks.add(scheduledTask);
+        nextQueueBlock = _appendTaskToQueue(
+          nextQueueBlock,
+          scheduledTask.id,
+          now,
+        );
+      } else {
+        normalizedTasks.add(task);
       }
     }
 
-    if (unblockedPriorityTask) {
-      _sortAndSliceActiveLists(
-        nextFocus: nextFocus,
-        nextReady: nextReady,
-        nextPlanned: nextPlanned,
-      );
-    } else {
-      _cascadeQueues(
-        nextFocus: nextFocus,
-        nextReady: nextReady,
-        nextPlanned: nextPlanned,
-      );
-    }
-
-    return copyWith(
-      focus: nextFocus,
-      ready: nextReady,
-      planned: nextPlanned,
-      blocked: nextBlocked,
+    return TaskBoard.evaluate(
+      tasks: normalizedTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
     );
   }
 
@@ -419,6 +485,7 @@ class TaskBoard {
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     DateTime? suspendedUntil,
   }) {
     final now = TaskItem.normalizeTimestamp(
@@ -438,33 +505,83 @@ class TaskBoard {
     }
 
     final wasCompleted = task.isCompleted || task.completedAt != null;
+    final useForever =
+        suspendedUntil == null || suspendedUntil == TaskItem.defaultSuspendedAt;
     final blockedTask = task.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
       isPriority: false,
       queuedAt: task.queuedAt ?? now,
-      suspendedAt: suspendedUntil ?? TaskItem.defaultSuspendedAt,
+      suspendedAt: useForever ? null : suspendedUntil,
+      clearSuspendedAt: useForever,
+      isSuspendedForever: useForever,
       subtasks: wasCompleted
           ? _setAllSubtasksCompleted(task.subtasks, isCompleted: false)
           : task.subtasks,
       modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
+    final nextQueueBlock = _appendTaskToQueue(queueBlock, taskId, now);
+    final updatedTasks = <TaskItem>[
+      for (final item in allTasks) item.id == taskId ? blockedTask : item,
+    ];
 
-    return _removeTaskFromTier(taskId, sourceTier)
-        .copyWith(blocked: [...blocked, blockedTask])
-        .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
-        ._logDomainMutation('blockTask id=$taskId');
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
+      pruneExpiredCompleted: true,
+    )._logDomainMutation('blockTask id=$taskId');
   }
 
-  /// Marks an active task as done per `TDF_SPEC.md` Section 6.4:
-  /// 1. Standard tasks: sets `finished` to [currentDate] and places it at the top of Tier 6 (`Completed`).
-  /// 2. Recurring tasks (`repeat` present): reschedules into Tier 4 (`Blocked`) with `priority`, UTC `queued`, local `suspended`, and reset `subtasks`.
+  /// Removes expired task and label deletion records (`now - deletedAt > 2,592,000` seconds)
+  /// and increments `deletedBlock.generation` once when at least one record is removed per `TDF_SPEC.md` Section 6.8.3.
+  TaskBoard cleanupExpiredDeletions({DateTime? currentDate}) {
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final retainedTasks = <TdfDeletedTaskRecord>[
+      for (final record in deletedBlock.tasks)
+        if (!_isTimestampExpired(record.deletedAt, now)) record,
+    ];
+    final retainedLabels = <TdfDeletedLabelRecord>[
+      for (final record in deletedBlock.labels)
+        if (!_isTimestampExpired(record.deletedAt, now)) record,
+    ];
+    final removedCount =
+        (deletedBlock.tasks.length - retainedTasks.length) +
+        (deletedBlock.labels.length - retainedLabels.length);
+    if (removedCount == 0) {
+      return this;
+    }
+    if (deletedBlock.generation >= TdfDeletedBlock.maxGeneration) {
+      throw const FormatException('LimitExceeded');
+    }
+    final nextDeletedBlock = TdfDeletedBlock(
+      generation: deletedBlock.generation + 1,
+      tasks: retainedTasks,
+      labels: retainedLabels,
+    );
+    AppLogger.info(
+      LogTag.domain,
+      'cleanupExpiredDeletions removed=$removedCount generation=${nextDeletedBlock.generation}',
+    );
+    return copyWith(deletedBlock: nextDeletedBlock);
+  }
+
+  /// Marks an active task as done per `TDF_SPEC.md` Section 6.4 and 6.9.4:
+  /// 1. Standard tasks: increments `completions`, sets `finished` to [currentDate], removes from `queue`, and places in Tier 6 (`Completed`).
+  /// 2. Recurring tasks (`repeat` present): increments `completions`, rearms prerequisites, and reschedules into Tier 4 (`Blocked`) with `priority`, UTC `queued`, UTC `suspended`, and reset `subtasks` while preserving `queue` position.
   /// 3. Prunes items in Tier 6 older than 30 days and refills Tier 1 and Tier 2.
   TaskBoard completeTask(
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    int? expectedCompletions,
   }) {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
@@ -481,34 +598,60 @@ class TaskBoard {
     if (task == null) {
       return this;
     }
+    if (expectedCompletions != null &&
+        task.completions != expectedCompletions) {
+      return this;
+    }
+    if (task.completions >= TdfTaskDependency.maxCompletions) {
+      throw const FormatException('LimitExceeded');
+    }
 
     if (task.repeatRule case final repeatRule?) {
+      final resolvedTimeZone = _resolveEffectiveTimeZone(
+        now: now,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+      );
       final rescheduledTask = _rescheduleRecurringTask(
         task,
         repeatRule,
         now,
-        localNow,
+        resolvedTimeZone,
       );
-      final updated = _removeTaskFromTier(
-        taskId,
-        sourceTier,
-      ).copyWith(blocked: [...blocked, rescheduledTask]);
-      return updated
-          .pruneCompletedTasks(currentDate: now)
-          .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
-          ._logDomainMutation('completeTask (recurring) id=$taskId');
+      final nextQueueBlock = _appendTaskToQueue(queueBlock, taskId, now);
+      final updatedTasks = <TaskItem>[
+        for (final item in allTasks) item.id == taskId ? rescheduledTask : item,
+      ];
+      return TaskBoard.evaluate(
+        tasks: updatedTasks,
+        evaluationTime: now,
+        localEvaluationTime: localNow,
+        timeZone: timeZone,
+        labels: labels,
+        deletedBlock: deletedBlock,
+        queueBlock: nextQueueBlock,
+        pruneExpiredCompleted: true,
+      )._logDomainMutation('completeTask (recurring) id=$taskId');
     }
 
     final completedTask = task.toCompleted(now);
-    final updated = _removeTaskFromTier(
-      taskId,
-      sourceTier,
-    ).copyWith(completed: [completedTask, ...completed]);
+    final nextQueueBlock = _removeTaskFromQueue(queueBlock, taskId, now);
+    final updatedTasks = <TaskItem>[
+      completedTask,
+      for (final item in allTasks)
+        if (item.id != taskId) item,
+    ];
 
-    return updated
-        .pruneCompletedTasks(currentDate: now)
-        .applyAutoPull(currentDate: now, localEvaluationTime: localNow)
-        ._logDomainMutation('completeTask id=$taskId');
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
+      pruneExpiredCompleted: true,
+    )._logDomainMutation('completeTask id=$taskId');
   }
 
   /// Returns a copy of this [TaskBoard] with the specified collections replaced.
@@ -520,30 +663,59 @@ class TaskBoard {
     List<TaskItem>? someday,
     List<TaskItem>? completed,
     List<TdfLabel>? labels,
+    TdfDeletedBlock? deletedBlock,
+    TdfQueueBlock? queueBlock,
   }) {
+    final nextFocus = focus ?? this.focus;
+    final nextReady = ready ?? this.ready;
+    final nextPlanned = planned ?? this.planned;
+    final nextBlocked = blocked ?? this.blocked;
+    final nextSomeday = someday ?? this.someday;
+    final nextCompleted = completed ?? this.completed;
+    final resolvedQueue =
+        queueBlock ??
+        _reconcileQueueWithSlices(
+          currentQueue: this.queueBlock,
+          focus: nextFocus,
+          ready: nextReady,
+          planned: nextPlanned,
+          blocked: nextBlocked,
+        );
     return TaskBoard(
-      focus: focus ?? this.focus,
-      ready: ready ?? this.ready,
-      planned: planned ?? this.planned,
-      blocked: blocked ?? this.blocked,
-      someday: someday ?? this.someday,
-      completed: completed ?? this.completed,
+      focus: nextFocus,
+      ready: nextReady,
+      planned: nextPlanned,
+      blocked: nextBlocked,
+      someday: nextSomeday,
+      completed: nextCompleted,
       labels: labels ?? this.labels,
+      deletedBlock: deletedBlock ?? this.deletedBlock,
+      queueBlock: resolvedQueue,
     );
   }
 
-  /// Deletes the label with [labelId] and removes its reference from all tasks.
+  /// Deletes the label with [labelId], removes its reference from all tasks (advancing their `modified` timestamps),
+  /// and records the deletion in [deletedBlock] per `TDF_SPEC.md` Section 6.8.1.
   TaskBoard deleteLabel(String labelId, {DateTime? currentDate}) {
+    final existingLabel = findLabel(labelId);
+    if (existingLabel == null) {
+      return this;
+    }
     final nextLabels = <TdfLabel>[
       for (final label in labels)
         if (label.id != labelId) label,
     ];
-    if (nextLabels.length == labels.length) {
-      return this;
-    }
-    final now = currentDate != null
-        ? TaskItem.normalizeTimestamp(currentDate)
-        : null;
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final deletionRevision = TaskItem.nextModifiedTimestamp(
+      now,
+      existingLabel.effectiveModifiedAt,
+    );
+    final nextDeletedBlock = _recordLabelDeletion(
+      deletedBlock,
+      TdfDeletedLabelRecord(labelId: labelId, deletedAt: deletionRevision),
+    );
     return copyWith(
       focus: _stripLabelFromTasks(focus, labelId, now),
       ready: _stripLabelFromTasks(ready, labelId, now),
@@ -552,13 +724,71 @@ class TaskBoard {
       someday: _stripLabelFromTasks(someday, labelId, now),
       completed: _stripLabelFromTasks(completed, labelId, now),
       labels: nextLabels,
+      deletedBlock: nextDeletedBlock,
     )._logDomainMutation('deleteLabel id=$labelId');
   }
 
-  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
-  TaskBoard downgradeTask(String taskId, {DateTime? currentDate}) {
+  /// Deletes the task with [taskId], removes its `queue` entry, and records the deletion
+  /// with its completion checkpoint in [deletedBlock] per `TDF_SPEC.md` Section 6.8.1.
+  TaskBoard deleteTask(
+    String taskId, {
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) {
+    final existingTask = findTask(taskId);
+    if (existingTask == null) {
+      return this;
+    }
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
+    final deletionRevision = TaskItem.nextModifiedTimestamp(
+      now,
+      existingTask.effectiveModifiedAt,
+    );
+    final nextDeletedBlock = _recordTaskDeletion(
+      deletedBlock,
+      TdfDeletedTaskRecord(
+        taskId: taskId,
+        deletedAt: deletionRevision,
+        completionsCheckpoint: existingTask.completions,
+      ),
+    );
+    final nextQueueBlock = _removeTaskFromQueue(queueBlock, taskId, now);
+    final remainingTasks = <TaskItem>[
+      for (final task in allTasks)
+        if (task.id != taskId) task,
+    ];
+    return TaskBoard.evaluate(
+      tasks: remainingTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: nextDeletedBlock,
+      queueBlock: nextQueueBlock,
+      pruneExpiredCompleted: true,
+    )._logDomainMutation('deleteTask id=$taskId');
+  }
+
+  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
+  TaskBoard downgradeTask(
+    String taskId, {
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) {
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
     );
     final sourceTier = findTierOfTask(taskId);
     if (sourceTier == null) {
@@ -573,18 +803,24 @@ class TaskBoard {
       return _downgradeFromFocus(
         task,
         now,
+        localNow: localNow,
+        timeZone: timeZone,
       )._logDomainMutation('downgradeTask id=$taskId from=Focus');
     }
     if (sourceTier == TaskTier.ready) {
       return _downgradeToPlanned(
         task,
         now,
+        localNow: localNow,
+        timeZone: timeZone,
       )._logDomainMutation('downgradeTask id=$taskId from=Ready');
     }
     if (sourceTier == TaskTier.planned) {
       return _downgradeToSomeday(
         task,
         now,
+        localNow: localNow,
+        timeZone: timeZone,
       )._logDomainMutation('downgradeTask id=$taskId from=Planned');
     }
     return this;
@@ -598,12 +834,16 @@ class TaskBoard {
     double? currentLongitude,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
   }) {
     return TaskBoard.evaluate(
       tasks: allTasks,
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
       labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: queueBlock,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
@@ -672,30 +912,117 @@ class TaskBoard {
     return false;
   }
 
+  /// Moves [taskId] within [queueBlock] before [beforeTaskId], after [afterTaskId], or to the end per `TDF_SPEC.md` Section 6.11.1.
+  TaskBoard moveTaskInQueue(
+    String taskId, {
+    String? beforeTaskId,
+    String? afterTaskId,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) {
+    if (!queueBlock.taskIds.contains(taskId)) {
+      return this;
+    }
+    if (beforeTaskId != null &&
+        (beforeTaskId == taskId ||
+            !queueBlock.taskIds.contains(beforeTaskId))) {
+      return this;
+    }
+    if (afterTaskId != null &&
+        (afterTaskId == taskId || !queueBlock.taskIds.contains(afterTaskId))) {
+      return this;
+    }
+    final withoutTask = <String>[
+      for (final id in queueBlock.taskIds)
+        if (id != taskId) id,
+    ];
+    final nextIds = <String>[];
+    if (beforeTaskId != null) {
+      for (final id in withoutTask) {
+        if (id == beforeTaskId) {
+          nextIds.add(taskId);
+        }
+        nextIds.add(id);
+      }
+    } else if (afterTaskId != null) {
+      for (final id in withoutTask) {
+        nextIds.add(id);
+        if (id == afterTaskId) {
+          nextIds.add(taskId);
+        }
+      }
+    } else {
+      nextIds
+        ..addAll(withoutTask)
+        ..add(taskId);
+    }
+    if (listEquals(nextIds, queueBlock.taskIds)) {
+      return this;
+    }
+    final now = TaskItem.normalizeTimestamp(
+      currentDate ?? DateTime.now().toUtc(),
+    );
+    final localNow = _resolveLocalEvaluationTime(
+      currentDate,
+      localEvaluationTime,
+    );
+    final nextQueue = TdfQueueBlock(
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, queueBlock.modifiedAt),
+      taskIds: nextIds,
+    );
+    return TaskBoard.evaluate(
+      tasks: allTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueue,
+    )._logDomainMutation('moveTaskInQueue id=$taskId');
+  }
+
   /// Returns the precomputed count of open (non-completed) tasks across tiers `1` to `5` referencing [labelId].
   int openTaskCountForLabel(String labelId) =>
       openTaskCountsByLabel[labelId] ?? 0;
 
-  /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (UTC) per `TDF_SPEC.md` Section 5.1.
+  /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (`2,592,000` seconds UTC) per `TDF_SPEC.md` Sections 5.2 and 6.8.1,
+  /// creating a deletion record in [deletedBlock] for each pruned task.
   TaskBoard pruneCompletedTasks({DateTime? currentDate}) {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
     );
-    final normalizedNow = DateTime.utc(now.year, now.month, now.day);
 
-    final retained = <TaskItem>[
-      for (final task in completed)
-        if (_isWithinRetention(task, normalizedNow)) task,
-    ];
-    final prunedCount = completed.length - retained.length;
-    if (prunedCount > 0) {
-      AppLogger.info(
-        LogTag.domain,
-        'pruneCompletedTasks pruned=$prunedCount expired tasks (>30 days)',
-      );
+    final retained = <TaskItem>[];
+    final prunedRecords = <TdfDeletedTaskRecord>[];
+    for (final task in completed) {
+      if (_isWithinRetention(task, now)) {
+        retained.add(task);
+      } else {
+        prunedRecords.add(
+          TdfDeletedTaskRecord(
+            taskId: task.id,
+            deletedAt: TaskItem.nextModifiedTimestamp(
+              now,
+              task.effectiveModifiedAt,
+            ),
+            completionsCheckpoint: task.completions,
+          ),
+        );
+      }
     }
-
-    return copyWith(completed: retained);
+    if (prunedRecords.isEmpty) {
+      return this;
+    }
+    AppLogger.info(
+      LogTag.domain,
+      'pruneCompletedTasks pruned=${prunedRecords.length} expired tasks (>30 days)',
+    );
+    final nextDeletedBlock = _mergePrunedTasksIntoDeletedBlock(
+      deletedBlock,
+      prunedRecords,
+    );
+    return copyWith(completed: retained, deletedBlock: nextDeletedBlock);
   }
 
   /// Restores a completed task back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
@@ -704,6 +1031,7 @@ class TaskBoard {
     TaskTier targetTier = TaskTier.planned,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
   }) {
     if (targetTier == TaskTier.completed) {
       return this;
@@ -723,12 +1051,16 @@ class TaskBoard {
 
     final isSomeday = targetTier == TaskTier.someday;
     final isFocus = targetTier == TaskTier.focus;
+    final rearmedDependencies = _rearmDependencies(existing.dependencies);
     final restored = existing.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
+      clearSuspendedAt: true,
+      isSuspendedForever: false,
       queuedAt: isSomeday ? null : now,
       clearQueuedAt: isSomeday,
       isPriority: isFocus,
+      dependencies: rearmedDependencies,
       subtasks: _setAllSubtasksCompleted(existing.subtasks, isCompleted: false),
       modifiedAt: TaskItem.nextModifiedTimestamp(
         now,
@@ -738,12 +1070,18 @@ class TaskBoard {
     final updatedTasks = <TaskItem>[
       for (final task in allTasks) task.id == taskId ? restored : task,
     ];
+    final nextQueueBlock = isSomeday
+        ? _removeTaskFromQueue(queueBlock, taskId, now)
+        : _appendTaskToQueue(queueBlock, taskId, now);
 
     return TaskBoard.evaluate(
       tasks: updatedTasks,
       evaluationTime: now,
       localEvaluationTime: localNow,
+      timeZone: timeZone,
       labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
       pruneExpiredCompleted: true,
     )._logDomainMutation(
       'restoreTask id=$taskId targetTier=${targetTier.name}',
@@ -755,6 +1093,7 @@ class TaskBoard {
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     bool isPriority = false,
   }) {
     final now = TaskItem.normalizeTimestamp(
@@ -770,11 +1109,17 @@ class TaskBoard {
     }
 
     final wasCompleted = existing.isCompleted || existing.completedAt != null;
+    final rearmedDependencies = wasCompleted
+        ? _rearmDependencies(existing.dependencies)
+        : existing.dependencies;
     final scheduled = existing.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
+      clearSuspendedAt: wasCompleted,
+      isSuspendedForever: wasCompleted ? false : existing.isSuspendedForever,
       queuedAt: now,
       isPriority: isPriority || existing.isPriority,
+      dependencies: rearmedDependencies,
       subtasks: wasCompleted
           ? _setAllSubtasksCompleted(existing.subtasks, isCompleted: false)
           : existing.subtasks,
@@ -786,12 +1131,16 @@ class TaskBoard {
     final updatedTasks = <TaskItem>[
       for (final task in allTasks) task.id == taskId ? scheduled : task,
     ];
+    final nextQueueBlock = _appendTaskToQueue(queueBlock, taskId, now);
 
     return TaskBoard.evaluate(
       tasks: updatedTasks,
       evaluationTime: now,
       localEvaluationTime: localNow,
+      timeZone: timeZone,
       labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
       pruneExpiredCompleted: true,
     )._logDomainMutation('scheduleTask id=$taskId');
   }
@@ -815,6 +1164,7 @@ class TaskBoard {
     int stepIndex, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
   }) {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
@@ -859,6 +1209,7 @@ class TaskBoard {
             taskId,
             currentDate: now,
             localEvaluationTime: localEvaluationTime,
+            timeZone: timeZone,
           )
           ._logDomainMutation(
             'toggleSubtask id=$taskId step=$stepIndex (auto-completed)',
@@ -881,6 +1232,7 @@ class TaskBoard {
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
   }) {
     final existing = findLabel(labelId);
     if (existing == null) {
@@ -915,7 +1267,10 @@ class TaskBoard {
       tasks: allTasks,
       evaluationTime: now,
       localEvaluationTime: localNow,
+      timeZone: timeZone,
       labels: nextLabels,
+      deletedBlock: deletedBlock,
+      queueBlock: queueBlock,
       pruneExpiredCompleted: true,
     )._logDomainMutation(
       'updateLabel/renameLabel id=$labelId name="$trimmedName"',
@@ -934,14 +1289,17 @@ class TaskBoard {
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
     DateTime? suspendedAt,
+    bool? isSuspendedForever,
     bool clearSuspendedAt = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
+    List<TdfTaskDependency>? dependencies,
     List<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
   }) {
     final existing = findTask(taskId);
     if (existing == null) {
@@ -960,8 +1318,18 @@ class TaskBoard {
       currentDate,
       localEvaluationTime,
     );
-    final sanitizedBlockedBy = blockedByTaskIds != null
-        ? _sanitizeBlockedByForTask(taskId, blockedByTaskIds)
+    final resolvedTimeZone = _resolveEffectiveTimeZone(
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    );
+    final armedDependencies = (blockedByTaskIds != null || dependencies != null)
+        ? _armDependenciesForTask(
+            taskId: taskId,
+            candidateBlockedByIds: blockedByTaskIds ?? const [],
+            explicitDependencies: dependencies,
+            existingDependencies: existing.dependencies,
+          )
         : null;
     final sanitizedLinks = links != null ? _cleanLinks(links) : null;
     final sanitizedConditions = conditions != null
@@ -977,24 +1345,34 @@ class TaskBoard {
       subtasks: subtasks,
       labelIds: labelIds,
       suspendedAt: suspendedAt,
+      isSuspendedForever: isSuspendedForever,
       clearSuspendedAt: clearSuspendedAt,
       repeatRule: repeatRule,
       clearRepeatRule: clearRepeatRule,
-      blockedByTaskIds: sanitizedBlockedBy,
+      dependencies: armedDependencies,
       links: sanitizedLinks,
       conditions: sanitizedConditions,
       now: now,
-      localNow: localNow,
+      resolvedTimeZone: resolvedTimeZone,
     );
     final updatedTasks = <TaskItem>[
       for (final task in allTasks) task.id == taskId ? updatedTask : task,
     ];
+    final nextQueueBlock = _updateQueueForEditedTask(
+      currentQueue: queueBlock,
+      existingTask: existing,
+      updatedTask: updatedTask,
+      now: now,
+    );
 
     return TaskBoard.evaluate(
       tasks: updatedTasks,
       evaluationTime: now,
       localEvaluationTime: localNow,
+      timeZone: timeZone,
       labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
       pruneExpiredCompleted: true,
     )._logDomainMutation('updateTask id=$taskId title="$trimmed"');
   }
@@ -1038,6 +1416,24 @@ class TaskBoard {
     for (final labelId in task.labelIds) {
       counts[labelId] = (counts[labelId] ?? 0) + 1;
     }
+  }
+
+  /// Appends [taskId] to [queue] if not already present, advancing `queue.modified` when changed.
+  static TdfQueueBlock _appendTaskToQueue(
+    TdfQueueBlock queue,
+    String taskId,
+    DateTime now,
+  ) {
+    if (queue.taskIds.contains(taskId)) {
+      return queue;
+    }
+    if (queue.taskIds.length >= TdfQueueBlock.maxQueueEntries) {
+      throw const FormatException('LimitExceeded');
+    }
+    return TdfQueueBlock(
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, queue.modifiedAt),
+      taskIds: <String>[...queue.taskIds, taskId],
+    );
   }
 
   /// Evaluates whether [task]'s effective condition groups are satisfied per `TDF_SPEC.md` Section 4.3.
@@ -1086,6 +1482,56 @@ class TaskBoard {
     return false;
   }
 
+  /// Arms prerequisite requirements for [taskId] per `TDF_SPEC.md` Section 6.9.3:
+  /// - Retains existing requirements for unchanged target IDs in [existingDependencies].
+  /// - Captures `target.completions + 1` for newly added open prerequisites, `target.completions` for finished prerequisites, or `1` if missing.
+  List<TdfTaskDependency> _armDependenciesForTask({
+    required String taskId,
+    required List<String> candidateBlockedByIds,
+    required List<TdfTaskDependency>? explicitDependencies,
+    required List<TdfTaskDependency> existingDependencies,
+  }) {
+    if (explicitDependencies != null) {
+      final filtered = <TdfTaskDependency>[];
+      final seen = <String>{};
+      for (final dep in explicitDependencies) {
+        final targetId = dep.taskId.trim();
+        if (targetId.isEmpty ||
+            !seen.add(targetId) ||
+            wouldCreateDependencyCycle(taskId, targetId)) {
+          continue;
+        }
+        filtered.add(dep);
+      }
+      return List<TdfTaskDependency>.unmodifiable(filtered);
+    }
+
+    final existingByTarget = <String, int>{
+      for (final dep in existingDependencies)
+        dep.taskId: dep.requiredCompletion,
+    };
+    final result = <TdfTaskDependency>[];
+    final seen = <String>{};
+    for (final rawBlockerId in candidateBlockedByIds) {
+      final blockerId = rawBlockerId.trim();
+      if (blockerId.isEmpty ||
+          !seen.add(blockerId) ||
+          wouldCreateDependencyCycle(taskId, blockerId)) {
+        continue;
+      }
+      final existingRequired = existingByTarget[blockerId];
+      final requiredCompletion =
+          existingRequired ?? _captureRequirementForTarget(blockerId);
+      result.add(
+        TdfTaskDependency(
+          taskId: blockerId,
+          requiredCompletion: requiredCompletion,
+        ),
+      );
+    }
+    return List<TdfTaskDependency>.unmodifiable(result);
+  }
+
   /// Builds an updated [TdfLabel] from [existing] with normalized color, note, and condition fields.
   static TdfLabel _buildUpdatedLabel({
     required TdfLabel existing,
@@ -1124,7 +1570,7 @@ class TaskBoard {
   }
 
   /// Builds an updated [TaskItem] from [existing] with normalized scheduling and subtask fields.
-  static TaskItem _buildUpdatedTask({
+  TaskItem _buildUpdatedTask({
     required TaskItem existing,
     required String title,
     required String? note,
@@ -1134,14 +1580,15 @@ class TaskBoard {
     required List<SubtaskItem>? subtasks,
     required List<String>? labelIds,
     required DateTime? suspendedAt,
+    required bool? isSuspendedForever,
     required bool clearSuspendedAt,
     required TaskRepeatRule? repeatRule,
     required bool clearRepeatRule,
-    required List<String>? blockedByTaskIds,
+    required List<TdfTaskDependency>? dependencies,
     required List<TaskLink>? links,
     required List<TaskCondition>? conditions,
     required DateTime now,
-    required DateTime localNow,
+    required TdfTimeZoneContext resolvedTimeZone,
   }) {
     final wasCompleted = existing.isCompleted || existing.completedAt != null;
     final isRestoringCompleted =
@@ -1172,15 +1619,23 @@ class TaskBoard {
         : (isDone
               ? _setAllSubtasksCompleted(cleanSubtasks, isCompleted: true)
               : cleanSubtasks);
-    final isBlocked = !isDone && targetTier == TaskTier.blocked;
-    final effectiveSuspendedAt = isDone || clearSuspendedAt
+    final isBlockedTarget = !isDone && targetTier == TaskTier.blocked;
+    final resolvedForever =
+        !isDone &&
+        !clearSuspendedAt &&
+        !isRestoringCompleted &&
+        (isSuspendedForever ??
+            (suspendedAt == TaskItem.defaultSuspendedAt ||
+                (suspendedAt == null &&
+                    (existing.isSuspendedForever ||
+                        (isBlockedTarget && existing.suspendedAt == null)))));
+    final effectiveSuspendedAt =
+        (isDone || clearSuspendedAt || isRestoringCompleted || resolvedForever)
         ? null
-        : (suspendedAt ??
-              (isBlocked
-                  ? (existing.suspendedAt ?? TaskItem.defaultSuspendedAt)
-                  : existing.suspendedAt));
+        : (suspendedAt ?? existing.suspendedAt);
     final isActivelySuspended =
-        effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(localNow);
+        resolvedForever ||
+        (effectiveSuspendedAt != null && effectiveSuspendedAt.isAfter(now));
     final isSomeday =
         !isDone &&
         !isActivelySuspended &&
@@ -1191,7 +1646,9 @@ class TaskBoard {
         : (isPriority ?? existing.isPriority);
     final effectivePriority =
         !isSomeday &&
-        (!isBlocked || isActivelySuspended || effectiveRepeatRule != null) &&
+        (!isBlockedTarget ||
+            isActivelySuspended ||
+            effectiveRepeatRule != null) &&
         (preservedPriority || targetTier == TaskTier.focus);
     final hasFutureQueuedToReset =
         !isActivelySuspended &&
@@ -1203,6 +1660,13 @@ class TaskBoard {
               ? now
               : (existing.queuedAt ?? now));
     final trimmedNote = note?.trim();
+    final baseDependencies = dependencies ?? existing.dependencies;
+    final effectiveDependencies = isRestoringCompleted
+        ? _rearmDependencies(baseDependencies)
+        : baseDependencies;
+    final nextCompletions = (isDone && !wasCompleted)
+        ? existing.completions + 1
+        : existing.completions;
 
     final baseUpdated = existing.copyWith(
       title: title,
@@ -1211,6 +1675,7 @@ class TaskBoard {
           : null,
       clearNote: trimmedNote != null && trimmedNote.isEmpty,
       isCompleted: isDone,
+      completions: nextCompletions,
       completedAt: isDone ? (existing.completedAt ?? now) : null,
       clearCompletedAt: !isDone,
       isPriority: effectivePriority,
@@ -1218,9 +1683,10 @@ class TaskBoard {
       clearQueuedAt: isSomeday,
       suspendedAt: effectiveSuspendedAt,
       clearSuspendedAt: effectiveSuspendedAt == null,
+      isSuspendedForever: resolvedForever,
       repeatRule: effectiveRepeatRule,
       clearRepeatRule: effectiveRepeatRule == null,
-      blockedByTaskIds: blockedByTaskIds,
+      dependencies: effectiveDependencies,
       labelIds: labelIds,
       links: links,
       conditions: conditions,
@@ -1236,66 +1702,34 @@ class TaskBoard {
         baseUpdated,
         effectiveRepeatRule,
         now,
-        localNow,
+        resolvedTimeZone,
         preserveModifiedAt: baseUpdated.modifiedAt,
       );
     }
     return baseUpdated;
   }
 
-  /// Executes the two-stage pull cascade across mutable queue lists in linear order.
-  static void _cascadeQueues({
-    required List<TaskItem> nextFocus,
-    required List<TaskItem> nextReady,
-    required List<TaskItem> nextPlanned,
-  }) {
-    var readyIndex = 0;
-    while (nextFocus.length < focusSoftLimit && readyIndex < nextReady.length) {
-      nextFocus.add(nextReady[readyIndex].toActive());
-      readyIndex++;
+  /// Captures the required completion number for a newly added prerequisite [targetId] per `TDF_SPEC.md` Section 6.9.3.
+  int _captureRequirementForTarget(String targetId) {
+    final target = findTask(targetId);
+    if (target == null) {
+      return 1;
     }
-    if (readyIndex > 0) {
-      nextReady.removeRange(0, readyIndex);
+    if (target.isCompleted || target.completedAt != null) {
+      return target.completions >= 1 ? target.completions : 1;
     }
-
-    var plannedIndex = 0;
-    while (nextReady.length < readySoftLimit &&
-        plannedIndex < nextPlanned.length) {
-      nextReady.add(nextPlanned[plannedIndex].toActive());
-      plannedIndex++;
+    if (target.completions >= TdfTaskDependency.maxCompletions) {
+      throw const FormatException('LimitExceeded');
     }
-    if (plannedIndex > 0) {
-      nextPlanned.removeRange(0, plannedIndex);
-    }
-
-    var secondReadyIndex = 0;
-    while (nextFocus.length < focusSoftLimit &&
-        secondReadyIndex < nextReady.length) {
-      nextFocus.add(nextReady[secondReadyIndex].toActive());
-      secondReadyIndex++;
-    }
-    if (secondReadyIndex > 0) {
-      nextReady.removeRange(0, secondReadyIndex);
-    }
-
-    var secondPlannedIndex = 0;
-    while (nextReady.length < readySoftLimit &&
-        secondPlannedIndex < nextPlanned.length) {
-      nextReady.add(nextPlanned[secondPlannedIndex].toActive());
-      secondPlannedIndex++;
-    }
-    if (secondPlannedIndex > 0) {
-      nextPlanned.removeRange(0, secondPlannedIndex);
-    }
+    return target.completions + 1;
   }
 
   /// Classifies a single [task] into the Section 5 evaluation buckets.
   static void _classifyTaskIntoPipeline({
     required TaskItem task,
-    required int index,
+    required DateTime nowUtc,
     required DateTime localNow,
-    required DateTime normalizedNow,
-    required Set<String> unfinishedIds,
+    required Map<String, TaskItem> taskMap,
     required Map<String, TdfLabel> labelMap,
     required String? activeLabelId,
     required double? currentLatitude,
@@ -1304,21 +1738,34 @@ class TaskBoard {
     required List<TaskItem> completedList,
     required List<TaskItem> somedayList,
     required List<TaskItem> blockedList,
-    required List<_IndexedTask> activeCandidates,
+    required Map<String, TaskItem> eligibleById,
+    required List<TdfDeletedTaskRecord> prunedTaskRecords,
   }) {
-    if (activeLabelId != null && !task.labelIds.contains(activeLabelId)) {
-      return;
-    }
-
     if (task.completedAt != null || task.isCompleted) {
-      if (!pruneExpiredCompleted || _isWithinRetention(task, normalizedNow)) {
+      if (pruneExpiredCompleted && !_isWithinRetention(task, nowUtc)) {
+        prunedTaskRecords.add(
+          TdfDeletedTaskRecord(
+            taskId: task.id,
+            deletedAt: TaskItem.nextModifiedTimestamp(
+              nowUtc,
+              task.effectiveModifiedAt,
+            ),
+            completionsCheckpoint: task.completions,
+          ),
+        );
+        return;
+      }
+      if (activeLabelId == null || task.labelIds.contains(activeLabelId)) {
         completedList.add(task.copyWith(isCompleted: true));
       }
       return;
     }
 
-    if (task.suspendedAt case final suspendedUntil?
-        when suspendedUntil.isAfter(localNow)) {
+    if (activeLabelId != null && !task.labelIds.contains(activeLabelId)) {
+      return;
+    }
+
+    if (_hasActiveDeferral(task, nowUtc)) {
       blockedList.add(task);
       return;
     }
@@ -1330,9 +1777,10 @@ class TaskBoard {
 
     if (_isTaskBlocked(
       task: task,
-      unfinishedIds: unfinishedIds,
+      taskMap: taskMap,
       labelMap: labelMap,
-      evaluationTime: localNow,
+      nowUtc: nowUtc,
+      localNow: localNow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
@@ -1341,7 +1789,7 @@ class TaskBoard {
       return;
     }
 
-    activeCandidates.add(_IndexedTask(index: index, task: task));
+    eligibleById[task.id] = task;
   }
 
   /// Trims, validates, and caps [links] at [TaskLink.maxLinksPerTask] while preserving order.
@@ -1371,16 +1819,31 @@ class TaskBoard {
     ];
   }
 
-  /// Collects the IDs of all open (unfinished) tasks in [tasks].
-  static Set<String> _collectUnfinishedIds(List<TaskItem> tasks) {
-    return <String>{
-      for (final task in tasks)
-        if (!task.isCompleted && task.completedAt == null) task.id,
-    };
+  /// Collects all task IDs, label IDs, and retained deletion record IDs so newly generated IDs never collide (`TDF_SPEC.md` Section 2.9).
+  Set<String> _collectAllUsedEntityIds() {
+    final ids = <String>{};
+    for (final task in allTasks) {
+      ids.add(task.id);
+      ids.addAll(task.blockedByTaskIds);
+      ids.addAll(task.labelIds);
+    }
+    for (final label in labels) {
+      ids.add(label.id);
+    }
+    for (final record in deletedBlock.tasks) {
+      ids.add(record.taskId);
+    }
+    for (final record in deletedBlock.labels) {
+      ids.add(record.labelId);
+    }
+    return ids;
   }
 
-  /// Compares two active tasks per `TDF_SPEC.md` Section 5.4 Step 2.
-  static int _compareActiveCandidates(_IndexedTask first, _IndexedTask second) {
+  /// Compares two scheduled open tasks for initial default queue construction (`priority` first, then ascending `queuedAt`, then declaration index).
+  static int _compareInitialQueueCandidates(
+    _IndexedTask first,
+    _IndexedTask second,
+  ) {
     if (first.task.isPriority != second.task.isPriority) {
       return first.task.isPriority ? -1 : 1;
     }
@@ -1408,124 +1871,197 @@ class TaskBoard {
     return first.id.compareTo(second.id);
   }
 
-  /// Downgrades [task] from Tier 1 (`Focus`) to Tier 2 (`Ready`) per `TDF_SPEC.md` Section 6.3.
-  TaskBoard _downgradeFromFocus(TaskItem task, DateTime now) {
-    final totalActiveCount = focus.length + ready.length + planned.length;
-    final nextFocus = _filterOutList(focus, task.id);
-    final nextReady = List<TaskItem>.from(ready);
-    final nextPlanned = List<TaskItem>.from(planned);
-
-    _pullForFocusDowngrade(
-      nextFocus: nextFocus,
-      nextReady: nextReady,
-      nextPlanned: nextPlanned,
-    );
-
-    if (totalActiveCount < focusSoftLimit + readySoftLimit) {
-      final effectiveQueued = _resolveEndOfRegularQueueTimestamp(
-        now,
-        nextFocus,
-        nextReady,
-        nextPlanned,
-      );
-      final downgradedTask = task.toActive(
-        isPriority: false,
-        queuedAt: effectiveQueued,
-        modifiedAt: TaskItem.nextModifiedTimestamp(
-          effectiveQueued,
-          task.effectiveModifiedAt,
-        ),
-      );
-      if (nextFocus.length < focusSoftLimit) {
-        nextFocus.add(downgradedTask);
-      } else {
-        nextReady.add(downgradedTask);
+  /// Derives a default [TdfQueueBlock] when `TaskBoard.evaluate` is invoked without an explicit `queueBlock`.
+  static TdfQueueBlock _deriveDefaultQueueBlock(List<TaskItem> tasks) {
+    final scheduledOpen = <_IndexedTask>[];
+    DateTime? latestModified;
+    for (var i = 0; i < tasks.length; i++) {
+      final task = tasks[i];
+      if (!task.isCompleted &&
+          task.completedAt == null &&
+          task.queuedAt != null) {
+        scheduledOpen.add(_IndexedTask(index: i, task: task));
+        final effectiveMod = task.effectiveModifiedAt;
+        if (latestModified == null || effectiveMod.isAfter(latestModified)) {
+          latestModified = effectiveMod;
+        }
       }
-    } else {
-      final slot8Task = nextReady.last;
-      final alignedPriority = slot8Task.isPriority;
-      final slot8Queued = slot8Task.queuedAt ?? slot8Task.createdAt;
-      final downgradedQueued = slot8Queued.add(const Duration(seconds: 1));
-      nextReady.add(
-        task.toActive(
-          isPriority: alignedPriority,
-          queuedAt: downgradedQueued,
-          modifiedAt: TaskItem.nextModifiedTimestamp(
-            now.isAfter(downgradedQueued) ? now : downgradedQueued,
-            task.effectiveModifiedAt,
-          ),
-        ),
-      );
-      _shiftCollidingPlannedTasks(
-        nextPlanned,
-        downgradedQueued,
-        isPriorityGroup: alignedPriority,
-        now: now,
+    }
+    scheduledOpen.sort(_compareInitialQueueCandidates);
+    return TdfQueueBlock(
+      modifiedAt: latestModified ?? TdfQueueBlock.epochModifiedAt,
+      taskIds: <String>[for (final entry in scheduledOpen) entry.task.id],
+    );
+  }
+
+  /// Downgrades [task] from Tier 1 (`Focus`) to Tier 2 (`Ready`) per `TDF_SPEC.md` Section 6.3.
+  TaskBoard _downgradeFromFocus(
+    TaskItem task,
+    DateTime now, {
+    required DateTime localNow,
+    required TdfTimeZoneContext? timeZone,
+  }) {
+    final totalEligibleCount = focus.length + ready.length + planned.length;
+    if (totalEligibleCount < focusSoftLimit + readySoftLimit) {
+      return _downgradeToQueueTail(
+        task,
+        now,
+        localNow: localNow,
+        timeZone: timeZone,
       );
     }
 
-    return copyWith(
-      focus: nextFocus,
-      ready: nextReady,
-      planned: nextPlanned,
-    ).pruneCompletedTasks(currentDate: now);
+    final slot8Anchor = ready[readySoftLimit - 1];
+    final alignedPriority = slot8Anchor.isPriority;
+    final priorityChanged = task.isPriority != alignedPriority;
+    final updatedTask = priorityChanged
+        ? task.copyWith(
+            isPriority: alignedPriority,
+            modifiedAt: TaskItem.nextModifiedTimestamp(
+              now,
+              task.effectiveModifiedAt,
+            ),
+          )
+        : task;
+
+    final nextQueueIds = <String>[];
+    for (final id in queueBlock.taskIds) {
+      if (id == task.id) {
+        continue;
+      }
+      nextQueueIds.add(id);
+      if (id == slot8Anchor.id) {
+        nextQueueIds.add(task.id);
+      }
+    }
+    if (!nextQueueIds.contains(task.id)) {
+      nextQueueIds.add(task.id);
+    }
+
+    final queueChanged = !listEquals(nextQueueIds, queueBlock.taskIds);
+    if (!priorityChanged && !queueChanged) {
+      return this;
+    }
+
+    final nextQueueBlock = queueChanged
+        ? TdfQueueBlock(
+            modifiedAt: TaskItem.nextModifiedTimestamp(
+              now,
+              queueBlock.modifiedAt,
+            ),
+            taskIds: nextQueueIds,
+          )
+        : queueBlock;
+    final updatedTasks = <TaskItem>[
+      for (final item in allTasks) item.id == task.id ? updatedTask : item,
+    ];
+
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
+      pruneExpiredCompleted: true,
+    );
   }
 
   /// Downgrades [task] from Tier 2 (`Ready`) to Tier 3 (`Planned`) per `TDF_SPEC.md` Section 6.3.
-  TaskBoard _downgradeToPlanned(TaskItem task, DateTime now) {
-    final nextFocus = List<TaskItem>.from(focus);
-    final nextReady = _filterOutList(ready, task.id);
-    final nextPlanned = List<TaskItem>.from(planned);
-
-    _cascadeQueues(
-      nextFocus: nextFocus,
-      nextReady: nextReady,
-      nextPlanned: nextPlanned,
-    );
-
-    final effectiveQueued = _resolveEndOfRegularQueueTimestamp(
+  TaskBoard _downgradeToPlanned(
+    TaskItem task,
+    DateTime now, {
+    required DateTime localNow,
+    required TdfTimeZoneContext? timeZone,
+  }) {
+    return _downgradeToQueueTail(
+      task,
       now,
-      nextFocus,
-      nextReady,
-      nextPlanned,
+      localNow: localNow,
+      timeZone: timeZone,
     );
-    final downgradedTask = task.toActive(
-      isPriority: false,
-      queuedAt: effectiveQueued,
-      modifiedAt: TaskItem.nextModifiedTimestamp(
-        effectiveQueued,
-        task.effectiveModifiedAt,
-      ),
-    );
+  }
 
-    if (nextFocus.length < focusSoftLimit) {
-      nextFocus.add(downgradedTask);
-    } else if (nextReady.length < readySoftLimit) {
-      nextReady.add(downgradedTask);
-    } else {
-      nextPlanned.add(downgradedTask);
+  /// Removes `priority` from [task] and moves its queue entry to the end of `queue` without changing `queuedAt` (`TDF_SPEC.md` Section 6.3).
+  TaskBoard _downgradeToQueueTail(
+    TaskItem task,
+    DateTime now, {
+    required DateTime localNow,
+    required TdfTimeZoneContext? timeZone,
+  }) {
+    final priorityChanged = task.isPriority;
+    final nextQueueIds = <String>[
+      for (final id in queueBlock.taskIds)
+        if (id != task.id) id,
+      task.id,
+    ];
+    final queueChanged = !listEquals(nextQueueIds, queueBlock.taskIds);
+    if (!priorityChanged && !queueChanged) {
+      return this;
     }
 
-    return copyWith(
-      focus: nextFocus,
-      ready: nextReady,
-      planned: nextPlanned,
-    ).pruneCompletedTasks(currentDate: now);
+    final updatedTask = priorityChanged
+        ? task.copyWith(
+            isPriority: false,
+            modifiedAt: TaskItem.nextModifiedTimestamp(
+              now,
+              task.effectiveModifiedAt,
+            ),
+          )
+        : task;
+    final nextQueueBlock = queueChanged
+        ? TdfQueueBlock(
+            modifiedAt: TaskItem.nextModifiedTimestamp(
+              now,
+              queueBlock.modifiedAt,
+            ),
+            taskIds: nextQueueIds,
+          )
+        : queueBlock;
+    final updatedTasks = <TaskItem>[
+      for (final item in allTasks) item.id == task.id ? updatedTask : item,
+    ];
+
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
+      pruneExpiredCompleted: true,
+    );
   }
 
   /// Downgrades [task] from Tier 3 (`Planned`) to Tier 5 (`Someday`) per `TDF_SPEC.md` Section 6.3.
-  TaskBoard _downgradeToSomeday(TaskItem task, DateTime now) {
-    final nextPlanned = _filterOutList(planned, task.id);
+  TaskBoard _downgradeToSomeday(
+    TaskItem task,
+    DateTime now, {
+    required DateTime localNow,
+    required TdfTimeZoneContext? timeZone,
+  }) {
     final downgradedTask = task.toActive(
       clearQueuedAt: true,
       isPriority: false,
       modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
+    final nextQueueBlock = _removeTaskFromQueue(queueBlock, task.id, now);
+    final updatedTasks = <TaskItem>[
+      for (final item in allTasks) item.id == task.id ? downgradedTask : item,
+    ];
 
-    return copyWith(
-      planned: nextPlanned,
-      someday: [...someday, downgradedTask],
-    ).pruneCompletedTasks(currentDate: now);
+    return TaskBoard.evaluate(
+      tasks: updatedTasks,
+      evaluationTime: now,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: nextQueueBlock,
+      pruneExpiredCompleted: true,
+    );
   }
 
   /// Evaluates all rules belonging to [group] within [rules] using intra-group `OR` short-circuiting.
@@ -1581,14 +2117,6 @@ class TaskBoard {
     return true;
   }
 
-  /// Returns a new list excluding the task with [taskId].
-  static List<TaskItem> _filterOutList(List<TaskItem> list, String taskId) {
-    return [
-      for (final item in list)
-        if (item.id != taskId) item,
-    ];
-  }
-
   /// Finds a task with [taskId] inside [list], or `null` if absent.
   static TaskItem? _findInList(List<TaskItem> list, String taskId) {
     for (final task in list) {
@@ -1597,6 +2125,18 @@ class TaskBoard {
       }
     }
     return null;
+  }
+
+  /// Checks whether [task] has an active deferral (`suspended forever` or `suspendedAt > nowUtc`).
+  static bool _hasActiveDeferral(TaskItem task, DateTime nowUtc) {
+    if (task.isSuspendedForever) {
+      return true;
+    }
+    if (task.suspendedAt case final suspendedUntil?
+        when suspendedUntil.isAfter(nowUtc)) {
+      return true;
+    }
+    return false;
   }
 
   /// Checks whether [conditions] contains a [GlobalResetTaskCondition] (`condition any`).
@@ -1678,32 +2218,34 @@ class TaskBoard {
     return false;
   }
 
-  /// Evaluates whether [task] is blocked at [evaluationTime] per `TDF_SPEC.md` Section 5.3.
-  ///
-  /// An active `suspended` timestamp (`suspended > evaluationTime`) short-circuits
-  /// immediately and disables evaluation of all other prerequisite and condition rules.
+  /// Evaluates whether [task] is blocked at [nowUtc] / [localNow] per `TDF_SPEC.md` Section 5.4:
+  /// 1. Active deferral (`suspended forever` or `suspended > nowUtc` in UTC).
+  /// 2. Unmet prerequisite (`target.completions < requiredCompletion` across the complete document).
+  /// 3. Unmet activation condition (`day -> time -> location` against [localNow]).
   static bool _isTaskBlocked({
     required TaskItem task,
-    required Set<String> unfinishedIds,
+    required Map<String, TaskItem> taskMap,
     required Map<String, TdfLabel> labelMap,
-    required DateTime evaluationTime,
+    required DateTime nowUtc,
+    required DateTime localNow,
     required String? activeLabelId,
     required double? currentLatitude,
     required double? currentLongitude,
   }) {
-    if (task.suspendedAt case final suspendedUntil?
-        when suspendedUntil.isAfter(evaluationTime)) {
+    if (_hasActiveDeferral(task, nowUtc)) {
       return true;
     }
-    for (final prerequisiteId in task.blockedByTaskIds) {
-      if (unfinishedIds.contains(prerequisiteId)) {
+    for (final dependency in task.dependencies) {
+      final target = taskMap[dependency.taskId];
+      if (target != null &&
+          target.completions < dependency.requiredCompletion) {
         return true;
       }
     }
     if (!_areTaskConditionsSatisfied(
       task: task,
       labelMap: labelMap,
-      evaluationTime: evaluationTime,
+      evaluationTime: localNow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
@@ -1713,19 +2255,19 @@ class TaskBoard {
     return false;
   }
 
-  /// Returns whether [task] is within the 30-day retention window relative to [normalizedNow].
-  static bool _isWithinRetention(TaskItem task, DateTime normalizedNow) {
+  /// Returns whether [timestamp] is strictly older than 30 days (`2,592,000` seconds) relative to [nowUtc].
+  static bool _isTimestampExpired(DateTime timestamp, DateTime nowUtc) {
+    return nowUtc.difference(timestamp.toUtc()).inSeconds >
+        completedRetentionSeconds;
+  }
+
+  /// Returns whether [task] is within the 30-day (`2,592,000` seconds) retention window relative to [nowUtc].
+  static bool _isWithinRetention(TaskItem task, DateTime nowUtc) {
     final completedDate = task.completedAt;
     if (completedDate == null) {
       return true;
     }
-    final normalizedTaskDate = DateTime.utc(
-      completedDate.year,
-      completedDate.month,
-      completedDate.day,
-    );
-    return normalizedNow.difference(normalizedTaskDate).inDays <=
-        completedRetentionDays;
+    return !_isTimestampExpired(completedDate, nowUtc);
   }
 
   /// Logs [action] with the resulting 6-tier task distribution under [LogTag.domain] and returns `this`.
@@ -1737,7 +2279,22 @@ class TaskBoard {
     return this;
   }
 
-  /// Normalizes active tasks across `[focus, ready, planned]` so `queuedAt` is always populated and ordered.
+  /// Merges [prunedRecords] into [current] without incrementing `generation`.
+  static TdfDeletedBlock _mergePrunedTasksIntoDeletedBlock(
+    TdfDeletedBlock current,
+    List<TdfDeletedTaskRecord> prunedRecords,
+  ) {
+    if (prunedRecords.isEmpty) {
+      return current;
+    }
+    var updated = current;
+    for (final record in prunedRecords) {
+      updated = _recordTaskDeletion(updated, record);
+    }
+    return updated;
+  }
+
+  /// Normalizes active tasks across `[focus, ready, planned]` so `queuedAt` is always populated.
   static void _normalizeActiveLists(
     List<TaskItem> focusList,
     List<TaskItem> readyList,
@@ -1783,6 +2340,7 @@ class TaskBoard {
     required List<TaskItem> someday,
     required List<TaskItem> completed,
     required List<TdfLabel> labels,
+    required TdfQueueBlock? explicitQueueBlock,
   }) {
     final nextFocus = List<TaskItem>.from(focus);
     final nextReady = List<TaskItem>.from(ready);
@@ -1799,13 +2357,12 @@ class TaskBoard {
           isCompleted: false,
           clearCompletedAt: true,
           queuedAt: task.queuedAt ?? task.createdAt,
-          suspendedAt:
+          isSuspendedForever:
+              task.isSuspendedForever ||
               (task.blockedByTaskIds.isEmpty &&
                   task.conditions.isEmpty &&
                   !_hasInheritedLabelConditions(task, labelIdsWithConditions) &&
-                  task.suspendedAt == null)
-              ? TaskItem.defaultSuspendedAt
-              : task.suspendedAt,
+                  task.suspendedAt == null),
         ),
     ];
 
@@ -1830,6 +2387,15 @@ class TaskBoard {
     _accumulateListLabelCounts(nextBlocked, openCountsByLabel);
     _accumulateListLabelCounts(nextSomeday, openCountsByLabel);
 
+    final resolvedQueueBlock =
+        explicitQueueBlock ??
+        _deriveSliceQueueBlock(
+          focus: nextFocus,
+          ready: nextReady,
+          planned: nextPlanned,
+          blocked: nextBlocked,
+        );
+
     return _NormalizedTierSlices(
       focus: nextFocus,
       ready: nextReady,
@@ -1838,43 +2404,170 @@ class TaskBoard {
       someday: nextSomeday,
       completed: nextCompleted,
       openTaskCountsByLabel: openCountsByLabel,
+      queueBlock: resolvedQueueBlock,
     );
   }
 
-  /// Pulls active tasks into [nextFocus] (up to 3) and [nextReady] (up to 4) before appending a downgraded `Focus` task.
-  static void _pullForFocusDowngrade({
-    required List<TaskItem> nextFocus,
-    required List<TaskItem> nextReady,
-    required List<TaskItem> nextPlanned,
+  /// Derives a [TdfQueueBlock] preserving the slice order of `[focus, ready, planned, blocked]`.
+  static TdfQueueBlock _deriveSliceQueueBlock({
+    required List<TaskItem> focus,
+    required List<TaskItem> ready,
+    required List<TaskItem> planned,
+    required List<TaskItem> blocked,
   }) {
-    var readyIndex = 0;
-    while (nextFocus.length < focusSoftLimit && readyIndex < nextReady.length) {
-      nextFocus.add(nextReady[readyIndex].toActive());
-      readyIndex++;
+    final ids = <String>[];
+    final seen = <String>{};
+    DateTime? latestModified;
+    for (final task in <TaskItem>[...focus, ...ready, ...planned, ...blocked]) {
+      if (!task.isCompleted &&
+          task.completedAt == null &&
+          task.queuedAt != null &&
+          seen.add(task.id)) {
+        ids.add(task.id);
+        final effectiveMod = task.effectiveModifiedAt;
+        if (latestModified == null || effectiveMod.isAfter(latestModified)) {
+          latestModified = effectiveMod;
+        }
+      }
     }
-    if (readyIndex > 0) {
-      nextReady.removeRange(0, readyIndex);
-    }
+    return TdfQueueBlock(
+      modifiedAt: latestModified ?? TdfQueueBlock.epochModifiedAt,
+      taskIds: ids,
+    );
+  }
 
-    var plannedForFocusIndex = 0;
-    while (nextFocus.length < focusSoftLimit &&
-        plannedForFocusIndex < nextPlanned.length) {
-      nextFocus.add(nextPlanned[plannedForFocusIndex].toActive());
-      plannedForFocusIndex++;
+  /// Orders eligible tasks by traversing [queueTaskIds] in saved order and grouping `priority` before regular per `TDF_SPEC.md` Section 5.5.
+  static List<TaskItem> _orderEligibleByQueue({
+    required Map<String, TaskItem> eligibleById,
+    required List<String> queueTaskIds,
+  }) {
+    if (eligibleById.isEmpty) {
+      return const <TaskItem>[];
     }
-    if (plannedForFocusIndex > 0) {
-      nextPlanned.removeRange(0, plannedForFocusIndex);
-    }
+    final priorityGroup = <TaskItem>[];
+    final regularGroup = <TaskItem>[];
+    final visited = <String>{};
 
-    var plannedForReadyIndex = 0;
-    while (nextReady.length < readySoftLimit - 1 &&
-        plannedForReadyIndex < nextPlanned.length) {
-      nextReady.add(nextPlanned[plannedForReadyIndex].toActive());
-      plannedForReadyIndex++;
+    for (final taskId in queueTaskIds) {
+      final task = eligibleById[taskId];
+      if (task != null && visited.add(taskId)) {
+        if (task.isPriority) {
+          priorityGroup.add(task);
+        } else {
+          regularGroup.add(task);
+        }
+      }
     }
-    if (plannedForReadyIndex > 0) {
-      nextPlanned.removeRange(0, plannedForReadyIndex);
+    for (final entry in eligibleById.entries) {
+      if (visited.add(entry.key)) {
+        if (entry.value.isPriority) {
+          priorityGroup.add(entry.value);
+        } else {
+          regularGroup.add(entry.value);
+        }
+      }
     }
+    return <TaskItem>[...priorityGroup, ...regularGroup];
+  }
+
+  /// Rearms [dependencies] for the next occurrence of a recurring or restored task per `TDF_SPEC.md` Section 6.9.3.
+  List<TdfTaskDependency> _rearmDependencies(
+    List<TdfTaskDependency> dependencies,
+  ) {
+    if (dependencies.isEmpty) {
+      return const <TdfTaskDependency>[];
+    }
+    final result = <TdfTaskDependency>[];
+    for (final dep in dependencies) {
+      final target = findTask(dep.taskId);
+      if (target == null) {
+        result.add(dep);
+        continue;
+      }
+      if (target.isCompleted || target.completedAt != null) {
+        result.add(
+          TdfTaskDependency(
+            taskId: dep.taskId,
+            requiredCompletion: target.completions >= 1
+                ? target.completions
+                : 1,
+          ),
+        );
+        continue;
+      }
+      if (target.completions >= TdfTaskDependency.maxCompletions) {
+        throw const FormatException('LimitExceeded');
+      }
+      result.add(
+        TdfTaskDependency(
+          taskId: dep.taskId,
+          requiredCompletion: target.completions + 1,
+        ),
+      );
+    }
+    return List<TdfTaskDependency>.unmodifiable(result);
+  }
+
+  /// Reconciles [currentQueue] when `copyWith` replaces tier slices without providing an explicit `queueBlock`.
+  static TdfQueueBlock _reconcileQueueWithSlices({
+    required TdfQueueBlock currentQueue,
+    required List<TaskItem> focus,
+    required List<TaskItem> ready,
+    required List<TaskItem> planned,
+    required List<TaskItem> blocked,
+  }) {
+    final scheduledOpenIds = <String>{};
+    final orderedSliceIds = <String>[];
+    for (final task in <TaskItem>[...focus, ...ready, ...planned, ...blocked]) {
+      if (!task.isCompleted &&
+          task.completedAt == null &&
+          task.queuedAt != null &&
+          scheduledOpenIds.add(task.id)) {
+        orderedSliceIds.add(task.id);
+      }
+    }
+    final reconciled = <String>[
+      for (final id in currentQueue.taskIds)
+        if (scheduledOpenIds.contains(id)) id,
+    ];
+    for (final id in orderedSliceIds) {
+      if (!reconciled.contains(id)) {
+        reconciled.add(id);
+      }
+    }
+    if (listEquals(reconciled, currentQueue.taskIds)) {
+      return currentQueue;
+    }
+    return TdfQueueBlock(
+      modifiedAt: currentQueue.modifiedAt,
+      taskIds: reconciled,
+    );
+  }
+
+  /// Records a label deletion in [current] while enforcing `TdfDeletedBlock.maxDeletedRecords`.
+  static TdfDeletedBlock _recordLabelDeletion(
+    TdfDeletedBlock current,
+    TdfDeletedLabelRecord record,
+  ) {
+    final nextLabels = <TdfDeletedLabelRecord>[...current.labels, record];
+    final candidate = current.copyWith(labels: nextLabels);
+    if (candidate.totalRecords > TdfDeletedBlock.maxDeletedRecords) {
+      throw const FormatException('LimitExceeded');
+    }
+    return candidate;
+  }
+
+  /// Records a task deletion in [current] while enforcing `TdfDeletedBlock.maxDeletedRecords`.
+  static TdfDeletedBlock _recordTaskDeletion(
+    TdfDeletedBlock current,
+    TdfDeletedTaskRecord record,
+  ) {
+    final nextTasks = <TdfDeletedTaskRecord>[...current.tasks, record];
+    final candidate = current.copyWith(tasks: nextTasks);
+    if (candidate.totalRecords > TdfDeletedBlock.maxDeletedRecords) {
+      throw const FormatException('LimitExceeded');
+    }
+    return candidate;
   }
 
   /// Returns [task] without [labelId] in its `labelIds` list.
@@ -1897,18 +2590,22 @@ class TaskBoard {
     );
   }
 
-  /// Removes the task with [taskId] from [tier].
-  TaskBoard _removeTaskFromTier(String taskId, TaskTier tier) {
-    return switch (tier) {
-      TaskTier.focus => copyWith(focus: _filterOutList(focus, taskId)),
-      TaskTier.ready => copyWith(ready: _filterOutList(ready, taskId)),
-      TaskTier.planned => copyWith(planned: _filterOutList(planned, taskId)),
-      TaskTier.blocked => copyWith(blocked: _filterOutList(blocked, taskId)),
-      TaskTier.someday => copyWith(someday: _filterOutList(someday, taskId)),
-      TaskTier.completed => copyWith(
-        completed: _filterOutList(completed, taskId),
-      ),
-    };
+  /// Removes [taskId] from [queue] if present, advancing `queue.modified` when changed.
+  static TdfQueueBlock _removeTaskFromQueue(
+    TdfQueueBlock queue,
+    String taskId,
+    DateTime now,
+  ) {
+    if (!queue.taskIds.contains(taskId)) {
+      return queue;
+    }
+    return TdfQueueBlock(
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, queue.modifiedAt),
+      taskIds: <String>[
+        for (final id in queue.taskIds)
+          if (id != taskId) id,
+      ],
+    );
   }
 
   /// Replaces the task with `updatedTask.id` inside [tier].
@@ -1929,67 +2626,65 @@ class TaskBoard {
     };
   }
 
-  /// Reschedules a completed recurring [task] for its next cycle per `TDF_SPEC.md` Section 6.4.
-  static TaskItem _rescheduleRecurringTask(
+  /// Reschedules a completed recurring [task] for its next cycle per `TDF_SPEC.md` Sections 6.4, 6.9.3, and 6.10.3.
+  TaskItem _rescheduleRecurringTask(
     TaskItem task,
     TaskRepeatRule repeatRule,
     DateTime now,
-    DateTime localNow, {
+    TdfTimeZoneContext timeZone, {
     DateTime? preserveModifiedAt,
   }) {
-    final nextDueLocal = repeatRule.nextLocalDueDate(
-      localNow,
-      previousSuspendedAt: task.suspendedAt,
+    if (task.completions >= TdfTaskDependency.maxCompletions) {
+      throw const FormatException('LimitExceeded');
+    }
+    final nextDueUtc = repeatRule.nextDueUtc(
+      completedAtUtc: now,
+      timeZone: timeZone,
     );
-    final localOffset = localNow.difference(now);
-    final nextDueUtc = nextDueLocal.subtract(localOffset);
     final resetSubtasks = _setAllSubtasksCompleted(
       task.subtasks,
       isCompleted: false,
     );
+    final rearmedDependencies = _rearmDependencies(task.dependencies);
     final nextModified =
         preserveModifiedAt ??
         TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt);
     AppLogger.info(
       LogTag.domain,
-      'Rescheduled recurring task id=${task.id} repeat -> nextDue=${nextDueLocal.toIso8601String()}',
+      'Rescheduled recurring task id=${task.id} repeat -> nextDueUtc=${nextDueUtc.toIso8601String()}',
     );
     return task.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
+      completions: task.completions + 1,
       isPriority: true,
       queuedAt: nextDueUtc,
-      suspendedAt: nextDueLocal,
+      suspendedAt: nextDueUtc,
+      isSuspendedForever: false,
       repeatRule: repeatRule,
+      dependencies: rearmedDependencies,
       subtasks: resetSubtasks,
       modifiedAt: nextModified,
     );
   }
 
-  /// Resolves the `queued` timestamp for placing a downgraded task at the end of the regular FIFO queue.
-  static DateTime _resolveEndOfRegularQueueTimestamp(
-    DateTime now,
-    List<TaskItem> focusList,
-    List<TaskItem> readyList,
-    List<TaskItem> plannedList,
-  ) {
-    DateTime? latestRegular;
-    for (final item in [...focusList, ...readyList, ...plannedList]) {
-      if (item.isPriority) {
-        continue;
-      }
-      final itemQueued = item.queuedAt ?? item.createdAt;
-      if (latestRegular == null || itemQueued.isAfter(latestRegular)) {
-        latestRegular = itemQueued;
-      }
+  /// Resolves the effective [TdfTimeZoneContext] from [timeZone] or [localEvaluationTime].
+  static TdfTimeZoneContext _resolveEffectiveTimeZone({
+    required DateTime now,
+    required DateTime? localEvaluationTime,
+    required TdfTimeZoneContext? timeZone,
+  }) {
+    if (timeZone != null) {
+      return timeZone;
     }
-    if (latestRegular != null && !now.isAfter(latestRegular)) {
-      return latestRegular.add(const Duration(seconds: 1));
+    if (localEvaluationTime != null) {
+      final localWall = _resolveLocalEvaluationTime(now, localEvaluationTime);
+      return TdfTimeZoneContext.fixedOffset(localWall.difference(now));
     }
-    return now;
+    return TdfTimeZoneContext.utc;
   }
 
-  /// Resolves the effective local wall-clock evaluation timestamp for `condition day`, `condition time`, and `suspended`.
+  /// Resolves the effective local wall-clock evaluation timestamp for `condition day` and `condition time`.
   static DateTime _resolveLocalEvaluationTime(
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
@@ -2025,36 +2720,14 @@ class TaskBoard {
     );
   }
 
-  /// Deduplicates and filters [candidateBlockedBy] for [taskId], rejecting self-dependencies
-  /// and circular dependencies against the current board graph.
-  List<String> _sanitizeBlockedByForTask(
-    String taskId,
-    List<String> candidateBlockedBy,
-  ) {
-    if (candidateBlockedBy.isEmpty) {
-      return const [];
-    }
-    final sanitized = <String>[];
-    for (final rawBlockerId in candidateBlockedBy) {
-      final blockerId = rawBlockerId.trim();
-      if (blockerId.isEmpty ||
-          sanitized.contains(blockerId) ||
-          wouldCreateDependencyCycle(taskId, blockerId)) {
-        continue;
-      }
-      sanitized.add(blockerId);
-    }
-    return List<String>.unmodifiable(sanitized);
-  }
-
-  /// Deduplicates and canonicalizes [conditions] for a `label` block, stripping task-only reset directives (`TDF_SPEC.md` Section 4.3).
+  /// Orders [conditions] for a `label` block by group (`day`, `time`, `location`) while stripping task-only resets (`TDF_SPEC.md` Section 4.3).
   static List<TaskCondition> _sanitizeLabelConditions(
     List<TaskCondition> conditions,
   ) {
     if (conditions.isEmpty) {
       return const [];
     }
-    final mergedDays = <int>{};
+    final dayRules = <DayTaskCondition>[];
     final timeRules = <TimeWindowTaskCondition>[];
     final locationRules = <LocationTaskCondition>[];
 
@@ -2063,29 +2736,23 @@ class TaskBoard {
         case GlobalResetTaskCondition():
         case GroupResetTaskCondition():
           break;
-        case DayTaskCondition(:final weekdays):
-          mergedDays.addAll(weekdays);
+        case DayTaskCondition():
+          dayRules.add(condition);
         case TimeWindowTaskCondition():
-          if (!timeRules.contains(condition)) {
-            timeRules.add(condition);
-          }
+          timeRules.add(condition);
         case LocationTaskCondition():
-          if (!locationRules.contains(condition)) {
-            locationRules.add(condition);
-          }
+          locationRules.add(condition);
       }
     }
 
     return List<TaskCondition>.unmodifiable([
-      if (mergedDays.isNotEmpty) DayTaskCondition.fromWeekdays(mergedDays),
+      ...dayRules,
       ...timeRules,
       ...locationRules,
     ]);
   }
 
-  /// Deduplicates and canonicalizes [conditions] while enforcing `TDF_SPEC.md` Section 4.3 reset rules:
-  /// - `condition any` supersedes all other task condition directives.
-  /// - `day any`, `time any`, and `location any` supersede specific rules in their respective group.
+  /// Orders [conditions] for a `task` block by group (`day`, `time`, `location`) while enforcing `TDF_SPEC.md` Section 4.3 reset rules.
   static List<TaskCondition> _sanitizeTaskConditions(
     List<TaskCondition> conditions,
   ) {
@@ -2101,7 +2768,7 @@ class TaskBoard {
       conditions,
       ConditionGroup.location,
     );
-    final mergedDays = <int>{};
+    final dayRules = <DayTaskCondition>[];
     final timeRules = <TimeWindowTaskCondition>[];
     final locationRules = <LocationTaskCondition>[];
 
@@ -2110,16 +2777,16 @@ class TaskBoard {
         case GlobalResetTaskCondition():
         case GroupResetTaskCondition():
           break;
-        case DayTaskCondition(:final weekdays):
+        case DayTaskCondition():
           if (!hasDayReset) {
-            mergedDays.addAll(weekdays);
+            dayRules.add(condition);
           }
         case TimeWindowTaskCondition():
-          if (!hasTimeReset && !timeRules.contains(condition)) {
+          if (!hasTimeReset) {
             timeRules.add(condition);
           }
         case LocationTaskCondition():
-          if (!hasLocationReset && !locationRules.contains(condition)) {
+          if (!hasLocationReset) {
             locationRules.add(condition);
           }
       }
@@ -2128,8 +2795,8 @@ class TaskBoard {
     return List<TaskCondition>.unmodifiable([
       if (hasDayReset)
         const GroupResetTaskCondition(targetGroup: ConditionGroup.day)
-      else if (mergedDays.isNotEmpty)
-        DayTaskCondition.fromWeekdays(mergedDays),
+      else
+        ...dayRules,
       if (hasTimeReset)
         const GroupResetTaskCondition(targetGroup: ConditionGroup.time)
       else
@@ -2157,45 +2824,15 @@ class TaskBoard {
     ];
   }
 
-  /// Shifts colliding tasks in [plannedList] belonging to [isPriorityGroup] forward by `+00:00:01` per Section 6.3 Step 3.
-  static void _shiftCollidingPlannedTasks(
-    List<TaskItem> plannedList,
-    DateTime minimumAfterQueued, {
-    required bool isPriorityGroup,
-    required DateTime now,
-  }) {
-    var cursor = minimumAfterQueued;
-    for (var i = 0; i < plannedList.length; i++) {
-      final current = plannedList[i];
-      if (current.isPriority != isPriorityGroup) {
-        continue;
-      }
-      final currentQueued = current.queuedAt ?? current.createdAt;
-      if (!currentQueued.isAfter(cursor)) {
-        final shifted = cursor.add(const Duration(seconds: 1));
-        plannedList[i] = current.copyWith(
-          queuedAt: shifted,
-          modifiedAt: TaskItem.nextModifiedTimestamp(
-            now.isAfter(shifted) ? now : shifted,
-            current.effectiveModifiedAt,
-          ),
-        );
-        cursor = shifted;
-      } else {
-        cursor = currentQueued;
-      }
-    }
-  }
-
-  /// Slices sorted [activeCandidates] into `Focus` (`0..2`), `Ready` (`3..7`), and `Planned` (`>= 8`).
-  static void _sliceActiveCandidates(
-    List<_IndexedTask> activeCandidates, {
+  /// Slices ordered [eligibleTasks] into `Focus` (`0..2`), `Ready` (`3..7`), and `Planned` (`>= 8`).
+  static void _sliceEligibleTasks(
+    List<TaskItem> eligibleTasks, {
     required List<TaskItem> focusList,
     required List<TaskItem> readyList,
     required List<TaskItem> plannedList,
   }) {
-    for (var i = 0; i < activeCandidates.length; i++) {
-      final task = activeCandidates[i].task;
+    for (var i = 0; i < eligibleTasks.length; i++) {
+      final task = eligibleTasks[i];
       if (i < focusSoftLimit) {
         focusList.add(task);
       } else if (i < focusSoftLimit + readySoftLimit) {
@@ -2204,29 +2841,6 @@ class TaskBoard {
         plannedList.add(task);
       }
     }
-  }
-
-  /// Sorts active tasks across [nextFocus], [nextReady], and [nextPlanned] by Section 5.5 priority/FIFO order and re-slices them.
-  static void _sortAndSliceActiveLists({
-    required List<TaskItem> nextFocus,
-    required List<TaskItem> nextReady,
-    required List<TaskItem> nextPlanned,
-  }) {
-    final combined = <TaskItem>[...nextFocus, ...nextReady, ...nextPlanned];
-    final indexed = <_IndexedTask>[
-      for (var i = 0; i < combined.length; i++)
-        _IndexedTask(index: i, task: combined[i].toActive()),
-    ];
-    indexed.sort(_compareActiveCandidates);
-    nextFocus.clear();
-    nextReady.clear();
-    nextPlanned.clear();
-    _sliceActiveCandidates(
-      indexed,
-      focusList: nextFocus,
-      readyList: nextReady,
-      plannedList: nextPlanned,
-    );
   }
 
   /// Returns an unmodifiable copy of [labels] sorted alphabetically by display name.
@@ -2248,6 +2862,33 @@ class TaskBoard {
     return [
       for (final task in tasks) _removeIdFromTaskLabels(task, labelId, now),
     ];
+  }
+
+  /// Updates [currentQueue] after [existingTask] is edited into [updatedTask].
+  static TdfQueueBlock _updateQueueForEditedTask({
+    required TdfQueueBlock currentQueue,
+    required TaskItem existingTask,
+    required TaskItem updatedTask,
+    required DateTime now,
+  }) {
+    final isNowScheduledOpen =
+        !updatedTask.isCompleted &&
+        updatedTask.completedAt == null &&
+        updatedTask.queuedAt != null;
+    final wasCompleted =
+        existingTask.isCompleted || existingTask.completedAt != null;
+    if (!isNowScheduledOpen) {
+      return _removeTaskFromQueue(currentQueue, updatedTask.id, now);
+    }
+    if (wasCompleted) {
+      final withoutTask = _removeTaskFromQueue(
+        currentQueue,
+        updatedTask.id,
+        now,
+      );
+      return _appendTaskToQueue(withoutTask, updatedTask.id, now);
+    }
+    return _appendTaskToQueue(currentQueue, updatedTask.id, now);
   }
 }
 
@@ -2274,6 +2915,7 @@ class _NormalizedTierSlices {
     required this.someday,
     required this.completed,
     required this.openTaskCountsByLabel,
+    required this.queueBlock,
   });
 
   /// Normalized Tier 4 (`Blocked`) tasks.
@@ -2290,6 +2932,9 @@ class _NormalizedTierSlices {
 
   /// Normalized Tier 3 (`Planned`) tasks.
   final List<TaskItem> planned;
+
+  /// Normalized shared `queue` block.
+  final TdfQueueBlock queueBlock;
 
   /// Normalized Tier 2 (`Ready`) tasks.
   final List<TaskItem> ready;

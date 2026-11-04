@@ -32,7 +32,22 @@ void main() {
     'Bottom tier indicator renders above QuickAddBar when add button is pressed, updates active icon when sliding across tiers, and jumps to target pane via wave wheel on long-press drag',
     (WidgetTester tester) async {
       const allTiersTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 07:50:00
+  task f10000OkD2
+  task f20000OkD2
+  task f30000OkD2
+  task r10000OkD2
+  task r20000OkD2
+  task r30000OkD2
+  task r40000OkD2
+  task r50000OkD2
+  task p10000OkD2
+  task blk100OkD2
+  task susp10OkD2
+}
 
 task f10000OkD2 {
   name "Focus Pane Task"
@@ -100,6 +115,7 @@ task cmp100OkD2 {
   created 2026-10-28 08:00
   queued 2026-10-28 08:00
   finished 2026-10-29 10:00
+  completions 1
 }
 ''';
 

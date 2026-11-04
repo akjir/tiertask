@@ -24,8 +24,8 @@ const String tdfBase62Alphabet =
 /// Modulo divisor `62^4` (`14,776,336` seconds) for the 4-character Base62 timestamp suffix.
 const int tdfBase62TimeModulo = 14776336;
 
-/// Fixed total character length of a TDF 0.4.0 `<task-id>` or `<label-id>`.
-const int _tdfEntityIdLength = 10;
+/// Fixed total character length of a TDF `<task-id>` or `<label-id>`.
+const int tdfEntityIdLength = 10;
 
 /// Canonical condition rule groups defined in `TDF_SPEC.md` Section 4.3.
 enum ConditionGroup {
@@ -253,7 +253,18 @@ class LocationTaskCondition extends TaskCondition {
     required this.latitude,
     required this.longitude,
     required this.radiusMeters,
-  });
+  }) : _latitudeText = null,
+       _longitudeText = null,
+       _radiusText = null;
+
+  const LocationTaskCondition._(
+    this.latitude,
+    this.longitude,
+    this.radiusMeters,
+    this._latitudeText,
+    this._longitudeText,
+    this._radiusText,
+  );
 
   /// Mean Earth radius in meters used for Haversine distance evaluation (`TDF_SPEC.md` Section 4.3.1).
   static const double earthRadiusMeters = 6371000.0;
@@ -267,8 +278,21 @@ class LocationTaskCondition extends TaskCondition {
   /// Inclusive geofencing radius in meters (`> 0.0`).
   final double radiusMeters;
 
+  final String? _latitudeText;
+  final String? _longitudeText;
+  final String? _radiusText;
+
   @override
   ConditionGroup get group => ConditionGroup.location;
+
+  /// Normalized decimal string representation of [latitude] per `TDF_SPEC.md` Section 6.7.3.
+  String get latitudeText => _latitudeText ?? _formatDecimal(latitude);
+
+  /// Normalized decimal string representation of [longitude] per `TDF_SPEC.md` Section 6.7.3.
+  String get longitudeText => _longitudeText ?? _formatDecimal(longitude);
+
+  /// Normalized decimal string representation of [radiusMeters] per `TDF_SPEC.md` Section 6.7.3.
+  String get radiusText => _radiusText ?? _formatDecimal(radiusMeters);
 
   /// Computes the great-circle Haversine distance in meters between two WGS-84 coordinates.
   static double haversineDistanceMeters(
@@ -310,12 +334,46 @@ class LocationTaskCondition extends TaskCondition {
     return distance <= radiusMeters;
   }
 
+  /// Normalizes a valid ASCII decimal literal per `TDF_SPEC.md` Section 6.7.3
+  /// (strips redundant leading integer zeros, trailing fractional zeros, empty
+  /// fractional part, and normalizes `-0` to `0`).
+  static String normalizeDecimalText(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return '0';
+    }
+    final isNegative = trimmed.codeUnitAt(0) == 0x2D;
+    final unsigned = isNegative ? trimmed.substring(1) : trimmed;
+    final dotIndex = unsigned.indexOf('.');
+    final rawInt = dotIndex < 0 ? unsigned : unsigned.substring(0, dotIndex);
+    final rawFrac = dotIndex < 0 ? '' : unsigned.substring(dotIndex + 1);
+
+    var intStart = 0;
+    while (intStart < rawInt.length - 1 &&
+        rawInt.codeUnitAt(intStart) == 0x30) {
+      intStart++;
+    }
+    final normInt = rawInt.isEmpty ? '0' : rawInt.substring(intStart);
+
+    var fracEnd = rawFrac.length;
+    while (fracEnd > 0 && rawFrac.codeUnitAt(fracEnd - 1) == 0x30) {
+      fracEnd--;
+    }
+    final normFrac = rawFrac.substring(0, fracEnd);
+
+    if (normInt == '0' && normFrac.isEmpty) {
+      return '0';
+    }
+    final sign = isNegative ? '-' : '';
+    if (normFrac.isEmpty) {
+      return '$sign$normInt';
+    }
+    return '$sign$normInt.$normFrac';
+  }
+
   @override
   String toTdfDirectiveArgs() {
-    final latStr = _formatDecimal(latitude);
-    final lonStr = _formatDecimal(longitude);
-    final radiusStr = _formatDecimal(radiusMeters);
-    return 'location $latStr $lonStr $radiusStr';
+    return 'location $latitudeText $longitudeText $radiusText';
   }
 
   /// Parses and validates [rawLatitude], [rawLongitude], and [rawRadius] into a [LocationTaskCondition].
@@ -324,9 +382,12 @@ class LocationTaskCondition extends TaskCondition {
     String rawLongitude,
     String rawRadius,
   ) {
-    final latitude = _tryParseDecimal(rawLatitude.trim());
-    final longitude = _tryParseDecimal(rawLongitude.trim());
-    final radius = _tryParseDecimal(rawRadius.trim());
+    final trimmedLat = rawLatitude.trim();
+    final trimmedLon = rawLongitude.trim();
+    final trimmedRad = rawRadius.trim();
+    final latitude = _tryParseDecimal(trimmedLat);
+    final longitude = _tryParseDecimal(trimmedLon);
+    final radius = _tryParseDecimal(trimmedRad);
     if (latitude == null || longitude == null || radius == null) {
       return null;
     }
@@ -337,10 +398,13 @@ class LocationTaskCondition extends TaskCondition {
         radius <= 0.0) {
       return null;
     }
-    return LocationTaskCondition(
-      latitude: latitude,
-      longitude: longitude,
-      radiusMeters: radius,
+    return LocationTaskCondition._(
+      latitude == 0.0 ? 0.0 : latitude,
+      longitude == 0.0 ? 0.0 : longitude,
+      radius,
+      normalizeDecimalText(trimmedLat),
+      normalizeDecimalText(trimmedLon),
+      normalizeDecimalText(trimmedRad),
     );
   }
 
@@ -350,11 +414,14 @@ class LocationTaskCondition extends TaskCondition {
 
   /// Formats [value] without a trailing `.0` suffix when it represents an exact integer.
   static String _formatDecimal(double value) {
+    if (value == 0.0) {
+      return '0';
+    }
     final truncated = value.truncateToDouble();
     if (value == truncated) {
       return value.toInt().toString();
     }
-    return value.toString();
+    return normalizeDecimalText(value.toString());
   }
 
   /// Parses a strict ASCII decimal literal (`-?[0-9]+(\.[0-9]+)?`) without regular expressions.
@@ -406,13 +473,13 @@ class LocationTaskCondition extends TaskCondition {
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
     return other is LocationTaskCondition &&
-        other.latitude == latitude &&
-        other.longitude == longitude &&
-        other.radiusMeters == radiusMeters;
+        other.latitudeText == latitudeText &&
+        other.longitudeText == longitudeText &&
+        other.radiusText == radiusText;
   }
 
   @override
-  int get hashCode => Object.hash(latitude, longitude, radiusMeters);
+  int get hashCode => Object.hash(latitudeText, longitudeText, radiusText);
 
   @override
   String toString() => 'condition ${toTdfDirectiveArgs()}';
@@ -604,8 +671,8 @@ class TdfLabel {
     this.conditions = const [],
   });
 
-  /// Fallback UTC modification timestamp when a `label` block omits `modified`.
-  static final DateTime defaultModifiedAt = DateTime.utc(2026, 11, 1, 8, 0);
+  /// Fallback UTC modification timestamp (`1970-01-01 00:00:00` UTC) when a `label` block omits `modified` (`TDF_SPEC.md` Section 6.7.2).
+  static final DateTime defaultModifiedAt = DateTime.utc(1970, 1, 1, 0, 0, 0);
 
   /// Optional hexadecimal color code (`"#RRGGBB"`).
   final String? color;
@@ -790,10 +857,10 @@ bool _isBase62CodeUnit(int unit) {
 
 /// Validates a 10-character `<6xBase62Random><4xBase62Time>` identifier without regular expressions.
 bool _isValidEntityId(String value) {
-  if (value.length != _tdfEntityIdLength) {
+  if (value.length != tdfEntityIdLength) {
     return false;
   }
-  for (var i = 0; i < _tdfEntityIdLength; i++) {
+  for (var i = 0; i < tdfEntityIdLength; i++) {
     if (!_isBase62CodeUnit(value.codeUnitAt(i))) {
       return false;
     }

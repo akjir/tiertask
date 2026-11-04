@@ -30,7 +30,12 @@ void main() {
     'Right-side task edit button and QuickAddBar Advanced button open the dedicated EditTaskScreen panel enforcing non-empty, non-duplicate names and shared fields',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task 000001OkD2
+}
 
 label home00OkD2 {
   name "Home"
@@ -738,7 +743,8 @@ task 000001OkD2 {
           localFileRepositoryProvider.overrideWith(
             (ref) => FakeLocalFileRepository(
               config: const WebDavConfig(language: AppLanguage.english),
-              initialTdf: 'tdf 0.4.0\n',
+              initialTdf:
+                  'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
             ),
           ),
           linkLauncherRepositoryProvider.overrideWithValue(fakeLauncher),

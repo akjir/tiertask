@@ -367,7 +367,7 @@ void main() {
       );
 
       const labelWithColorTdf = '''
-tdf 0.4.0
+tdf 0.5.0
 
 label officeOkD2 {
     name  "Main Office"
@@ -396,7 +396,7 @@ label officeOkD2 {
 
       expect(
         () => tdfService.parse(
-          'tdf 0.4.0\nlabel home00OkD2 {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
+          'tdf 0.5.0\nlabel home00OkD2 {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
           evaluationTime: fixedDate,
         ),
         throwsA(

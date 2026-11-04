@@ -74,7 +74,12 @@ void main() {
   test('Two-stage save pipeline merges external local file edits first and then merges with WebDAV on save', () async {
     var currentTime = DateTime.utc(2026, 11, 1, 9);
     var localTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task 000001OkD2
+}
 
 label work00OkD2 {
   name "Work"
@@ -131,7 +136,13 @@ task 000001OkD2 {
 
     // External local file edit adds 000002OkD2 while remote edit renames label "work00OkD2" -> "Enterprise"
     localTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 09:30:00
+  task 000001OkD2
+  task 000002OkD2
+}
 
 label work00OkD2 {
   name "Work"
@@ -153,7 +164,12 @@ task 000002OkD2 {
 }
 ''';
     remoteTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task 000001OkD2
+}
 
 label work00OkD2 {
   name "Enterprise"
@@ -201,8 +217,8 @@ task 000001OkD2 {
     );
     expect(
       localTdf,
-      contains('tdf 0.4.0'),
-      reason: 'Output header must use TDF 0.4.0',
+      contains('tdf 0.5.0'),
+      reason: 'Output header must use TDF 0.5.0',
     );
   });
 
@@ -210,7 +226,13 @@ task 000001OkD2 {
     var currentTime = DateTime.utc(2026, 11, 1, 8);
     var isOnline = true;
     var localTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task 000001OkD2
+  task 000002OkD2
+}
 
 label ops000OkD2 {
   name "Ops"
@@ -294,7 +316,13 @@ task 000002OkD2 {
 
     // Meanwhile on WebDAV, another device updates 000002OkD2 at 09:30 UTC.
     remoteTdf = '''
-tdf 0.4.0
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task 000001OkD2
+  task 000002OkD2
+}
 
 label ops000OkD2 {
   name "Ops"
@@ -346,7 +374,7 @@ task 000002OkD2 {
           .where((label) => label.id == 'ops000OkD2')
           .firstOrNull,
       isNull,
-      reason: 'Offline label deletion persisted in WorkspaceSyncState must delete unmodified remote label',
+      reason: 'Offline label deletion persisted in deleted block and WorkspaceSyncState must delete unmodified remote label',
     );
 
     final activeWorkspace = await container2.read(
@@ -362,10 +390,10 @@ task 000002OkD2 {
     );
   });
 
-  test('Loading a tdf 0.3.0 or tdf 0.4.0 file with non-conforming IDs (such as t001, work, or 13-char t_/l_ IDs) immediately converts task and label IDs to 10-character Base62 IDs, rewrites blocked and labels references, and syncs tdf 0.4.0 back to local and WebDAV storage', () async {
+  test('Explicitly importing a legacy tdf 0.3.0 document via TaskNotifier.importLegacyTdf migrates IDs via SHA-256 Base62, resets sync baseline per Section 10.1, and syncs tdf 0.5.0 to local and WebDAV storage', () async {
     final currentTime = DateTime.utc(2026, 11, 1, 12);
-    var localTdf = '''
-tdf 0.4.0
+    const legacyTdf = '''
+tdf 0.3.0
 
 label l_work00_OkD2 {
   name "Work"
@@ -387,7 +415,8 @@ task t002 {
   labels l_work00_OkD2
 }
 ''';
-    var remoteTdf = localTdf;
+    var localTdf = 'tdf 0.5.0\n';
+    var remoteTdf = 'tdf 0.5.0\n';
     var localSaveCount = 0;
     var remoteSaveCount = 0;
 
@@ -430,13 +459,14 @@ task t002 {
     );
     addTearDown(container.dispose);
 
-    final board = await container.read(taskNotifierProvider.future);
+    await container.read(taskNotifierProvider.future);
+    final importResult = await container
+        .read(taskNotifierProvider.notifier)
+        .importLegacyTdf(legacyTdf);
+    final board = importResult.board;
+
     expect(board.labels.length, equals(1));
-    expect(
-      board.allTasks.length,
-      equals(2),
-      reason: 'Deterministic ID normalization must not duplicate entities when merging local and remote files',
-    );
+    expect(board.allTasks.length, equals(2));
 
     final convertedLabelId = board.labels.single.id;
     final convertedFirstTaskId = board.focus.single.id;
@@ -455,27 +485,14 @@ task t002 {
       equals([convertedFirstTaskId]),
     );
 
-    expect(
-      localSaveCount,
-      greaterThanOrEqualTo(1),
-      reason:
-          'Normalized 0.4.0 document must be immediately saved to local disk',
-    );
-    expect(
-      remoteSaveCount,
-      greaterThanOrEqualTo(1),
-      reason:
-          'Normalized 0.4.0 document must be immediately synced back to WebDAV',
-    );
-    expect(localTdf, startsWith('tdf 0.4.0\n'));
+    expect(localSaveCount, greaterThanOrEqualTo(1));
+    expect(remoteSaveCount, greaterThanOrEqualTo(1));
+    expect(localTdf, startsWith('tdf 0.5.0\n'));
     expect(remoteTdf, equals(localTdf));
     expect(localTdf, contains('label $convertedLabelId {'));
     expect(localTdf, contains('task $convertedFirstTaskId {'));
     expect(localTdf, contains('task $convertedSecondTaskId {'));
     expect(localTdf, contains('blocked $convertedFirstTaskId'));
     expect(localTdf, contains('labels $convertedLabelId'));
-    expect(localTdf, isNot(contains('task t_000001_OkD2')));
-    expect(localTdf, isNot(contains('task t002')));
-    expect(localTdf, isNot(contains('label l_work00_OkD2')));
   });
 }

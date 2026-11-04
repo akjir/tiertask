@@ -19,89 +19,305 @@ import 'dart:typed_data' show BytesBuilder, Uint8List;
 import 'package:flutter/foundation.dart';
 
 import '../services/app_logger.dart';
+import '../services/tdf_service.dart';
 import 'task_board.dart';
 import 'task_item.dart';
 import 'tdf_metadata.dart';
+import 'tdf_payload_comparison.dart';
+import 'tdf_sync_metadata.dart';
+import 'tdf_timezone.dart';
 
-/// Stateless entity-level synchronization and Last-Write-Wins (LWW) merge engine
-/// for [TaskBoard] documents per `TDF_SPEC.md` Section 6.7.
+/// Stateless entity-level synchronization, three-way merge, deletion record
+/// reconciliation, and shared queue merge engine for [TaskBoard] documents
+/// per `TDF_SPEC.md` Sections 6.7, 6.8, 6.9.5, and 6.11.2.
 @immutable
 class TaskBoardSync {
   const TaskBoardSync._();
 
-  /// Merges [primary] and [secondary] entity-by-entity (`label` and `task` blocks)
-  /// using [baseline] and [deletedLabelTimestamps], and evaluates the 6-tier pipeline at [evaluationTime].
+  /// Merges [primary] and [secondary] entity-by-entity (`label`, `task`, `deleted`,
+  /// and `queue` blocks) using [baseline], [acknowledgedGeneration],
+  /// [deletedLabelTimestamps], [taskConflictResolutions], and [labelConflictResolutions],
+  /// and evaluates the 6-tier pipeline at [evaluationTime].
   static TaskBoard merge({
     required TaskBoard primary,
     required TaskBoard secondary,
     TaskBoard? baseline,
+    int? acknowledgedGeneration,
     Map<String, DateTime> deletedLabelTimestamps = const {},
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> labelConflictResolutions = const {},
     required DateTime evaluationTime,
     DateTime? localEvaluationTime,
+    bool pruneExpiredDeleted = true,
+    bool requireAcknowledgedGeneration = false,
   }) {
     final now = TaskItem.normalizeTimestamp(evaluationTime);
-    final mergedLabels = _mergeLabels(
+    final effectiveAckGen =
+        acknowledgedGeneration ?? baseline?.deletedBlock.generation;
+    final lGen = primary.deletedBlock.generation;
+    final rGen = secondary.deletedBlock.generation;
+
+    _verifyGenerationsAndCompletionHistory(
+      primary: primary,
+      secondary: secondary,
+      baseline: baseline,
+      effectiveAckGen: effectiveAckGen,
+    );
+
+    final targetGeneration = lGen >= rGen ? lGen : rGen;
+    final combinedDeleted = _combineInitialDeletedRecords(
+      primary: primary.deletedBlock,
+      secondary: secondary.deletedBlock,
+      baseline: baseline?.deletedBlock,
+      deletedLabelTimestamps: deletedLabelTimestamps,
+    );
+
+    final labelOutcome = _reconcileLabels(
       primaryLabels: primary.labels,
       secondaryLabels: secondary.labels,
       baselineLabels: baseline?.labels,
-      deletedLabelTimestamps: deletedLabelTimestamps,
+      initialDeletedLabels: combinedDeleted.labels,
+      resolutions: labelConflictResolutions,
+      lGen: lGen,
+      rGen: rGen,
+      effectiveAckGen: effectiveAckGen,
+      requireAcknowledgedGeneration: requireAcknowledgedGeneration,
       now: now,
     );
-    final validLabelIds = <String>{for (final label in mergedLabels) label.id};
 
-    final rawMergedTasks = _mergeTasks(
+    final taskOutcome = _reconcileTasks(
       primaryTasks: primary.allTasks,
       secondaryTasks: secondary.allTasks,
       baselineTasks: baseline?.allTasks,
+      initialDeletedTasks: combinedDeleted.tasks,
+      resolutions: taskConflictResolutions,
+      lGen: lGen,
+      rGen: rGen,
+      effectiveAckGen: effectiveAckGen,
+      requireAcknowledgedGeneration: requireAcknowledgedGeneration,
       now: now,
     );
 
-    final sanitizedTasks = _sanitizeMergedTasks(
-      tasks: rawMergedTasks,
+    _checkSyncOutcomes(labelOutcome: labelOutcome, taskOutcome: taskOutcome);
+
+    final validLabelIds = <String>{
+      for (final label in labelOutcome.liveLabels) label.id,
+    };
+    final tasksAfterLabelStrip = _stripDeletedLabelsAndValidateReferences(
+      tasks: taskOutcome.liveTasks,
       validLabelIds: validLabelIds,
+      deletedLabelsById: labelOutcome.deletedLabelsById,
+      baselineLabels: baseline?.labels,
+    );
+
+    _validateMergedGraphAndBounds(
+      tasks: tasksAfterLabelStrip,
+      labels: labelOutcome.liveLabels,
+    );
+
+    final finalizedDeletedBlock = _finalizeDeletedBlock(
+      baseGeneration: targetGeneration,
+      deletedTasks: taskOutcome.deletedTasksById.values,
+      deletedLabels: labelOutcome.deletedLabelsById.values,
+      retiredByUndelete:
+          labelOutcome.retiredByUndelete || taskOutcome.retiredByUndelete,
+      pruneExpiredDeleted: pruneExpiredDeleted,
+      now: now,
+    );
+
+    final mergedQueueBlock = _mergeQueueBlocks(
+      primaryQueue: primary.queueBlock,
+      secondaryQueue: secondary.queueBlock,
+      baselineQueue: baseline?.queueBlock,
+      mergedTasks: tasksAfterLabelStrip,
     );
 
     final mergedBoard = TaskBoard.evaluate(
-      tasks: sanitizedTasks,
+      tasks: tasksAfterLabelStrip,
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
-      labels: mergedLabels,
+      labels: labelOutcome.liveLabels,
+      deletedBlock: finalizedDeletedBlock,
+      queueBlock: mergedQueueBlock,
       pruneExpiredCompleted: true,
     );
     AppLogger.info(
       LogTag.sync,
-      'TaskBoardSync.merge completed: primary=(tasks=${primary.allTasks.length}, labels=${primary.labels.length}), secondary=(tasks=${secondary.allTasks.length}, labels=${secondary.labels.length}) -> merged=(tasks=${mergedBoard.allTasks.length}, labels=${mergedBoard.labels.length})',
+      'TaskBoardSync.merge completed: primary=(tasks=${primary.allTasks.length}, labels=${primary.labels.length}, gen=$lGen), secondary=(tasks=${secondary.allTasks.length}, labels=${secondary.labels.length}, gen=$rGen) -> merged=(tasks=${mergedBoard.allTasks.length}, labels=${mergedBoard.labels.length}, gen=${mergedBoard.deletedBlock.generation})',
     );
     return mergedBoard;
   }
 
-  /// Ensures every [TdfLabel] and [TaskItem] in [board] carries an explicit UTC `modifiedAt`
-  /// timestamp and evaluates the 6-tier pipeline at [evaluationTime].
+  /// Recovers ambiguous local entities identified by [recoverTaskIds] and [recoverLabelIds]
+  /// from [localBoard] into [sharedBoard] as new entities with freshly generated 10-character
+  /// Base62 IDs, rewriting `labels` and `blocked` references among recovered entities per
+  /// `TDF_SPEC.md` Section 6.8.4.
+  static TaskBoard recoverAmbiguousEntities({
+    required TaskBoard localBoard,
+    required TaskBoard sharedBoard,
+    TaskBoard? baseline,
+    Iterable<String> recoverTaskIds = const <String>[],
+    Iterable<String> recoverLabelIds = const <String>[],
+    required DateTime evaluationTime,
+    DateTime? localEvaluationTime,
+  }) {
+    final now = TaskItem.normalizeTimestamp(evaluationTime);
+    final recoverTaskSet = <String>{...recoverTaskIds};
+    final recoverLabelSet = <String>{...recoverLabelIds};
+
+    final reservedLabelIds = <String>{
+      for (final label in localBoard.labels) label.id,
+      for (final label in sharedBoard.labels) label.id,
+      for (final record in localBoard.deletedBlock.labels) record.labelId,
+      for (final record in sharedBoard.deletedBlock.labels) record.labelId,
+    };
+    final reservedTaskIds = <String>{
+      for (final task in localBoard.allTasks) task.id,
+      for (final task in sharedBoard.allTasks) task.id,
+      for (final record in localBoard.deletedBlock.tasks) record.taskId,
+      for (final record in sharedBoard.deletedBlock.tasks) record.taskId,
+    };
+
+    final labelIdMap = <String, String>{};
+    for (final oldLabelId in recoverLabelSet) {
+      final newId = generateLabelId(
+        timestamp: now,
+        existingIds: reservedLabelIds,
+      );
+      reservedLabelIds.add(newId);
+      labelIdMap[oldLabelId] = newId;
+    }
+
+    final taskIdMap = <String, String>{};
+    for (final oldTaskId in recoverTaskSet) {
+      final newId = generateTaskId(
+        timestamp: now,
+        existingIds: reservedTaskIds,
+      );
+      reservedTaskIds.add(newId);
+      taskIdMap[oldTaskId] = newId;
+    }
+
+    final sharedLabelIds = <String>{
+      for (final label in sharedBoard.labels) label.id,
+    };
+    final sharedTaskIds = <String>{
+      for (final task in sharedBoard.allTasks) task.id,
+    };
+
+    final adjustedLocalLabels = <TdfLabel>[];
+    for (final label in localBoard.labels) {
+      if (labelIdMap[label.id] case final newId?) {
+        final nextMod = TaskItem.nextModifiedTimestamp(
+          now,
+          label.effectiveModifiedAt,
+        );
+        adjustedLocalLabels.add(
+          TdfLabel(
+            id: newId,
+            name: label.name,
+            color: label.color,
+            note: label.note,
+            modifiedAt: nextMod,
+            conditions: label.conditions,
+          ),
+        );
+      } else if (sharedLabelIds.contains(label.id)) {
+        adjustedLocalLabels.add(label);
+      }
+    }
+
+    final adjustedLocalTasks = <TaskItem>[];
+    for (final task in localBoard.allTasks) {
+      if (taskIdMap[task.id] case final newId?) {
+        adjustedLocalTasks.add(
+          _rewriteRecoveredTask(
+            task: task,
+            newId: newId,
+            labelIdMap: labelIdMap,
+            taskIdMap: taskIdMap,
+            now: now,
+          ),
+        );
+      } else if (sharedTaskIds.contains(task.id)) {
+        adjustedLocalTasks.add(task);
+      }
+    }
+
+    final adjustedQueueIds = <String>[
+      for (final id in localBoard.queueBlock.taskIds)
+        if (taskIdMap[id] case final mapped?)
+          mapped
+        else if (sharedTaskIds.contains(id))
+          id,
+    ];
+
+    final preparedLocal = TaskBoard.evaluate(
+      tasks: adjustedLocalTasks,
+      labels: adjustedLocalLabels,
+      deletedBlock: localBoard.deletedBlock.copyWith(
+        generation: sharedBoard.deletedBlock.generation,
+      ),
+      queueBlock: localBoard.queueBlock.copyWith(taskIds: adjustedQueueIds),
+      evaluationTime: now,
+      localEvaluationTime: localEvaluationTime,
+    );
+
+    return merge(
+      primary: preparedLocal,
+      secondary: sharedBoard,
+      baseline: baseline,
+      acknowledgedGeneration: sharedBoard.deletedBlock.generation,
+      evaluationTime: now,
+      localEvaluationTime: localEvaluationTime,
+    );
+  }
+
+  /// Evaluates the 6-tier pipeline on [board] at [evaluationTime] while preserving
+  /// each entity's existing `modifiedAt` state (including omitted `modified` directives)
+  /// per `TDF_SPEC.md` Section 6.7.1 and 6.7.4.
   static TaskBoard stampAndNormalize(
     TaskBoard board, {
     required DateTime evaluationTime,
     DateTime? localEvaluationTime,
   }) {
     final now = TaskItem.normalizeTimestamp(evaluationTime);
-    final stampedLabels = <TdfLabel>[
-      for (final label in board.labels)
-        label.modifiedAt != null
-            ? label
-            : label.copyWith(modifiedAt: label.effectiveModifiedAt),
-    ];
-    final stampedTasks = <TaskItem>[
-      for (final task in board.allTasks)
-        task.modifiedAt != null
-            ? task
-            : task.copyWith(modifiedAt: task.effectiveModifiedAt),
-    ];
     return TaskBoard.evaluate(
-      tasks: stampedTasks,
+      tasks: board.allTasks,
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
-      labels: stampedLabels,
+      labels: board.labels,
+      deletedBlock: board.deletedBlock,
+      queueBlock: board.queueBlock,
       pruneExpiredCompleted: true,
     );
+  }
+
+  /// Throws a [TdfSyncOutcomeException] when [labelOutcome] or [taskOutcome] recorded deletion conflicts or ambiguous recovery items.
+  static void _checkSyncOutcomes({
+    required _LabelReconciliationOutcome labelOutcome,
+    required _TaskReconciliationOutcome taskOutcome,
+  }) {
+    if (taskOutcome.conflictedIds.isNotEmpty ||
+        labelOutcome.conflictedIds.isNotEmpty) {
+      throw TdfSyncOutcomeException(
+        kind: TdfSyncOutcomeKind.deletionConflict,
+        conflictedTaskIds: List<String>.unmodifiable(taskOutcome.conflictedIds),
+        conflictedLabelIds: List<String>.unmodifiable(
+          labelOutcome.conflictedIds,
+        ),
+        message: 'Entity deletion conflicts with concurrent live modification.',
+      );
+    }
+    if (taskOutcome.ambiguousIds.isNotEmpty ||
+        labelOutcome.ambiguousIds.isNotEmpty) {
+      throw TdfSyncOutcomeException(
+        kind: TdfSyncOutcomeKind.recoveryRequired,
+        ambiguousTaskIds: List<String>.unmodifiable(taskOutcome.ambiguousIds),
+        ambiguousLabelIds: List<String>.unmodifiable(labelOutcome.ambiguousIds),
+        message: 'Ambiguous local entities require user recovery after deletion history expiry.',
+      );
+    }
   }
 
   /// Collects all unique entity keys in declaration order across [first] and [second].
@@ -124,17 +340,334 @@ class TaskBoardSync {
     return ordered;
   }
 
-  /// Merges `label` blocks across [primaryLabels] and [secondaryLabels] using [baselineLabels] and [deletedLabelTimestamps].
-  static List<TdfLabel> _mergeLabels({
+  /// Combines active deletion records from [primary] and [secondary], discarding old acknowledged records when one side advanced generation.
+  static ({
+    Map<String, TdfDeletedTaskRecord> tasks,
+    Map<String, TdfDeletedLabelRecord> labels,
+  })
+  _combineInitialDeletedRecords({
+    required TdfDeletedBlock primary,
+    required TdfDeletedBlock secondary,
+    required TdfDeletedBlock? baseline,
+    required Map<String, DateTime> deletedLabelTimestamps,
+  }) {
+    final discardAckPrimary = primary.generation < secondary.generation;
+    final discardAckSecondary = secondary.generation < primary.generation;
+
+    final taskRecords = <String, TdfDeletedTaskRecord>{};
+    for (final record in primary.tasks) {
+      if (!_isAcknowledgedInBaselineTask(
+        record,
+        baseline,
+        discard: discardAckPrimary,
+      )) {
+        taskRecords[record.taskId] = record;
+      }
+    }
+    for (final record in secondary.tasks) {
+      if (!_isAcknowledgedInBaselineTask(
+        record,
+        baseline,
+        discard: discardAckSecondary,
+      )) {
+        final existing = taskRecords[record.taskId];
+        taskRecords[record.taskId] = existing == null
+            ? record
+            : existing.mergeWith(record);
+      }
+    }
+
+    final labelRecords = <String, TdfDeletedLabelRecord>{};
+    for (final record in primary.labels) {
+      if (!_isAcknowledgedInBaselineLabel(
+        record,
+        baseline,
+        discard: discardAckPrimary,
+      )) {
+        labelRecords[record.labelId] = record;
+      }
+    }
+    for (final record in secondary.labels) {
+      if (!_isAcknowledgedInBaselineLabel(
+        record,
+        baseline,
+        discard: discardAckSecondary,
+      )) {
+        final existing = labelRecords[record.labelId];
+        if (existing == null || record.deletedAt.isAfter(existing.deletedAt)) {
+          labelRecords[record.labelId] = record;
+        }
+      }
+    }
+    for (final entry in deletedLabelTimestamps.entries) {
+      if (!isValidLabelId(entry.key)) {
+        continue;
+      }
+      final normalizedTs = TaskItem.normalizeTimestamp(entry.value);
+      final existing = labelRecords[entry.key];
+      if (existing == null || normalizedTs.isAfter(existing.deletedAt)) {
+        labelRecords[entry.key] = TdfDeletedLabelRecord(
+          labelId: entry.key,
+          deletedAt: normalizedTs,
+        );
+      }
+    }
+    return (tasks: taskRecords, labels: labelRecords);
+  }
+
+  /// Computes `decisionRevision = max(now, eachObservedRevision + 1 second)` per Section 6.8.2.
+  static DateTime _computeDecisionRevision(
+    DateTime now,
+    DateTime liveRevision,
+    DateTime deletedRevision,
+    DateTime? baselineRevision,
+  ) {
+    var maxObserved = liveRevision.isAfter(deletedRevision)
+        ? liveRevision
+        : deletedRevision;
+    if (baselineRevision != null && baselineRevision.isAfter(maxObserved)) {
+      maxObserved = baselineRevision;
+    }
+    final bumped = maxObserved.add(const Duration(seconds: 1));
+    final decision = now.isAfter(bumped) ? now : bumped;
+    if (!TdfCalendar.isWithinTimestampBounds(decision)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Decision revision exceeds maximum supported timestamp.',
+      );
+    }
+    return decision;
+  }
+
+  /// Prunes expired deletion records (> `2,592,000` seconds) and increments `generation` once when records are retired per Section 6.8.3.
+  static TdfDeletedBlock _finalizeDeletedBlock({
+    required int baseGeneration,
+    required Iterable<TdfDeletedTaskRecord> deletedTasks,
+    required Iterable<TdfDeletedLabelRecord> deletedLabels,
+    required bool retiredByUndelete,
+    required bool pruneExpiredDeleted,
+    required DateTime now,
+  }) {
+    var anyExpired = false;
+    final activeTasks = <TdfDeletedTaskRecord>[];
+    for (final record in deletedTasks) {
+      final isExpired =
+          pruneExpiredDeleted &&
+          now.difference(record.deletedAt).inSeconds >
+              TaskBoard.completedRetentionSeconds;
+      if (isExpired) {
+        anyExpired = true;
+      } else {
+        activeTasks.add(record);
+      }
+    }
+
+    final activeLabels = <TdfDeletedLabelRecord>[];
+    for (final record in deletedLabels) {
+      final isExpired =
+          pruneExpiredDeleted &&
+          now.difference(record.deletedAt).inSeconds >
+              TaskBoard.completedRetentionSeconds;
+      if (isExpired) {
+        anyExpired = true;
+      } else {
+        activeLabels.add(record);
+      }
+    }
+
+    if (activeTasks.length + activeLabels.length >
+        TdfDeletedBlock.maxDeletedRecords) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Merged deleted block exceeds MAX_DELETED_RECORDS (4096).',
+      );
+    }
+
+    var nextGeneration = baseGeneration;
+    if (anyExpired || retiredByUndelete) {
+      if (baseGeneration >= TdfDeletedBlock.maxGeneration) {
+        throw const TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: 1,
+          message: 'Deletion history generation exceeds MAX_SYNC_GENERATION (9007199254740991).',
+        );
+      }
+      nextGeneration = baseGeneration + 1;
+    }
+
+    return TdfDeletedBlock(
+      generation: nextGeneration,
+      tasks: activeTasks,
+      labels: activeLabels,
+    );
+  }
+
+  /// Checks whether [taskMap] contains any directed dependency cycle.
+  static bool _hasDependencyCycle(Map<String, TaskItem> taskMap) {
+    final state = <String, int>{};
+    for (final id in taskMap.keys) {
+      if ((state[id] ?? 0) == 0 && _visitCycleDfs(id, taskMap, state)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns whether [record] was already acknowledged in [baseline] when [discard] is true.
+  static bool _isAcknowledgedInBaselineLabel(
+    TdfDeletedLabelRecord record,
+    TdfDeletedBlock? baseline, {
+    required bool discard,
+  }) {
+    if (!discard || baseline == null) {
+      return false;
+    }
+    final baseRecord = baseline.findLabelRecord(record.labelId);
+    return baseRecord != null &&
+        !record.deletedAt.isAfter(baseRecord.deletedAt);
+  }
+
+  /// Returns whether [record] was already acknowledged in [baseline] when [discard] is true.
+  static bool _isAcknowledgedInBaselineTask(
+    TdfDeletedTaskRecord record,
+    TdfDeletedBlock? baseline, {
+    required bool discard,
+  }) {
+    if (!discard || baseline == null) {
+      return false;
+    }
+    final baseRecord = baseline.findTaskRecord(record.taskId);
+    return baseRecord != null &&
+        !record.deletedAt.isAfter(baseRecord.deletedAt);
+  }
+
+  /// Returns whether [label] is identical to [baseLabel] in payload and effective revision.
+  static bool _isLabelUnchangedFromBaseline(
+    TdfLabel label,
+    TdfLabel baseLabel,
+  ) {
+    return label.effectiveModifiedAt == baseLabel.effectiveModifiedAt &&
+        TdfPayloadComparison.compareLabelPayloads(label, baseLabel) == 0;
+  }
+
+  /// Returns whether [task] is identical to [baseTask] in payload, completions, and effective revision.
+  static bool _isTaskUnchangedFromBaseline(TaskItem task, TaskItem baseTask) {
+    return task.completions == baseTask.completions &&
+        task.effectiveModifiedAt == baseTask.effectiveModifiedAt &&
+        TdfPayloadComparison.compareTaskPayloads(task, baseTask) == 0;
+  }
+
+  /// Merges [primaryQueue] and [secondaryQueue] with [baselineQueue] and reconciles against [mergedTasks] per Section 6.11.2.
+  static TdfQueueBlock _mergeQueueBlocks({
+    required TdfQueueBlock primaryQueue,
+    required TdfQueueBlock secondaryQueue,
+    required TdfQueueBlock? baselineQueue,
+    required List<TaskItem> mergedTasks,
+  }) {
+    final winnerQueue =
+        TdfPayloadComparison.compareQueueBlocks(primaryQueue, secondaryQueue) >=
+            0
+        ? primaryQueue
+        : secondaryQueue;
+    final List<String> selectedIds;
+    if (baselineQueue == null) {
+      selectedIds = winnerQueue.taskIds;
+    } else if (listEquals(primaryQueue.taskIds, secondaryQueue.taskIds)) {
+      selectedIds = primaryQueue.taskIds;
+    } else if (listEquals(primaryQueue.taskIds, baselineQueue.taskIds)) {
+      selectedIds = secondaryQueue.taskIds;
+    } else if (listEquals(secondaryQueue.taskIds, baselineQueue.taskIds)) {
+      selectedIds = primaryQueue.taskIds;
+    } else {
+      selectedIds = winnerQueue.taskIds;
+    }
+
+    final scheduledOpenById = <String, TaskItem>{
+      for (final task in mergedTasks)
+        if (task.queuedAt != null && !task.isCompleted) task.id: task,
+    };
+
+    final reconciledIds = <String>[];
+    final seenInQueue = <String>{};
+    for (final id in selectedIds) {
+      if (scheduledOpenById.containsKey(id) && seenInQueue.add(id)) {
+        reconciledIds.add(id);
+      }
+    }
+
+    final missingTasks = <TaskItem>[
+      for (final task in scheduledOpenById.values)
+        if (!seenInQueue.contains(task.id)) task,
+    ]..sort(_compareMissingScheduledTasks);
+    for (final task in missingTasks) {
+      reconciledIds.add(task.id);
+    }
+
+    if (reconciledIds.length > TdfQueueBlock.maxQueueEntries) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Merged queue block exceeds MAX_QUEUE_ENTRIES (4096).',
+      );
+    }
+
+    var greatestQueue = winnerQueue;
+    if (baselineQueue != null &&
+        TdfPayloadComparison.compareQueueBlocks(baselineQueue, greatestQueue) >
+            0) {
+      greatestQueue = baselineQueue;
+    }
+
+    if (listEquals(greatestQueue.taskIds, reconciledIds)) {
+      return TdfQueueBlock(
+        modifiedAt: greatestQueue.modifiedAt,
+        taskIds: reconciledIds,
+      );
+    }
+
+    var maxMod = primaryQueue.modifiedAt.isAfter(secondaryQueue.modifiedAt)
+        ? primaryQueue.modifiedAt
+        : secondaryQueue.modifiedAt;
+    if (baselineQueue != null && baselineQueue.modifiedAt.isAfter(maxMod)) {
+      maxMod = baselineQueue.modifiedAt;
+    }
+    final nextMod = maxMod.add(const Duration(seconds: 1));
+    if (!TdfCalendar.isWithinTimestampBounds(nextMod)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Merged queue revision exceeds maximum supported timestamp.',
+      );
+    }
+    return TdfQueueBlock(modifiedAt: nextMod, taskIds: reconciledIds);
+  }
+
+  /// Orders missing scheduled open tasks by ascending UTC `queuedAt`, then ascending ASCII `id` per Section 6.11.2.
+  static int _compareMissingScheduledTasks(TaskItem left, TaskItem right) {
+    final lQueued = left.queuedAt ?? left.createdAt;
+    final rQueued = right.queuedAt ?? right.createdAt;
+    final qCmp = lQueued.compareTo(rQueued);
+    if (qCmp != 0) {
+      return qCmp;
+    }
+    return left.id.compareTo(right.id);
+  }
+
+  /// Reconciles all `label` blocks across [primaryLabels], [secondaryLabels], [baselineLabels], and [initialDeletedLabels].
+  static _LabelReconciliationOutcome _reconcileLabels({
     required List<TdfLabel> primaryLabels,
     required List<TdfLabel> secondaryLabels,
     required List<TdfLabel>? baselineLabels,
-    required Map<String, DateTime> deletedLabelTimestamps,
+    required Map<String, TdfDeletedLabelRecord> initialDeletedLabels,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required int lGen,
+    required int rGen,
+    required int? effectiveAckGen,
+    required bool requireAcknowledgedGeneration,
     required DateTime now,
   }) {
-    final normalizedDeleted = _normalizeDeletedLabelTimestamps(
-      deletedLabelTimestamps,
-    );
     final primaryMap = <String, TdfLabel>{
       for (final label in primaryLabels) label.id: label,
     };
@@ -146,31 +679,291 @@ class TaskBoardSync {
             for (final label in baselineLabels) label.id: label,
           }
         : null;
+    final deletedById = <String, TdfDeletedLabelRecord>{
+      ...initialDeletedLabels,
+    };
     final orderedIds = _collectOrderedKeys(primaryMap.keys, secondaryMap.keys);
-    final merged = <TdfLabel>[];
+
+    final liveLabels = <TdfLabel>[];
+    final conflictedIds = <String>[];
+    final ambiguousIds = <String>[];
+    var retiredByUndelete = false;
 
     for (final id in orderedIds) {
-      final resolved = _resolveSingleLabel(
+      final retired = _reconcileSingleLabel(
         id: id,
         primaryLabel: primaryMap[id],
         secondaryLabel: secondaryMap[id],
         baselineLabel: baselineMap?[id],
         hasBaseline: baselineMap != null,
-        deletedAt: normalizedDeleted[id],
+        deletedById: deletedById,
+        resolutions: resolutions,
+        lGen: lGen,
+        rGen: rGen,
+        effectiveAckGen: effectiveAckGen,
+        requireAcknowledgedGeneration: requireAcknowledgedGeneration,
         now: now,
+        liveLabels: liveLabels,
+        conflictedIds: conflictedIds,
+        ambiguousIds: ambiguousIds,
       );
-      if (resolved != null) {
-        merged.add(resolved);
+      if (retired) {
+        retiredByUndelete = true;
       }
     }
-    return merged;
+
+    return _LabelReconciliationOutcome(
+      liveLabels: liveLabels,
+      deletedLabelsById: deletedById,
+      conflictedIds: conflictedIds,
+      ambiguousIds: ambiguousIds,
+      retiredByUndelete: retiredByUndelete,
+    );
   }
 
-  /// Merges `task` blocks across [primaryTasks] and [secondaryTasks] using [baselineTasks].
-  static List<TaskItem> _mergeTasks({
+  /// Reconciles a single label [id] and returns whether an explicit `Undelete` retired a deletion record.
+  static bool _reconcileSingleLabel({
+    required String id,
+    required TdfLabel? primaryLabel,
+    required TdfLabel? secondaryLabel,
+    required TdfLabel? baselineLabel,
+    required bool hasBaseline,
+    required Map<String, TdfDeletedLabelRecord> deletedById,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required int lGen,
+    required int rGen,
+    required int? effectiveAckGen,
+    required bool requireAcknowledgedGeneration,
+    required DateTime now,
+    required List<TdfLabel> liveLabels,
+    required List<String> conflictedIds,
+    required List<String> ambiguousIds,
+  }) {
+    if (primaryLabel != null && secondaryLabel != null) {
+      liveLabels.add(
+        TdfPayloadComparison.mergeLabelWithBaseline(
+          local: primaryLabel,
+          incoming: secondaryLabel,
+          baseline: baselineLabel,
+        ),
+      );
+      return false;
+    }
+
+    final surviving = primaryLabel ?? secondaryLabel;
+    if (surviving == null) {
+      return false;
+    }
+    final isFromPrimary = primaryLabel != null;
+    final existingDeleted = deletedById[id];
+
+    if (existingDeleted != null) {
+      if (baselineLabel != null &&
+          _isLabelUnchangedFromBaseline(surviving, baselineLabel)) {
+        return false;
+      }
+      return _resolveLabelDeletionConflict(
+        id: id,
+        surviving: surviving,
+        baselineLabel: baselineLabel,
+        deletedRecord: existingDeleted,
+        resolution: resolutions[id],
+        now: now,
+        deletedById: deletedById,
+        liveLabels: liveLabels,
+        conflictedIds: conflictedIds,
+      );
+    }
+
+    final genAdvanced =
+        lGen != rGen ||
+        (effectiveAckGen != null &&
+            (lGen > effectiveAckGen || rGen > effectiveAckGen));
+    if (baselineLabel != null) {
+      if (_isLabelUnchangedFromBaseline(surviving, baselineLabel)) {
+        if (!genAdvanced) {
+          final synthDeletedAt = TaskItem.nextModifiedTimestamp(
+            now,
+            baselineLabel.effectiveModifiedAt,
+          );
+          deletedById[id] = TdfDeletedLabelRecord(
+            labelId: id,
+            deletedAt: synthDeletedAt,
+          );
+        }
+        return false;
+      }
+      if (genAdvanced) {
+        ambiguousIds.add(id);
+        return false;
+      }
+      final synthDeletedAt = TaskItem.nextModifiedTimestamp(
+        now,
+        baselineLabel.effectiveModifiedAt,
+      );
+      final synthRecord = TdfDeletedLabelRecord(
+        labelId: id,
+        deletedAt: synthDeletedAt,
+      );
+      return _resolveLabelDeletionConflict(
+        id: id,
+        surviving: surviving,
+        baselineLabel: baselineLabel,
+        deletedRecord: synthRecord,
+        resolution: resolutions[id],
+        now: now,
+        deletedById: deletedById,
+        liveLabels: liveLabels,
+        conflictedIds: conflictedIds,
+      );
+    }
+
+    final survivingSideOutdated = isFromPrimary
+        ? (rGen > (effectiveAckGen ?? lGen) ||
+              (requireAcknowledgedGeneration && effectiveAckGen == null))
+        : (lGen > (effectiveAckGen ?? rGen));
+    if (survivingSideOutdated || (!hasBaseline && genAdvanced)) {
+      ambiguousIds.add(id);
+      return false;
+    }
+
+    liveLabels.add(surviving);
+    return false;
+  }
+
+  /// Reconciles a single task [id] and returns whether an explicit `Undelete` retired a deletion record.
+  static bool _reconcileSingleTask({
+    required String id,
+    required TaskItem? primaryTask,
+    required TaskItem? secondaryTask,
+    required TaskItem? baselineTask,
+    required bool hasBaseline,
+    required Map<String, TdfDeletedTaskRecord> deletedById,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required int lGen,
+    required int rGen,
+    required int? effectiveAckGen,
+    required bool requireAcknowledgedGeneration,
+    required DateTime now,
+    required List<TaskItem> liveTasks,
+    required List<String> conflictedIds,
+    required List<String> ambiguousIds,
+  }) {
+    if (primaryTask != null && secondaryTask != null) {
+      liveTasks.add(
+        TdfPayloadComparison.mergeTaskWithBaseline(
+          local: primaryTask,
+          incoming: secondaryTask,
+          baseline: baselineTask,
+        ),
+      );
+      return false;
+    }
+
+    final surviving = primaryTask ?? secondaryTask;
+    if (surviving == null) {
+      return false;
+    }
+    final isFromPrimary = primaryTask != null;
+    final existingDeleted = deletedById[id];
+
+    if (existingDeleted != null) {
+      if (baselineTask != null &&
+          _isTaskUnchangedFromBaseline(surviving, baselineTask)) {
+        final maxComp = _max3Int(
+          existingDeleted.completionsCheckpoint,
+          surviving.completions,
+          baselineTask.completions,
+        );
+        deletedById[id] = TdfDeletedTaskRecord(
+          taskId: id,
+          deletedAt: existingDeleted.deletedAt,
+          completionsCheckpoint: maxComp,
+        );
+        return false;
+      }
+      return _resolveTaskDeletionConflict(
+        id: id,
+        surviving: surviving,
+        baselineTask: baselineTask,
+        deletedRecord: existingDeleted,
+        resolution: resolutions[id],
+        now: now,
+        deletedById: deletedById,
+        liveTasks: liveTasks,
+        conflictedIds: conflictedIds,
+      );
+    }
+
+    final genAdvanced =
+        lGen != rGen ||
+        (effectiveAckGen != null &&
+            (lGen > effectiveAckGen || rGen > effectiveAckGen));
+    if (baselineTask != null) {
+      if (_isTaskUnchangedFromBaseline(surviving, baselineTask)) {
+        if (!genAdvanced) {
+          final synthDeletedAt = TaskItem.nextModifiedTimestamp(
+            now,
+            baselineTask.effectiveModifiedAt,
+          );
+          deletedById[id] = TdfDeletedTaskRecord(
+            taskId: id,
+            deletedAt: synthDeletedAt,
+            completionsCheckpoint: baselineTask.completions,
+          );
+        }
+        return false;
+      }
+      if (genAdvanced) {
+        ambiguousIds.add(id);
+        return false;
+      }
+      final synthDeletedAt = TaskItem.nextModifiedTimestamp(
+        now,
+        baselineTask.effectiveModifiedAt,
+      );
+      final synthRecord = TdfDeletedTaskRecord(
+        taskId: id,
+        deletedAt: synthDeletedAt,
+        completionsCheckpoint: baselineTask.completions,
+      );
+      return _resolveTaskDeletionConflict(
+        id: id,
+        surviving: surviving,
+        baselineTask: baselineTask,
+        deletedRecord: synthRecord,
+        resolution: resolutions[id],
+        now: now,
+        deletedById: deletedById,
+        liveTasks: liveTasks,
+        conflictedIds: conflictedIds,
+      );
+    }
+
+    final survivingSideOutdated = isFromPrimary
+        ? (rGen > (effectiveAckGen ?? lGen) ||
+              (requireAcknowledgedGeneration && effectiveAckGen == null))
+        : (lGen > (effectiveAckGen ?? rGen));
+    if (survivingSideOutdated || (!hasBaseline && genAdvanced)) {
+      ambiguousIds.add(id);
+      return false;
+    }
+
+    liveTasks.add(surviving);
+    return false;
+  }
+
+  /// Reconciles all `task` blocks across [primaryTasks], [secondaryTasks], [baselineTasks], and [initialDeletedTasks].
+  static _TaskReconciliationOutcome _reconcileTasks({
     required List<TaskItem> primaryTasks,
     required List<TaskItem> secondaryTasks,
     required List<TaskItem>? baselineTasks,
+    required Map<String, TdfDeletedTaskRecord> initialDeletedTasks,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required int lGen,
+    required int rGen,
+    required int? effectiveAckGen,
+    required bool requireAcknowledgedGeneration,
     required DateTime now,
   }) {
     final primaryMap = <String, TaskItem>{
@@ -182,214 +975,347 @@ class TaskBoardSync {
     final baselineMap = baselineTasks != null
         ? <String, TaskItem>{for (final task in baselineTasks) task.id: task}
         : null;
+    final deletedById = <String, TdfDeletedTaskRecord>{...initialDeletedTasks};
     final orderedIds = _collectOrderedKeys(primaryMap.keys, secondaryMap.keys);
-    final merged = <TaskItem>[];
+
+    final liveTasks = <TaskItem>[];
+    final conflictedIds = <String>[];
+    final ambiguousIds = <String>[];
+    var retiredByUndelete = false;
 
     for (final id in orderedIds) {
-      final resolved = _resolveSingleTask(
+      final retired = _reconcileSingleTask(
+        id: id,
         primaryTask: primaryMap[id],
         secondaryTask: secondaryMap[id],
         baselineTask: baselineMap?[id],
+        hasBaseline: baselineMap != null,
+        deletedById: deletedById,
+        resolutions: resolutions,
+        lGen: lGen,
+        rGen: rGen,
+        effectiveAckGen: effectiveAckGen,
+        requireAcknowledgedGeneration: requireAcknowledgedGeneration,
         now: now,
+        liveTasks: liveTasks,
+        conflictedIds: conflictedIds,
+        ambiguousIds: ambiguousIds,
       );
-      if (resolved != null) {
-        merged.add(resolved);
+      if (retired) {
+        retiredByUndelete = true;
       }
-    }
-    return merged;
-  }
-
-  /// Normalizes [deletedLabelTimestamps] so both 10-character TDF 0.4.0 label IDs
-  /// and deterministically converted legacy label IDs match during synchronization.
-  static Map<String, DateTime> _normalizeDeletedLabelTimestamps(
-    Map<String, DateTime> deletedLabelTimestamps,
-  ) {
-    if (deletedLabelTimestamps.isEmpty) {
-      return const <String, DateTime>{};
-    }
-    final normalized = <String, DateTime>{};
-    for (final entry in deletedLabelTimestamps.entries) {
-      normalized[entry.key] = entry.value;
-      if (!isValidLabelId(entry.key)) {
-        final convertedKey = convertLegacyEntityId(
-          prefix: 'l',
-          legacyId: entry.key,
-        );
-        normalized[convertedKey] = entry.value;
-      }
-    }
-    return normalized;
-  }
-
-  /// Resolves a single label entity across primary, secondary, baseline, and deletion state.
-  static TdfLabel? _resolveSingleLabel({
-    required String id,
-    required TdfLabel? primaryLabel,
-    required TdfLabel? secondaryLabel,
-    required TdfLabel? baselineLabel,
-    required bool hasBaseline,
-    required DateTime? deletedAt,
-    required DateTime now,
-  }) {
-    if (primaryLabel != null && secondaryLabel != null) {
-      final pMod = primaryLabel.effectiveModifiedAt;
-      final sMod = secondaryLabel.effectiveModifiedAt;
-      if (pMod.isAfter(sMod)) {
-        return primaryLabel.copyWith(modifiedAt: pMod);
-      }
-      if (sMod.isAfter(pMod)) {
-        return secondaryLabel.copyWith(modifiedAt: sMod);
-      }
-      if (primaryLabel == secondaryLabel) {
-        return primaryLabel.copyWith(modifiedAt: pMod);
-      }
-      AppLogger.debug(
-        LogTag.sync,
-        'Label $id tie-breaker triggered (external edit wins)',
-      );
-      return secondaryLabel.copyWith(
-        modifiedAt: TaskItem.nextModifiedTimestamp(now, sMod),
-      );
     }
 
-    if (primaryLabel != null) {
-      final pMod = primaryLabel.effectiveModifiedAt;
-      if (deletedAt != null && !pMod.isAfter(deletedAt)) {
-        AppLogger.debug(
-          LogTag.sync,
-          'Label $id deleted via tombstone ($deletedAt)',
-        );
-        return null;
-      }
-      if (baselineLabel != null &&
-          !pMod.isAfter(baselineLabel.effectiveModifiedAt)) {
-        AppLogger.debug(LogTag.sync, 'Label $id deleted relative to baseline');
-        return null;
-      }
-      return primaryLabel.copyWith(modifiedAt: pMod);
-    }
-
-    if (secondaryLabel == null) {
-      return null;
-    }
-    if (secondaryLabel.modifiedAt == null &&
-        (!hasBaseline || baselineLabel == null)) {
-      return secondaryLabel.copyWith(modifiedAt: now);
-    }
-    final sMod = secondaryLabel.effectiveModifiedAt;
-    if (deletedAt != null && !sMod.isAfter(deletedAt)) {
-      AppLogger.debug(
-        LogTag.sync,
-        'Label $id deleted via tombstone ($deletedAt)',
-      );
-      return null;
-    }
-    if (baselineLabel != null &&
-        !sMod.isAfter(baselineLabel.effectiveModifiedAt)) {
-      AppLogger.debug(LogTag.sync, 'Label $id deleted relative to baseline');
-      return null;
-    }
-    return secondaryLabel.copyWith(
-      modifiedAt: secondaryLabel.modifiedAt ?? sMod,
+    return _TaskReconciliationOutcome(
+      liveTasks: liveTasks,
+      deletedTasksById: deletedById,
+      conflictedIds: conflictedIds,
+      ambiguousIds: ambiguousIds,
+      retiredByUndelete: retiredByUndelete,
     );
   }
 
-  /// Resolves a single task entity across primary, secondary, and baseline boards.
-  static TaskItem? _resolveSingleTask({
-    required TaskItem? primaryTask,
-    required TaskItem? secondaryTask,
-    required TaskItem? baselineTask,
+  /// Applies [resolution] (or records a `DeletionConflict`) for label [id] per Section 6.8.2.
+  static bool _resolveLabelDeletionConflict({
+    required String id,
+    required TdfLabel surviving,
+    required TdfLabel? baselineLabel,
+    required TdfDeletedLabelRecord deletedRecord,
+    required TdfDeletionResolution? resolution,
     required DateTime now,
+    required Map<String, TdfDeletedLabelRecord> deletedById,
+    required List<TdfLabel> liveLabels,
+    required List<String> conflictedIds,
   }) {
-    if (primaryTask != null && secondaryTask != null) {
-      final pMod = primaryTask.effectiveModifiedAt;
-      final sMod = secondaryTask.effectiveModifiedAt;
-      if (pMod.isAfter(sMod)) {
-        return primaryTask.copyWith(modifiedAt: pMod);
-      }
-      if (sMod.isAfter(pMod)) {
-        return secondaryTask.copyWith(modifiedAt: sMod);
-      }
-      if (_tasksContentEqual(primaryTask, secondaryTask)) {
-        return primaryTask.copyWith(modifiedAt: pMod);
-      }
-      AppLogger.debug(
-        LogTag.sync,
-        'Task ${primaryTask.id} tie-breaker triggered (external edit wins)',
-      );
-      return secondaryTask.copyWith(
-        modifiedAt: TaskItem.nextModifiedTimestamp(now, sMod),
-      );
+    if (resolution == null) {
+      conflictedIds.add(id);
+      return false;
     }
-
-    if (primaryTask != null) {
-      final pMod = primaryTask.effectiveModifiedAt;
-      if (baselineTask != null &&
-          !pMod.isAfter(baselineTask.effectiveModifiedAt)) {
-        return null;
-      }
-      return primaryTask.copyWith(modifiedAt: pMod);
+    final decisionRevision = _computeDecisionRevision(
+      now,
+      surviving.effectiveModifiedAt,
+      deletedRecord.deletedAt,
+      baselineLabel?.effectiveModifiedAt,
+    );
+    switch (resolution) {
+      case TdfDeletionResolution.delete:
+        deletedById[id] = TdfDeletedLabelRecord(
+          labelId: id,
+          deletedAt: decisionRevision,
+        );
+        return false;
+      case TdfDeletionResolution.undelete:
+        deletedById.remove(id);
+        liveLabels.add(surviving.copyWith(modifiedAt: decisionRevision));
+        return true;
     }
-
-    if (secondaryTask == null) {
-      return null;
-    }
-    final sMod = secondaryTask.effectiveModifiedAt;
-    if (baselineTask != null &&
-        !sMod.isAfter(baselineTask.effectiveModifiedAt)) {
-      return null;
-    }
-    return secondaryTask.copyWith(modifiedAt: sMod);
   }
 
-  /// Strips unknown label references and self-referential blockers from merged [tasks].
-  static List<TaskItem> _sanitizeMergedTasks({
+  /// Applies [resolution] (or records a `DeletionConflict`) for task [id] per Section 6.8.2.
+  static bool _resolveTaskDeletionConflict({
+    required String id,
+    required TaskItem surviving,
+    required TaskItem? baselineTask,
+    required TdfDeletedTaskRecord deletedRecord,
+    required TdfDeletionResolution? resolution,
+    required DateTime now,
+    required Map<String, TdfDeletedTaskRecord> deletedById,
+    required List<TaskItem> liveTasks,
+    required List<String> conflictedIds,
+  }) {
+    if (resolution == null) {
+      conflictedIds.add(id);
+      return false;
+    }
+    final decisionRevision = _computeDecisionRevision(
+      now,
+      surviving.effectiveModifiedAt,
+      deletedRecord.deletedAt,
+      baselineTask?.effectiveModifiedAt,
+    );
+    final maxComp = _max3Int(
+      surviving.completions,
+      baselineTask?.completions ?? 0,
+      deletedRecord.completionsCheckpoint,
+    );
+    switch (resolution) {
+      case TdfDeletionResolution.delete:
+        deletedById[id] = TdfDeletedTaskRecord(
+          taskId: id,
+          deletedAt: decisionRevision,
+          completionsCheckpoint: maxComp,
+        );
+        return false;
+      case TdfDeletionResolution.undelete:
+        deletedById.remove(id);
+        liveTasks.add(
+          surviving.copyWith(
+            completions: maxComp,
+            modifiedAt: decisionRevision,
+          ),
+        );
+        return true;
+    }
+  }
+
+  /// Rewrites a recovered [task] with [newId] and remapped `labelIds` and `dependencies` per Section 6.8.4.
+  static TaskItem _rewriteRecoveredTask({
+    required TaskItem task,
+    required String newId,
+    required Map<String, String> labelIdMap,
+    required Map<String, String> taskIdMap,
+    required DateTime now,
+  }) {
+    final remappedLabels = <String>[
+      for (final labelId in task.labelIds) labelIdMap[labelId] ?? labelId,
+    ];
+    final remappedDeps = <TdfTaskDependency>[
+      for (final dep in task.dependencies)
+        TdfTaskDependency(
+          taskId: taskIdMap[dep.taskId] ?? dep.taskId,
+          requiredCompletion: dep.requiredCompletion,
+        ),
+    ];
+    final nextMod = TaskItem.nextModifiedTimestamp(
+      now,
+      task.effectiveModifiedAt,
+    );
+    return TaskItem(
+      id: newId,
+      title: task.title,
+      note: task.note,
+      createdAt: task.createdAt,
+      queuedAt: task.queuedAt,
+      completedAt: task.completedAt,
+      modifiedAt: nextMod,
+      completions: task.completions,
+      isPriority: task.isPriority,
+      suspendedAt: task.suspendedAt,
+      isSuspendedForever: task.isSuspendedForever,
+      repeatRule: task.repeatRule,
+      labelIds: remappedLabels,
+      dependencies: remappedDeps,
+      links: task.links,
+      conditions: task.conditions,
+      subtasksAutoFinish: task.subtasksAutoFinish,
+      subtasks: task.subtasks,
+    );
+  }
+
+  /// Strips deleted labels from [tasks] (advancing affected tasks' `modified` timestamp)
+  /// and validates that no unknown label references remain per Sections 6.7.7 and 6.8.1.
+  static List<TaskItem> _stripDeletedLabelsAndValidateReferences({
     required List<TaskItem> tasks,
     required Set<String> validLabelIds,
+    required Map<String, TdfDeletedLabelRecord> deletedLabelsById,
+    required List<TdfLabel>? baselineLabels,
   }) {
-    final validTaskIds = <String>{for (final task in tasks) task.id};
+    final baselineLabelSet = <String>{
+      if (baselineLabels != null)
+        for (final label in baselineLabels) label.id,
+    };
     return <TaskItem>[
       for (final task in tasks)
-        _sanitizeSingleMergedTask(
+        _stripDeletedLabelsFromSingleTask(
           task: task,
           validLabelIds: validLabelIds,
-          validTaskIds: validTaskIds,
+          deletedLabelsById: deletedLabelsById,
+          baselineLabelSet: baselineLabelSet,
         ),
     ];
   }
 
-  /// Sanitizes `labelIds` and `blockedByTaskIds` on a single merged [task].
-  static TaskItem _sanitizeSingleMergedTask({
+  /// Strips deleted labels from a single [task] and validates remaining label references.
+  static TaskItem _stripDeletedLabelsFromSingleTask({
     required TaskItem task,
     required Set<String> validLabelIds,
-    required Set<String> validTaskIds,
+    required Map<String, TdfDeletedLabelRecord> deletedLabelsById,
+    required Set<String> baselineLabelSet,
   }) {
-    final cleanLabels = <String>[
-      for (final labelId in task.labelIds)
-        if (validLabelIds.contains(labelId)) labelId,
-    ];
-    final cleanBlockers = <String>[
-      for (final blockerId in task.blockedByTaskIds)
-        if (blockerId != task.id && validTaskIds.contains(blockerId)) blockerId,
-    ];
-    if (cleanLabels.length == task.labelIds.length &&
-        cleanBlockers.length == task.blockedByTaskIds.length) {
+    if (task.labelIds.isEmpty) {
       return task;
     }
-    return task.copyWith(
-      labelIds: cleanLabels,
-      blockedByTaskIds: cleanBlockers,
-    );
+    final retained = <String>[];
+    DateTime? latestLabelDeletion;
+    var strippedAny = false;
+
+    for (final labelId in task.labelIds) {
+      if (validLabelIds.contains(labelId)) {
+        retained.add(labelId);
+        continue;
+      }
+      final delRecord = deletedLabelsById[labelId];
+      if (delRecord != null || baselineLabelSet.contains(labelId)) {
+        strippedAny = true;
+        if (delRecord != null &&
+            (latestLabelDeletion == null ||
+                delRecord.deletedAt.isAfter(latestLabelDeletion))) {
+          latestLabelDeletion = delRecord.deletedAt;
+        }
+        continue;
+      }
+      throw TdfException(
+        kind: TdfErrorKind.unknownLabelReference,
+        line: 1,
+        message:
+            'Merged task "${task.id}" references undeclared label "$labelId".',
+      );
+    }
+
+    if (!strippedAny) {
+      return task;
+    }
+    var baseMod = task.effectiveModifiedAt;
+    if (latestLabelDeletion != null && latestLabelDeletion.isAfter(baseMod)) {
+      baseMod = latestLabelDeletion;
+    }
+    final nextMod = baseMod.add(const Duration(seconds: 1));
+    return task.copyWith(labelIds: retained, modifiedAt: nextMod);
   }
 
-  /// Compares two [TaskItem] instances for semantic content equality (ignoring `modifiedAt`).
-  static bool _tasksContentEqual(TaskItem first, TaskItem second) {
-    return first.copyWith(clearModifiedAt: true) ==
-        second.copyWith(clearModifiedAt: true);
+  /// Validates the combined dependency graph for cycles and checks Section 7 resource bounds.
+  static void _validateMergedGraphAndBounds({
+    required List<TaskItem> tasks,
+    required List<TdfLabel> labels,
+  }) {
+    if (tasks.length + labels.length + 2 > TdfService.maxBlocksPerDoc) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Merged document exceeds MAX_BLOCKS_PER_DOC (4096).',
+      );
+    }
+    final taskMap = <String, TaskItem>{for (final task in tasks) task.id: task};
+    if (_hasDependencyCycle(taskMap)) {
+      throw const TdfException(
+        kind: TdfErrorKind.circularDependency,
+        line: 1,
+        message: 'Merged document contains a circular task dependency.',
+      );
+    }
+  }
+
+  /// Verifies that deletion history generations have not rolled back and task completion counters have not regressed.
+  static void _verifyGenerationsAndCompletionHistory({
+    required TaskBoard primary,
+    required TaskBoard secondary,
+    required TaskBoard? baseline,
+    required int? effectiveAckGen,
+  }) {
+    final lGen = primary.deletedBlock.generation;
+    final rGen = secondary.deletedBlock.generation;
+    if (effectiveAckGen != null &&
+        (lGen < effectiveAckGen || rGen < effectiveAckGen)) {
+      throw const TdfSyncOutcomeException(
+        kind: TdfSyncOutcomeKind.syncGenerationRollback,
+        message: 'Shared deletion history generation is lower than the acknowledged generation.',
+      );
+    }
+    if (baseline == null) {
+      return;
+    }
+    final primaryMap = <String, TaskItem>{
+      for (final task in primary.allTasks) task.id: task,
+    };
+    final secondaryMap = <String, TaskItem>{
+      for (final task in secondary.allTasks) task.id: task,
+    };
+    final regressedIds = <String>[];
+    for (final baseTask in baseline.allTasks) {
+      final pTask = primaryMap[baseTask.id];
+      final sTask = secondaryMap[baseTask.id];
+      if ((pTask != null && pTask.completions < baseTask.completions) ||
+          (sTask != null && sTask.completions < baseTask.completions)) {
+        regressedIds.add(baseTask.id);
+      }
+    }
+    if (regressedIds.isNotEmpty) {
+      throw TdfSyncOutcomeException(
+        kind: TdfSyncOutcomeKind.recoveryRequired,
+        ambiguousTaskIds: List<String>.unmodifiable(regressedIds),
+        message: 'Task completion counter regressed below the proven baseline counter.',
+      );
+    }
+  }
+
+  /// Recursive DFS helper for cycle detection (`0` = unvisited, `1` = visiting, `2` = visited).
+  static bool _visitCycleDfs(
+    String currentId,
+    Map<String, TaskItem> taskMap,
+    Map<String, int> state,
+  ) {
+    state[currentId] = 1;
+    final task = taskMap[currentId];
+    if (task != null) {
+      for (final dep in task.dependencies) {
+        final targetId = dep.taskId;
+        if (targetId == currentId) {
+          return true;
+        }
+        if (!taskMap.containsKey(targetId)) {
+          continue;
+        }
+        final targetState = state[targetId] ?? 0;
+        if (targetState == 1) {
+          return true;
+        }
+        if (targetState == 0 && _visitCycleDfs(targetId, taskMap, state)) {
+          return true;
+        }
+      }
+    }
+    state[currentId] = 2;
+    return false;
+  }
+
+  /// Returns the maximum of three integers.
+  static int _max3Int(int a, int b, int c) {
+    final ab = a >= b ? a : b;
+    return ab >= c ? ab : c;
   }
 }
 
-/// Immutable per-workspace synchronization baseline and label deletion state.
+/// Immutable per-workspace synchronization baseline, acknowledged generations, and label deletion state.
 @immutable
 class WorkspaceSyncState {
   /// Creates a [WorkspaceSyncState].
@@ -397,6 +1323,8 @@ class WorkspaceSyncState {
     this.lastSyncedLocalTdf,
     this.lastSyncedRemoteTdf,
     Map<String, DateTime> deletedLabelTimestamps = const {},
+    this.acknowledgedLocalGeneration = 0,
+    this.acknowledgedRemoteGeneration = 0,
   }) : deletedLabelTimestamps = Map<String, DateTime>.unmodifiable(
          <String, DateTime>{
            for (final entry in deletedLabelTimestamps.entries)
@@ -407,18 +1335,21 @@ class WorkspaceSyncState {
   const WorkspaceSyncState._empty()
     : lastSyncedLocalTdf = null,
       lastSyncedRemoteTdf = null,
-      deletedLabelTimestamps = const <String, DateTime>{};
+      deletedLabelTimestamps = const <String, DateTime>{},
+      acknowledgedLocalGeneration = 0,
+      acknowledgedRemoteGeneration = 0;
 
-  /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x01` binary payload,
+  /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x01` or `TTS\x02` binary payload,
   /// returning [empty] if [bytes] is empty or malformed.
   factory WorkspaceSyncState.fromBytes(List<int> bytes) {
     if (bytes.length < 6 ||
         bytes[0] != 0x54 ||
         bytes[1] != 0x54 ||
         bytes[2] != 0x53 ||
-        bytes[3] != _binaryVersion) {
+        (bytes[3] != _binaryVersionV1 && bytes[3] != _binaryVersionV2)) {
       return empty;
     }
+    final version = bytes[3];
     final source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     try {
       final (localTdf, afterLocal) = _readNullableString(source, 4);
@@ -437,6 +1368,16 @@ class WorkspaceSyncState {
         deletedMap[labelId] = dateVal;
         cursor = nextCursor;
       }
+      var localGen = 0;
+      var remoteGen = 0;
+      if (version == _binaryVersionV2) {
+        if (cursor + 16 != source.length) {
+          return empty;
+        }
+        localGen = _readInt64(source, cursor);
+        remoteGen = _readInt64(source, cursor + 8);
+        cursor += 16;
+      }
       if (cursor != source.length) {
         return empty;
       }
@@ -444,6 +1385,8 @@ class WorkspaceSyncState {
         lastSyncedLocalTdf: localTdf,
         lastSyncedRemoteTdf: remoteTdf,
         deletedLabelTimestamps: deletedMap,
+        acknowledgedLocalGeneration: localGen,
+        acknowledgedRemoteGeneration: remoteGen,
       );
     } on FormatException {
       return empty;
@@ -453,8 +1396,15 @@ class WorkspaceSyncState {
   /// Empty synchronization state with no baselines and no pending label deletions.
   static const WorkspaceSyncState empty = WorkspaceSyncState._empty();
 
-  static const int _binaryVersion = 1;
+  static const int _binaryVersionV1 = 1;
+  static const int _binaryVersionV2 = 2;
   static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
+
+  /// Last acknowledged `deleted.generation` for the local `.tdf` file.
+  final int acknowledgedLocalGeneration;
+
+  /// Last acknowledged `deleted.generation` for the remote WebDAV `.tdf` file.
+  final int acknowledgedRemoteGeneration;
 
   /// UTC deletion timestamps (`T_del`) for labels deleted since the last full sync.
   final Map<String, DateTime> deletedLabelTimestamps;
@@ -472,6 +1422,8 @@ class WorkspaceSyncState {
     String? lastSyncedRemoteTdf,
     bool clearLastSyncedRemoteTdf = false,
     Map<String, DateTime>? deletedLabelTimestamps,
+    int? acknowledgedLocalGeneration,
+    int? acknowledgedRemoteGeneration,
   }) {
     return WorkspaceSyncState(
       lastSyncedLocalTdf: clearLastSyncedLocalTdf
@@ -482,13 +1434,17 @@ class WorkspaceSyncState {
           : (lastSyncedRemoteTdf ?? this.lastSyncedRemoteTdf),
       deletedLabelTimestamps:
           deletedLabelTimestamps ?? this.deletedLabelTimestamps,
+      acknowledgedLocalGeneration:
+          acknowledgedLocalGeneration ?? this.acknowledgedLocalGeneration,
+      acknowledgedRemoteGeneration:
+          acknowledgedRemoteGeneration ?? this.acknowledgedRemoteGeneration,
     );
   }
 
-  /// Encodes this [WorkspaceSyncState] into a compact `TTS\x01` binary [Uint8List].
+  /// Encodes this [WorkspaceSyncState] into a compact `TTS\x02` binary [Uint8List].
   Uint8List toBytes() {
     final builder = BytesBuilder(copy: false)
-      ..add(const <int>[0x54, 0x54, 0x53, _binaryVersion]);
+      ..add(const <int>[0x54, 0x54, 0x53, _binaryVersionV2]);
     _writeNullableString(builder, lastSyncedLocalTdf);
     _writeNullableString(builder, lastSyncedRemoteTdf);
 
@@ -500,6 +1456,8 @@ class WorkspaceSyncState {
     for (var i = 0; i < count; i++) {
       _writeDeletedLabelEntry(builder, entries[i].key, entries[i].value);
     }
+    _writeInt64(builder, acknowledgedLocalGeneration);
+    _writeInt64(builder, acknowledgedRemoteGeneration);
     return builder.toBytes();
   }
 
@@ -512,15 +1470,21 @@ class WorkspaceSyncState {
     if (labelId == null || labelId.isEmpty || afterId + 8 > source.length) {
       throw const FormatException('Invalid deleted label entry.');
     }
-    var epochSeconds = 0;
-    for (var i = 0; i < 8; i++) {
-      epochSeconds = (epochSeconds << 8) | source[afterId + i];
-    }
+    final epochSeconds = _readInt64(source, afterId);
     final timestamp = DateTime.fromMillisecondsSinceEpoch(
       epochSeconds * 1000,
       isUtc: true,
     );
     return (labelId, TaskItem.normalizeTimestamp(timestamp), afterId + 8);
+  }
+
+  /// Reads a big-endian 64-bit integer from [source] at [offset].
+  static int _readInt64(Uint8List source, int offset) {
+    var value = 0;
+    for (var i = 0; i < 8; i++) {
+      value = (value << 8) | source[offset + i];
+    }
+    return value;
   }
 
   /// Reads a 32-bit length-prefixed nullable UTF-8 string from [source] at [offset].
@@ -560,8 +1524,13 @@ class WorkspaceSyncState {
     _writeNullableString(builder, labelId);
     final epochSeconds =
         TaskItem.normalizeTimestamp(deletedAt).millisecondsSinceEpoch ~/ 1000;
+    _writeInt64(builder, epochSeconds);
+  }
+
+  /// Appends a big-endian 64-bit integer [value] to [builder].
+  static void _writeInt64(BytesBuilder builder, int value) {
     for (var shift = 56; shift >= 0; shift -= 8) {
-      builder.addByte((epochSeconds >> shift) & 0xFF);
+      builder.addByte((value >> shift) & 0xFF);
     }
   }
 
@@ -588,6 +1557,8 @@ class WorkspaceSyncState {
     return other is WorkspaceSyncState &&
         other.lastSyncedLocalTdf == lastSyncedLocalTdf &&
         other.lastSyncedRemoteTdf == lastSyncedRemoteTdf &&
+        other.acknowledgedLocalGeneration == acknowledgedLocalGeneration &&
+        other.acknowledgedRemoteGeneration == acknowledgedRemoteGeneration &&
         mapEquals(other.deletedLabelTimestamps, deletedLabelTimestamps);
   }
 
@@ -595,10 +1566,48 @@ class WorkspaceSyncState {
   int get hashCode => Object.hash(
     lastSyncedLocalTdf,
     lastSyncedRemoteTdf,
+    acknowledgedLocalGeneration,
+    acknowledgedRemoteGeneration,
     Object.hashAllUnordered(
       deletedLabelTimestamps.entries.map(
         (entry) => Object.hash(entry.key, entry.value),
       ),
     ),
   );
+}
+
+/// Internal result of reconciling `label` blocks and label deletion records.
+@immutable
+class _LabelReconciliationOutcome {
+  const _LabelReconciliationOutcome({
+    required this.liveLabels,
+    required this.deletedLabelsById,
+    required this.conflictedIds,
+    required this.ambiguousIds,
+    required this.retiredByUndelete,
+  });
+
+  final List<String> ambiguousIds;
+  final List<String> conflictedIds;
+  final Map<String, TdfDeletedLabelRecord> deletedLabelsById;
+  final List<TdfLabel> liveLabels;
+  final bool retiredByUndelete;
+}
+
+/// Internal result of reconciling `task` blocks and task deletion records.
+@immutable
+class _TaskReconciliationOutcome {
+  const _TaskReconciliationOutcome({
+    required this.liveTasks,
+    required this.deletedTasksById,
+    required this.conflictedIds,
+    required this.ambiguousIds,
+    required this.retiredByUndelete,
+  });
+
+  final List<String> ambiguousIds;
+  final List<String> conflictedIds;
+  final Map<String, TdfDeletedTaskRecord> deletedTasksById;
+  final List<TaskItem> liveTasks;
+  final bool retiredByUndelete;
 }

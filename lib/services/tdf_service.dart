@@ -20,7 +20,10 @@ import 'package:flutter/foundation.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/tdf_metadata.dart';
+import '../models/tdf_sync_metadata.dart';
+import '../models/tdf_timezone.dart';
 import 'app_logger.dart';
+import 'tdf_importer.dart';
 
 /// Mandatory lexical, structural, and semantic error categories defined in `TDF_SPEC.md` Section 8.
 enum TdfErrorKind {
@@ -30,7 +33,7 @@ enum TdfErrorKind {
   /// A single-valued directive or sub-block appears more than once in the same block.
   duplicateDirective,
 
-  /// Two blocks in the same namespace share an identical `<id>`.
+  /// Two blocks, deletion records, or queue entries in the same namespace share an identical `<id>`.
   duplicateIdentifier,
 
   /// A required text argument (`name`, `step` `<text>`, or `link` `<title>` / `<uri>`) is empty or whitespace-only after unescaping.
@@ -45,17 +48,26 @@ enum TdfErrorKind {
   /// A `color` argument is unquoted or fails `#RRGGBB` hexadecimal validation.
   invalidColor,
 
+  /// A task has `finished` present while its effective `completions` counter is `0`.
+  invalidCompletionState,
+
   /// A condition rule has an invalid weekday, equal time window, out-of-range GPS coordinate/radius, or invalid reset.
   invalidCondition,
 
   /// A double-quoted string contains an unsupported backslash escape sequence.
   invalidEscapeSequence,
 
-  /// A block/directive identifier or entity ID is quoted or contains invalid characters.
+  /// A block/directive identifier or entity ID is quoted or fails canonical format validation.
   invalidIdentifier,
 
-  /// A numeric argument fails decimal format validation.
+  /// A numeric argument, generation counter, completion count, or prerequisite count fails decimal validation.
   invalidNumber,
+
+  /// Queue entries do not match the exact set of live scheduled open tasks.
+  invalidQueueMembership,
+
+  /// A repeat clock (`<repeat-time>`) is quoted or outside `00:00:00..23:59:59`.
+  invalidTime,
 
   /// A timestamp or time-window argument fails ISO-8601 calendar or 24-hour clock validation.
   invalidTimestamp,
@@ -69,7 +81,7 @@ enum TdfErrorKind {
   /// A standalone directive identifier appears without arguments and without `{`.
   missingDirectiveArgument,
 
-  /// A required directive (`name`, `created`, `step`, or condition rule) is missing from a block.
+  /// A required directive (`name`, `created`, `generation`, `modified`, `step`, or condition rule) is missing from a block.
   missingRequiredDirective,
 
   /// The document contains no statements or does not begin with `tdf <version>`.
@@ -103,7 +115,7 @@ enum TdfErrorKind {
   unterminatedString,
 }
 
-/// Structured exception thrown when scanning, parsing, or validating a `.tdf` document fails.
+/// Structured exception thrown when scanning, parsing, validating, or serializing a `.tdf` document fails.
 @immutable
 class TdfException implements Exception {
   /// Creates a [TdfException] for [kind] at 1-based [line] with [message].
@@ -111,6 +123,8 @@ class TdfException implements Exception {
     required this.kind,
     required this.line,
     required this.message,
+    this.sourceVersion,
+    this.targetVersion,
   });
 
   /// Normative error category from `TDF_SPEC.md` Section 8.
@@ -122,21 +136,26 @@ class TdfException implements Exception {
   /// Human-readable diagnostic description.
   final String message;
 
+  /// Optional historical source version when thrown during explicit import migration.
+  final String? sourceVersion;
+
+  /// Optional target version when thrown during explicit import migration.
+  final String? targetVersion;
+
   @override
-  String toString() => 'TdfException(${kind.name}, line $line): $message';
+  String toString() {
+    if (sourceVersion != null && targetVersion != null) {
+      return 'TdfException(${kind.name}, $sourceVersion->$targetVersion, line $line): $message';
+    }
+    return 'TdfException(${kind.name}, line $line): $message';
+  }
 }
 
-/// Stateless service that scans, parses, and serializes TierTask Data Format (`.tdf`) documents
+/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.5.0` documents
 /// in a single $O(N)$ linear pass without regular expressions.
 class TdfService {
   /// Creates a const [TdfService].
   const TdfService();
-
-  /// Legacy TDF specification version string (`tdf 0.2.0`) accepted for backward-compatible parsing.
-  static const String legacyVersion = '0.2.0';
-
-  /// Legacy TDF specification version string (`tdf 0.3.0`) accepted for backward-compatible parsing.
-  static const String legacyVersion030 = '0.3.0';
 
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = 64;
@@ -144,7 +163,16 @@ class TdfService {
   /// Maximum total blocks per `.tdf` document (`MAX_BLOCKS_PER_DOC`).
   static const int maxBlocksPerDoc = 4096;
 
-  /// Maximum input size in bytes (`MAX_FILE_BYTES`, 1 MiB).
+  /// Maximum completion counter, deletion checkpoint, and prerequisite completion number (`MAX_COMPLETIONS`).
+  static const int maxCompletions = TdfTaskDependency.maxCompletions;
+
+  /// Maximum stored condition rules across all inline directives and condition blocks on one entity (`MAX_CONDITION_RULES_PER_ENTITY`).
+  static const int maxConditionRulesPerEntity = 512;
+
+  /// Maximum task and label deletion records in the shared `deleted` block (`MAX_DELETED_RECORDS`).
+  static const int maxDeletedRecords = TdfDeletedBlock.maxDeletedRecords;
+
+  /// Maximum input or serialized output size in UTF-8 bytes (`MAX_FILE_BYTES`, 1 MiB).
   static const int maxFileBytes = 1048576;
 
   /// Maximum logical lines per `.tdf` document (`MAX_LINE_COUNT`).
@@ -156,29 +184,61 @@ class TdfService {
   /// Maximum `{ ... }` block nesting depth (`MAX_NESTING_DEPTH`).
   static const int maxNestingDepth = 2;
 
-  /// Maximum character length of a `note` text value (`MAX_NOTE_LENGTH`).
+  /// Maximum decoded Unicode scalar values in a `note` text value (`MAX_NOTE_LENGTH`).
   static const int maxNoteLength = 2000;
+
+  /// Maximum `task` entries in the shared `queue` block (`MAX_QUEUE_ENTRIES`).
+  static const int maxQueueEntries = TdfQueueBlock.maxQueueEntries;
 
   /// Maximum recurrence interval count `<count>` in `repeat <count> <unit>` (`MAX_REPEAT_COUNT`).
   static const int maxRepeatCount = TaskRepeatRule.maxRepeatCount;
 
-  /// Maximum directives or sub-blocks inside a single block (`MAX_STMTS_PER_BLOCK`).
+  /// Maximum direct child statements per ordinary block (`MAX_STMTS_PER_BLOCK`).
   static const int maxStmtsPerBlock = 512;
 
-  /// Maximum character length of a `name` or `step` text value (`MAX_TEXT_LENGTH`).
+  /// Maximum deletion history generation (`MAX_SYNC_GENERATION`).
+  static const int maxSyncGeneration = TdfDeletedBlock.maxGeneration;
+
+  /// Maximum decoded Unicode scalar values in a `name`, `step`, or link `<title>` (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = 500;
 
-  /// Maximum character length of a `link` `<uri>` value (`MAX_URI_LENGTH`).
+  /// Maximum decoded Unicode scalar values in a `link` `<uri>` (`MAX_URI_LENGTH`).
   static const int maxUriLength = TaskLink.maxUriLength;
 
-  /// Canonical TDF specification version string (`tdf 0.4.0`).
-  static const String supportedVersion = '0.4.0';
+  /// Canonical TDF specification version string (`tdf 0.5.0`).
+  static const String supportedVersion = '0.5.0';
 
-  /// Scans and parses [tdfContent] into a [TaskBoard] evaluated at [evaluationTime].
+  /// Explicitly imports and migrates [sourceContent] (`0.2.0`, `0.3.0`, `0.4.0`, or `0.5.0`)
+  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0`) into a [TaskBoard].
+  TaskBoard importDocument(
+    String sourceContent, {
+    TdfTimeZoneContext? sourceTimeZone,
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? evaluationTimeZone,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+  }) {
+    final result = TdfImporter.importDocument(
+      sourceContent,
+      sourceTimeZone: sourceTimeZone,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      evaluationTimeZone: evaluationTimeZone,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+    );
+    return result.board;
+  }
+
+  /// Scans and parses a `tdf 0.5.0` [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -190,6 +250,7 @@ class TdfService {
         tdfContent,
         evaluationTime: evaluationTime,
         localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
         activeLabelId: activeLabelId,
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
@@ -209,10 +270,16 @@ class TdfService {
     }
   }
 
-  /// Serializes [board] into a canonical `LF`-terminated (`.tdf`) document string.
+  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.5.0` document string
+  /// and validates canonical output against Section 7.1 bounds.
   String serialize(TaskBoard board) {
     final stopwatch = Stopwatch()..start();
-    if (board.labels.isEmpty && board.allTasks.isEmpty) {
+    final hasDeleted = !board.deletedBlock.isDefaultEmpty;
+    final hasQueue = !board.queueBlock.isDefaultEmpty;
+    if (!hasDeleted &&
+        !hasQueue &&
+        board.labels.isEmpty &&
+        board.allTasks.isEmpty) {
       AppLogger.info(
         LogTag.tdf,
         'TdfService.serialize v$supportedVersion tasks=0 labels=0 elapsed=${stopwatch.elapsedMilliseconds}ms',
@@ -220,6 +287,12 @@ class TdfService {
       return 'tdf $supportedVersion\n';
     }
     final buffer = StringBuffer('tdf $supportedVersion\n\n');
+    if (hasDeleted) {
+      _writeDeletedBlock(buffer, board.deletedBlock);
+    }
+    if (hasQueue) {
+      _writeQueueBlock(buffer, board.queueBlock);
+    }
     for (final label in board.labels) {
       _writeLabelBlock(buffer, label);
     }
@@ -227,6 +300,7 @@ class TdfService {
       _writeTaskBlock(buffer, task);
     }
     final output = buffer.toString();
+    _validateCanonicalOutputBounds(output);
     AppLogger.info(
       LogTag.tdf,
       'TdfService.serialize v$supportedVersion tasks=${board.allTasks.length} labels=${board.labels.length} bytes=${output.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
@@ -234,12 +308,37 @@ class TdfService {
     return output;
   }
 
-  /// Adds [rule] to [builder] after verifying Section 4.3 reset conflict constraints.
+  /// Adds [rule] to [builder] after verifying `MAX_CONDITION_RULES_PER_ENTITY` and Section 4.3 reset constraints.
+  static void _addConditionToLabel(
+    _LabelBuilder builder,
+    TaskCondition rule,
+    int lineNumber,
+  ) {
+    if (builder.conditions.length + 1 > maxConditionRulesPerEntity) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message:
+            'Label exceeds maximum of $maxConditionRulesPerEntity condition rules.',
+      );
+    }
+    builder.conditions.add(rule);
+  }
+
+  /// Adds [rule] to [builder] after verifying `MAX_CONDITION_RULES_PER_ENTITY` and Section 4.3 reset conflict constraints.
   static void _addConditionToTask(
     _TaskBuilder builder,
     TaskCondition rule,
     int lineNumber,
   ) {
+    if (builder.conditions.length + 1 > maxConditionRulesPerEntity) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message:
+            'Task exceeds maximum of $maxConditionRulesPerEntity condition rules.',
+      );
+    }
     if (rule is GlobalResetTaskCondition) {
       if (builder.conditions.isNotEmpty) {
         throw TdfException(
@@ -325,10 +424,74 @@ class TdfService {
       allowResets: builder.allowResets,
       lineNumber: lineNumber,
     );
-    builder.rules.add(_LineConditionRule(rule: rule, line: lineNumber));
+    builder.hasAnyRule = true;
+    final parent = builder.parent;
+    if (parent is _LabelBuilder) {
+      _addConditionToLabel(parent, rule, lineNumber);
+    } else if (parent is _TaskBuilder) {
+      _addConditionToTask(parent, rule, lineNumber);
+    }
   }
 
-  /// Applies a directive inside a `label` (or legacy `category` / `location`) block.
+  /// Applies a directive inside the root `deleted` block (`generation`, `task`, or `label`).
+  static void _applyDeletedDirective(
+    _ParserState state,
+    _DeletedBlockBuilder builder,
+    String directive,
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    switch (directive) {
+      case 'generation':
+        if (builder.generation != null) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.generation = _requireUnsignedCountArg(
+          args,
+          lineNumber,
+          maxAllowed: maxSyncGeneration,
+          allowZero: true,
+        );
+      case 'task':
+        if (builder.totalRecords >= maxDeletedRecords) {
+          throw TdfException(
+            kind: TdfErrorKind.limitExceeded,
+            line: lineNumber,
+            message:
+                'Deleted block exceeds maximum of $maxDeletedRecords records.',
+          );
+        }
+        final record = _parseDeletedTaskRecord(args, lineNumber);
+        if (state.taskIds.contains(record.taskId) ||
+            !state.deletedTaskIds.add(record.taskId)) {
+          _throwDuplicateId(record.taskId, lineNumber);
+        }
+        builder.tasks.add(record);
+      case 'label':
+        if (builder.totalRecords >= maxDeletedRecords) {
+          throw TdfException(
+            kind: TdfErrorKind.limitExceeded,
+            line: lineNumber,
+            message:
+                'Deleted block exceeds maximum of $maxDeletedRecords records.',
+          );
+        }
+        final record = _parseDeletedLabelRecord(args, lineNumber);
+        if (state.labelIds.contains(record.labelId) ||
+            !state.deletedLabelIds.add(record.labelId)) {
+          _throwDuplicateId(record.labelId, lineNumber);
+        }
+        builder.labels.add(record);
+      default:
+        throw TdfException(
+          kind: TdfErrorKind.unknownDirective,
+          line: lineNumber,
+          message: 'Unknown directive "$directive" in deleted block.',
+        );
+    }
+  }
+
+  /// Applies a directive inside a `label` block.
   static void _applyLabelDirective(
     _LabelBuilder builder,
     String directive,
@@ -362,19 +525,7 @@ class TdfService {
           allowResets: false,
           lineNumber: lineNumber,
         );
-        builder.conditions.add(rule);
-      case 'gps':
-        if (!builder.isLegacyLocation) {
-          throw TdfException(
-            kind: TdfErrorKind.unknownDirective,
-            line: lineNumber,
-            message: 'Unknown directive "gps" in label block.',
-          );
-        }
-        if (builder.hasLegacyGps) {
-          _throwDuplicateDirective(directive, lineNumber);
-        }
-        _parseLegacyGpsArgs(builder, args, lineNumber);
+        _addConditionToLabel(builder, rule, lineNumber);
       default:
         throw TdfException(
           kind: TdfErrorKind.unknownDirective,
@@ -415,20 +566,8 @@ class TdfService {
         message: 'Link title and URI must not be empty or whitespace-only.',
       );
     }
-    if (title.length > maxTextLength) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Link title exceeds maximum length of $maxTextLength.',
-      );
-    }
-    if (uri.length > maxUriLength) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Link URI exceeds maximum length of $maxUriLength.',
-      );
-    }
+    _requireScalarLength(title, maxTextLength, lineNumber);
+    _requireScalarLength(uri, maxUriLength, lineNumber);
     if (!TaskLink.isValidUri(uri)) {
       throw TdfException(
         kind: TdfErrorKind.invalidUri,
@@ -437,6 +576,58 @@ class TdfService {
       );
     }
     builder.links.add(TaskLink(title: title, uri: uri));
+  }
+
+  /// Applies a directive inside the root `queue` block (`modified` or `task`).
+  static void _applyQueueDirective(
+    _QueueBlockBuilder builder,
+    String directive,
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    switch (directive) {
+      case 'modified':
+        if (builder.modifiedAt != null) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.modifiedAt = _requireTimestampArgs(args, lineNumber);
+      case 'task':
+        if (builder.entries.length >= maxQueueEntries) {
+          throw TdfException(
+            kind: TdfErrorKind.limitExceeded,
+            line: lineNumber,
+            message:
+                'Queue block exceeds maximum of $maxQueueEntries task entries.',
+          );
+        }
+        if (args.length != 1) {
+          throw TdfException(
+            kind: TdfErrorKind.unexpectedToken,
+            line: lineNumber,
+            message: 'Directive "task" in queue requires a single <task-id>.',
+          );
+        }
+        final token = args[0];
+        if (token.kind != _TokenKind.bareWord || !isValidTaskId(token.value)) {
+          throw TdfException(
+            kind: TdfErrorKind.invalidIdentifier,
+            line: lineNumber,
+            message: 'Invalid task identifier "${token.value}" in queue.',
+          );
+        }
+        if (!builder.seenTaskIds.add(token.value)) {
+          _throwDuplicateId(token.value, lineNumber);
+        }
+        builder.entries.add(
+          _QueueEntryLine(taskId: token.value, line: lineNumber),
+        );
+      default:
+        throw TdfException(
+          kind: TdfErrorKind.unknownDirective,
+          line: lineNumber,
+          message: 'Unknown directive "$directive" in queue block.',
+        );
+    }
   }
 
   /// Applies a directive inside a `subtasks` sub-block.
@@ -477,13 +668,7 @@ class TdfService {
         message: 'Step text must not be empty or whitespace-only.',
       );
     }
-    if (textValue.length > maxTextLength) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Step text exceeds maximum length of $maxTextLength.',
-      );
-    }
+    _requireScalarLength(textValue, maxTextLength, lineNumber);
     builder.steps.add(
       SubtaskItem(title: textValue, isCompleted: boolToken.value == 'true'),
     );
@@ -522,16 +707,35 @@ class TdfService {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.completedAt = _requireTimestampArgs(args, lineNumber);
+        builder.finishedLine = lineNumber;
       case 'modified':
         if (builder.modifiedAt != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
         builder.modifiedAt = _requireTimestampArgs(args, lineNumber);
-      case 'suspended':
-        if (builder.suspendedAt != null) {
+      case 'completions':
+        if (builder.completions != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.suspendedAt = _requireTimestampArgs(args, lineNumber);
+        builder.completions = _requireUnsignedCountArg(
+          args,
+          lineNumber,
+          maxAllowed: maxCompletions,
+          allowZero: true,
+        );
+        builder.completionsLine = lineNumber;
+      case 'suspended':
+        if (builder.hasSuspendedDirective) {
+          _throwDuplicateDirective(directive, lineNumber);
+        }
+        builder.hasSuspendedDirective = true;
+        if (args.length == 1 &&
+            args[0].kind == _TokenKind.bareWord &&
+            args[0].value == 'forever') {
+          builder.isSuspendedForever = true;
+        } else {
+          builder.suspendedAt = _requireTimestampArgs(args, lineNumber);
+        }
       case 'repeat':
         if (builder.repeatRule != null) {
           _throwDuplicateDirective(directive, lineNumber);
@@ -541,25 +745,13 @@ class TdfService {
         if (builder.canonicalLabelIds != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.canonicalLabelIds = _requireIdListArgs(args, lineNumber);
+        builder.canonicalLabelIds = _requireLabelIdListArgs(args, lineNumber);
         builder.labelsLine = lineNumber;
-      case 'categories':
-        if (builder.hasLegacyCategories) {
-          _throwDuplicateDirective(directive, lineNumber);
-        }
-        builder.hasLegacyCategories = true;
-        builder.legacyLabelIds.addAll(_requireIdListArgs(args, lineNumber));
-      case 'locations':
-        if (builder.hasLegacyLocations) {
-          _throwDuplicateDirective(directive, lineNumber);
-        }
-        builder.hasLegacyLocations = true;
-        builder.legacyLabelIds.addAll(_requireIdListArgs(args, lineNumber));
       case 'blocked':
-        if (builder.blockedByTaskIds != null) {
+        if (builder.dependencies != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.blockedByTaskIds = _requireIdListArgs(args, lineNumber);
+        builder.dependencies = _requireDependencyListArgs(args, lineNumber);
         builder.blockedLine = lineNumber;
       case 'link':
         _applyLinkDirective(builder, args, lineNumber);
@@ -628,6 +820,12 @@ class TdfService {
         state.taskEntries.add(taskBuilder.build(lineNumber));
       case final _LabelBuilder labelBuilder:
         state.labels.add(labelBuilder.build(lineNumber));
+      case final _DeletedBlockBuilder deletedBuilder:
+        state.deletedBlock = deletedBuilder.build(lineNumber);
+      case final _QueueBlockBuilder queueBuilder:
+        state.queueBlock = queueBuilder.build(lineNumber);
+        state.queueEntries.addAll(queueBuilder.entries);
+        state.queueTaskIds.addAll(queueBuilder.seenTaskIds);
       case final _SubtasksBuilder subtasksBuilder:
         if (subtasksBuilder.steps.isEmpty) {
           throw TdfException(
@@ -642,15 +840,13 @@ class TdfService {
           parent.subtasks = subtasksBuilder.steps;
         }
       case final _ConditionBlockBuilder conditionBuilder:
-        if (conditionBuilder.rules.isEmpty) {
+        if (!conditionBuilder.hasAnyRule) {
           throw TdfException(
             kind: TdfErrorKind.missingRequiredDirective,
             line: lineNumber,
             message: 'Condition block requires at least one condition rule.',
           );
         }
-        final parent = state.blockStack.last;
-        _mergeConditionBlockRules(parent, conditionBuilder.rules);
     }
   }
 
@@ -697,17 +893,42 @@ class TdfService {
     return _SubtasksBuilder(autoFinish: autoFinish);
   }
 
-  /// Creates a root block builder (`label`, `task`, or legacy `category`/`location`) and registers its `<id>`.
+  /// Creates a root block builder (`deleted`, `queue`, `label`, or `task`).
   static _BlockBuilder _createRootBlockBuilder(
     _ParserState state,
     String blockName,
     List<_ScannedToken> headerArgs,
     int lineNumber,
   ) {
-    if (blockName != 'label' &&
-        blockName != 'task' &&
-        blockName != 'category' &&
-        blockName != 'location') {
+    if (blockName == 'deleted') {
+      if (state.hasDeletedBlock) {
+        _throwDuplicateDirective('deleted', lineNumber);
+      }
+      if (headerArgs.isNotEmpty) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidBlockHeader,
+          line: lineNumber,
+          message: 'Block "deleted" does not accept header arguments.',
+        );
+      }
+      state.hasDeletedBlock = true;
+      return _DeletedBlockBuilder();
+    }
+    if (blockName == 'queue') {
+      if (state.hasQueueBlock) {
+        _throwDuplicateDirective('queue', lineNumber);
+      }
+      if (headerArgs.isNotEmpty) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidBlockHeader,
+          line: lineNumber,
+          message: 'Block "queue" does not accept header arguments.',
+        );
+      }
+      state.hasQueueBlock = true;
+      return _QueueBlockBuilder();
+    }
+    if (blockName != 'label' && blockName != 'task') {
       throw TdfException(
         kind: TdfErrorKind.unknownBlockType,
         line: lineNumber,
@@ -722,8 +943,7 @@ class TdfService {
       );
     }
     final idToken = headerArgs[0];
-    if (idToken.kind != _TokenKind.bareWord ||
-        !_isValidLegacyEntityId(idToken.value)) {
+    if (idToken.kind != _TokenKind.bareWord || !isValidTaskId(idToken.value)) {
       throw TdfException(
         kind: TdfErrorKind.invalidIdentifier,
         line: lineNumber,
@@ -737,16 +957,14 @@ class TdfService {
       throw TdfException(
         kind: TdfErrorKind.invalidBlockHeader,
         line: lineNumber,
-        message: 'Block "$blockName" accepts only a single <id> argument.',
+        message: 'Block "label" accepts only a single <id> argument.',
       );
     }
-    if (!state.labelIds.add(idToken.value)) {
+    if (state.deletedLabelIds.contains(idToken.value) ||
+        !state.labelIds.add(idToken.value)) {
       _throwDuplicateId(idToken.value, lineNumber);
     }
-    return _LabelBuilder(
-      id: idToken.value,
-      isLegacyLocation: blockName == 'location',
-    );
+    return _LabelBuilder(id: idToken.value);
   }
 
   /// Escapes a string value for canonical double-quoted TDF serialization.
@@ -773,7 +991,7 @@ class TdfService {
     return buffer.toString();
   }
 
-  /// Finds the end of the line starting at [startOffset] and validates line terminators and control chars.
+  /// Finds the end of the line starting at [startOffset] and validates line terminators, control chars, and UTF-16 surrogates.
   static _LineSpan _findLineSpan(
     String source,
     int startOffset,
@@ -810,6 +1028,32 @@ class TdfService {
           line: lineNumber,
           message:
               'ASCII control character is not permitted in a TDF document.',
+        );
+      }
+      if (unit >= 0xD800 && unit <= 0xDBFF) {
+        if (index + 1 >= source.length) {
+          throw TdfException(
+            kind: TdfErrorKind.unexpectedToken,
+            line: lineNumber,
+            message: 'Unpaired high surrogate in TDF document.',
+          );
+        }
+        final low = source.codeUnitAt(index + 1);
+        if (low < 0xDC00 || low > 0xDFFF) {
+          throw TdfException(
+            kind: TdfErrorKind.unexpectedToken,
+            line: lineNumber,
+            message: 'Unpaired high surrogate in TDF document.',
+          );
+        }
+        index += 2;
+        continue;
+      }
+      if (unit >= 0xDC00 && unit <= 0xDFFF) {
+        throw TdfException(
+          kind: TdfErrorKind.unexpectedToken,
+          line: lineNumber,
+          message: 'Unpaired low surrogate in TDF document.',
         );
       }
       index++;
@@ -852,19 +1096,10 @@ class TdfService {
         message: 'Condition block header does not accept arguments.',
       );
     }
-    if (parent is _TaskBuilder) {
-      if (parent.hasConditionBlock) {
-        _throwDuplicateDirective('condition', lineNumber);
-      }
-      parent.hasConditionBlock = true;
-      return _ConditionBlockBuilder(allowResets: true);
-    }
-    final labelParent = parent as _LabelBuilder;
-    if (labelParent.hasConditionBlock) {
-      _throwDuplicateDirective('condition', lineNumber);
-    }
-    labelParent.hasConditionBlock = true;
-    return _ConditionBlockBuilder(allowResets: false);
+    return _ConditionBlockBuilder(
+      parent: parent,
+      allowResets: parent is _TaskBuilder,
+    );
   }
 
   /// Validates and initializes a `_TaskBuilder` for `task <id> [priority]`.
@@ -894,10 +1129,10 @@ class TdfService {
       }
       isPriority = true;
     }
-    if (!state.taskIds.add(id)) {
+    if (state.deletedTaskIds.contains(id) || !state.taskIds.add(id)) {
       _throwDuplicateId(id, lineNumber);
     }
-    return _TaskBuilder(id: id, isPriority: isPriority);
+    return _TaskBuilder(id: id, isPriority: isPriority, headerLine: lineNumber);
   }
 
   /// Checks whether [codeUnit] is an ASCII alphanumeric, underscore, or hyphen (`[a-zA-Z0-9_-]`).
@@ -914,7 +1149,7 @@ class TdfService {
         codeUnit == 0x5F;
   }
 
-  /// Checks whether [codeUnit] is a disallowed control or non-ASCII whitespace character outside quotes.
+  /// Checks whether [codeUnit] is a disallowed control or non-ASCII whitespace character outside quotes and comments.
   static bool _isInvalidBareChar(int codeUnit) {
     if (codeUnit < 0x20 || codeUnit == 0x7F) {
       return true;
@@ -927,7 +1162,32 @@ class TdfService {
         codeUnit == 0x2029 ||
         codeUnit == 0x202F ||
         codeUnit == 0x205F ||
-        codeUnit == 0x3000;
+        codeUnit == 0x3000 ||
+        codeUnit == 0xFEFF;
+  }
+
+  /// Checks whether [raw] matches `0` (when [allowZero] is `true`) or `[1-9][0-9]*`.
+  static bool _isValidCanonicalUnsignedInt(
+    String raw, {
+    required bool allowZero,
+  }) {
+    if (raw.isEmpty) {
+      return false;
+    }
+    if (raw == '0') {
+      return allowZero;
+    }
+    final first = raw.codeUnitAt(0);
+    if (first < 0x31 || first > 0x39) {
+      return false;
+    }
+    for (var i = 1; i < raw.length; i++) {
+      final unit = raw.codeUnitAt(i);
+      if (unit < 0x30 || unit > 0x39) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Checks whether [raw] matches `-?[0-9]+(\.[0-9]+)?` without using regular expressions.
@@ -985,114 +1245,6 @@ class TdfService {
     return true;
   }
 
-  /// Validates that [value] matches a legacy TDF 0.2.0 or 0.3.0 `<id>` (`[a-zA-Z0-9_-]+`).
-  static bool _isValidLegacyEntityId(String value) {
-    if (value.isEmpty) {
-      return false;
-    }
-    for (var i = 0; i < value.length; i++) {
-      if (!_isIdContinueChar(value.codeUnitAt(i))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Merges validated [rules] from a `condition { ... }` sub-block into [parent].
-  static void _mergeConditionBlockRules(
-    _BlockBuilder parent,
-    List<_LineConditionRule> rules,
-  ) {
-    if (parent is _LabelBuilder) {
-      for (final entry in rules) {
-        parent.conditions.add(entry.rule);
-      }
-      return;
-    }
-    if (parent is _TaskBuilder) {
-      for (final entry in rules) {
-        _addConditionToTask(parent, entry.rule, entry.line);
-      }
-    }
-  }
-
-  /// Deterministically converts any non-conforming label and task IDs on [state]
-  /// into 10-character TDF 0.4.0 Base62 IDs and rewrites intra-document references.
-  static String? _migrateLegacyIds(
-    _ParserState state, {
-    required String? activeLabelId,
-  }) {
-    final labelIdMap = <String, String>{};
-    final usedLabelIds = <String>{};
-    for (final label in state.labels) {
-      if (isValidLabelId(label.id)) {
-        usedLabelIds.add(label.id);
-        labelIdMap[label.id] = label.id;
-      }
-    }
-    for (var i = 0; i < state.labels.length; i++) {
-      final label = state.labels[i];
-      if (isValidLabelId(label.id)) {
-        continue;
-      }
-      final newId = convertLegacyEntityId(
-        prefix: 'l',
-        legacyId: label.id,
-        existingIds: usedLabelIds,
-      );
-      usedLabelIds.add(newId);
-      labelIdMap[label.id] = newId;
-      state.labels[i] = label.copyWith(id: newId);
-    }
-
-    final taskIdMap = <String, String>{};
-    final usedTaskIds = <String>{};
-    for (final entry in state.taskEntries) {
-      final id = entry.task.id;
-      if (isValidTaskId(id)) {
-        usedTaskIds.add(id);
-        taskIdMap[id] = id;
-      }
-    }
-    for (final entry in state.taskEntries) {
-      final oldId = entry.task.id;
-      if (isValidTaskId(oldId)) {
-        continue;
-      }
-      final newId = convertLegacyEntityId(
-        prefix: 't',
-        legacyId: oldId,
-        timestamp: entry.task.createdAt,
-        existingIds: usedTaskIds,
-      );
-      usedTaskIds.add(newId);
-      taskIdMap[oldId] = newId;
-    }
-
-    for (var i = 0; i < state.taskEntries.length; i++) {
-      state.taskEntries[i] = _rewriteLegacyTaskEntry(
-        state.taskEntries[i],
-        taskIdMap: taskIdMap,
-        usedTaskIds: usedTaskIds,
-        labelIdMap: labelIdMap,
-      );
-    }
-
-    if (activeLabelId == null) {
-      return null;
-    }
-    if (labelIdMap.containsKey(activeLabelId)) {
-      return labelIdMap[activeLabelId];
-    }
-    return isValidLabelId(activeLabelId)
-        ? activeLabelId
-        : convertLegacyEntityId(
-            prefix: 'l',
-            legacyId: activeLabelId,
-            existingIds: usedLabelIds,
-          );
-  }
-
   /// Opens a new root or nested block on [state] after checking Section 7 bounds.
   static void _openBlock(
     _ParserState state,
@@ -1117,6 +1269,14 @@ class TdfService {
     }
     if (state.blockStack.isNotEmpty) {
       final parent = state.blockStack.last;
+      if (parent is _DeletedBlockBuilder || parent is _QueueBlockBuilder) {
+        throw TdfException(
+          kind: TdfErrorKind.unknownBlockType,
+          line: lineNumber,
+          message:
+              'Nested blocks are forbidden inside deleted or queue blocks.',
+        );
+      }
       if (parent.statementCount + 1 > maxStmtsPerBlock) {
         throw TdfException(
           kind: TdfErrorKind.limitExceeded,
@@ -1140,7 +1300,7 @@ class TdfService {
     state.blockStack.add(builder);
   }
 
-  /// Orders [conditions] into canonical `day`, `time`, and `location` groups per Section 3.4.
+  /// Orders [conditions] into canonical `day`, `time`, and `location` groups per Section 4.3.1.
   static List<TaskCondition> _orderConditionsForSerialization(
     List<TaskCondition> conditions,
   ) {
@@ -1247,6 +1407,90 @@ class TdfService {
     return DayTaskCondition(weekdays: weekdays, dayTokens: dayTokens);
   }
 
+  /// Parses `label <label-id> <timestamp>` inside a `deleted` block.
+  static TdfDeletedLabelRecord _parseDeletedLabelRecord(
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    if (args.length < 2 || args.length > 3) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Deleted label record requires <label-id> and <timestamp> arguments.',
+      );
+    }
+    final idToken = args[0];
+    if (idToken.kind != _TokenKind.bareWord || !isValidLabelId(idToken.value)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidIdentifier,
+        line: lineNumber,
+        message: 'Invalid deleted label identifier "${idToken.value}".',
+      );
+    }
+    final deletedAt = _requireTimestampArgs(args.sublist(1), lineNumber);
+    return TdfDeletedLabelRecord(labelId: idToken.value, deletedAt: deletedAt);
+  }
+
+  /// Parses `task <task-id> <timestamp> [<completion-count>]` inside a `deleted` block per Section 4.4.
+  static TdfDeletedTaskRecord _parseDeletedTaskRecord(
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    if (args.length < 2 || args.length > 4) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Deleted task record requires <task-id>, <timestamp>, and optional <completion-count>.',
+      );
+    }
+    final idToken = args[0];
+    if (idToken.kind != _TokenKind.bareWord || !isValidTaskId(idToken.value)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidIdentifier,
+        line: lineNumber,
+        message: 'Invalid deleted task identifier "${idToken.value}".',
+      );
+    }
+    if (args.length == 2) {
+      final deletedAt = _requireTimestampArgs([args[1]], lineNumber);
+      return TdfDeletedTaskRecord(taskId: idToken.value, deletedAt: deletedAt);
+    }
+    if (args.length == 3) {
+      final third = args[2];
+      if (third.kind == _TokenKind.bareWord && third.value.contains(':')) {
+        final deletedAt = _requireTimestampArgs([args[1], third], lineNumber);
+        return TdfDeletedTaskRecord(
+          taskId: idToken.value,
+          deletedAt: deletedAt,
+        );
+      }
+      final deletedAt = _requireTimestampArgs([args[1]], lineNumber);
+      final checkpoint = _requireUnsignedCountArg(
+        [third],
+        lineNumber,
+        maxAllowed: maxCompletions,
+        allowZero: true,
+      );
+      return TdfDeletedTaskRecord(
+        taskId: idToken.value,
+        deletedAt: deletedAt,
+        completionsCheckpoint: checkpoint,
+      );
+    }
+    final deletedAt = _requireTimestampArgs([args[1], args[2]], lineNumber);
+    final checkpoint = _requireUnsignedCountArg(
+      [args[3]],
+      lineNumber,
+      maxAllowed: maxCompletions,
+      allowZero: true,
+    );
+    return TdfDeletedTaskRecord(
+      taskId: idToken.value,
+      deletedAt: deletedAt,
+      completionsCheckpoint: checkpoint,
+    );
+  }
+
   /// Parses an inline `condition ...` directive on a `label` or `task` block.
   static TaskCondition _parseInlineConditionArgs(
     List<_ScannedToken> args, {
@@ -1279,11 +1523,12 @@ class TdfService {
     );
   }
 
-  /// Internal single-pass TDF scanner and parser implementation called by [parse].
+  /// Internal single-pass TDF 0.5.0 scanner and parser implementation called by [parse].
   TaskBoard _parseInternal(
     String tdfContent, {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -1318,7 +1563,7 @@ class TdfService {
       throw const TdfException(
         kind: TdfErrorKind.missingVersionHeader,
         line: 1,
-        message: 'TDF document is missing required "tdf 0.4.0" version header.',
+        message: 'TDF document is missing required "tdf 0.5.0" version header.',
       );
     }
 
@@ -1330,12 +1575,9 @@ class TdfService {
       );
     }
 
-    _validateAndResolveLabelReferences(state);
+    _validateLabelReferences(state);
     _validateDependencyCycles(state.taskEntries);
-    final resolvedActiveLabelId = _migrateLegacyIds(
-      state,
-      activeLabelId: activeLabelId,
-    );
+    _validateQueueMembership(state);
 
     final tasks = <TaskItem>[for (final entry in state.taskEntries) entry.task];
 
@@ -1343,40 +1585,14 @@ class TdfService {
       tasks: tasks,
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
       labels: state.labels,
-      activeLabelId: resolvedActiveLabelId,
+      deletedBlock: state.deletedBlock,
+      queueBlock: state.queueBlock,
+      activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
-    );
-  }
-
-  /// Parses legacy `gps <lat> <lon> [<radius>]` arguments on a legacy `location` block.
-  static void _parseLegacyGpsArgs(
-    _LabelBuilder builder,
-    List<_ScannedToken> args,
-    int lineNumber,
-  ) {
-    if (args.length < 2 || args.length > 3) {
-      throw TdfException(
-        kind: TdfErrorKind.invalidNumber,
-        line: lineNumber,
-        message: 'Directive "gps" requires 2 or 3 numeric arguments.',
-      );
-    }
-    final latitude = _requireNumberToken(args[0], lineNumber);
-    final longitude = _requireNumberToken(args[1], lineNumber);
-    final radiusMeters = args.length == 3
-        ? _requireNumberToken(args[2], lineNumber)
-        : 150.0;
-    _validateGpsBounds(latitude, longitude, radiusMeters, lineNumber);
-    builder.hasLegacyGps = true;
-    builder.conditions.add(
-      LocationTaskCondition(
-        latitude: latitude,
-        longitude: longitude,
-        radiusMeters: radiusMeters,
-      ),
     );
   }
 
@@ -1510,12 +1726,15 @@ class TdfService {
     }
 
     final activeBlock = state.blockStack.last;
-    if (activeBlock.statementCount + 1 > maxStmtsPerBlock) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Block exceeds maximum statements of $maxStmtsPerBlock.',
-      );
+    if (activeBlock is! _DeletedBlockBuilder &&
+        activeBlock is! _QueueBlockBuilder) {
+      if (activeBlock.statementCount + 1 > maxStmtsPerBlock) {
+        throw TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: lineNumber,
+          message: 'Block exceeds maximum statements of $maxStmtsPerBlock.',
+        );
+      }
     }
     activeBlock.statementCount++;
 
@@ -1526,6 +1745,16 @@ class TdfService {
         _applyTaskDirective(taskBuilder, directiveName, args, lineNumber);
       case final _LabelBuilder labelBuilder:
         _applyLabelDirective(labelBuilder, directiveName, args, lineNumber);
+      case final _DeletedBlockBuilder deletedBuilder:
+        _applyDeletedDirective(
+          state,
+          deletedBuilder,
+          directiveName,
+          args,
+          lineNumber,
+        );
+      case final _QueueBlockBuilder queueBuilder:
+        _applyQueueDirective(queueBuilder, directiveName, args, lineNumber);
       case final _SubtasksBuilder subtasksBuilder:
         _applySubtasksDirective(
           subtasksBuilder,
@@ -1543,7 +1772,7 @@ class TdfService {
     }
   }
 
-  /// Validates the first non-empty statement (`tdf 0.4.0`, legacy `0.3.0`/`0.2.0`, or legacy `category`/`location` root block).
+  /// Validates the first non-empty statement (`tdf 0.5.0`) per Section 4.0.
   static bool _processInitialStatement(
     _ParserState state,
     List<_ScannedToken> tokens,
@@ -1563,9 +1792,7 @@ class TdfService {
       }
       if (tokens.length != 2 ||
           tokens[1].kind != _TokenKind.bareWord ||
-          (tokens[1].value != supportedVersion &&
-              tokens[1].value != legacyVersion &&
-              tokens[1].value != legacyVersion030)) {
+          tokens[1].value != supportedVersion) {
         throw TdfException(
           kind: TdfErrorKind.unsupportedVersion,
           line: lineNumber,
@@ -1574,13 +1801,6 @@ class TdfService {
       }
       state.hasSeenFirstStatement = true;
       return true;
-    }
-
-    if (firstToken.kind == _TokenKind.bareWord &&
-        (firstToken.value == 'category' || firstToken.value == 'location') &&
-        _findTokenKindIndex(tokens, _TokenKind.openBrace) != -1) {
-      state.hasSeenFirstStatement = true;
-      return false;
     }
 
     throw TdfException(
@@ -1670,19 +1890,77 @@ class TdfService {
     return token.value.toUpperCase();
   }
 
-  /// Validates and extracts a list of entity `<id>` bare words.
-  static List<String> _requireIdListArgs(
+  /// Validates and parses `blocked <dependency> [<dependency> ...]` arguments.
+  static List<TdfTaskDependency> _requireDependencyListArgs(
+    List<_ScannedToken> args,
+    int lineNumber,
+  ) {
+    final parsed = <TdfTaskDependency>[];
+    for (final token in args) {
+      if (token.kind != _TokenKind.bareWord) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidIdentifier,
+          line: lineNumber,
+          message: 'Quoted prerequisite token "${token.value}" is forbidden.',
+        );
+      }
+      final raw = token.value;
+      final colonIndex = raw.indexOf(':');
+      final idPart = colonIndex < 0 ? raw : raw.substring(0, colonIndex);
+      if (!isValidTaskId(idPart)) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidIdentifier,
+          line: lineNumber,
+          message: 'Invalid prerequisite task identifier "$idPart".',
+        );
+      }
+      if (colonIndex < 0) {
+        parsed.add(TdfTaskDependency(taskId: idPart));
+        continue;
+      }
+      final countPart = raw.substring(colonIndex + 1);
+      if (!_isValidCanonicalUnsignedInt(countPart, allowZero: false)) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidNumber,
+          line: lineNumber,
+          message: 'Invalid prerequisite completion count "$countPart".',
+        );
+      }
+      final bigCount = BigInt.tryParse(countPart);
+      if (bigCount == null) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidNumber,
+          line: lineNumber,
+          message: 'Invalid prerequisite completion count "$countPart".',
+        );
+      }
+      if (bigCount > BigInt.from(maxCompletions)) {
+        throw TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: lineNumber,
+          message:
+              'Prerequisite completion count exceeds maximum of $maxCompletions.',
+        );
+      }
+      parsed.add(
+        TdfTaskDependency(taskId: idPart, requiredCompletion: bigCount.toInt()),
+      );
+    }
+    return TdfTaskDependency.normalizeList(parsed);
+  }
+
+  /// Validates and extracts a list of canonical 10-character Base62 `<label-id>` bare words.
+  static List<String> _requireLabelIdListArgs(
     List<_ScannedToken> args,
     int lineNumber,
   ) {
     final ids = <String>[];
     for (final token in args) {
-      if (token.kind != _TokenKind.bareWord ||
-          !_isValidLegacyEntityId(token.value)) {
+      if (token.kind != _TokenKind.bareWord || !isValidLabelId(token.value)) {
         throw TdfException(
           kind: TdfErrorKind.invalidIdentifier,
           line: lineNumber,
-          message: 'Invalid entity identifier "${token.value}".',
+          message: 'Invalid label identifier "${token.value}".',
         );
       }
       ids.add(token.value);
@@ -1690,7 +1968,7 @@ class TdfService {
     return ids;
   }
 
-  /// Validates that [args] contains a single non-empty text argument within [maxTextLength].
+  /// Validates that [args] contains a single non-empty text argument within [maxTextLength] Unicode scalars.
   static String _requireNameOrStepArg(
     List<_ScannedToken> args,
     int lineNumber,
@@ -1710,17 +1988,11 @@ class TdfService {
         message: 'Text argument must not be empty or whitespace-only.',
       );
     }
-    if (value.length > maxTextLength) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Text argument exceeds maximum length of $maxTextLength.',
-      );
-    }
+    _requireScalarLength(value, maxTextLength, lineNumber);
     return value;
   }
 
-  /// Validates that [args] contains a single non-empty `note` argument (`1..maxNoteLength`).
+  /// Validates that [args] contains a single non-empty `note` argument (`1..maxNoteLength` Unicode scalars).
   static String _requireNoteArg(List<_ScannedToken> args, int lineNumber) {
     if (args.length != 1) {
       throw TdfException(
@@ -1737,13 +2009,7 @@ class TdfService {
         message: 'Directive "note" must not be empty.',
       );
     }
-    if (value.length > maxNoteLength) {
-      throw TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: lineNumber,
-        message: 'Note exceeds maximum length of $maxNoteLength.',
-      );
-    }
+    _requireScalarLength(value, maxNoteLength, lineNumber);
     return value;
   }
 
@@ -1768,16 +2034,16 @@ class TdfService {
     return parsed;
   }
 
-  /// Validates and parses `repeat <count> <days|weeks|months>` arguments (`1..maxRepeatCount`).
+  /// Validates and parses `repeat <count> <days|weeks|months> [<repeat-time>]` arguments (`1..maxRepeatCount`).
   static TaskRepeatRule _requireRepeatRuleArgs(
     List<_ScannedToken> args,
     int lineNumber,
   ) {
-    if (args.length != 2) {
+    if (args.length < 2 || args.length > 3) {
       throw TdfException(
         kind: TdfErrorKind.unexpectedToken,
         line: lineNumber,
-        message: 'Directive "repeat" requires <count> and <days|weeks|months> arguments.',
+        message: 'Directive "repeat" requires <count>, <days|weeks|months>, and optional <repeat-time>.',
       );
     }
     final countToken = args[0];
@@ -1815,7 +2081,46 @@ class TdfService {
             'Unknown repeat unit "${unitToken.value}" (expected days, weeks, or months).',
       );
     }
-    return TaskRepeatRule(count: parsedCount, unit: parsedUnit);
+    var clock = TdfRepeatClock.midnight;
+    if (args.length == 3) {
+      final clockToken = args[2];
+      final parsedClock = clockToken.kind == _TokenKind.bareWord
+          ? TdfRepeatClock.tryParse(clockToken.value)
+          : null;
+      if (parsedClock == null) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidTime,
+          line: lineNumber,
+          message: 'Invalid repeat clock "${clockToken.value}".',
+        );
+      }
+      clock = parsedClock;
+    }
+    return TaskRepeatRule(count: parsedCount, unit: parsedUnit, clock: clock);
+  }
+
+  /// Validates that [text] contains at most [maxScalars] Unicode scalar values.
+  static void _requireScalarLength(
+    String text,
+    int maxScalars,
+    int lineNumber,
+  ) {
+    final scalarCount = TdfCalendar.countUnicodeScalars(text);
+    if (scalarCount == null) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Invalid unpaired UTF-16 surrogate in text value.',
+      );
+    }
+    if (scalarCount > maxScalars) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message:
+            'Text argument exceeds maximum length of $maxScalars Unicode scalar values.',
+      );
+    }
   }
 
   /// Validates and parses `<YYYY-MM-DD> [<HH:MM[:SS]>]` timestamp arguments.
@@ -1847,46 +2152,45 @@ class TdfService {
     return parsed;
   }
 
-  /// Rewrites `id`, `labelIds`, and `blockedByTaskIds` on [entry] using [taskIdMap] and [labelIdMap].
-  static _ParsedTaskEntry _rewriteLegacyTaskEntry(
-    _ParsedTaskEntry entry, {
-    required Map<String, String> taskIdMap,
-    required Set<String> usedTaskIds,
-    required Map<String, String> labelIdMap,
+  /// Validates a single unsigned integer bare word (`0..maxAllowed` or `1..maxAllowed`).
+  static int _requireUnsignedCountArg(
+    List<_ScannedToken> args,
+    int lineNumber, {
+    required int maxAllowed,
+    required bool allowZero,
   }) {
-    final task = entry.task;
-    final newTaskId = taskIdMap[task.id] ?? task.id;
-    final mappedLabels = <String>[
-      for (final labelId in task.labelIds) labelIdMap[labelId] ?? labelId,
-    ];
-    final mappedBlockers = <String>[];
-    for (final blockerId in task.blockedByTaskIds) {
-      if (taskIdMap.containsKey(blockerId)) {
-        mappedBlockers.add(taskIdMap[blockerId]!);
-      } else if (isValidTaskId(blockerId)) {
-        mappedBlockers.add(blockerId);
-      } else {
-        final converted = convertLegacyEntityId(
-          prefix: 't',
-          legacyId: blockerId,
-          existingIds: usedTaskIds,
-        );
-        taskIdMap[blockerId] = converted;
-        usedTaskIds.add(converted);
-        mappedBlockers.add(converted);
-      }
+    if (args.length != 1) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: lineNumber,
+        message: 'Expected a single integer argument.',
+      );
     }
-    return _ParsedTaskEntry(
-      task: task.copyWith(
-        id: newTaskId,
-        labelIds: mappedLabels,
-        blockedByTaskIds: mappedBlockers,
-      ),
-      canonicalLabelIds: mappedLabels,
-      legacyLabelIds: const <String>[],
-      labelsLine: entry.labelsLine,
-      blockedLine: entry.blockedLine,
-    );
+    final token = args[0];
+    if (token.kind != _TokenKind.bareWord ||
+        !_isValidCanonicalUnsignedInt(token.value, allowZero: allowZero)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidNumber,
+        line: lineNumber,
+        message: 'Invalid integer literal "${token.value}".',
+      );
+    }
+    final bigVal = BigInt.tryParse(token.value);
+    if (bigVal == null) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidNumber,
+        line: lineNumber,
+        message: 'Invalid integer literal "${token.value}".',
+      );
+    }
+    if (bigVal > BigInt.from(maxAllowed)) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: lineNumber,
+        message: 'Integer value exceeds maximum of $maxAllowed.',
+      );
+    }
+    return bigVal.toInt();
   }
 
   /// Scans an unquoted bare word token starting at [start].
@@ -2103,7 +2407,7 @@ class TdfService {
     throw TdfException(
       kind: TdfErrorKind.duplicateIdentifier,
       line: lineNumber,
-      message: 'Duplicate block identifier "$id".',
+      message: 'Duplicate entity identifier "$id".',
     );
   }
 
@@ -2124,13 +2428,6 @@ class TdfService {
     };
   }
 
-  /// Validates canonical `labels` references and synthesizes missing labels for legacy `categories`/`locations`.
-  static void _validateAndResolveLabelReferences(_ParserState state) {
-    for (final entry in state.taskEntries) {
-      _validateTaskLabelEntry(entry, state);
-    }
-  }
-
   /// Validates that [tdfContent] does not exceed [maxFileBytes].
   static void _validateByteLimit(String tdfContent) {
     if (tdfContent.length > maxFileBytes ||
@@ -2141,6 +2438,25 @@ class TdfService {
         message:
             'TDF document exceeds maximum file size of $maxFileBytes bytes.',
       );
+    }
+  }
+
+  /// Validates that serialized [output] obeys [maxFileBytes] and [maxLineCount] per Section 7.1.
+  static void _validateCanonicalOutputBounds(String output) {
+    _validateByteLimit(output);
+    var lineCount = 0;
+    for (var i = 0; i < output.length; i++) {
+      if (output.codeUnitAt(i) == 0x0A) {
+        lineCount++;
+        if (lineCount > maxLineCount) {
+          throw TdfException(
+            kind: TdfErrorKind.limitExceeded,
+            line: lineCount,
+            message:
+                'Canonical TDF output exceeds maximum line count of $maxLineCount.',
+          );
+        }
+      }
     }
   }
 
@@ -2178,6 +2494,22 @@ class TdfService {
     }
   }
 
+  /// Validates canonical `labels` references across all parsed tasks.
+  static void _validateLabelReferences(_ParserState state) {
+    for (final entry in state.taskEntries) {
+      for (final labelId in entry.canonicalLabelIds) {
+        if (!state.labelIds.contains(labelId)) {
+          throw TdfException(
+            kind: TdfErrorKind.unknownLabelReference,
+            line: entry.labelsLine,
+            message:
+                'Task "${entry.task.id}" references unknown label "$labelId".',
+          );
+        }
+      }
+    }
+  }
+
   /// Validates the character immediately following a closing quote.
   static void _validatePostQuoteDelimiter(
     String source,
@@ -2206,24 +2538,39 @@ class TdfService {
     );
   }
 
-  /// Validates canonical `labels` and legacy `categories`/`locations` for a single [entry].
-  static void _validateTaskLabelEntry(
-    _ParsedTaskEntry entry,
-    _ParserState state,
-  ) {
-    for (final labelId in entry.canonicalLabelIds) {
-      if (!state.labelIds.contains(labelId)) {
+  /// Validates that `queue` entries match the exact set of scheduled open tasks per Section 4.5.
+  static void _validateQueueMembership(_ParserState state) {
+    final scheduledOpenIds = <String>{};
+    for (final entry in state.taskEntries) {
+      final task = entry.task;
+      if (task.queuedAt != null &&
+          !task.isCompleted &&
+          task.completedAt == null) {
+        scheduledOpenIds.add(task.id);
+      }
+    }
+
+    for (final queueEntry in state.queueEntries) {
+      if (!scheduledOpenIds.contains(queueEntry.taskId)) {
         throw TdfException(
-          kind: TdfErrorKind.unknownLabelReference,
-          line: entry.labelsLine,
+          kind: TdfErrorKind.invalidQueueMembership,
+          line: queueEntry.line,
           message:
-              'Task "${entry.task.id}" references unknown label "$labelId".',
+              'Queue entry "${queueEntry.taskId}" does not reference a live scheduled open task.',
         );
       }
     }
-    for (final legacyId in entry.legacyLabelIds) {
-      if (state.labelIds.add(legacyId)) {
-        state.labels.add(TdfLabel(id: legacyId, name: legacyId));
+
+    for (final entry in state.taskEntries) {
+      final task = entry.task;
+      if (scheduledOpenIds.contains(task.id) &&
+          !state.queueTaskIds.contains(task.id)) {
+        throw TdfException(
+          kind: TdfErrorKind.invalidQueueMembership,
+          line: entry.headerLine,
+          message:
+              'Scheduled open task "${task.id}" is missing from the shared queue block.',
+        );
       }
     }
   }
@@ -2252,6 +2599,39 @@ class TdfService {
     buffer.write('    }\n');
   }
 
+  /// Writes a canonical `deleted` block to [buffer] per Section 4.4.
+  static void _writeDeletedBlock(
+    StringBuffer buffer,
+    TdfDeletedBlock deletedBlock,
+  ) {
+    buffer.write('deleted {\n    generation ');
+    buffer.write(deletedBlock.generation);
+    buffer.write('\n');
+    for (final taskRecord in deletedBlock.tasks) {
+      buffer.write('    task ');
+      buffer.write(taskRecord.taskId);
+      buffer.write(' ');
+      buffer.write(
+        TaskItem.formatTdfTimestampWithSeconds(taskRecord.deletedAt),
+      );
+      if (taskRecord.completionsCheckpoint > 0) {
+        buffer.write(' ');
+        buffer.write(taskRecord.completionsCheckpoint);
+      }
+      buffer.write('\n');
+    }
+    for (final labelRecord in deletedBlock.labels) {
+      buffer.write('    label ');
+      buffer.write(labelRecord.labelId);
+      buffer.write(' ');
+      buffer.write(
+        TaskItem.formatTdfTimestampWithSeconds(labelRecord.deletedAt),
+      );
+      buffer.write('\n');
+    }
+    buffer.write('}\n\n');
+  }
+
   /// Writes a canonical `label` block to [buffer].
   static void _writeLabelBlock(StringBuffer buffer, TdfLabel label) {
     buffer.write('label ');
@@ -2275,6 +2655,19 @@ class TdfService {
       buffer.write('\n');
     }
     _writeConditions(buffer, label.conditions);
+    buffer.write('}\n\n');
+  }
+
+  /// Writes a canonical `queue` block to [buffer] per Section 4.5.
+  static void _writeQueueBlock(StringBuffer buffer, TdfQueueBlock queueBlock) {
+    buffer.write('queue {\n    modified ');
+    buffer.write(TaskItem.formatTdfTimestampWithSeconds(queueBlock.modifiedAt));
+    buffer.write('\n');
+    for (final taskId in queueBlock.taskIds) {
+      buffer.write('    task ');
+      buffer.write(taskId);
+      buffer.write('\n');
+    }
     buffer.write('}\n\n');
   }
 
@@ -2311,17 +2704,27 @@ class TdfService {
       buffer.write(TaskItem.formatTdfTimestamp(modifiedAt));
       buffer.write('\n');
     }
+    if (task.completions > 0) {
+      buffer.write('    completions ');
+      buffer.write(task.completions);
+      buffer.write('\n');
+    }
     if (task.labelIds.isNotEmpty) {
       buffer.write('    labels ');
       buffer.write(task.labelIds.join(' '));
       buffer.write('\n');
     }
-    if (task.blockedByTaskIds.isNotEmpty) {
+    if (task.dependencies.isNotEmpty) {
+      final normalizedDeps = TdfTaskDependency.normalizeList(task.dependencies);
       buffer.write('    blocked ');
-      buffer.write(task.blockedByTaskIds.join(' '));
+      buffer.write(
+        normalizedDeps.map((dep) => dep.formatCanonical()).join(' '),
+      );
       buffer.write('\n');
     }
-    if (task.suspendedAt case final suspendedAt?) {
+    if (task.isSuspendedForever) {
+      buffer.write('    suspended forever\n');
+    } else if (task.suspendedAt case final suspendedAt?) {
       buffer.write('    suspended ');
       buffer.write(TaskItem.formatTdfTimestamp(suspendedAt));
       buffer.write('\n');
@@ -2366,19 +2769,54 @@ sealed class _BlockBuilder {
 /// Mutable builder for a `condition { ... }` sub-block during single-pass parsing.
 final class _ConditionBlockBuilder extends _BlockBuilder {
   /// Creates a [_ConditionBlockBuilder].
-  _ConditionBlockBuilder({required this.allowResets});
+  _ConditionBlockBuilder({required this.parent, required this.allowResets});
 
   /// Whether `<type> any` reset directives are permitted in this sub-block.
   final bool allowResets;
 
-  /// Accumulated condition rules and their source line numbers.
-  final List<_LineConditionRule> rules = <_LineConditionRule>[];
+  /// Enclosing `_TaskBuilder` or `_LabelBuilder`.
+  final _BlockBuilder parent;
+
+  /// Whether at least one condition rule directive was parsed inside this block.
+  bool hasAnyRule = false;
 }
 
-/// Mutable builder for a `label` (or legacy `category` / `location`) block during single-pass parsing.
+/// Mutable builder for the root `deleted` block during single-pass parsing.
+final class _DeletedBlockBuilder extends _BlockBuilder {
+  /// Deleted label records in declaration order.
+  final List<TdfDeletedLabelRecord> labels = <TdfDeletedLabelRecord>[];
+
+  /// Deleted task records in declaration order.
+  final List<TdfDeletedTaskRecord> tasks = <TdfDeletedTaskRecord>[];
+
+  /// Parsed `generation` counter.
+  int? generation;
+
+  /// Total deletion records parsed in this block.
+  int get totalRecords => tasks.length + labels.length;
+
+  /// Validates required `generation` directive and builds a [TdfDeletedBlock].
+  TdfDeletedBlock build(int lineNumber) {
+    final resolvedGen = generation;
+    if (resolvedGen == null) {
+      throw TdfException(
+        kind: TdfErrorKind.missingRequiredDirective,
+        line: lineNumber,
+        message: 'Deleted block is missing required "generation" directive.',
+      );
+    }
+    return TdfDeletedBlock(
+      generation: resolvedGen,
+      tasks: tasks,
+      labels: labels,
+    );
+  }
+}
+
+/// Mutable builder for a `label` block during single-pass parsing.
 final class _LabelBuilder extends _BlockBuilder {
   /// Creates a [_LabelBuilder] for [id].
-  _LabelBuilder({required this.id, required this.isLegacyLocation});
+  _LabelBuilder({required this.id});
 
   /// Accumulated `condition` rules in declaration order.
   final List<TaskCondition> conditions = <TaskCondition>[];
@@ -2386,17 +2824,8 @@ final class _LabelBuilder extends _BlockBuilder {
   /// Label `<id>`.
   final String id;
 
-  /// Whether this block was opened via a legacy `location <id> {` header.
-  final bool isLegacyLocation;
-
   /// Optional `color` value.
   String? color;
-
-  /// Whether a `condition { ... }` sub-block was already encountered.
-  bool hasConditionBlock = false;
-
-  /// Whether a legacy `gps` directive has been parsed.
-  bool hasLegacyGps = false;
 
   /// Optional `modified` timestamp.
   DateTime? modifiedAt;
@@ -2428,19 +2857,6 @@ final class _LabelBuilder extends _BlockBuilder {
   }
 }
 
-/// Associates a parsed [TaskCondition] inside a `condition { ... }` sub-block with its 1-based line number.
-@immutable
-class _LineConditionRule {
-  /// Creates a [_LineConditionRule].
-  const _LineConditionRule({required this.rule, required this.line});
-
-  /// 1-based line number where the rule was declared.
-  final int line;
-
-  /// Parsed condition rule.
-  final TaskCondition rule;
-}
-
 /// Represents the start, end, and next offset of a single logical line.
 @immutable
 class _LineSpan {
@@ -2468,7 +2884,7 @@ class _ParsedTaskEntry {
   const _ParsedTaskEntry({
     required this.task,
     required this.canonicalLabelIds,
-    required this.legacyLabelIds,
+    required this.headerLine,
     required this.labelsLine,
     required this.blockedLine,
   });
@@ -2479,11 +2895,11 @@ class _ParsedTaskEntry {
   /// Label IDs declared via the canonical `labels` directive.
   final List<String> canonicalLabelIds;
 
+  /// 1-based line number of the `task <id>` block header.
+  final int headerLine;
+
   /// 1-based line number of the `labels` directive, or `0` if absent.
   final int labelsLine;
-
-  /// Label IDs declared via legacy `categories` or `locations` directives.
-  final List<String> legacyLabelIds;
 
   /// Built immutable task item.
   final TaskItem task;
@@ -2494,23 +2910,88 @@ class _ParserState {
   /// Active block nesting stack (maximum depth [TdfService.maxNestingDepth]).
   final List<_BlockBuilder> blockStack = <_BlockBuilder>[];
 
-  /// Set of seen `label` IDs to enforce uniqueness across `label` and legacy `category`/`location` blocks.
+  /// Set of seen `deleted` label IDs to enforce uniqueness and disallow live+deleted collisions.
+  final Set<String> deletedLabelIds = <String>{};
+
+  /// Set of seen `deleted` task IDs to enforce uniqueness and disallow live+deleted collisions.
+  final Set<String> deletedTaskIds = <String>{};
+
+  /// Set of seen live `label` IDs to enforce uniqueness.
   final Set<String> labelIds = <String>{};
 
   /// Parsed `label` blocks in declaration order.
   final List<TdfLabel> labels = <TdfLabel>[];
 
+  /// Parsed `queue` entries with their 1-based line numbers.
+  final List<_QueueEntryLine> queueEntries = <_QueueEntryLine>[];
+
+  /// Set of task IDs referenced in the `queue` block.
+  final Set<String> queueTaskIds = <String>{};
+
   /// Parsed `task` entries in declaration order.
   final List<_ParsedTaskEntry> taskEntries = <_ParsedTaskEntry>[];
 
-  /// Set of seen `task` IDs to enforce uniqueness.
+  /// Set of seen live `task` IDs to enforce uniqueness.
   final Set<String> taskIds = <String>{};
 
-  /// Whether the initial `tdf 0.4.0` header (or legacy version/root block) has been processed.
+  /// Parsed `deleted` block (defaults to [TdfDeletedBlock.empty]).
+  TdfDeletedBlock deletedBlock = TdfDeletedBlock.empty;
+
+  /// Whether a `deleted` block has been opened.
+  bool hasDeletedBlock = false;
+
+  /// Whether a `queue` block has been opened.
+  bool hasQueueBlock = false;
+
+  /// Whether the initial `tdf 0.5.0` header has been processed.
   bool hasSeenFirstStatement = false;
+
+  /// Parsed `queue` block (defaults to [TdfQueueBlock.empty]).
+  TdfQueueBlock queueBlock = TdfQueueBlock.empty;
 
   /// Total blocks opened across the document.
   int totalBlocks = 0;
+}
+
+/// Mutable builder for the root `queue` block during single-pass parsing.
+final class _QueueBlockBuilder extends _BlockBuilder {
+  /// Ordered `task <id>` entries with their 1-based line numbers.
+  final List<_QueueEntryLine> entries = <_QueueEntryLine>[];
+
+  /// Seen task IDs inside this `queue` block to detect duplicates.
+  final Set<String> seenTaskIds = <String>{};
+
+  /// Parsed `modified` timestamp.
+  DateTime? modifiedAt;
+
+  /// Validates required `modified` directive and builds a [TdfQueueBlock].
+  TdfQueueBlock build(int lineNumber) {
+    final resolvedModified = modifiedAt;
+    if (resolvedModified == null) {
+      throw TdfException(
+        kind: TdfErrorKind.missingRequiredDirective,
+        line: lineNumber,
+        message: 'Queue block is missing required "modified" directive.',
+      );
+    }
+    return TdfQueueBlock(
+      modifiedAt: resolvedModified,
+      taskIds: <String>[for (final entry in entries) entry.taskId],
+    );
+  }
+}
+
+/// Pairs a `task <id>` entry inside `queue` with its 1-based line number.
+@immutable
+class _QueueEntryLine {
+  /// Creates a [_QueueEntryLine].
+  const _QueueEntryLine({required this.taskId, required this.line});
+
+  /// 1-based line number of the `task <id>` directive in `queue`.
+  final int line;
+
+  /// Referenced `<task-id>`.
+  final String taskId;
 }
 
 /// Lexical token scanned from a single TDF line.
@@ -2540,11 +3021,18 @@ final class _SubtasksBuilder extends _BlockBuilder {
 
 /// Mutable builder for a `task` block during single-pass parsing.
 final class _TaskBuilder extends _BlockBuilder {
-  /// Creates a [_TaskBuilder] for [id] and [isPriority].
-  _TaskBuilder({required this.id, required this.isPriority});
+  /// Creates a [_TaskBuilder] for [id], [isPriority], and [headerLine].
+  _TaskBuilder({
+    required this.id,
+    required this.isPriority,
+    required this.headerLine,
+  });
 
   /// Repeatable `condition` directives in declaration order.
   final List<TaskCondition> conditions = <TaskCondition>[];
+
+  /// 1-based line number of the `task <id>` block header.
+  final int headerLine;
 
   /// Task `<id>`.
   final String id;
@@ -2552,14 +3040,8 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Whether the `priority` flag was present in the block header.
   final bool isPriority;
 
-  /// Legacy `categories` and `locations` IDs in declaration order.
-  final List<String> legacyLabelIds = <String>[];
-
   /// Repeatable `link` directives in declaration order.
   final List<TaskLink> links = <TaskLink>[];
-
-  /// Optional `blocked` task IDs.
-  List<String>? blockedByTaskIds;
 
   /// 1-based line number of the `blocked` directive.
   int blockedLine = 0;
@@ -2570,20 +3052,29 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Optional `finished` timestamp.
   DateTime? completedAt;
 
+  /// Optional `completions` counter.
+  int? completions;
+
+  /// 1-based line number of the `completions` directive.
+  int completionsLine = 0;
+
   /// Required `created` timestamp.
   DateTime? createdAt;
 
-  /// Whether a `condition { ... }` sub-block was already encountered.
-  bool hasConditionBlock = false;
+  /// Optional `blocked` dependencies.
+  List<TdfTaskDependency>? dependencies;
 
-  /// Whether a legacy `categories` directive was already encountered.
-  bool hasLegacyCategories = false;
-
-  /// Whether a legacy `locations` directive was already encountered.
-  bool hasLegacyLocations = false;
+  /// 1-based line number of the `finished` directive.
+  int finishedLine = 0;
 
   /// Whether a `subtasks` sub-block was already encountered.
   bool hasSubtasksBlock = false;
+
+  /// Whether a `suspended` directive was already encountered.
+  bool hasSuspendedDirective = false;
+
+  /// Whether `suspended forever` was specified.
+  bool isSuspendedForever = false;
 
   /// 1-based line number of the `labels` directive.
   int labelsLine = 0;
@@ -2609,10 +3100,10 @@ final class _TaskBuilder extends _BlockBuilder {
   /// Whether `subtasks` carried `auto-finish`.
   bool subtasksAutoFinish = false;
 
-  /// Optional `suspended` timestamp.
+  /// Optional finite `suspended` timestamp.
   DateTime? suspendedAt;
 
-  /// Validates required directives (`name` and `created`) and builds a [_ParsedTaskEntry].
+  /// Validates required directives (`name`, `created`, and completion state) and builds a [_ParsedTaskEntry].
   _ParsedTaskEntry build(int lineNumber) {
     final resolvedName = name;
     final resolvedCreated = createdAt;
@@ -2625,33 +3116,44 @@ final class _TaskBuilder extends _BlockBuilder {
       );
     }
 
-    final mergedLabelIds = <String>[];
+    final effectiveCompletions = completions ?? 0;
+    if (completedAt != null && effectiveCompletions <= 0) {
+      final reportLine = completionsLine > 0
+          ? completionsLine
+          : (finishedLine > 0 ? finishedLine : lineNumber);
+      throw TdfException(
+        kind: TdfErrorKind.invalidCompletionState,
+        line: reportLine,
+        message:
+            'Task "$id" has "finished" set but effective "completions" is 0.',
+      );
+    }
+
+    final dedupedLabels = <String>[];
     final canonical = canonicalLabelIds ?? const <String>[];
     for (final labelId in canonical) {
-      if (!mergedLabelIds.contains(labelId)) {
-        mergedLabelIds.add(labelId);
-      }
-    }
-    for (final labelId in legacyLabelIds) {
-      if (!mergedLabelIds.contains(labelId)) {
-        mergedLabelIds.add(labelId);
+      if (!dedupedLabels.contains(labelId)) {
+        dedupedLabels.add(labelId);
       }
     }
 
+    final resolvedDeps = dependencies ?? const <TdfTaskDependency>[];
     final task = TaskItem(
       id: id,
       title: resolvedName,
       note: note,
       isCompleted: completedAt != null,
       isPriority: isPriority,
+      completions: effectiveCompletions,
       createdAt: resolvedCreated,
       queuedAt: queuedAt,
       completedAt: completedAt,
       modifiedAt: modifiedAt,
       suspendedAt: suspendedAt,
+      isSuspendedForever: isSuspendedForever,
       repeatRule: repeatRule,
-      labelIds: mergedLabelIds,
-      blockedByTaskIds: blockedByTaskIds ?? const <String>[],
+      labelIds: dedupedLabels,
+      dependencies: resolvedDeps,
       links: links,
       conditions: conditions,
       subtasksAutoFinish: subtasksAutoFinish,
@@ -2661,7 +3163,7 @@ final class _TaskBuilder extends _BlockBuilder {
     return _ParsedTaskEntry(
       task: task,
       canonicalLabelIds: canonical,
-      legacyLabelIds: List<String>.unmodifiable(legacyLabelIds),
+      headerLine: headerLine,
       labelsLine: labelsLine,
       blockedLine: blockedLine,
     );

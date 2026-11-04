@@ -77,7 +77,7 @@ void main() {
       final initialFilePath =
           '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
       File(initialFilePath).writeAsStringSync(
-        'tdf 0.3.0\ntask t001 {\n    name "Desktop Task"\n    created 2026-11-01 08:00\n    queued 2026-11-01 08:00\n}\n',
+        'tdf 0.5.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "Desktop Task"\n    created 2026-11-01 08:00\n    queued 2026-11-01 08:00\n}\n',
         flush: true,
       );
 
