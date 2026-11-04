@@ -77,6 +77,10 @@ flutter::EncodableMap BuildUnavailableWithWifiMap() {
   return map;
 }
 
+// Recent Windows SDKs deprecate these COM interfaces. Keep the existing
+// location adapter compatible and limit C4995 suppression to this function.
+#pragma warning(push)
+#pragma warning(disable : 4995)
 flutter::EncodableMap QueryWindowsLocation() {
   Microsoft::WRL::ComPtr<ILocation> location;
   HRESULT hr = CoCreateInstance(CLSID_Location, nullptr, CLSCTX_INPROC_SERVER,
@@ -142,6 +146,8 @@ flutter::EncodableMap QueryWindowsLocation() {
       {flutter::EncodableValue("source"), flutter::EncodableValue(source)},
   };
 }
+
+#pragma warning(pop)
 
 std::wstring Utf16FromUtf8(const std::string& utf8_string) {
   if (utf8_string.empty()) {
