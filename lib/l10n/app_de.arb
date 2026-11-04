@@ -263,5 +263,16 @@
   "tooltipScrollToBottom": "Nach unten scrollen",
   "tooltipClearLog": "Protokoll leeren",
   "logCopiedSnackBar": "Diagnoseprotokoll in die Zwischenablage kopiert.",
-  "logClearedSnackBar": "Diagnoseprotokoll geleert."
+  "logClearedSnackBar": "Diagnoseprotokoll geleert.",
+  "actionWipeLocalFile": "Lokale TDF-Datei zurücksetzen",
+  "actionWipeRemoteFile": "Remote-TDF-Datei zurücksetzen",
+  "wipeLocalDialogTitle": "Lokale TDF-Datei zurücksetzen",
+  "wipeRemoteDialogTitle": "Remote-TDF-Datei zurücksetzen",
+  "wipeLocalDialogDescription": "Dadurch wird die lokale Datei „{fileName}“ geleert und als leeres TDF-Dokument neu angelegt. Zur Bestätigung „{baseName}“ (Dateiname ohne .tdf) eingeben.",
+  "wipeRemoteDialogDescription": "Dadurch wird die Remote-WebDAV-Datei „{fileName}“ geleert und als leeres TDF-Dokument neu angelegt. Zur Bestätigung „{baseName}“ (Dateiname ohne .tdf) eingeben.",
+  "wipeConfirmInputLabel": "Dateiname ohne .tdf",
+  "wipeCreateBackupLabel": "Sicherungskopie (.bak / .bak.001+) anlegen, falls Datei vorhanden ist",
+  "actionWipeConfirm": "Datei zurücksetzen",
+  "localFileWipedBanner": "Lokale TDF-Datei wurde geleert und neu angelegt.",
+  "remoteFileWipedBanner": "Remote-TDF-Datei auf WebDAV wurde geleert und neu angelegt."
 }

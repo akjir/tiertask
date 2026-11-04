@@ -21,6 +21,8 @@ import 'dart:ui';
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
+import '../services/tdf_service.dart';
+import 'local_file_repository.dart';
 
 /// Custom domain exception thrown when WebDAV HTTP operations fail.
 class WebDavException implements Exception {
@@ -80,9 +82,49 @@ class WebDavRepository {
   /// Returns an empty string when the remote file does not exist (`HTTP 404`)
   /// so a new 6-tier board can be initialized on first save.
   Future<String> fetchTdf() async {
-    final stopwatch = Stopwatch()..start();
     final localizations = _localizations;
     final uri = _requireUri(localizations);
+    final result = await _getFromUri(uri, localizations);
+    return result.content;
+  }
+
+  /// Overwrites the remote TDF file on the WebDAV server via HTTP PUT.
+  Future<void> saveTdf(String tdfContent) async {
+    final localizations = _localizations;
+    final uri = _requireUri(localizations);
+    await _putToUri(uri, tdfContent, localizations);
+  }
+
+  /// Empties and re-initializes the remote `.tdf` file on the WebDAV server, optionally creating a `.bak` or `.bak.001`+ backup first if the file exists.
+  Future<void> wipeTdf({bool createBackup = false}) async {
+    final localizations = _localizations;
+    final uri = _requireUri(localizations);
+    const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
+
+    if (createBackup) {
+      final current = await _getFromUri(uri, localizations);
+      if (current.exists) {
+        final backupUri = await _resolveNextRemoteBackupUri(uri, localizations);
+        await _putToUri(backupUri, current.content, localizations);
+        AppLogger.info(
+          LogTag.storage,
+          'WebDavRepository.wipeTdf created remote backup $backupUri',
+        );
+      }
+    }
+    await _putToUri(uri, emptyContent, localizations);
+    AppLogger.info(
+      LogTag.storage,
+      'WebDavRepository.wipeTdf reset remote file $uri backup=$createBackup',
+    );
+  }
+
+  /// Executes an HTTP GET against [uri] and returns whether the resource exists along with its decoded body.
+  Future<({bool exists, String content})> _getFromUri(
+    Uri uri,
+    AppLocalizations localizations,
+  ) async {
+    final stopwatch = Stopwatch()..start();
     final client = _clientFactory();
     client.connectionTimeout = timeout;
 
@@ -103,14 +145,14 @@ class WebDavRepository {
           LogTag.storage,
           'WebDavRepository.fetchTdf GET $uri status=$status bytes=${body.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
         );
-        return body;
+        return (exists: true, content: body);
       }
       if (status == HttpStatus.notFound) {
         AppLogger.info(
           LogTag.storage,
           'WebDavRepository.fetchTdf GET $uri status=404 (not found) elapsed=${stopwatch.elapsedMilliseconds}ms',
         );
-        return '';
+        return (exists: false, content: '');
       }
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
         throw WebDavException(
@@ -161,11 +203,13 @@ class WebDavRepository {
     }
   }
 
-  /// Overwrites the remote TDF file on the WebDAV server via HTTP PUT.
-  Future<void> saveTdf(String tdfContent) async {
+  /// Executes an HTTP PUT sending [tdfContent] to [uri].
+  Future<void> _putToUri(
+    Uri uri,
+    String tdfContent,
+    AppLocalizations localizations,
+  ) async {
     final stopwatch = Stopwatch()..start();
-    final localizations = _localizations;
-    final uri = _requireUri(localizations);
     final client = _clientFactory();
     client.connectionTimeout = timeout;
 
@@ -249,5 +293,28 @@ class WebDavRepository {
       throw WebDavException(localizations.errorInvalidServerUrl);
     }
     return uri;
+  }
+
+  /// Resolves the first available `<uri>.bak` or `<uri>.bak.NNN` URI on the WebDAV server.
+  Future<Uri> _resolveNextRemoteBackupUri(
+    Uri baseUri,
+    AppLocalizations localizations,
+  ) async {
+    for (
+      var attempt = 0;
+      attempt <= LocalFileRepository.maxBackupSuffix;
+      attempt++
+    ) {
+      final candidatePath = LocalFileRepository.formatBackupPath(
+        baseUri.path,
+        attempt,
+      );
+      final candidateUri = baseUri.replace(path: candidatePath);
+      final existing = await _getFromUri(candidateUri, localizations);
+      if (!existing.exists) {
+        return candidateUri;
+      }
+    }
+    throw WebDavException(localizations.errorSaveMarkdownFailed);
   }
 }

@@ -38,7 +38,14 @@ class FakeLocalFileRepository extends LocalFileRepository {
 /// Fake [WebDavRepository] for deterministic widget tests of connection status banners.
 class FakeWebDavRepository extends WebDavRepository {
   /// Creates a [FakeWebDavRepository].
-  FakeWebDavRepository({required super.config, required this.shouldFail});
+  FakeWebDavRepository({
+    required super.config,
+    required this.shouldFail,
+    this.remoteStore,
+  });
+
+  /// Optional in-memory remote file map keyed by endpoint path.
+  final Map<String, String>? remoteStore;
 
   /// Callback returning whether WebDAV operations should throw a [WebDavException].
   final bool Function() shouldFail;
@@ -51,6 +58,10 @@ class FakeWebDavRepository extends WebDavRepository {
         statusCode: 401,
       );
     }
+    final path = config.resolveEndpointUri()?.path;
+    if (path != null && remoteStore != null) {
+      return remoteStore![path] ?? '';
+    }
     return '';
   }
 
@@ -61,6 +72,39 @@ class FakeWebDavRepository extends WebDavRepository {
         'Authentication failed while saving. Please check app password.',
         statusCode: 401,
       );
+    }
+    final path = config.resolveEndpointUri()?.path;
+    if (path != null && remoteStore != null) {
+      remoteStore![path] = tdfContent;
+    }
+  }
+
+  @override
+  Future<void> wipeTdf({bool createBackup = false}) async {
+    if (shouldFail()) {
+      throw const WebDavException(
+        'Authentication failed while saving. Please check app password.',
+        statusCode: 401,
+      );
+    }
+    final path = config.resolveEndpointUri()?.path;
+    final store = remoteStore;
+    if (path != null && store != null) {
+      if (createBackup && store.containsKey(path)) {
+        final existing = store[path] ?? '';
+        for (
+          var attempt = 0;
+          attempt <= LocalFileRepository.maxBackupSuffix;
+          attempt++
+        ) {
+          final candidate = LocalFileRepository.formatBackupPath(path, attempt);
+          if (!store.containsKey(candidate)) {
+            store[candidate] = existing;
+            break;
+          }
+        }
+      }
+      store[path] = 'tdf 0.5.0\n';
     }
   }
 }

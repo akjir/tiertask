@@ -1681,6 +1681,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Diagnostic log cleared.'**
   String get logClearedSnackBar;
+
+  /// Button label in Settings to wipe and re-initialize the local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe Local TDF File'**
+  String get actionWipeLocalFile;
+
+  /// Button label in Settings to wipe and re-initialize the remote WebDAV TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe Remote TDF File'**
+  String get actionWipeRemoteFile;
+
+  /// Dialog title when confirming a wipe of the local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe Local TDF File'**
+  String get wipeLocalDialogTitle;
+
+  /// Dialog title when confirming a wipe of the remote WebDAV TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe Remote TDF File'**
+  String get wipeRemoteDialogTitle;
+
+  /// Description in the local file wipe confirmation dialog instructing the user to enter the file name without .tdf.
+  ///
+  /// In en, this message translates to:
+  /// **'This will empty the local file \"{fileName}\" and re-initialize it as an empty TDF document. Enter \"{baseName}\" (file name without .tdf) to confirm.'**
+  String wipeLocalDialogDescription(String fileName, String baseName);
+
+  /// Description in the remote WebDAV file wipe confirmation dialog instructing the user to enter the file name without .tdf.
+  ///
+  /// In en, this message translates to:
+  /// **'This will empty the remote WebDAV file \"{fileName}\" and re-initialize it as an empty TDF document. Enter \"{baseName}\" (file name without .tdf) to confirm.'**
+  String wipeRemoteDialogDescription(String fileName, String baseName);
+
+  /// Input label in the wipe confirmation dialog requiring the file name without the .tdf extension.
+  ///
+  /// In en, this message translates to:
+  /// **'File name without .tdf'**
+  String get wipeConfirmInputLabel;
+
+  /// Checkbox label in the wipe confirmation dialog to create a .bak or .bak.001+ backup before wiping.
+  ///
+  /// In en, this message translates to:
+  /// **'Create backup (.bak / .bak.001+) if file exists'**
+  String get wipeCreateBackupLabel;
+
+  /// Confirmation button label in the wipe TDF file dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe File'**
+  String get actionWipeConfirm;
+
+  /// Status banner message shown after wiping and re-initializing the local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Local TDF file wiped and re-initialized.'**
+  String get localFileWipedBanner;
+
+  /// Status banner message shown after wiping and re-initializing the remote WebDAV TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote TDF file wiped and re-initialized on WebDAV.'**
+  String get remoteFileWipedBanner;
 }
 
 class _AppLocalizationsDelegate

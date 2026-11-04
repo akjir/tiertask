@@ -900,4 +900,44 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get logClearedSnackBar => 'Diagnoseprotokoll geleert.';
+
+  @override
+  String get actionWipeLocalFile => 'Lokale TDF-Datei zurücksetzen';
+
+  @override
+  String get actionWipeRemoteFile => 'Remote-TDF-Datei zurücksetzen';
+
+  @override
+  String get wipeLocalDialogTitle => 'Lokale TDF-Datei zurücksetzen';
+
+  @override
+  String get wipeRemoteDialogTitle => 'Remote-TDF-Datei zurücksetzen';
+
+  @override
+  String wipeLocalDialogDescription(String fileName, String baseName) {
+    return 'Dadurch wird die lokale Datei „$fileName“ geleert und als leeres TDF-Dokument neu angelegt. Zur Bestätigung „$baseName“ (Dateiname ohne .tdf) eingeben.';
+  }
+
+  @override
+  String wipeRemoteDialogDescription(String fileName, String baseName) {
+    return 'Dadurch wird die Remote-WebDAV-Datei „$fileName“ geleert und als leeres TDF-Dokument neu angelegt. Zur Bestätigung „$baseName“ (Dateiname ohne .tdf) eingeben.';
+  }
+
+  @override
+  String get wipeConfirmInputLabel => 'Dateiname ohne .tdf';
+
+  @override
+  String get wipeCreateBackupLabel =>
+      'Sicherungskopie (.bak / .bak.001+) anlegen, falls Datei vorhanden ist';
+
+  @override
+  String get actionWipeConfirm => 'Datei zurücksetzen';
+
+  @override
+  String get localFileWipedBanner =>
+      'Lokale TDF-Datei wurde geleert und neu angelegt.';
+
+  @override
+  String get remoteFileWipedBanner =>
+      'Remote-TDF-Datei auf WebDAV wurde geleert und neu angelegt.';
 }

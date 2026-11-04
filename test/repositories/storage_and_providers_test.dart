@@ -472,6 +472,215 @@ task 000005OkD2 {
       expect(remoteTdf, contains('name "Dual Synced TDF Task"'));
       expect(remotePutCount, greaterThanOrEqualTo(1));
     });
+
+    test('wipes local and remote TDF files, creates .bak and .bak.001+ backups when file exists, and resets sync baselines', () async {
+      expect(
+        LocalFileRepository.extractFileBaseName('tasks.tdf'),
+        equals('tasks'),
+        reason: 'extractFileBaseName must strip .tdf extension',
+      );
+      expect(
+        LocalFileRepository.extractFileBaseName('/home/user/my.board.TDF'),
+        equals('my.board'),
+        reason:
+            'extractFileBaseName must strip case-insensitive .tdf from path',
+      );
+      expect(
+        LocalFileRepository.extractFileBaseName(r'C:\Users\user\work.tdf'),
+        equals('work'),
+        reason: 'extractFileBaseName must handle Windows path separators',
+      );
+      expect(
+        LocalFileRepository.formatBackupPath('/tmp/tasks.tdf', 0),
+        equals('/tmp/tasks.tdf.bak'),
+        reason: 'First backup path must use .bak suffix',
+      );
+      expect(
+        LocalFileRepository.formatBackupPath('/tmp/tasks.tdf', 1),
+        equals('/tmp/tasks.tdf.bak.001'),
+        reason: 'Second backup path must use .bak.001 suffix',
+      );
+      expect(
+        LocalFileRepository.formatBackupPath('/tmp/tasks.tdf', 12),
+        equals('/tmp/tasks.tdf.bak.012'),
+        reason: 'Subsequent backup paths must pad 3-digit index',
+      );
+
+      const config = WebDavConfig(
+        localFilePath: 'wipe_test.tdf',
+        storageMode: StorageMode.local,
+      );
+      final repository = LocalFileRepository(
+        config: config,
+        baseDirectoryPath: tempDir.path,
+      );
+      final mainFile = File('${tempDir.path}/wipe_test.tdf');
+      final bakFile = File('${tempDir.path}/wipe_test.tdf.bak');
+      final bak001File = File('${tempDir.path}/wipe_test.tdf.bak.001');
+      final bak002File = File('${tempDir.path}/wipe_test.tdf.bak.002');
+
+      await repository.wipeTdf(createBackup: true);
+      expect(
+        await mainFile.exists(),
+        isTrue,
+        reason: 'wipeTdf on missing file must create the empty TDF file',
+      );
+      expect(
+        await mainFile.readAsString(),
+        equals('tdf 0.5.0\n'),
+        reason:
+            'Wiped local file must contain canonical empty tdf 0.5.0 header',
+      );
+      expect(
+        await bakFile.exists(),
+        isFalse,
+        reason: 'No .bak file may be created when original file did not exist',
+      );
+
+      await mainFile.writeAsString('corrupted tdf content 1', flush: true);
+      await repository.wipeTdf(createBackup: false);
+      expect(
+        await mainFile.readAsString(),
+        equals('tdf 0.5.0\n'),
+        reason: 'wipeTdf(createBackup: false) must reset file to tdf 0.5.0',
+      );
+      expect(
+        await bakFile.exists(),
+        isFalse,
+        reason: 'wipeTdf(createBackup: false) must not create a .bak file',
+      );
+
+      await mainFile.writeAsString('corrupted tdf content A', flush: true);
+      await repository.wipeTdf(createBackup: true);
+      expect(
+        await bakFile.exists(),
+        isTrue,
+        reason: 'First wipe with createBackup: true must create .bak',
+      );
+      expect(
+        await bakFile.readAsString(),
+        equals('corrupted tdf content A'),
+        reason: '.bak must preserve exact pre-wipe content',
+      );
+      expect(await mainFile.readAsString(), equals('tdf 0.5.0\n'));
+
+      await mainFile.writeAsString('corrupted tdf content B', flush: true);
+      await repository.wipeTdf(createBackup: true);
+      expect(
+        await bak001File.exists(),
+        isTrue,
+        reason: 'Second wipe with createBackup: true must create .bak.001',
+      );
+      expect(
+        await bak001File.readAsString(),
+        equals('corrupted tdf content B'),
+        reason: '.bak.001 must preserve second pre-wipe content',
+      );
+      expect(
+        await bakFile.readAsString(),
+        equals('corrupted tdf content A'),
+        reason: 'Original .bak file must not be overwritten',
+      );
+
+      await mainFile.writeAsString('corrupted tdf content C', flush: true);
+      await repository.wipeTdf(createBackup: true);
+      expect(
+        await bak002File.exists(),
+        isTrue,
+        reason: 'Third wipe with createBackup: true must create .bak.002',
+      );
+      expect(
+        await bak002File.readAsString(),
+        equals('corrupted tdf content C'),
+      );
+
+      final remoteFiles = <String, String>{};
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        if (request.method == 'GET') {
+          if (remoteFiles.containsKey(path)) {
+            request.response.statusCode = HttpStatus.ok;
+            request.response.write(remoteFiles[path]);
+          } else {
+            request.response.statusCode = HttpStatus.notFound;
+          }
+          await request.response.close();
+        } else if (request.method == 'PUT') {
+          remoteFiles[path] = await utf8.decoder.bind(request).join();
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+        }
+      });
+
+      final webdavConfig = WebDavConfig(
+        serverUrl: 'http://${server.address.host}:${server.port}',
+        username: 'stefan',
+        password: 'secret',
+        filePath: 'remote_wipe.tdf',
+        localFilePath: 'local_wipe.tdf',
+        storageMode: StorageMode.both,
+        language: AppLanguage.english,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(webdavConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      await container
+          .read(taskNotifierProvider.notifier)
+          .addTask('Task before wipe');
+
+      const remotePath = '/remote.php/dav/files/stefan/remote_wipe.tdf';
+      expect(remoteFiles[remotePath], contains('Task before wipe'));
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .wipeRemoteFile(webdavConfig, createBackup: true);
+      expect(
+        remoteFiles['$remotePath.bak'],
+        contains('Task before wipe'),
+        reason: 'First remote wipe with createBackup must write .bak on WebDAV',
+      );
+      expect(
+        remoteFiles[remotePath],
+        equals('tdf 0.5.0\n'),
+        reason: 'Remote file must be reset to canonical empty tdf 0.5.0',
+      );
+
+      remoteFiles[remotePath] = 'broken remote state 2';
+      await container
+          .read(taskNotifierProvider.notifier)
+          .wipeRemoteFile(webdavConfig, createBackup: true);
+      expect(
+        remoteFiles['$remotePath.bak.001'],
+        equals('broken remote state 2'),
+        reason: 'Second remote wipe with createBackup must write .bak.001 on WebDAV',
+      );
+      expect(remoteFiles[remotePath], equals('tdf 0.5.0\n'));
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .wipeLocalFile(webdavConfig, createBackup: true);
+      final localWipeFile = File('${tempDir.path}/local_wipe.tdf');
+      final localWipeBak = File('${tempDir.path}/local_wipe.tdf.bak');
+      expect(await localWipeBak.exists(), isTrue);
+      expect(await localWipeBak.readAsString(), contains('Task before wipe'));
+      expect(await localWipeFile.readAsString(), equals('tdf 0.5.0\n'));
+      expect(
+        container.read(taskNotifierProvider).value?.allTasks,
+        isEmpty,
+        reason: 'In-memory board must be empty after wiping local file',
+      );
+    });
   });
 }
 

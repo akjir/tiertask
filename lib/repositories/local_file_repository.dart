@@ -22,6 +22,7 @@ import 'package:flutter/services.dart';
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
+import '../services/tdf_service.dart';
 
 /// Custom domain exception thrown when local TDF file operations fail.
 class LocalFileException implements Exception {
@@ -55,6 +56,9 @@ class LocalFileRepository {
   static const MethodChannel directoryPickerChannel = MethodChannel(
     'de.akjir.tiertask/directory_picker',
   );
+
+  /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
+  static const int maxBackupSuffix = 999;
 
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
   static final RegExp _windowsDrivePattern = RegExp(r'^[a-zA-Z]:[\\/]');
@@ -127,6 +131,16 @@ class LocalFileRepository {
     }
   }
 
+  /// Extracts the base file name without a trailing `.tdf` extension from [rawPath].
+  static String extractFileBaseName(String rawPath) {
+    final fileName = extractFileNameFromPath(rawPath);
+    if (fileName.length > 4 &&
+        fileName.substring(fileName.length - 4).toLowerCase() == '.tdf') {
+      return fileName.substring(0, fileName.length - 4);
+    }
+    return fileName;
+  }
+
   /// Extracts the trailing `.tdf` file name segment from [ config.localFilePath ].
   String extractFileName() => extractFileNameFromPath(config.localFilePath);
 
@@ -141,6 +155,18 @@ class LocalFileRepository {
         .where((part) => part.isNotEmpty)
         .toList();
     return parts.isEmpty ? WebDavConfig.defaultFileName : parts.last;
+  }
+
+  /// Formats the candidate backup path or URI suffix for [basePath] at [attemptIndex].
+  ///
+  /// Returns `<basePath>.bak` for `attemptIndex == 0` and `<basePath>.bak.NNN`
+  /// (zero-padded to 3 digits) for `attemptIndex >= 1`.
+  static String formatBackupPath(String basePath, int attemptIndex) {
+    if (attemptIndex <= 0) {
+      return '$basePath.bak';
+    }
+    final suffix = attemptIndex.toString().padLeft(3, '0');
+    return '$basePath.bak.$suffix';
   }
 
   /// Reads the local `.tdf` file and returns its contents, or an empty string if the file does not exist.
@@ -438,6 +464,79 @@ class LocalFileRepository {
     }
   }
 
+  /// Empties and re-initializes the local `.tdf` file as a blank TDF document, optionally creating a `.bak` or `.bak.001`+ backup first if the file exists.
+  Future<void> wipeTdf({bool createBackup = false}) async {
+    final stopwatch = Stopwatch()..start();
+    final localizations = _localizations;
+    final filePath = resolveFilePath();
+    const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
+
+    if (_useInMemoryFallback) {
+      _wipeInMemoryEntry(filePath, emptyContent, createBackup: createBackup);
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.wipeTdf (in-memory) path=$filePath backup=$createBackup elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
+      return;
+    }
+
+    try {
+      final sourceType = FileSystemEntity.typeSync(
+        filePath,
+        followLinks: false,
+      );
+      if (sourceType == FileSystemEntityType.directory) {
+        throw LocalFileException(
+          localizations.errorMoveSourceIsDirectory(filePath),
+        );
+      }
+      if (sourceType == FileSystemEntityType.link) {
+        throw LocalFileException(
+          localizations.errorMoveSourceIsSymlink(filePath),
+        );
+      }
+      final file = File(filePath);
+      if (sourceType != FileSystemEntityType.notFound && createBackup) {
+        final backupPath = _resolveNextLocalBackupPath(filePath, localizations);
+        file.copySync(backupPath);
+        AppLogger.info(
+          LogTag.storage,
+          'LocalFileRepository.wipeTdf created backup $backupPath',
+        );
+      }
+      file.parent.createSync(recursive: true);
+      file.writeAsBytesSync(utf8.encode(emptyContent), flush: true);
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.wipeTdf path=$filePath backup=$createBackup elapsed=${stopwatch.elapsedMilliseconds}ms',
+      );
+    } on LocalFileException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.wipeTdf failed path=$filePath: $error',
+      );
+      rethrow;
+    } on FileSystemException catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.wipeTdf filesystem error path=$filePath: ${error.message}',
+      );
+      throw LocalFileException(
+        localizations.errorSaveLocalFileFailed(error.message),
+        cause: error,
+      );
+    } on Object catch (error) {
+      AppLogger.error(
+        LogTag.storage,
+        'LocalFileRepository.wipeTdf unexpected error path=$filePath: $error',
+      );
+      throw LocalFileException(
+        localizations.errorSaveLocalFileFailed(error.toString()),
+        cause: error,
+      );
+    }
+  }
+
   /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
   static void writeLogFileSync(
     String path,
@@ -632,6 +731,23 @@ class LocalFileRepository {
     }
   }
 
+  /// Resolves the first available `<filePath>.bak` or `<filePath>.bak.NNN` backup path on disk.
+  String _resolveNextLocalBackupPath(
+    String filePath,
+    AppLocalizations localizations,
+  ) {
+    for (var attempt = 0; attempt <= maxBackupSuffix; attempt++) {
+      final candidate = formatBackupPath(filePath, attempt);
+      if (FileSystemEntity.typeSync(candidate, followLinks: false) ==
+          FileSystemEntityType.notFound) {
+        return candidate;
+      }
+    }
+    throw LocalFileException(
+      localizations.errorSaveLocalFileFailed('Maximum backup files reached'),
+    );
+  }
+
   /// Strips trailing `/` and `\` characters from [path].
   static String _trimTrailingSeparators(String path) {
     var end = path.length;
@@ -714,5 +830,28 @@ class LocalFileRepository {
     } on FileSystemException catch (error) {
       throw mapMoveFileSystemException(error, fallbackPath: targetDirPath);
     }
+  }
+
+  /// Wipes [filePath] in [inMemoryStore] during hermetic widget tests, creating a `.bak` or `.bak.NNN` copy when [createBackup] is `true`.
+  void _wipeInMemoryEntry(
+    String filePath,
+    String emptyContent, {
+    required bool createBackup,
+  }) {
+    final store = inMemoryStore;
+    if (store == null) {
+      return;
+    }
+    if (createBackup && store.containsKey(filePath)) {
+      final existing = store[filePath] ?? '';
+      for (var attempt = 0; attempt <= maxBackupSuffix; attempt++) {
+        final candidate = formatBackupPath(filePath, attempt);
+        if (!store.containsKey(candidate)) {
+          store[candidate] = existing;
+          break;
+        }
+      }
+    }
+    store[filePath] = emptyContent;
   }
 }

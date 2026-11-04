@@ -23,6 +23,7 @@ import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import '../repositories/local_file_repository.dart';
 import 'widgets/clearable_text_field.dart';
+import 'widgets/wipe_tdf_dialog.dart';
 
 /// Settings screen for language, color theme, storage mode, local file name, and WebDAV parameters.
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -129,6 +130,7 @@ class _LocalStorageSection extends StatelessWidget {
     required this.localFilePathController,
     required this.resolvedLocalPath,
     this.onChangeDirectory,
+    this.onWipeLocalFile,
   });
 
   /// Controller for the local Markdown file name or path field.
@@ -136,6 +138,9 @@ class _LocalStorageSection extends StatelessWidget {
 
   /// Optional callback to open the native desktop directory picker on Linux and Windows.
   final VoidCallback? onChangeDirectory;
+
+  /// Optional callback to open the confirmation dialog and wipe the local `.tdf` file.
+  final VoidCallback? onWipeLocalFile;
 
   /// Resolved local filesystem path preview, or `null` if invalid.
   final String? resolvedLocalPath;
@@ -181,6 +186,12 @@ class _LocalStorageSection extends StatelessWidget {
               value: previewPath,
             ),
           ],
+          const SizedBox(height: 12),
+          _WipeStorageButton(
+            buttonKey: const ValueKey('settings_wipe_local_button'),
+            label: localizations.actionWipeLocalFile,
+            onPressed: onWipeLocalFile,
+          ),
         ],
       ),
     );
@@ -654,6 +665,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             onChangeDirectory: ref.watch(supportsDirectoryPickerProvider)
                 ? _handleChangeDirectory
                 : null,
+            onWipeLocalFile: _isTesting ? null : _handleWipeLocalFile,
           ),
         ],
         if (_selectedStorageMode.usesWebDav) ...[
@@ -666,6 +678,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             obscurePassword: _obscurePassword,
             resolvedUri: currentConfig.resolveEndpointUri(),
             onToggleObscurePassword: _toggleObscurePassword,
+            onWipeRemoteFile: _isTesting ? null : _handleWipeRemoteFile,
           ),
         ],
       ],
@@ -697,6 +710,66 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       _isTesting = false;
       _showStatusBanner(
         localizations.connectionSuccessBanner,
+        _StatusBannerTone.success,
+      );
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _isTesting = false;
+      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+    }
+  }
+
+  /// Runs [TaskNotifier.wipeLocalFile] and displays the status banner.
+  Future<void> _executeWipeLocalFile(
+    WebDavConfig config, {
+    required bool createBackup,
+  }) async {
+    setState(() {
+      _isTesting = true;
+    });
+    try {
+      await ref
+          .read(taskNotifierProvider.notifier)
+          .wipeLocalFile(config, createBackup: createBackup);
+      if (!mounted) {
+        return;
+      }
+      final localizations = AppLocalizations.of(context);
+      _isTesting = false;
+      _showStatusBanner(
+        localizations.localFileWipedBanner,
+        _StatusBannerTone.success,
+      );
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _isTesting = false;
+      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+    }
+  }
+
+  /// Runs [TaskNotifier.wipeRemoteFile] and displays the status banner.
+  Future<void> _executeWipeRemoteFile(
+    WebDavConfig config, {
+    required bool createBackup,
+  }) async {
+    setState(() {
+      _isTesting = true;
+    });
+    try {
+      await ref
+          .read(taskNotifierProvider.notifier)
+          .wipeRemoteFile(config, createBackup: createBackup);
+      if (!mounted) {
+        return;
+      }
+      final localizations = AppLocalizations.of(context);
+      _isTesting = false;
+      _showStatusBanner(
+        localizations.remoteFileWipedBanner,
         _StatusBannerTone.success,
       );
     } on Object catch (error) {
@@ -851,6 +924,79 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref
         .read(webDavConfigProvider.notifier)
         .updateTimeZoneMode(newTimeZoneMode);
+  }
+
+  /// Opens [WipeTdfDialog] for the local `.tdf` file and wipes it if confirmed.
+  Future<void> _handleWipeLocalFile() async {
+    setState(_clearStatusBanner);
+    final localizations = AppLocalizations.of(context);
+    if (_localFilePathController.text.trim().isEmpty) {
+      _formKey.currentState?.validate();
+      return;
+    }
+    final currentConfig = _buildCurrentConfig();
+    if (_resolvePreviewLocalPath(currentConfig) == null) {
+      _showStatusBanner(
+        localizations.errorInvalidLocalFilePath,
+        _StatusBannerTone.error,
+      );
+      return;
+    }
+    final fileName = LocalFileRepository.extractFileNameFromPath(
+      currentConfig.localFilePath,
+    );
+    final baseName = LocalFileRepository.extractFileBaseName(
+      currentConfig.localFilePath,
+    );
+    final dialogResult = await showWipeTdfDialog(
+      context,
+      target: WipeTdfTarget.local,
+      fileName: fileName,
+      expectedBaseName: baseName,
+    );
+    if (!mounted || dialogResult == null) {
+      return;
+    }
+    await _executeWipeLocalFile(
+      currentConfig,
+      createBackup: dialogResult.createBackup,
+    );
+  }
+
+  /// Opens [WipeTdfDialog] for the remote WebDAV `.tdf` file and wipes it if confirmed.
+  Future<void> _handleWipeRemoteFile() async {
+    setState(_clearStatusBanner);
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+    final currentConfig = _buildCurrentConfig();
+    if (!currentConfig.isWebDavConfigured) {
+      final localizations = AppLocalizations.of(context);
+      _showStatusBanner(
+        localizations.errorWebDavNotConfigured,
+        _StatusBannerTone.error,
+      );
+      return;
+    }
+    final fileName = LocalFileRepository.extractFileNameFromPath(
+      currentConfig.filePath,
+    );
+    final baseName = LocalFileRepository.extractFileBaseName(
+      currentConfig.filePath,
+    );
+    final dialogResult = await showWipeTdfDialog(
+      context,
+      target: WipeTdfTarget.remote,
+      fileName: fileName,
+      expectedBaseName: baseName,
+    );
+    if (!mounted || dialogResult == null) {
+      return;
+    }
+    await _executeWipeRemoteFile(
+      currentConfig,
+      createBackup: dialogResult.createBackup,
+    );
   }
 
   /// Initializes the text controllers and selections once when [config] finishes loading.
@@ -1477,6 +1623,7 @@ class _WebDavStorageSection extends StatelessWidget {
     required this.obscurePassword,
     required this.resolvedUri,
     required this.onToggleObscurePassword,
+    this.onWipeRemoteFile,
   });
 
   /// Controller for the remote Markdown file path field.
@@ -1487,6 +1634,9 @@ class _WebDavStorageSection extends StatelessWidget {
 
   /// Callback to toggle password visibility.
   final VoidCallback onToggleObscurePassword;
+
+  /// Optional callback to open the confirmation dialog and wipe the remote WebDAV `.tdf` file.
+  final VoidCallback? onWipeRemoteFile;
 
   /// Controller for the password field.
   final TextEditingController passwordController;
@@ -1527,8 +1677,48 @@ class _WebDavStorageSection extends StatelessWidget {
               value: endpointUri.toString(),
             ),
           ],
+          const SizedBox(height: 12),
+          _WipeStorageButton(
+            buttonKey: const ValueKey('settings_wipe_remote_button'),
+            label: localizations.actionWipeRemoteFile,
+            onPressed: onWipeRemoteFile,
+          ),
         ],
       ),
+    );
+  }
+}
+
+/// Destructive outlined button for wiping the local or remote TDF file in [SettingsScreen].
+class _WipeStorageButton extends StatelessWidget {
+  /// Creates a [_WipeStorageButton].
+  const _WipeStorageButton({
+    required this.buttonKey,
+    required this.label,
+    required this.onPressed,
+  });
+
+  /// Widget key for the button.
+  final Key buttonKey;
+
+  /// Localized button label.
+  final String label;
+
+  /// Callback invoked when pressed, or `null` when disabled.
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return OutlinedButton.icon(
+      key: buttonKey,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: colorScheme.error,
+        side: BorderSide(color: colorScheme.error),
+      ),
+      onPressed: onPressed,
+      icon: const Icon(Icons.delete_sweep_outlined),
+      label: Text(label),
     );
   }
 }

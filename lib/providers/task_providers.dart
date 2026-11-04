@@ -608,6 +608,84 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
+  /// Wipes and re-initializes the local `.tdf` file for [config], optionally creating a `.bak` backup first, and resets synchronization baselines.
+  Future<void> wipeLocalFile(
+    WebDavConfig config, {
+    bool createBackup = false,
+  }) async {
+    if (_inFlightSync case final pending?) {
+      try {
+        await pending;
+      } on Object {
+        // Proceed with local wipe.
+      }
+    }
+    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    ref.read(syncStateProvider.notifier).setSyncing();
+    try {
+      await ref
+          .read(localFileRepositoryProvider)
+          .wipeTdf(createBackup: createBackup);
+      final workspace = await ref.read(activeWorkspaceProvider.future);
+      _pendingDeletedLabelTimestamps.clear();
+      await ref
+          .read(settingsRepositoryProvider)
+          .saveWorkspaceSyncState(workspace.id, WorkspaceSyncState.empty);
+      state = AsyncData(TaskBoard.empty());
+      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+      AppLogger.info(
+        LogTag.sync,
+        'Wiped local TDF file workspace=${workspace.id} backup=$createBackup',
+      );
+    } on Object catch (error) {
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+      rethrow;
+    }
+  }
+
+  /// Wipes and re-initializes the remote WebDAV `.tdf` file for [config], optionally creating a `.bak` backup first, and resets synchronization baselines.
+  Future<void> wipeRemoteFile(
+    WebDavConfig config, {
+    bool createBackup = false,
+  }) async {
+    if (_inFlightSync case final pending?) {
+      try {
+        await pending;
+      } on Object {
+        // Proceed with remote wipe.
+      }
+    }
+    final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
+    if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
+      final exception = WebDavException(localizations.errorWebDavNotConfigured);
+      ref.read(syncStateProvider.notifier).setError(exception.toString());
+      throw exception;
+    }
+    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    ref.read(syncStateProvider.notifier).setSyncing();
+    try {
+      await ref
+          .read(webDavRepositoryProvider)
+          .wipeTdf(createBackup: createBackup);
+      final workspace = await ref.read(activeWorkspaceProvider.future);
+      _pendingDeletedLabelTimestamps.clear();
+      await ref
+          .read(settingsRepositoryProvider)
+          .saveWorkspaceSyncState(workspace.id, WorkspaceSyncState.empty);
+      if (!config.storageMode.usesLocal) {
+        state = AsyncData(TaskBoard.empty());
+      }
+      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+      AppLogger.info(
+        LogTag.sync,
+        'Wiped remote WebDAV TDF file workspace=${workspace.id} backup=$createBackup',
+      );
+    } on Object catch (error) {
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+      rethrow;
+    }
+  }
+
   /// Updates the in-memory board state and executes the two-stage persistence pipeline.
   Future<void> _commitMutation(TaskBoard updatedBoard) async {
     state = AsyncData(updatedBoard);

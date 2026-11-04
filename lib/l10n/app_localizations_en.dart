@@ -884,4 +884,43 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get logClearedSnackBar => 'Diagnostic log cleared.';
+
+  @override
+  String get actionWipeLocalFile => 'Wipe Local TDF File';
+
+  @override
+  String get actionWipeRemoteFile => 'Wipe Remote TDF File';
+
+  @override
+  String get wipeLocalDialogTitle => 'Wipe Local TDF File';
+
+  @override
+  String get wipeRemoteDialogTitle => 'Wipe Remote TDF File';
+
+  @override
+  String wipeLocalDialogDescription(String fileName, String baseName) {
+    return 'This will empty the local file \"$fileName\" and re-initialize it as an empty TDF document. Enter \"$baseName\" (file name without .tdf) to confirm.';
+  }
+
+  @override
+  String wipeRemoteDialogDescription(String fileName, String baseName) {
+    return 'This will empty the remote WebDAV file \"$fileName\" and re-initialize it as an empty TDF document. Enter \"$baseName\" (file name without .tdf) to confirm.';
+  }
+
+  @override
+  String get wipeConfirmInputLabel => 'File name without .tdf';
+
+  @override
+  String get wipeCreateBackupLabel =>
+      'Create backup (.bak / .bak.001+) if file exists';
+
+  @override
+  String get actionWipeConfirm => 'Wipe File';
+
+  @override
+  String get localFileWipedBanner => 'Local TDF file wiped and re-initialized.';
+
+  @override
+  String get remoteFileWipedBanner =>
+      'Remote TDF file wiped and re-initialized on WebDAV.';
 }

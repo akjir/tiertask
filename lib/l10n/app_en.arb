@@ -1180,5 +1180,65 @@
   "logClearedSnackBar": "Diagnostic log cleared.",
   "@logClearedSnackBar": {
     "description": "SnackBar confirmation message shown after clearing the diagnostic log."
+  },
+  "actionWipeLocalFile": "Wipe Local TDF File",
+  "@actionWipeLocalFile": {
+    "description": "Button label in Settings to wipe and re-initialize the local TDF file."
+  },
+  "actionWipeRemoteFile": "Wipe Remote TDF File",
+  "@actionWipeRemoteFile": {
+    "description": "Button label in Settings to wipe and re-initialize the remote WebDAV TDF file."
+  },
+  "wipeLocalDialogTitle": "Wipe Local TDF File",
+  "@wipeLocalDialogTitle": {
+    "description": "Dialog title when confirming a wipe of the local TDF file."
+  },
+  "wipeRemoteDialogTitle": "Wipe Remote TDF File",
+  "@wipeRemoteDialogTitle": {
+    "description": "Dialog title when confirming a wipe of the remote WebDAV TDF file."
+  },
+  "wipeLocalDialogDescription": "This will empty the local file \"{fileName}\" and re-initialize it as an empty TDF document. Enter \"{baseName}\" (file name without .tdf) to confirm.",
+  "@wipeLocalDialogDescription": {
+    "description": "Description in the local file wipe confirmation dialog instructing the user to enter the file name without .tdf.",
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      },
+      "baseName": {
+        "type": "String"
+      }
+    }
+  },
+  "wipeRemoteDialogDescription": "This will empty the remote WebDAV file \"{fileName}\" and re-initialize it as an empty TDF document. Enter \"{baseName}\" (file name without .tdf) to confirm.",
+  "@wipeRemoteDialogDescription": {
+    "description": "Description in the remote WebDAV file wipe confirmation dialog instructing the user to enter the file name without .tdf.",
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      },
+      "baseName": {
+        "type": "String"
+      }
+    }
+  },
+  "wipeConfirmInputLabel": "File name without .tdf",
+  "@wipeConfirmInputLabel": {
+    "description": "Input label in the wipe confirmation dialog requiring the file name without the .tdf extension."
+  },
+  "wipeCreateBackupLabel": "Create backup (.bak / .bak.001+) if file exists",
+  "@wipeCreateBackupLabel": {
+    "description": "Checkbox label in the wipe confirmation dialog to create a .bak or .bak.001+ backup before wiping."
+  },
+  "actionWipeConfirm": "Wipe File",
+  "@actionWipeConfirm": {
+    "description": "Confirmation button label in the wipe TDF file dialog."
+  },
+  "localFileWipedBanner": "Local TDF file wiped and re-initialized.",
+  "@localFileWipedBanner": {
+    "description": "Status banner message shown after wiping and re-initializing the local TDF file."
+  },
+  "remoteFileWipedBanner": "Remote TDF file wiped and re-initialized on WebDAV.",
+  "@remoteFileWipedBanner": {
+    "description": "Status banner message shown after wiping and re-initializing the remote WebDAV TDF file."
   }
 }
