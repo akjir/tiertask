@@ -1,10 +1,13 @@
 #include "flutter_window.h"
 
-#include <locationapi.h>
+#include <roapi.h>
 #include <shellapi.h>
 #include <shobjidl.h>
+#include <windows.devices.geolocation.h>
+#include <windows.foundation.h>
 #include <wlanapi.h>
 #include <wrl/client.h>
+#include <wrl/wrappers/corewrappers.h>
 
 #include <cstdio>
 #include <optional>
@@ -77,61 +80,102 @@ flutter::EncodableMap BuildUnavailableWithWifiMap() {
   return map;
 }
 
-// Recent Windows SDKs deprecate these COM interfaces. Keep the existing
-// location adapter compatible and limit C4995 suppression to this function.
-#pragma warning(push)
-#pragma warning(disable : 4995)
 flutter::EncodableMap QueryWindowsLocation() {
-  Microsoft::WRL::ComPtr<ILocation> location;
-  HRESULT hr = CoCreateInstance(CLSID_Location, nullptr, CLSCTX_INPROC_SERVER,
-                                IID_PPV_ARGS(&location));
-  if (FAILED(hr) || !location) {
+  Microsoft::WRL::Wrappers::HStringReference class_id(
+      RuntimeClass_Windows_Devices_Geolocation_Geolocator);
+  Microsoft::WRL::ComPtr<IInspectable> inspectable;
+  HRESULT hr = RoActivateInstance(class_id.Get(), &inspectable);
+  if (FAILED(hr) || !inspectable) {
     return BuildUnavailableWithWifiMap();
   }
 
-  location->SetDesiredAccuracy(IID_ILatLongReport,
-                               LOCATION_DESIRED_ACCURACY_HIGH);
-
-  IID report_types[] = {IID_ILatLongReport};
-  LOCATION_REPORT_STATUS status = REPORT_NOT_SUPPORTED;
-  hr = location->GetReportStatus(IID_ILatLongReport, &status);
-  if (FAILED(hr) || status == REPORT_NOT_SUPPORTED ||
-      status == REPORT_ACCESS_DENIED) {
-    location->RequestPermissions(nullptr, report_types, 1, TRUE);
+  Microsoft::WRL::ComPtr<ABI::Windows::Devices::Geolocation::IGeolocator>
+      geolocator;
+  hr = inspectable.As(&geolocator);
+  if (FAILED(hr) || !geolocator) {
+    return BuildUnavailableWithWifiMap();
   }
 
+  geolocator->put_DesiredAccuracy(
+      ABI::Windows::Devices::Geolocation::PositionAccuracy_High);
+
+  ABI::Windows::Devices::Geolocation::PositionStatus status =
+      ABI::Windows::Devices::Geolocation::PositionStatus_NotAvailable;
+  if (SUCCEEDED(geolocator->get_LocationStatus(&status)) &&
+      (status == ABI::Windows::Devices::Geolocation::PositionStatus_Disabled ||
+       status ==
+           ABI::Windows::Devices::Geolocation::PositionStatus_NotAvailable)) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  ABI::Windows::Foundation::TimeSpan maximum_age{5LL * 60 * 10000000};
+  ABI::Windows::Foundation::TimeSpan timeout{600LL * 10000};
+  Microsoft::WRL::ComPtr<ABI::Windows::Foundation::IAsyncOperation<
+      ABI::Windows::Devices::Geolocation::Geoposition*>>
+      async_op;
+  hr = geolocator->GetGeopositionAsyncWithAgeAndTimeout(maximum_age, timeout,
+                                                        &async_op);
+  if (FAILED(hr) || !async_op) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  Microsoft::WRL::ComPtr<ABI::Windows::Foundation::IAsyncInfo> async_info;
+  hr = async_op.As(&async_info);
+  if (FAILED(hr) || !async_info) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  ABI::Windows::Foundation::AsyncStatus async_status =
+      ABI::Windows::Foundation::AsyncStatus::Started;
   for (int attempt = 0; attempt < 5; ++attempt) {
-    hr = location->GetReportStatus(IID_ILatLongReport, &status);
-    if (SUCCEEDED(hr) && status == REPORT_RUNNING) {
-      break;
-    }
-    if (status != REPORT_INITIALIZING) {
+    hr = async_info->get_Status(&async_status);
+    if (FAILED(hr) ||
+        async_status != ABI::Windows::Foundation::AsyncStatus::Started) {
       break;
     }
     Sleep(120);
   }
-
-  Microsoft::WRL::ComPtr<ILocationReport> base_report;
-  hr = location->GetReport(IID_ILatLongReport, &base_report);
-  if (FAILED(hr) || !base_report) {
+  if (async_status != ABI::Windows::Foundation::AsyncStatus::Completed) {
+    async_info->Cancel();
     return BuildUnavailableWithWifiMap();
   }
 
-  Microsoft::WRL::ComPtr<ILatLongReport> lat_long_report;
-  hr = base_report.As(&lat_long_report);
-  if (FAILED(hr) || !lat_long_report) {
+  Microsoft::WRL::ComPtr<ABI::Windows::Devices::Geolocation::IGeoposition>
+      geoposition;
+  hr = async_op->GetResults(&geoposition);
+  if (FAILED(hr) || !geoposition) {
     return BuildUnavailableWithWifiMap();
   }
 
-  DOUBLE latitude = 0.0;
-  DOUBLE longitude = 0.0;
-  if (FAILED(lat_long_report->GetLatitude(&latitude)) ||
-      FAILED(lat_long_report->GetLongitude(&longitude))) {
+  Microsoft::WRL::ComPtr<ABI::Windows::Devices::Geolocation::IGeocoordinate>
+      coordinate;
+  hr = geoposition->get_Coordinate(&coordinate);
+  if (FAILED(hr) || !coordinate) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  Microsoft::WRL::ComPtr<
+      ABI::Windows::Devices::Geolocation::IGeocoordinateWithPoint>
+      coordinate_with_point;
+  hr = coordinate.As(&coordinate_with_point);
+  if (FAILED(hr) || !coordinate_with_point) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  Microsoft::WRL::ComPtr<ABI::Windows::Devices::Geolocation::IGeopoint>
+      geopoint;
+  hr = coordinate_with_point->get_Point(&geopoint);
+  if (FAILED(hr) || !geopoint) {
+    return BuildUnavailableWithWifiMap();
+  }
+
+  ABI::Windows::Devices::Geolocation::BasicGeoposition position{};
+  if (FAILED(geopoint->get_Position(&position))) {
     return BuildUnavailableWithWifiMap();
   }
 
   DOUBLE error_radius = 0.0;
-  if (SUCCEEDED(lat_long_report->GetErrorRadius(&error_radius)) &&
+  if (SUCCEEDED(coordinate->get_Accuracy(&error_radius)) &&
       error_radius > 5000.0) {
     return BuildUnavailableWithWifiMap();
   }
@@ -140,14 +184,13 @@ flutter::EncodableMap QueryWindowsLocation() {
       (error_radius > 0.0 && error_radius <= 50.0) ? "gps" : "system";
   return {
       {flutter::EncodableValue("status"), flutter::EncodableValue("found")},
-      {flutter::EncodableValue("latitude"), flutter::EncodableValue(latitude)},
+      {flutter::EncodableValue("latitude"),
+       flutter::EncodableValue(position.Latitude)},
       {flutter::EncodableValue("longitude"),
-       flutter::EncodableValue(longitude)},
+       flutter::EncodableValue(position.Longitude)},
       {flutter::EncodableValue("source"), flutter::EncodableValue(source)},
   };
 }
-
-#pragma warning(pop)
 
 std::wstring Utf16FromUtf8(const std::string& utf8_string) {
   if (utf8_string.empty()) {
