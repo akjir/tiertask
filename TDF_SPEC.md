@@ -1,14 +1,14 @@
 # TierTask Data Format (TDF) Specification
 
-**Version:** 0.5.0
+**Version:** 0.5.1
 **Status:** Working draft
 **File Extension:** `.tdf`
 **Character Encoding:** UTF-8
 
-This working draft defines TDF 0.5.0. Sections remain provisional until reviewed.
+This working draft defines TDF 0.5.1. Sections remain provisional until reviewed.
 
 Sections 1 through 9 define the current specification.
-Section 10 contains import rules and changes between adjacent versions.
+Section 10 contains import rules, load-time conversion from `0.5.0`, and changes between adjacent versions.
 Historical compatibility rules belong only in Section 10.
 
 ## 1. Overview, Architecture & Design Goals
@@ -22,12 +22,12 @@ A `.tdf` document stores tasks, labels, timestamps, recurrence, prerequisites, l
 1. **No Explicit Tier Storage:** A `.tdf` document stores no explicit tier assignment (`[1]` through `[6]`) on any task.
 2. **Dynamic Derivation:** Derive all six tiers by filtering the stored order, applying priority, and assigning bounded slots. Section 5 defines this process.
 
-The document also stores recent deletion records and their deletion history generation. Queue order is stored once in `queue`.
+The document also stores recent deletion records and their deletion history generation. Queue membership and order are stored once in `queue`.
 
 ### 1.2 Core Design Principles
 
-1. **Current Version and Root Blocks:** A current document MUST start with `tdf 0.5.0`. Root blocks are `task`, `label`, `deleted`, or `queue`.
-2. **No Empty Directives:** Omit optional directives that have no value, such as an unset `finished` or `queued` timestamp. Never write a directive with empty arguments.
+1. **Current Version and Root Blocks:** A current document MUST start with `tdf 0.5.1` (normal loading also accepts `tdf 0.5.0` and converts it in memory to `0.5.1` under Section 10.6). Root blocks are `task`, `label`, `deleted`, or `queue`.
+2. **No Empty Directives:** Omit optional directives that have no value, such as an unset `finished` timestamp or `suspended` deferral. Never write a directive with empty arguments.
 3. **Single-Pass Linear Grammar:** Tokenize and parse TDF in a single $O(N)$ linear pass without regular expressions or backtracking.
 4. **Two-Layer Validation (Syntax vs. Domain Semantics):** The lexical and structural layers scan all identifiers and arguments as UTF-8 string tokens. The domain schema layer validates the version header, 10-character Base62 `<task-id>` and `<label-id>` identifiers, ISO-8601 timestamps, 24-hour time windows, weekday tokens, booleans, geographic coordinates and radii, hexadecimal colors, scheme-prefixed URIs, and cross-block references.
 
@@ -111,7 +111,7 @@ A scalar value above `U+FFFF` counts as one character.
 Do not count UTF-8 bytes, UTF-16 code units, or grapheme clusters for text limits.
 Do not normalize Unicode before counting.
 
-- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.5.0` for this specification).
+- **Version (`<version>`):** Semantic version bare word written as `<MAJOR>.<MINOR>.<PATCH>` where `<MAJOR>`, `<MINOR>`, and `<PATCH>` are non-negative ASCII decimal integers (`0.5.1` for this specification).
 - **Base62 Alphabet (`<base62-char>`):** The 62 ASCII alphanumeric characters `0-9` (`U+0030`–`U+0039`), `A-Z` (`U+0041`–`U+005A`), and `a-z` (`U+0061`–`U+007A`) in canonical index order (`0`..`61`):
   `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz`
 - **Task Entity ID (`<task-id>`):** Canonical 10-character bare word identifying a `task` block or referenced in `blocked`, matching `<6xBase62Random><4xBase62Time>` (`[0-9A-Za-z]{10}`, such as `8jKaCdOkD2`):
@@ -129,7 +129,7 @@ Do not normalize Unicode before counting.
   - Two whitespace-separated bare-word tokens: `<YYYY-MM-DD> <HH:MM[:SS]>` (such as `2026-11-01 19:30` or `2026-11-01 19:30:05`), where month `MM` is `01..12`, `DD` is valid for the calendar month and year, `HH` is `00..23`, minute `MM` is `00..59`, and optional `SS` is `00..59`.
   - **Timestamp Semantics:** All stored timestamps, including finite `suspended` values, represent UTC instants. Recurrence clocks and day/time conditions use the configured local calendar. Section 6.10 defines conversion, display, and daylight-saving rules.
   - Date-only timestamps default to `00:00:00` for chronological ordering and comparison. Minute-precision timestamps (`<HH:MM>`) default to `:00` seconds (`<HH:MM:00>`).
-  - Explicit seconds support revision advancement under Sections 6.7 and 6.11. Queue moves do not change activation timestamps.
+  - Explicit seconds support revision advancement under Sections 6.7 and 6.11.
   - **Calendar:** Use the proleptic Gregorian calendar for all dates and calendar calculations.
     Years use four ASCII digits in `0001..9999`.
     Reject year `0000` with `InvalidTimestamp`.
@@ -183,12 +183,12 @@ Generate a new 10-character Base62 ID only when creating a new `task` or `label`
 ## 3. Structural Grammar
 
 ### 3.1 Document Structure & Nesting Depth
-A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.5.0`) followed by zero or more root-level **Blocks**.
+A TDF document consists of a mandatory root-level **Version Header** (`tdf 0.5.1`) followed by zero or more root-level **Blocks**.
 - **Nesting Depth Definition:** Nesting depth equals the number of open `{ ... }` blocks:
   - Depth `0` (document root): Permit the initial version header, `task`, `label`, `deleted`, and `queue` blocks, blank lines, and comments.
   - Depth `1`: Permit root-block directives and schema-defined nested blocks. The `deleted` and `queue` blocks permit directives only.
   - Depth `2` (inside `subtasks` or `condition`): Permit only `step`, `day`, `time`, and `location` directives. Forbid further nested blocks (`MAX_NESTING_DEPTH = 2`).
-- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.5.0` at depth `0` before any root block, preceded only by optional blank lines and `#` comments. Reject a file with no statements or whose first statement is not `tdf <version>` with `MissingVersionHeader`. A file containing `tdf 0.5.0` and zero root blocks is a valid empty TDF document.
+- **Mandatory Version Header:** Every valid `.tdf` document MUST begin with `tdf 0.5.1` at depth `0` before any root block, preceded only by optional blank lines and `#` comments. Normal loading also accepts `tdf 0.5.0` and converts it in memory to `0.5.1` under Section 10.6. Reject a file with no statements or whose first statement is not `tdf <version>` with `MissingVersionHeader`. A file containing `tdf 0.5.1` and zero root blocks is a valid empty TDF document.
 - **Root-Level Directive Prohibition:** Reject any directive at depth `0` other than the initial `tdf` version header, including a later duplicate `tdf` directive, with `UnexpectedRootDirective`.
 
 ### 3.2 Blocks
@@ -214,10 +214,10 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 <identifier> <argument> [<argument> ...]
 ```
 
-- **Scope:** Except for the initial `tdf 0.5.0` version header at depth `0` (Section 4.0), every directive MUST reside inside a block (depth `1` or `2`). Reject any other directive at depth `0` with `UnexpectedRootDirective`.
+- **Scope:** Except for the initial `tdf 0.5.1` version header at depth `0` (Section 4.0), every directive MUST reside inside a block (depth `1` or `2`). Reject any other directive at depth `0` with `UnexpectedRootDirective`.
 - **Minimum Arity (No Empty Directives):** A directive requires an Identifier followed by at least one Argument separated by horizontal whitespace. Reject a standalone identifier inside a block without arguments and without `{` with `MissingDirectiveArgument`. Omit optional directives that have no value.
 - **Termination:** A newline (`LF` or `CRLF`) terminates each directive. Reaching `EOF` on a block directive line without a closing `}` on a subsequent line produces `UnclosedBlock`. Semicolons (`;`) do not terminate statements; a trailing `;` on an unquoted token is part of that bare word.
-- **Ordering & Multiplicity:** Preserve declaration order while parsing. Repeatable directives include links, conditions, checklist steps, deletion records, and queue entries. Scalar and reference directives permit one occurrence per enclosing block. Permit one `subtasks` block per task, one `deleted` block per document, and one `queue` block per document. Report repeated singleton directives or blocks as `DuplicateDirective`.
+- **Ordering & Multiplicity:** Preserve declaration order while parsing. Repeatable directives include links, conditions, checklist steps, deletion records, and queue entries. Single-valued `task` directives (`name`, `note`, `created`, `finished`, `modified`, `completions`, `repeat`, `labels`, `blocked`, `suspended`) and single-valued `label` directives (`name`, `color`, `note`, `modified`) permit at most one occurrence per enclosing block. Permit one `subtasks` block per task, one `deleted` block per document, and one `queue` block per document. Report repeated singleton directives or blocks as `DuplicateDirective`.
 
 ### 3.4 Formal Grammar (EBNF)
 
@@ -225,7 +225,7 @@ A **Directive** is a single-line key-value or key-tuple instruction.
 (* Document Root: Mandatory Version Header followed by Blocks, Comments, and Blank Lines *)
 document        = { empty-line } version-header { empty-line | root-block } [ trailing-empty ] ;
 
-version-header  = ws* "tdf" ws+ "0.5.0" ws* [ comment ] newline ;
+version-header  = ws* "tdf" ws+ "0.5.1" ws* [ comment ] newline ;
 
 root-block      = task-block
                 | label-block
@@ -333,16 +333,16 @@ At depth `0`, a document MUST start with the version header from Section 4.0. Pe
 Every `.tdf` document MUST begin with a single-line `tdf` version header at depth `0` before any root block:
 
 ```text
-tdf 0.5.0
+tdf 0.5.1
 ```
 
-- **First Statement Requirement:** `tdf 0.5.0` MUST be the first statement of every `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at depth `0`.
-- **Version Argument:** The header MUST contain one unquoted version token, `0.5.0`.
+- **First Statement Requirement:** `tdf 0.5.1` MUST be the first statement of every current `.tdf` document (preceded only by optional blank lines and `#` comments) and is the only directive permitted at depth `0`.
+- **Version Argument & `0.5.0` Load-Time Conversion:** The header MUST contain one unquoted version token, `0.5.1` (or `0.5.0` when loading a previous-patch document). When a loader encounters `tdf 0.5.0`, it MUST validate the input against the `0.5.0` schema and convert it in memory to `0.5.1` under Section 10.6 without writing to storage during read-only loading.
 - **Validation Rules:**
   - Reject a file with no statements or whose first statement is not `tdf <version>` with `MissingVersionHeader`.
-  - Reject any `<version>` other than `0.5.0`, a quoted version token, or extra header arguments with `UnsupportedVersion`.
+  - Reject any `<version>` other than `0.5.1` (and `0.5.0` during load-time conversion), a quoted version token, or extra header arguments with `UnsupportedVersion`.
   - Reject a duplicate `tdf` directive later at depth `0` with `UnexpectedRootDirective`.
-- **Serializer Output:** A canonical TDF serializer MUST emit `tdf 0.5.0` as the first statement of every output document, including an empty board.
+- **Serializer Output:** A canonical TDF serializer MUST emit `tdf 0.5.1` as the first statement of every output document, including an empty board.
 
 ### 4.1 The `task` Block (Tasks)
 
@@ -367,23 +367,40 @@ task <task-id> [priority] {
 | Directive | Required | Multiplicity | Format / Arguments | Semantics When Present / Omitted |
 | :--- | :--- | :--- | :--- | :--- |
 | `name` | Yes | `1` | `"<text>"` | Human-readable title of the task (`1..MAX_TEXT_LENGTH` characters). Required in every `task` block. |
+| `note` | No | `0..1` | `"<text>"` | Optional extended description or note (`1..MAX_NOTE_LENGTH` characters). **When omitted**, the task has no extended note. |
 | `created` | Yes | `1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | Creation timestamp of the task in UTC. Required in every `task` block. |
-| `queued` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC activation timestamp. Presence schedules an open task. Queue position comes from Section 4.5. Omission excludes the task from the active pull cycle. Section 5 defines `Someday` and deferral classification. |
-| `finished` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC completion timestamp. Its presence places the task in `Completed`. Retention pruning after more than 30 days creates a deletion record under Section 6.8. |
+| `finished` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC completion timestamp. Its presence places the task in `Completed`. Completed tasks MUST NOT appear in `queue`. Retention pruning after more than 30 days creates a deletion record under Section 6.8. |
 | `modified` | No | `0..1` | `<YYYY-MM-DD> [<HH:MM[:SS]>]` | UTC entity revision timestamp. Section 6.7.1 defines its effective value when omitted. Section 6.7 defines synchronization and revision updates. |
 | `completions` | No | `0..1` | `<completion-count>` | Monotonic completion counter, defaulting to zero. A finished task requires a positive explicit value. Section 6.9 defines occurrence behavior. |
-| `note` | No | `0..1` | `"<text>"` | Optional extended description or note (`1..MAX_NOTE_LENGTH` characters). **When omitted**, the task has no extended note. |
+| `repeat` | No | `0..1` | `<count> <days\|weeks\|months> [<repeat-time>]` | Completion-relative local calendar recurrence with an optional clock, defaulting to midnight. Completion keeps the task open, advances its counter, resets its checklist, and schedules its next UTC deadline. Sections 6.4, 6.9, and 6.10 define the transition. |
 | `labels` | No | `0..1` | `<label-id1> [<label-id2> ...]` | One or more label IDs assigned to the task. Each argument MUST be an unquoted 10-character Base62 ID (`InvalidIdentifier` otherwise). Each ID MUST match a declared label (`UnknownLabelReference` otherwise). Assigned labels provide context filtering and condition inheritance. Omission means no label assignment. |
 | `blocked` | No | `0..1` | `<dependency> [<dependency> ...]` | Stored prerequisite completion requirements. Each token contains a canonical task ID and optional required completion number. Section 6.9 defines capture and evaluation. Missing targets remain non-blocking. Target IDs MUST NOT form dependency cycles. |
 | `suspended` | No | `0..1` | `<timestamp>` or `forever` | A finite UTC deferral or indefinite suspension. An active deferral blocks an open task before other restrictions are evaluated. Section 6.10 defines comparison and conversion. |
-| `repeat` | No | `0..1` | `<count> <days\|weeks\|months> [<repeat-time>]` | Completion-relative local calendar recurrence with an optional clock, defaulting to midnight. Completion keeps the task open, advances its counter, resets its checklist, and schedules its next UTC deadline. Sections 6.4, 6.9, and 6.10 define the transition. |
 | `link` | No | `0..MAX_LINKS_PER_TASK` | `"<title>" "<uri>"` | Repeatable external or local URI link (`0..20` per `task`) in declaration order. `<title>` is a non-empty quoted display label (`1..MAX_TEXT_LENGTH`). `<uri>` is a non-empty quoted URI (`1..MAX_URI_LENGTH`) with a scheme prefix (`[a-zA-Z][a-zA-Z0-9+.-]*:`). Omission means no links. |
 | `condition` | No | `0..N` | `<type> <args...>`, `<type> any`, `any`, or `{ ... }` | Task-level activation conditions (`day`, `time`, `location`), group resets (`day any`, `time any`, `location any`), or global reset (`condition any`), written inline or as a `condition { ... }` block (Section 4.3). `condition any` disables all inherited `label` conditions. Group rules and group resets override only that rule group from assigned labels while preserving other inherited groups and the task's `labels` assignment. |
+
+- **No `queued` Directive in `0.5.1`:** Membership in the root `queue { ... }` block (Section 4.5) is the sole source of truth for whether an open task is scheduled into the active pull cycle. Encountering `queued` inside a `task` block in a `tdf 0.5.1` document MUST trigger `UnknownDirective` (Section 8). When loading a `tdf 0.5.0` document, `queued` is validated under `0.5.0` rules and stripped during load-time conversion to `0.5.1` (Section 10.6).
+
+**Canonical `task` Directive Serialization Order (13 Directives & Sub-Blocks):**
+A canonical serializer MUST emit present directives and sub-blocks inside each `task` block in this exact 13-position order:
+1. `name`
+2. `note`
+3. `created`
+4. `finished`
+5. `modified`
+6. `completions` (omitted when `0`, emitted when `>= 1`)
+7. `repeat`
+8. `labels` (sorted ascending by ASCII ID, deduplicated)
+9. `blocked` (sorted ascending by ASCII target ID, `:1` suffix omitted)
+10. `suspended`
+11. `link` (in declaration order)
+12. `condition` (`condition any`, inline single rule, or `condition { ... }` sub-block sorted by `day`, `time`, `location`)
+13. `subtasks` (in declaration order of `step` directives)
 
 Additional `link` rules inside `task` blocks:
 - **Arguments (`link <title> <uri>`):** Both arguments MUST be non-empty `<quoted-string>` tokens (not blank or whitespace-only after unescaping). `<title>` has length `1..MAX_TEXT_LENGTH` and represents the human-readable display label. `<uri>` has length `1..MAX_URI_LENGTH` (`2048`) and a valid scheme prefix (`[a-zA-Z][a-zA-Z0-9+.-]*:`, Section 2.8).
 - **Preserved Ordering:** Preserve the exact declaration order of `link` directives in memory and during serialization.
-- **Canonical Serializer Position:** Emit `link` directives after scalar and reference directives (`name`, `note`, `created`, `queued`, `finished`, `modified`, `completions`, `repeat`, `labels`, `blocked`, `suspended`) and before `condition` and `subtasks`.
+- **Canonical Serializer Position:** Emit `link` directives after scalar and reference directives (`name`, `note`, `created`, `finished`, `modified`, `completions`, `repeat`, `labels`, `blocked`, `suspended`) and before `condition` and `subtasks`.
 - **Tier Derivation & Sync:** `link` directives are task metadata and do not affect tier derivation (Section 5). Adding, modifying, reordering, or removing a `link` updates the task's `modified` timestamp (Sections 6.6 and 6.7).
 
 #### 4.1.3 Sub-Block `subtasks` (Checklists)
@@ -585,8 +602,7 @@ Section 6.8 defines deletion, retention, cleanup, and recovery behavior.
 
 ### 4.5 The `queue` Block
 
-The document contains one shared order for all scheduled open tasks.
-Store that order in one root-level `queue` block.
+The document contains one shared order for all scheduled open tasks, stored in one root-level `queue` block. Membership in `queue` is the sole single source of truth for whether an open task (`finished` omitted) is scheduled into the active pull cycle or resides in `Someday` (`Tier 5`).
 
 ```text
 queue {
@@ -597,7 +613,7 @@ queue {
 }
 ```
 
-These illustrative IDs require corresponding scheduled open task blocks in a complete document.
+These illustrative IDs require corresponding live open task blocks in a complete document.
 The header takes no arguments.
 Nested blocks are forbidden.
 
@@ -606,15 +622,15 @@ Nested blocks are forbidden.
 | `modified` | Yes | `1` | `<timestamp>` | UTC revision for the complete ordered list. |
 | `task` | No | `0..MAX_QUEUE_ENTRIES` | `<task-id>` | One scheduled open task in saved order. |
 
-Each entry MUST reference a live task with `queued` present and `finished` absent.
-Include every such task exactly once, including temporarily blocked tasks.
+Each entry MUST reference a live open task (`finished` absent) in the document.
+Include every scheduled open task at most once, including temporarily blocked tasks.
+Open tasks (`finished` absent) whose task ID is omitted from `queue` are unscheduled (`Someday` under Section 5.3, or `Blocked` under Section 5.4 if an active `suspended` lock is present).
 Resolve references after reading the complete document.
 Reject duplicate queue IDs with `DuplicateIdentifier`.
-Reject missing, unknown, completed, or unscheduled members with `InvalidQueueMembership`.
+Reject unknown, deleted, or completed (`finished` present) task IDs in `queue` with `InvalidQueueMembership`.
 An entry references an existing identity and does not declare another entity.
 
-A missing block means an empty list with revision `1970-01-01 00:00:00` UTC.
-It is valid only when no scheduled open tasks exist.
+A missing block means an empty list (no scheduled open tasks) with revision `1970-01-01 00:00:00` UTC.
 A present block requires `modified`, even when its list is empty.
 Canonical output MAY omit the block only when its list is empty and its revision equals that epoch.
 Preserve other empty queue revisions.
@@ -622,7 +638,7 @@ Preserve other empty queue revisions.
 Canonical output places `queue` after `deleted`, when present, and before live entity blocks.
 Emit `modified` first, with explicit seconds.
 Emit each `task` entry on its own line in saved order.
-Task block declaration order and `queued` values do not change this order.
+Task block declaration order does not change this order.
 
 The saved order does not reserve Focus or Ready slots.
 Section 5 filters eligible tasks before assigning slots.
@@ -637,36 +653,36 @@ Evaluate the document against one UTC reference instant `now`. Derive `localNow`
 - **When no `label` context filter is selected (global view):** All `task` blocks in the document enter Sections 5.2 through 5.5.
 
 ### 5.2 Tier 6 — `Completed`
-- **Selection Rule:** All retained tasks (after Section 5.1 pre-filtering) that possess a `finished` directive enter `Completed`.
+- **Selection Rule:** All retained tasks (after Section 5.1 pre-filtering) that possess a `finished` directive enter `Completed`. Completed tasks MUST NOT be members of `queue` (`InvalidQueueMembership`).
 - **No Blocking Evaluation:** Retained tasks with `finished` remain in `Completed` when they match the label filter. Ignore deferrals, prerequisite requirements, and activation conditions for their tier classification.
 - **Garbage Collection:** Prune any task whose `finished` timestamp is strictly more than 30 days old during persistence. Replace its live block with a deletion record under Section 6.8. Do not prune during loading or import.
 
 ### 5.3 Tier 5 — `Someday`
-- **Selection Rule:** Retained open tasks without `queued` and without an active deferral under Section 6.10 enter `Someday`. When a finite `suspended` timestamp expires (`suspended <= now` in UTC) without `queued`, the task enters `Someday` directly.
+- **Selection Rule:** Retained open tasks (`finished` omitted) whose task ID is **not** listed in the `queue` block and that do not have an active `suspended` lock (`suspended > now` in UTC or `suspended forever`) under Section 6.10 enter `Someday`. When a finite `suspended` lock on an unqueued task expires (`suspended <= now` in UTC), the task is derived directly as `Someday` without mutating the document during read-only evaluation (Section 6.10.1).
 - **Behavior:** These tasks form the unscheduled backlog and do not participate in the active pull cycle.
 
 ### 5.4 Tier 4 — `Blocked`
-- **Selection Rule:** Open tasks with active deferrals enter `Blocked`, even without `queued` in hand-edited files. Scheduled open tasks also enter `Blocked` when a prerequisite or activation condition is unmet. Evaluate these restrictions in the following order:
-  1. **Active Deferral (`suspended`):** The value is `forever`, or its UTC timestamp is later than `now`. Classify the task as `Blocked` without evaluating other restrictions. If a finite `suspended` timestamp expires (`suspended <= now` in UTC) without `queued`, the task enters `Someday` under Section 5.3.
-  2. **Unmet Prerequisite (`blocked`):** At least one existing target has fewer completions than its stored requirement under Section 6.9. Missing targets do not block. Resolve targets across the complete document, regardless of the active label filter.
-  3. **Unmet Condition (`condition` — `day` -> `time` -> `location` Short-Circuit):** Resolve candidate condition contexts under Section 4.3.3 (the task's own context if unlabeled, the active `label`'s effective context when filtered, or each assigned `label`'s effective context with `OR` across labels in global view). Evaluate each context against `localNow` by group in order `day`, `time`, `location` (Section 4.3.4). If no candidate context has all three effective groups satisfied, classify the task as `Blocked`.
-- **Auto-Pull Cascade Behavior:** Blocked tasks consume no Focus or Ready slots. Preserve their saved queue entries. Recompute eligible order before assigning slots whenever restrictions change.
+- **Selection Rule:**
+  - Any open task listed in `queue` that has at least one unsatisfied `blocked` dependency (`<id>:<count>`), an active `suspended` lock (`suspended > now` in UTC or `suspended forever`), or an unsatisfied effective `condition` rule group (`day`, `time`, `location`).
+  - Any open task **not** listed in `queue` (such as in a hand-edited file) that has an active `suspended` lock (`suspended > now` in UTC or `suspended forever`). When a finite `suspended` lock on an unqueued task expires (`suspended <= now` in UTC), the task is derived directly as `Someday` (`Tier 5`) under Section 5.3 without mutating the document during read-only evaluation (Section 6.10.1).
+  - Evaluate restrictions in the following order:
+    1. **Active Deferral (`suspended`):** The value is `forever`, or its UTC timestamp is later than `now`. Classify the task as `Blocked` without evaluating other restrictions. If a finite `suspended` timestamp expires (`suspended <= now` in UTC) on a task not listed in `queue`, the task enters `Someday` under Section 5.3.
+    2. **Unmet Prerequisite (`blocked`):** At least one existing target has fewer completions than its stored requirement under Section 6.9. Missing targets do not block. Resolve targets across the complete document, regardless of the active label filter.
+    3. **Unmet Condition (`condition` — `day` -> `time` -> `location` Short-Circuit):** Resolve candidate condition contexts under Section 4.3.3 (the task's own context if unlabeled, the active `label`'s effective context when filtered, or each assigned `label`'s effective context with `OR` across labels in global view). Evaluate each context against `localNow` by group in order `day`, `time`, `location` (Section 4.3.4). If no candidate context has all three effective groups satisfied, classify the task as `Blocked`.
+- **Auto-Pull Cascade Behavior:** Scheduled tasks in `Blocked` consume no `Focus` or `Ready` slots and remain at their exact position inside `queue` so they resume their original queue slot automatically once all blocking conditions clear. Recompute eligible order before assigning slots whenever restrictions change.
 
 ### 5.5 Active Pull Cycle (`Focus`, `Ready`, `Planned`)
 
-1. Traverse the shared queue in saved order.
-2. Exclude tasks outside the selected label context.
-3. Exclude tasks classified as `Blocked` under Section 5.4.
-4. Collect eligible prioritized tasks and eligible regular tasks separately, preserving relative order within each group.
-5. Concatenate the prioritized group followed by the regular group.
-6. Assign the first three tasks to `Focus`, the next five to `Ready`, and all remaining tasks to `Planned`.
+1. Filter the task IDs in `queue` to retain only open, currently executable tasks (not classified as `Blocked` under Section 5.4) that match the active label filter context (Section 5.1), preserving their relative `queue` order.
+2. Partition this ordered sequence stably by the `priority` header flag: all executable `priority` tasks appear first (in their relative `queue` order), followed by all remaining executable tasks (in their relative `queue` order).
+3. Slice positions `1..3` into `Focus` (`Tier 1`), positions `4..8` into `Ready` (`Tier 2`), and positions `9..N` into `Planned` (`Tier 3`).
 
 `Focus` MUST contain at most three tasks.
 `Ready` MUST contain at most five tasks.
 Apply these limits after filtering and priority grouping.
-Do not sort by `queued` or task block declaration order.
+Do not sort by task block declaration order.
 
-When a task becomes blocked, retain its saved position and fill available slots with later eligible tasks.
+When a task becomes blocked, retain its saved position in `queue` and fill available slots with later eligible tasks.
 When it becomes eligible again, use that same position under its current priority and context.
 This can displace existing Focus tasks into Ready and existing Ready tasks into Planned.
 Recompute the complete assignment. Do not insert into already populated tiers.
@@ -690,40 +706,36 @@ State transitions update task facts and the shared queue order. Apply related ch
 ### 6.1 Creating a New Task or Label
 - **Entity ID Generation:** Generate a unique, immutable 10-character Base62 `<task-id>` or `<label-id>` (`<6xBase62Random><4xBase62Time>`) under Section 2.9.
 - **New Completion History:** Initialize `completions` to zero and omit its directive canonically.
-- **For `Planned` (Default Task):** Set `created`, `queued`, and `modified` to `now` in UTC. Append the ID to the shared queue. Section 5 fills available Focus and Ready slots automatically.
-- **For `Someday`:** Set `created` and `modified` to `now` in UTC. Omit `queued` and do not add a queue entry.
-- **With `priority` Flag (For `Focus`):** Set the same timestamps as a default task and add `priority`. Append its ID to the queue. Section 5 places it after existing eligible prioritized tasks and before regular tasks.
+- **Scheduled (`Planned` or `Focus` with `priority`):** Create the `task` block with `created` and `modified` set to `now` in UTC (adding the `priority` header flag when targeting `Focus`), append its task ID to the end of `queue`, and advance `queue.modified`. Section 5 fills available `Focus` and `Ready` slots automatically (placing `priority` tasks after existing eligible prioritized tasks and before regular tasks).
+- **Unscheduled (`Someday`):** Create the `task` block with `created` and `modified` set to `now` in UTC without adding its ID to `queue`. `queue` and `queue.modified` remain unchanged.
 
-### 6.2 Scheduling a Task from `Someday`
-- Set `queued` to `now` in UTC and advance the task's `modified` revision.
-- Append its ID to the shared queue and advance the queue revision.
+### 6.2 Scheduling from `Someday` & Moving to `Someday`
+- **Scheduling from `Someday`:** Append the task's ID to the end of `queue` and advance `queue.modified`. If no task-level attributes (such as `priority` or `suspended`) are changed, `task.modified` MUST remain unchanged.
+- **Moving to `Someday`:** Remove the task's ID from `queue` and advance `queue.modified`. If the task had a `priority` flag or `suspended` directive, strip them and advance `task.modified`; otherwise, leave `task.modified` unchanged.
 
 ### 6.3 Downgrading an Active Task (`Focus`, `Ready`, and `Planned`)
 
 Use the current context and Section 5 assignment to determine the source tier.
-A downgrade outside Focus, Ready, or Planned is a no-op.
+A downgrade outside `Focus`, `Ready`, or `Planned` is a no-op.
 
-- **Focus, at least eight eligible tasks:** Identify the task currently at active slot eight. Remove the selected queue entry. Match the anchor task's priority flag. Insert the selected entry immediately after that anchor in the saved queue. It becomes active slot eight.
-- **Focus, fewer than eight eligible tasks:** Remove `priority` and move the selected entry to the end of `queue`. The task takes the last available slot in Focus or Ready.
-- **Ready:** Remove `priority` and move the selected entry to the end of `queue` without removing `queued`. Planned starts at the ninth eligible slot, after three Focus and five Ready slots. The task enters Planned when at least eight other eligible tasks precede it. With fewer than eight eligible tasks in total, it takes the last available slot in Focus or Ready.
-- **Planned:** Remove `priority`, omit `queued`, and remove the queue entry. The task enters Someday.
+- **Step-Down Downgrade from `Focus` to `Ready`:** Strip `priority` if present (or match the 8th executable anchor's `priority` flag when at least eight executable tasks exist and slot eight is prioritized) and move the task ID in `queue` immediately after the 8th executable task (or to the end of `queue` if fewer than eight executable tasks exist), respecting the strict No-Op revision rule when neither `priority` nor the `queue` order changes.
+- **Downgrade to `Planned` (from `Ready`, or end of queue when `< 8` executable tasks exist):** Strip `priority` if present (advancing `task.modified` only if `priority` was removed) and move the task ID to the end of `queue` (advancing `queue.modified` only if its position in `queue` changed). `Planned` starts at the ninth executable slot, after three `Focus` and five `Ready` slots. The task enters `Planned` when at least eight other executable tasks precede it; with fewer than eight executable tasks in total, it takes the last available slot in `Focus` or `Ready`.
+- **Downgrade from `Planned` to `Someday`:** Remove the task ID from `queue` and advance `queue.modified`. Strip `priority` if present and advance `task.modified` only if a task attribute (`priority` or `suspended`) was removed (Section 6.2). The task enters `Someday`.
 
 Preserve the relative order of every other queue entry, including blocked tasks.
-Reordering MUST preserve every `queued` value. The Planned-to-Someday transition removes its activation timestamp.
-Advance the queue revision only when its list changes.
-Advance the selected task's revision only when its own fields or flag change.
-If a Focus or Ready task has no `priority` flag and is already at the end of `queue`, neither task attributes nor `queue` order change.
-Leave both `task.modified` and `queue.modified` unchanged.
+Advance `queue.modified` only when `queue` changes.
+Advance `task.modified` only when the selected task's own fields or `priority` flag change.
+If a `Focus` or `Ready` task has no `priority` flag and is already at the end of `queue`, neither task attributes nor `queue` order change; leave both `task.modified` and `queue.modified` unchanged.
 Do not revise other tasks merely because their derived tier changes.
 
 ### 6.4 Completing a Task (From Any Open Tier)
-- **Standard Task (`repeat` Omitted):** Complete any open task under Section 6.9.4. Increment `completions`, set `finished` to `now` in UTC, and mark checklist steps true. Remove its queue entry if present. Advance the task revision once and the queue revision when changed. Reevaluate dependents and refill active slots.
-- **Recurring Task (`repeat <count> <days|weeks|months>` Present):** Use the same guarded completion operation from Section 6.9.4. Increment `completions` once and keep `finished` omitted. Rearm prerequisites for the next occurrence under Section 6.9.3 and apply the reschedule below atomically:
+- **Standard Task (`repeat` Omitted):** Complete any open task under Section 6.9.4. Set `finished` to `now` in UTC, increment `completions` by `1`, mark checklist steps `true`, advance `task.modified` once, and remove the task ID from `queue` (advancing `queue.modified` if the ID was present in `queue`). Reevaluate dependents and refill active slots.
+- **Recurring Task (`repeat <count> <days|weeks|months>` Present):** Use the same guarded completion operation from Section 6.9.4. Omit `finished`, increment `completions` by `1`, rearm prerequisites for the next occurrence under Section 6.9.3, and apply the reschedule below atomically:
   1. **Remain Open:** Keep `finished` omitted so the task stays open and exempt from 30-day garbage collection.
   2. **Reset Subtasks:** Reset every `step` directive in `subtasks` to `step false "<text>"`.
-  3. **Ensure Priority on Wake-Up:** Add `priority` to the `task <task-id> priority {` block header if not already present.
-  4. **Calculate Next Due Instant:** Use the configured local calendar and the repeat rule's clock under Section 6.10. Resolve the target date with the zone rules applicable to that date.
-  5. **Store the Next Occurrence:** Set `suspended` and `queued` to the computed UTC instant. Preserve an existing queue position. Append the ID only if it was unscheduled. Advance the task revision once and the queue revision only when its list changes. The deferral blocks the task without reserving an active slot. Release restores its saved position under its current priority.
+  3. **Ensure Priority on Wake-Up:** Enable the `priority` header flag on `task <task-id> priority {` if not already present.
+  4. **Calculate Next Due Instant:** Compute `<next_due>` using the configured local calendar and the repeat rule's clock under Section 6.10, resolving the target date with the zone rules applicable to that date.
+  5. **Store the Next Occurrence:** Set `suspended` to `<next_due>` in UTC and advance `task.modified` once. Keep the task ID at its existing position in `queue` (or append it to `queue` and advance `queue.modified` if it was completed while not in `queue`). While `suspended > now`, the task is derived as `Blocked` (`Tier 4`) without reserving an active slot; once `suspended <= now`, it unblocks into `Focus` (`Tier 1`) at its saved `queue` position.
 
 ### 6.5 Restoring a Task from `Completed`
 
@@ -734,21 +746,14 @@ Mark each newly added step complete and lock it.
 Restoration creates a new occurrence.
 Remove `finished` and `suspended`, including an expired deadline or `forever`.
 Preserve the completion counter and repeat rule, including its local clock.
-Reset all checklist steps to false.
+Reset all checklist steps to `false`.
 Rearm prerequisites under Section 6.9.3.
-Apply the selected scheduling option:
+Advance `task.modified` once and apply the selected scheduling target:
 
-- **Restore to `Someday`:** Remove `priority` and `queued`.
-  Keep the task outside the queue.
-- **Restore to `Planned`:** Remove `priority`.
-  Set `queued` to `now` in UTC.
-  Append its ID to the queue.
-- **Restore to `Focus`:** Add `priority`.
-  Set `queued` to `now` in UTC.
-  Append its ID to the queue.
-  Existing eligible prioritized tasks remain ahead.
+- **Target `Someday`:** Strip `priority` if present; do not add the task ID to `queue` (`queue.modified` unchanged).
+- **Target `Planned`:** Strip `priority` if present, append the task ID to the end of `queue`, and advance `queue.modified`.
+- **Target `Focus`:** Set `priority` to `true`, append the task ID to the end of `queue`, and advance `queue.modified`. Existing eligible prioritized tasks remain ahead.
 
-Advance the task revision once and the queue revision only when its list changes.
 Persist all restoration changes atomically.
 Derive the actual tier under Section 5.
 Unmet prerequisites or conditions can block a scheduled restored task.
@@ -759,14 +764,14 @@ Setting a new deferral requires a separate explicit mutation under Section 6.6.
 
 | Case | Expected result |
 | --- | --- |
-| Restore a task with `suspended forever` to `Someday` | Remove `finished`, `suspended`, `queued`, and `priority`. Classify it as `Someday`. |
-| Restore a task with a future or expired deferral to `Planned` | Remove the old deferral. Schedule it at `now` and append it to the queue. |
-| Restore to `Focus` with an unmet prerequisite | Remove the old deferral. Retain priority and queue membership. Classify it as `Blocked`. |
+| Restore a task with `suspended forever` to `Someday` | Remove `finished`, `suspended`, and `priority`. Keep it outside `queue` (`queue.modified` unchanged) and classify it as `Someday`. |
+| Restore a task with a future or expired deferral to `Planned` | Remove `finished`, `suspended`, and `priority`. Append its ID to `queue` and advance `queue.modified`. |
+| Restore to `Focus` with an unmet prerequisite | Remove `finished` and `suspended`, set `priority`, append its ID to `queue`, and classify it as `Blocked`. |
 | Restore a task with completion counter `7` and a repeat clock | Keep both values. Reset the checklist and rearm prerequisites. |
 | Restoration persistence fails | Preserve the complete previous task and queue. |
 
 ### 6.6 Setting Task Deferral (`suspended`), Recurrence (`repeat`), Prerequisites (`blocked`), Links (`link`), and Activation Conditions (`condition`)
-- **Setting `suspended`:** Convert local input under Section 6.10. Set a future UTC deadline or `forever`. If unscheduled, set `queued` to `now` and append its ID to the queue. Otherwise, preserve its queue position. Clearing removes `suspended` without changing `queued` or queue order. Advance the task revision and any changed queue revision. Reevaluate remaining restrictions.
+- **Setting `suspended`:** Convert local input under Section 6.10. Set a future UTC deadline or `forever`. If the task ID is not in `queue`, append its ID to the end of `queue` and advance `queue.modified`; otherwise, preserve its `queue` position. Clearing removes `suspended` without changing `queue` order. Advance `task.modified` and any changed `queue.modified`. Reevaluate remaining restrictions.
 - **Setting `repeat`:** Set or clear `<count> <unit> [<repeat-time>]` under Section 6.10 and advance `modified`. Preserve the current deadline, completion history, and current prerequisite requirements.
 - **Setting `blocked`:** Add, retain, or remove prerequisite targets under Section 6.9.3. Preserve requirements for unchanged targets and capture requirements for new targets. Reject self-dependencies and cycles. Advance `modified` without changing the completion counter.
 - **Setting `link`:** Add, modify, reorder, or remove `link <title> <uri>` directives (`0..MAX_LINKS_PER_TASK`) in preserved declaration order and advance `modified`.
@@ -783,7 +788,7 @@ Individual fields and checklist items do not receive timestamps.
 - Identify each entity by its namespace (`task` or `label`) and immutable ID.
 - Equal IDs in different namespaces identify different entities.
 - A task's effective revision time is `modified`, when present.
-- Without `modified`, use the maximum of its present `created`, `queued`, and `finished` timestamps.
+- Without `modified`, use the maximum of its present `created` and `finished` timestamps.
 - A label's effective revision time is `modified`, when present.
 - Without `modified`, a label's effective revision time is `1970-01-01 00:00:00` UTC.
 - Resolve these fallback values without changing the entity.
@@ -855,7 +860,7 @@ Use these payload tuples:
 | --- | --- |
 | Task payload | `created`, `name`, `note`, `labels`, `condition`, `link`, task state |
 | Label payload | `name`, `note`, `color`, `condition` |
-| Task state | `completions`, `priority`, `queued`, `finished`, `suspended`, `repeat`, `blocked`, `subtasks` |
+| Task state | `completions`, `priority`, `finished`, `suspended`, `repeat`, `blocked`, `subtasks` |
 | Subtasks | `auto-finish`, ordered `(completed, text)` steps |
 | Link | Decoded title, decoded URI |
 
@@ -897,7 +902,7 @@ Determine the complete winner `W` of `L` and `R` before merging units.
 | Task | `labels` | Merge the label reference set separately. |
 | Task and label | Complete `condition` model | Merge as one value. |
 | Task | Complete ordered `link` list | Merge as one value. |
-| Task | `completions`, `priority`, `queued`, `finished`, `suspended`, `repeat`, `blocked`, `subtasks` | Merge together as one occurrence state value. |
+| Task | `completions`, `priority`, `finished`, `suspended`, `repeat`, `blocked`, `subtasks` | Merge together as one occurrence state value. |
 
 Apply these rules to each scalar or atomic value after normalization:
 
@@ -925,8 +930,8 @@ Validate resulting label references and dependencies under Section 6.7.7.
 
 Copy the complete task state value selected by the three-way rules.
 Do not combine its individual fields or checklist steps.
-This preserves completion progress, prerequisite requirements, recurrence, deferral, scheduling membership, and checklist changes as one operation.
-Merge shared queue order separately under Section 6.11.
+This preserves completion progress, prerequisite requirements, recurrence, deferral, and checklist changes as one operation.
+Merge shared queue membership and order separately under Section 6.11.
 Do not merge prerequisite thresholds from different occurrences as independent reference additions.
 Section 6.9.5 guards completion history against regression.
 Synchronization MUST NOT independently trigger completion or recurrence.
@@ -1319,7 +1324,7 @@ Expired history still uses the new-identity recovery rules from Section 6.8.4.
 #### 6.9.6 Example
 
 ```text
-tdf 0.5.0
+tdf 0.5.1
 
 queue {
     modified 2026-11-04 09:00:00
@@ -1330,7 +1335,6 @@ queue {
 task 8jKaCdOkD2 {
     name        "Create backup"
     created     2026-11-01 08:00
-    queued      2026-11-04 08:00
     modified    2026-11-04 08:00
     completions 7
     repeat      1 days 09:00
@@ -1339,7 +1343,6 @@ task 8jKaCdOkD2 {
 task 3nQp7ROkB8 {
     name     "Install update"
     created  2026-11-04 09:00
-    queued   2026-11-04 09:00
     modified 2026-11-04 09:00
     blocked  8jKaCdOkD2:8
 }
@@ -1437,7 +1440,7 @@ When completing a recurring task:
 5. Combine the target date with the repeat rule's local clock.
 6. Resolve that local value under Section 6.10.2.
 7. Require the resulting UTC instant to be strictly later than the completion instant.
-8. Store that instant in both `suspended` and `queued` under Section 6.4.
+8. Store that instant in `suspended` under Section 6.4.
 
 Preserve the intended repeat clock when a gap or overlap changes the resolved offset.
 Do not derive future clocks from a stored UTC deadline or from the completion's time of day.
@@ -1491,7 +1494,7 @@ When a command changes neither task attributes nor `queue` order, leave both `ta
 Fail with `InvalidTimestamp` if advancement exceeds the supported range.
 
 Append newly scheduled tasks unless a transition specifies another position.
-Remove entries when tasks become completed, unscheduled, or deleted.
+Remove entries when tasks become completed, moved to `Someday`, or deleted.
 Retain entries during temporary restrictions and recurring deferrals.
 A priority change preserves the saved list unless the command also requests a move.
 
@@ -1502,25 +1505,27 @@ Task facts, queue changes, and deletion records MUST succeed or fail together.
 
 #### 6.11.2 Queue Merge
 
-Treat the complete ordered list as one merge value.
+Treat the complete ordered list in `queue` as the authoritative merge unit for `Someday` <-> scheduled transitions and queue order.
 Bind its baseline to the same acknowledged document and history generation as the entity baseline.
 Compare decoded IDs in list order. Block declaration order and whitespace are irrelevant.
 
-Choose a complete queue winner by later queue `modified`, then lexicographically greater ordered ID list.
+Choose a complete queue winner by later `queue.modified`, then lexicographically greater ordered ID list.
 Use unsigned ASCII ID order. A shorter equal-prefix list sorts first.
 Without a proven common baseline, start from that winner's complete list.
-With a baseline, apply the scalar three-way rules from Section 6.7.5 to the complete list.
-Use the complete queue winner for a true conflict.
-Concurrent conflicting reorders can therefore select one order.
+With a baseline, apply the scalar three-way rules from Section 6.7.5 to the complete list:
+- If `L.queue` and `R.queue` are equal, keep that list.
+- If `L.queue` equals `B.queue`, keep `R.queue` (incorporating any `Someday` <-> scheduled transitions or reorders performed on `R`).
+- If `R.queue` equals `B.queue`, keep `L.queue` (incorporating any `Someday` <-> scheduled transitions or reorders performed on `L`).
+- Otherwise (both `L.queue` and `R.queue` diverged from `B.queue`, or no baseline `B` is available), start from the complete queue winner's list (`W.queue`), and append any concurrent additions from the non-winning queue (`Loser.queue` entries that were not in `B.queue`, or live open tasks present only on the losing side and listed in `Loser.queue` when no baseline is available) ordered by ascending UTC `created` timestamp, then ascending ASCII ID.
 
 First resolve entity presence, deletion conflicts, and history generation guards.
-Let `S` contain the retained live tasks with `queued` present and `finished` absent.
-Reconcile the selected list with `S`:
+Let `O` contain the retained live open tasks (`finished` absent and not tombstoned in `deleted`) in the merged document.
+Perform post-merge queue normalization against `O`:
 
-1. Keep entries whose IDs belong to `S`, preserving their relative order.
-2. Append IDs from `S` missing from that list, ordered by ascending UTC `queued`, then ascending ASCII ID.
+1. Keep entries in the merged queue whose IDs belong to `O`, preserving their relative order and removing any duplicate IDs.
+2. Remove any task IDs from `queue` that are not in `O` (tasks that were completed with `finished` present or tombstoned in `deleted` on either side during the merge).
 
-This fallback order includes concurrent additions without losing task data.
+This reconciliation preserves concurrent scheduled additions and `Someday` <-> scheduled transitions without losing task data.
 It does not change stored task timestamps.
 Filtering a stale entry does not itself delete a task.
 Do not recover rejected or ambiguous local entities through queue membership.
@@ -1547,14 +1552,15 @@ Advance their common baseline only after successful guarded publication or ackno
 | A label filter changes | Recompute tiers without changing saved order or revisions. |
 | Priority groups interleave in the saved list | Preserve list order within each priority group. |
 | Focus task moves behind active slot eight | Place it at slot eight without timestamp shifts. |
-| Ready task moves to the end | Preserve every `queued` timestamp and every other entry's relative order. |
+| Ready task moves to the end | Move its queue entry to the end of `queue` and preserve every other entry's relative order. |
 | Downgrade a Focus or Ready task without `priority` already at the end of `queue` | Leave task attributes, `queue` order, `task.modified`, and `queue.modified` unchanged. |
+| Schedule a `Someday` task or move a scheduled task to `Someday` | Update `queue` membership and `queue.modified`; merge via `queue` and `queue.modified` rather than `task.modified` when task attributes are unchanged. |
 | Recurrence creates a temporary deferral | Retain the existing queue position without occupying an active slot. |
 | Standard completion or task deletion | Remove its entry atomically with the task mutation. |
-| Concurrent additions have different lists | Retain both task identities and append missing members deterministically. |
-| A selected queue contains a now-completed task | Remove only its queue entry. |
+| Concurrent additions have different lists | Retain both task identities and append missing members deterministically by ascending `created`, then ascending ASCII ID. |
+| A selected queue contains a now-completed (`finished`) or tombstoned (`deleted`) task | Remove its queue entry during post-merge queue normalization. |
 | Queue publication fails | Preserve the active document and acknowledged baseline. |
-| Queue list is incomplete or duplicated on load | Reject it without changing the source. |
+| Queue list contains an unknown, deleted, completed, or duplicated ID on load | Reject it without changing the source. |
 
 ## 7. Conformance & Resource Bounds
 
@@ -1581,11 +1587,26 @@ To guarantee bounded memory usage and prevent denial-of-service on malformed inp
 
 ### 7.1 Canonical Output Validation
 
+Inside every `task` block, a canonical serializer MUST emit present directives and sub-blocks in the exact 13-directive order defined in Section 4.1.2:
+1. `name`
+2. `note`
+3. `created`
+4. `finished`
+5. `modified`
+6. `completions` (omitted when `0`, emitted when `>= 1`)
+7. `repeat`
+8. `labels` (sorted ascending by ASCII ID, deduplicated)
+9. `blocked` (sorted ascending by ASCII target ID, `:1` suffix omitted)
+10. `suspended`
+11. `link` (in declaration order)
+12. `condition` (`condition any`, inline single rule, or `condition { ... }` sub-block sorted by `day`, `time`, `location`)
+13. `subtasks` (in declaration order of `step` directives)
+
 Canonical condition grouping MUST preserve every accepted rule without exceeding `MAX_STMTS_PER_BLOCK`.
 Apply the entity-wide condition limit before grouping.
 Splitting rules across several input blocks MUST NOT bypass that limit.
 
-Every successful serialization MUST produce a valid current-version document.
+Every successful serialization MUST produce a valid current-version (`tdf 0.5.1`) document.
 Parsing that output MUST preserve the decoded values defined in Section 6.7.3 and the saved queue order.
 Preserve entity identities, revisions, deletion records, and deletion history generation.
 Validate the complete output against all schema and resource bounds before publication.
@@ -1627,9 +1648,9 @@ These output checks do not authorize serialization or persistence during loading
 A conforming TDF parser MUST report a structured error with the 1-based line number and fail deterministically on any of the following inputs:
 
 - **Missing Version Header (`MissingVersionHeader`):** The file contains no statements (empty or only whitespace and `#` comments), or the first statement at depth `0` is not `tdf <version>` (such as starting directly with a `label` or `task` block, or bare `tdf` without a version argument).
-- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies any `<version>` other than `0.5.0`, quotes the version token, or has extra arguments.
+- **Unsupported Version (`UnsupportedVersion`):** The initial `tdf <version>` header specifies any `<version>` other than `0.5.1` (or `0.5.0` during load-time conversion under Section 10.6), quotes the version token, or has extra arguments.
 - **Root Directive (`UnexpectedRootDirective`):** Any root-level directive other than the initial `tdf` version header appears at depth `0` outside a `{ ... }` block, including a duplicate `tdf` directive later in the file.
-- **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (such as `queued` with no timestamp).
+- **Missing Argument or Brace (`MissingDirectiveArgument`):** A single identifier appears on a line without arguments and without an opening `{` (such as `created` with no timestamp).
 - **Quoted or Invalid Identifier (`InvalidIdentifier`):** A block or directive name violates Section 2.6. An entity ID component is quoted or not canonical Base62. A prerequisite token is quoted or has an invalid ID component. Reject these inputs without generating replacements.
 - **Malformed Block Header or Missing Whitespace Before Brace (`InvalidBlockHeader`):** The opening `{` attaches directly to an identifier or argument without whitespace (such as `task 8jKaCdOkD2{` or `condition{`). A required `<task-id>` or `<label-id>` is missing (`task {` or `label {`), or an unknown or extra header argument is present (`task 8jKaCdOkD2 urgent {`, `label 4x9p2mOkD2 extra {`, `subtasks urgent {`, or `condition arg {`).
 - **Unexpected Token, Control Character, or Trailing Tokens (`UnexpectedToken`):** Non-comment tokens appear on the same line after `{` or `}`. A quote opens or closes inside a token without separating whitespace (such as `foo"bar"` or `"foo"bar"`). A directive has an invalid argument count (including `link` with fewer or more than `2` arguments), or `<title>` or `<uri>` in `link` is unquoted. A `repeat` directive uses a unit other than `days`, `weeks`, or `months`. Also report `UnexpectedToken` for invalid UTF-8 bytes, null bytes (`U+0000`), disallowed control characters, standalone `CR` without `LF`, or non-ASCII whitespace outside quoted strings and comments.
@@ -1639,11 +1660,11 @@ A conforming TDF parser MUST report a structured error with the 1-based line num
 - **Invalid Escape (`InvalidEscapeSequence`):** A `"` string contains an unknown escape sequence (such as `\a`, `\x`, or `\0`).
 - **Schema Validation Errors:**
   - `UnknownBlockType`: A root block is not `task`, `label`, `deleted`, or `queue`. Tasks permit `subtasks` and `condition`. Labels permit `condition`. Blocks inside `deleted`, `queue`, `subtasks`, or `condition` are forbidden.
-  - `UnknownDirective`: A directive is invalid for its enclosing block. Deletion blocks permit `generation`, `task`, and `label`. Queue blocks permit `modified` and `task`. Condition rule types are `day`, `time`, and `location`.
+  - `UnknownDirective`: A directive is invalid for its enclosing block, including `queued` inside a `task` block in a `tdf 0.5.1` document. Deletion blocks permit `generation`, `task`, and `label`. Queue blocks permit `modified` and `task`. Condition rule types are `day`, `time`, and `location`.
   - `MissingRequiredDirective`: A task lacks `name` or `created`, a label lacks `name`, a deletion block lacks `generation`, or a queue lacks `modified`. A checklist or condition block contains no step or rule.
   - `DuplicateDirective`: A scalar or reference directive occurs repeatedly. A task contains multiple `subtasks` blocks, or the document contains multiple `deleted` or `queue` blocks.
-  - `DuplicateIdentifier`: An entity identity is declared repeatedly, including duplicate deletion records or a live identity with a deletion record. A repeated queue entry also produces this error. One queue reference to a live task is permitted.
-  - `InvalidQueueMembership`: Queue entries do not match the complete set of live scheduled open tasks under Section 4.5. Report missing members at their task lines and invalid entries at their queue lines.
+  - `DuplicateIdentifier`: An entity identity is declared repeatedly, including duplicate deletion records or a live identity with a deletion record. A repeated queue entry also produces this error. One queue reference to a live open task is permitted.
+  - `InvalidQueueMembership`: A `queue` entry in a `0.5.1` document references an unknown task ID, a deleted task ID, or a completed task (`finished` present) under Section 4.5. Report invalid entries at their queue lines.
   - `UnknownLabelReference`: A `labels` directive references a `<label-id>` that matches no declared `label` block in the document. Prerequisite `<task-id>` references to missing or pruned tasks remain valid and non-blocking.
   - `CircularDependency`: Task references in `blocked` directives form a direct cycle (self-dependency) or an indirect cycle across two or more `task` blocks.
   - `EmptyText`: `<title>` or `<uri>` in `link <title> <uri>` is empty or whitespace-only after unescaping.
@@ -1679,7 +1700,7 @@ These outcomes preserve input data and prevent the affected conversion, evaluati
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-tdf 0.5.0
+tdf 0.5.1
 
 deleted {
     generation 4
@@ -1717,13 +1738,12 @@ label 9kLm2P0aBc {
     }
 }
 
-# Prioritized task in '4x9p2mOkD2' overriding only the 'time' condition group
-# (narrowed to 09:00..18:00 while inheriting 'day sat sun' and 'location' from '4x9p2mOkD2'):
+# Scheduled prioritized task in '4x9p2mOkD2' (listed in 'queue') overriding only the 'time'
+# condition group (narrowed to 09:00..18:00 while inheriting 'day sat sun' and 'location' from '4x9p2mOkD2'):
 task 8jKaCdOkD2 priority {
     name      "Mow the lawn"
     note      "Check fuel level before starting"
     created   2026-11-01 19:30
-    queued    2026-11-01 19:30
     modified  2026-11-01 19:30
     labels    4x9p2mOkD2
     blocked   3nQp7ROkB8
@@ -1736,12 +1756,11 @@ task 8jKaCdOkD2 priority {
     }
 }
 
-# Prerequisite task in '4x9p2mOkD2' using 'condition any' to disable all inherited
-# label conditions (can be ordered online on any day, at any time, from anywhere):
+# Scheduled prerequisite task in '4x9p2mOkD2' (listed in 'queue') using 'condition any' to disable
+# all inherited label conditions (can be ordered online on any day, at any time, from anywhere):
 task 3nQp7ROkB8 {
     name      "Order replacement lawnmower blades online"
     created   2026-11-01 18:00
-    queued    2026-11-01 18:00
     modified  2026-11-01 18:00
     labels    4x9p2mOkD2
     link      "Portal Login" "https://example.com/portal#login"
@@ -1749,20 +1768,19 @@ task 3nQp7ROkB8 {
     condition any
 }
 
-# Task assigned to multiple labels without task-level overrides (in global view,
-# evaluates each label context independently and is active if all condition groups
+# Scheduled task assigned to multiple labels without task-level overrides (listed in 'queue';
+# in global view, evaluates each label context independently and is active if all condition groups
 # of '4x9p2mOkD2' OR all condition groups of '9kLm2P0aBc' are satisfied; when filtered by
 # '4x9p2mOkD2' or '9kLm2P0aBc', evaluates only the selected label's conditions; repeats every 30 days):
 task 5vWx9ZOk91 {
     name     "Clean dust filters on home NAS server"
     created  2026-11-01 10:00
-    queued   2026-11-01 10:00
     modified 2026-11-01 10:00
     labels   4x9p2mOkD2 9kLm2P0aBc
     repeat   30 days
 }
 
-# Task in "Someday" (no 'queued' directive present)
+# Unscheduled task in "Someday" (open task not listed in the 'queue' block)
 task 2bDf6HOkA4 {
     name     "Design 3D-printed enclosure for backup NAS"
     created  2026-11-01 12:00
@@ -1770,15 +1788,14 @@ task 2bDf6HOkA4 {
     labels   9kLm2P0aBc
 }
 
-# Completed task (pruning after more than 30 days creates a deletion record)
+# Completed task (omitted from 'queue'; pruning after more than 30 days creates a deletion record)
 task 7mPr4T09xY {
-    name     "Mount winter tires"
-    created  2026-10-20 14:00
-    queued   2026-10-21 08:00
-    finished 2026-10-29 16:45
-    modified 2026-10-29 16:45
+    name        "Mount winter tires"
+    created     2026-10-20 14:00
+    finished    2026-10-29 16:45
+    modified    2026-10-29 16:45
     completions 1
-    labels   4x9p2mOkD2
+    labels      4x9p2mOkD2
 }
 ```
 
@@ -1791,27 +1808,27 @@ Do not duplicate complete historical specifications here.
 
 ### 10.1 Import Boundary and Migration Chain
 
-- Normal loading MUST accept only the current version.
-- Import MUST be an explicit operation.
-- Import MUST validate the input against its declared source schema before applying migration rules.
+- Normal loading MUST accept the current version (`0.5.1`) and MUST also accept `0.5.0`, converting `0.5.0` documents in memory to `0.5.1` on load under Section 10.6 without writing to storage during read-only loading.
+- Importing older legacy versions (`0.2.0`, `0.3.0`, `0.4.0`) MUST be an explicit operation.
+- Import and load-time conversion MUST validate the input against its declared source schema before applying migration rules.
   Use the immutable source references in Section 10.1.1.
 - Import MUST apply adjacent migration steps in version order.
 - A chained import MUST execute every intermediate step. It MUST NOT skip a version.
 - Intermediate documents MAY remain in memory.
-- A migration step MUST NOT write files or communicate with storage.
-- The import operation MUST validate the complete result against the current specification before persistence.
-- A failed import MUST leave stored source data and the active document unchanged.
-- Import MUST NOT trigger task completion, recurrence, retention pruning, or other unrelated mutations.
+- A migration step or load-time conversion MUST NOT write files or communicate with storage.
+- The import or load-time conversion operation MUST validate the complete result against the current (`0.5.1`) specification before use or persistence.
+- A failed import or load-time conversion MUST leave stored source data and the active document unchanged.
+- Import and load-time conversion MUST NOT trigger task completion, recurrence, retention pruning, or other unrelated mutations.
 - Preserve fields and declaration order unless a migration entry explicitly requires a change.
 - Migration errors MUST identify the source version, target version, and relevant source line.
 
-For example, importing version `0.3.0` executes `0.3.0 -> 0.4.0`, followed by `0.4.0 -> 0.5.0`.
-Do not define a separate `0.3.0 -> 0.5.0` transformation.
+For example, importing version `0.3.0` executes `0.3.0 -> 0.4.0`, followed by `0.4.0 -> 0.5.0`, followed by `0.5.0 -> 0.5.1`.
+Do not define a separate `0.3.0 -> 0.5.1` transformation.
 Future versions MUST add one adjacent migration entry and retain earlier entries.
 
 #### 10.1.1 Historical Schema References
 
-These immutable snapshots identify the source schemas used by the adjacent migration chain.
+These immutable snapshots identify the source schemas used by the adjacent migration chain and load-time conversion.
 Each snapshot contains `TDF_SPEC.md` at the specified Git commit.
 The blob identifier identifies that file's exact contents.
 
@@ -1820,6 +1837,7 @@ The blob identifier identifies that file's exact contents.
 | `0.2.0` | `e6e6f804608fb00466d265533130c407f114b53e` | `e66b5917be314cebbea02d4163987f13018d1f5a` |
 | `0.3.0` | `ad4634a090a136b840a232f1830ef3fac3e8b6d4` | `562df38feb93009c15df998491536d8d44104e9d` |
 | `0.4.0` | `73bc56a9cd6fb09828df7bb97353b71eee81ddcd` | `0fdc2ce15a72ba6288fcd59ef4e23ab419d749fb` |
+| `0.5.0` | `e64e6a554bdbc2f6d5d76eacb900ae36d8c9b25b` | `8b492e7dfedea819ddeb9a2f0663d28fa8b08dfc` |
 
 Use these snapshots for historical syntax, value domains, and schema validation.
 Do not execute their load-time normalization, persistence, or synchronization behavior during source validation.
@@ -1838,7 +1856,7 @@ Each entry MUST specify:
 - Changes required in an implementation of the source version.
 - Result validation and verification cases.
 
-The supported adjacent chain is `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0`.
+The supported adjacent chain is `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`.
 Execute every intermediate step for older inputs.
 
 A draft entry MUST identify unresolved conversion rules.
@@ -2157,7 +2175,50 @@ Before claiming implementation conformance, execute all verification cases requi
 Add any newly discovered conversion ambiguity here before treating affected inputs as supported.
 Mark the affected rule unresolved until its conversion and acceptance cases are specified.
 
-### 10.6 Migration from the Initial Draft
+The next step in the adjacent migration chain is `0.5.0 -> 0.5.1` (Section 10.6).
+
+### 10.6 Migration and Load-Time Conversion from 0.5.0 to 0.5.1
+
+**Status:** Conversion rules are complete for this working draft.
+No unresolved conversion rules remain in this adjacent step.
+Implementation conformance remains unverified.
+
+**Scope (Load-Time Conversion & Import Chain):**
+- A `0.5.1` reader MUST accept `tdf 0.5.0` documents directly during normal loading and convert them in memory to `0.5.1` without writing to storage during read-only loading.
+- An explicit import of `0.2.0`, `0.3.0`, or `0.4.0` executes `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0` followed by this `0.5.0 -> 0.5.1` step.
+
+**File and in-memory conversion:**
+
+1. Validate the source using the `0.5.0` schema (Section 10.1.1).
+   In a valid `0.5.0` document, the `queue` block already contains all live open tasks (`finished` absent) that have a `queued` directive, in their saved queue order.
+2. If an intermediate migration step or hand-edited `0.5.0` input omitted an explicit `queue` block while containing open tasks with `queued` present, construct `queue` by ordering prioritized open `queued` tasks first, then regular open `queued` tasks, sorted within each group by ascending UTC `queued` timestamp and then source declaration order for ties, with `queue.modified` set to the greatest `0.5.0` effective revision (`max(created, queued, finished)` when `modified` is absent) among those queued tasks (or `1970-01-01 00:00:00` UTC when no scheduled open tasks exist).
+3. For each `task` block in the `0.5.0` document:
+   - If `modified` is omitted and `queued` is present with a UTC timestamp strictly greater than `created` (and `finished`, when present), set `task.modified` to that `0.5.0` effective revision (`max(created, queued, finished)`) so no historical revision ordering is lost when `queued` is removed.
+   - Strip the `queued` directive from the `task` block.
+   - Open tasks (`finished` absent) whose task ID is listed in `queue` remain scheduled in their exact `queue` order.
+   - Open tasks (`finished` absent) whose task ID is not listed in `queue` remain unscheduled (`Someday` under Section 5.3, or `Blocked` under Section 5.4 if an active `suspended` lock is present).
+   - Completed tasks (`finished` present) have their `queued` directive stripped and remain excluded from `queue`.
+4. Preserve all entity IDs, `deleted` records and generation, `queue` order and `queue.modified`, `label` blocks, completion counters, prerequisites, deferrals, recurrence rules, links, conditions, and checklists.
+5. Upgrade the document version header to `tdf 0.5.1` and validate the complete result against the `0.5.1` specification.
+
+**Implementation changes:**
+
+- Update canonical serialization to emit `tdf 0.5.1` and the 13-directive `task` order without `queued` (Sections 4.1.2 and 7.1).
+- Accept both `tdf 0.5.1` and `tdf 0.5.0` during normal loading, converting `0.5.0` documents in memory to `0.5.1` without performing disk writes during read-only loading.
+- Reject `queued` inside `task` blocks in `tdf 0.5.1` documents with `UnknownDirective` (Section 8).
+- Derive 6-tier scheduling status (`Focus`, `Ready`, `Planned`, `Blocked` vs. `Someday`) strictly from membership in `queue` and active `suspended` locks (Section 5).
+- Update task creation, `Someday` scheduling/unscheduling, downgrading, completion, recurrence rescheduling, restoration, and `suspended` mutations to operate on `queue` and `queue.modified` without `queued` (Section 6).
+- Update the omitted `task.modified` fallback formula in `0.5.1` to `max(created, finished)` (Section 6.7.1) and remove `queued` from the task occurrence state tuple (Sections 6.7.3 and 6.7.5).
+- Merge `Someday` <-> scheduled transitions via `queue` membership and `queue.modified`, and normalize the merged `queue` by removing any completed (`finished`) or tombstoned (`deleted`) task IDs (Section 6.11.2).
+
+**Verification cases:**
+
+- Loading a valid `tdf 0.5.0` document succeeds, strips `queued` from all tasks in memory, preserves `queue` membership and order, and performs no storage writes during read-only loading.
+- Serializing a loaded `0.5.0` document after conversion emits `tdf 0.5.1` with zero `queued` directives.
+- Loading a `tdf 0.5.1` document containing a `queued` directive inside a `task` block fails with `UnknownDirective`.
+- Chained import of `0.2.0`, `0.3.0`, and `0.4.0` documents executes through `0.5.0 -> 0.5.1`, populates `queue` from legacy `queued` open tasks, preserves fallback `task.modified` timestamps when `queued > created`, omits completed and unqueued tasks from `queue`, and strips all `queued` directives in the final `0.5.1` output.
+
+### 10.7 Migration from the Initial Draft
 
 The repository also contains the unfinished, headerless `0.1.0-draft`.
 Its adjacent migration to `0.2.0` remains under review.
