@@ -28,6 +28,7 @@ import '../models/webdav_config.dart';
 import '../providers/location_providers.dart';
 import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
+import '../repositories/app_version_repository.dart';
 import '../services/app_logger.dart';
 import 'edit_labels_screen.dart';
 import 'settings_screen.dart';
@@ -358,6 +359,121 @@ class _DrawerLabelsHeader extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Labels section inside [_LandingDrawer] rendering the section header, sorted label filter tiles, and the create-label tile.
+class _DrawerLabelsSection extends StatelessWidget {
+  /// Creates a [_DrawerLabelsSection].
+  const _DrawerLabelsSection({
+    required this.activeLabelId,
+    required this.board,
+    required this.onOpenEditLabels,
+    required this.onSelectLabel,
+  });
+
+  /// Currently selected label filter ID, or `null` when all tasks are shown.
+  final String? activeLabelId;
+
+  /// Current task board snapshot.
+  final TaskBoard board;
+
+  /// Callback to open [EditLabelsScreen], passing whether the create input should autofocus.
+  final ValueChanged<bool> onOpenEditLabels;
+
+  /// Callback to select or clear a label filter.
+  final ValueChanged<String?> onSelectLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _DrawerLabelsHeader(onEditLabels: () => onOpenEditLabels(false)),
+        for (final label in board.sortedLabels)
+          _DrawerLabelTile(
+            key: ValueKey('drawer_label_tile_${label.id}'),
+            count: board.openTaskCountForLabel(label.id),
+            isSelected: activeLabelId == label.id,
+            label: label,
+            onTap: () =>
+                onSelectLabel(activeLabelId == label.id ? null : label.id),
+          ),
+        _DrawerActionTile(
+          tileKey: const ValueKey('drawer_create_label_tile'),
+          icon: Icons.add_rounded,
+          title: localizations.createNewLabel,
+          onAction: () => onOpenEditLabels(true),
+        ),
+      ],
+    );
+  }
+}
+
+/// Muted SemVer 2.0.0 version and Git build metadata footer anchored at the bottom of [_LandingDrawer].
+class _DrawerVersionFooter extends ConsumerWidget {
+  /// Creates a [_DrawerVersionFooter].
+  const _DrawerVersionFooter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final rawVersion =
+        ref.watch(appVersionProvider).asData?.value ??
+        AppVersionRepository.defaultFullVersion;
+    final parts = _splitVersionParts(rawVersion);
+    final theme = Theme.of(context);
+    final baseColor = theme.colorScheme.onSurfaceVariant;
+    final versionColor =
+        Color.lerp(baseColor, theme.cardColor, 0.18) ?? baseColor;
+    final buildColor =
+        Color.lerp(versionColor, Colors.black, 0.32) ?? versionColor;
+    final baseStyle = theme.textTheme.labelSmall?.copyWith(
+      fontFamily: 'monospace',
+      fontSize: 11.5,
+      letterSpacing: 0.3,
+    );
+
+    return Padding(
+      key: const ValueKey('drawer_version_footer'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(
+              text: parts.versionLabel,
+              style: baseStyle?.copyWith(color: versionColor),
+            ),
+            if (parts.buildSuffix.isNotEmpty)
+              TextSpan(
+                text: parts.buildSuffix,
+                style: baseStyle?.copyWith(color: buildColor),
+              ),
+          ],
+        ),
+        key: const ValueKey('drawer_version_text'),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  /// Splits [rawVersion] (`v0.1.0+<build>`) into `Version 0.1.0` and `+<build>`.
+  static ({String versionLabel, String buildSuffix}) _splitVersionParts(
+    String rawVersion,
+  ) {
+    final trimmed = rawVersion.trim();
+    final withoutLeadingV = (trimmed.startsWith('v') || trimmed.startsWith('V'))
+        ? trimmed.substring(1)
+        : trimmed;
+    final plusIndex = withoutLeadingV.indexOf('+');
+    if (plusIndex < 0) {
+      return (versionLabel: 'Version $withoutLeadingV', buildSuffix: '');
+    }
+    return (
+      versionLabel: 'Version ${withoutLeadingV.substring(0, plusIndex)}',
+      buildSuffix: withoutLeadingV.substring(plusIndex),
     );
   }
 }
@@ -921,46 +1037,44 @@ class _LandingDrawer extends StatelessWidget {
 
     return Drawer(
       child: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.zero,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _DrawerHeader(title: localizations.appTitle),
-            const Divider(height: 8),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: DrawerWorkspaceCard(
-                workspace: activeWorkspace,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onManageWorkspaces();
-                },
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _DrawerHeader(title: localizations.appTitle),
+                  const Divider(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: DrawerWorkspaceCard(
+                      workspace: activeWorkspace,
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        onManageWorkspaces();
+                      },
+                    ),
+                  ),
+                  const Divider(height: 8),
+                  _DrawerLabelsSection(
+                    activeLabelId: activeLabelId,
+                    board: board,
+                    onOpenEditLabels: onOpenEditLabels,
+                    onSelectLabel: onSelectLabel,
+                  ),
+                  const Divider(height: 8),
+                  _DrawerFooterSection(
+                    enableLogging: activeWorkspace.config.enableLogging,
+                    onOpenDiagnosticLog: () => showLogViewerDialog(context),
+                    onOpenMarkdownPreview: onOpenMarkdownPreview,
+                    onOpenSettings: onOpenSettings,
+                    onSyncRemote: onSyncRemote,
+                  ),
+                ],
               ),
             ),
-            const Divider(height: 8),
-            _DrawerLabelsHeader(onEditLabels: () => onOpenEditLabels(false)),
-            for (final label in board.sortedLabels)
-              _DrawerLabelTile(
-                key: ValueKey('drawer_label_tile_${label.id}'),
-                count: board.openTaskCountForLabel(label.id),
-                isSelected: activeLabelId == label.id,
-                label: label,
-                onTap: () =>
-                    onSelectLabel(activeLabelId == label.id ? null : label.id),
-              ),
-            _DrawerActionTile(
-              tileKey: const ValueKey('drawer_create_label_tile'),
-              icon: Icons.add_rounded,
-              title: localizations.createNewLabel,
-              onAction: () => onOpenEditLabels(true),
-            ),
-            const Divider(height: 8),
-            _DrawerFooterSection(
-              enableLogging: activeWorkspace.config.enableLogging,
-              onOpenDiagnosticLog: () => showLogViewerDialog(context),
-              onOpenMarkdownPreview: onOpenMarkdownPreview,
-              onOpenSettings: onOpenSettings,
-              onSyncRemote: onSyncRemote,
-            ),
+            const _DrawerVersionFooter(),
           ],
         ),
       ),

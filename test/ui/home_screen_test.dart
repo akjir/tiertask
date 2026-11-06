@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/repositories/app_version_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 
 import 'test_helpers.dart';
@@ -1311,6 +1312,113 @@ task c20000OkD2 {
         find.text('PLANNED TASKS'),
         findsOneWidget,
         reason: 'Closing search must return to the Planned screen',
+      );
+    },
+  );
+
+  testWidgets(
+    'Navigation drawer displays version and build metadata anchored at the bottom of the sidepanel',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            appVersionRepositoryProvider.overrideWithValue(
+              const FakeAppVersionRepository(version: 'v0.1.0+55.e64e6a5.dev'),
+            ),
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+
+      final drawerFinder = find.byType(Drawer);
+      final versionFooterFinder = find.byKey(
+        const ValueKey('drawer_version_footer'),
+      );
+      final versionTextFinder = find.byKey(
+        const ValueKey('drawer_version_text'),
+      );
+      final settingsTileFinder = find.descendant(
+        of: drawerFinder,
+        matching: find.text('Settings'),
+      );
+
+      expect(
+        versionFooterFinder,
+        findsOneWidget,
+        reason: 'Sidepanel must render the bottom version footer container',
+      );
+      expect(
+        versionTextFinder,
+        findsOneWidget,
+        reason: 'Sidepanel must render the version text widget',
+      );
+      expect(
+        find.descendant(
+          of: versionFooterFinder,
+          matching: find.text('Version 0.1.0+55.e64e6a5.dev'),
+        ),
+        findsOneWidget,
+        reason:
+            'Sidepanel footer must display Version 0.1.0+<count>.<hash>[.dev]',
+      );
+
+      final versionTextWidget = tester.widget<Text>(versionTextFinder);
+      final rootSpan = versionTextWidget.textSpan;
+      expect(
+        rootSpan,
+        isA<TextSpan>(),
+        reason: 'Version footer must use Text.rich with a root TextSpan',
+      );
+      if (rootSpan case final TextSpan span) {
+        final children = span.children ?? const <InlineSpan>[];
+        expect(
+          children.length,
+          equals(2),
+          reason: 'Version text must split into Version 0.1.0 and the +build suffix',
+        );
+        if (children case [
+          final TextSpan versionSpan,
+          final TextSpan buildSpan,
+        ]) {
+          expect(versionSpan.text, equals('Version 0.1.0'));
+          expect(buildSpan.text, equals('+55.e64e6a5.dev'));
+          final versionColor = versionSpan.style?.color;
+          final buildColor = buildSpan.style?.color;
+          expect(versionColor, isNotNull);
+          expect(buildColor, isNotNull);
+          if (versionColor != null && buildColor != null) {
+            expect(
+              buildColor.computeLuminance() < versionColor.computeLuminance(),
+              isTrue,
+              reason: 'Build metadata starting from + must be rendered darker than Version 0.1.0',
+            );
+          }
+        }
+      }
+
+      final drawerRect = tester.getRect(drawerFinder);
+      final settingsRect = tester.getRect(settingsTileFinder);
+      final footerRect = tester.getRect(versionFooterFinder);
+
+      expect(
+        footerRect.top >= settingsRect.bottom,
+        isTrue,
+        reason: 'Version footer must be positioned below the Settings action',
+      );
+      expect(
+        drawerRect.bottom - footerRect.bottom <= 24.0,
+        isTrue,
+        reason: 'Version footer must be anchored at the bottom edge of the sidepanel',
       );
     },
   );

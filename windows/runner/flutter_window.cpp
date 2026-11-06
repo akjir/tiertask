@@ -14,6 +14,7 @@
 #include <string>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "generated_version.h"
 #include "utils.h"
 
 namespace {
@@ -283,6 +284,22 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  app_version_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "de.akjir.tiertask/app_version",
+          &flutter::StandardMethodCodec::GetInstance());
+  app_version_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        if (call.method_name() == "getAppVersion") {
+          result->Success(flutter::EncodableValue(TIERTASK_FULL_VERSION));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   directory_picker_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(),
@@ -390,6 +407,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  app_version_channel_ = nullptr;
   directory_picker_channel_ = nullptr;
   link_launcher_channel_ = nullptr;
   location_channel_ = nullptr;

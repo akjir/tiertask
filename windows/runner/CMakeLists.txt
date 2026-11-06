@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
 
+set(GENERATED_VERSION_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated_version.h")
+add_custom_target(generate_version_header ALL
+  BYPRODUCTS "${GENERATED_VERSION_HEADER}"
+  COMMAND ${CMAKE_COMMAND}
+    "-DPROJECT_DIR=${CMAKE_SOURCE_DIR}/.."
+    "-DPACKAGE_VERSION=0.1.0"
+    "-DOUTPUT_HEADER=${GENERATED_VERSION_HEADER}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/generate_version.cmake"
+  VERBATIM
+)
+
 # Define the application target. To change its name, change BINARY_NAME in the
 # top-level CMakeLists.txt, not the value here, or `flutter run` will no longer
 # work.
@@ -15,6 +26,7 @@ add_executable(${BINARY_NAME} WIN32
   "Runner.rc"
   "runner.exe.manifest"
 )
+add_dependencies(${BINARY_NAME} generate_version_header)
 
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
@@ -34,7 +46,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib" "ole32.lib" "runtimeobject.lib" "shell32.lib" "wlanapi.lib")
-target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

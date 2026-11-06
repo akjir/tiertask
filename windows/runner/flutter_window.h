@@ -31,6 +31,10 @@ class FlutterWindow : public Win32Window {
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
+  // Channel for querying the compile-time application version and build metadata.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      app_version_channel_;
+
   // Channel for opening the native Windows folder selection dialog.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       directory_picker_channel_;

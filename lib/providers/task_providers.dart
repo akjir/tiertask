@@ -28,6 +28,7 @@ import '../models/tdf_metadata.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
+import '../repositories/app_version_repository.dart';
 import '../repositories/link_launcher_repository.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/settings_repository.dart';
@@ -58,6 +59,16 @@ final appThemePaletteProvider = Provider<AppThemePalette>((ref) {
 final appThemeProvider = NotifierProvider<AppThemeNotifier, AppThemeSet>(
   AppThemeNotifier.new,
 );
+
+/// Provides the resolved SemVer 2.0.0 application version and Git build metadata (`v0.1.0+<count>.<hash>[.dev]`).
+final appVersionProvider = FutureProvider<String>((ref) async {
+  return ref.watch(appVersionRepositoryProvider).loadAppVersion();
+});
+
+/// Provides the [AppVersionRepository] used to load the application version and build metadata.
+final appVersionRepositoryProvider = Provider<AppVersionRepository>((ref) {
+  return const PlatformAppVersionRepository();
+});
 
 /// Injectable clock function for deterministic date handling in unit tests.
 final clockProvider = Provider<DateTime Function()>((ref) {

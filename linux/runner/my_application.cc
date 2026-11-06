@@ -7,10 +7,12 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "generated_version.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* app_version_channel;
   FlMethodChannel* directory_picker_channel;
   FlMethodChannel* link_launcher_channel;
   FlMethodChannel* location_channel;
@@ -338,6 +340,20 @@ static void on_link_launcher_method_call(FlMethodChannel* channel,
   fl_method_call_respond(method_call, response, nullptr);
 }
 
+static void on_app_version_method_call(FlMethodChannel* channel,
+                                       FlMethodCall* method_call,
+                                       gpointer user_data) {
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+  if (g_strcmp0(method, "getAppVersion") == 0) {
+    g_autoptr(FlValue) result = fl_value_new_string(TIERTASK_FULL_VERSION);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
 static void on_location_method_call(FlMethodChannel* channel,
                                     FlMethodCall* method_call,
                                     gpointer user_data) {
@@ -427,6 +443,10 @@ static void my_application_activate(GApplication* application) {
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   FlBinaryMessenger* messenger =
       fl_engine_get_binary_messenger(fl_view_get_engine(view));
+  self->app_version_channel = fl_method_channel_new(
+      messenger, "de.akjir.tiertask/app_version", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->app_version_channel, on_app_version_method_call, self, nullptr);
   self->directory_picker_channel = fl_method_channel_new(
       messenger, "de.akjir.tiertask/directory_picker", FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(
@@ -486,6 +506,7 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
+  g_clear_object(&self->app_version_channel);
   g_clear_object(&self->directory_picker_channel);
   g_clear_object(&self->link_launcher_channel);
   g_clear_object(&self->location_channel);
