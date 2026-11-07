@@ -392,7 +392,6 @@ class TaskItem {
     this.isPriority = false,
     int? completions,
     DateTime? createdAt,
-    this.queuedAt,
     this.completedAt,
     this.modifiedAt,
     this.suspendedAt,
@@ -471,9 +470,6 @@ class TaskItem {
   /// Optional extended description (`note` directive).
   final String? note;
 
-  /// Active pull-cycle queue timestamp (`queued` directive), or `null` when in `Someday`.
-  final DateTime? queuedAt;
-
   /// Optional recurrence rule (`repeat` directive).
   final TaskRepeatRule? repeatRule;
 
@@ -489,9 +485,9 @@ class TaskItem {
   /// Human-readable task title (`name` directive).
   final String title;
 
-  /// Effective UTC modification timestamp (`modifiedAt ?? max(createdAt, queuedAt, completedAt)`).
+  /// Effective UTC modification timestamp (`modifiedAt ?? max(createdAt, completedAt)`).
   DateTime get effectiveModifiedAt =>
-      modifiedAt ?? _latestTimestamp(createdAt, queuedAt, completedAt);
+      modifiedAt ?? _latestTimestamp(createdAt, completedAt);
 
   /// Returns a copy of this task with the provided fields updated.
   TaskItem copyWith({
@@ -502,7 +498,6 @@ class TaskItem {
     bool? isPriority,
     int? completions,
     DateTime? createdAt,
-    DateTime? queuedAt,
     DateTime? completedAt,
     DateTime? modifiedAt,
     DateTime? suspendedAt,
@@ -516,7 +511,6 @@ class TaskItem {
     bool? subtasksAutoFinish,
     List<SubtaskItem>? subtasks,
     bool clearNote = false,
-    bool clearQueuedAt = false,
     bool clearCompletedAt = false,
     bool clearModifiedAt = false,
     bool clearSuspendedAt = false,
@@ -538,7 +532,6 @@ class TaskItem {
       isPriority: isPriority ?? this.isPriority,
       completions: completions ?? this.completions,
       createdAt: createdAt ?? this.createdAt,
-      queuedAt: clearQueuedAt ? null : (queuedAt ?? this.queuedAt),
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
@@ -623,8 +616,6 @@ class TaskItem {
 
   /// Creates an open (incomplete) task with no `finished` timestamp.
   TaskItem toActive({
-    DateTime? queuedAt,
-    bool clearQueuedAt = false,
     bool? isPriority,
     bool clearBlocking = false,
     DateTime? modifiedAt,
@@ -632,8 +623,6 @@ class TaskItem {
     return copyWith(
       isCompleted: false,
       clearCompletedAt: true,
-      queuedAt: queuedAt,
-      clearQueuedAt: clearQueuedAt,
       isPriority: isPriority,
       clearSuspendedAt: clearBlocking,
       blockedByTaskIds: clearBlocking ? const [] : null,
@@ -775,19 +764,9 @@ class TaskItem {
     return hour * 60 + minute;
   }
 
-  /// Returns the latest non-null UTC timestamp among [created], [queued], and [completed].
-  static DateTime _latestTimestamp(
-    DateTime created,
-    DateTime? queued,
-    DateTime? completed,
-  ) {
+  /// Returns the latest non-null UTC timestamp between [created] and [completed].
+  static DateTime _latestTimestamp(DateTime created, DateTime? completed) {
     var latest = normalizeTimestamp(created);
-    if (queued case final q?) {
-      final normalizedQueued = normalizeTimestamp(q);
-      if (normalizedQueued.isAfter(latest)) {
-        latest = normalizedQueued;
-      }
-    }
     if (completed case final c?) {
       final normalizedCompleted = normalizeTimestamp(c);
       if (normalizedCompleted.isAfter(latest)) {
@@ -851,7 +830,6 @@ class TaskItem {
         other.isPriority == isPriority &&
         other.completions == completions &&
         other.createdAt == createdAt &&
-        other.queuedAt == queuedAt &&
         other.completedAt == completedAt &&
         other.modifiedAt == modifiedAt &&
         other.suspendedAt == suspendedAt &&
@@ -875,7 +853,6 @@ class TaskItem {
     isPriority,
     completions,
     createdAt,
-    queuedAt,
     completedAt,
     modifiedAt,
     suspendedAt,

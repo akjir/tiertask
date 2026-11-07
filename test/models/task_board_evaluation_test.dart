@@ -333,9 +333,10 @@ task donunmOkD2 priority {
             'Restoring to Planned must strip the priority flag per Section 6.5',
       );
       expect(
-        restoredTask.queuedAt,
-        equals(restoredTime),
-        reason: 'Restoring to Planned must set queued to now per Section 6.5',
+        restoredBoard.queueTaskIds.last,
+        equals('donunmOkD2'),
+        reason:
+            'Restoring to Planned must append task ID to queue per Section 6.5',
       );
     });
 

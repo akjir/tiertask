@@ -138,7 +138,7 @@ class TdfRepeatClock {
   /// Whether this clock represents local midnight (`00:00:00`).
   bool get isMidnight => hour == 0 && minute == 0 && second == 0;
 
-  /// Formats this clock in canonical TDF 0.5.0 form: empty string for `00:00:00`, `HH:MM` when [second] is `0`, else `HH:MM:SS`.
+  /// Formats this clock in canonical TDF 0.5.1 form: empty string for `00:00:00`, `HH:MM` when [second] is `0`, else `HH:MM:SS`.
   String formatCanonical() {
     if (isMidnight) {
       return '';

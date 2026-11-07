@@ -50,7 +50,7 @@ void main() {
         int? expectedLine,
       }) {
         expectRawTdfError(
-          'tdf 0.5.0\n$bodyWithoutHeader',
+          'tdf 0.5.1\n$bodyWithoutHeader',
           expectedKind,
           expectedLine: expectedLine == null ? null : expectedLine + 1,
         );
@@ -83,18 +83,18 @@ void main() {
         expectedLine: 1,
       );
       expectRawTdfError(
-        'tdf "0.5.0"\n',
+        'tdf "0.5.1"\n',
         TdfErrorKind.unsupportedVersion,
         expectedLine: 1,
       );
       expectRawTdfError(
-        'tdf 0.5.0 extra\n',
+        'tdf 0.5.1 extra\n',
         TdfErrorKind.unsupportedVersion,
         expectedLine: 1,
       );
 
       expectTdfError(
-        'tdf 0.5.0',
+        'tdf 0.5.1',
         TdfErrorKind.unexpectedRootDirective,
         expectedLine: 1,
       );
@@ -104,8 +104,13 @@ void main() {
         expectedLine: 1,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  queued\n}',
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  modified\n}',
         TdfErrorKind.missingDirectiveArgument,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  queued 2026-11-01 08:00\n}',
+        TdfErrorKind.unknownDirective,
         expectedLine: 4,
       );
       expectTdfError(
@@ -243,14 +248,9 @@ void main() {
         expectedLine: 5,
       );
       expectTdfError(
-        'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Dup queue"\n  created 2026-11-01\n  queued 2026-11-01\n}',
+        'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Dup queue"\n  created 2026-11-01\n}',
         TdfErrorKind.duplicateIdentifier,
         expectedLine: 4,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Scheduled but missing from queue"\n  created 2026-11-01\n  queued 2026-11-01\n}',
-        TdfErrorKind.invalidQueueMembership,
-        expectedLine: 1,
       );
       expectTdfError(
         'queue {\n  modified 2026-11-01 00:00:00\n  task 999999OkD2\n}',
@@ -258,14 +258,24 @@ void main() {
         expectedLine: 3,
       );
       expectTdfError(
-        'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Someday in queue"\n  created 2026-11-01\n}',
+        'deleted {\n  generation 0\n  task 000001OkD2 2026-11-01\n}\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}',
+        TdfErrorKind.invalidQueueMembership,
+        expectedLine: 7,
+      );
+      expectTdfError(
+        'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Completed in queue"\n  created 2026-11-01\n  finished 2026-11-01 10:00\n  completions 1\n}',
         TdfErrorKind.invalidQueueMembership,
         expectedLine: 3,
       );
-      expectTdfError(
-        'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Completed in queue"\n  created 2026-11-01\n  queued 2026-11-01\n  finished 2026-11-01 10:00\n  completions 1\n}',
+      expectRawTdfError(
+        'tdf 0.5.0\nqueue {\n  modified 2026-11-01 00:00:00\n}\ntask 000001OkD2 {\n  name "Scheduled but missing from explicit 0.5.0 queue"\n  created 2026-11-01\n  queued 2026-11-01\n}',
         TdfErrorKind.invalidQueueMembership,
-        expectedLine: 3,
+        expectedLine: 5,
+      );
+      expectRawTdfError(
+        'tdf 0.5.0\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Someday in 0.5.0 queue"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidQueueMembership,
+        expectedLine: 4,
       );
       expectTdfError(
         'task 000001OkD2 {\n  name "Finished without completions"\n  created 2026-11-01\n  finished 2026-11-01 10:00\n}',

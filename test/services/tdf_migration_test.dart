@@ -115,15 +115,25 @@ task home priority {
       );
       expect(
         result.executedSteps,
-        equals(['0.2.0', '0.3.0', '0.4.0', '0.5.0']),
-        reason:
-            'Chained 0.2.0 import must execute every intermediate version step',
+        equals(['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1']),
+        reason: 'Chained 0.2.0 import must execute every intermediate version step through 0.5.1',
+      );
+      expect(result.migratedTdfContent, startsWith('tdf 0.5.1\n'));
+      expect(
+        result.migratedTdfContent.contains('    queued '),
+        isFalse,
+        reason: 'Final 0.5.1 output must strip all queued directives',
       );
       final migratedTask = result.board.findTask('OaPtpMHEy3')!;
       expect(
         migratedTask.suspendedAt,
         equals(DateTime.utc(2026, 10, 25, 0, 30)),
         reason: 'Fall-back overlap 2026-10-25 02:30 in Europe/Berlin must convert to first occurrence 00:30 UTC in 0.4.0 -> 0.5.0',
+      );
+      expect(
+        migratedTask.modifiedAt,
+        equals(DateTime.utc(2026, 7, 1, 7, 0)),
+        reason: 'Section 10.6 step 3 must preserve fallback modified (queued 2026-07-01 07:00 UTC > created 2026-06-30 22:00 UTC)',
       );
       expect(result.board.queueBlock.taskIds, equals(['OaPtpMHEy3']));
 
@@ -290,6 +300,74 @@ task 8jKaCdOkD2 {
           ),
         ),
         reason: 'Converted UTC timestamp below 0001-01-01 00:00:00 must fail with InvalidTimestamp without clamping',
+      );
+    });
+
+    test('executes adjacent 0.5.0 -> 0.5.1 migration per Section 10.6 and verifies pinned schemaRef050', () {
+      expect(TdfImporter.schemaRef050.version, equals('0.5.0'));
+      expect(
+        TdfImporter.schemaRef050.commit,
+        equals('e64e6a554bdbc2f6d5d76eacb900ae36d8c9b25b'),
+      );
+      expect(
+        TdfImporter.schemaRef050.blob,
+        equals('8b492e7dfedea819ddeb9a2f0663d28fa8b08dfc'),
+      );
+      expect(TdfImporter.historicalSchemaReferences.length, equals(4));
+
+      const doc050 = '''
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 09:00:00
+    task 111111OkD2
+}
+
+task 111111OkD2 {
+    name    "Queued Task With Later Queued Timestamp"
+    created 2026-11-01 08:00
+    queued  2026-11-01 09:30
+}
+
+task 222222OkD2 {
+    name    "Unqueued Someday Task"
+    created 2026-11-01 08:30
+}
+
+task 333333OkD2 {
+    name        "Completed Task With Earlier Queued"
+    created     2026-11-01 07:00
+    queued      2026-11-01 07:30
+    finished    2026-11-01 10:00
+    completions 1
+}
+''';
+
+      final migrated051 = TdfImporter.migrate050To051(doc050);
+      expect(migrated051, startsWith('tdf 0.5.1\n'));
+      expect(migrated051.contains('    queued '), isFalse);
+      expect(
+        migrated051,
+        contains(
+          'task 111111OkD2 {\n'
+          '    name "Queued Task With Later Queued Timestamp"\n'
+          '    created 2026-11-01 08:00\n'
+          '    modified 2026-11-01 09:30\n'
+          '}',
+        ),
+        reason: 'Section 10.6 step 3 must promote queued (09:30 > created 08:00) into modified when modified was omitted',
+      );
+      expect(
+        migrated051,
+        contains(
+          'task 333333OkD2 {\n'
+          '    name "Completed Task With Earlier Queued"\n'
+          '    created 2026-11-01 07:00\n'
+          '    finished 2026-11-01 10:00\n'
+          '    completions 1\n'
+          '}',
+        ),
+        reason: 'When finished (10:00) > queued (07:30), 0.5.1 fallback max(created, finished) already equals 10:00 so modified stays omitted',
       );
     });
   });

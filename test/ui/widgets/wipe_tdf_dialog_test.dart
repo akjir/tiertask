@@ -206,8 +206,8 @@ task 000001OkD2 {
       );
       expect(
         localFile.readAsStringSync(),
-        equals('tdf 0.5.0\n'),
-        reason: 'Local file must be emptied to canonical tdf 0.5.0',
+        equals('tdf 0.5.1\n'),
+        reason: 'Local file must be emptied to canonical tdf 0.5.1',
       );
       final localBak = File('${tempDir.path}/local_board.tdf.bak');
       expect(
@@ -264,7 +264,7 @@ task 000001OkD2 {
       );
       expect(
         remoteFiles['/remote.php/dav/files/alice/remote_board.tdf'],
-        equals('tdf 0.5.0\n'),
+        equals('tdf 0.5.1\n'),
       );
       expect(
         remoteFiles['/remote.php/dav/files/alice/remote_board.tdf.bak'],

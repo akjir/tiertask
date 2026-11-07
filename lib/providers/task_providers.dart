@@ -384,8 +384,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updated);
   }
 
-  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.4.0`) or `0.5.0` [rawTdf]
-  /// document into `tdf 0.5.0`, invalidates any earlier synchronization baseline per
+  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.0`) or `0.5.1` [rawTdf]
+  /// document into `tdf 0.5.1`, invalidates any earlier synchronization baseline per
   /// `TDF_SPEC.md` Section 10.1, and persists the migrated document to active storage.
   Future<TdfImportResult> importLegacyTdf(
     String rawTdf, {

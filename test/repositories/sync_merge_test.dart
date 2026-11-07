@@ -217,8 +217,8 @@ task 000001OkD2 {
     );
     expect(
       localTdf,
-      contains('tdf 0.5.0'),
-      reason: 'Output header must use TDF 0.5.0',
+      contains('tdf 0.5.1'),
+      reason: 'Output header must use TDF 0.5.1',
     );
   });
 
@@ -487,7 +487,7 @@ task t002 {
 
     expect(localSaveCount, greaterThanOrEqualTo(1));
     expect(remoteSaveCount, greaterThanOrEqualTo(1));
-    expect(localTdf, startsWith('tdf 0.5.0\n'));
+    expect(localTdf, startsWith('tdf 0.5.1\n'));
     expect(remoteTdf, equals(localTdf));
     expect(localTdf, contains('label $convertedLabelId {'));
     expect(localTdf, contains('task $convertedFirstTaskId {'));

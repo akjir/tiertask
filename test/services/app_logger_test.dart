@@ -393,7 +393,6 @@ void main() {
         title: 'Expired Completed Task',
         isCompleted: true,
         createdAt: fixedUtc.subtract(const Duration(days: 40)),
-        queuedAt: fixedUtc.subtract(const Duration(days: 40)),
         completedAt: fixedUtc.subtract(const Duration(days: 35)),
         modifiedAt: fixedUtc.subtract(const Duration(days: 35)),
       );

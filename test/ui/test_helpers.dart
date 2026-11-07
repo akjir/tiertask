@@ -104,7 +104,7 @@ class FakeWebDavRepository extends WebDavRepository {
           }
         }
       }
-      store[path] = 'tdf 0.5.0\n';
+      store[path] = 'tdf 0.5.1\n';
     }
   }
 }

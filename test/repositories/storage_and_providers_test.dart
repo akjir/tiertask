@@ -184,7 +184,7 @@ task 000005OkD2 {
       expect(updatedBoard.completed.first.title, equals('Remote Focus 1'));
 
       expect(putCount, greaterThanOrEqualTo(1));
-      expect(remoteTdfStore, contains('tdf 0.5.0'));
+      expect(remoteTdfStore, contains('tdf 0.5.1'));
       expect(remoteTdfStore, contains('task $firstFocusId {'));
       expect(remoteTdfStore, contains('finished 2026-11-01 12:00'));
     });
@@ -408,7 +408,7 @@ task 000005OkD2 {
         reason: 'Local mode must persist local_only.tdf on disk',
       );
       final savedDiskContent = await localFile.readAsString();
-      expect(savedDiskContent, contains('tdf 0.5.0'));
+      expect(savedDiskContent, contains('tdf 0.5.1'));
       expect(savedDiskContent, contains('name "Persistent Local Task"'));
       expect(savedDiskContent, contains('step false "First step"'));
       expect(remotePutCount, equals(0));
@@ -527,9 +527,9 @@ task 000005OkD2 {
       );
       expect(
         await mainFile.readAsString(),
-        equals('tdf 0.5.0\n'),
+        equals('tdf 0.5.1\n'),
         reason:
-            'Wiped local file must contain canonical empty tdf 0.5.0 header',
+            'Wiped local file must contain canonical empty tdf 0.5.1 header',
       );
       expect(
         await bakFile.exists(),
@@ -541,8 +541,8 @@ task 000005OkD2 {
       await repository.wipeTdf(createBackup: false);
       expect(
         await mainFile.readAsString(),
-        equals('tdf 0.5.0\n'),
-        reason: 'wipeTdf(createBackup: false) must reset file to tdf 0.5.0',
+        equals('tdf 0.5.1\n'),
+        reason: 'wipeTdf(createBackup: false) must reset file to tdf 0.5.1',
       );
       expect(
         await bakFile.exists(),
@@ -562,7 +562,7 @@ task 000005OkD2 {
         equals('corrupted tdf content A'),
         reason: '.bak must preserve exact pre-wipe content',
       );
-      expect(await mainFile.readAsString(), equals('tdf 0.5.0\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.5.1\n'));
 
       await mainFile.writeAsString('corrupted tdf content B', flush: true);
       await repository.wipeTdf(createBackup: true);
@@ -652,8 +652,8 @@ task 000005OkD2 {
       );
       expect(
         remoteFiles[remotePath],
-        equals('tdf 0.5.0\n'),
-        reason: 'Remote file must be reset to canonical empty tdf 0.5.0',
+        equals('tdf 0.5.1\n'),
+        reason: 'Remote file must be reset to canonical empty tdf 0.5.1',
       );
 
       remoteFiles[remotePath] = 'broken remote state 2';
@@ -665,7 +665,7 @@ task 000005OkD2 {
         equals('broken remote state 2'),
         reason: 'Second remote wipe with createBackup must write .bak.001 on WebDAV',
       );
-      expect(remoteFiles[remotePath], equals('tdf 0.5.0\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.5.1\n'));
 
       await container
           .read(taskNotifierProvider.notifier)
@@ -674,7 +674,7 @@ task 000005OkD2 {
       final localWipeBak = File('${tempDir.path}/local_wipe.tdf.bak');
       expect(await localWipeBak.exists(), isTrue);
       expect(await localWipeBak.readAsString(), contains('Task before wipe'));
-      expect(await localWipeFile.readAsString(), equals('tdf 0.5.0\n'));
+      expect(await localWipeFile.readAsString(), equals('tdf 0.5.1\n'));
       expect(
         container.read(taskNotifierProvider).value?.allTasks,
         isEmpty,

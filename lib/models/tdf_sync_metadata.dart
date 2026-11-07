@@ -374,7 +374,7 @@ class TdfTaskDependency {
   /// Canonical 10-character Base62 identifier of the prerequisite task.
   final String taskId;
 
-  /// Formats this dependency in canonical TDF 0.5.0 form (`<task-id>` when [requiredCompletion] is `1`, else `<task-id>:<n>`).
+  /// Formats this dependency in canonical TDF 0.5.1 form (`<task-id>` when [requiredCompletion] is `1`, else `<task-id>:<n>`).
   String formatCanonical() {
     if (requiredCompletion <= 1) {
       return taskId;

@@ -37,23 +37,32 @@ class TdfImportResult {
     required this.board,
   }) : executedSteps = List<String>.unmodifiable(executedSteps);
 
-  /// Evaluated target `0.5.0` [TaskBoard].
+  /// Evaluated target `0.5.1` [TaskBoard].
   final TaskBoard board;
 
-  /// Ordered sequence of schema versions traversed during import (for example `['0.2.0', '0.3.0', '0.4.0', '0.5.0']`).
+  /// Ordered sequence of schema versions traversed during import (for example `['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1']`).
   final List<String> executedSteps;
 
-  /// Canonical `tdf 0.5.0` document string produced by the migration chain.
+  /// Canonical `tdf 0.5.1` document string produced by the migration chain.
   final String migratedTdfContent;
 
-  /// Declared version of the input document (`0.2.0`, `0.3.0`, `0.4.0`, or `0.5.0`).
+  /// Declared version of the input document (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, or `0.5.1`).
   final String sourceVersion;
 }
 
-/// Stateless service implementing the explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0`
+/// Stateless service implementing the explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`
 /// version import and adjacent migration chain defined in `TDF_SPEC.md` Section 10.
 class TdfImporter {
   const TdfImporter._();
+
+  /// Ordered list of all pinned historical TDF schema snapshot references (`0.2.0` through `0.5.0`).
+  static const List<({String version, String commit, String blob})>
+  historicalSchemaReferences = <({String version, String commit, String blob})>[
+    schemaRef020,
+    schemaRef030,
+    schemaRef040,
+    schemaRef050,
+  ];
 
   /// Historical schema snapshot reference for `0.2.0` (`TDF_SPEC.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef020 = (
@@ -76,7 +85,14 @@ class TdfImporter {
     blob: '0fdc2ce15a72ba6288fcd59ef4e23ab419d749fb',
   );
 
-  /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0`).
+  /// Historical schema snapshot reference for `0.5.0` (`TDF_SPEC.md` Section 10.1.1).
+  static const ({String version, String commit, String blob}) schemaRef050 = (
+    version: '0.5.0',
+    commit: 'e64e6a554bdbc2f6d5d76eacb900ae36d8c9b25b',
+    blob: '8b492e7dfedea819ddeb9a2f0663d28fa8b08dfc',
+  );
+
+  /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`).
   static TdfImportResult importDocument(
     String sourceContent, {
     TdfTimeZoneContext? sourceTimeZone,
@@ -104,6 +120,10 @@ class TdfImporter {
     if (executedSteps.last == '0.4.0') {
       currentDoc = migrate040To050(currentDoc, sourceTimeZone: sourceTimeZone);
       executedSteps.add('0.5.0');
+    }
+    if (executedSteps.last == '0.5.0') {
+      currentDoc = migrate050To051(currentDoc);
+      executedSteps.add('0.5.1');
     }
 
     final board = service.parse(
@@ -254,7 +274,7 @@ class TdfImporter {
       );
     }
 
-    final tasks050 = <TaskItem>[];
+    final tasks050 = <({TaskItem task, DateTime? queuedAt})>[];
     for (final task in rewritten.tasks) {
       tasks050.add(
         _convertHistoricalTaskTo050(task, sourceTimeZone: sourceTimeZone),
@@ -263,27 +283,55 @@ class TdfImporter {
 
     final queueBlock = _buildLegacyQueueBlock(tasks050);
     const service = TdfService();
-    final board = TaskBoard.evaluate(
-      tasks: tasks050,
+    final serialized050 = _serializeDocument050(
       labels: labels050,
-      deletedBlock: TdfDeletedBlock.empty,
+      tasks: tasks050,
       queueBlock: queueBlock,
-      pruneExpiredCompleted: false,
     );
-    final serialized050 = service.serialize(board);
     service.parse(serialized050, pruneExpiredCompleted: false);
     return serialized050;
   }
 
+  /// Executes the adjacent `0.5.0 -> 0.5.1` file conversion defined in `TDF_SPEC.md` Section 10.6.
+  static String migrate050To051(String source050) {
+    final version = _detectDeclaredVersion(source050);
+    if (version != '0.5.0') {
+      throw TdfException(
+        kind: TdfErrorKind.unsupportedVersion,
+        line: 1,
+        sourceVersion: '0.5.0',
+        targetVersion: '0.5.1',
+        message:
+            'Expected source version "0.5.0" for 0.5.0 -> 0.5.1 migration, found "$version".',
+      );
+    }
+    const service = TdfService();
+    try {
+      final board = service.parse(source050, pruneExpiredCompleted: false);
+      final serialized051 = service.serialize(board);
+      service.parse(serialized051, pruneExpiredCompleted: false);
+      return serialized051;
+    } on TdfException catch (error) {
+      throw TdfException(
+        kind: error.kind,
+        line: error.line,
+        sourceVersion: '0.5.0',
+        targetVersion: '0.5.1',
+        message: error.message,
+      );
+    }
+  }
+
   /// Builds the shared `0.5.0` [TdfQueueBlock] preserving the `0.4.0` effective queue order per Section 10.5.
-  static TdfQueueBlock _buildLegacyQueueBlock(List<TaskItem> tasks) {
-    final indexed = <({int index, TaskItem task})>[];
+  static TdfQueueBlock _buildLegacyQueueBlock(
+    List<({TaskItem task, DateTime? queuedAt})> tasks,
+  ) {
+    final indexed = <({int index, TaskItem task, DateTime queuedAt})>[];
     for (var i = 0; i < tasks.length; i++) {
-      final task = tasks[i];
-      if (task.queuedAt != null &&
-          !task.isCompleted &&
-          task.completedAt == null) {
-        indexed.add((index: i, task: task));
+      final entry = tasks[i];
+      if (entry.queuedAt case final queuedAt?
+          when !entry.task.isCompleted && entry.task.completedAt == null) {
+        indexed.add((index: i, task: entry.task, queuedAt: queuedAt));
       }
     }
     if (indexed.isEmpty) {
@@ -293,28 +341,32 @@ class TdfImporter {
       if (left.task.isPriority != right.task.isPriority) {
         return left.task.isPriority ? -1 : 1;
       }
-      final leftQueued = left.task.queuedAt ?? left.task.createdAt;
-      final rightQueued = right.task.queuedAt ?? right.task.createdAt;
-      final timeCmp = leftQueued.compareTo(rightQueued);
+      final timeCmp = left.queuedAt.compareTo(right.queuedAt);
       if (timeCmp != 0) {
         return timeCmp;
       }
       return left.index.compareTo(right.index);
     });
-    var maxModified = indexed.first.task.effectiveModifiedAt;
+    DateTime? maxModified;
     final orderedIds = <String>[];
     for (final entry in indexed) {
       orderedIds.add(entry.task.id);
-      final effective = entry.task.effectiveModifiedAt;
-      if (effective.isAfter(maxModified)) {
+      var effective = entry.task.effectiveModifiedAt;
+      if (entry.task.modifiedAt == null && entry.queuedAt.isAfter(effective)) {
+        effective = entry.queuedAt;
+      }
+      if (maxModified == null || effective.isAfter(maxModified)) {
         maxModified = effective;
       }
     }
-    return TdfQueueBlock(modifiedAt: maxModified, taskIds: orderedIds);
+    return TdfQueueBlock(
+      modifiedAt: maxModified ?? TdfQueueBlock.epochModifiedAt,
+      taskIds: orderedIds,
+    );
   }
 
-  /// Converts a validated `0.4.0` [_HistoricalTask] into a `0.5.0` [TaskItem] per Section 10.5.
-  static TaskItem _convertHistoricalTaskTo050(
+  /// Converts a validated `0.4.0` [_HistoricalTask] into a `0.5.0` [TaskItem] and optional `queuedAt` timestamp per Section 10.5.
+  static ({TaskItem task, DateTime? queuedAt}) _convertHistoricalTaskTo050(
     _HistoricalTask task, {
     required TdfTimeZoneContext? sourceTimeZone,
   }) {
@@ -365,26 +417,28 @@ class TdfImporter {
         TdfTaskDependency(taskId: blockerId, requiredCompletion: 1),
     ]);
 
-    return TaskItem(
-      id: task.id,
-      title: task.name,
-      note: task.note,
-      isCompleted: isFinished,
-      isPriority: task.isPriority,
-      completions: isFinished ? 1 : 0,
-      createdAt: task.createdAt,
+    return (
+      task: TaskItem(
+        id: task.id,
+        title: task.name,
+        note: task.note,
+        isCompleted: isFinished,
+        isPriority: task.isPriority,
+        completions: isFinished ? 1 : 0,
+        createdAt: task.createdAt,
+        completedAt: task.completedAt,
+        modifiedAt: task.modifiedAt,
+        suspendedAt: suspendedUtc,
+        isSuspendedForever: isSuspendedForever,
+        repeatRule: repeatRule,
+        labelIds: task.labelIds,
+        dependencies: dependencies,
+        links: task.links,
+        conditions: task.conditions,
+        subtasksAutoFinish: task.subtasksAutoFinish,
+        subtasks: task.subtasks,
+      ),
       queuedAt: task.queuedAt,
-      completedAt: task.completedAt,
-      modifiedAt: task.modifiedAt,
-      suspendedAt: suspendedUtc,
-      isSuspendedForever: isSuspendedForever,
-      repeatRule: repeatRule,
-      labelIds: task.labelIds,
-      dependencies: dependencies,
-      links: task.links,
-      conditions: task.conditions,
-      subtasksAutoFinish: task.subtasksAutoFinish,
-      subtasks: task.subtasks,
     );
   }
 
@@ -491,7 +545,8 @@ class TdfImporter {
       if (version != '0.2.0' &&
           version != '0.3.0' &&
           version != '0.4.0' &&
-          version != '0.5.0') {
+          version != '0.5.0' &&
+          version != '0.5.1') {
         throw TdfException(
           kind: TdfErrorKind.unsupportedVersion,
           line: lineNumber,
@@ -1508,6 +1563,118 @@ class TdfImporter {
       }
     }
     return tokens;
+  }
+
+  /// Serializes an intermediate `0.5.0` document in declaration order.
+  static String _serializeDocument050({
+    required List<TdfLabel> labels,
+    required List<({TaskItem task, DateTime? queuedAt})> tasks,
+    required TdfQueueBlock queueBlock,
+  }) {
+    final hasQueue = !queueBlock.isDefaultEmpty;
+    if (!hasQueue && labels.isEmpty && tasks.isEmpty) {
+      return 'tdf 0.5.0\n';
+    }
+    final buffer = StringBuffer('tdf 0.5.0\n\n');
+    if (hasQueue) {
+      buffer.write('queue {\n    modified ');
+      buffer.write(
+        TaskItem.formatTdfTimestampWithSeconds(queueBlock.modifiedAt),
+      );
+      buffer.write('\n');
+      for (final taskId in queueBlock.taskIds) {
+        buffer.write('    task $taskId\n');
+      }
+      buffer.write('}\n\n');
+    }
+    for (final label in labels) {
+      buffer.write('label ${label.id} {\n');
+      buffer.write('    name ${_escapeQuoted(label.name)}\n');
+      if (label.color case final color?) {
+        buffer.write('    color ${_escapeQuoted(color)}\n');
+      }
+      if (label.note case final note?) {
+        buffer.write('    note ${_escapeQuoted(note)}\n');
+      }
+      if (label.modifiedAt case final modifiedAt?) {
+        buffer.write(
+          '    modified ${TaskItem.formatTdfTimestamp(modifiedAt)}\n',
+        );
+      }
+      _writeHistoricalConditions(buffer, label.conditions);
+      buffer.write('}\n\n');
+    }
+    for (final entry in tasks) {
+      final task = entry.task;
+      buffer.write('task ${task.id}');
+      if (task.isPriority) {
+        buffer.write(' priority');
+      }
+      buffer.write(' {\n');
+      buffer.write('    name ${_escapeQuoted(task.title)}\n');
+      if (task.note case final note?) {
+        buffer.write('    note ${_escapeQuoted(note)}\n');
+      }
+      buffer.write(
+        '    created ${TaskItem.formatTdfTimestamp(task.createdAt)}\n',
+      );
+      if (entry.queuedAt case final queuedAt?) {
+        buffer.write('    queued ${TaskItem.formatTdfTimestamp(queuedAt)}\n');
+      }
+      if (task.completedAt case final completedAt?) {
+        buffer.write(
+          '    finished ${TaskItem.formatTdfTimestamp(completedAt)}\n',
+        );
+      }
+      if (task.modifiedAt case final modifiedAt?) {
+        buffer.write(
+          '    modified ${TaskItem.formatTdfTimestamp(modifiedAt)}\n',
+        );
+      }
+      if (task.completions > 0) {
+        buffer.write('    completions ${task.completions}\n');
+      }
+      if (task.labelIds.isNotEmpty) {
+        buffer.write('    labels ${task.labelIds.join(" ")}\n');
+      }
+      if (task.dependencies.isNotEmpty) {
+        final deps = TdfTaskDependency.normalizeList(task.dependencies);
+        buffer.write(
+          '    blocked ${deps.map((dep) => dep.formatCanonical()).join(" ")}\n',
+        );
+      }
+      if (task.isSuspendedForever) {
+        buffer.write('    suspended forever\n');
+      } else if (task.suspendedAt case final suspendedAt?) {
+        buffer.write(
+          '    suspended ${TaskItem.formatTdfTimestamp(suspendedAt)}\n',
+        );
+      }
+      if (task.repeatRule case final repeatRule?) {
+        buffer.write('    repeat ${repeatRule.toTdfDirectiveArgs()}\n');
+      }
+      for (final link in task.links) {
+        buffer.write(
+          '    link ${_escapeQuoted(link.title)} ${_escapeQuoted(link.uri)}\n',
+        );
+      }
+      _writeHistoricalConditions(buffer, task.conditions);
+      if (task.subtasks.isNotEmpty || task.subtasksAutoFinish) {
+        buffer.write('    subtasks');
+        if (task.subtasksAutoFinish) {
+          buffer.write(' auto-finish');
+        }
+        buffer.write(' {\n');
+        for (final step in task.subtasks) {
+          buffer.write(
+            '        step ${step.isCompleted ? "true" : "false"} ${_escapeQuoted(step.title)}\n',
+          );
+        }
+        buffer.write('    }\n');
+      }
+      buffer.write('}\n\n');
+    }
+    return buffer.toString();
   }
 
   /// Serializes an intermediate `0.3.0` or `0.4.0` document in declaration order.

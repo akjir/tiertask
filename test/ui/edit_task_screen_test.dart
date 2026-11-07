@@ -501,9 +501,9 @@ task 000001OkD2 {
         reason: 'Restoring to Planned via completion circle must strip the priority flag per Section 6.5',
       );
       expect(
-        board.focus.single.queuedAt,
-        equals(fixedNow),
-        reason: 'Restoring to Planned via completion circle must set queued to now per Section 6.5',
+        board.queueTaskIds,
+        contains(rotateTaskId),
+        reason: 'Restoring to Planned via completion circle must append task ID to queue per Section 6.5',
       );
 
       await container

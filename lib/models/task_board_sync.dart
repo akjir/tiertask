@@ -125,10 +125,19 @@ class TaskBoardSync {
       now: now,
     );
 
+    final undeletedTaskIds = <String>{
+      for (final entry in taskConflictResolutions.entries)
+        if (entry.value == TdfDeletionResolution.undelete) entry.key,
+    };
     final mergedQueueBlock = _mergeQueueBlocks(
       primaryQueue: primary.queueBlock,
       secondaryQueue: secondary.queueBlock,
       baselineQueue: baseline?.queueBlock,
+      primaryTaskIds: <String>{for (final task in primary.allTasks) task.id},
+      secondaryTaskIds: <String>{
+        for (final task in secondary.allTasks) task.id,
+      },
+      undeletedTaskIds: undeletedTaskIds,
       mergedTasks: tasksAfterLabelStrip,
     );
 
@@ -564,44 +573,79 @@ class TaskBoardSync {
     required TdfQueueBlock primaryQueue,
     required TdfQueueBlock secondaryQueue,
     required TdfQueueBlock? baselineQueue,
+    required Set<String> primaryTaskIds,
+    required Set<String> secondaryTaskIds,
+    required Set<String> undeletedTaskIds,
     required List<TaskItem> mergedTasks,
   }) {
-    final winnerQueue =
-        TdfPayloadComparison.compareQueueBlocks(primaryQueue, secondaryQueue) >=
-            0
-        ? primaryQueue
-        : secondaryQueue;
-    final List<String> selectedIds;
-    if (baselineQueue == null) {
-      selectedIds = winnerQueue.taskIds;
-    } else if (listEquals(primaryQueue.taskIds, secondaryQueue.taskIds)) {
-      selectedIds = primaryQueue.taskIds;
-    } else if (listEquals(primaryQueue.taskIds, baselineQueue.taskIds)) {
-      selectedIds = secondaryQueue.taskIds;
-    } else if (listEquals(secondaryQueue.taskIds, baselineQueue.taskIds)) {
-      selectedIds = primaryQueue.taskIds;
-    } else {
-      selectedIds = winnerQueue.taskIds;
-    }
-
-    final scheduledOpenById = <String, TaskItem>{
+    final openById = <String, TaskItem>{
       for (final task in mergedTasks)
-        if (task.queuedAt != null && !task.isCompleted) task.id: task,
+        if (!task.isCompleted && task.completedAt == null) task.id: task,
     };
+
+    final primaryWins =
+        TdfPayloadComparison.compareQueueBlocks(primaryQueue, secondaryQueue) >=
+        0;
+    final winnerQueue = primaryWins ? primaryQueue : secondaryQueue;
+    final loserQueue = primaryWins ? secondaryQueue : primaryQueue;
+    final winnerBoardTaskIds = primaryWins ? primaryTaskIds : secondaryTaskIds;
+
+    final List<String> baseSelectedIds;
+    var appendConcurrentFromLoser = false;
+    if (baselineQueue == null) {
+      baseSelectedIds = winnerQueue.taskIds;
+      appendConcurrentFromLoser = true;
+    } else if (listEquals(primaryQueue.taskIds, secondaryQueue.taskIds)) {
+      baseSelectedIds = primaryQueue.taskIds;
+    } else if (listEquals(primaryQueue.taskIds, baselineQueue.taskIds)) {
+      baseSelectedIds = secondaryQueue.taskIds;
+    } else if (listEquals(secondaryQueue.taskIds, baselineQueue.taskIds)) {
+      baseSelectedIds = primaryQueue.taskIds;
+    } else {
+      baseSelectedIds = winnerQueue.taskIds;
+      appendConcurrentFromLoser = true;
+    }
 
     final reconciledIds = <String>[];
     final seenInQueue = <String>{};
-    for (final id in selectedIds) {
-      if (scheduledOpenById.containsKey(id) && seenInQueue.add(id)) {
+    for (final id in baseSelectedIds) {
+      if (openById.containsKey(id) && seenInQueue.add(id)) {
         reconciledIds.add(id);
       }
     }
 
-    final missingTasks = <TaskItem>[
-      for (final task in scheduledOpenById.values)
-        if (!seenInQueue.contains(task.id)) task,
-    ]..sort(_compareMissingScheduledTasks);
-    for (final task in missingTasks) {
+    final concurrentAdditions = <TaskItem>[];
+    if (appendConcurrentFromLoser) {
+      final baselineIdSet = baselineQueue?.taskIds.toSet();
+      for (final id in loserQueue.taskIds) {
+        final task = openById[id];
+        if (task == null || seenInQueue.contains(id)) {
+          continue;
+        }
+        final isConcurrentAddition = baselineIdSet != null
+            ? (!baselineIdSet.contains(id) || undeletedTaskIds.contains(id))
+            : (!winnerBoardTaskIds.contains(id) ||
+                  undeletedTaskIds.contains(id));
+        if (isConcurrentAddition && seenInQueue.add(id)) {
+          concurrentAdditions.add(task);
+        }
+      }
+    } else if (undeletedTaskIds.isNotEmpty) {
+      for (final id in <String>[
+        ...primaryQueue.taskIds,
+        ...secondaryQueue.taskIds,
+      ]) {
+        final task = openById[id];
+        if (task != null &&
+            undeletedTaskIds.contains(id) &&
+            seenInQueue.add(id)) {
+          concurrentAdditions.add(task);
+        }
+      }
+    }
+
+    concurrentAdditions.sort(_compareConcurrentQueuedTasks);
+    for (final task in concurrentAdditions) {
       reconciledIds.add(task.id);
     }
 
@@ -644,13 +688,11 @@ class TaskBoardSync {
     return TdfQueueBlock(modifiedAt: nextMod, taskIds: reconciledIds);
   }
 
-  /// Orders missing scheduled open tasks by ascending UTC `queuedAt`, then ascending ASCII `id` per Section 6.11.2.
-  static int _compareMissingScheduledTasks(TaskItem left, TaskItem right) {
-    final lQueued = left.queuedAt ?? left.createdAt;
-    final rQueued = right.queuedAt ?? right.createdAt;
-    final qCmp = lQueued.compareTo(rQueued);
-    if (qCmp != 0) {
-      return qCmp;
+  /// Orders concurrent queue additions by ascending UTC `createdAt`, then ascending ASCII `id` per Section 6.11.2.
+  static int _compareConcurrentQueuedTasks(TaskItem left, TaskItem right) {
+    final cCmp = left.createdAt.compareTo(right.createdAt);
+    if (cCmp != 0) {
+      return cCmp;
     }
     return left.id.compareTo(right.id);
   }
@@ -1125,7 +1167,6 @@ class TaskBoardSync {
       title: task.title,
       note: task.note,
       createdAt: task.createdAt,
-      queuedAt: task.queuedAt,
       completedAt: task.completedAt,
       modifiedAt: nextMod,
       completions: task.completions,

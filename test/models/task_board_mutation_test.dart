@@ -653,7 +653,7 @@ label officeOkD2 {
         equals(DateTime.utc(2026, 11, 8, 0, 0)),
         reason: '2026-11-01 + 1 week must set suspendedAt to 2026-11-08 00:00',
       );
-      expect(rescheduled.queuedAt, equals(DateTime.utc(2026, 11, 8, 0, 0)));
+      expect(board.queueTaskIds, equals([taskId]));
       expect(
         rescheduled.modifiedAt,
         equals(toggleTime),
@@ -674,11 +674,7 @@ label officeOkD2 {
       );
       final unblocked = board.findTask(taskId)!;
       expect(unblocked.suspendedAt, isNull);
-      expect(
-        unblocked.queuedAt,
-        equals(manualUnblockTime),
-        reason: 'Manually unblocking a deferred recurring task early must reset future queuedAt to now',
-      );
+      expect(board.queueTaskIds, equals([taskId]));
       expect(
         board.focus.map((task) => task.id),
         equals([taskId]),

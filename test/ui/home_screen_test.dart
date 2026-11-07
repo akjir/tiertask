@@ -900,15 +900,7 @@ task p10000OkD2 {
       expect(
         board.planned.map((task) => task.id),
         equals(['p10000OkD2']),
-        reason: 'Colliding Planned task p1 must remain in Planned with shifted timestamp',
-      );
-      expect(
-        board.findTask('f10000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 8, 0, 0)),
-      );
-      expect(
-        board.findTask('p10000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 9, 0, 1)),
+        reason: 'Colliding Planned task p1 must remain in Planned',
       );
       expect(
         board.queueBlock.taskIds.indexOf('f10000OkD2'),
@@ -967,9 +959,9 @@ task p10000OkD2 {
             'Downgraded Planned task r2 must move to Someday per Section 6.3',
       );
       expect(
-        board.findTask('r20000OkD2')?.queuedAt,
-        isNull,
-        reason: 'Downgraded Planned task r2 must omit queued per Section 6.3',
+        board.queueTaskIds.contains('r20000OkD2'),
+        isFalse,
+        reason: 'Downgraded Planned task r2 must be removed from queue per Section 6.3',
       );
       expect(
         board.findTask('r20000OkD2')?.isPriority,

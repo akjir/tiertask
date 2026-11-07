@@ -24,14 +24,14 @@ void main() {
   const tdfService = TdfService();
   final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
 
-  group('TdfService 0.5.0 Lexical Scanner, Parser & Canonical Serializer', () {
-    test('parses canonical TDF 0.5.0 document from TDF_SPEC.md Section 9 and derives all 6 tiers', () {
+  group('TdfService 0.5.1 Lexical Scanner, Parser & Canonical Serializer', () {
+    test('parses canonical TDF 0.5.1 document from TDF_SPEC.md Section 9 and derives all 6 tiers', () {
       const canonicalTdf = '''
 # ==========================================
 # TierTask Data Format (TDF) Example Document
 # ==========================================
 
-tdf 0.5.0
+tdf 0.5.1
 
 deleted {
     generation 4
@@ -73,7 +73,6 @@ task 8jKaCdOkD2 priority {
     name      "Mow the lawn"
     note      "Check fuel level before starting"
     created   2026-11-01 19:30
-    queued    2026-11-01 19:30
     modified  2026-11-01 19:30
     labels    4x9p2mOkD2
     blocked   3nQp7ROkB8
@@ -89,7 +88,6 @@ task 8jKaCdOkD2 priority {
 task 3nQp7ROkB8 {
     name      "Order replacement lawnmower blades online"
     created   2026-11-01 18:00
-    queued    2026-11-01 18:00
     modified  2026-11-01 18:00
     labels    4x9p2mOkD2
     link      "Portal Login" "https://example.com/portal#login"
@@ -100,7 +98,6 @@ task 3nQp7ROkB8 {
 task 5vWx9ZOk91 {
     name     "Clean dust filters on home NAS server"
     created  2026-11-01 10:00
-    queued   2026-11-01 10:00
     modified 2026-11-01 10:00
     labels   4x9p2mOkD2 9kLm2P0aBc
     repeat   30 days
@@ -114,13 +111,12 @@ task 2bDf6HOkA4 {
 }
 
 task 7mPr4T09xY {
-    name     "Mount winter tires"
-    created  2026-10-20 14:00
-    queued   2026-10-21 08:00
-    finished 2026-10-29 16:45
-    modified 2026-10-29 16:45
+    name        "Mount winter tires"
+    created     2026-10-20 14:00
+    finished    2026-10-29 16:45
+    modified    2026-10-29 16:45
     completions 1
-    labels   4x9p2mOkD2
+    labels      4x9p2mOkD2
 }
 ''';
 
@@ -157,7 +153,22 @@ task 7mPr4T09xY {
       expect(board.completed.single.completions, equals(1));
 
       final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.5.0\n\ndeleted {\n'));
+      expect(serialized, startsWith('tdf 0.5.1\n\ndeleted {\n'));
+      expect(serialized.contains('    queued '), isFalse);
+      expect(
+        serialized,
+        contains('    suspended 2026-11-04 23:00:00\n'),
+        reason: 'Section 6.10.3 requires emitting finite deferrals as YYYY-MM-DD HH:MM:SS',
+      );
+      final repeatIdx = serialized.indexOf('    repeat 30 days\n');
+      final labelsIdx = serialized.indexOf(
+        '    labels 4x9p2mOkD2 9kLm2P0aBc\n',
+      );
+      expect(
+        repeatIdx,
+        lessThan(labelsIdx),
+        reason: 'Section 4.1.2 and 7.1 place repeat (position 7) before labels (position 8)',
+      );
       expect(
         serialized,
         contains(
@@ -361,20 +372,21 @@ task 333333OkD2 {
       expect(reparsed.labels.single.conditions.length, equals(3));
     });
 
-    test('accepts tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
+    test('accepts tdf 0.5.1 and tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
       expect(
         TdfService.supportedVersion,
-        equals('0.5.0'),
-        reason: 'Supported TDF version must be 0.5.0',
+        equals('0.5.1'),
+        reason: 'Supported TDF version must be 0.5.1',
       );
+      expect(tdfService.parse('tdf 0.5.1\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.5.0\n').focus, isEmpty);
       expect(
         tdfService
-            .parse('   \t  \n# only comment\r\ntdf 0.5.0  # version\n')
+            .parse('   \t  \n# only comment\r\ntdf 0.5.1  # version\n')
             .focus,
         isEmpty,
       );
-      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.5.0\n'));
+      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.5.1\n'));
 
       for (final legacyVersion in ['0.4.0', '0.3.0', '0.2.0', '0.1.0']) {
         expect(
@@ -392,14 +404,14 @@ task 333333OkD2 {
       }
 
       final invalidIdDocuments = <String>[
-        'tdf 0.5.0\ntask t001 {\n  name "Noncanonical ID"\n  created 2026-11-01\n}\n',
-        'tdf 0.5.0\ntask t_8jKaCd_OkD2 {\n  name "13-char ID"\n  created 2026-11-01\n}\n',
-        'tdf 0.5.0\nlabel home {\n  name "Short label ID"\n}\n',
-        'tdf 0.5.0\ntask "8jKaCdOkD2" {\n  name "Quoted task ID"\n  created 2026-11-01\n}\n',
-        'tdf 0.5.0\nlabel "4x9p2mOkD2" {\n  name "Quoted label ID"\n}\n',
-        'tdf 0.5.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  labels "4x9p2mOkD2"\n}\n',
-        'tdf 0.5.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked "3nQp7ROkB8"\n}\n',
-        'tdf 0.5.0\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked t001:2\n}\n',
+        'tdf 0.5.1\ntask t001 {\n  name "Noncanonical ID"\n  created 2026-11-01\n}\n',
+        'tdf 0.5.1\ntask t_8jKaCd_OkD2 {\n  name "13-char ID"\n  created 2026-11-01\n}\n',
+        'tdf 0.5.1\nlabel home {\n  name "Short label ID"\n}\n',
+        'tdf 0.5.1\ntask "8jKaCdOkD2" {\n  name "Quoted task ID"\n  created 2026-11-01\n}\n',
+        'tdf 0.5.1\nlabel "4x9p2mOkD2" {\n  name "Quoted label ID"\n}\n',
+        'tdf 0.5.1\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  labels "4x9p2mOkD2"\n}\n',
+        'tdf 0.5.1\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked "3nQp7ROkB8"\n}\n',
+        'tdf 0.5.1\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked t001:2\n}\n',
       ];
 
       for (final doc in invalidIdDocuments) {
@@ -418,15 +430,9 @@ task 333333OkD2 {
       }
     });
 
-    test('parses and serializes per-entity modified UTC timestamps with Section 6.7.2 epoch fallback on labels and Section 6.7.1 fallback on tasks', () {
-      const tdfWithModified = '''
+    test('converts tdf 0.5.0 in memory on load per Section 10.6, preserving queued > created into modified, synthesizing omitted queue, and stripping queued on serialize', () {
+      const tdf050WithOmittedQueue = '''
 tdf 0.5.0
-
-queue {
-    modified 2026-11-01 10:45:12
-    task explicOkD2
-    task fallbkOkD2
-}
 
 label explicOkD2 {
     name     "Explicit Label"
@@ -445,16 +451,21 @@ task explicOkD2 {
     labels   explicOkD2
 }
 
-task fallbkOkD2 {
+task fallbkOkD2 priority {
     name     "Fallback Modified Task"
     created  2026-11-01 08:00
     queued   2026-11-01 09:20
     labels   fallbkOkD2
 }
+
+task somdayOkD2 {
+    name    "Unqueued Someday Task"
+    created 2026-11-01 07:00
+}
 ''';
 
       final board = tdfService.parse(
-        tdfWithModified,
+        tdf050WithOmittedQueue,
         evaluationTime: fixedDate,
       );
       expect(
@@ -467,8 +478,28 @@ task fallbkOkD2 {
         reason: 'Label without modified must fall back to fixed UTC epoch 1970-01-01 00:00:00 per Section 6.7.2',
       );
       expect(
-        board.findTask('fallbkOkD2')!.effectiveModifiedAt,
+        board.findTask('fallbkOkD2')!.modifiedAt,
         equals(DateTime.utc(2026, 11, 1, 9, 20)),
+        reason: 'Section 10.6 step 3 must set task.modified to max(created, queued, finished) when modified was omitted and queued > created',
+      );
+      expect(
+        board.queueBlock.taskIds,
+        equals(['fallbkOkD2', 'explicOkD2']),
+        reason: 'Section 10.6 step 2 must construct omitted 0.5.0 queue with priority tasks first, then regular tasks by ascending queued',
+      );
+      expect(
+        board.queueBlock.modifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 10, 45, 12)),
+        reason: 'Constructed 0.5.0 queue.modified must equal greatest 0.5.0 effective revision among queued tasks',
+      );
+      expect(board.someday.map((task) => task.id), equals(['somdayOkD2']));
+
+      final serialized = tdfService.serialize(board);
+      expect(serialized, startsWith('tdf 0.5.1\n'));
+      expect(
+        serialized.contains('\n    queued '),
+        isFalse,
+        reason: 'Serializing a converted 0.5.0 document must emit tdf 0.5.1 with zero queued directives',
       );
     });
 

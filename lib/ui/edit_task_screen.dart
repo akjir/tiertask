@@ -113,7 +113,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       text: task?.title ?? widget.initialTitle,
     );
     _noteController = TextEditingController(text: task?.note ?? '');
-    _mode = task != null ? _resolveInitialMode(task) : widget.initialMode;
+    final initialBoard =
+        ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+    _mode = task != null
+        ? _resolveInitialMode(task, initialBoard)
+        : widget.initialMode;
     _selectedLabelIds = <String>{
       ...(task != null ? task.labelIds : widget.initialLabelIds),
     };
@@ -630,15 +634,17 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     return <TaskLink>[..._links, parsed];
   }
 
-  /// Derives the initial [QuickAddMode] for an existing [task].
-  static QuickAddMode _resolveInitialMode(TaskItem task) {
+  /// Derives the initial [QuickAddMode] for an existing [task] on [board].
+  static QuickAddMode _resolveInitialMode(TaskItem task, TaskBoard board) {
     if (task.isCompleted || task.completedAt != null) {
       return QuickAddMode.standard;
     }
     if (task.isPriority) {
       return QuickAddMode.priority;
     }
-    if (task.queuedAt == null) {
+    if (board.someday.any((candidate) => candidate.id == task.id) ||
+        (board.allTasks.any((candidate) => candidate.id == task.id) &&
+            !board.queueTaskIds.contains(task.id))) {
       return QuickAddMode.someday;
     }
     return QuickAddMode.standard;

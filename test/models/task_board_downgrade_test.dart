@@ -22,46 +22,42 @@ void main() {
   const tdfService = TdfService();
   final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
 
-  group('TDF 0.5.0 Section 6.3 and 6.11.3 Queue-Driven Task Downgrade Transitions', () {
-    test('executes Section 6.3 Focus-to-Ready (< 8 and >= 8 eligible tasks), Ready-to-Planned, and Planned-to-Someday downgrades via shared queue order without shifting queuedAt timestamps', () {
-      final f1InitialQueued = DateTime.utc(2026, 11, 1, 8, 0);
-      final b2InitialQueued = DateTime.utc(2026, 11, 1, 8, 20);
+  group('TDF 0.5.1 Section 6.3 and 6.11.3 Queue-Driven Task Downgrade Transitions', () {
+    test('executes Section 6.3 Focus-to-Ready (< 8 and >= 8 eligible tasks), Ready-to-Planned, and Planned-to-Someday downgrades via shared queue order with strict revision discipline', () {
+      final f1Created = DateTime.utc(2026, 11, 1, 8, 0);
+      final b2Created = DateTime.utc(2026, 11, 1, 8, 20);
       final board = TaskBoard(
         focus: [
           TaskItem(
             id: 'f10000OkD2',
             title: 'Focus 1 (Downgrade Me)',
             isPriority: true,
-            queuedAt: f1InitialQueued,
+            createdAt: f1Created,
           ),
           TaskItem(
             id: 'f20000OkD2',
             title: 'Focus 2',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 5),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 5),
           ),
           TaskItem(
             id: 'f30000OkD2',
             title: 'Focus 3',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 10),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 10),
           ),
         ],
         ready: [
           TaskItem(
             id: 'b10000OkD2',
             title: 'Ready 1 (Should Pull Up)',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 15),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 15),
           ),
-          TaskItem(
-            id: 'b20000OkD2',
-            title: 'Ready 2',
-            queuedAt: b2InitialQueued,
-          ),
+          TaskItem(id: 'b20000OkD2', title: 'Ready 2', createdAt: b2Created),
         ],
         planned: [
           TaskItem(
             id: 'g10000OkD2',
             title: 'Planned 1',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 25),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 25),
           ),
         ],
       );
@@ -84,11 +80,7 @@ void main() {
         isFalse,
         reason: 'Downgrading with < 8 eligible tasks must strip the priority flag per Section 6.3',
       );
-      expect(
-        downgraded.findTask('f10000OkD2')?.queuedAt,
-        equals(f1InitialQueued),
-        reason: 'Section 6.3 requires preserving queuedAt when moving to the end of queue',
-      );
+      expect(downgraded.findTask('f10000OkD2')?.createdAt, equals(f1Created));
       expect(
         downgraded.queueTaskIds.last,
         equals('f10000OkD2'),
@@ -106,9 +98,9 @@ void main() {
         reason: 'Downgrading Ready task when < 8 eligible tasks exist must move it to the end of queue',
       );
       expect(
-        downgradedReadyUnder8.findTask('b20000OkD2')?.queuedAt,
-        equals(b2InitialQueued),
-        reason: 'Ready downgrade must preserve queuedAt',
+        downgradedReadyUnder8.findTask('b20000OkD2')?.modifiedAt,
+        isNull,
+        reason: 'Ready downgrade without priority change must leave task.modified unchanged',
       );
       expect(downgradedReadyUnder8.planned, isEmpty);
 
@@ -137,52 +129,56 @@ void main() {
             id: 'f10000OkD2',
             title: 'F1',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
           ),
           TaskItem(
             id: 'f20000OkD2',
             title: 'F2',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 5),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 5),
           ),
           TaskItem(
             id: 'f30000OkD2',
             title: 'F3',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 10),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 10),
           ),
         ],
         ready: [
           TaskItem(
             id: 'r10000OkD2',
             title: 'R1',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 15),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 15),
           ),
           TaskItem(
             id: 'r20000OkD2',
             title: 'R2',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 20),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 20),
           ),
           TaskItem(
             id: 'r30000OkD2',
             title: 'R3',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 25),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 25),
           ),
           TaskItem(
             id: 'r40000OkD2',
             title: 'R4',
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 30),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 30),
           ),
-          TaskItem(id: 'r50000OkD2', title: 'R5 (Slot 8)', queuedAt: slot8Time),
+          TaskItem(
+            id: 'r50000OkD2',
+            title: 'R5 (Slot 8)',
+            createdAt: slot8Time,
+          ),
         ],
         planned: [
           TaskItem(
             id: 'p10000OkD2',
             title: 'P1 (Slot 9)',
-            queuedAt: collidingSlot9Time,
+            createdAt: collidingSlot9Time,
           ),
           TaskItem(
             id: 'p20000OkD2',
             title: 'P2',
-            queuedAt: DateTime.utc(2026, 11, 1, 9, 5),
+            createdAt: DateTime.utc(2026, 11, 1, 9, 5),
           ),
         ],
       );
@@ -213,14 +209,9 @@ void main() {
         reason: 'Downgraded Focus task must match slot 8 anchor priority flag (false)',
       );
       expect(
-        afterFocusDowngradeOnFullBoard.findTask('f10000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 8, 0)),
-        reason: 'Section 6.3 and 6.11.3: Focus downgrade behind slot 8 must preserve queuedAt without timestamp shifts',
-      );
-      expect(
-        afterFocusDowngradeOnFullBoard.findTask('p10000OkD2')?.queuedAt,
-        equals(collidingSlot9Time),
-        reason: 'Section 6.3 and 6.11.3: Planned task p10000OkD2 must not have its queuedAt or modifiedAt shifted',
+        afterFocusDowngradeOnFullBoard.findTask('p10000OkD2')?.modifiedAt,
+        isNull,
+        reason: 'Section 6.3 and 6.11.3: Planned task p10000OkD2 must not have its modifiedAt shifted',
       );
 
       final allPriorityBoard = TaskBoard(
@@ -229,19 +220,19 @@ void main() {
             id: 'pf1000OkD2',
             title: 'PF1',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
           ),
           TaskItem(
             id: 'pf2000OkD2',
             title: 'PF2',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 5),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 5),
           ),
           TaskItem(
             id: 'pf3000OkD2',
             title: 'PF3',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 10),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 10),
           ),
         ],
         ready: [
@@ -249,31 +240,31 @@ void main() {
             id: 'pr1000OkD2',
             title: 'PR1',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 15),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 15),
           ),
           TaskItem(
             id: 'pr2000OkD2',
             title: 'PR2',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 20),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 20),
           ),
           TaskItem(
             id: 'pr3000OkD2',
             title: 'PR3',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 25),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 25),
           ),
           TaskItem(
             id: 'pr4000OkD2',
             title: 'PR4',
             isPriority: true,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 30),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 30),
           ),
           TaskItem(
             id: 'pr5000OkD2',
             title: 'PR5 (Priority Slot 8)',
             isPriority: true,
-            queuedAt: slot8Time,
+            createdAt: slot8Time,
           ),
         ],
         planned: [
@@ -281,13 +272,13 @@ void main() {
             id: 'pp1000OkD2',
             title: 'PP1 (Priority Slot 9)',
             isPriority: true,
-            queuedAt: collidingSlot9Time,
+            createdAt: collidingSlot9Time,
           ),
           TaskItem(
             id: 'regp20OkD2',
             title: 'Regular Planned Task',
             isPriority: false,
-            queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
           ),
         ],
       );
@@ -302,19 +293,14 @@ void main() {
         reason: 'When slot 8 carries priority, downgraded Focus task must retain priority per Section 6.3',
       );
       expect(
-        afterPriorityFocusDowngrade.findTask('pf1000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 8, 0)),
-        reason: 'Downgraded priority Focus task must preserve its original queuedAt',
-      );
-      expect(
         afterPriorityFocusDowngrade.findTask('pf1000OkD2')?.modifiedAt,
         isNull,
         reason: 'Section 6.3: When pf1000OkD2 keeps priority=true and only queue order changes, pf1000OkD2.modified must remain unchanged',
       );
       expect(
-        afterPriorityFocusDowngrade.findTask('pp1000OkD2')?.queuedAt,
-        equals(collidingSlot9Time),
-        reason: 'pp1000OkD2 must preserve its queuedAt without shifting',
+        afterPriorityFocusDowngrade.findTask('pp1000OkD2')?.modifiedAt,
+        isNull,
+        reason: 'pp1000OkD2 must preserve its modifiedAt without shifting',
       );
       final reparsedPriorityDowngrade = tdfService.parse(
         tdfService.serialize(afterPriorityFocusDowngrade),
@@ -329,7 +315,7 @@ void main() {
           'pr5000OkD2',
           'pf1000OkD2',
         ]),
-        reason: 'Reparsed TDF 0.5.0 document must keep pf1000OkD2 at Ready slot 8 ahead of pp1000OkD2 in Planned via saved queue block',
+        reason: 'Reparsed TDF 0.5.1 document must keep pf1000OkD2 at Ready slot 8 ahead of pp1000OkD2 in Planned via saved queue block',
       );
       expect(
         reparsedPriorityDowngrade.planned.map((task) => task.id),
@@ -357,9 +343,9 @@ void main() {
         reason: 'Downgraded Ready task must move to the end of Planned',
       );
       expect(
-        afterReadyDowngrade.findTask('r10000OkD2')?.queuedAt,
-        equals(DateTime.utc(2026, 11, 1, 8, 15)),
-        reason: 'Section 6.3: Downgrading Ready to Planned must preserve queuedAt and move entry to the end of queue',
+        afterReadyDowngrade.findTask('r10000OkD2')?.modifiedAt,
+        isNull,
+        reason: 'Section 6.3: Downgrading non-priority Ready task to Planned must leave task.modified unchanged',
       );
 
       final afterPlannedDowngrade = afterReadyDowngrade.downgradeTask(
@@ -377,9 +363,9 @@ void main() {
         reason: 'Downgrading a Planned task must move it to Someday per Section 6.3',
       );
       expect(
-        afterPlannedDowngrade.findTask('p20000OkD2')?.queuedAt,
+        afterPlannedDowngrade.findTask('p20000OkD2')?.modifiedAt,
         isNull,
-        reason: 'Downgrading from Planned to Someday must omit queued per Section 6.3',
+        reason: 'Section 6.3: Downgrading a non-priority Planned task to Someday must leave task.modified unchanged',
       );
       expect(
         afterPlannedDowngrade.queueTaskIds.contains('p20000OkD2'),
@@ -407,9 +393,9 @@ void main() {
         reason: 'Downgrading a priority Planned task to Someday must remove the priority flag per Section 6.3',
       );
       expect(
-        afterPriorityPlannedDowngrade.findTask('pp1000OkD2')?.queuedAt,
-        isNull,
-        reason: 'Downgrading a priority Planned task to Someday must omit queued per Section 6.3',
+        afterPriorityPlannedDowngrade.findTask('pp1000OkD2')?.modifiedAt,
+        equals(fixedDate),
+        reason: 'Section 6.3: Downgrading a priority Planned task to Someday strips priority so task.modified advances',
       );
 
       final afterSomedayNoop = afterPlannedDowngrade.downgradeTask(

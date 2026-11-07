@@ -168,7 +168,7 @@ class TdfPayloadComparison {
     return compareTaskStates(left, right);
   }
 
-  /// Compares two [TaskItem] occurrence states `(completions, priority, queued, finished, suspended, repeat, blocked, subtasks)` per Section 6.7.3.
+  /// Compares two [TaskItem] occurrence states `(completions, priority, finished, suspended, repeat, blocked, subtasks)` per Section 6.7.3.
   static int compareTaskStates(TaskItem left, TaskItem right) {
     final compCmp = left.completions.compareTo(right.completions);
     if (compCmp != 0) {
@@ -177,14 +177,6 @@ class TdfPayloadComparison {
     final prioCmp = _compareBool(left.isPriority, right.isPriority);
     if (prioCmp != 0) {
       return prioCmp;
-    }
-    final queuedCmp = _compareNullable(
-      left.queuedAt,
-      right.queuedAt,
-      (a, b) => a.compareTo(b),
-    );
-    if (queuedCmp != 0) {
-      return queuedCmp;
     }
     final finCmp = _compareNullable(
       left.completedAt,
@@ -372,7 +364,6 @@ class TdfPayloadComparison {
       title: mergedName,
       note: mergedNote,
       createdAt: winner.createdAt,
-      queuedAt: stateSource.queuedAt,
       completedAt: stateSource.completedAt,
       completions: stateSource.completions,
       isPriority: stateSource.isPriority,

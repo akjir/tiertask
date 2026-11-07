@@ -151,11 +151,14 @@ class TdfException implements Exception {
   }
 }
 
-/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.5.0` documents
+/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.5.1` documents
 /// in a single $O(N)$ linear pass without regular expressions.
 class TdfService {
   /// Creates a const [TdfService].
   const TdfService();
+
+  /// Legacy TDF specification version string (`tdf 0.5.0`) converted in memory at load time per Section 10.6.
+  static const String legacySupportedVersion = '0.5.0';
 
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = 64;
@@ -205,11 +208,11 @@ class TdfService {
   /// Maximum decoded Unicode scalar values in a `link` `<uri>` (`MAX_URI_LENGTH`).
   static const int maxUriLength = TaskLink.maxUriLength;
 
-  /// Canonical TDF specification version string (`tdf 0.5.0`).
-  static const String supportedVersion = '0.5.0';
+  /// Canonical TDF specification version string (`tdf 0.5.1`).
+  static const String supportedVersion = '0.5.1';
 
-  /// Explicitly imports and migrates [sourceContent] (`0.2.0`, `0.3.0`, `0.4.0`, or `0.5.0`)
-  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0`) into a [TaskBoard].
+  /// Explicitly imports and migrates [sourceContent] (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, or `0.5.1`)
+  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`) into a [TaskBoard].
   TaskBoard importDocument(
     String sourceContent, {
     TdfTimeZoneContext? sourceTimeZone,
@@ -233,7 +236,7 @@ class TdfService {
     return result.board;
   }
 
-  /// Scans and parses a `tdf 0.5.0` [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
+  /// Scans and parses a `tdf 0.5.1` (or legacy `tdf 0.5.0`) [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
@@ -679,8 +682,9 @@ class TdfService {
     _TaskBuilder builder,
     String directive,
     List<_ScannedToken> args,
-    int lineNumber,
-  ) {
+    int lineNumber, {
+    required bool isLegacy050,
+  }) {
     switch (directive) {
       case 'name':
         if (builder.name != null) {
@@ -698,10 +702,17 @@ class TdfService {
         }
         builder.createdAt = _requireTimestampArgs(args, lineNumber);
       case 'queued':
-        if (builder.queuedAt != null) {
+        if (!isLegacy050) {
+          throw TdfException(
+            kind: TdfErrorKind.unknownDirective,
+            line: lineNumber,
+            message: 'Unknown directive "$directive" in TDF 0.5.1 task block.',
+          );
+        }
+        if (builder.legacyQueuedAt != null) {
           _throwDuplicateDirective(directive, lineNumber);
         }
-        builder.queuedAt = _requireTimestampArgs(args, lineNumber);
+        builder.legacyQueuedAt = _requireTimestampArgs(args, lineNumber);
       case 'finished':
         if (builder.completedAt != null) {
           _throwDuplicateDirective(directive, lineNumber);
@@ -817,7 +828,9 @@ class TdfService {
     final active = state.blockStack.removeLast();
     switch (active) {
       case final _TaskBuilder taskBuilder:
-        state.taskEntries.add(taskBuilder.build(lineNumber));
+        state.taskEntries.add(
+          taskBuilder.build(lineNumber, isLegacy050: state.isLegacy050),
+        );
       case final _LabelBuilder labelBuilder:
         state.labels.add(labelBuilder.build(lineNumber));
       case final _DeletedBlockBuilder deletedBuilder:
@@ -1742,7 +1755,13 @@ class TdfService {
     final args = tokens.sublist(1);
     switch (activeBlock) {
       case final _TaskBuilder taskBuilder:
-        _applyTaskDirective(taskBuilder, directiveName, args, lineNumber);
+        _applyTaskDirective(
+          taskBuilder,
+          directiveName,
+          args,
+          lineNumber,
+          isLegacy050: state.isLegacy050,
+        );
       case final _LabelBuilder labelBuilder:
         _applyLabelDirective(labelBuilder, directiveName, args, lineNumber);
       case final _DeletedBlockBuilder deletedBuilder:
@@ -1772,7 +1791,7 @@ class TdfService {
     }
   }
 
-  /// Validates the first non-empty statement (`tdf 0.5.0`) per Section 4.0.
+  /// Validates the first non-empty statement (`tdf 0.5.1` or legacy `tdf 0.5.0`) per Section 4.0 and Section 10.6.
   static bool _processInitialStatement(
     _ParserState state,
     List<_ScannedToken> tokens,
@@ -1792,13 +1811,15 @@ class TdfService {
       }
       if (tokens.length != 2 ||
           tokens[1].kind != _TokenKind.bareWord ||
-          tokens[1].value != supportedVersion) {
+          (tokens[1].value != supportedVersion &&
+              tokens[1].value != legacySupportedVersion)) {
         throw TdfException(
           kind: TdfErrorKind.unsupportedVersion,
           line: lineNumber,
           message: 'Unsupported or malformed TDF version "${tokens[1].value}".',
         );
       }
+      state.isLegacy050 = tokens[1].value == legacySupportedVersion;
       state.hasSeenFirstStatement = true;
       return true;
     }
@@ -2538,38 +2559,106 @@ class TdfService {
     );
   }
 
-  /// Validates that `queue` entries match the exact set of scheduled open tasks per Section 4.5.
-  static void _validateQueueMembership(_ParserState state) {
-    final scheduledOpenIds = <String>{};
-    for (final entry in state.taskEntries) {
+  /// Compares two legacy `0.5.0` queued open task entries for Section 10.6 step 2 queue synthesis.
+  static int _compareLegacy050QueueEntries(
+    ({int index, _ParsedTaskEntry entry}) first,
+    ({int index, _ParsedTaskEntry entry}) second,
+  ) {
+    if (first.entry.task.isPriority != second.entry.task.isPriority) {
+      return first.entry.task.isPriority ? -1 : 1;
+    }
+    final firstQueued =
+        first.entry.legacyQueuedAt ?? first.entry.task.createdAt;
+    final secondQueued =
+        second.entry.legacyQueuedAt ?? second.entry.task.createdAt;
+    final timeCompare = firstQueued.compareTo(secondQueued);
+    if (timeCompare != 0) {
+      return timeCompare;
+    }
+    return first.index.compareTo(second.index);
+  }
+
+  /// Synthesizes the root `queue` block from legacy `0.5.0` queued open tasks when omitted per Section 10.6 step 2.
+  static TdfQueueBlock _synthesizeLegacy050Queue(
+    List<_ParsedTaskEntry> entries,
+  ) {
+    final scheduledOpen = <({int index, _ParsedTaskEntry entry})>[];
+    DateTime? latestModified;
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
       final task = entry.task;
-      if (task.queuedAt != null &&
+      if (entry.legacyQueuedAt != null &&
           !task.isCompleted &&
           task.completedAt == null) {
-        scheduledOpenIds.add(task.id);
+        scheduledOpen.add((index: i, entry: entry));
+        final effectiveMod = task.effectiveModifiedAt;
+        if (latestModified == null || effectiveMod.isAfter(latestModified)) {
+          latestModified = effectiveMod;
+        }
       }
     }
+    scheduledOpen.sort(_compareLegacy050QueueEntries);
+    return TdfQueueBlock(
+      modifiedAt: latestModified ?? TdfQueueBlock.epochModifiedAt,
+      taskIds: <String>[for (final item in scheduledOpen) item.entry.task.id],
+    );
+  }
+
+  /// Validates `queue` entries per Section 4.5 (or converts legacy `0.5.0` queue membership per Section 10.6).
+  static void _validateQueueMembership(_ParserState state) {
+    if (state.isLegacy050) {
+      if (!state.hasQueueBlock) {
+        state.queueBlock = _synthesizeLegacy050Queue(state.taskEntries);
+      } else {
+        final scheduledOpenIds = <String>{
+          for (final entry in state.taskEntries)
+            if (entry.legacyQueuedAt != null &&
+                !entry.task.isCompleted &&
+                entry.task.completedAt == null)
+              entry.task.id,
+        };
+        for (final queueEntry in state.queueEntries) {
+          if (!scheduledOpenIds.contains(queueEntry.taskId)) {
+            throw TdfException(
+              kind: TdfErrorKind.invalidQueueMembership,
+              line: queueEntry.line,
+              message:
+                  'Queue entry "${queueEntry.taskId}" does not reference a live scheduled open task.',
+            );
+          }
+        }
+        for (final entry in state.taskEntries) {
+          if (scheduledOpenIds.contains(entry.task.id) &&
+              !state.queueTaskIds.contains(entry.task.id)) {
+            throw TdfException(
+              kind: TdfErrorKind.invalidQueueMembership,
+              line: entry.headerLine,
+              message:
+                  'Scheduled open task "${entry.task.id}" is missing from the shared queue block.',
+            );
+          }
+        }
+      }
+      AppLogger.info(
+        LogTag.tdf,
+        'Converted legacy TDF 0.5.0 document in memory to TDF 0.5.1 (tasks=${state.taskEntries.length}, queued=${state.queueBlock.taskIds.length})',
+      );
+      return;
+    }
+
+    final openTaskIds = <String>{
+      for (final entry in state.taskEntries)
+        if (!entry.task.isCompleted && entry.task.completedAt == null)
+          entry.task.id,
+    };
 
     for (final queueEntry in state.queueEntries) {
-      if (!scheduledOpenIds.contains(queueEntry.taskId)) {
+      if (!openTaskIds.contains(queueEntry.taskId)) {
         throw TdfException(
           kind: TdfErrorKind.invalidQueueMembership,
           line: queueEntry.line,
           message:
-              'Queue entry "${queueEntry.taskId}" does not reference a live scheduled open task.',
-        );
-      }
-    }
-
-    for (final entry in state.taskEntries) {
-      final task = entry.task;
-      if (scheduledOpenIds.contains(task.id) &&
-          !state.queueTaskIds.contains(task.id)) {
-        throw TdfException(
-          kind: TdfErrorKind.invalidQueueMembership,
-          line: entry.headerLine,
-          message:
-              'Scheduled open task "${task.id}" is missing from the shared queue block.',
+              'Queue entry "${queueEntry.taskId}" does not reference a live open task.',
         );
       }
     }
@@ -2671,7 +2760,7 @@ class TdfService {
     buffer.write('}\n\n');
   }
 
-  /// Writes a canonical `task` block (including optional `condition` and `subtasks`) to [buffer].
+  /// Writes a canonical `task` block (including optional `condition` and `subtasks`) to [buffer] per Section 9.1.
   static void _writeTaskBlock(StringBuffer buffer, TaskItem task) {
     buffer.write('task ');
     buffer.write(task.id);
@@ -2689,11 +2778,6 @@ class TdfService {
     buffer.write('    created ');
     buffer.write(TaskItem.formatTdfTimestamp(task.createdAt));
     buffer.write('\n');
-    if (task.queuedAt case final queuedAt?) {
-      buffer.write('    queued ');
-      buffer.write(TaskItem.formatTdfTimestamp(queuedAt));
-      buffer.write('\n');
-    }
     if (task.completedAt case final completedAt?) {
       buffer.write('    finished ');
       buffer.write(TaskItem.formatTdfTimestamp(completedAt));
@@ -2707,6 +2791,11 @@ class TdfService {
     if (task.completions > 0) {
       buffer.write('    completions ');
       buffer.write(task.completions);
+      buffer.write('\n');
+    }
+    if (task.repeatRule case final repeatRule?) {
+      buffer.write('    repeat ');
+      buffer.write(repeatRule.toTdfDirectiveArgs());
       buffer.write('\n');
     }
     if (task.labelIds.isNotEmpty) {
@@ -2726,12 +2815,7 @@ class TdfService {
       buffer.write('    suspended forever\n');
     } else if (task.suspendedAt case final suspendedAt?) {
       buffer.write('    suspended ');
-      buffer.write(TaskItem.formatTdfTimestamp(suspendedAt));
-      buffer.write('\n');
-    }
-    if (task.repeatRule case final repeatRule?) {
-      buffer.write('    repeat ');
-      buffer.write(repeatRule.toTdfDirectiveArgs());
+      buffer.write(TaskItem.formatTdfTimestampWithSeconds(suspendedAt));
       buffer.write('\n');
     }
     for (final link in task.links) {
@@ -2887,6 +2971,7 @@ class _ParsedTaskEntry {
     required this.headerLine,
     required this.labelsLine,
     required this.blockedLine,
+    this.legacyQueuedAt,
   });
 
   /// 1-based line number of the `blocked` directive, or `0` if absent.
@@ -2900,6 +2985,9 @@ class _ParsedTaskEntry {
 
   /// 1-based line number of the `labels` directive, or `0` if absent.
   final int labelsLine;
+
+  /// Optional `queued` timestamp parsed from a legacy `tdf 0.5.0` document.
+  final DateTime? legacyQueuedAt;
 
   /// Built immutable task item.
   final TaskItem task;
@@ -2943,8 +3031,11 @@ class _ParserState {
   /// Whether a `queue` block has been opened.
   bool hasQueueBlock = false;
 
-  /// Whether the initial `tdf 0.5.0` header has been processed.
+  /// Whether the initial `tdf 0.5.1` (or legacy `tdf 0.5.0`) header has been processed.
   bool hasSeenFirstStatement = false;
+
+  /// Whether the input document declared the legacy `tdf 0.5.0` header.
+  bool isLegacy050 = false;
 
   /// Parsed `queue` block (defaults to [TdfQueueBlock.empty]).
   TdfQueueBlock queueBlock = TdfQueueBlock.empty;
@@ -3079,6 +3170,9 @@ final class _TaskBuilder extends _BlockBuilder {
   /// 1-based line number of the `labels` directive.
   int labelsLine = 0;
 
+  /// Optional `queued` timestamp parsed from a legacy `tdf 0.5.0` document.
+  DateTime? legacyQueuedAt;
+
   /// Optional `modified` timestamp.
   DateTime? modifiedAt;
 
@@ -3087,9 +3181,6 @@ final class _TaskBuilder extends _BlockBuilder {
 
   /// Optional `note` string.
   String? note;
-
-  /// Optional `queued` timestamp.
-  DateTime? queuedAt;
 
   /// Optional `repeat` rule.
   TaskRepeatRule? repeatRule;
@@ -3104,7 +3195,7 @@ final class _TaskBuilder extends _BlockBuilder {
   DateTime? suspendedAt;
 
   /// Validates required directives (`name`, `created`, and completion state) and builds a [_ParsedTaskEntry].
-  _ParsedTaskEntry build(int lineNumber) {
+  _ParsedTaskEntry build(int lineNumber, {required bool isLegacy050}) {
     final resolvedName = name;
     final resolvedCreated = createdAt;
     if (resolvedName == null || resolvedCreated == null) {
@@ -3137,6 +3228,17 @@ final class _TaskBuilder extends _BlockBuilder {
       }
     }
 
+    var resolvedModified = modifiedAt;
+    if (isLegacy050 && resolvedModified == null && legacyQueuedAt != null) {
+      final maxCreatedFinished =
+          completedAt != null && completedAt!.isAfter(resolvedCreated)
+          ? completedAt!
+          : resolvedCreated;
+      if (legacyQueuedAt!.isAfter(maxCreatedFinished)) {
+        resolvedModified = legacyQueuedAt;
+      }
+    }
+
     final resolvedDeps = dependencies ?? const <TdfTaskDependency>[];
     final task = TaskItem(
       id: id,
@@ -3146,9 +3248,8 @@ final class _TaskBuilder extends _BlockBuilder {
       isPriority: isPriority,
       completions: effectiveCompletions,
       createdAt: resolvedCreated,
-      queuedAt: queuedAt,
       completedAt: completedAt,
-      modifiedAt: modifiedAt,
+      modifiedAt: resolvedModified,
       suspendedAt: suspendedAt,
       isSuspendedForever: isSuspendedForever,
       repeatRule: repeatRule,
@@ -3166,6 +3267,7 @@ final class _TaskBuilder extends _BlockBuilder {
       headerLine: headerLine,
       labelsLine: labelsLine,
       blockedLine: blockedLine,
+      legacyQueuedAt: legacyQueuedAt,
     );
   }
 }

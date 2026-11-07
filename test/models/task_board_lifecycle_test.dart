@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -192,7 +193,7 @@ task manualOkD2 {
           TaskItem(
             id: 'dep1',
             title: 'Waiting on f1',
-            queuedAt: DateTime.utc(2026, 11, 1, 9, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 9, 0),
             blockedByTaskIds: const ['f1'],
           ),
         ],
@@ -305,9 +306,9 @@ task manualOkD2 {
       expect(
         restoredToSomeday.someday.map((task) => task.id),
         equals(['f1']),
-        reason: 'Restoring to Someday must clear finished and queued and strip priority',
+        reason: 'Restoring to Someday must clear finished and strip priority while keeping task out of queue',
       );
-      expect(restoredToSomeday.someday.single.queuedAt, isNull);
+      expect(restoredToSomeday.queueTaskIds.contains('f1'), isFalse);
       expect(restoredToSomeday.someday.single.isPriority, isFalse);
       expect(
         restoredToSomeday.someday.single.subtasks.every(
@@ -354,7 +355,6 @@ task manualOkD2 {
             isPriority: true,
             isCompleted: true,
             createdAt: DateTime.utc(2026, 10, 20, 8, 0),
-            queuedAt: DateTime.utc(2026, 10, 20, 8, 0),
             completedAt: DateTime.utc(2026, 10, 25, 10, 0),
             subtasksAutoFinish: true,
             subtasks: const [SubtaskItem(title: 'Step 1', isCompleted: true)],
@@ -388,9 +388,9 @@ task manualOkD2 {
         reason: 'Restoring to Planned via updateTask must remove priority per Section 6.5',
       );
       expect(
-        plannedRestored.queuedAt,
-        equals(restoreTime),
-        reason: 'Restoring to Planned via updateTask must replace the old queued timestamp with now per Section 6.5',
+        updatedToPlanned.queueTaskIds,
+        contains('done_prio'),
+        reason: 'Restoring to Planned via updateTask must append task ID to queue per Section 6.5',
       );
 
       final recompletedViaUpdate = updatedToPlanned.updateTask(
@@ -429,9 +429,9 @@ task manualOkD2 {
         reason: 'Restoring to Focus via updateTask must set priority per Section 6.5',
       );
       expect(
-        focusRestored.queuedAt,
-        equals(restoreTime),
-        reason: 'Restoring to Focus via updateTask must replace the old queued timestamp with now per Section 6.5',
+        updatedToFocus.queueTaskIds,
+        contains('done_prio'),
+        reason: 'Restoring to Focus via updateTask must append task ID to queue per Section 6.5',
       );
 
       final updatedToSomeday = completedPriorityAutoFinish.updateTask(
@@ -455,13 +455,13 @@ task manualOkD2 {
         reason: 'Restoring to Someday via updateTask must remove priority per Section 6.5',
       );
       expect(
-        somedayRestored.queuedAt,
-        isNull,
-        reason: 'Restoring to Someday via updateTask must omit queued per Section 6.5',
+        updatedToSomeday.queueTaskIds.contains('done_prio'),
+        isFalse,
+        reason: 'Restoring to Someday via updateTask must keep task ID out of queue per Section 6.5',
       );
     });
 
-    test('completing a recurring task reschedules it into Blocked with priority, UTC queuedAt, local suspendedAt, advanced modifiedAt, and reset subtasks, then wakes it into Focus', () {
+    test('completing a recurring task reschedules it into Blocked with priority, preserved queue position, UTC suspendedAt, advanced modifiedAt, and reset subtasks, then wakes it into Focus', () {
       final utcCompletion = DateTime.utc(2026, 11, 1, 22, 30);
       final localCompletion = DateTime.utc(2026, 11, 2, 0, 30); // UTC+2
 
@@ -469,7 +469,6 @@ task manualOkD2 {
         id: 't_repeat',
         title: 'Daily routine',
         createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
         modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
         subtasksAutoFinish: false,
@@ -482,19 +481,21 @@ task manualOkD2 {
         id: 't_reg1',
         title: 'Regular 1',
         createdAt: DateTime.utc(2026, 11, 1, 9, 0),
-        queuedAt: DateTime.utc(2026, 11, 1, 9, 0),
       );
       final regularTask2 = TaskItem(
         id: 't_reg2',
         title: 'Regular 2',
         createdAt: DateTime.utc(2026, 11, 1, 9, 30),
-        queuedAt: DateTime.utc(2026, 11, 1, 9, 30),
       );
 
       final initialBoard = TaskBoard.evaluate(
         tasks: [recurringTask, regularTask1, regularTask2],
         evaluationTime: utcCompletion,
         localEvaluationTime: localCompletion,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 9, 30),
+          taskIds: const <String>['t_repeat', 't_reg1', 't_reg2'],
+        ),
       );
 
       final completedBoard = initialBoard.completeTask(
@@ -528,9 +529,14 @@ task manualOkD2 {
         reason: 'localCompletion (2026-11-02 00:30) + 1 day at 00:00 local (UTC+2) must set suspendedAt to 2026-11-02 22:00 UTC per Section 6.10.3',
       );
       expect(
-        rescheduled.queuedAt,
-        equals(DateTime.utc(2026, 11, 2, 22, 0)),
-        reason: 'queuedAt must be converted from 2026-11-03 00:00 local (UTC+2) to 2026-11-02 22:00 UTC',
+        completedBoard.queueTaskIds,
+        equals(['t_repeat', 't_reg1', 't_reg2']),
+        reason: 'Section 6.4: Recurring completion must preserve existing position in queue',
+      );
+      expect(
+        completedBoard.queueModifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 9, 30)),
+        reason: 'Section 6.4: Preserving existing queue position must leave queue.modified unchanged',
       );
       expect(
         rescheduled.modifiedAt,
@@ -568,7 +574,6 @@ task manualOkD2 {
         id: 't_month',
         title: 'End of month report',
         createdAt: DateTime.utc(2026, 1, 1, 8, 0),
-        queuedAt: DateTime.utc(2026, 1, 1, 8, 0),
         suspendedAt: DateTime.utc(2026, 1, 31, 9, 30),
         repeatRule: const TaskRepeatRule(
           count: 1,
@@ -580,6 +585,10 @@ task manualOkD2 {
       final board = TaskBoard.evaluate(
         tasks: [monthlyTask],
         evaluationTime: jan31Local,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 1, 1, 8, 0),
+          taskIds: const <String>['t_month'],
+        ),
       ).completeTask('t_month', currentDate: jan31Local);
 
       final rescheduled = board.findTask('t_month')!;
@@ -597,6 +606,10 @@ task manualOkD2 {
       final leapBoard = TaskBoard.evaluate(
         tasks: [leapTask],
         evaluationTime: leapJan31,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 1, 1, 8, 0),
+          taskIds: const <String>['t_month'],
+        ),
       ).completeTask('t_month', currentDate: leapJan31);
       expect(
         leapBoard.findTask('t_month')!.suspendedAt,

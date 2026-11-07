@@ -228,7 +228,6 @@ void main() {
         id: taskId,
         title: 'Recurring Task',
         createdAt: created,
-        queuedAt: t(0),
         modifiedAt: t(10),
         completions: 1,
         labelIds: const [l1, l2],
@@ -237,6 +236,7 @@ void main() {
       final baseBoard = TaskBoard.evaluate(
         tasks: [baseTask],
         labels: labels,
+        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
         evaluationTime: t(100),
       );
 
@@ -244,13 +244,13 @@ void main() {
       final localTask = baseTask.copyWith(
         labelIds: const [l2],
         completions: 2,
-        queuedAt: t(86400),
         suspendedAt: t(86400),
         modifiedAt: t(11),
       );
       final localBoard = TaskBoard.evaluate(
         tasks: [localTask],
         labels: labels,
+        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
         evaluationTime: t(100),
       );
 
@@ -264,6 +264,7 @@ void main() {
       final remoteBoard = TaskBoard.evaluate(
         tasks: [remoteTask],
         labels: labels,
+        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
         evaluationTime: t(100),
       );
 
@@ -484,7 +485,6 @@ label 000001OkD2 {
           id: taskId,
           title: 'Original Task',
           createdAt: created,
-          queuedAt: t(0),
           modifiedAt: t(10),
           completions: 3,
           labelIds: const [labelId],
@@ -493,6 +493,7 @@ label 000001OkD2 {
         final baseline = TaskBoard.evaluate(
           tasks: [baseTask],
           labels: const [baseLabel],
+          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
           evaluationTime: t(10),
         );
 
@@ -505,6 +506,7 @@ label 000001OkD2 {
         final localBoard = TaskBoard.evaluate(
           tasks: [editedTask],
           labels: const [baseLabel],
+          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
           evaluationTime: t(15),
         );
 
@@ -594,13 +596,13 @@ label 000001OkD2 {
           id: taskId,
           title: 'Shared Task',
           createdAt: created,
-          queuedAt: t(0),
           modifiedAt: t(10),
           completions: 4,
         );
         final baseline = TaskBoard.evaluate(
           tasks: [sharedTask],
           deletedBlock: TdfDeletedBlock(generation: 2),
+          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
           evaluationTime: t(10),
         );
 
@@ -608,6 +610,7 @@ label 000001OkD2 {
         final rolledBackRemote = TaskBoard.evaluate(
           tasks: [sharedTask],
           deletedBlock: TdfDeletedBlock(generation: 1),
+          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
           evaluationTime: t(20),
         );
         expect(
@@ -631,6 +634,7 @@ label 000001OkD2 {
         final regressedLocal = TaskBoard.evaluate(
           tasks: [sharedTask.copyWith(completions: 3, modifiedAt: t(15))],
           deletedBlock: TdfDeletedBlock(generation: 2),
+          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
           evaluationTime: t(20),
         );
         expect(
@@ -660,7 +664,6 @@ label 000001OkD2 {
           id: ambTask1Id,
           title: 'Ambiguous Prerequisite',
           createdAt: created,
-          queuedAt: t(11),
           modifiedAt: t(11),
           labelIds: const [ambLabelId],
         );
@@ -668,7 +671,6 @@ label 000001OkD2 {
           id: ambTask2Id,
           title: 'Ambiguous Dependent',
           createdAt: created,
-          queuedAt: t(12),
           modifiedAt: t(12),
           labelIds: const [ambLabelId],
           dependencies: const [
@@ -680,6 +682,10 @@ label 000001OkD2 {
           tasks: [sharedTask, ambTask1, ambTask2],
           labels: const [ambLabel],
           deletedBlock: TdfDeletedBlock(generation: 2),
+          queueBlock: TdfQueueBlock(
+            modifiedAt: t(12),
+            taskIds: const [taskId, ambTask1Id, ambTask2Id],
+          ),
           evaluationTime: t(20),
         );
         final advancedShared = TaskBoard.evaluate(
@@ -763,7 +769,6 @@ label 000001OkD2 {
           id: taskId,
           title: 'Task 1',
           createdAt: created,
-          queuedAt: t(0),
           modifiedAt: t(10),
           completions: 2,
         );
@@ -771,16 +776,23 @@ label 000001OkD2 {
           id: task2Id,
           title: 'Task 2',
           createdAt: created,
-          queuedAt: t(1),
           modifiedAt: t(10),
         );
         final baseline = TaskBoard.evaluate(
           tasks: [task1, task2],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: t(10),
+            taskIds: const [taskId, task2Id],
+          ),
           evaluationTime: t(10),
         );
         // External editor deleted task1 from secondary without writing a deleted record:
         final externallyDeletedBoard = TaskBoard.evaluate(
           tasks: [task2],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: t(10),
+            taskIds: const [task2Id],
+          ),
           evaluationTime: t(10),
         );
 
@@ -799,25 +811,23 @@ label 000001OkD2 {
     },
   );
 
-  group('TDF 0.5.0 Section 6.11.2 Shared Queue Synchronization', () {
+  group('TDF 0.5.1 Section 6.11.2 Shared Queue Synchronization', () {
     const id1 = '000001OkD2';
     const id2 = '000002OkD2';
     const id3 = '000003OkD2';
     final created = DateTime.utc(2026, 11, 1, 8, 0, 0);
 
-    test('merges shared queue order via three-way baseline rules, filters completed tasks, appends concurrent additions by ascending UTC queued then ASCII ID, and computes deterministic queue revision', () {
+    test('merges shared queue order via three-way baseline rules, preserves Someday <-> scheduled transitions without task.modified changes, filters completed tasks, appends concurrent additions by ascending UTC created then ASCII ID, and computes deterministic queue revision', () {
       final t1 = TaskItem(
         id: id1,
         title: 'Task 1',
         createdAt: created,
-        queuedAt: t(1),
         modifiedAt: t(10),
       );
       final t2 = TaskItem(
         id: id2,
         title: 'Task 2',
-        createdAt: created,
-        queuedAt: t(2),
+        createdAt: created.add(const Duration(seconds: 1)),
         modifiedAt: t(10),
       );
       final baseline = TaskBoard.evaluate(
@@ -826,19 +836,42 @@ label 000001OkD2 {
         evaluationTime: t(10),
       );
 
-      // Local reorders queue to [id2, id1] at T15:
+      // 1. Moving t2 to Someday on Local (L.queue = [id1] at T12, t2.modifiedAt unchanged at T10)
+      // while Remote leaves queue at B.queue ([id1, id2] at T10):
+      final localMovedToSomeday = TaskBoard.evaluate(
+        tasks: [t1, t2],
+        queueBlock: TdfQueueBlock(modifiedAt: t(12), taskIds: const [id1]),
+        evaluationTime: t(12),
+      );
+      final mergedToSomeday = TaskBoardSync.merge(
+        primary: localMovedToSomeday,
+        secondary: baseline,
+        baseline: baseline,
+        evaluationTime: t(100),
+      );
+      expect(
+        mergedToSomeday.queueBlock.taskIds,
+        equals([id1]),
+        reason: 'Section 6.11.2: Moving a scheduled task to Someday on L while R.queue == B.queue must keep L.queue ([id1])',
+      );
+      expect(
+        mergedToSomeday.someday.map((task) => task.id),
+        equals([id2]),
+        reason: 't2 must be in Someday after merging L.queue removal against unchanged R.queue',
+      );
+
+      // 2. Local reorders queue to [id2, id1] at T15:
       final localBoard = TaskBoard.evaluate(
         tasks: [t1, t2],
         queueBlock: TdfQueueBlock(modifiedAt: t(15), taskIds: const [id2, id1]),
         evaluationTime: t(15),
       );
 
-      // Remote leaves [id1, id2] order unchanged from baseline, but adds t3 (queued at t(3)) at T18:
+      // Remote leaves [id1, id2] order unchanged from baseline, but adds t3 at T18:
       final t3 = TaskItem(
         id: id3,
         title: 'Task 3 Added Remotely',
-        createdAt: created,
-        queuedAt: t(3),
+        createdAt: created.add(const Duration(seconds: 3)),
         modifiedAt: t(18),
       );
       final remoteBoard = TaskBoard.evaluate(
@@ -862,7 +895,7 @@ label 000001OkD2 {
       expect(mergedConflict.queueBlock.modifiedAt, equals(t(18)));
 
       // When local has newer queue revision T20 ([id2, id1]) and remote added t3 at T18 ([id1, id2, id3]),
-      // complete queue winner is local ([id2, id1]), and missing t3 is appended -> [id2, id1, id3] with revision max(T10, T20, T18) + 1s = T21:
+      // complete queue winner is local ([id2, id1]), and missing t3 from Loser.queue is appended -> [id2, id1, id3] with revision max(T10, T20, T18) + 1s = T21:
       final localNewerQueue = TaskBoard.evaluate(
         tasks: [t1, t2],
         queueBlock: TdfQueueBlock(modifiedAt: t(20), taskIds: const [id2, id1]),

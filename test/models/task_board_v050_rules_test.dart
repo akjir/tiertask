@@ -24,7 +24,7 @@ import 'package:tiertask/models/tdf_timezone.dart';
 void main() {
   final fixedNow = DateTime.utc(2026, 11, 4, 12, 0, 0);
 
-  group('TDF 0.5.0 Section 5.5 and 6.11.3 Queue-Driven Tier Derivation', () {
+  group('TDF 0.5.1 Section 5.5 and 6.11.3 Queue-Driven Tier Derivation', () {
     test('preserves saved queue position across blocking and release (A..J table) without rewriting queue order or revisions', () {
       final ids = <String>[
         'taskA00001',
@@ -44,7 +44,6 @@ void main() {
             id: ids[i],
             title: 'Task ${ids[i]}',
             createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-            queuedAt: DateTime.utc(2026, 11, 1, 9, 0),
             suspendedAt: i == 0 ? DateTime.utc(2026, 11, 5, 0, 0) : null,
           ),
       ];
@@ -122,29 +121,29 @@ void main() {
       );
     });
 
-    test('preserves interleaved priority and regular relative queue order regardless of queuedAt timestamps', () {
+    test('preserves interleaved priority and regular relative queue order regardless of createdAt timestamps', () {
       final tasks = <TaskItem>[
         TaskItem(
           id: 'reg1000001',
           title: 'Regular 1 (later timestamp, earlier in queue)',
-          queuedAt: DateTime.utc(2026, 11, 4, 11, 0),
+          createdAt: DateTime.utc(2026, 11, 4, 11, 0),
         ),
         TaskItem(
           id: 'prio100001',
           title: 'Priority 1 (later timestamp, earlier in queue)',
           isPriority: true,
-          queuedAt: DateTime.utc(2026, 11, 4, 11, 30),
+          createdAt: DateTime.utc(2026, 11, 4, 11, 30),
         ),
         TaskItem(
           id: 'reg2000002',
           title: 'Regular 2 (earlier timestamp, later in queue)',
-          queuedAt: DateTime.utc(2026, 11, 4, 8, 0),
+          createdAt: DateTime.utc(2026, 11, 4, 8, 0),
         ),
         TaskItem(
           id: 'prio200002',
           title: 'Priority 2 (earlier timestamp, later in queue)',
           isPriority: true,
-          queuedAt: DateTime.utc(2026, 11, 4, 7, 0),
+          createdAt: DateTime.utc(2026, 11, 4, 7, 0),
         ),
       ];
       final queue = TdfQueueBlock(
@@ -164,20 +163,61 @@ void main() {
       expect(
         board.focus.map((task) => task.id),
         equals(['prio100001', 'prio200002', 'reg1000001']),
-        reason: 'Section 5.5 groups priority before regular while preserving saved queue order within each group, ignoring queuedAt order',
+        reason: 'Section 5.5 groups priority before regular while preserving saved queue order within each group',
       );
       expect(board.ready.map((task) => task.id), equals(['reg2000002']));
     });
+
+    test('derives unqueued task with expired finite suspended lock as Someday without mutating suspended, modified, or queue per Sections 5.3, 5.4, and 6.10.1', () {
+      final unqueuedDeferred = TaskItem(
+        id: 'unqdefOkD2',
+        title: 'Unqueued Deferred Task',
+        createdAt: DateTime.utc(2026, 11, 1, 8, 0),
+        modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
+        suspendedAt: DateTime.utc(2026, 11, 5, 0, 0),
+      );
+      final whileSuspended = TaskBoard.evaluate(
+        tasks: <TaskItem>[unqueuedDeferred],
+        evaluationTime: fixedNow,
+        queueBlock: TdfQueueBlock.empty,
+      );
+      expect(
+        whileSuspended.blocked.map((task) => task.id),
+        equals(['unqdefOkD2']),
+        reason: 'Section 5.4: Unqueued task with active suspended lock must be Blocked',
+      );
+      expect(whileSuspended.queueTaskIds, isEmpty);
+
+      final afterExpiry = whileSuspended.applyAutoPull(
+        currentDate: DateTime.utc(2026, 11, 5, 1, 0),
+      );
+      expect(
+        afterExpiry.someday.map((task) => task.id),
+        equals(['unqdefOkD2']),
+        reason: 'Section 5.3 and 6.10.1: When finite suspended expires on an unqueued task, derive directly as Someday without queuing',
+      );
+      expect(afterExpiry.queueTaskIds, isEmpty);
+      expect(
+        afterExpiry.findTask('unqdefOkD2')!.suspendedAt,
+        equals(DateTime.utc(2026, 11, 5, 0, 0)),
+        reason: 'Section 6.10.1: Read-only evaluation must not strip expired suspended',
+      );
+      expect(
+        afterExpiry.findTask('unqdefOkD2')!.modifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 8, 0)),
+        reason:
+            'Section 6.10.1: Read-only evaluation must not advance modifiedAt',
+      );
+    });
   });
 
-  group('TDF 0.5.0 Section 6.5 Restoration Verification Cases', () {
+  group('TDF 0.5.1 Section 6.5 Restoration Verification Cases', () {
     test('restores task with suspended forever to Someday, future/expired deferral to Planned, Focus with unmet prerequisite to Blocked, and preserves completions + repeat clock while rearming prerequisites', () {
       final openPrereq = TaskItem(
         id: 'prereq0001',
         title: 'Open Prerequisite',
         completions: 4,
         createdAt: fixedNow,
-        queuedAt: fixedNow,
       );
       final finishedForever = TaskItem(
         id: 'forever001',
@@ -186,7 +226,6 @@ void main() {
         completedAt: fixedNow,
         completions: 7,
         isPriority: true,
-        queuedAt: fixedNow,
         isSuspendedForever: true,
         repeatRule: const TaskRepeatRule(
           count: 2,
@@ -225,7 +264,6 @@ void main() {
       expect(somedayTask.completedAt, isNull);
       expect(somedayTask.isSuspendedForever, isFalse);
       expect(somedayTask.suspendedAt, isNull);
-      expect(somedayTask.queuedAt, isNull);
       expect(somedayTask.isPriority, isFalse);
       expect(
         somedayTask.completions,
@@ -276,13 +314,12 @@ void main() {
     });
   });
 
-  group('TDF 0.5.0 Section 6.9.7 Prerequisite Completion Counter Verification Cases', () {
+  group('TDF 0.5.1 Section 6.9.7 Prerequisite Completion Counter Verification Cases', () {
     test('evaluates completion thresholds, rearms recurring dependents on completion, guards expectedCompletions, and rejects MAX_COMPLETIONS overflow', () {
       final backupTask = TaskItem(
         id: '8jKaCdOkD2',
         title: 'Create backup',
         createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        queuedAt: DateTime.utc(2026, 11, 4, 8, 0),
         modifiedAt: DateTime.utc(2026, 11, 4, 8, 0),
         completions: 7,
         repeatRule: const TaskRepeatRule(
@@ -295,7 +332,6 @@ void main() {
         id: '3nQp7ROkB8',
         title: 'Install update',
         createdAt: DateTime.utc(2026, 11, 4, 9, 0),
-        queuedAt: DateTime.utc(2026, 11, 4, 9, 0),
         modifiedAt: DateTime.utc(2026, 11, 4, 9, 0),
         dependencies: const <TdfTaskDependency>[
           TdfTaskDependency(taskId: '8jKaCdOkD2', requiredCompletion: 8),
@@ -396,11 +432,14 @@ void main() {
         title: 'At Max Counter',
         completions: TdfTaskDependency.maxCompletions,
         createdAt: fixedNow,
-        queuedAt: fixedNow,
       );
       final maxBoard = TaskBoard.evaluate(
         tasks: <TaskItem>[maxCounterTask],
         evaluationTime: fixedNow,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: fixedNow,
+          taskIds: const <String>['max000OkD2'],
+        ),
       );
       expect(
         () => maxBoard.completeTask('max000OkD2', currentDate: fixedNow),
@@ -410,7 +449,7 @@ void main() {
     });
   });
 
-  group('TDF 0.5.0 Section 6.8 Deletion Records and 30-Day Cleanup', () {
+  group('TDF 0.5.1 Section 6.8 Deletion Records and 30-Day Cleanup', () {
     test('records task and label deletions, records pruned completed tasks at deletion time, and increments generation once during 30-day cleanup', () {
       final label = TdfLabel(
         id: 'lbl000OkD2',
@@ -422,7 +461,6 @@ void main() {
         title: 'Active Task',
         completions: 3,
         createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        queuedAt: DateTime.utc(2026, 11, 1, 8, 0),
         modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
         labelIds: const <String>['lbl000OkD2'],
       );
@@ -440,6 +478,10 @@ void main() {
         tasks: <TaskItem>[activeTask, expiredCompleted],
         labels: <TdfLabel>[label],
         evaluationTime: fixedNow,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
+          taskIds: const <String>['act000OkD2'],
+        ),
       );
 
       board = board.deleteLabel('lbl000OkD2', currentDate: fixedNow);
