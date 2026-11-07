@@ -3,23 +3,19 @@
 > [!IMPORTANT]
 > **Disclaimer:** `TierTask` is strictly a private, personal project developed for individual use. It is provided without any warranty, official support, or maintenance guarantees.
 
-`TierTask` is a Flutter task manager for Linux, Android, and Windows that dynamically derives six priority and status tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single local or WebDAV-synchronized `.tdf` file (`tiertask.tdf`) in the block-based TierTask Data Format ([`TDF_SPEC.md`](TDF_SPEC.md)).
+`TierTask` is a Flutter task manager for Linux, Android, and Windows that dynamically derives six priority and status tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single local or WebDAV-synchronized `.tdf` file (`tasks.tdf`) in the block-based TierTask Data Format ([`TDF_SPEC.md`](TDF_SPEC.md)).
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.5.1`, `queue`, `deleted`, `label`, `task`, `modified`, `completions`, `repeat`, `link`, `condition`, `subtasks`) in one `.tdf` document and derives operational tiers automatically:
+`TierTask` stores objective task facts (`tdf 0.5.0`, `queue`, `deleted`, `label`, `task`) in one `.tdf` document and derives operational tiers automatically in a deterministic pull system.
 
-* **Supported Target Platforms:** Linux (`linux/`), Android (`android/`), and Windows (`windows/`). All other target platforms are unsupported.
-* **Dynamic $O(N)$ 6-Tier Derivation & Shared Queue:** Derives `Completed` (`finished`), `Someday` (open tasks omitted from `queue`), `Blocked` (open tasks in `queue` with unsatisfied `blocked <task-id>[:<required-completion>]` dependencies, `suspended forever` or future UTC `suspended`, or unmet `condition` across `day`, `time`, and `location` rule groups with label inheritance), and slices active tasks in `queue` block order into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`.
-* **Recurring Tasks (`repeat <count> <days|weeks|months> [<repeat-time>]`):** Completing a recurring task (or completing all steps of its `subtasks auto-finish` checklist) increments `completions`, resets all `subtasks` to `false`, computes the next local calendar target (`localNow + <count> <unit>` at `<repeat-time>` or `00:00:00` local time), converts it to a UTC `suspended` timestamp, adds `priority`, and preserves the task's `queue` position (or inserts it at the front of `queue` when absent) so it wakes up into `Focus`.
-* **UTC Instant Storage & Local Wall-Clock Conditions:** Stores and compares point-in-time directives (`created`, `finished`, `modified`, and timed `suspended`) and 30-day completed task and deletion record pruning strictly in UTC while evaluating `condition day`, `condition time`, and `repeat` calendar progression in the active local time zone (`Automatic` / `Manual` UTC offset).
-* **Foreground-Only Location Determination (`locationEnabled`):** Optional setting (default `Off`) that determines the current place name and GPS coordinates on Android (`LocationManager` + `Geocoder`), Linux (`GeoClue2` D-Bus), and Windows (`Windows.Devices.Geolocation.Geolocator`) with 100-meter Haversine displacement reverse-geocoding gating, 30-minute cached GeoIP desktop fallback, and 5-minute app-resume cooldown only while the application is running in the foreground, displaying a 3-state status icon (`searching`, `found`, `unavailable`) and status popup in the top bar and dynamically evaluating `condition location` rules.
-* **Two-Stage Three-Way Synchronization & Version Import (`In-Memory <-> Local File <-> WebDAV`):** Uses 10-character Base62 entity identifiers (`<6xBase62Random><4xBase62Time>`), reconciles `task`, `label`, `queue`, and `deleted` (`generation`, `task`, `label`) blocks via three-way baseline comparison and monotonic UTC `modified` timestamps (`TaskBoardSync.merge`), automatically converts `tdf 0.5.0` documents to `tdf 0.5.1` in memory on load, rejects older cross-version runtime sync (`VersionMismatch`), and provides an explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1` migration pipeline (`TdfImporter`) with deterministic SHA-256 Base62 legacy ID migration (`TdfIdMigration`).
-* **Anti-Ping-Pong Queue Downgrade & Auto-Finish Checklists:** Repositions downgraded tasks inside `queue` (`Focus -> Ready -> Planned`) or removes them from `queue` (`Planned -> Someday`), and automatically completes a `task` when all steps in `subtasks auto-finish` become `true`.
-* **30-Day Completed Task & Tombstone Pruning:** Removes `Completed` tasks whose `finished` timestamp and `deleted` records whose `timestamp` are strictly older than `30` days (UTC) on save (advancing `deleted.generation` when tombstones expire).
-* **Configurable Storage Modes (`Local`, `WebDAV`, `Both`):** Supports local-only `.tdf` persistence (`LocalFileRepository` defaulting to `tiertask.tdf`), remote-only WebDAV synchronization (`WebDavRepository`), or combined dual persistence (`Both`).
-* **Encrypted Configuration Persistence:** Stores storage mode, local and remote `.tdf` file names, WebDAV credentials, language, theme, and time zone settings via `flutter_secure_storage`.
-* **Opt-In Diagnostic Logging & Crash Preservation (`enableLogging`):** Optional setting (`Enable Diagnostic Log`, default `Off`) that records sanitized runtime events across `LIFECYCLE`, `TDF`, `DOMAIN`, `SYNC`, `STORAGE`, and `UI` into `tiertask.log` with a 5,000-line ring buffer, preserves crash logs across unclean exits while truncating `tiertask.log` on clean shutdown, deletes `tiertask.log` immediately when disabled, and exposes an in-app sidepanel `Diagnostic Log` viewer (`Copy All`, `Scroll to Bottom`, `Clear Log`).
+- **Cross-Platform Desktop & Mobile:** Supports Linux (`linux/`), Android (`android/`), and Windows (`windows/`) with English (`en`, default) and German (`de`) localization and Material 3 `Slate` and `Navy` color palettes.
+- **Unified Block DSL (`TDF`):** Scans, parses, and serializes `.tdf` documents (`tdf 0.5.0`) in a single $O(N)$ pass with strict resource bounds and explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0` version migration.
+- **Deterministic 6-Tier Derivation:** Evaluates `Completed`, `Someday`, and `Blocked` automatically, slices active tasks in `queue` block order into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`, and prunes completed tasks and `deleted` tombstones older than `30` days (UTC).
+- **Context-Aware Conditions & Recurrence:** Evaluates completion-count dependencies (`blocked <task-id>[:<required-completion>]`), `suspended`, and `day`, `time`, and foreground GPS `location` conditions with label inheritance, and reschedules completed `repeat` tasks into `Focus` via `Blocked`.
+- **Two-Stage Three-Way Synchronization:** Reconciles in-memory state, local `.tdf` files, and WebDAV servers using 10-character Base62 entity identifiers, monotonic UTC `modified` timestamps, and `deleted.generation` counters across `Local`, `WebDAV`, and `Both` storage modes.
+- **Multi-Workspace & Encrypted Settings:** Isolates independent `.tdf` task boards and storage settings into switchable workspaces persisted via `flutter_secure_storage`.
+- **Opt-In Diagnostic Logging:** Records sanitized runtime events and crash stack traces into a 5,000-line rolling `tiertask.log` ring buffer with an in-app log viewer when enabled.
 
 ## Requirements
 
@@ -33,17 +29,25 @@
 
 ## Installation & Build
 
+Clone the repository and generate localization bindings:
+
 ```bash
 git clone https://github.com/ststark/tiertask.git
 cd tiertask
 flutter pub get
 flutter gen-l10n
+```
 
-# Run on Linux or Windows desktop
+Run in debug mode on Linux or Windows desktop:
+
+```bash
 flutter run -d linux
 flutter run -d windows
+```
 
-# Build obfuscated release artifacts for supported platforms
+Build obfuscated release artifacts for supported platforms:
+
+```bash
 flutter build linux --release --obfuscate --split-debug-info=build/symbols
 flutter build apk --release --obfuscate --split-debug-info=build/symbols
 flutter build windows --release --obfuscate --split-debug-info=build/symbols
@@ -51,28 +55,26 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 
 ## Quick Start
 
-1. Launch `TierTask` and open the settings screen via the menu drawer.
-2. Select the display language (`System`, `English`, or `Deutsch`) and color theme (`System`, `Light`, or `Dark`).
-3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local TDF file name (default `tiertask.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password/app-password, and remote file path `tiertask.tdf`).
-4. Add tasks via the floating action button (`QuickAddBar`) using the input field, mutually exclusive `Priority` and `Someday` toggles, or the multi-select `Labels` menu; changes persist immediately to the configured `.tdf` file.
+1. Launch `TierTask` and open the settings screen via the navigation drawer.
+2. Select the display language (`System`, `English`, or `Deutsch`), theme mode (`System`, `Light`, or `Dark`), color palette (`Slate` or `Navy`), and local time zone (`Automatic` or `Manual` UTC offset).
+3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local `.tdf` file name (default `tasks.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password, and remote path `tasks.tdf`).
+4. Add tasks via the bottom quick-add bar (`Priority`, `Someday`, `Labels`, or `Advanced` for the full task editor); changes synchronize and persist automatically.
 
-## Tier System & TDF Format
-
-See [`TDF_SPEC.md`](TDF_SPEC.md) for the complete grammar and evaluation pipeline:
+## Tier System & Documentation
 
 | Tier | English (`en`) | German (`de`) | Soft Limit | Derivation Rule |
 | :--- | :--- | :--- | :--- | :--- |
 | `1` | `Focus` | `Fokus` | `3` | Active tasks at positions `1..3` in `queue` block order |
 | `2` | `Ready` | `Bereit` | `5` | Active tasks at positions `4..8` in `queue` block order |
 | `3` | `Planned` | `Geplant` | None | Active tasks from position `9` onward in `queue` block order |
-| `4` | `Blocked` | `Blockiert` | None | Open tasks in `queue` with unsatisfied `blocked` dependencies, `suspended forever` or future UTC `suspended`, or unmet `condition` |
-| `5` | `Someday` | `Irgendwann` | None | Open tasks omitted from `queue` |
-| `6` | `Completed` | `Erledigt` | None | Tasks with a `finished` directive (pruned after `30` days) |
+| `4` | `Blocked` | `Blockiert` | None | Open scheduled tasks with unsatisfied `blocked` dependencies, `suspended`, or unmet `condition` rules |
+| `5` | `Someday` | `Irgendwann` | None | Open tasks without a `queued` directive |
+| `6` | `Completed` | `Erledigt` | None | Tasks with a `finished` directive (pruned after `30` days in UTC) |
 
-Canonical `tiertask.tdf` example:
+Canonical `tasks.tdf` example:
 
 ```text
-tdf 0.5.1
+tdf 0.5.0
 
 queue {
     modified 2026-11-01 09:15:00
@@ -89,6 +91,7 @@ label 4x9p2mOkD2 {
 task 8jKaCdOkD2 priority {
     name     "Verify server backup"
     created  2026-11-01 08:30
+    queued   2026-11-01 08:30
     modified 2026-11-01 08:30
     labels   4x9p2mOkD2
 }
@@ -96,6 +99,7 @@ task 8jKaCdOkD2 priority {
 task 3nR8vWOkD8 {
     name     "Clean up study"
     created  2026-11-01 09:00
+    queued   2026-11-01 09:15
     modified 2026-11-01 09:15
     subtasks auto-finish {
         step true  "Wipe desk"
@@ -104,7 +108,11 @@ task 3nR8vWOkD8 {
 }
 ```
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the layer design, [TDF_SPEC.md](TDF_SPEC.md) for the format specification, and [CHANGELOG.md](CHANGELOG.md) for release history.
+For complete documentation, refer to the dedicated specifications in this repository:
+- **[TDF_SPEC.md](TDF_SPEC.md):** Normative lexical grammar, root-block schema, 6-tier evaluation pipeline, and synchronization rules for `.tdf` files.
+- **[ARCHITECTURE.md](ARCHITECTURE.md):** Architectural layers, directory structure, file inventory, and synchronization flow.
+- **[AGENTS.md](AGENTS.md):** Engineering rules, TDD workflow (`P-TDD-FIRST`), deterministic `.dart` file layout, and test requirements.
+- **[CHANGELOG.md](CHANGELOG.md):** Version history and user-facing release notes.
 
 ## Development
 
@@ -117,4 +125,4 @@ flutter test
 
 ## Disclaimer & License
 
-`TierTask` is a strictly private project. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. Licensed under the GNU General Public License v3.0; see [LICENSE](LICENSE) for full terms.
+`TierTask` is a strictly private project. This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. Licensed under the **GNU General Public License v3.0 (GPL-3.0)**; see [LICENSE](LICENSE) for full terms.
