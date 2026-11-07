@@ -21,8 +21,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
-import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 

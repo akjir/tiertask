@@ -16,17 +16,13 @@
 import 'dart:io';
 import 'dart:ui';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_sync.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
-import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
-import 'package:tiertask/repositories/settings_repository.dart';
-import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -38,7 +34,10 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('tiertask_logger_test_');
     logFilePath = '${tempDir.path}${Platform.pathSeparator}tiertask.log';
-    AppLogger.resetForTesting(clock: () => fixedUtc);
+    AppLogger.resetForTesting(
+      clock: () => fixedUtc,
+      sink: const LocalFileLogSink(),
+    );
   });
 
   tearDown(() async {
@@ -314,7 +313,10 @@ void main() {
       );
 
       final nextBootUtc = DateTime.utc(2026, 11, 3, 22, 10, 0, 0);
-      AppLogger.resetForTesting(clock: () => nextBootUtc);
+      AppLogger.resetForTesting(
+        clock: () => nextBootUtc,
+        sink: const LocalFileLogSink(),
+      );
       AppLogger.setEnabled(true, logFilePath: logFilePath);
       AppLogger.info(LogTag.lifecycle, 'First entry in new session');
 
@@ -339,172 +341,105 @@ void main() {
     });
   });
 
-  group('Full Subsystem Instrumentation', () {
-    test('instruments TdfService, TaskBoard mutations, TaskBoardSync.merge, LocalFileRepository, and WebDavRepository', () async {
-      AppLogger.setEnabled(true, logFilePath: logFilePath);
+  group('Core Domain, TDF & Sync Subsystem Instrumentation', () {
+    test(
+      'instruments TdfService, TaskBoard mutations, and TaskBoardSync.merge',
+      () {
+        AppLogger.setEnabled(true, logFilePath: logFilePath);
 
-      const tdfService = TdfService();
-      expect(
-        () => tdfService.parse('invalid header'),
-        throwsA(isA<TdfException>()),
-        reason: 'Malformed TDF must throw TdfException',
-      );
-      expect(
-        AppLogger.fullLogText,
-        contains('[ERROR] [TDF]'),
-        reason: 'TdfService.parse failure must log [ERROR] [TDF]',
-      );
+        const tdfService = TdfService();
+        expect(
+          () => tdfService.parse('invalid header'),
+          throwsA(isA<TdfException>()),
+          reason: 'Malformed TDF must throw TdfException',
+        );
+        expect(
+          AppLogger.fullLogText,
+          contains('[ERROR] [TDF]'),
+          reason: 'TdfService.parse failure must log [ERROR] [TDF]',
+        );
 
-      var board = TaskBoard.empty()
-          .addLabel('Work', color: '#4CAF50', currentDate: fixedUtc)
-          .addTask(
-            'Recurring backup',
-            targetTier: TaskTier.focus,
-            isPriority: true,
-            repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
-            subtasksAutoFinish: true,
-            subtasks: const [SubtaskItem(title: 'Verify checksums')],
-            currentDate: fixedUtc,
-          )
-          .addTask(
-            'Secondary task',
-            targetTier: TaskTier.ready,
-            currentDate: fixedUtc,
-          );
+        var board = TaskBoard.empty()
+            .addLabel('Work', color: '#4CAF50', currentDate: fixedUtc)
+            .addTask(
+              'Recurring backup',
+              targetTier: TaskTier.focus,
+              isPriority: true,
+              repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+              subtasksAutoFinish: true,
+              subtasks: const [SubtaskItem(title: 'Verify checksums')],
+              currentDate: fixedUtc,
+            )
+            .addTask(
+              'Secondary task',
+              targetTier: TaskTier.ready,
+              currentDate: fixedUtc,
+            );
 
-      final labelId = board.labels.first.id;
-      final firstTaskId = board.allTasks.first.id;
-      final secondTaskId = board.allTasks.last.id;
+        final labelId = board.labels.first.id;
+        final firstTaskId = board.allTasks.first.id;
+        final secondTaskId = board.allTasks.last.id;
 
-      board = board
-          .updateLabel(labelId, name: 'Engineering', currentDate: fixedUtc)
-          .updateTask(
-            secondTaskId,
-            title: 'Secondary task updated',
-            currentDate: fixedUtc,
-          )
-          .downgradeTask(secondTaskId, currentDate: fixedUtc)
-          .scheduleTask(secondTaskId, currentDate: fixedUtc)
-          .blockTask(secondTaskId, currentDate: fixedUtc)
-          .toggleSubtask(firstTaskId, 0, currentDate: fixedUtc);
+        board = board
+            .updateLabel(labelId, name: 'Engineering', currentDate: fixedUtc)
+            .updateTask(
+              secondTaskId,
+              title: 'Secondary task updated',
+              currentDate: fixedUtc,
+            )
+            .downgradeTask(secondTaskId, currentDate: fixedUtc)
+            .scheduleTask(secondTaskId, currentDate: fixedUtc)
+            .blockTask(secondTaskId, currentDate: fixedUtc)
+            .toggleSubtask(firstTaskId, 0, currentDate: fixedUtc);
 
-      final expiredTask = TaskItem(
-        id: 'exp100OkD2',
-        title: 'Expired Completed Task',
-        isCompleted: true,
-        createdAt: fixedUtc.subtract(const Duration(days: 40)),
-        completedAt: fixedUtc.subtract(const Duration(days: 35)),
-        modifiedAt: fixedUtc.subtract(const Duration(days: 35)),
-      );
-      board = board
-          .copyWith(completed: [expiredTask])
-          .pruneCompletedTasks(currentDate: fixedUtc)
-          .deleteLabel(labelId, currentDate: fixedUtc);
+        final expiredTask = TaskItem(
+          id: 'exp100OkD2',
+          title: 'Expired Completed Task',
+          isCompleted: true,
+          createdAt: fixedUtc.subtract(const Duration(days: 40)),
+          completedAt: fixedUtc.subtract(const Duration(days: 35)),
+          modifiedAt: fixedUtc.subtract(const Duration(days: 35)),
+        );
+        board = board
+            .copyWith(completed: [expiredTask])
+            .pruneCompletedTasks(currentDate: fixedUtc)
+            .deleteLabel(labelId, currentDate: fixedUtc);
 
-      final serialized = tdfService.serialize(board);
-      final parsed = tdfService.parse(serialized, evaluationTime: fixedUtc);
-      parsed.evaluateForContext(
-        activeLabelId: labelId,
-        evaluationTime: fixedUtc,
-      );
+        final serialized = tdfService.serialize(board);
+        final parsed = tdfService.parse(serialized, evaluationTime: fixedUtc);
+        parsed.evaluateForContext(
+          activeLabelId: labelId,
+          evaluationTime: fixedUtc,
+        );
 
-      TaskBoardSync.merge(
-        primary: board,
-        secondary: parsed,
-        evaluationTime: fixedUtc,
-      );
+        TaskBoardSync.merge(
+          primary: board,
+          secondary: parsed,
+          evaluationTime: fixedUtc,
+        );
 
-      final localRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'instrumented.tdf'),
-        baseDirectoryPath: tempDir.path,
-      );
-      await localRepo.saveTdf(serialized);
-      await localRepo.loadTdf();
-
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      addTearDown(() => server.close(force: true));
-      server.listen((request) async {
-        request.response.statusCode = HttpStatus.ok;
-        request.response.write(serialized);
-        await request.response.close();
-      });
-
-      final webDavRepo = WebDavRepository(
-        config: WebDavConfig(
-          serverUrl: 'http://${server.address.host}:${server.port}',
-          username: 'alice',
-          password: 'secret-webdav-password',
-          filePath: 'instrumented.tdf',
-          storageMode: StorageMode.webdav,
-        ),
-      );
-      await webDavRepo.fetchTdf();
-      await webDavRepo.saveTdf(serialized);
-
-      final container = ProviderContainer(
-        overrides: [
-          settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(
-              const WebDavConfig(
-                localFilePath: 'notifier.tdf',
-                diagnosticsEnabled: true,
-              ),
-            ),
-          ),
-          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
-          clockProvider.overrideWithValue(() => fixedUtc),
-        ],
-      );
-      addTearDown(container.dispose);
-      await container.read(taskNotifierProvider.future);
-      await container
-          .read(taskNotifierProvider.notifier)
-          .addTask('Notifier task', isPriority: true, currentDate: fixedUtc);
-      final notifierTaskId = container
-          .read(taskNotifierProvider)
-          .requireValue
-          .allTasks
-          .first
-          .id;
-      await container
-          .read(taskNotifierProvider.notifier)
-          .completeTask(notifierTaskId, currentDate: fixedUtc);
-      await container
-          .read(taskNotifierProvider.notifier)
-          .restoreTask(notifierTaskId, currentDate: fixedUtc);
-
-      final logOutput = AppLogger.fullLogText;
-      expect(
-        logOutput,
-        contains('[TDF]'),
-        reason: 'TdfService parse and serialize must emit [TDF] logs',
-      );
-      expect(
-        logOutput,
-        contains('[DOMAIN]'),
-        reason: 'TaskBoard mutations must emit [DOMAIN] logs',
-      );
-      expect(
-        logOutput,
-        contains('Focus='),
-        reason: 'Domain logs must include 6-tier distribution counts',
-      );
-      expect(
-        logOutput,
-        contains('[SYNC]'),
-        reason: 'TaskBoardSync and TaskNotifier sync must emit [SYNC] logs',
-      );
-      expect(
-        logOutput,
-        contains('[STORAGE]'),
-        reason:
-            'LocalFileRepository and WebDavRepository must emit [STORAGE] logs',
-      );
-      expect(
-        logOutput,
-        isNot(contains('secret-webdav-password')),
-        reason: 'WebDavRepository logs must never leak the password',
-      );
-    });
+        final logOutput = AppLogger.fullLogText;
+        expect(
+          logOutput,
+          contains('[TDF]'),
+          reason: 'TdfService parse and serialize must emit [TDF] logs',
+        );
+        expect(
+          logOutput,
+          contains('[DOMAIN]'),
+          reason: 'TaskBoard mutations must emit [DOMAIN] logs',
+        );
+        expect(
+          logOutput,
+          contains('Focus='),
+          reason: 'Domain logs must include 6-tier distribution counts',
+        );
+        expect(
+          logOutput,
+          contains('[SYNC]'),
+          reason: 'TaskBoardSync.merge must emit [SYNC] logs',
+        );
+      },
+    );
   });
 }

@@ -22,6 +22,7 @@ import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
 import '../services/app_logger.dart';
 import 'widgets/clearable_text_field.dart';
+import 'widgets/condition_editor_controller.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_sections.dart';
 

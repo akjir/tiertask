@@ -20,193 +20,133 @@ import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_sync.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/workspace_sync_state.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
   final baseInstant = DateTime.utc(2026, 11, 4, 12, 0, 0);
+  final defaultCreated = DateTime.utc(2026, 11, 1, 8, 0, 0);
   DateTime t(int seconds) => baseInstant.add(Duration(seconds: seconds));
+  TdfQueueBlock makeQueue(int seconds, List<String> taskIds) =>
+      TdfQueueBlock(modifiedAt: t(seconds), taskIds: taskIds);
 
-  group('TDF 0.5.0 Section 6.7.9 Three-Way Merge Verification Table', () {
+  TaskItem makeTask(
+    String id,
+    String title, [
+    int modSec = 10,
+    int comp = 0,
+    List<String> labels = const [],
+    List<TdfTaskDependency> deps = const [],
+    String? note,
+  ]) => TaskItem(
+    id: id,
+    title: title,
+    note: note,
+    createdAt: defaultCreated,
+    modifiedAt: modSec < 0 ? null : t(modSec),
+    completions: comp,
+    labelIds: labels,
+    dependencies: deps,
+  );
+
+  TaskBoard evalBoard(
+    List<TaskItem> tasks, [
+    TdfQueueBlock? queue,
+    int atSec = 100,
+    int? gen,
+    List<TdfLabel> labels = const [],
+    TdfDeletedBlock? deleted,
+    DateTime? at,
+  ]) => TaskBoard.evaluate(
+    tasks: tasks,
+    labels: labels,
+    deletedBlock:
+        deleted ?? (gen != null ? TdfDeletedBlock(generation: gen) : null),
+    queueBlock: queue,
+    evaluationTime: at ?? t(atSec),
+  );
+
+  TaskBoard syncBoards(
+    TaskBoard primary,
+    TaskBoard secondary, [
+    TaskBoard? baseline,
+    DateTime? at,
+    int? ackGen,
+    Map<String, TdfDeletionResolution> taskRes = const {},
+  ]) => TaskBoardSync.merge(
+    primary: primary,
+    secondary: secondary,
+    baseline: baseline,
+    acknowledgedGeneration: ackGen,
+    taskConflictResolutions: taskRes,
+    evaluationTime: at ?? t(100),
+  );
+
+  Matcher throwsSyncOutcome(
+    TdfSyncOutcomeKind kind, {
+    Object? conflictedTasks = anything,
+    Object? ambiguousTasks = anything,
+    Object? ambiguousLabels = anything,
+  }) => throwsA(
+    isA<TdfSyncOutcomeException>()
+        .having((error) => error.kind, 'kind', kind)
+        .having((error) => error.conflictedTaskIds, 'conf', conflictedTasks)
+        .having((error) => error.ambiguousTaskIds, 'ambTasks', ambiguousTasks)
+        .having((error) => error.ambiguousLabelIds, 'ambLabs', ambiguousLabels),
+  );
+
+  group('TDF 0.5.0 Section 6.7.9 Three-Way Merge Table', () {
     const taskId = '8jKaCdOkD2';
-    final created = DateTime.utc(2026, 11, 1, 8, 0, 0);
 
-    TaskBoard singleTaskBoard({
-      required String name,
-      required String? note,
-      DateTime? modifiedAt,
-    }) {
-      final task = TaskItem(
-        id: taskId,
-        title: name,
-        note: note,
-        createdAt: created,
-        modifiedAt: modifiedAt,
-      );
-      return TaskBoard.evaluate(tasks: [task], evaluationTime: t(100));
-    }
+    TaskBoard singleTaskBoard(String name, String? note, [int modSec = 10]) =>
+        evalBoard([
+          makeTask(taskId, name, modSec, 0, const [], const [], note),
+        ]);
 
-    final baseline = singleTaskBoard(name: 'N0', note: 'Q0', modifiedAt: t(10));
+    final baseline = singleTaskBoard('N0', 'Q0', 10);
 
     test('executes all 6 scalar verification table cases symmetrically in both (L, R) and (R, L) directions', () {
-      final cases =
-          <
-            ({
-              String description,
-              TaskBoard local,
-              TaskBoard incoming,
-              String expectedName,
-              String expectedNote,
-              DateTime expectedRevision,
-            })
-          >[
-            (
-              description: 'Independent edits',
-              local: singleTaskBoard(name: 'N1', note: 'Q0', modifiedAt: t(11)),
-              incoming: singleTaskBoard(
-                name: 'N0',
-                note: 'Q1',
-                modifiedAt: t(12),
-              ),
-              expectedName: 'N1',
-              expectedNote: 'Q1',
-              expectedRevision: t(13),
-            ),
-            (
-              description: 'Matching edits',
-              local: singleTaskBoard(name: 'N1', note: 'Q0', modifiedAt: t(11)),
-              incoming: singleTaskBoard(
-                name: 'N1',
-                note: 'Q0',
-                modifiedAt: t(12),
-              ),
-              expectedName: 'N1',
-              expectedNote: 'Q0',
-              expectedRevision: t(12),
-            ),
-            (
-              description: 'Same field conflict',
-              local: singleTaskBoard(name: 'N1', note: 'Q0', modifiedAt: t(11)),
-              incoming: singleTaskBoard(
-                name: 'N2',
-                note: 'Q0',
-                modifiedAt: t(12),
-              ),
-              expectedName: 'N2',
-              expectedNote: 'Q0',
-              expectedRevision: t(12),
-            ),
-            (
-              description: 'Equal timestamp conflict',
-              local: singleTaskBoard(
-                name: 'Alpha',
-                note: 'Q0',
-                modifiedAt: t(12),
-              ),
-              incoming: singleTaskBoard(
-                name: 'Zulu',
-                note: 'Q0',
-                modifiedAt: t(12),
-              ),
-              expectedName: 'Zulu',
-              expectedNote: 'Q0',
-              expectedRevision: t(12),
-            ),
-            (
-              description: 'Conflict and independent edit',
-              local: singleTaskBoard(
-                name: 'N1',
-                note: 'Alpha',
-                modifiedAt: t(11),
-              ),
-              incoming: singleTaskBoard(
-                name: 'N0',
-                note: 'Zulu',
-                modifiedAt: t(12),
-              ),
-              expectedName: 'N1',
-              expectedNote: 'Zulu',
-              expectedRevision: t(13),
-            ),
-            (
-              description: 'Unstamped external edit',
-              local: singleTaskBoard(name: 'N0', note: 'Q0', modifiedAt: t(20)),
-              incoming: singleTaskBoard(
-                name: 'N1',
-                note: 'Q0',
-                modifiedAt: t(10),
-              ),
-              expectedName: 'N1',
-              expectedNote: 'Q0',
-              expectedRevision: t(21),
-            ),
-          ];
+      final cases = [
+        ('Independent edits', 'N1', 'Q0', 11, 'N0', 'Q1', 12, 'N1', 'Q1', 13),
+        ('Matching edits', 'N1', 'Q0', 11, 'N1', 'Q0', 12, 'N1', 'Q0', 12),
+        ('Same field conflict', 'N1', 'Q0', 11, 'N2', 'Q0', 12, 'N2', 'Q0', 12),
+        ('Equal ts', 'Alpha', 'Q0', 12, 'Zulu', 'Q0', 12, 'Zulu', 'Q0', 12),
+        ('Conflict', 'N1', 'Alpha', 11, 'N0', 'Zulu', 12, 'N1', 'Zulu', 13),
+        ('Unstamped edit', 'N0', 'Q0', 20, 'N1', 'Q0', 10, 'N1', 'Q0', 21),
+      ];
 
-      for (final testCase in cases) {
-        final forward = TaskBoardSync.merge(
-          primary: testCase.local,
-          secondary: testCase.incoming,
-          baseline: baseline,
-          evaluationTime: t(500),
-        );
-        final reversed = TaskBoardSync.merge(
-          primary: testCase.incoming,
-          secondary: testCase.local,
-          baseline: baseline,
-          evaluationTime: t(500),
-        );
-
-        final forwardTask = forward.findTask(taskId)!;
-        final reversedTask = reversed.findTask(taskId)!;
-
-        expect(
-          forwardTask.title,
-          equals(testCase.expectedName),
-          reason: '${testCase.description} (forward): name mismatch',
-        );
-        expect(
-          forwardTask.note,
-          equals(testCase.expectedNote),
-          reason: '${testCase.description} (forward): note mismatch',
-        );
-        expect(
-          forwardTask.modifiedAt,
-          equals(testCase.expectedRevision),
-          reason: '${testCase.description} (forward): revision mismatch',
-        );
-
-        expect(
-          reversedTask.title,
-          equals(testCase.expectedName),
-          reason: '${testCase.description} (reversed): name mismatch',
-        );
-        expect(
-          reversedTask.note,
-          equals(testCase.expectedNote),
-          reason: '${testCase.description} (reversed): note mismatch',
-        );
-        expect(
-          reversedTask.modifiedAt,
-          equals(testCase.expectedRevision),
-          reason: '${testCase.description} (reversed): revision mismatch',
-        );
+      for (final (desc, lN, lQ, lT, rN, rQ, rT, eN, eQ, eT) in cases) {
+        final local = singleTaskBoard(lN, lQ, lT);
+        final incoming = singleTaskBoard(rN, rQ, rT);
+        for (final (dir, first, second) in [
+          ('forward', local, incoming),
+          ('reversed', incoming, local),
+        ]) {
+          final merged = syncBoards(
+            first,
+            second,
+            baseline,
+            t(500),
+          ).findTask(taskId)!;
+          expect(merged.title, equals(eN), reason: '$desc ($dir): name');
+          expect(merged.note, equals(eQ), reason: '$desc ($dir): note');
+          expect(merged.modifiedAt, equals(t(eT)), reason: '$desc ($dir): rev');
+        }
       }
 
-      // Without a known common baseline, the independent-edits case MUST retain the complete version at T12:
-      final noBaselineForward = TaskBoardSync.merge(
-        primary: singleTaskBoard(name: 'N1', note: 'Q0', modifiedAt: t(11)),
-        secondary: singleTaskBoard(name: 'N0', note: 'Q1', modifiedAt: t(12)),
-        evaluationTime: t(500),
-      );
-      final noBaselineReversed = TaskBoardSync.merge(
-        primary: singleTaskBoard(name: 'N0', note: 'Q1', modifiedAt: t(12)),
-        secondary: singleTaskBoard(name: 'N1', note: 'Q0', modifiedAt: t(11)),
-        evaluationTime: t(500),
-      );
-      for (final board in [noBaselineForward, noBaselineReversed]) {
-        final winner = board.findTask(taskId)!;
+      final b11 = singleTaskBoard('N1', 'Q0', 11);
+      final b12 = singleTaskBoard('N0', 'Q1', 12);
+      for (final (first, second) in [(b11, b12), (b12, b11)]) {
+        final winner = syncBoards(
+          first,
+          second,
+          null,
+          t(500),
+        ).findTask(taskId)!;
         expect(winner.title, equals('N0'));
         expect(winner.note, equals('Q1'));
         expect(winner.modifiedAt, equals(t(12)));
@@ -217,113 +157,64 @@ void main() {
       const l1 = '000001OkD2';
       const l2 = '000002OkD2';
       const l3 = '000003OkD2';
-      final labels = <TdfLabel>[
-        const TdfLabel(id: l1, name: 'L1'),
-        const TdfLabel(id: l2, name: 'L2'),
-        const TdfLabel(id: l3, name: 'L3'),
+      const labels = <TdfLabel>[
+        TdfLabel(id: l1, name: 'L1'),
+        TdfLabel(id: l2, name: 'L2'),
+        TdfLabel(id: l3, name: 'L3'),
       ];
+      final queue = makeQueue(10, const [taskId]);
+      TaskBoard boardFor(TaskItem item) =>
+          evalBoard([item], queue, 100, null, labels);
 
-      // Baseline has labels {l1, l2}, completions = 1, repeat 1 days:
-      final baseTask = TaskItem(
-        id: taskId,
-        title: 'Recurring Task',
-        createdAt: created,
-        modifiedAt: t(10),
-        completions: 1,
-        labelIds: const [l1, l2],
-        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+      final baseTask = makeTask(taskId, 'Recurring Task', 10, 1, const [l1, l2])
+          .copyWith(
+            repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+          );
+      final baseBoard = boardFor(baseTask);
+      final localBoard = boardFor(
+        baseTask.copyWith(
+          labelIds: const [l2],
+          completions: 2,
+          suspendedAt: t(86400),
+          modifiedAt: t(11),
+        ),
       );
-      final baseBoard = TaskBoard.evaluate(
-        tasks: [baseTask],
-        labels: labels,
-        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-        evaluationTime: t(100),
-      );
-
-      // Local removes l1 and completes occurrence 2 (completions = 2) at T11:
-      final localTask = baseTask.copyWith(
-        labelIds: const [l2],
-        completions: 2,
-        suspendedAt: t(86400),
-        modifiedAt: t(11),
-      );
-      final localBoard = TaskBoard.evaluate(
-        tasks: [localTask],
-        labels: labels,
-        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-        evaluationTime: t(100),
+      final remoteBoard = boardFor(
+        baseTask.copyWith(
+          labelIds: const [l1, l2, l3],
+          completions: 1,
+          suspendedAt: t(3600),
+          modifiedAt: t(15),
+        ),
       );
 
-      // Remote adds l3 and edits subtasks/deferral on older occurrence 1 (completions = 1) at later timestamp T15:
-      final remoteTask = baseTask.copyWith(
-        labelIds: const [l1, l2, l3],
-        completions: 1,
-        suspendedAt: t(3600),
-        modifiedAt: t(15),
-      );
-      final remoteBoard = TaskBoard.evaluate(
-        tasks: [remoteTask],
-        labels: labels,
-        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-        evaluationTime: t(100),
-      );
-
-      final merged = TaskBoardSync.merge(
-        primary: localBoard,
-        secondary: remoteBoard,
-        baseline: baseBoard,
-        evaluationTime: t(100),
-      );
+      final merged = syncBoards(localBoard, remoteBoard, baseBoard);
       final mergedTask = merged.findTask(taskId)!;
 
-      // Label set merge: B = {l1, l2}, L = {l2} (removed l1), R = {l1, l2, l3} (added l3) -> {l2, l3}:
       expect(
         mergedTask.labelIds,
         equals([l2, l3]),
-        reason: 'Label set must combine independent removal of l1 and addition of l3',
+        reason: 'Label set must combine removal of l1 and addition of l3',
       );
-      // Occurrence state: L has completions = 2 > R.completions = 1, so L is the complete winner W even though R has later T15:
       expect(
         mergedTask.completions,
         equals(2),
-        reason: 'Greater completion counter (2 > 1) must win over later timestamp on older occurrence',
+        reason: 'Greater completion counter (2 > 1) must win',
       );
       expect(mergedTask.suspendedAt, equals(t(86400)));
       expect(mergedTask.modifiedAt, equals(t(16)));
 
-      // Merging the same result again must preserve revisions:
-      final remerged = TaskBoardSync.merge(
-        primary: merged,
-        secondary: merged,
-        baseline: merged,
-        evaluationTime: t(200),
-      );
+      final remerged = syncBoards(merged, merged, merged, t(200));
       expect(remerged.findTask(taskId)!.modifiedAt, equals(t(16)));
 
-      // UTF-8 byte order vs UTF-16 code-unit order for supplementary character above U+FFFF:
-      // U+FF21 (FULLWIDTH LATIN CAPITAL LETTER A, 'Ａ') has UTF-16 [0xFF21] and UTF-8 [0xEF, 0xBC, 0xA1].
-      // U+1F680 (ROCKET, '🚀') has UTF-16 [0xD83D, 0xDE80] and UTF-8 [0xF0, 0x9F, 0x9A, 0x80].
-      // In UTF-16 code units, 0xD83D < 0xFF21, so '🚀' < 'Ａ'.
-      // In unsigned UTF-8 bytes, 0xF0 > 0xEF, so '🚀' > 'Ａ'!
-      final bmpFullwidthBoard = singleTaskBoard(
-        name: '\uFF21',
-        note: null,
-        modifiedAt: t(12),
-      );
-      final supplementaryRocketBoard = singleTaskBoard(
-        name: '🚀',
-        note: null,
-        modifiedAt: t(12),
-      );
-      final utf8Winner = TaskBoardSync.merge(
-        primary: bmpFullwidthBoard,
-        secondary: supplementaryRocketBoard,
-        evaluationTime: t(100),
+      final utf8Winner = syncBoards(
+        singleTaskBoard('\uFF21', null, 12),
+        singleTaskBoard('🚀', null, 12),
       );
       expect(
         utf8Winner.findTask(taskId)!.title,
         equals('🚀'),
-        reason: 'UTF-8 byte comparison must rank U+1F680 (0xF0...) above U+FF21 (0xEF...)',
+        reason: 'UTF-8 byte comparison ranks U+1F680 above U+FF21',
       );
     });
 
@@ -331,7 +222,6 @@ void main() {
       const parser = TdfService();
       const docA = '''
 tdf 0.5.0
-
 label 000001OkD2 {
     name 'Work & Ops'
     condition location 048.13715400 -000.000 0250.00
@@ -339,7 +229,6 @@ label 000001OkD2 {
 ''';
       const docB = '''
 tdf 0.5.0
-
 label 000001OkD2 {
     name "Work & Ops"
     condition {
@@ -350,63 +239,30 @@ label 000001OkD2 {
       final boardA = parser.parse(docA, evaluationTime: t(100));
       final boardB = parser.parse(docB, evaluationTime: t(100));
 
-      final merged = TaskBoardSync.merge(
-        primary: boardA,
-        secondary: boardB,
-        baseline: boardA,
-        evaluationTime: t(100),
-      );
+      final merged = syncBoards(boardA, boardB, boardA);
       expect(
         merged.labels.single.modifiedAt,
         isNull,
-        reason: 'Equivalent decoded payloads with omitted modified must not advance revision',
+        reason: 'Equivalent decoded payloads must not advance revision',
       );
 
-      // Merged dependency cycle from two individually acyclic inputs:
       const idA = '00000AOkD2';
       const idB = '00000BOkD2';
-      final leftA = TaskItem(
-        id: idA,
-        title: 'A blocked by B on Left',
-        createdAt: created,
-        modifiedAt: t(20),
-        dependencies: const [TdfTaskDependency(taskId: idB)],
-      );
-      final leftB = TaskItem(
-        id: idB,
-        title: 'B unblocked on Left',
-        createdAt: created,
-        modifiedAt: t(10),
-      );
-      final rightA = TaskItem(
-        id: idA,
-        title: 'A unblocked on Right',
-        createdAt: created,
-        modifiedAt: t(10),
-      );
-      final rightB = TaskItem(
-        id: idB,
-        title: 'B blocked by A on Right',
-        createdAt: created,
-        modifiedAt: t(20),
-        dependencies: const [TdfTaskDependency(taskId: idA)],
-      );
-
-      final leftBoard = TaskBoard.evaluate(
-        tasks: [leftA, leftB],
-        evaluationTime: t(100),
-      );
-      final rightBoard = TaskBoard.evaluate(
-        tasks: [rightA, rightB],
-        evaluationTime: t(100),
-      );
+      final leftBoard = evalBoard([
+        makeTask(idA, 'A blocked by B', 20, 0, const [], const [
+          TdfTaskDependency(taskId: idB),
+        ]),
+        makeTask(idB, 'B unblocked'),
+      ]);
+      final rightBoard = evalBoard([
+        makeTask(idA, 'A unblocked'),
+        makeTask(idB, 'B blocked by A', 20, 0, const [], const [
+          TdfTaskDependency(taskId: idA),
+        ]),
+      ]);
 
       expect(
-        () => TaskBoardSync.merge(
-          primary: leftBoard,
-          secondary: rightBoard,
-          evaluationTime: t(100),
-        ),
+        () => syncBoards(leftBoard, rightBoard),
         throwsA(
           isA<TdfException>().having(
             (error) => error.kind,
@@ -414,555 +270,354 @@ label 000001OkD2 {
             TdfErrorKind.circularDependency,
           ),
         ),
-        reason: 'Combined dependency cycle A -> B -> A must fail validation with CircularDependency',
+        reason: 'Combined dependency cycle A -> B -> A must fail validation',
       );
     });
   });
 
-  group(
-    'TDF 0.5.0 Section 6.8 & 6.8.5 Deletion Records, Generations & Recovery',
-    () {
-      const taskId = '8jKaCdOkD2';
-      const task2Id = '3nQp7ROkB8';
-      const labelId = 'work00OkD2';
-      final created = DateTime.utc(2026, 10, 1, 8, 0, 0);
+  group('TDF 0.5.0 Section 6.8 Deletion Records & Recovery', () {
+    const taskId = '8jKaCdOkD2';
+    const task2Id = '3nQp7ROkB8';
+    const labelId = 'work00OkD2';
 
-      test('enforces exact 30-day (2,592,000s) deletion record expiry, single generation increment across multiple expiries, and nonzero generation retention', () {
-        final delTime = DateTime.utc(2026, 10, 5, 12, 0, 0);
-        final exactly30Days = delTime.add(const Duration(seconds: 2592000));
-        final over30Days = delTime.add(const Duration(seconds: 2592001));
-
-        final boardWithRecords = TaskBoard.evaluate(
-          tasks: const [],
-          deletedBlock: TdfDeletedBlock(
-            generation: 0,
-            tasks: [
-              TdfDeletedTaskRecord(
-                taskId: taskId,
-                deletedAt: delTime,
-                completionsCheckpoint: 4,
-              ),
-            ],
-            labels: [
-              TdfDeletedLabelRecord(labelId: labelId, deletedAt: delTime),
-            ],
+    test('enforces exact 30-day (2,592,000s) deletion record expiry, single generation increment across multiple expiries, and nonzero generation retention', () {
+      final delTime = DateTime.utc(2026, 10, 5, 12, 0, 0);
+      final exactly30Days = delTime.add(const Duration(seconds: 2592000));
+      final over30Days = delTime.add(const Duration(seconds: 2592001));
+      final delBlock = TdfDeletedBlock(
+        generation: 0,
+        tasks: [
+          TdfDeletedTaskRecord(
+            taskId: taskId,
+            deletedAt: delTime,
+            completionsCheckpoint: 4,
           ),
-          evaluationTime: exactly30Days,
-        );
+        ],
+        labels: [TdfDeletedLabelRecord(labelId: labelId, deletedAt: delTime)],
+      );
+      final bRec = evalBoard(
+        const [],
+        null,
+        100,
+        null,
+        const [],
+        delBlock,
+        exactly30Days,
+      );
 
-        // At exactly 30 days (2,592,000s), records are kept and generation stays 0:
-        final mergedAt30Days = TaskBoardSync.merge(
-          primary: boardWithRecords,
-          secondary: boardWithRecords,
-          baseline: boardWithRecords,
-          evaluationTime: exactly30Days,
-        );
-        expect(mergedAt30Days.deletedBlock.generation, equals(0));
-        expect(mergedAt30Days.deletedBlock.totalRecords, equals(2));
+      final mergedAt30Days = syncBoards(bRec, bRec, bRec, exactly30Days);
+      expect(mergedAt30Days.deletedBlock.generation, equals(0));
+      expect(mergedAt30Days.deletedBlock.totalRecords, equals(2));
 
-        // At 2,592,001s (> 30 days), both records expire and generation increments once from 0 -> 1:
-        final mergedOver30Days = TaskBoardSync.merge(
-          primary: boardWithRecords,
-          secondary: boardWithRecords,
-          baseline: boardWithRecords,
-          evaluationTime: over30Days,
-        );
+      final mergedOver30Days = syncBoards(bRec, bRec, bRec, over30Days);
+      expect(
+        mergedOver30Days.deletedBlock.generation,
+        equals(1),
+        reason: 'Expiring multiple records increments generation once',
+      );
+      expect(mergedOver30Days.deletedBlock.totalRecords, equals(0));
+      expect(
+        mergedOver30Days.deletedBlock.isDefaultEmpty,
+        isFalse,
+        reason: 'Nonzero generation keeps deleted block non-default',
+      );
+    });
+
+    test('handles DeletionConflict, Delete and Undelete resolutions with completion checkpoint preservation, and single generation increment when combined with cleanup', () {
+      final baseTask = makeTask(taskId, 'Original Task', 10, 3, const [
+        labelId,
+      ]);
+      const baseLabel = TdfLabel(id: labelId, name: 'Work');
+      final queue = makeQueue(10, const [taskId]);
+      final baseline = evalBoard(
+        [baseTask],
+        queue,
+        10,
+        null,
+        const [baseLabel],
+      );
+      final edited = baseTask.copyWith(
+        title: 'Edited Task',
+        completions: 5,
+        modifiedAt: t(15),
+      );
+      final localBoard = evalBoard(
+        [edited],
+        queue,
+        15,
+        null,
+        const [baseLabel],
+      );
+      final delRec = TdfDeletedTaskRecord(
+        taskId: taskId,
+        deletedAt: t(20),
+        completionsCheckpoint: 7,
+      );
+      final remoteBoard = evalBoard(const [], null, 20, null, const [
+        baseLabel,
+      ], TdfDeletedBlock(generation: 0, tasks: [delRec]));
+
+      for (final (first, second) in [
+        (localBoard, remoteBoard),
+        (remoteBoard, localBoard),
+      ]) {
         expect(
-          mergedOver30Days.deletedBlock.generation,
-          equals(1),
-          reason: 'Expiring multiple records in one cleanup must increment generation once',
-        );
-        expect(mergedOver30Days.deletedBlock.totalRecords, equals(0));
-        expect(
-          mergedOver30Days.deletedBlock.isDefaultEmpty,
-          isFalse,
-          reason: 'Nonzero generation must keep deleted block non-default',
-        );
-      });
-
-      test('handles DeletionConflict, Delete and Undelete resolutions with completion checkpoint preservation, and single generation increment when combined with cleanup', () {
-        final baseTask = TaskItem(
-          id: taskId,
-          title: 'Original Task',
-          createdAt: created,
-          modifiedAt: t(10),
-          completions: 3,
-          labelIds: const [labelId],
-        );
-        const baseLabel = TdfLabel(id: labelId, name: 'Work');
-        final baseline = TaskBoard.evaluate(
-          tasks: [baseTask],
-          labels: const [baseLabel],
-          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-          evaluationTime: t(10),
-        );
-
-        // Local edits the task (completions = 5, new title) at T15:
-        final editedTask = baseTask.copyWith(
-          title: 'Edited Task',
-          completions: 5,
-          modifiedAt: t(15),
-        );
-        final localBoard = TaskBoard.evaluate(
-          tasks: [editedTask],
-          labels: const [baseLabel],
-          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-          evaluationTime: t(15),
-        );
-
-        // Remote deleted the task at T20 with checkpoint 7 (e.g., completed twice more before deletion):
-        final remoteBoard = TaskBoard.evaluate(
-          tasks: const [],
-          labels: const [baseLabel],
-          deletedBlock: TdfDeletedBlock(
-            generation: 0,
-            tasks: [
-              TdfDeletedTaskRecord(
-                taskId: taskId,
-                deletedAt: t(20),
-                completionsCheckpoint: 7,
-              ),
-            ],
-          ),
-          evaluationTime: t(20),
-        );
-
-        // Without user resolution, merge must return DeletionConflict in both directions:
-        for (final pair in [
-          (localBoard, remoteBoard),
-          (remoteBoard, localBoard),
-        ]) {
-          expect(
-            () => TaskBoardSync.merge(
-              primary: pair.$1,
-              secondary: pair.$2,
-              baseline: baseline,
-              evaluationTime: t(30),
-            ),
-            throwsA(
-              isA<TdfSyncOutcomeException>()
-                  .having(
-                    (error) => error.kind,
-                    'kind',
-                    TdfSyncOutcomeKind.deletionConflict,
-                  )
-                  .having(
-                    (error) => error.conflictedTaskIds,
-                    'conflictedTaskIds',
-                    contains(taskId),
-                  ),
-            ),
-          );
-        }
-
-        // Resolution = Delete at T30: decisionRevision = max(T30, T20 + 1s) = T30, checkpoint = max(5, 3, 7) = 7, generation stays 0:
-        final resolvedDelete = TaskBoardSync.merge(
-          primary: localBoard,
-          secondary: remoteBoard,
-          baseline: baseline,
-          taskConflictResolutions: const {taskId: TdfDeletionResolution.delete},
-          evaluationTime: t(30),
-        );
-        expect(resolvedDelete.findTask(taskId), isNull);
-        expect(resolvedDelete.deletedBlock.generation, equals(0));
-        final deleteRecord = resolvedDelete.deletedBlock.findTaskRecord(
-          taskId,
-        )!;
-        expect(deleteRecord.deletedAt, equals(t(30)));
-        expect(deleteRecord.completionsCheckpoint, equals(7));
-
-        // Resolution = Undelete at T18 (earlier than T20): decisionRevision = max(T18, T20 + 1s) = T21,
-        // restores edited task with completions = 7, removes record, and increments generation 0 -> 1:
-        final resolvedUndelete = TaskBoardSync.merge(
-          primary: localBoard,
-          secondary: remoteBoard,
-          baseline: baseline,
-          taskConflictResolutions: const {
-            taskId: TdfDeletionResolution.undelete,
-          },
-          evaluationTime: t(18),
-        );
-        final restoredTask = resolvedUndelete.findTask(taskId)!;
-        expect(restoredTask.title, equals('Edited Task'));
-        expect(restoredTask.completions, equals(7));
-        expect(restoredTask.modifiedAt, equals(t(21)));
-        expect(resolvedUndelete.deletedBlock.findTaskRecord(taskId), isNull);
-        expect(resolvedUndelete.deletedBlock.generation, equals(1));
-        expect(resolvedUndelete.queueBlock.taskIds, contains(taskId));
-      });
-
-      test('detects SyncGenerationRollback, RecoveryRequired on unacknowledged generation expiry or completion regression, and supports explicit new-ID recovery with reference rewriting', () {
-        final sharedTask = TaskItem(
-          id: taskId,
-          title: 'Shared Task',
-          createdAt: created,
-          modifiedAt: t(10),
-          completions: 4,
-        );
-        final baseline = TaskBoard.evaluate(
-          tasks: [sharedTask],
-          deletedBlock: TdfDeletedBlock(generation: 2),
-          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-          evaluationTime: t(10),
-        );
-
-        // 1. SyncGenerationRollback when incoming generation < acknowledged generation:
-        final rolledBackRemote = TaskBoard.evaluate(
-          tasks: [sharedTask],
-          deletedBlock: TdfDeletedBlock(generation: 1),
-          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-          evaluationTime: t(20),
-        );
-        expect(
-          () => TaskBoardSync.merge(
-            primary: baseline,
-            secondary: rolledBackRemote,
-            baseline: baseline,
-            acknowledgedGeneration: 2,
-            evaluationTime: t(20),
-          ),
-          throwsA(
-            isA<TdfSyncOutcomeException>().having(
-              (error) => error.kind,
-              'kind',
-              TdfSyncOutcomeKind.syncGenerationRollback,
-            ),
+          () => syncBoards(first, second, baseline, t(30)),
+          throwsSyncOutcome(
+            TdfSyncOutcomeKind.deletionConflict,
+            conflictedTasks: contains(taskId),
           ),
         );
+      }
 
-        // 2. Completion counter regression below baseline (completions 3 < baseline 4) -> RecoveryRequired:
-        final regressedLocal = TaskBoard.evaluate(
-          tasks: [sharedTask.copyWith(completions: 3, modifiedAt: t(15))],
-          deletedBlock: TdfDeletedBlock(generation: 2),
-          queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [taskId]),
-          evaluationTime: t(20),
-        );
-        expect(
-          () => TaskBoardSync.merge(
-            primary: regressedLocal,
-            secondary: baseline,
-            baseline: baseline,
-            acknowledgedGeneration: 2,
-            evaluationTime: t(20),
-          ),
-          throwsA(
-            isA<TdfSyncOutcomeException>().having(
-              (error) => error.kind,
-              'kind',
-              TdfSyncOutcomeKind.recoveryRequired,
-            ),
-          ),
-        );
+      const delMap = {taskId: TdfDeletionResolution.delete};
+      final resolvedDelete = syncBoards(
+        localBoard,
+        remoteBoard,
+        baseline,
+        t(30),
+        null,
+        delMap,
+      );
+      expect(resolvedDelete.findTask(taskId), isNull);
+      expect(resolvedDelete.deletedBlock.generation, equals(0));
+      final deleteRecord = resolvedDelete.deletedBlock.findTaskRecord(taskId)!;
+      expect(deleteRecord.deletedAt, equals(t(30)));
+      expect(deleteRecord.completionsCheckpoint, equals(7));
 
-        // 3. Shared generation increased (2 -> 3): unchanged cached entity is discarded,
-        // but local-only or locally edited entity absent remotely triggers RecoveryRequired:
-        const ambLabelId = 'ambLabOkD2';
-        const ambTask1Id = 'ambT01OkD2';
-        const ambTask2Id = 'ambT02OkD2';
-        const ambLabel = TdfLabel(id: ambLabelId, name: 'Ambiguous Label');
-        final ambTask1 = TaskItem(
-          id: ambTask1Id,
-          title: 'Ambiguous Prerequisite',
-          createdAt: created,
-          modifiedAt: t(11),
-          labelIds: const [ambLabelId],
-        );
-        final ambTask2 = TaskItem(
-          id: ambTask2Id,
-          title: 'Ambiguous Dependent',
-          createdAt: created,
-          modifiedAt: t(12),
-          labelIds: const [ambLabelId],
-          dependencies: const [
-            TdfTaskDependency(taskId: ambTask1Id, requiredCompletion: 2),
-          ],
-        );
+      const undelMap = {taskId: TdfDeletionResolution.undelete};
+      final resolvedUndelete = syncBoards(
+        localBoard,
+        remoteBoard,
+        baseline,
+        t(18),
+        null,
+        undelMap,
+      );
+      final restoredTask = resolvedUndelete.findTask(taskId)!;
+      expect(restoredTask.title, equals('Edited Task'));
+      expect(restoredTask.completions, equals(7));
+      expect(restoredTask.modifiedAt, equals(t(21)));
+      expect(resolvedUndelete.deletedBlock.findTaskRecord(taskId), isNull);
+      expect(resolvedUndelete.deletedBlock.generation, equals(1));
+      expect(resolvedUndelete.queueBlock.taskIds, contains(taskId));
+    });
 
-        final localWithAmbiguous = TaskBoard.evaluate(
-          tasks: [sharedTask, ambTask1, ambTask2],
-          labels: const [ambLabel],
-          deletedBlock: TdfDeletedBlock(generation: 2),
-          queueBlock: TdfQueueBlock(
-            modifiedAt: t(12),
-            taskIds: const [taskId, ambTask1Id, ambTask2Id],
-          ),
-          evaluationTime: t(20),
-        );
-        final advancedShared = TaskBoard.evaluate(
-          tasks: const [], // sharedTask was deleted and its record expired in generation 3
-          deletedBlock: TdfDeletedBlock(generation: 3),
-          evaluationTime: t(20),
-        );
+    test('detects SyncGenerationRollback, RecoveryRequired on unacknowledged generation expiry or completion regression, and supports explicit new-ID recovery with reference rewriting', () {
+      final sharedTask = makeTask(taskId, 'Shared Task', 10, 4);
+      final queue = makeQueue(10, const [taskId]);
+      final baseline = evalBoard([sharedTask], queue, 10, 2);
+      final rolledBackRemote = evalBoard([sharedTask], queue, 20, 1);
+      expect(
+        () => syncBoards(baseline, rolledBackRemote, baseline, t(20), 2),
+        throwsSyncOutcome(TdfSyncOutcomeKind.syncGenerationRollback),
+      );
 
-        expect(
-          () => TaskBoardSync.merge(
-            primary: localWithAmbiguous,
-            secondary: advancedShared,
-            baseline: baseline,
-            acknowledgedGeneration: 2,
-            evaluationTime: t(20),
-          ),
-          throwsA(
-            isA<TdfSyncOutcomeException>()
-                .having(
-                  (error) => error.kind,
-                  'kind',
-                  TdfSyncOutcomeKind.recoveryRequired,
-                )
-                .having(
-                  (error) => error.ambiguousTaskIds,
-                  'ambiguousTaskIds',
-                  containsAll([ambTask1Id, ambTask2Id]),
-                )
-                .having(
-                  (error) => error.ambiguousLabelIds,
-                  'ambiguousLabelIds',
-                  contains(ambLabelId),
-                ),
-          ),
-        );
+      final regressedTask = sharedTask.copyWith(
+        completions: 3,
+        modifiedAt: t(15),
+      );
+      final regressedLocal = evalBoard([regressedTask], queue, 20, 2);
+      expect(
+        () => syncBoards(regressedLocal, baseline, baseline, t(20), 2),
+        throwsSyncOutcome(TdfSyncOutcomeKind.recoveryRequired),
+      );
 
-        // Explicit recovery generates new 10-character Base62 IDs, rewrites references between recovered entities,
-        // and discards the unchanged cached sharedTask:
-        final recoveredBoard = TaskBoardSync.recoverAmbiguousEntities(
-          localBoard: localWithAmbiguous,
-          sharedBoard: advancedShared,
-          baseline: baseline,
-          recoverTaskIds: const [ambTask1Id, ambTask2Id],
-          recoverLabelIds: const [ambLabelId],
-          evaluationTime: t(30),
-        );
+      const ambLabelId = 'ambLabOkD2';
+      const ambTask1Id = 'ambT01OkD2';
+      const ambTask2Id = 'ambT02OkD2';
+      const ambLabel = TdfLabel(id: ambLabelId, name: 'Ambiguous Label');
+      final ambTask1 = makeTask(
+        ambTask1Id,
+        'Ambiguous Prerequisite',
+        11,
+        0,
+        const [ambLabelId],
+      );
+      final ambTask2 = makeTask(
+        ambTask2Id,
+        'Ambiguous Dependent',
+        12,
+        0,
+        const [ambLabelId],
+        const [TdfTaskDependency(taskId: ambTask1Id, requiredCompletion: 2)],
+      );
 
-        expect(recoveredBoard.deletedBlock.generation, equals(3));
-        expect(
-          recoveredBoard.findTask(taskId),
-          isNull,
-          reason: 'Unchanged cached sharedTask absent from advancedShared must be discarded',
-        );
-        expect(recoveredBoard.labels.length, equals(1));
-        final newLabelId = recoveredBoard.labels.single.id;
-        expect(newLabelId, isNot(equals(ambLabelId)));
-        expect(isValidLabelId(newLabelId), isTrue);
+      final localWithAmbiguous = evalBoard(
+        [sharedTask, ambTask1, ambTask2],
+        makeQueue(12, const [taskId, ambTask1Id, ambTask2Id]),
+        20,
+        2,
+        const [ambLabel],
+      );
+      final advancedShared = evalBoard(const [], null, 20, 3);
 
-        expect(recoveredBoard.allTasks.length, equals(2));
-        final recTask1 = recoveredBoard.allTasks.firstWhere(
-          (task) => task.title == 'Ambiguous Prerequisite',
-        );
-        final recTask2 = recoveredBoard.allTasks.firstWhere(
-          (task) => task.title == 'Ambiguous Dependent',
-        );
-        expect(recTask1.id, isNot(equals(ambTask1Id)));
-        expect(recTask2.id, isNot(equals(ambTask2Id)));
-        expect(recTask1.labelIds, equals([newLabelId]));
-        expect(recTask2.labelIds, equals([newLabelId]));
-        expect(
-          recTask2.dependencies,
-          equals([
-            TdfTaskDependency(taskId: recTask1.id, requiredCompletion: 2),
-          ]),
-          reason: 'Recovered dependent must rewrite prerequisite ID to new recovered task ID while preserving requiredCompletion',
-        );
-      });
+      expect(
+        () =>
+            syncBoards(localWithAmbiguous, advancedShared, baseline, t(20), 2),
+        throwsSyncOutcome(
+          TdfSyncOutcomeKind.recoveryRequired,
+          ambiguousTasks: containsAll([ambTask1Id, ambTask2Id]),
+          ambiguousLabels: contains(ambLabelId),
+        ),
+      );
 
-      test('creates a deletion record when a compatible baseline proves an external deletion without an existing record', () {
-        final task1 = TaskItem(
-          id: taskId,
-          title: 'Task 1',
-          createdAt: created,
-          modifiedAt: t(10),
-          completions: 2,
-        );
-        final task2 = TaskItem(
-          id: task2Id,
-          title: 'Task 2',
-          createdAt: created,
-          modifiedAt: t(10),
-        );
-        final baseline = TaskBoard.evaluate(
-          tasks: [task1, task2],
-          queueBlock: TdfQueueBlock(
-            modifiedAt: t(10),
-            taskIds: const [taskId, task2Id],
-          ),
-          evaluationTime: t(10),
-        );
-        // External editor deleted task1 from secondary without writing a deleted record:
-        final externallyDeletedBoard = TaskBoard.evaluate(
-          tasks: [task2],
-          queueBlock: TdfQueueBlock(
-            modifiedAt: t(10),
-            taskIds: const [task2Id],
-          ),
-          evaluationTime: t(10),
-        );
+      final recoveredBoard = TaskBoardSync.recoverAmbiguousEntities(
+        localBoard: localWithAmbiguous,
+        sharedBoard: advancedShared,
+        baseline: baseline,
+        recoverTaskIds: const [ambTask1Id, ambTask2Id],
+        recoverLabelIds: const [ambLabelId],
+        evaluationTime: t(30),
+      );
 
-        final merged = TaskBoardSync.merge(
-          primary: baseline,
-          secondary: externallyDeletedBoard,
-          baseline: baseline,
-          evaluationTime: t(25),
-        );
-        expect(merged.findTask(taskId), isNull);
-        final createdRecord = merged.deletedBlock.findTaskRecord(taskId);
-        expect(createdRecord, isNotNull);
-        expect(createdRecord!.deletedAt, equals(t(25)));
-        expect(createdRecord.completionsCheckpoint, equals(2));
-      });
-    },
-  );
+      expect(recoveredBoard.deletedBlock.generation, equals(3));
+      expect(
+        recoveredBoard.findTask(taskId),
+        isNull,
+        reason: 'Unchanged cached sharedTask must be discarded',
+      );
+      expect(recoveredBoard.labels.length, equals(1));
+      final newLabelId = recoveredBoard.labels.single.id;
+      expect(newLabelId, isNot(equals(ambLabelId)));
+      expect(isValidLabelId(newLabelId), isTrue);
 
-  group('TDF 0.5.1 Section 6.11.2 Shared Queue Synchronization', () {
+      expect(recoveredBoard.allTasks.length, equals(2));
+      final recTask1 = recoveredBoard.allTasks.firstWhere(
+        (task) => task.title == 'Ambiguous Prerequisite',
+      );
+      final recTask2 = recoveredBoard.allTasks.firstWhere(
+        (task) => task.title == 'Ambiguous Dependent',
+      );
+      expect(recTask1.id, isNot(equals(ambTask1Id)));
+      expect(recTask2.id, isNot(equals(ambTask2Id)));
+      expect(recTask1.labelIds, equals([newLabelId]));
+      expect(recTask2.labelIds, equals([newLabelId]));
+      expect(
+        recTask2.dependencies,
+        equals([TdfTaskDependency(taskId: recTask1.id, requiredCompletion: 2)]),
+        reason: 'Recovered dependent must rewrite prerequisite ID',
+      );
+    });
+
+    test('creates a deletion record when a compatible baseline proves an external deletion without an existing record', () {
+      final task1 = makeTask(taskId, 'Task 1', 10, 2);
+      final task2 = makeTask(task2Id, 'Task 2');
+      final baseline = evalBoard(
+        [task1, task2],
+        makeQueue(10, const [taskId, task2Id]),
+        10,
+      );
+      final extDeleted = evalBoard([task2], makeQueue(10, const [task2Id]), 10);
+
+      final merged = syncBoards(baseline, extDeleted, baseline, t(25));
+      expect(merged.findTask(taskId), isNull);
+      final createdRecord = merged.deletedBlock.findTaskRecord(taskId);
+      expect(createdRecord, isNotNull);
+      expect(createdRecord!.deletedAt, equals(t(25)));
+      expect(createdRecord.completionsCheckpoint, equals(2));
+    });
+  });
+
+  group('TDF 0.5.1 Section 6.11.2 Shared Queue Sync', () {
     const id1 = '000001OkD2';
     const id2 = '000002OkD2';
     const id3 = '000003OkD2';
-    final created = DateTime.utc(2026, 11, 1, 8, 0, 0);
 
     test('merges shared queue order via three-way baseline rules, preserves Someday <-> scheduled transitions without task.modified changes, filters completed tasks, appends concurrent additions by ascending UTC created then ASCII ID, and computes deterministic queue revision', () {
-      final t1 = TaskItem(
-        id: id1,
-        title: 'Task 1',
-        createdAt: created,
-        modifiedAt: t(10),
-      );
-      final t2 = TaskItem(
-        id: id2,
-        title: 'Task 2',
-        createdAt: created.add(const Duration(seconds: 1)),
-        modifiedAt: t(10),
-      );
-      final baseline = TaskBoard.evaluate(
-        tasks: [t1, t2],
-        queueBlock: TdfQueueBlock(modifiedAt: t(10), taskIds: const [id1, id2]),
-        evaluationTime: t(10),
-      );
+      final t1 = makeTask(id1, 'Task 1');
+      final t2 = makeTask(
+        id2,
+        'Task 2',
+      ).copyWith(createdAt: defaultCreated.add(const Duration(seconds: 1)));
+      final baseline = evalBoard([t1, t2], makeQueue(10, const [id1, id2]), 10);
 
-      // 1. Moving t2 to Someday on Local (L.queue = [id1] at T12, t2.modifiedAt unchanged at T10)
-      // while Remote leaves queue at B.queue ([id1, id2] at T10):
-      final localMovedToSomeday = TaskBoard.evaluate(
-        tasks: [t1, t2],
-        queueBlock: TdfQueueBlock(modifiedAt: t(12), taskIds: const [id1]),
-        evaluationTime: t(12),
-      );
-      final mergedToSomeday = TaskBoardSync.merge(
-        primary: localMovedToSomeday,
-        secondary: baseline,
-        baseline: baseline,
-        evaluationTime: t(100),
-      );
+      final localSomeday = evalBoard([t1, t2], makeQueue(12, const [id1]), 12);
+      final mergedToSomeday = syncBoards(localSomeday, baseline, baseline);
       expect(
         mergedToSomeday.queueBlock.taskIds,
         equals([id1]),
-        reason: 'Section 6.11.2: Moving a scheduled task to Someday on L while R.queue == B.queue must keep L.queue ([id1])',
+        reason: 'Moving scheduled task to Someday on L keeps L.queue',
       );
       expect(
         mergedToSomeday.someday.map((task) => task.id),
         equals([id2]),
-        reason: 't2 must be in Someday after merging L.queue removal against unchanged R.queue',
+        reason: 't2 must be in Someday after merging L.queue removal',
       );
 
-      // 2. Local reorders queue to [id2, id1] at T15:
-      final localBoard = TaskBoard.evaluate(
-        tasks: [t1, t2],
-        queueBlock: TdfQueueBlock(modifiedAt: t(15), taskIds: const [id2, id1]),
-        evaluationTime: t(15),
+      final localBoard = evalBoard(
+        [t1, t2],
+        makeQueue(15, const [id2, id1]),
+        15,
+      );
+      final t3 = makeTask(
+        id3,
+        'Task 3 Added',
+        18,
+      ).copyWith(createdAt: defaultCreated.add(const Duration(seconds: 3)));
+      final remoteBoard = evalBoard(
+        [t1, t2, t3],
+        makeQueue(18, const [id1, id2, id3]),
+        18,
       );
 
-      // Remote leaves [id1, id2] order unchanged from baseline, but adds t3 at T18:
-      final t3 = TaskItem(
-        id: id3,
-        title: 'Task 3 Added Remotely',
-        createdAt: created.add(const Duration(seconds: 3)),
-        modifiedAt: t(18),
-      );
-      final remoteBoard = TaskBoard.evaluate(
-        tasks: [t1, t2, t3],
-        queueBlock: TdfQueueBlock(
-          modifiedAt: t(18),
-          taskIds: const [id1, id2, id3],
-        ),
-        evaluationTime: t(18),
-      );
-
-      // Both changed queue relative to baseline ([id2, id1] vs [id1, id2, id3]);
-      // complete queue winner is remoteBoard (T18 > T15), preserving [id1, id2, id3] at T18:
-      final mergedConflict = TaskBoardSync.merge(
-        primary: localBoard,
-        secondary: remoteBoard,
-        baseline: baseline,
-        evaluationTime: t(100),
-      );
+      final mergedConflict = syncBoards(localBoard, remoteBoard, baseline);
       expect(mergedConflict.queueBlock.taskIds, equals([id1, id2, id3]));
       expect(mergedConflict.queueBlock.modifiedAt, equals(t(18)));
 
-      // When local has newer queue revision T20 ([id2, id1]) and remote added t3 at T18 ([id1, id2, id3]),
-      // complete queue winner is local ([id2, id1]), and missing t3 from Loser.queue is appended -> [id2, id1, id3] with revision max(T10, T20, T18) + 1s = T21:
-      final localNewerQueue = TaskBoard.evaluate(
-        tasks: [t1, t2],
-        queueBlock: TdfQueueBlock(modifiedAt: t(20), taskIds: const [id2, id1]),
-        evaluationTime: t(20),
+      final localNewerQueue = evalBoard(
+        [t1, t2],
+        makeQueue(20, const [id2, id1]),
+        20,
       );
-      final mergedForward = TaskBoardSync.merge(
-        primary: localNewerQueue,
-        secondary: remoteBoard,
-        baseline: baseline,
-        evaluationTime: t(100),
-      );
-      final mergedReversed = TaskBoardSync.merge(
-        primary: remoteBoard,
-        secondary: localNewerQueue,
-        baseline: baseline,
-        evaluationTime: t(100),
-      );
-      for (final board in [mergedForward, mergedReversed]) {
+      for (final (first, second) in [
+        (localNewerQueue, remoteBoard),
+        (remoteBoard, localNewerQueue),
+      ]) {
+        final board = syncBoards(first, second, baseline);
         expect(board.queueBlock.taskIds, equals([id2, id1, id3]));
         expect(
           board.queueBlock.modifiedAt,
           equals(t(21)),
-          reason: 'Reconciled queue differing from winning input queue must advance to greatest observed queue revision + 1s without using wall clock',
+          reason: 'Reconciled queue advances to greatest queue revision + 1s',
         );
       }
     });
   });
 
-  group(
-    'WorkspaceSyncState Binary Serialization & SettingsRepository Persistence',
-    () {
-      test('round-trips WorkspaceSyncState binary encoding including acknowledged generations and persists per-workspace sync state', () async {
-        final state = WorkspaceSyncState(
-          lastSyncedLocalTdf: 'tdf 0.5.0\n\ntask 000001OkD2 {\n    name "Local"\n    created 2026-11-01 08:00\n}\n',
-          lastSyncedRemoteTdf: 'tdf 0.5.0\n\ntask 000001OkD2 {\n    name "Remote"\n    created 2026-11-01 08:00\n}\n',
-          deletedLabelTimestamps: <String, DateTime>{
-            'work00OkD2': DateTime.utc(2026, 11, 2, 10, 15, 30),
-            'home00OkD2': DateTime.utc(2026, 11, 2, 11, 0, 0),
-          },
-          acknowledgedLocalGeneration: 4,
-          acknowledgedRemoteGeneration: 7,
-        );
+  group('WorkspaceSyncState Binary Codec & Persistence', () {
+    test('round-trips WorkspaceSyncState binary encoding including acknowledged generations and persists per-workspace sync state', () async {
+      final state = WorkspaceSyncState(
+        lastSyncedLocalTdf: 'tdf 0.5.0\n\ntask 000001OkD2 {\n    name "Local"\n    created 2026-11-01 08:00\n}\n',
+        lastSyncedRemoteTdf: 'tdf 0.5.0\n\ntask 000001OkD2 {\n    name "Remote"\n    created 2026-11-01 08:00\n}\n',
+        deletedLabelTimestamps: <String, DateTime>{
+          'work00OkD2': DateTime.utc(2026, 11, 2, 10, 15, 30),
+          'home00OkD2': DateTime.utc(2026, 11, 2, 11, 0, 0),
+        },
+        acknowledgedLocalGeneration: 4,
+        acknowledgedRemoteGeneration: 7,
+      );
 
-        final encoded = state.toBytes();
-        final decoded = WorkspaceSyncState.fromBytes(encoded);
-        expect(decoded, equals(state));
-        expect(decoded.hashCode, equals(state.hashCode));
-        expect(decoded.acknowledgedLocalGeneration, equals(4));
-        expect(decoded.acknowledgedRemoteGeneration, equals(7));
+      final decoded = WorkspaceSyncState.fromBytes(state.toBytes());
+      expect(decoded, equals(state));
+      expect(decoded.hashCode, equals(state.hashCode));
+      expect(decoded.acknowledgedLocalGeneration, equals(4));
+      expect(decoded.acknowledgedRemoteGeneration, equals(7));
+      expect(
+        WorkspaceSyncState.fromBytes(Uint8List(0)),
+        equals(WorkspaceSyncState.empty),
+      );
 
-        expect(
-          WorkspaceSyncState.fromBytes(Uint8List(0)),
-          equals(WorkspaceSyncState.empty),
-        );
-
-        final repository = InMemorySettingsRepository();
-        expect(
-          await repository.loadWorkspaceSyncState(AppWorkspace.defaultId),
-          equals(WorkspaceSyncState.empty),
-        );
-
-        await repository.saveWorkspaceSyncState(AppWorkspace.defaultId, state);
-        expect(
-          await repository.loadWorkspaceSyncState(AppWorkspace.defaultId),
-          equals(state),
-        );
-      });
-    },
-  );
+      final repository = InMemorySettingsRepository();
+      expect(
+        await repository.loadWorkspaceSyncState(AppWorkspace.defaultId),
+        equals(WorkspaceSyncState.empty),
+      );
+      await repository.saveWorkspaceSyncState(AppWorkspace.defaultId, state);
+      expect(
+        await repository.loadWorkspaceSyncState(AppWorkspace.defaultId),
+        equals(state),
+      );
+    });
+  });
 }

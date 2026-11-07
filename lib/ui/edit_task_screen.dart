@@ -19,14 +19,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
+import '../models/task_tier.dart';
 import '../models/webdav_config.dart';
+import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
 import '../repositories/link_launcher_repository.dart';
 import '../services/app_logger.dart';
-import 'widgets/quick_add_bar.dart';
+import 'widgets/condition_editor_controller.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_links_section.dart';
+import 'widgets/task_editor_scheduling_card.dart';
 import 'widgets/task_editor_sections.dart';
+import 'widgets/task_editor_subtasks_and_blockers.dart';
 
 /// Dedicated panel screen used for both extended task creation and editing an existing task.
 class EditTaskScreen extends ConsumerStatefulWidget {

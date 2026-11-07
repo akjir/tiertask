@@ -43,27 +43,6 @@ class QuickAddBar extends ConsumerStatefulWidget {
   ConsumerState<QuickAddBar> createState() => _QuickAddBarState();
 }
 
-/// Mutually exclusive scheduling mode for creating a task in [QuickAddBar].
-enum QuickAddMode {
-  /// Default mode: adds the task to `# [3] Planned` (cascading up if slots are open).
-  standard,
-
-  /// Priority mode: marks the task as priority and places it into `# [1] Focus`.
-  priority,
-
-  /// Someday mode: places the task into `# [5] Someday` without automatic pull.
-  someday;
-
-  /// Target [TaskTier] corresponding to this mode.
-  TaskTier get targetTier {
-    return switch (this) {
-      QuickAddMode.standard => TaskTier.planned,
-      QuickAddMode.priority => TaskTier.focus,
-      QuickAddMode.someday => TaskTier.someday,
-    };
-  }
-}
-
 /// Horizontal row of action icon buttons inside [QuickAddBar].
 class _QuickAddActionButtons extends StatelessWidget {
   /// Creates a [_QuickAddActionButtons] row.

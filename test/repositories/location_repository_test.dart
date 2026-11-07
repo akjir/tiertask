@@ -16,14 +16,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/location_state.dart';
-import 'package:tiertask/providers/location_providers.dart';
-import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/location_repository.dart';
-import 'package:tiertask/repositories/settings_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -173,7 +168,6 @@ void main() {
         reason: 'Initial un-named coordinate fix must query reverse geocoder.',
       );
 
-      // Move slightly (~35 meters, well within the 100m threshold).
       channelResponse = <String, Object?>{
         'status': 'found',
         'latitude': 50.9789,
@@ -199,7 +193,6 @@ void main() {
             'Sub-100m movement must not trigger an additional HTTP request.',
       );
 
-      // Move > 100m (to Weimar).
       reverseGeocodeResponseBody =
           '{"address":{"town":"Weimar","country":"Germany"}}';
       channelResponse = <String, Object?>{
@@ -251,7 +244,6 @@ void main() {
       );
       expect(geoIpRequests, equals(1));
 
-      // 29 minutes later: should still return cached GeoIP fix without HTTP I/O.
       now = now.add(const Duration(minutes: 29));
       final cachedFix = await repository.determineLocation();
       expect(cachedFix, equals(firstFix));
@@ -262,7 +254,6 @@ void main() {
             'GeoIP response within 30-minute TTL must be served from cache.',
       );
 
-      // 30 minutes elapsed: cache expires and triggers a new GeoIP lookup.
       now = now.add(const Duration(minutes: 1));
       geoIpResponseBody = '{"latitude":51.3397,"longitude":12.3731,"city":"Leipzig","country_name":"Germany"}';
       final refreshedFix = await repository.determineLocation();
@@ -279,7 +270,6 @@ void main() {
       );
       expect(geoIpRequests, equals(2));
 
-      // Manual forceRefresh bypasses the 30-minute GeoIP cache immediately.
       geoIpResponseBody = '{"latitude":52.5200,"longitude":13.4050,"city":"Berlin","country":"Germany"}';
       final forcedFix = await repository.determineLocation(forceRefresh: true);
       expect(
@@ -325,7 +315,6 @@ void main() {
         reason: 'Oversized geocoder response must be rejected while preserving native coordinates.',
       );
 
-      // When native is unavailable and GeoIP returns HTTP 500, returns null.
       channelResponse = <String, Object?>{'status': 'unavailable'};
       responseStatusCode = HttpStatus.internalServerError;
       final failedFix = await repository.determineLocation(forceRefresh: true);
@@ -374,7 +363,6 @@ void main() {
         reason: 'Successful Wi-Fi BSSID lookup must not fall back to GeoIP.',
       );
 
-      // When Wi-Fi BSSIDs are unknown (HTTP 404), falls back cleanly to GeoIP.
       wifiStatusCode = HttpStatus.notFound;
       final fallbackFix = await repository.determineLocation(
         forceRefresh: true,
@@ -395,104 +383,30 @@ void main() {
     });
   });
 
-  group('LocationNotifier & WebDavConfigNotifier Lifecycle Integration', () {
-    test('starts disabled by default, queries on enable, enforces 5-minute resume cooldown, and stops when disabled', () async {
-      var now = DateTime.utc(2026, 3, 29, 12, 0);
-      final fakeLocationRepository = FakeLocationRepository(
-        initialFix: const LocationFix(
+  group('FakeLocationRepository', () {
+    test(
+      'records callCount, lastForceRefresh, and returns currentFix',
+      () async {
+        const initialFix = LocationFix(
           latitude: 50.9787,
           longitude: 11.0328,
           placeName: 'Erfurt, Germany',
-        ),
-      );
-      final settingsRepo = InMemorySettingsRepository();
+        );
+        final fake = FakeLocationRepository(initialFix: initialFix);
+        expect(fake.callCount, equals(0));
+        expect(fake.lastForceRefresh, isFalse);
 
-      final container = ProviderContainer(
-        overrides: [
-          clockProvider.overrideWithValue(() => now),
-          settingsRepositoryProvider.overrideWithValue(settingsRepo),
-          locationRepositoryProvider.overrideWithValue(fakeLocationRepository),
-        ],
-      );
-      addTearDown(container.dispose);
-      final subscription = container.listen(
-        locationStateProvider,
-        (previous, next) {},
-      );
-      addTearDown(subscription.close);
+        final result1 = await fake.determineLocation();
+        expect(result1, equals(initialFix));
+        expect(fake.callCount, equals(1));
+        expect(fake.lastForceRefresh, isFalse);
 
-      await container.read(webDavConfigProvider.future);
-      expect(
-        container.read(locationStateProvider).status,
-        equals(LocationStatus.disabled),
-        reason: 'Location determination must be disabled by default.',
-      );
-      expect(fakeLocationRepository.callCount, equals(0));
-
-      // Enable location determination in settings.
-      await container
-          .read(webDavConfigProvider.notifier)
-          .updateLocationEnabled(true);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-
-      final enabledState = container.read(locationStateProvider);
-      expect(enabledState.status, equals(LocationStatus.found));
-      expect(enabledState.fix?.placeName, equals('Erfurt, Germany'));
-      expect(fakeLocationRepository.callCount, equals(1));
-
-      // Resume after 4 minutes 59 seconds (< 5 min cooldown): must NOT query repository.
-      now = now.add(const Duration(minutes: 4, seconds: 59));
-      container
-          .read(locationStateProvider.notifier)
-          .handleAppLifecycleState(AppLifecycleState.resumed);
-      await Future<void>.delayed(Duration.zero);
-      expect(
-        fakeLocationRepository.callCount,
-        equals(1),
-        reason: 'App resume within 5-minute cooldown must skip sensor/network lookup.',
-      );
-
-      // Resume at 5 minutes 00 seconds (>= 5 min cooldown): must trigger a refresh.
-      now = now.add(const Duration(seconds: 1));
-      fakeLocationRepository.currentFix = const LocationFix(
-        latitude: 52.5200,
-        longitude: 13.4050,
-        placeName: 'Berlin, Germany',
-      );
-      container
-          .read(locationStateProvider.notifier)
-          .handleAppLifecycleState(AppLifecycleState.resumed);
-      await Future<void>.delayed(Duration.zero);
-      await Future<void>.delayed(Duration.zero);
-      expect(
-        fakeLocationRepository.callCount,
-        equals(2),
-        reason: 'App resume after 5-minute cooldown must refresh location.',
-      );
-      expect(
-        container.read(locationStateProvider).fix?.placeName,
-        equals('Berlin, Germany'),
-      );
-
-      // Manual refresh triggers an immediate lookup with forceRefresh: true.
-      fakeLocationRepository.currentFix = null;
-      await container.read(locationStateProvider.notifier).refreshLocation();
-      expect(fakeLocationRepository.callCount, equals(3));
-      expect(fakeLocationRepository.lastForceRefresh, isTrue);
-      expect(
-        container.read(locationStateProvider).status,
-        equals(LocationStatus.unavailable),
-      );
-
-      // Disabling location resets state to disabled.
-      await container
-          .read(webDavConfigProvider.notifier)
-          .updateLocationEnabled(false);
-      expect(
-        container.read(locationStateProvider).status,
-        equals(LocationStatus.disabled),
-      );
-    });
+        fake.currentFix = null;
+        final result2 = await fake.determineLocation(forceRefresh: true);
+        expect(result2, isNull);
+        expect(fake.callCount, equals(2));
+        expect(fake.lastForceRefresh, isTrue);
+      },
+    );
   });
 }

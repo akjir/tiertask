@@ -24,15 +24,15 @@ import 'app_logger.dart';
 
 /// Deterministic SHA-256 and Base62 identifier migration service per `TDF_SPEC.md` Section 10.4.
 abstract final class TdfIdMigration {
+  /// Maximum collision retry counter (`255`, giving `256` total attempts `0..255`).
+  static const int maxCounter = 255;
+
   /// Base62 alphabet (`0-9`, `A-Z`, `a-z`) in ascending ASCII order.
   static const String _base62Alphabet =
       '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
   /// Base62 radix (`62`) as a [BigInt].
   static final BigInt _base62Radix = BigInt.from(62);
-
-  /// Maximum collision retry counter (`255`, giving `256` total attempts `0..255`).
-  static const int maxCounter = 255;
 
   /// Base62 modulus $62^{10} = 839299365868340224$.
   static final BigInt _modulus = BigInt.parse('839299365868340224');

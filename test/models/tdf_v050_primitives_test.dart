@@ -15,6 +15,8 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
@@ -385,6 +387,39 @@ void main() {
         ),
         reason: 'Exhausting all 256 counters must fail with MigrationIdentifierCollision',
       );
+    });
+  });
+
+  group('QuickAddMode and TdfException Primitives', () {
+    test('maps QuickAddMode to targetTier and formats TdfException diagnostic strings', () {
+      expect(QuickAddMode.standard.targetTier, equals(TaskTier.planned));
+      expect(QuickAddMode.priority.targetTier, equals(TaskTier.focus));
+      expect(QuickAddMode.someday.targetTier, equals(TaskTier.someday));
+
+      const parseErr = TdfException(
+        kind: TdfErrorKind.invalidIdentifier,
+        line: 12,
+        message: 'Bad ID',
+      );
+      expect(
+        parseErr.toString(),
+        equals('TdfException(invalidIdentifier, line 12): Bad ID'),
+      );
+
+      const migrationErr = TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 3,
+        message: 'Too many blocks',
+        sourceVersion: '0.4.0',
+        targetVersion: '0.5.0',
+      );
+      expect(
+        migrationErr.toString(),
+        equals(
+          'TdfException(limitExceeded, 0.4.0->0.5.0, line 3): Too many blocks',
+        ),
+      );
+      expect(maxTdfBlocksPerDoc, equals(4096));
     });
   });
 }

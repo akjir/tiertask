@@ -16,8 +16,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/app_workspace.dart';
-import '../models/task_board_sync.dart';
 import '../models/webdav_config.dart';
+import '../models/workspace_sync_state.dart';
 import '../services/base64_service.dart';
 
 /// In-memory [SettingsRepository] implementation for unit and widget tests.

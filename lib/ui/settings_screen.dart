@@ -20,346 +20,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
+import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
 import '../repositories/local_file_repository.dart';
-import 'widgets/clearable_text_field.dart';
-import 'widgets/local_tdf_file_dialogs.dart';
+import 'widgets/settings_local_storage_section.dart';
+import 'widgets/settings_preference_cards.dart';
+import 'widgets/settings_webdav_storage_section.dart';
 import 'widgets/wipe_tdf_dialog.dart';
 
-/// Settings screen for language, color theme, storage mode, local file name, and WebDAV parameters.
-class SettingsScreen extends ConsumerStatefulWidget {
-  /// Creates a [SettingsScreen] widget.
-  const SettingsScreen({super.key});
-
-  /// Duration a status banner stays fully visible before fading out.
-  static const Duration statusBannerDisplayDuration = Duration(seconds: 3);
-
-  /// Duration of the status banner fade-out animation.
-  static const Duration statusBannerFadeDuration = Duration(milliseconds: 300);
-
-  @override
-  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
-}
-
-/// Card for enabling or disabling the opt-in diagnostic log (`tiertask.log`).
-class _DiagnosticsSelectionCard extends StatelessWidget {
-  /// Creates a [_DiagnosticsSelectionCard].
-  const _DiagnosticsSelectionCard({
-    required this.diagnosticsEnabled,
-    required this.onDiagnosticsEnabledChanged,
-  });
-
-  /// Whether opt-in diagnostic logging is currently enabled.
-  final bool diagnosticsEnabled;
-
-  /// Callback invoked when the user toggles the diagnostic logging switch.
-  final ValueChanged<bool> onDiagnosticsEnabledChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.bug_report_outlined,
-      title: localizations.diagnosticsSectionTitle,
-      description: localizations.diagnosticsSectionDescription,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Switch(
-          key: const ValueKey('settings_diagnostics_switch'),
-          value: diagnosticsEnabled,
-          onChanged: onDiagnosticsEnabledChanged,
-        ),
-      ),
-    );
-  }
-}
-
-/// Card for choosing the application display language (`System`, `English`, or `Deutsch`).
-class _LanguageSelectionCard extends StatelessWidget {
-  /// Creates a [_LanguageSelectionCard].
-  const _LanguageSelectionCard({
-    required this.selectedLanguage,
-    required this.onLanguageChanged,
-  });
-
-  /// Callback invoked when the user selects a new [AppLanguage].
-  final ValueChanged<AppLanguage> onLanguageChanged;
-
-  /// Currently selected [AppLanguage].
-  final AppLanguage selectedLanguage;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.language_rounded,
-      title: localizations.languageSectionTitle,
-      description: localizations.languageSectionDescription,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<AppLanguage>(
-          segments: [
-            ButtonSegment(
-              value: AppLanguage.system,
-              label: Text(localizations.languageSystem),
-            ),
-            ButtonSegment(
-              value: AppLanguage.english,
-              label: Text(localizations.languageEnglish),
-            ),
-            ButtonSegment(
-              value: AppLanguage.german,
-              label: Text(localizations.languageGerman),
-            ),
-          ],
-          selected: {selectedLanguage},
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              onLanguageChanged(selection.first);
-            }
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Horizontal row of four local TDF file action buttons (`Select`, `Move`, `Rename`, `Delete`).
-class _LocalStorageActionsRow extends StatelessWidget {
-  /// Creates a [_LocalStorageActionsRow].
-  const _LocalStorageActionsRow({
-    this.onSelectLocalFile,
-    this.onMoveLocalFile,
-    this.onRenameLocalFile,
-    this.onWipeLocalFile,
-  });
-
-  /// Optional callback to move the existing local `.tdf` file to another folder.
-  final VoidCallback? onMoveLocalFile;
-
-  /// Optional callback to rename the local `.tdf` file inside its current folder.
-  final VoidCallback? onRenameLocalFile;
-
-  /// Optional callback to select an existing `.tdf` file or create a new one.
-  final VoidCallback? onSelectLocalFile;
-
-  /// Optional callback to open the confirmation dialog and wipe the local `.tdf` file.
-  final VoidCallback? onWipeLocalFile;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final compactStyle = OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-    );
-
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            key: const ValueKey('settings_select_local_button'),
-            style: compactStyle,
-            onPressed: onSelectLocalFile,
-            icon: const Icon(Icons.file_open_outlined, size: 18),
-            label: Text(
-              localizations.actionSelectLocalFile,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            key: const ValueKey('settings_move_local_button'),
-            style: compactStyle,
-            onPressed: onMoveLocalFile,
-            icon: const Icon(Icons.drive_file_move_outlined, size: 18),
-            label: Text(
-              localizations.actionMoveLocalFile,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            key: const ValueKey('settings_rename_local_button'),
-            style: compactStyle,
-            onPressed: onRenameLocalFile,
-            icon: const Icon(Icons.drive_file_rename_outline, size: 18),
-            label: Text(
-              localizations.actionRenameLocalFile,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _WipeStorageButton(
-            buttonKey: const ValueKey('settings_wipe_local_button'),
-            compact: true,
-            label: localizations.actionDelete,
-            onPressed: onWipeLocalFile,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Card for previewing the resolved local `.tdf` file path and managing the file via four side-by-side actions.
-class _LocalStorageSection extends StatelessWidget {
-  /// Creates a [_LocalStorageSection].
-  const _LocalStorageSection({
-    required this.resolvedLocalPath,
-    this.onSelectLocalFile,
-    this.onMoveLocalFile,
-    this.onRenameLocalFile,
-    this.onWipeLocalFile,
-  });
-
-  /// Optional callback to move the local `.tdf` file into another directory.
-  final VoidCallback? onMoveLocalFile;
-
-  /// Optional callback to rename the local `.tdf` file in the current directory.
-  final VoidCallback? onRenameLocalFile;
-
-  /// Optional callback to select an existing `.tdf` file or create a new one.
-  final VoidCallback? onSelectLocalFile;
-
-  /// Optional callback to open the confirmation dialog and wipe the local `.tdf` file.
-  final VoidCallback? onWipeLocalFile;
-
-  /// Resolved local filesystem path preview, or `null` if invalid.
-  final String? resolvedLocalPath;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final previewPath = resolvedLocalPath;
-
-    return _SettingsSectionCard(
-      icon: Icons.folder_outlined,
-      title: localizations.localSectionTitle,
-      description: localizations.localSectionDescription,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (previewPath != null) ...[
-            _ResolvedPathPreview(
-              label: localizations.resolvedLocalPathLabel,
-              value: previewPath,
-            ),
-            const SizedBox(height: 12),
-          ],
-          _LocalStorageActionsRow(
-            onSelectLocalFile: onSelectLocalFile,
-            onMoveLocalFile: onMoveLocalFile,
-            onRenameLocalFile: onRenameLocalFile,
-            onWipeLocalFile: onWipeLocalFile,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Card for enabling or disabling foreground location determination.
-class _LocationSelectionCard extends StatelessWidget {
-  /// Creates a [_LocationSelectionCard].
-  const _LocationSelectionCard({
-    required this.locationEnabled,
-    required this.onLocationEnabledChanged,
-  });
-
-  /// Whether foreground location determination is currently enabled.
-  final bool locationEnabled;
-
-  /// Callback invoked when the user toggles location determination.
-  final ValueChanged<bool> onLocationEnabledChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.location_on_outlined,
-      title: localizations.locationSectionTitle,
-      description: localizations.locationSectionDescription,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<bool>(
-          key: const ValueKey('settings_location_segmented_button'),
-          segments: [
-            ButtonSegment<bool>(
-              value: false,
-              label: Text(localizations.locationOff),
-            ),
-            ButtonSegment<bool>(
-              value: true,
-              label: Text(localizations.locationOn),
-            ),
-          ],
-          selected: <bool>{locationEnabled},
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              onLocationEnabledChanged(selection.first);
-            }
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Monospace preview box displaying a resolved local file path or WebDAV endpoint URI.
-class _ResolvedPathPreview extends StatelessWidget {
-  /// Creates a [_ResolvedPathPreview].
-  const _ResolvedPathPreview({required this.label, required this.value});
-
-  /// Descriptive header label above the resolved path or URI.
-  final String label;
-
-  /// Resolved path or URI string.
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 4),
-          SelectableText(
-            value,
-            style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Action buttons row for saving settings or testing synchronization.
-class _SettingsActionRow extends StatelessWidget {
-  /// Creates a [_SettingsActionRow].
-  const _SettingsActionRow({
+class SettingsActionRow extends StatelessWidget {
+  /// Creates a [SettingsActionRow].
+  const SettingsActionRow({
+    super.key,
     required this.canTestConnection,
     required this.isTesting,
     required this.onSaveOnly,
@@ -381,10 +54,18 @@ class _SettingsActionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final syncIcon = isTesting
+        ? const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.sync_rounded);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: Row(
+        spacing: 12,
         children: [
           Expanded(
             child: OutlinedButton.icon(
@@ -393,20 +74,13 @@ class _SettingsActionRow extends StatelessWidget {
               label: Text(localizations.actionSave),
             ),
           ),
-          const SizedBox(width: 12),
           Expanded(
             flex: 2,
             child: FilledButton.icon(
               onPressed: (canTestConnection && !isTesting)
                   ? onTestAndSync
                   : null,
-              icon: isTesting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.sync_rounded),
+              icon: syncIcon,
               label: Text(localizations.actionTestConnectionAndSync),
             ),
           ),
@@ -416,153 +90,98 @@ class _SettingsActionRow extends StatelessWidget {
   }
 }
 
-/// WebDAV connection text fields and remote file path input.
-class _SettingsFormFields extends StatelessWidget {
-  /// Creates [_SettingsFormFields].
-  const _SettingsFormFields({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-    required this.obscurePassword,
-    required this.onToggleObscurePassword,
+/// Settings screen for language, color theme, storage mode, local file name, and WebDAV parameters.
+class SettingsScreen extends ConsumerStatefulWidget {
+  /// Creates a [SettingsScreen] widget.
+  const SettingsScreen({super.key});
+
+  /// Duration a status banner stays fully visible before fading out.
+  static const Duration statusBannerDisplayDuration = Duration(seconds: 3);
+
+  /// Duration of the status banner fade-out animation.
+  static const Duration statusBannerFadeDuration = Duration(milliseconds: 300);
+
+  @override
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+/// Floating status banner displaying save confirmation or synchronization messages above the bottom action row.
+class SettingsStatusBanner extends StatelessWidget {
+  /// Creates a [SettingsStatusBanner].
+  const SettingsStatusBanner({
+    super.key,
+    required this.isVisible,
+    required this.message,
+    required this.onFadeOutComplete,
+    required this.tone,
   });
 
-  /// Controller for the remote Markdown file path field.
-  final TextEditingController filePathController;
+  /// Whether the banner is currently opaque (`true`) or fading out (`false`).
+  final bool isVisible;
 
-  /// Whether the password input is obscured.
-  final bool obscurePassword;
+  /// Status message text.
+  final String message;
 
-  /// Callback to toggle password visibility.
-  final VoidCallback onToggleObscurePassword;
+  /// Callback invoked when the opacity animation finishes.
+  final VoidCallback onFadeOutComplete;
 
-  /// Controller for the password field.
-  final TextEditingController passwordController;
-
-  /// Controller for the server URL field.
-  final TextEditingController serverUrlController;
-
-  /// Controller for the username field.
-  final TextEditingController usernameController;
+  /// Visual tone (`success` or `error`).
+  final StatusBannerTone tone;
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final isError = tone == StatusBannerTone.error;
+    final foregroundColor = isError
+        ? colorScheme.onErrorContainer
+        : colorScheme.onPrimaryContainer;
+    final icon = isError
+        ? Icons.error_outline_rounded
+        : Icons.check_circle_outline_rounded;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _WebDavCredentialsFields(
-          serverUrlController: serverUrlController,
-          usernameController: usernameController,
-          passwordController: passwordController,
-          obscurePassword: obscurePassword,
-          onToggleObscurePassword: onToggleObscurePassword,
-        ),
-        const SizedBox(height: 16),
-        ClearableTextField(
-          useFormField: true,
-          controller: filePathController,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: localizations.filePathLabel,
-            hintText: localizations.filePathHint,
-            prefixIcon: const Icon(Icons.description_outlined),
-            border: const OutlineInputBorder(),
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 8,
+      child: AnimatedOpacity(
+        opacity: isVisible ? 1.0 : 0.0,
+        duration: SettingsScreen.statusBannerFadeDuration,
+        curve: Curves.easeOut,
+        onEnd: onFadeOutComplete,
+        child: Material(
+          elevation: 4,
+          color: isError
+              ? colorScheme.errorContainer
+              : colorScheme.primaryContainer,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              spacing: 10,
+              children: [
+                Icon(icon, color: foregroundColor),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(color: foregroundColor),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ],
+      ),
     );
   }
 }
 
-/// Groups the language, theme, color palette, time zone, location, diagnostics, and storage mode preference cards on [SettingsScreen].
-class _SettingsPreferenceCards extends StatelessWidget {
-  /// Creates [_SettingsPreferenceCards].
-  const _SettingsPreferenceCards({
-    required this.config,
-    required this.onDiagnosticsEnabledChanged,
-    required this.onLanguageChanged,
-    required this.onLocationEnabledChanged,
-    required this.onThemeModeChanged,
-    required this.onThemePaletteChanged,
-    required this.onTimeZoneModeChanged,
-    required this.onManualTimeZoneOffsetChanged,
-    required this.onStorageModeChanged,
-  });
+/// Visual tone for [SettingsStatusBanner].
+enum StatusBannerTone {
+  /// Indicates a completed save, move, rename, wipe, or synchronization action.
+  success,
 
-  /// Current [WebDavConfig] holding the selected preference states.
-  final WebDavConfig config;
-
-  /// Callback when `diagnosticsEnabled` changes.
-  final ValueChanged<bool> onDiagnosticsEnabledChanged;
-
-  /// Callback when [AppLanguage] changes.
-  final ValueChanged<AppLanguage> onLanguageChanged;
-
-  /// Callback when `locationEnabled` changes.
-  final ValueChanged<bool> onLocationEnabledChanged;
-
-  /// Callback when the manual UTC offset in minutes changes.
-  final ValueChanged<int> onManualTimeZoneOffsetChanged;
-
-  /// Callback when [StorageMode] changes.
-  final ValueChanged<StorageMode> onStorageModeChanged;
-
-  /// Callback when [AppThemeMode] changes.
-  final ValueChanged<AppThemeMode> onThemeModeChanged;
-
-  /// Callback when [AppThemePalette] changes.
-  final ValueChanged<AppThemePalette> onThemePaletteChanged;
-
-  /// Callback when [AppTimeZoneMode] changes.
-  final ValueChanged<AppTimeZoneMode> onTimeZoneModeChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _LanguageSelectionCard(
-          selectedLanguage: config.language,
-          onLanguageChanged: onLanguageChanged,
-        ),
-        const SizedBox(height: 10),
-        _ThemeSelectionCard(
-          selectedThemeMode: config.themeMode,
-          onThemeModeChanged: onThemeModeChanged,
-        ),
-        const SizedBox(height: 10),
-        _ThemePaletteSelectionCard(
-          selectedThemePalette: config.themePalette,
-          onThemePaletteChanged: onThemePaletteChanged,
-        ),
-        const SizedBox(height: 10),
-        _TimeZoneSelectionCard(
-          selectedTimeZoneMode: config.timeZoneMode,
-          manualOffsetMinutes: config.manualTimeZoneOffsetMinutes,
-          onTimeZoneModeChanged: onTimeZoneModeChanged,
-          onManualOffsetChanged: onManualTimeZoneOffsetChanged,
-        ),
-        const SizedBox(height: 10),
-        _LocationSelectionCard(
-          locationEnabled: config.locationEnabled,
-          onLocationEnabledChanged: onLocationEnabledChanged,
-        ),
-        const SizedBox(height: 10),
-        _DiagnosticsSelectionCard(
-          diagnosticsEnabled: config.diagnosticsEnabled,
-          onDiagnosticsEnabledChanged: onDiagnosticsEnabledChanged,
-        ),
-        const SizedBox(height: 10),
-        _StorageModeSelectionCard(
-          selectedStorageMode: config.storageMode,
-          onStorageModeChanged: onStorageModeChanged,
-        ),
-      ],
-    );
-  }
+  /// Indicates a validation, filesystem, or synchronization failure.
+  error,
 }
 
 /// State for [SettingsScreen].
@@ -577,18 +196,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _initialized = false;
   bool _isBannerVisible = false;
   bool _isTesting = false;
-  String _localFilePath = WebDavConfig.defaultFileName;
-  int _manualTimeZoneOffsetMinutes = 0;
   bool _obscurePassword = true;
-  bool _selectedDiagnosticsEnabled = false;
-  AppLanguage _selectedLanguage = AppLanguage.system;
-  bool _selectedLocationEnabled = false;
-  StorageMode _selectedStorageMode = StorageMode.local;
-  AppThemeMode _selectedThemeMode = AppThemeMode.system;
-  AppThemePalette _selectedThemePalette = AppThemePalette.slate;
-  AppTimeZoneMode _selectedTimeZoneMode = AppTimeZoneMode.automatic;
+  WebDavConfig _preferences = const WebDavConfig();
   String? _statusBannerMessage;
-  _StatusBannerTone _statusTone = _StatusBannerTone.success;
+  StatusBannerTone _statusTone = StatusBannerTone.success;
 
   @override
   void initState() {
@@ -613,21 +224,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final configAsync = ref.watch(webDavConfigProvider);
-    if (configAsync.asData?.value case final loadedConfig?) {
-      _populateFieldsIfNeeded(loadedConfig);
+    if (ref.watch(webDavConfigProvider).asData?.value case final loaded?) {
+      _populateFieldsIfNeeded(loaded);
     }
-    final localizations = AppLocalizations.of(context);
     final currentConfig = _buildCurrentConfig();
     final bannerMessage = _statusBannerMessage;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: Text(localizations.settingsTitle)),
+      appBar: AppBar(title: Text(AppLocalizations.of(context).settingsTitle)),
       body: SafeArea(
         child: Form(
           key: _formKey,
-          onChanged: _handleFormChanged,
+          onChanged: () => setState(_clearStatusBanner),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -639,17 +248,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       child: _buildFormColumn(currentConfig),
                     ),
                     if (bannerMessage != null)
-                      _SettingsStatusBanner(
+                      SettingsStatusBanner(
                         isVisible: _isBannerVisible,
                         message: bannerMessage,
-                        onFadeOutComplete: _handleStatusBannerFadeEnd,
                         tone: _statusTone,
+                        onFadeOutComplete: () {
+                          if (mounted && !_isBannerVisible) {
+                            setState(() => _statusBannerMessage = null);
+                          }
+                        },
                       ),
                   ],
                 ),
               ),
-              _SettingsActionRow(
-                canTestConnection: _selectedStorageMode.usesWebDav,
+              SettingsActionRow(
+                canTestConnection: _preferences.storageMode.usesWebDav,
                 isTesting: _isTesting,
                 onSaveOnly: _saveOnly,
                 onTestAndSync: _testConnectionAndSync,
@@ -661,115 +274,100 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// Moves or renames the local `.tdf` file to [targetFilePath] and updates the status banner.
-  Future<void> _applyLocalLocationChange(
-    String targetFilePath, {
+  /// Resolves a local file path via [pickPath], runs [operation], and updates [_preferences] and the status banner.
+  Future<void> _applyLocalFileUpdate(
+    FutureOr<String?> Function(WebDavConfig config) pickPath, {
+    Future<void> Function(WebDavConfig)? operation,
     required String Function(AppLocalizations) bannerSelector,
   }) async {
+    setState(_clearStatusBanner);
+    final targetFilePath = await pickPath(_buildCurrentConfig());
+    if (!mounted || targetFilePath == null || targetFilePath.trim().isEmpty) {
+      return;
+    }
     final candidateConfig = _buildCurrentConfig(
       localFilePathOverride: targetFilePath,
     );
     try {
-      await ref
-          .read(webDavConfigProvider.notifier)
-          .changeLocalFileLocation(candidateConfig);
+      final effectiveOperation =
+          operation ??
+          ref.read(webDavConfigProvider.notifier).changeLocalFileLocation;
+      await effectiveOperation(candidateConfig);
       if (!mounted) {
         return;
       }
       final localizations = AppLocalizations.of(context);
       setState(() {
-        _localFilePath = targetFilePath;
+        _preferences = _preferences.copyWith(
+          localFilePath: candidateConfig.localFilePath,
+        );
       });
       _showStatusBanner(
         bannerSelector(localizations),
-        _StatusBannerTone.success,
+        StatusBannerTone.success,
       );
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+      _showStatusBanner(error.toString(), StatusBannerTone.error);
     }
   }
 
-  /// Starts fading out the active status banner after the display timer expires.
-  void _beginStatusBannerFadeOut() {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _isBannerVisible = false;
-    });
-  }
-
-  /// Constructs a [WebDavConfig] from the current form field values.
+  /// Constructs a [WebDavConfig] from the current form field values and [_preferences].
   WebDavConfig _buildCurrentConfig({String? localFilePathOverride}) {
-    final rawLocal = (localFilePathOverride ?? _localFilePath).trim();
-    final resolvedLocalFilePath = rawLocal.isEmpty
-        ? WebDavConfig.defaultFileName
-        : rawLocal;
-
-    return WebDavConfig(
+    final rawLocal = (localFilePathOverride ?? _preferences.localFilePath)
+        .trim();
+    final filePath = _filePathController.text.trim();
+    return _preferences.copyWith(
       serverUrl: _serverUrlController.text.trim(),
       username: _usernameController.text.trim(),
       password: _passwordController.text,
-      filePath: _filePathController.text.trim().isEmpty
-          ? WebDavConfig.defaultFileName
-          : _filePathController.text.trim(),
-      localFilePath: resolvedLocalFilePath,
-      storageMode: _selectedStorageMode,
-      language: _selectedLanguage,
-      themeMode: _selectedThemeMode,
-      themePalette: _selectedThemePalette,
-      timeZoneMode: _selectedTimeZoneMode,
-      manualTimeZoneOffsetMinutes: _manualTimeZoneOffsetMinutes,
-      locationEnabled: _selectedLocationEnabled,
-      diagnosticsEnabled: _selectedDiagnosticsEnabled,
+      filePath: filePath.isEmpty ? WebDavConfig.defaultFileName : filePath,
+      localFilePath: rawLocal.isEmpty ? WebDavConfig.defaultFileName : rawLocal,
     );
   }
 
   /// Builds the scrollable preference and storage section card column for [currentConfig].
   Widget _buildFormColumn(WebDavConfig currentConfig) {
     final canPickDirectory = ref.watch(supportsDirectoryPickerProvider);
+    final storageMode = _preferences.storageMode;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 10,
       children: [
-        _SettingsPreferenceCards(
+        SettingsPreferenceCards(
           config: currentConfig,
-          onDiagnosticsEnabledChanged: _handleDiagnosticsEnabledChanged,
-          onLanguageChanged: _handleLanguageChanged,
-          onLocationEnabledChanged: _handleLocationEnabledChanged,
-          onThemeModeChanged: _handleThemeModeChanged,
-          onThemePaletteChanged: _handleThemePaletteChanged,
-          onTimeZoneModeChanged: _handleTimeZoneModeChanged,
-          onManualTimeZoneOffsetChanged: _handleManualTimeZoneOffsetChanged,
-          onStorageModeChanged: _handleStorageModeChanged,
+          onPreferenceChanged: _handlePreferenceChanged,
         ),
-        if (_selectedStorageMode.usesLocal) ...[
-          const SizedBox(height: 10),
-          _LocalStorageSection(
+        if (storageMode.usesLocal)
+          LocalStorageSection(
             resolvedLocalPath: _resolvePreviewLocalPath(currentConfig),
             onSelectLocalFile: _isTesting ? null : _handleSelectLocalFile,
             onMoveLocalFile: (!canPickDirectory || _isTesting)
                 ? null
-                : _handleMoveLocalFile,
-            onRenameLocalFile: _isTesting ? null : _handleRenameLocalFile,
-            onWipeLocalFile: _isTesting ? null : _handleWipeLocalFile,
+                : () => _handleMoveOrRenameLocalFile(rename: false),
+            onRenameLocalFile: _isTesting
+                ? null
+                : () => _handleMoveOrRenameLocalFile(rename: true),
+            onWipeLocalFile: _isTesting
+                ? null
+                : () => _handleWipeFile(isRemote: false),
           ),
-        ],
-        if (_selectedStorageMode.usesWebDav) ...[
-          const SizedBox(height: 10),
-          _WebDavStorageSection(
+        if (storageMode.usesWebDav)
+          WebDavStorageSection(
             serverUrlController: _serverUrlController,
             usernameController: _usernameController,
             passwordController: _passwordController,
             filePathController: _filePathController,
             obscurePassword: _obscurePassword,
             resolvedUri: currentConfig.resolveEndpointUri(),
-            onToggleObscurePassword: _toggleObscurePassword,
-            onWipeRemoteFile: _isTesting ? null : _handleWipeRemoteFile,
+            onToggleObscurePassword: () =>
+                setState(() => _obscurePassword = !_obscurePassword),
+            onWipeRemoteFile: _isTesting
+                ? null
+                : () => _handleWipeFile(isRemote: true),
           ),
-        ],
       ],
     );
   }
@@ -782,403 +380,129 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _statusBannerMessage = null;
   }
 
-  /// Runs [TaskNotifier.testConnectionAndSync] for [config] and updates the status banner.
-  Future<void> _executeConnectionTest(WebDavConfig config) async {
-    setState(() {
-      _isTesting = true;
-    });
-
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .testConnectionAndSync(config);
-      if (!mounted) {
-        return;
-      }
-      final localizations = AppLocalizations.of(context);
-      _isTesting = false;
-      _showStatusBanner(
-        localizations.connectionSuccessBanner,
-        _StatusBannerTone.success,
-      );
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _isTesting = false;
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
-    }
-  }
-
-  /// Runs [TaskNotifier.wipeLocalFile] and displays the status banner.
-  Future<void> _executeWipeLocalFile(
-    WebDavConfig config, {
-    required bool createBackup,
+  /// Executes an asynchronous storage [action] while setting [_isTesting] and showing [bannerSelector] on completion.
+  Future<void> _executeStorageAction(
+    Future<void> Function() action, {
+    required String Function(AppLocalizations) bannerSelector,
   }) async {
-    setState(() {
-      _isTesting = true;
-    });
+    setState(() => _isTesting = true);
     try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .wipeLocalFile(config, createBackup: createBackup);
+      await action();
       if (!mounted) {
         return;
       }
       final localizations = AppLocalizations.of(context);
       _isTesting = false;
       _showStatusBanner(
-        localizations.localFileWipedBanner,
-        _StatusBannerTone.success,
+        bannerSelector(localizations),
+        StatusBannerTone.success,
       );
     } on Object catch (error) {
       if (!mounted) {
         return;
       }
       _isTesting = false;
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+      _showStatusBanner(error.toString(), StatusBannerTone.error);
     }
   }
 
-  /// Runs [TaskNotifier.wipeRemoteFile] and displays the status banner.
-  Future<void> _executeWipeRemoteFile(
-    WebDavConfig config, {
-    required bool createBackup,
-  }) async {
+  /// Moves (`rename: false`) or renames (`rename: true`) the local `.tdf` file and updates state.
+  Future<void> _handleMoveOrRenameLocalFile({required bool rename}) {
+    return _applyLocalFileUpdate(
+      (config) => LocalStorageSection.pickLocalFilePath(
+        context,
+        ref,
+        config,
+        moveDirectory: !rename,
+        renameOnly: rename,
+      ),
+      bannerSelector: (localizations) => rename
+          ? localizations.localFileRenamedBanner
+          : localizations.localDirectoryMovedBanner,
+    );
+  }
+
+  /// Updates [_preferences], clears any status banner, and persists [updatedConfig] via [webDavConfigProvider].
+  Future<void> _handlePreferenceChanged(WebDavConfig updatedConfig) async {
+    final diagnosticsChanged =
+        updatedConfig.diagnosticsEnabled != _preferences.diagnosticsEnabled;
     setState(() {
-      _isTesting = true;
+      _preferences = updatedConfig;
+      _clearStatusBanner();
     });
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .wipeRemoteFile(config, createBackup: createBackup);
-      if (!mounted) {
-        return;
-      }
-      final localizations = AppLocalizations.of(context);
-      _isTesting = false;
-      _showStatusBanner(
-        localizations.remoteFileWipedBanner,
-        _StatusBannerTone.success,
-      );
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _isTesting = false;
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+    final notifier = ref.read(webDavConfigProvider.notifier);
+    if (diagnosticsChanged) {
+      await notifier.updateDiagnosticsEnabled(updatedConfig.diagnosticsEnabled);
+    } else {
+      await notifier.updateConfig(updatedConfig);
     }
   }
 
-  /// Updates [_selectedDiagnosticsEnabled], synchronizes [AppLogger], and persists it immediately.
-  Future<void> _handleDiagnosticsEnabledChanged(bool diagnosticsEnabled) async {
-    setState(() {
-      _selectedDiagnosticsEnabled = diagnosticsEnabled;
-      _clearStatusBanner();
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateDiagnosticsEnabled(diagnosticsEnabled);
-  }
-
-  /// Clears stale status banners and refreshes previews when form inputs change.
-  void _handleFormChanged() {
-    setState(_clearStatusBanner);
-  }
-
-  /// Updates the selected [AppLanguage] and persists it immediately.
-  Future<void> _handleLanguageChanged(AppLanguage newLanguage) async {
-    setState(() {
-      _selectedLanguage = newLanguage;
-      _clearStatusBanner();
-    });
-    await ref.read(webDavConfigProvider.notifier).updateLanguage(newLanguage);
-  }
-
-  /// Updates [_selectedLocationEnabled] and persists it immediately.
-  Future<void> _handleLocationEnabledChanged(bool locationEnabled) async {
-    setState(() {
-      _selectedLocationEnabled = locationEnabled;
-      _clearStatusBanner();
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateLocationEnabled(locationEnabled);
-  }
-
-  /// Updates [_manualTimeZoneOffsetMinutes] and persists it immediately.
-  Future<void> _handleManualTimeZoneOffsetChanged(int newOffsetMinutes) async {
-    setState(() {
-      _manualTimeZoneOffsetMinutes = newOffsetMinutes;
-      _clearStatusBanner();
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateManualTimeZoneOffsetMinutes(newOffsetMinutes);
-  }
-
-  /// Opens the native directory picker, moves the existing `.tdf` file into the chosen folder, and updates state or displays an error.
-  Future<void> _handleMoveLocalFile() async {
-    setState(_clearStatusBanner);
-    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
-    final currentRepo = LocalFileRepository(
-      config: _buildCurrentConfig(),
-      baseDirectoryPath: baseDirectoryPath,
+  /// Opens the native file chooser (or in-app dialog fallback on Android) to select or create a `.tdf` file.
+  Future<void> _handleSelectLocalFile() {
+    return _applyLocalFileUpdate(
+      (config) => LocalStorageSection.pickLocalFilePath(context, ref, config),
+      operation: ref.read(taskNotifierProvider.notifier).selectLocalFile,
+      bannerSelector: (localizations) => localizations.localFileSelectedBanner,
     );
-    final currentDirectory = currentRepo.tryResolveDirectoryPath();
-    final selectedDirectory = await ref.read(directoryPickerProvider)(
-      initialDirectory: currentDirectory,
-    );
-    if (!mounted ||
-        selectedDirectory == null ||
-        selectedDirectory.trim().isEmpty ||
-        selectedDirectory == currentDirectory) {
+  }
+
+  /// Opens [WipeTdfDialog] for the local (`isRemote: false`) or remote (`isRemote: true`) `.tdf` file and wipes it if confirmed.
+  Future<void> _handleWipeFile({required bool isRemote}) async {
+    setState(_clearStatusBanner);
+    if (isRemote && !(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    final targetFilePath = LocalFileRepository.combineDirectoryAndFileName(
-      selectedDirectory,
-      currentRepo.extractFileName(),
-    );
-    await _applyLocalLocationChange(
-      targetFilePath,
-      bannerSelector: (localizations) =>
-          localizations.localDirectoryMovedBanner,
-    );
-  }
-
-  /// Opens [RenameLocalTdfDialog] and renames the `.tdf` file inside its current directory (`mv source target`).
-  Future<void> _handleRenameLocalFile() async {
-    setState(_clearStatusBanner);
-    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
-    final currentRepo = LocalFileRepository(
-      config: _buildCurrentConfig(),
-      baseDirectoryPath: baseDirectoryPath,
-    );
-    final currentFileName = currentRepo.extractFileName();
-    final newFileName = await showRenameLocalTdfDialog(
-      context,
-      currentFileName: currentFileName,
-    );
-    if (!mounted ||
-        newFileName == null ||
-        newFileName.trim().isEmpty ||
-        newFileName == currentFileName) {
-      return;
-    }
-    final targetFilePath = _resolveLocalTargetPathInCurrentDir(
-      currentRepo,
-      baseDirectoryPath,
-      newFileName,
-    );
-    await _applyLocalLocationChange(
-      targetFilePath,
-      bannerSelector: (localizations) => localizations.localFileRenamedBanner,
-    );
-  }
-
-  /// Opens the native file chooser (or in-app dialog fallback on Android) to select an existing `.tdf` file or create a new one.
-  Future<void> _handleSelectLocalFile() async {
-    setState(_clearStatusBanner);
-    final selectedFilePath = await _pickOrDialogSelectLocalFile();
-    if (!mounted ||
-        selectedFilePath == null ||
-        selectedFilePath.trim().isEmpty) {
-      return;
-    }
-    final candidateConfig = _buildCurrentConfig(
-      localFilePathOverride: selectedFilePath,
-    );
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .selectLocalFile(candidateConfig);
-      if (!mounted) {
-        return;
-      }
-      final localizations = AppLocalizations.of(context);
-      setState(() {
-        _localFilePath = selectedFilePath;
-      });
-      _showStatusBanner(
-        localizations.localFileSelectedBanner,
-        _StatusBannerTone.success,
-      );
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
-    }
-  }
-
-  /// Removes the status banner from the widget tree once its fade-out animation finishes.
-  void _handleStatusBannerFadeEnd() {
-    if (!mounted || _isBannerVisible) {
-      return;
-    }
-    setState(() {
-      _statusBannerMessage = null;
-    });
-  }
-
-  /// Updates the selected [StorageMode] and persists it immediately.
-  Future<void> _handleStorageModeChanged(StorageMode newStorageMode) async {
-    setState(() {
-      _selectedStorageMode = newStorageMode;
-      _clearStatusBanner();
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateStorageMode(newStorageMode);
-  }
-
-  /// Updates the selected [AppThemeMode] and persists it immediately.
-  Future<void> _handleThemeModeChanged(AppThemeMode newThemeMode) async {
-    setState(() {
-      _selectedThemeMode = newThemeMode;
-    });
-    await ref.read(webDavConfigProvider.notifier).updateThemeMode(newThemeMode);
-  }
-
-  /// Updates the selected [AppThemePalette] and persists it immediately.
-  Future<void> _handleThemePaletteChanged(
-    AppThemePalette newThemePalette,
-  ) async {
-    setState(() {
-      _selectedThemePalette = newThemePalette;
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateThemePalette(newThemePalette);
-  }
-
-  /// Updates the selected [AppTimeZoneMode] and persists it immediately.
-  Future<void> _handleTimeZoneModeChanged(
-    AppTimeZoneMode newTimeZoneMode,
-  ) async {
-    setState(() {
-      _selectedTimeZoneMode = newTimeZoneMode;
-      _clearStatusBanner();
-    });
-    await ref
-        .read(webDavConfigProvider.notifier)
-        .updateTimeZoneMode(newTimeZoneMode);
-  }
-
-  /// Opens [WipeTdfDialog] for the local `.tdf` file and wipes it if confirmed.
-  Future<void> _handleWipeLocalFile() async {
-    setState(_clearStatusBanner);
+    final currentConfig = _buildCurrentConfig();
     final localizations = AppLocalizations.of(context);
-    final currentConfig = _buildCurrentConfig();
-    if (_resolvePreviewLocalPath(currentConfig) == null) {
-      _showStatusBanner(
-        localizations.errorInvalidLocalFilePath,
-        _StatusBannerTone.error,
-      );
-      return;
-    }
-    final fileName = LocalFileRepository.extractFileNameFromPath(
-      currentConfig.localFilePath,
-    );
-    final baseName = LocalFileRepository.extractFileBaseName(
-      currentConfig.localFilePath,
-    );
-    final dialogResult = await showWipeTdfDialog(
-      context,
-      target: WipeTdfTarget.local,
-      fileName: fileName,
-      expectedBaseName: baseName,
-    );
-    if (!mounted || dialogResult == null) {
-      return;
-    }
-    await _executeWipeLocalFile(
-      currentConfig,
-      createBackup: dialogResult.createBackup,
-    );
-  }
-
-  /// Opens [WipeTdfDialog] for the remote WebDAV `.tdf` file and wipes it if confirmed.
-  Future<void> _handleWipeRemoteFile() async {
-    setState(_clearStatusBanner);
-    if (!(_formKey.currentState?.validate() ?? false)) {
-      return;
-    }
-    final currentConfig = _buildCurrentConfig();
-    if (!currentConfig.isWebDavConfigured) {
-      final localizations = AppLocalizations.of(context);
+    if (isRemote && !currentConfig.isWebDavConfigured) {
       _showStatusBanner(
         localizations.errorWebDavNotConfigured,
-        _StatusBannerTone.error,
+        StatusBannerTone.error,
       );
       return;
     }
-    final fileName = LocalFileRepository.extractFileNameFromPath(
-      currentConfig.filePath,
-    );
-    final baseName = LocalFileRepository.extractFileBaseName(
-      currentConfig.filePath,
-    );
+    if (!isRemote && _resolvePreviewLocalPath(currentConfig) == null) {
+      _showStatusBanner(
+        localizations.errorInvalidLocalFilePath,
+        StatusBannerTone.error,
+      );
+      return;
+    }
+    final targetPath = isRemote
+        ? currentConfig.filePath
+        : currentConfig.localFilePath;
     final dialogResult = await showWipeTdfDialog(
       context,
-      target: WipeTdfTarget.remote,
-      fileName: fileName,
-      expectedBaseName: baseName,
+      target: isRemote ? WipeTdfTarget.remote : WipeTdfTarget.local,
+      fileName: LocalFileRepository.extractFileNameFromPath(targetPath),
+      expectedBaseName: LocalFileRepository.extractFileBaseName(targetPath),
     );
     if (!mounted || dialogResult == null) {
       return;
     }
-    await _executeWipeRemoteFile(
-      currentConfig,
-      createBackup: dialogResult.createBackup,
+    final notifier = ref.read(taskNotifierProvider.notifier);
+    await _executeStorageAction(
+      () => isRemote
+          ? notifier.wipeRemoteFile(
+              currentConfig,
+              createBackup: dialogResult.createBackup,
+            )
+          : notifier.wipeLocalFile(
+              currentConfig,
+              createBackup: dialogResult.createBackup,
+            ),
+      bannerSelector: (loc) =>
+          isRemote ? loc.remoteFileWipedBanner : loc.localFileWipedBanner,
     );
   }
 
-  /// Opens the native file chooser on desktop or [SelectLocalTdfDialog] on Android and returns the chosen `.tdf` path.
-  Future<String?> _pickOrDialogSelectLocalFile() async {
-    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
-    final currentRepo = LocalFileRepository(
-      config: _buildCurrentConfig(),
-      baseDirectoryPath: baseDirectoryPath,
-    );
-    final currentDirectory = currentRepo.tryResolveDirectoryPath();
-    final currentFileName = currentRepo.extractFileName();
-    if (ref.read(supportsDirectoryPickerProvider)) {
-      return ref.read(filePickerProvider)(
-        initialDirectory: currentDirectory,
-        currentFileName: currentFileName,
-      );
-    }
-    final existingNames = ref
-        .read(localFileRepositoryProvider)
-        .listTdfFileNamesInDirectory();
-    final selectedName = await showSelectLocalTdfDialog(
-      context,
-      currentFileName: currentFileName,
-      existingFileNames: existingNames,
-    );
-    if (selectedName == null || selectedName.trim().isEmpty) {
-      return null;
-    }
-    return _resolveLocalTargetPathInCurrentDir(
-      currentRepo,
-      baseDirectoryPath,
-      selectedName,
-    );
-  }
-
-  /// Initializes the text controllers and selections once when [config] finishes loading.
+  /// Synchronizes [_preferences] and initializes the text controllers once when [config] finishes loading.
   void _populateFieldsIfNeeded(WebDavConfig config) {
-    _selectedLanguage = config.language;
-    _selectedThemeMode = config.themeMode;
-    _selectedThemePalette = config.themePalette;
-    _selectedTimeZoneMode = config.timeZoneMode;
-    _manualTimeZoneOffsetMinutes = config.manualTimeZoneOffsetMinutes;
-    _selectedLocationEnabled = config.locationEnabled;
-    _selectedDiagnosticsEnabled = config.diagnosticsEnabled;
-    _selectedStorageMode = config.storageMode;
     final rawLocal = config.localFilePath.trim();
-    _localFilePath = rawLocal.isEmpty ? WebDavConfig.defaultFileName : rawLocal;
+    _preferences = config.copyWith(
+      localFilePath: rawLocal.isEmpty ? WebDavConfig.defaultFileName : rawLocal,
+    );
     if (_initialized) {
       return;
     }
@@ -1191,32 +515,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         : config.filePath;
   }
 
-  /// Combines [newFileName] with [currentRepo]'s directory when an explicit directory path is configured.
-  String _resolveLocalTargetPathInCurrentDir(
-    LocalFileRepository currentRepo,
-    String? baseDirectoryPath,
-    String newFileName,
-  ) {
-    final currentDirectory = currentRepo.tryResolveDirectoryPath();
-    final hasExplicitDirectory =
-        _localFilePath.contains('/') ||
-        _localFilePath.contains(r'\') ||
-        baseDirectoryPath != null;
-    if (hasExplicitDirectory && currentDirectory != null) {
-      return LocalFileRepository.combineDirectoryAndFileName(
-        currentDirectory,
-        newFileName,
-      );
-    }
-    return newFileName;
-  }
-
   /// Resolves the preview local file path for [config], or `null` if invalid.
   String? _resolvePreviewLocalPath(WebDavConfig config) {
-    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
     return LocalFileRepository(
       config: config,
-      baseDirectoryPath: baseDirectoryPath,
+      baseDirectoryPath: ref.read(localStorageDirectoryPathProvider),
     ).tryResolveFilePath();
   }
 
@@ -1226,46 +529,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    final config = _buildCurrentConfig();
-    try {
-      await ref
-          .read(webDavConfigProvider.notifier)
-          .changeLocalFileLocation(config);
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    _showStatusBanner(
-      localizations.credentialsSavedBanner,
-      _StatusBannerTone.success,
+    await _applyLocalFileUpdate(
+      (config) => config.localFilePath,
+      bannerSelector: (localizations) => localizations.credentialsSavedBanner,
     );
   }
 
   /// Displays [message] with [tone] and schedules an automatic fade-out.
-  void _showStatusBanner(String message, _StatusBannerTone tone) {
+  void _showStatusBanner(String message, StatusBannerTone tone) {
     _bannerTimer?.cancel();
     setState(() {
       _statusTone = tone;
       _statusBannerMessage = message;
       _isBannerVisible = true;
     });
-    _bannerTimer = Timer(
-      SettingsScreen.statusBannerDisplayDuration,
-      _beginStatusBannerFadeOut,
-    );
+    _bannerTimer = Timer(SettingsScreen.statusBannerDisplayDuration, () {
+      if (mounted) {
+        setState(() => _isBannerVisible = false);
+      }
+    });
   }
 
   /// Validates the form, saves [WebDavConfig], and runs a storage synchronization test.
   Future<void> _testConnectionAndSync() async {
     setState(_clearStatusBanner);
-    if (!_selectedStorageMode.usesWebDav) {
+    if (!_preferences.storageMode.usesWebDav) {
       return;
     }
     if (!(_formKey.currentState?.validate() ?? false)) {
@@ -1273,632 +561,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     final config = _buildCurrentConfig();
     if (!config.isWebDavConfigured) {
-      final localizations = AppLocalizations.of(context);
       _showStatusBanner(
-        localizations.errorWebDavNotConfigured,
-        _StatusBannerTone.error,
+        AppLocalizations.of(context).errorWebDavNotConfigured,
+        StatusBannerTone.error,
       );
       return;
     }
-    await _executeConnectionTest(config);
-  }
-
-  /// Toggles [_obscurePassword] visibility.
-  void _toggleObscurePassword() {
-    setState(() {
-      _obscurePassword = !_obscurePassword;
-    });
-  }
-}
-
-/// Shared Material 3 card container with an icon, title, description, and body [child].
-class _SettingsSectionCard extends StatelessWidget {
-  /// Creates a [_SettingsSectionCard].
-  const _SettingsSectionCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.child,
-  });
-
-  /// Interactive content below the description.
-  final Widget child;
-
-  /// Section subtitle description.
-  final String description;
-
-  /// Leading header icon.
-  final IconData icon;
-
-  /// Section title text.
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Card(
-      margin: EdgeInsets.zero,
-      color: theme.cardColor,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(icon, color: colorScheme.primary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              description,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 10),
-            child,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Floating status banner displaying save confirmation or synchronization messages above the bottom action row.
-class _SettingsStatusBanner extends StatelessWidget {
-  /// Creates a [_SettingsStatusBanner].
-  const _SettingsStatusBanner({
-    required this.isVisible,
-    required this.message,
-    required this.onFadeOutComplete,
-    required this.tone,
-  });
-
-  /// Whether the banner is currently opaque (`true`) or fading out (`false`).
-  final bool isVisible;
-
-  /// Status message text.
-  final String message;
-
-  /// Callback invoked when the opacity animation finishes.
-  final VoidCallback onFadeOutComplete;
-
-  /// Visual tone (`success` or `error`).
-  final _StatusBannerTone tone;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isError = tone == _StatusBannerTone.error;
-    final foregroundColor = isError
-        ? colorScheme.onErrorContainer
-        : colorScheme.onPrimaryContainer;
-
-    return Positioned(
-      left: 16,
-      right: 16,
-      bottom: 8,
-      child: AnimatedOpacity(
-        opacity: isVisible ? 1.0 : 0.0,
-        duration: SettingsScreen.statusBannerFadeDuration,
-        curve: Curves.easeOut,
-        onEnd: onFadeOutComplete,
-        child: Material(
-          elevation: 4,
-          color: isError
-              ? colorScheme.errorContainer
-              : colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              children: [
-                Icon(
-                  isError
-                      ? Icons.error_outline_rounded
-                      : Icons.check_circle_outline_rounded,
-                  color: foregroundColor,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    message,
-                    style: TextStyle(color: foregroundColor),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Visual tone for [_SettingsStatusBanner].
-enum _StatusBannerTone { success, error }
-
-/// Card for choosing the Markdown storage mode (`Local`, `WebDAV`, or `Both`).
-class _StorageModeSelectionCard extends StatelessWidget {
-  /// Creates a [_StorageModeSelectionCard].
-  const _StorageModeSelectionCard({
-    required this.selectedStorageMode,
-    required this.onStorageModeChanged,
-  });
-
-  /// Callback invoked when the user selects a new [StorageMode].
-  final ValueChanged<StorageMode> onStorageModeChanged;
-
-  /// Currently selected [StorageMode].
-  final StorageMode selectedStorageMode;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.storage_rounded,
-      title: localizations.storageModeSectionTitle,
-      description: localizations.storageModeSectionDescription,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<StorageMode>(
-          segments: [
-            ButtonSegment(
-              value: StorageMode.local,
-              label: Text(localizations.storageModeLocal),
-            ),
-            ButtonSegment(
-              value: StorageMode.webdav,
-              label: Text(localizations.storageModeWebDav),
-            ),
-            ButtonSegment(
-              value: StorageMode.both,
-              label: Text(localizations.storageModeBoth),
-            ),
-          ],
-          selected: {selectedStorageMode},
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              onStorageModeChanged(selection.first);
-            }
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Card for choosing the Material 3 color palette (`Slate` or `Navy`).
-class _ThemePaletteSelectionCard extends StatelessWidget {
-  /// Creates a [_ThemePaletteSelectionCard].
-  const _ThemePaletteSelectionCard({
-    required this.selectedThemePalette,
-    required this.onThemePaletteChanged,
-  });
-
-  /// Callback invoked when the user selects a new [AppThemePalette].
-  final ValueChanged<AppThemePalette> onThemePaletteChanged;
-
-  /// Currently selected [AppThemePalette].
-  final AppThemePalette selectedThemePalette;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.palette_outlined,
-      title: localizations.themePaletteSectionTitle,
-      description: localizations.themePaletteSectionDescription,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<AppThemePalette>(
-          segments: [
-            ButtonSegment(
-              value: AppThemePalette.slate,
-              label: Text(localizations.themePaletteSlate),
-            ),
-            ButtonSegment(
-              value: AppThemePalette.navy,
-              label: Text(localizations.themePaletteNavy),
-            ),
-          ],
-          selected: {selectedThemePalette},
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              onThemePaletteChanged(selection.first);
-            }
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Card for choosing the application color theme (`System`, `Light`, or `Dark`).
-class _ThemeSelectionCard extends StatelessWidget {
-  /// Creates a [_ThemeSelectionCard].
-  const _ThemeSelectionCard({
-    required this.selectedThemeMode,
-    required this.onThemeModeChanged,
-  });
-
-  /// Callback invoked when the user selects a new [AppThemeMode].
-  final ValueChanged<AppThemeMode> onThemeModeChanged;
-
-  /// Currently selected [AppThemeMode].
-  final AppThemeMode selectedThemeMode;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return _SettingsSectionCard(
-      icon: Icons.brightness_6_outlined,
-      title: localizations.themeSectionTitle,
-      description: localizations.themeSectionDescription,
-      child: SizedBox(
-        width: double.infinity,
-        child: SegmentedButton<AppThemeMode>(
-          segments: [
-            ButtonSegment(
-              value: AppThemeMode.system,
-              label: Text(localizations.themeSystem),
-            ),
-            ButtonSegment(
-              value: AppThemeMode.light,
-              label: Text(localizations.themeLight),
-            ),
-            ButtonSegment(
-              value: AppThemeMode.dark,
-              label: Text(localizations.themeDark),
-            ),
-          ],
-          selected: {selectedThemeMode},
-          onSelectionChanged: (selection) {
-            if (selection.isNotEmpty) {
-              onThemeModeChanged(selection.first);
-            }
-          },
-        ),
-      ),
-    );
-  }
-}
-
-/// Card for choosing whether the local time zone is detected automatically or configured manually.
-class _TimeZoneSelectionCard extends StatelessWidget {
-  /// Creates a [_TimeZoneSelectionCard].
-  const _TimeZoneSelectionCard({
-    required this.selectedTimeZoneMode,
-    required this.manualOffsetMinutes,
-    required this.onTimeZoneModeChanged,
-    required this.onManualOffsetChanged,
-  });
-
-  /// Currently selected manual UTC offset in minutes.
-  final int manualOffsetMinutes;
-
-  /// Callback invoked when the user selects a manual UTC offset.
-  final ValueChanged<int> onManualOffsetChanged;
-
-  /// Callback invoked when the user selects a new [AppTimeZoneMode].
-  final ValueChanged<AppTimeZoneMode> onTimeZoneModeChanged;
-
-  /// Currently selected [AppTimeZoneMode].
-  final AppTimeZoneMode selectedTimeZoneMode;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final effectiveOffset =
-        WebDavConfig.supportedUtcOffsetMinutes.contains(manualOffsetMinutes)
-        ? manualOffsetMinutes
-        : 0;
-
-    return _SettingsSectionCard(
-      icon: Icons.schedule_rounded,
-      title: localizations.timeZoneSectionTitle,
-      description: localizations.timeZoneSectionDescription,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: double.infinity,
-            child: SegmentedButton<AppTimeZoneMode>(
-              segments: [
-                ButtonSegment(
-                  value: AppTimeZoneMode.automatic,
-                  label: Text(localizations.timeZoneModeAutomatic),
-                ),
-                ButtonSegment(
-                  value: AppTimeZoneMode.manual,
-                  label: Text(localizations.timeZoneModeManual),
-                ),
-              ],
-              selected: {selectedTimeZoneMode},
-              onSelectionChanged: (selection) {
-                if (selection.isNotEmpty) {
-                  onTimeZoneModeChanged(selection.first);
-                }
-              },
-            ),
-          ),
-          if (selectedTimeZoneMode == AppTimeZoneMode.manual) ...[
-            const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              initialValue: effectiveOffset,
-              decoration: InputDecoration(
-                labelText: localizations.timeZoneOffsetLabel,
-                prefixIcon: const Icon(Icons.public_rounded),
-                border: const OutlineInputBorder(),
-              ),
-              items: [
-                for (final offset in WebDavConfig.supportedUtcOffsetMinutes)
-                  DropdownMenuItem<int>(
-                    value: offset,
-                    child: Text(WebDavConfig.formatUtcOffset(offset)),
-                  ),
-              ],
-              onChanged: (selected) {
-                if (selected != null) {
-                  onManualOffsetChanged(selected);
-                }
-              },
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// Server URL, username, and password input fields for WebDAV authentication.
-class _WebDavCredentialsFields extends StatelessWidget {
-  /// Creates [_WebDavCredentialsFields].
-  const _WebDavCredentialsFields({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.obscurePassword,
-    required this.onToggleObscurePassword,
-  });
-
-  /// Whether the password input is obscured.
-  final bool obscurePassword;
-
-  /// Callback to toggle password visibility.
-  final VoidCallback onToggleObscurePassword;
-
-  /// Controller for the password field.
-  final TextEditingController passwordController;
-
-  /// Controller for the server URL field.
-  final TextEditingController serverUrlController;
-
-  /// Controller for the username field.
-  final TextEditingController usernameController;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ClearableTextField(
-          useFormField: true,
-          controller: serverUrlController,
-          keyboardType: TextInputType.url,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: localizations.serverUrlLabel,
-            hintText: 'https://cloud.example.com',
-            prefixIcon: const Icon(Icons.dns_outlined),
-            border: const OutlineInputBorder(),
-          ),
-          validator: (value) => (value == null || value.trim().isEmpty)
-              ? localizations.serverUrlErrorEmpty
-              : null,
-        ),
-        const SizedBox(height: 16),
-        ClearableTextField(
-          useFormField: true,
-          controller: usernameController,
-          autocorrect: false,
-          decoration: InputDecoration(
-            labelText: localizations.usernameLabel,
-            hintText: 'example-user',
-            prefixIcon: const Icon(Icons.person_outline_rounded),
-            border: const OutlineInputBorder(),
-          ),
-          validator: (value) => (value == null || value.trim().isEmpty)
-              ? localizations.usernameErrorEmpty
-              : null,
-        ),
-        const SizedBox(height: 16),
-        _WebDavPasswordField(
-          controller: passwordController,
-          obscurePassword: obscurePassword,
-          onToggleObscurePassword: onToggleObscurePassword,
-        ),
-      ],
-    );
-  }
-}
-
-/// Password text field with a visibility toggle button for WebDAV authentication.
-class _WebDavPasswordField extends StatelessWidget {
-  /// Creates a [_WebDavPasswordField].
-  const _WebDavPasswordField({
-    required this.controller,
-    required this.obscurePassword,
-    required this.onToggleObscurePassword,
-  });
-
-  /// Controller for the password input.
-  final TextEditingController controller;
-
-  /// Whether the password text is obscured.
-  final bool obscurePassword;
-
-  /// Callback to toggle password visibility.
-  final VoidCallback onToggleObscurePassword;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return ClearableTextField(
-      useFormField: true,
-      controller: controller,
-      obscureText: obscurePassword,
-      autocorrect: false,
-      decoration: InputDecoration(
-        labelText: localizations.passwordLabel,
-        prefixIcon: const Icon(Icons.key_outlined),
-        border: const OutlineInputBorder(),
-        suffixIcon: IconButton(
-          tooltip: obscurePassword
-              ? localizations.tooltipShowPassword
-              : localizations.tooltipHidePassword,
-          icon: Icon(
-            obscurePassword
-                ? Icons.visibility_outlined
-                : Icons.visibility_off_outlined,
-          ),
-          onPressed: onToggleObscurePassword,
-        ),
-      ),
-      validator: (value) => (value == null || value.isEmpty)
-          ? localizations.passwordErrorEmpty
-          : null,
-    );
-  }
-}
-
-/// Card grouping the WebDAV synchronization header, connection form fields, and resolved URI preview.
-class _WebDavStorageSection extends StatelessWidget {
-  /// Creates a [_WebDavStorageSection].
-  const _WebDavStorageSection({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-    required this.obscurePassword,
-    required this.resolvedUri,
-    required this.onToggleObscurePassword,
-    this.onWipeRemoteFile,
-  });
-
-  /// Controller for the remote Markdown file path field.
-  final TextEditingController filePathController;
-
-  /// Whether the password input is obscured.
-  final bool obscurePassword;
-
-  /// Callback to toggle password visibility.
-  final VoidCallback onToggleObscurePassword;
-
-  /// Optional callback to open the confirmation dialog and wipe the remote WebDAV `.tdf` file.
-  final VoidCallback? onWipeRemoteFile;
-
-  /// Controller for the password field.
-  final TextEditingController passwordController;
-
-  /// Resolved WebDAV endpoint URI preview, or `null` if empty.
-  final Uri? resolvedUri;
-
-  /// Controller for the server URL field.
-  final TextEditingController serverUrlController;
-
-  /// Controller for the username field.
-  final TextEditingController usernameController;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final endpointUri = resolvedUri;
-
-    return _SettingsSectionCard(
-      icon: Icons.cloud_sync_outlined,
-      title: localizations.webdavSectionTitle,
-      description: localizations.webdavSectionDescription,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _SettingsFormFields(
-            serverUrlController: serverUrlController,
-            usernameController: usernameController,
-            passwordController: passwordController,
-            filePathController: filePathController,
-            obscurePassword: obscurePassword,
-            onToggleObscurePassword: onToggleObscurePassword,
-          ),
-          if (endpointUri != null) ...[
-            const SizedBox(height: 12),
-            _ResolvedPathPreview(
-              label: localizations.resolvedEndpointLabel,
-              value: endpointUri.toString(),
-            ),
-          ],
-          const SizedBox(height: 12),
-          _WipeStorageButton(
-            buttonKey: const ValueKey('settings_wipe_remote_button'),
-            label: localizations.actionWipeRemoteFile,
-            onPressed: onWipeRemoteFile,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Destructive outlined button for wiping the local or remote TDF file in [SettingsScreen].
-class _WipeStorageButton extends StatelessWidget {
-  /// Creates a [_WipeStorageButton].
-  const _WipeStorageButton({
-    required this.buttonKey,
-    required this.label,
-    required this.onPressed,
-    this.compact = false,
-  });
-
-  /// Widget key for the button.
-  final Key buttonKey;
-
-  /// Whether to use compact horizontal padding for side-by-side button rows.
-  final bool compact;
-
-  /// Localized button label.
-  final String label;
-
-  /// Callback invoked when pressed, or `null` when disabled.
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return OutlinedButton.icon(
-      key: buttonKey,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: colorScheme.error,
-        side: BorderSide(color: colorScheme.error),
-        padding: compact
-            ? const EdgeInsets.symmetric(horizontal: 8, vertical: 10)
-            : null,
-      ),
-      onPressed: onPressed,
-      icon: Icon(Icons.delete_sweep_outlined, size: compact ? 18 : null),
-      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    await _executeStorageAction(
+      () =>
+          ref.read(taskNotifierProvider.notifier).testConnectionAndSync(config),
+      bannerSelector: (localizations) => localizations.connectionSuccessBanner,
     );
   }
 }

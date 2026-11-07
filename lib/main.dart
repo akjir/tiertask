@@ -20,8 +20,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'l10n/app_localizations.dart';
 import 'models/webdav_config.dart';
-import 'providers/task_providers.dart';
+import 'providers/config_providers.dart';
+import 'providers/workspace_providers.dart';
 import 'services/app_logger.dart';
+import 'ui/app_theme.dart';
 import 'ui/home_screen.dart';
 
 /// Root Material 3 application widget for TierTask.

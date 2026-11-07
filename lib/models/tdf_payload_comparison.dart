@@ -17,8 +17,8 @@ import 'dart:convert' show utf8;
 
 import 'package:flutter/foundation.dart';
 
-import '../services/tdf_service.dart';
 import 'task_item.dart';
+import 'tdf_error.dart';
 import 'tdf_metadata.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';

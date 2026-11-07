@@ -17,8 +17,15 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/webdav_config.dart';
+import '../providers/config_providers.dart';
+
+/// Provides the active [AppThemeSet] (`light` and `dark` [AppTheme] pair) replaceable at runtime.
+final appThemeProvider = NotifierProvider<AppThemeNotifier, AppThemeSet>(
+  AppThemeNotifier.new,
+);
 
 /// Immutable semantic palette and Material 3 theme definition for TierTask.
 ///
@@ -767,6 +774,25 @@ class AppTheme extends ThemeExtension<AppTheme> {
     tertiaryAccent,
     warningAccent,
   ]);
+}
+
+/// Manages the active [AppThemeSet] and supports swapping themes at runtime.
+class AppThemeNotifier extends Notifier<AppThemeSet> {
+  @override
+  AppThemeSet build() {
+    final palette = ref.watch(appThemePaletteProvider);
+    return AppThemeSet.forPalette(palette);
+  }
+
+  /// Replaces both light and dark themes with a single [theme] at runtime.
+  void setTheme(AppTheme theme) {
+    state = AppThemeSet.uniform(theme);
+  }
+
+  /// Replaces the active [AppThemeSet] (`light` and `dark` pair) at runtime.
+  void setThemeSet(AppThemeSet themeSet) {
+    state = themeSet;
+  }
 }
 
 /// Pair of light and dark [AppTheme] definitions active in the application.

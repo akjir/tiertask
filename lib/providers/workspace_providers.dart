@@ -17,14 +17,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
+import '../repositories/settings_repository.dart';
 import '../services/app_logger.dart';
-import 'task_providers.dart';
 
 /// Provides the single currently loaded [AppWorkspace] in memory.
 final activeWorkspaceProvider =
     AsyncNotifierProvider<ActiveWorkspaceNotifier, AppWorkspace>(
       ActiveWorkspaceNotifier.new,
     );
+
+/// Provides the [SettingsRepository] for loading and saving application settings.
+final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
+  return SecureSettingsRepository();
+});
 
 /// Provides lightweight [WorkspaceSummary] entries for all persisted workspaces.
 final workspaceSummariesProvider = FutureProvider<List<WorkspaceSummary>>((
@@ -172,3 +177,6 @@ class _WorkspaceListRevisionNotifier extends Notifier<int> {
     state++;
   }
 }
+
+/// Disables automatic Riverpod background retries so failed storage loads execute once until explicitly retried.
+Duration? disableProviderRetry(int retryCount, Object error) => null;

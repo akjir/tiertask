@@ -1,7 +1,7 @@
 ---
 id: TEP-001
 title: Agent-Optimized Codebase Architecture, Acyclic Import DAG, and Sub-5s TDD Harness
-status: planned # concept | planned | in-progress | review | completed | rejected
+status: in-progress # concept | planned | in-progress | review | completed | rejected
 type: architecture # feature | enhancement | refactor | architecture | spec
 created: 2026-11-07
 updated: 2026-11-07
@@ -373,26 +373,26 @@ Add `pumpLeafWidget` and `FakeTaskNotifier` to `test/ui/test_helpers.dart` (`<= 
 ### 3.1 Task Breakdown
 
 #### Wave 1: DAG Decoupling, Domain Model Splits & Service Splits
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
-- [ ] Decouple `lib/services/app_logger.dart` at DAG rank 0 by replacing `dart:io` `Platform` with `defaultTargetPlatform.name` and replacing `LocalFileRepository` with `abstract interface class AppLogSink`; extract `TdfErrorKind` and `TdfException` into `lib/models/tdf_error.dart` and move `QuickAddMode` to `lib/models/task_tier.dart` using direct canonical imports (zero `export` shims).
-- [ ] Decompose `lib/models/task_board.dart` (`2,852L`) into `task_board.dart`, `task_board_evaluator.dart`, `task_board_mutator.dart`, and `task_board_queue_mutator.dart` (`<= 650L` each).
-- [ ] Decompose `lib/models/task_board_sync.dart` (`1,654L`) into `task_board_sync.dart`, `task_board_reconciler.dart`, and `workspace_sync_state.dart` (`<= 600L` each).
-- [ ] Decompose `lib/services/tdf_service.dart` (`3,291L`) into `tdf_service.dart`, `tdf_scanner.dart`, `tdf_parser.dart`, `tdf_directive_parser.dart`, and `tdf_serializer.dart` (`<= 650L` each).
-- [ ] Decompose `lib/services/tdf_importer.dart` (`2,431L`) into `tdf_importer.dart`, `tdf_historical_parser.dart`, and `tdf_historical_serializer.dart` (`<= 650L` each).
-- [ ] Verify Wave 1 with `flutter analyze --fatal-infos --fatal-warnings` and `flutter test test/models test/services`.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
+- [x] Decouple `lib/services/app_logger.dart` at DAG rank 0 by replacing `dart:io` `Platform` with `defaultTargetPlatform.name` and replacing `LocalFileRepository` with `abstract interface class AppLogSink`; extract `TdfErrorKind` and `TdfException` into `lib/models/tdf_error.dart` and move `QuickAddMode` to `lib/models/task_tier.dart` using direct canonical imports (zero `export` shims).
+- [x] Decompose `lib/models/task_board.dart` (`2,852L`) into `task_board.dart`, `task_board_evaluator.dart`, `task_board_mutator.dart`, and `task_board_queue_mutator.dart` (`<= 650L` each).
+- [x] Decompose `lib/models/task_board_sync.dart` (`1,654L`) into `task_board_sync.dart`, `task_board_reconciler.dart`, and `workspace_sync_state.dart` (`<= 600L` each).
+- [x] Decompose `lib/services/tdf_service.dart` (`3,291L`) into `tdf_service.dart`, `tdf_scanner.dart`, `tdf_parser.dart`, `tdf_directive_parser.dart`, and `tdf_serializer.dart` (`<= 650L` each).
+- [x] Decompose `lib/services/tdf_importer.dart` (`2,431L`) into `tdf_importer.dart`, `tdf_historical_parser.dart`, and `tdf_historical_serializer.dart` (`<= 650L` each).
+- [x] Verify Wave 1 with `flutter analyze --fatal-infos --fatal-warnings` and `flutter test test/models test/services`.
 
 #### Wave 2: Repository & Provider Decomposition
-- [ ] Split `lib/repositories/local_file_repository.dart` (`1,003L`) into `local_file_repository.dart` (adding `LocalFileLogSink implements AppLogSink`) and `lib/repositories/local_file_operations.dart`, and split `test/repositories/` into focused repository test suites (`local_file_repository_test.dart`, `settings_repository_test.dart`, `webdav_repository_test.dart`, `location_repository_test.dart` with `HttpOverrides.global = null`).
-- [ ] Decompose `lib/providers/task_providers.dart` (`1,348L`) and `lib/providers/workspace_providers.dart` (`174L`) into `workspace_providers.dart`, `config_providers.dart`, `location_providers.dart`, `sync_providers.dart`, and `task_providers.dart` (moving `AppThemeNotifier` and `appThemeProvider` to `lib/ui/app_theme.dart`), eliminating the `task_providers <-> workspace_providers` cycle and `providers -> ui` upward dependency.
-- [ ] Create `test/providers/` (`config_providers_test.dart`, `sync_providers_test.dart`, `task_providers_test.dart`, `workspace_providers_test.dart`) and remove the obsolete combined files (`test/repositories/storage_and_providers_test.dart`, `test/repositories/sync_merge_test.dart`, `test/repositories/local_directory_migration_test.dart`).
-- [ ] Verify Wave 2 with `flutter analyze --fatal-infos --fatal-warnings` and `flutter test test/repositories test/providers`.
+- [x] Split `lib/repositories/local_file_repository.dart` (`1,003L`) into `local_file_repository.dart` (adding `LocalFileLogSink implements AppLogSink`) and `lib/repositories/local_file_operations.dart`, and split `test/repositories/` into focused repository test suites (`local_file_repository_test.dart`, `settings_repository_test.dart`, `webdav_repository_test.dart`, `location_repository_test.dart` with `HttpOverrides.global = null`).
+- [x] Decompose `lib/providers/task_providers.dart` (`1,348L`) and `lib/providers/workspace_providers.dart` (`174L`) into `workspace_providers.dart`, `config_providers.dart`, `location_providers.dart`, `sync_providers.dart`, and `task_providers.dart` (moving `AppThemeNotifier` and `appThemeProvider` to `lib/ui/app_theme.dart`), eliminating the `task_providers <-> workspace_providers` cycle and `providers -> ui` upward dependency.
+- [x] Create `test/providers/` (`config_providers_test.dart`, `sync_providers_test.dart`, `task_providers_test.dart`, `workspace_providers_test.dart`) and remove the obsolete combined files (`test/repositories/storage_and_providers_test.dart`, `test/repositories/sync_merge_test.dart`, `test/repositories/local_directory_migration_test.dart`).
+- [x] Verify Wave 2 with `flutter analyze --fatal-infos --fatal-warnings` and `flutter test test/repositories test/providers`.
 
 #### Wave 3: UI Screen & Widget Leaf Extraction
-- [ ] Decompose `lib/ui/settings_screen.dart` (`1,904L`) into `settings_screen.dart`, `lib/ui/widgets/settings_preference_cards.dart`, `lib/ui/widgets/settings_local_storage_section.dart`, and `lib/ui/widgets/settings_webdav_storage_section.dart`.
-- [ ] Decompose `lib/ui/home_screen.dart` (`1,722L`) into `home_screen.dart`, `lib/ui/widgets/home_top_bar.dart`, `lib/ui/widgets/home_drawer.dart`, and `lib/ui/widgets/home_tier_pane.dart`.
-- [ ] Decompose `lib/ui/widgets/task_editor_sections.dart` (`1,430L`) and `lib/ui/widgets/task_editor_conditions_section.dart` (`1,086L`) into `task_editor_sections.dart`, `task_editor_scheduling_card.dart`, `task_editor_subtasks_and_blockers.dart`, `condition_editor_controller.dart`, and `task_editor_conditions_section.dart`.
-- [ ] Decompose `lib/ui/widgets/workspace_dialog.dart` (`1,238L`) and `lib/ui/widgets/tier_task_pill.dart` (`1,148L`) into `workspace_dialog.dart`, `workspace_row_card.dart`, `tier_task_pill.dart`, and `tier_task_subtasks_section.dart`.
-- [ ] Verify Wave 3 with `flutter analyze --fatal-infos --fatal-warnings` and `flutter test test/ui`.
+- [x] Decompose `lib/ui/settings_screen.dart` (`1,904L`) into `settings_screen.dart`, `lib/ui/widgets/settings_preference_cards.dart`, `lib/ui/widgets/settings_local_storage_section.dart`, and `lib/ui/widgets/settings_webdav_storage_section.dart`.
+- [x] Decompose `lib/ui/home_screen.dart` (`1,722L`) into `home_screen.dart`, `lib/ui/widgets/home_top_bar.dart`, `lib/ui/widgets/home_drawer.dart`, and `lib/ui/widgets/home_tier_pane.dart`.
+- [x] Decompose `lib/ui/widgets/task_editor_sections.dart` (`1,430L`) and `lib/ui/widgets/task_editor_conditions_section.dart` (`1,086L`) into `task_editor_sections.dart`, `task_editor_scheduling_card.dart`, `task_editor_subtasks_and_blockers.dart`, `condition_editor_controller.dart`, and `task_editor_conditions_section.dart`.
+- [x] Decompose `lib/ui/widgets/workspace_dialog.dart` (`1,238L`) and `lib/ui/widgets/tier_task_pill.dart` (`1,148L`) into `workspace_dialog.dart`, `workspace_row_card.dart`, `tier_task_pill.dart`, and `tier_task_subtasks_section.dart`.
+- [x] Verify Wave 3 with `flutter analyze --fatal-infos --fatal-warnings` and `flutter test test/ui`.
 
 #### Wave 4: UI Test Suite Alignment, `pumpLeafWidget` Harness, Tooling & Documentation Sync
 - [ ] Implement `pumpLeafWidget` and `FakeTaskNotifier` in `test/ui/test_helpers.dart`, split `test/ui/home_screen_test.dart` (`1,486L` -> `home_screen_test.dart` + `home_drawer_test.dart`) and `test/ui/widgets/tier_task_pill_test.dart` (`1,292L` -> `tier_task_pill_test.dart` + `tier_task_subtasks_test.dart`), and trim oversized test suites so all 41 test suites are $\le 650$ lines.

@@ -13,6 +13,27 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+/// Mutually exclusive scheduling mode for creating or editing a task.
+enum QuickAddMode {
+  /// Default mode: adds the task to `# [3] Planned` (cascading up if slots are open).
+  standard,
+
+  /// Priority mode: marks the task as priority and places it into `# [1] Focus`.
+  priority,
+
+  /// Someday mode: places the task into `# [5] Someday` without automatic pull.
+  someday;
+
+  /// Target [TaskTier] corresponding to this mode.
+  TaskTier get targetTier {
+    return switch (this) {
+      QuickAddMode.standard => TaskTier.planned,
+      QuickAddMode.priority => TaskTier.focus,
+      QuickAddMode.someday => TaskTier.someday,
+    };
+  }
+}
+
 /// Represents the six strictly ordered priority and status tiers (`1` to `6`) in TierTask.
 enum TaskTier {
   /// Tier 1: Active top-priority focus tasks (soft limit: 3).

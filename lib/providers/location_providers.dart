@@ -20,7 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/location_state.dart';
 import '../repositories/location_repository.dart';
-import 'task_providers.dart';
+import 'config_providers.dart';
 import 'workspace_providers.dart';
 
 /// Provides whether foreground location determination is currently enabled in the active workspace.

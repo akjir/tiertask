@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -74,15 +75,10 @@ void main() {
         id: 't002',
       );
 
-      expect(
-        board.hasDuplicateTaskTitle('  deploy cluster  '),
-        isTrue,
-        reason: 'hasDuplicateTaskTitle must detect case-insensitive duplicate titles',
-      );
+      expect(board.hasDuplicateTaskTitle('  deploy cluster  '), isTrue);
       expect(
         board.hasDuplicateTaskTitle('Deploy cluster', excludingTaskId: 't001'),
         isFalse,
-        reason: 'hasDuplicateTaskTitle must ignore the task matching excludingTaskId',
       );
 
       final afterDuplicateAdd = board.addTask(
@@ -103,7 +99,6 @@ void main() {
       expect(
         afterEmptyUpdate.findTask('t001')?.title,
         equals('Deploy cluster'),
-        reason: 'updateTask must reject empty task titles',
       );
 
       final afterDuplicateUpdate = board.updateTask(
@@ -114,7 +109,7 @@ void main() {
       expect(
         afterDuplicateUpdate.findTask('t001')?.title,
         equals('Deploy cluster'),
-        reason: 'updateTask must reject renaming a task to another existing task title',
+        reason: 'updateTask must reject renaming to another existing title',
       );
 
       final updatedSomeday = board.updateTask(
@@ -155,35 +150,28 @@ void main() {
       expect(
         promotedPriority.focus.first.id,
         equals('t001'),
-        reason: 'Promoting edited task to Priority must place it at the top of Focus even when keeping its own title',
+        reason:
+            'Promoting edited task to Priority must place it at top of Focus',
       );
-      expect(
-        promotedPriority.focus.first.note,
-        isNull,
-        reason: 'Updating note with empty string must clear the note',
-      );
+      expect(promotedPriority.focus.first.note, isNull);
     });
 
     test('sets and updates suspended, blocked prerequisites with cycle prevention, and task condition rules while suspended short-circuits condition evaluation into Blocked', () {
       expect(
         TaskItem.tryParseTdfTimestampInput('  2026-11-05  '),
         equals(DateTime.utc(2026, 11, 5)),
-        reason: 'Date-only input must parse to UTC midnight',
       );
       expect(
         TaskItem.tryParseTdfTimestampInput('2026-11-05 09:30'),
         equals(DateTime.utc(2026, 11, 5, 9, 30)),
-        reason: 'Date and HH:MM input must parse accurately',
       );
       expect(
         TaskItem.tryParseTdfTimestampInput('2026-11-05 09:30:45'),
         equals(DateTime.utc(2026, 11, 5, 9, 30, 45)),
-        reason: 'Date and HH:MM:SS input must parse accurately',
       );
       expect(
         TaskItem.tryParseTdfTimestampInput('2026-11-05 09:30 extra'),
         isNull,
-        reason: 'Timestamp input with extra tokens must be rejected',
       );
       expect(
         DayTaskCondition.tryFromTokens(['sun', 'mon', 'mon']),
@@ -193,7 +181,6 @@ void main() {
             dayTokens: const ['mon', 'sun'],
           ),
         ),
-        reason: 'DayTaskCondition.tryFromTokens must canonicalize and deduplicate weekday tokens',
       );
       expect(
         TimeWindowTaskCondition.tryParse('08:00', '17:30'),
@@ -206,11 +193,7 @@ void main() {
           ),
         ),
       );
-      expect(
-        TimeWindowTaskCondition.tryParse('09:00', '09:00'),
-        isNull,
-        reason: 'Identical start and end times must be rejected',
-      );
+      expect(TimeWindowTaskCondition.tryParse('09:00', '09:00'), isNull);
       expect(
         LocationTaskCondition.tryParse('50.9787', '11.0328', '150'),
         equals(
@@ -221,11 +204,7 @@ void main() {
           ),
         ),
       );
-      expect(
-        LocationTaskCondition.tryParse('95.0', '11.0328', '150'),
-        isNull,
-        reason: 'Out-of-range latitude must be rejected',
-      );
+      expect(LocationTaskCondition.tryParse('95.0', '11.0328', '150'), isNull);
 
       var board = TaskBoard(
         labels: [
@@ -256,13 +235,9 @@ void main() {
       expect(
         board.blocked.map((task) => task.id),
         equals(['susp00OkD2']),
-        reason: 'Setting suspended in the future must disable evaluation of all other conditions (even condition any or Someday mode) and place the task under Blocked',
+        reason: 'Future suspendedAt must place the task under Blocked',
       );
-      expect(
-        board.someday,
-        isEmpty,
-        reason: 'Suspended task must appear in Blocked rather than Someday',
-      );
+      expect(board.someday, isEmpty);
       expect(board.findTask('susp00OkD2')?.suspendedAt, equals(futureSuspend));
 
       board = board.updateTask(
@@ -274,7 +249,7 @@ void main() {
       expect(
         board.focus.map((task) => task.id),
         equals(['susp00OkD2']),
-        reason: 'Clearing suspendedAt must re-enable condition evaluation so condition any places the task in Focus',
+        reason: 'Clearing suspendedAt re-enables condition any into Focus',
       );
 
       board = board.addTask(
@@ -299,12 +274,7 @@ void main() {
         id: 'dependOkD2',
       );
 
-      expect(
-        board.blocked.map((task) => task.id),
-        equals(['dependOkD2']),
-        reason:
-            'Task with open prerequisite susp00OkD2 must be placed in Blocked',
-      );
+      expect(board.blocked.map((task) => task.id), equals(['dependOkD2']));
       expect(
         board.findTask('dependOkD2')?.blockedByTaskIds,
         equals(['susp00OkD2']),
@@ -313,7 +283,6 @@ void main() {
       expect(
         board.wouldCreateDependencyCycle('susp00OkD2', 'dependOkD2'),
         isTrue,
-        reason: 'Adding dependOkD2 as a prerequisite of susp00OkD2 would form a cycle',
       );
 
       board = board.updateTask(
@@ -334,37 +303,12 @@ void main() {
     });
 
     test('normalizes hex colors, parses/serializes label colors, and rejects duplicate label color directives', () {
-      expect(
-        TdfColor.normalizeHex('#4caf50'),
-        equals('#4CAF50'),
-        reason: 'Hex string with leading # must normalize to uppercase #RRGGBB',
-      );
-      expect(
-        TdfColor.normalizeHex('  2196f3 '),
-        equals('#2196F3'),
-        reason:
-            'Hex string without # must prepend # and normalize to uppercase',
-      );
-      expect(
-        TdfColor.normalizeHex('#GGGGGG'),
-        isNull,
-        reason: 'Non-hex characters must be rejected',
-      );
-      expect(
-        TdfColor.normalizeHex('#12345'),
-        isNull,
-        reason: '5-character hex string must be rejected',
-      );
-      expect(
-        TdfColor.tryParseArgb('eb06ff'),
-        equals(0xFFEB06FF),
-        reason: 'Valid 6-digit hex must parse to opaque 32-bit ARGB int',
-      );
-      expect(
-        TdfColor.formatArgb(0xFF00E5FF),
-        equals('#00E5FF'),
-        reason: '32-bit ARGB int must format to canonical #RRGGBB',
-      );
+      expect(TdfColor.normalizeHex('#4caf50'), equals('#4CAF50'));
+      expect(TdfColor.normalizeHex('  2196f3 '), equals('#2196F3'));
+      expect(TdfColor.normalizeHex('#GGGGGG'), isNull);
+      expect(TdfColor.normalizeHex('#12345'), isNull);
+      expect(TdfColor.tryParseArgb('eb06ff'), equals(0xFFEB06FF));
+      expect(TdfColor.formatArgb(0xFF00E5FF), equals('#00E5FF'));
 
       const labelWithColorTdf = '''
 tdf 0.5.0
@@ -381,18 +325,10 @@ label officeOkD2 {
       );
       expect(parsed.labels.single.id, equals('officeOkD2'));
       expect(parsed.labels.single.name, equals('Main Office'));
-      expect(
-        parsed.labels.single.color,
-        equals('#FF9100'),
-        reason: 'Label block must parse optional color directive',
-      );
+      expect(parsed.labels.single.color, equals('#FF9100'));
 
       final serialized = tdfService.serialize(parsed);
-      expect(
-        serialized,
-        contains('color "#FF9100"'),
-        reason: 'Serializer must emit color directive for label block',
-      );
+      expect(serialized, contains('color "#FF9100"'));
 
       expect(
         () => tdfService.parse(
@@ -406,7 +342,6 @@ label officeOkD2 {
             TdfErrorKind.duplicateDirective,
           ),
         ),
-        reason: 'Duplicate color directive in label block must fail',
       );
     });
 
@@ -438,32 +373,13 @@ label officeOkD2 {
         expect(
           labelId.length,
           equals(10),
-          reason:
-              'Generated label ID ($labelId) must be 10 characters without prefix or underscore',
+          reason: 'ID $labelId must be 10 chars',
         );
-        expect(
-          isValidLabelId(labelId),
-          isTrue,
-          reason:
-              'Generated label ID ($labelId) must be a valid 10-character Base62 ID',
-        );
-        expect(
-          labelId.endsWith(expectedTimeSuffix),
-          isTrue,
-          reason:
-              'Generated label ID ($labelId) must encode the creation timestamp in Base62',
-        );
+        expect(isValidLabelId(labelId), isTrue);
+        expect(labelId.endsWith(expectedTimeSuffix), isTrue);
       }
-      expect(
-        {firstLabelId, secondLabelId, thirdLabelId}.length,
-        equals(3),
-        reason: 'Generated label IDs must be unique',
-      );
-      expect(
-        board.labels.first.color,
-        equals('#2196F3'),
-        reason: 'Label color must be normalized to #RRGGBB',
-      );
+      expect({firstLabelId, secondLabelId, thirdLabelId}.length, equals(3));
+      expect(board.labels.first.color, equals('#2196F3'));
 
       board = board.addTask(
         'Configure VPN router',
@@ -472,74 +388,35 @@ label officeOkD2 {
       );
 
       final createdTask = board.focus.single;
-      expect(
-        createdTask.id.length,
-        equals(10),
-        reason: 'Generated task ID must be 10 characters without prefix or underscore',
-      );
-      expect(
-        isValidTaskId(createdTask.id),
-        isTrue,
-        reason: 'Generated task ID must be a valid 10-character Base62 ID',
-      );
+      expect(createdTask.id.length, equals(10));
+      expect(isValidTaskId(createdTask.id), isTrue);
       expect(createdTask.id.endsWith(expectedTimeSuffix), isTrue);
-      expect(
-        createdTask.labelIds,
-        equals([firstLabelId, thirdLabelId]),
-        reason: 'Task must store multiple selected label IDs',
-      );
+      expect(createdTask.labelIds, equals([firstLabelId, thirdLabelId]));
 
       board = board.deleteLabel(firstLabelId);
       expect(
         board.labels.map((label) => label.id),
         equals([secondLabelId, thirdLabelId]),
-        reason: 'Deleting a label must remove it from board.labels',
       );
-      expect(
-        board.focus.single.labelIds,
-        equals([thirdLabelId]),
-        reason: 'Deleting a label must strip its ID from referencing tasks',
-      );
-
-      expect(
-        board.openTaskCountForLabel(thirdLabelId),
-        equals(1),
-        reason:
-            'openTaskCountForLabel must count open tasks referencing the label',
-      );
-      expect(
-        board.openTaskCountForLabel(secondLabelId),
-        equals(0),
-        reason: 'openTaskCountForLabel must return 0 when no open tasks reference the label',
-      );
+      expect(board.focus.single.labelIds, equals([thirdLabelId]));
+      expect(board.openTaskCountForLabel(thirdLabelId), equals(1));
+      expect(board.openTaskCountForLabel(secondLabelId), equals(0));
       expect(
         board.openTaskCountsByLabel,
         equals(<String, int>{thirdLabelId: 1}),
-        reason: 'Precomputed openTaskCountsByLabel map must expose O(1) counts for open tasks',
       );
-
       expect(
         board.sortedLabels.map((label) => label.name),
         equals(['Home Office', 'IT & Servers']),
-        reason: 'sortedLabels must order labels alphabetically by display name',
       );
-      expect(
-        board.findLabel(thirdLabelId)?.name,
-        equals('Home Office'),
-        reason: 'findLabel must return the matching TdfLabel by ID',
-      );
-      expect(
-        board.hasDuplicateLabelName('  home office  '),
-        isTrue,
-        reason: 'hasDuplicateLabelName must detect case-insensitive duplicate names',
-      );
+      expect(board.findLabel(thirdLabelId)?.name, equals('Home Office'));
+      expect(board.hasDuplicateLabelName('  home office  '), isTrue);
       expect(
         board.hasDuplicateLabelName(
           '  home office  ',
           excludingLabelId: thirdLabelId,
         ),
         isFalse,
-        reason: 'hasDuplicateLabelName must ignore excludingLabelId',
       );
 
       final updateTime = fixedDate.add(const Duration(minutes: 10));
@@ -556,37 +433,20 @@ label officeOkD2 {
         localEvaluationTime: updateTime,
       );
       final updatedLabel = board.findLabel(thirdLabelId)!;
-      expect(
-        updatedLabel.name,
-        equals('Remote Work'),
-        reason: 'updateLabel must update the trimmed display name',
-      );
-      expect(
-        updatedLabel.color,
-        equals('#4CAF50'),
-        reason: 'updateLabel must normalize hex color to #RRGGBB',
-      );
-      expect(
-        updatedLabel.note,
-        equals('Home desk setup'),
-        reason: 'updateLabel must store trimmed note text',
-      );
+      expect(updatedLabel.name, equals('Remote Work'));
+      expect(updatedLabel.color, equals('#4CAF50'));
+      expect(updatedLabel.note, equals('Home desk setup'));
       expect(
         updatedLabel.conditions,
         equals([
           DayTaskCondition.fromWeekdays(const [DateTime.saturday]),
         ]),
-        reason: 'updateLabel must store label conditions and strip task-only resets',
       );
-      expect(
-        updatedLabel.modifiedAt,
-        equals(updateTime),
-        reason: 'updateLabel must advance modifiedAt monotonically',
-      );
+      expect(updatedLabel.modifiedAt, equals(updateTime));
       expect(
         board.blocked.map((task) => task.id),
         equals([createdTask.id]),
-        reason: 'Updating a label with an unmet condition must re-evaluate referencing tasks into Blocked',
+        reason: 'Unmet label condition must move referencing task to Blocked',
       );
 
       board = board.updateLabel(
@@ -594,11 +454,7 @@ label officeOkD2 {
         name: '   ',
         currentDate: updateTime,
       );
-      expect(
-        board.findLabel(thirdLabelId)?.name,
-        equals('Remote Work'),
-        reason: 'updateLabel must ignore empty or whitespace-only names',
-      );
+      expect(board.findLabel(thirdLabelId)?.name, equals('Remote Work'));
 
       board = board.updateLabel(
         thirdLabelId,
@@ -612,11 +468,7 @@ label officeOkD2 {
       expect(clearedLabel.color, isNull);
       expect(clearedLabel.note, isNull);
       expect(clearedLabel.conditions, isEmpty);
-      expect(
-        board.focus.map((task) => task.id),
-        equals([createdTask.id]),
-        reason: 'Clearing unmet conditions on a label must re-evaluate referencing tasks back into Focus',
-      );
+      expect(board.focus.map((task) => task.id), equals([createdTask.id]));
     });
 
     test('toggleSubtask with subtasksAutoFinish on a recurring task reschedules it into Blocked and resets steps', () {
@@ -635,36 +487,15 @@ label officeOkD2 {
       final toggleTime = fixedDate.add(const Duration(hours: 2));
       board = board.toggleSubtask(taskId, 1, currentDate: toggleTime);
 
-      expect(
-        board.completed,
-        isEmpty,
-        reason: 'subtasks auto-finish on recurring task must not move task to Completed',
-      );
-      expect(
-        board.blocked.map((task) => task.id),
-        equals([taskId]),
-        reason: 'subtasks auto-finish on recurring task must reschedule task into Blocked',
-      );
+      expect(board.completed, isEmpty);
+      expect(board.blocked.map((task) => task.id), equals([taskId]));
       final rescheduled = board.findTask(taskId)!;
       expect(rescheduled.isCompleted, isFalse);
       expect(rescheduled.isPriority, isTrue);
-      expect(
-        rescheduled.suspendedAt,
-        equals(DateTime.utc(2026, 11, 8, 0, 0)),
-        reason: '2026-11-01 + 1 week must set suspendedAt to 2026-11-08 00:00',
-      );
+      expect(rescheduled.suspendedAt, equals(DateTime.utc(2026, 11, 8, 0, 0)));
       expect(board.queueTaskIds, equals([taskId]));
-      expect(
-        rescheduled.modifiedAt,
-        equals(toggleTime),
-        reason: 'toggleSubtask auto-finish on recurring task must advance modifiedAt',
-      );
-      expect(
-        rescheduled.subtasks.every((step) => !step.isCompleted),
-        isTrue,
-        reason:
-            'All subtasks must be reset to false after auto-finish recurrence',
-      );
+      expect(rescheduled.modifiedAt, equals(toggleTime));
+      expect(rescheduled.subtasks.every((step) => !step.isCompleted), isTrue);
 
       final manualUnblockTime = DateTime.utc(2026, 11, 3, 10, 0);
       board = board.updateTask(
@@ -675,11 +506,7 @@ label officeOkD2 {
       final unblocked = board.findTask(taskId)!;
       expect(unblocked.suspendedAt, isNull);
       expect(board.queueTaskIds, equals([taskId]));
-      expect(
-        board.focus.map((task) => task.id),
-        equals([taskId]),
-        reason: 'Early unblocked recurring task must immediately enter Focus',
-      );
+      expect(board.focus.map((task) => task.id), equals([taskId]));
     });
 
     test('TaskLink validates URI schemes and TaskBoard addTask/updateTask manage links and advance modifiedAt', () {
@@ -726,7 +553,6 @@ label officeOkD2 {
           TaskLink(title: 'Runbook', uri: 'https://example.com/runbook'),
           TaskLink(title: 'Ticket', uri: 'https://example.com/issues/42'),
         ]),
-        reason: 'addTask must preserve task links in declaration order',
       );
 
       final updateTime = fixedDate.add(const Duration(minutes: 15));
@@ -744,11 +570,7 @@ label officeOkD2 {
           TaskLink(title: 'Runbook', uri: 'https://example.com/runbook-v2'),
         ]),
       );
-      expect(
-        updated.modifiedAt,
-        equals(updateTime),
-        reason: 'Changing task links must advance modifiedAt',
-      );
+      expect(updated.modifiedAt, equals(updateTime));
 
       final overLimitLinks = List<TaskLink>.generate(
         TaskLink.maxLinksPerTask + 5,
@@ -763,7 +585,6 @@ label officeOkD2 {
       expect(
         board.findTask(taskId)!.links.length,
         equals(TaskLink.maxLinksPerTask),
-        reason: 'TaskBoard must cap links at TaskLink.maxLinksPerTask (20)',
       );
     });
   });

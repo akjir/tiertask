@@ -13,12 +13,23 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:io' show Platform;
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import '../repositories/local_file_repository.dart';
+/// Synchronous log file persistence contract injected from the repository layer.
+abstract interface class AppLogSink {
+  /// Computes the canonical log file path for [baseDirectoryPath].
+  String defaultLogFilePath({String? baseDirectoryPath});
+
+  /// Synchronously deletes the log file at [path] if it exists.
+  void deleteLogFileSync(String path);
+
+  /// Synchronously reads up to the trailing [maxBytes] of [path].
+  String readLogFileSync(String path, {required int maxBytes});
+
+  /// Synchronously writes or appends [content] to [path].
+  void writeLogFileSync(String path, String content, {required bool append});
+}
 
 /// Severity levels for structured diagnostic log entries.
 enum LogLevel {
@@ -111,6 +122,7 @@ class AppLogger {
   static String? _logFilePath;
   static int _maxLines = defaultMaxLines;
   static final Set<String> _registeredSecrets = <String>{};
+  static AppLogSink? _sink;
   static final RegExp _urlUserInfoPattern = RegExp(
     r'(https?://[^/\s:@]+:)([^@\s/]+)(@)',
     caseSensitive: false,
@@ -141,7 +153,7 @@ class AppLogger {
     _crashedInSession = false;
     if (_enabled) {
       if (_logFilePath case final path?) {
-        LocalFileRepository.writeLogFileSync(path, '', append: false);
+        _sink?.writeLogFileSync(path, '', append: false);
       }
     }
     _notifyChange();
@@ -231,7 +243,7 @@ class AppLogger {
   }
 
   /// Resets all static logger state and restores the UTC clock for isolated testing.
-  static void resetForTesting({DateTime Function()? clock}) {
+  static void resetForTesting({DateTime Function()? clock, AppLogSink? sink}) {
     _enabled = false;
     _crashedInSession = false;
     _lines.clear();
@@ -239,6 +251,7 @@ class AppLogger {
     _logFilePath = null;
     _maxLines = defaultMaxLines;
     _registeredSecrets.clear();
+    _sink = sink;
     AppLogger.clock = clock ?? (() => DateTime.now().toUtc());
     _notifyChange();
   }
@@ -277,10 +290,14 @@ class AppLogger {
   /// or immediate buffer and file deletion on disable.
   static void setEnabled(
     bool enabled, {
+    AppLogSink? sink,
     String? logFilePath,
     String? secretToRedact,
     int? maxLines,
   }) {
+    if (sink != null) {
+      _sink = sink;
+    }
     if (secretToRedact != null) {
       registerSecret(secretToRedact);
     }
@@ -294,7 +311,7 @@ class AppLogger {
       _lines.clear();
       _estimatedBytes = 0;
       _logFilePath = resolvedPath;
-      LocalFileRepository.deleteLogFileSync(resolvedPath);
+      _sink?.deleteLogFileSync(resolvedPath);
       _notifyChange();
       return;
     }
@@ -322,18 +339,10 @@ class AppLogger {
     if (_lines.length > _maxLines || _estimatedBytes > maxFileBytes) {
       _pruneOldestTwentyPercent();
       if (path != null) {
-        LocalFileRepository.writeLogFileSync(
-          path,
-          '${_lines.join('\n')}\n',
-          append: false,
-        );
+        _sink?.writeLogFileSync(path, '${_lines.join('\n')}\n', append: false);
       }
     } else if (path != null) {
-      LocalFileRepository.writeLogFileSync(
-        path,
-        '${entries.join('\n')}\n',
-        append: true,
-      );
+      _sink?.writeLogFileSync(path, '${entries.join('\n')}\n', append: true);
     }
     _notifyChange();
   }
@@ -356,25 +365,22 @@ class AppLogger {
     _lines.clear();
     _estimatedBytes = 0;
     if (_logFilePath case final path?) {
-      LocalFileRepository.writeLogFileSync(path, '', append: false);
+      _sink?.writeLogFileSync(path, '', append: false);
     }
     _notifyChange();
   }
 
   /// Inspects `tiertask.log` at [path] on session startup to detect clean exit vs. crash recovery.
   static void _initializeSessionFile(String path) {
-    final existing = LocalFileRepository.readLogFileSync(
-      path,
-      maxBytes: maxFileBytes,
-    );
+    final existing = _sink?.readLogFileSync(path, maxBytes: maxFileBytes) ?? '';
     final timestamp = formatUtcTimestamp(clock());
-    final platform = Platform.operatingSystem;
+    final platform = defaultTargetPlatform.name;
     if (existing.trim().isEmpty) {
       _lines.clear();
       final header = '=== SESSION START $timestamp [$platform] ===';
       _lines.add(header);
       _recomputeEstimatedBytes();
-      LocalFileRepository.writeLogFileSync(path, '$header\n', append: false);
+      _sink?.writeLogFileSync(path, '$header\n', append: false);
       return;
     }
 
@@ -387,13 +393,9 @@ class AppLogger {
     _recomputeEstimatedBytes();
     if (_lines.length > _maxLines || _estimatedBytes > maxFileBytes) {
       _pruneOldestTwentyPercent();
-      LocalFileRepository.writeLogFileSync(
-        path,
-        '${_lines.join('\n')}\n',
-        append: false,
-      );
+      _sink?.writeLogFileSync(path, '${_lines.join('\n')}\n', append: false);
     } else {
-      LocalFileRepository.writeLogFileSync(path, '\n$banner\n', append: true);
+      _sink?.writeLogFileSync(path, '\n$banner\n', append: true);
     }
   }
 
@@ -460,6 +462,6 @@ class AppLogger {
     if (_logFilePath case final currentPath? when currentPath.isNotEmpty) {
       return currentPath;
     }
-    return LocalFileRepository.defaultLogFilePath();
+    return _sink?.defaultLogFilePath() ?? defaultLogFileName;
   }
 }
