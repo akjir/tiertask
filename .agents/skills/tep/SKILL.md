@@ -22,8 +22,8 @@ description: >-
 ## 3. Lifecycle Stages
 * **`concept`:** Define the idea, motivation, goals/non-goals, and alternatives (Part 1).
 * **`planned`:** Agree on architecture, `TDF_SPEC.md` schema changes, localization (`app_en.arb`, `app_de.arb`), and `M-*` TDD test strategy with the user (Part 2).
-* **`in-progress`:** Run `flutter analyze --fatal-infos --fatal-warnings` and `flutter test` first to confirm a clean baseline. Implement with strict Red-Green-Refactor TDD per **`tiertask-dev-workflow`** (and **`tdf-spec-workflow`** when `TDF_SPEC.md` changes). Track tasks in Part 3.1. Update Parts 1 and 2 if the design changes during coding.
-* **`review`:** Pass `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, and `flutter test`, sync `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and `TDF_SPEC.md` per **`update-documentation`** and **`tdf-spec-workflow`**, update `CHANGELOG.md` per **`changelog-updater`**, set `status: review`, update `BOARD.md`, and ask the user for approval. Never set `completed` without user approval.
+* **`in-progress`:** Run `python3 .agents/scripts/tiertask_dev.py verify --fast` first to confirm a clean baseline. Implement with strict Red-Green-Refactor TDD per **`tiertask-dev-workflow`** (and **`tdf-spec-workflow`** when `TDF_SPEC.md` changes). Track tasks in Part 3.1. Update Parts 1 and 2 if the design changes during coding.
+* **`review`:** Pass `python3 .agents/scripts/tiertask_dev.py verify --full --fix`, sync `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and `TDF_SPEC.md` per **`update-documentation`** and **`tdf-spec-workflow`**, update `CHANGELOG.md` per **`changelog-updater`**, set `status: review`, update `BOARD.md`, and ask the user for approval. Never set `completed` without user approval.
 * **`completed`:** After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3. Keep completed proposals permanently. If superseded later, keep `status: completed` and add a `> [!NOTE]` block at the top referencing the superseding TEP.
 * **`rejected`:** Document the rejection reason and set `status: rejected`.
 

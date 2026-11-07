@@ -19,17 +19,17 @@ Omit a Table of Contents. Maintain this exact section order:
 3. **`## Requirements`:** 2-column table (`Component | Requirement`).
 4. **`## Installation & Build`:** Copy-paste ready `git clone`, `flutter pub get`, `flutter gen-l10n`, debug `flutter run`, and obfuscated `flutter build <target> --release --obfuscate --split-debug-info=build/symbols` commands (`linux`, `apk`, `windows`) separated into short descriptive blocks.
 5. **`## Quick Start`:** Self-contained numbered steps for configuring display language/theme, configuring `Local` / `WebDAV` / `Both` storage (`tasks.tdf`), creating tasks with `Priority`, `Someday`, or `Labels`, and synchronizing the board.
-6. **`## Tier System & Documentation`:** Summary table of the 6 tiers (`Tier | English (en) | German (de) | Soft Limit | Derivation Rule`), canonical `tasks.tdf` example (`tdf 0.5.0`), and a bullet list of links to `[TDF_SPEC.md](TDF_SPEC.md)`, `[ARCHITECTURE.md](ARCHITECTURE.md)`, `[AGENTS.md](AGENTS.md)`, and `[CHANGELOG.md](CHANGELOG.md)`.
+6. **`## Tier System & Documentation`:** Summary table of the 6 tiers (`Tier | English (en) | German (de) | Soft Limit | Derivation Rule`), canonical `tasks.tdf` example (`tdf 0.5.1`), and a bullet list of links to `[TDF_SPEC.md](TDF_SPEC.md)`, `[ARCHITECTURE.md](ARCHITECTURE.md)`, `[AGENTS.md](AGENTS.md)`, and `[CHANGELOG.md](CHANGELOG.md)`.
 7. **`## Development`:** Self-contained `flutter gen-l10n`, `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, and `flutter test` commands.
 8. **`## Disclaimer & License`:** 2-sentence warranty disclaimer and GPL-3.0 link to `[LICENSE](LICENSE)`.
 
-## 3. `ARCHITECTURE.md` Structure
-Maintain this exact section order:
+## 3. `ARCHITECTURE.md` Structure & Automation (`tiertask_dev.py arch`)
+Maintain this exact section order and use `python3 .agents/scripts/tiertask_dev.py arch --sync-tree [--set <rel_path> "<description>"] --audit` to keep the directory tree and tables synchronized:
 1. **`# TierTask Architecture and File Structure`** + update callout referencing `AGENTS.md` and `TDF_SPEC.md`.
 2. **`## Architectural Layers`:** Table of layers (`Localization`, `Models`, `Services`, `Repositories`, `Providers`, `UI`) with paths and responsibilities, plus `P-UDF-ARCHITECTURE` / `P-IO-ISOLATION` note.
-3. **`## Directory Layout`:** ASCII tree of the repository structure (`android/`, `assets/`, `linux/`, `windows/`, `lib/`, `test/`).
-4. **Layer Sections (`## Root Files`, `## Localization`, `## Domain Models`, `## Services`, `## Repositories`, `## State Providers`, `## User Interface`):** 2-column tables (`File | Function`) describing each file concisely.
-5. **`## Execution & Synchronization Flow`:** Numbered end-to-end flow from app startup, active workspace loading, and locale/theme resolution to two-stage three-way `.tdf` synchronization (`In-Memory <-> Local File <-> WebDAV`), single-pass $O(N)$ `tdf 0.5.0` parsing/serialization, dynamic 6-tier evaluation, 30-day completed task and tombstone pruning, and opt-in diagnostic logging.
+3. **`## Directory Layout`:** ASCII tree of the repository structure (`android/`, `assets/`, `linux/`, `windows/`, `lib/`, `test/`), auto-synced via `tiertask_dev.py arch --sync-tree`.
+4. **Layer Sections (`## Root Files`, `## Localization`, `## Domain Models`, `## Services`, `## Repositories`, `## State Providers`, `## User Interface`):** 2-column tables (`File | Function`) where each row is a concise 1-sentence summary (`<= 65` words) listing only public classes/functions and core responsibilities. Never list private `_Widget` names, icon identifiers, or widget test keys in `ARCHITECTURE.md`.
+5. **`## Execution & Synchronization Flow`:** Numbered end-to-end flow from app startup, active workspace loading, and locale/theme resolution to two-stage three-way `.tdf` synchronization (`In-Memory <-> Local File <-> WebDAV`), single-pass $O(N)$ `tdf 0.5.1` parsing/serialization, dynamic 6-tier evaluation, 30-day completed task and tombstone pruning, and opt-in diagnostic logging.
 
 ## 4. Style, Tone & Formatting Enforcement (`P-LANG-RULES`)
 * **Language & Tone:** Write all documentation in concise, factual English following ASD-STE100 (80%). Never use emojis, marketing adjectives ("powerful", "seamless", "intuitive"), greetings, concluding summary paragraphs, or redundant explanations.

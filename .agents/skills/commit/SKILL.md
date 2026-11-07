@@ -9,10 +9,9 @@ Execute this workflow whenever the user invokes `/commit`, `/commit force`, `/co
 
 ## 1. Pre-Commit Verification Gate (`/commit` and `/commit push` only)
 - **Force Bypass (`/commit force` / `/commit force <message>`):** Skip this section completely. Do not run any tests, analyzer checks, or format checks; proceed directly to Section 2.
-- **Standard Verification (`/commit` / `/commit push`):** Before staging or committing any changes, verify that the workspace passes all checks:
-  1. **Run Test Suite:** Execute `flutter test` and verify that all unit and widget tests pass.
-  2. **Run Analyzer & Format Checks:** Execute `flutter analyze --fatal-infos --fatal-warnings` and `dart format --output=none --set-exit-if-changed lib test` to verify zero analyzer diagnostics and compliant formatting.
-  3. **Abort on Failure (No Code Changes):** If `flutter test`, `flutter analyze`, or `dart format` fails, stop the workflow immediately. Do NOT edit or fix any files, do NOT stage or commit changes, and do NOT push. Report the failing test, analyzer, or formatter output directly to the user.
+- **Standard Verification (`/commit` / `/commit push`):** Before staging or committing any changes, run the unified verification gate:
+  1. **Execute Verification & Stamp Check:** Run `python3 .agents/scripts/tiertask_dev.py verify --full` (which checks static `AGENTS.md` / `l10n` / `ARCHITECTURE.md` invariants without modifying code, and either short-circuits in `< 0.1s` when the SHA-256 code/test tree digest in `.dart_tool/tiertask_verify_stamp.json` is already verified or runs `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --no-pub --fatal-infos --fatal-warnings`, and `flutter test --no-pub --no-test-assets -r failures-only`).
+  2. **Abort on Failure (No Code Changes):** If `verify --full` exits with a non-zero code, stop the workflow immediately. Do NOT edit or fix any files, do NOT stage or commit changes, and do NOT push. Report the failing static check, formatter check, analyzer diagnostic, or test failure directly to the user.
 
 ## 2. Stage & Commit All Open Changes
 When invoked via `/commit force`, or once all verification checks in Section 1 pass:

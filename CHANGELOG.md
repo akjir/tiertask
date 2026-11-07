@@ -12,12 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added English (`en`, default) and German (`de`) localization with `System`, `English`, and `Deutsch` language selection in Settings.
 - Added theme mode selection (`System`, `Light`, `Dark`) and runtime Material 3 color palette switching (`Slate` and `Navy`) in Settings.
 - Added the `TierTask` application logo across Linux, Android, and Windows launcher icons and the navigation drawer header.
-- Added single-pass $O(N)$ TierTask Data Format (`tdf 0.5.0`) scanning, parsing, and canonical `LF` serialization with 10-character Base62 entity identifiers (`<6xBase62Random><4xBase62Time>`), shared `queue` and `deleted` (`generation`) root blocks, and explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0` version migration.
+- Added single-pass $O(N)$ TierTask Data Format (`tdf 0.5.1`) scanning, parsing (with automatic `tdf 0.5.0` load conversion), and canonical `LF` serialization with 10-character Base62 entity identifiers (`<6xBase62Random><4xBase62Time>`), shared `queue` and `deleted` (`generation`) root blocks, and explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1` version migration.
 - Added dynamic 6-tier evaluation with `Focus` (`3`) and `Ready` (`5`) soft WIP limits, `subtasks auto-finish` checklist completion, and 30-day UTC pruning for completed tasks and `deleted` tombstones.
 - Added configurable storage modes (`Local`, `WebDAV`, `Both`), local `.tdf` file persistence, and two-stage three-way synchronization (`In-Memory <-> Local File <-> WebDAV`) using baseline comparison and monotonic UTC `modified` timestamps.
 - Added multi-workspace management in the navigation drawer to switch, create, rename, and delete isolated `.tdf` workspaces without restarting the application.
-- Added a desktop `Change Directory` action in Settings on Linux and Windows to move the local `.tdf` file via a native folder picker without overwriting existing targets.
-- Added `Wipe Local TDF File` and `Wipe Remote TDF File` actions in Settings with filename confirmation, sync baseline reset, and optional `.bak` / `.bak.001`+ backup creation.
+- Added `Select`, `Move`, `Rename`, and `Delete` actions for the local `.tdf` file in Settings with native desktop file/folder pickers, target conflict checks, and optional `.bak` / `.bak.001`+ backup creation.
+- Added `Wipe Remote TDF File` in Settings with filename confirmation, sync baseline reset, and optional `.bak` / `.bak.001`+ backup creation.
 - Added a `Time Zone` setting (`Automatic` or `Manual` UTC offset) so recurring schedules and wall-clock conditions evaluate in local time while point-in-time directives persist in UTC.
 - Added foreground-only location determination (`Off` / `On`, default `Off`) across Android, Linux, and Windows with a 3-state top-bar status indicator, location details popup, and live `condition location` evaluation.
 - Added an opt-in diagnostic logging system (`Enable Diagnostic Log`, default `Off`) with credential redaction, a 5,000-line rolling `tiertask.log` ring buffer, crash log preservation across unclean exits, and an in-app `Diagnostic Log` viewer.
@@ -31,7 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Changed `.tdf` tier derivation, task downgrade, recurring task rescheduling, and synchronization to `TDF_SPEC.md` Version `0.5.0`, slicing `Focus`, `Ready`, and `Planned` in `queue` block order and repositioning downgraded tasks inside `queue` without mutating `queued` timestamps.
+- Changed `.tdf` tier derivation, task downgrade, recurring task rescheduling, and synchronization to `TDF_SPEC.md` Version `0.5.1`, consolidating active scheduling membership and ordering exclusively into the root `queue` block and removing the task-level `queued` directive.
 - Changed task completion and restoration so completing a task marks and locks all of its subtasks as completed (`step true`), while restoring a completed task unlocks and resets all of its subtasks to open (`step false`).
 - Changed top-bar task search on the home screen to open an `ALL TASKS` (`ALLE AUFGABEN`) view listing matching tasks across all six tiers (`Focus` through `Completed`) with active label filtering before returning to the previous tier pane on close.
 - Changed the home screen top bar to center the active label name when a label filter is selected and smoothly animate it to the left when the search input expands.
@@ -46,10 +46,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Fixed Linux and Windows native window, header bar, and taskbar titles to display `TierTask` instead of `tiertask`.
 - Fixed Settings to disable the `Test Connection / Sync Now` button in `Local` storage mode and clear stale WebDAV status banners.
 - Fixed ISO-8601 date and 24-hour timestamp parsing to reject out-of-range calendar rollover dates.
+- Fixed repeated remote load retries when a local or WebDAV `.tdf` file fails to parse and added localized update hints when a newer `.tdf` format version is encountered.
 
 ### Removed
 
 - Removed the `Open Task Count` setting from Settings and workspace configuration.
-- Removed preset filename recommendation chips (`tasks.tdf` and `t2.tdf`) from the Local TDF and WebDAV sections in Settings.
+- Removed direct local `.tdf` filename text editing and preset filename recommendation chips (`tasks.tdf` and `t2.tdf`) in Settings.
 - Removed the landing greeting (`What's up!` / `Was steht an!`) and redundant tier navigation entries from the home screen and navigation drawer.
 - Removed legacy Markdown (`.md`) parsing and serialization in favor of the TierTask Data Format (`.tdf`).

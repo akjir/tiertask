@@ -7,10 +7,10 @@
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.5.0`, `queue`, `deleted`, `label`, `task`) in one `.tdf` document and derives operational tiers automatically in a deterministic pull system.
+`TierTask` stores objective task facts (`tdf 0.5.1`, `queue`, `deleted`, `label`, `task`) in one `.tdf` document and derives operational tiers automatically in a deterministic pull system.
 
 - **Cross-Platform Desktop & Mobile:** Supports Linux (`linux/`), Android (`android/`), and Windows (`windows/`) with English (`en`, default) and German (`de`) localization and Material 3 `Slate` and `Navy` color palettes.
-- **Unified Block DSL (`TDF`):** Scans, parses, and serializes `.tdf` documents (`tdf 0.5.0`) in a single $O(N)$ pass with strict resource bounds and explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0` version migration.
+- **Unified Block DSL (`TDF`):** Scans, parses, and serializes `.tdf` documents (`tdf 0.5.1`, with automatic `tdf 0.5.0` load conversion) in a single $O(N)$ pass with strict resource bounds and explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1` version migration.
 - **Deterministic 6-Tier Derivation:** Evaluates `Completed`, `Someday`, and `Blocked` automatically, slices active tasks in `queue` block order into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`, and prunes completed tasks and `deleted` tombstones older than `30` days (UTC).
 - **Context-Aware Conditions & Recurrence:** Evaluates completion-count dependencies (`blocked <task-id>[:<required-completion>]`), `suspended`, and `day`, `time`, and foreground GPS `location` conditions with label inheritance, and reschedules completed `repeat` tasks into `Focus` via `Blocked`.
 - **Two-Stage Three-Way Synchronization:** Reconciles in-memory state, local `.tdf` files, and WebDAV servers using 10-character Base62 entity identifiers, monotonic UTC `modified` timestamps, and `deleted.generation` counters across `Local`, `WebDAV`, and `Both` storage modes.
@@ -57,7 +57,7 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 
 1. Launch `TierTask` and open the settings screen via the navigation drawer.
 2. Select the display language (`System`, `English`, or `Deutsch`), theme mode (`System`, `Light`, or `Dark`), color palette (`Slate` or `Navy`), and local time zone (`Automatic` or `Manual` UTC offset).
-3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local `.tdf` file name (default `tasks.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password, and remote path `tasks.tdf`).
+3. Select the storage mode (`Local`, `WebDAV`, or `Both`) and configure the local `.tdf` file (`tasks.tdf` via `Select`, `Move`, `Rename`, or `Delete`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, password, and remote path `tasks.tdf`).
 4. Add tasks via the bottom quick-add bar (`Priority`, `Someday`, `Labels`, or `Advanced` for the full task editor); changes synchronize and persist automatically.
 
 ## Tier System & Documentation
@@ -67,14 +67,14 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 | `1` | `Focus` | `Fokus` | `3` | Active tasks at positions `1..3` in `queue` block order |
 | `2` | `Ready` | `Bereit` | `5` | Active tasks at positions `4..8` in `queue` block order |
 | `3` | `Planned` | `Geplant` | None | Active tasks from position `9` onward in `queue` block order |
-| `4` | `Blocked` | `Blockiert` | None | Open scheduled tasks with unsatisfied `blocked` dependencies, `suspended`, or unmet `condition` rules |
-| `5` | `Someday` | `Irgendwann` | None | Open tasks without a `queued` directive |
+| `4` | `Blocked` | `Blockiert` | None | Open tasks with an active `suspended` lock, or open `queue` tasks with unsatisfied `blocked` dependencies or unmet `condition` rules |
+| `5` | `Someday` | `Irgendwann` | None | Open tasks omitted from `queue` without an active `suspended` lock |
 | `6` | `Completed` | `Erledigt` | None | Tasks with a `finished` directive (pruned after `30` days in UTC) |
 
 Canonical `tasks.tdf` example:
 
 ```text
-tdf 0.5.0
+tdf 0.5.1
 
 queue {
     modified 2026-11-01 09:15:00
@@ -91,7 +91,6 @@ label 4x9p2mOkD2 {
 task 8jKaCdOkD2 priority {
     name     "Verify server backup"
     created  2026-11-01 08:30
-    queued   2026-11-01 08:30
     modified 2026-11-01 08:30
     labels   4x9p2mOkD2
 }
@@ -99,7 +98,6 @@ task 8jKaCdOkD2 priority {
 task 3nR8vWOkD8 {
     name     "Clean up study"
     created  2026-11-01 09:00
-    queued   2026-11-01 09:15
     modified 2026-11-01 09:15
     subtasks auto-finish {
         step true  "Wipe desk"

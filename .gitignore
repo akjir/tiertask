@@ -3,6 +3,7 @@
 *.lock
 *.log
 *.pyc
+__pycache__/
 *.swp
 *~
 .DS_Store
