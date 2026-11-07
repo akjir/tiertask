@@ -89,7 +89,9 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   registerGlobalErrorHandlers();
-  runApp(const ProviderScope(child: TierTaskApp()));
+  runApp(
+    const ProviderScope(retry: disableProviderRetry, child: TierTaskApp()),
+  );
 }
 
 /// Registers global framework and isolate crash handlers for [AppLogger].

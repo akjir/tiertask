@@ -165,6 +165,7 @@ final syncStateProvider = NotifierProvider<SyncStateNotifier, SyncState>(
 /// Provides the [TaskNotifier] managing the in-memory [TaskBoard] and persistence.
 final taskNotifierProvider = AsyncNotifierProvider<TaskNotifier, TaskBoard>(
   TaskNotifier.new,
+  retry: disableProviderRetry,
 );
 
 /// Provides the stateless [TdfService] scanner, parser, and serializer.
@@ -784,6 +785,65 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await pushToRemote(updatedBoard);
   }
 
+  /// Checks whether the remote WebDAV `.tdf` file fails with [TdfErrorKind.unsupportedVersion] without mutating storage.
+  Future<TdfException?> _checkRemoteUnsupportedVersion(
+    DateTime utcNow,
+    DateTime localNow,
+  ) async {
+    try {
+      final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
+      if (rawRemote.trim().isEmpty) {
+        return null;
+      }
+      _parseTdf(rawRemote, utcNow, localNow);
+      return null;
+    } on TdfException catch (error) {
+      return error.kind == TdfErrorKind.unsupportedVersion ? error : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Builds and logs a localized [UnsupportedTdfVersionException] for [localError] and/or [remoteError].
+  UnsupportedTdfVersionException _createUnsupportedVersionException({
+    required WebDavConfig config,
+    TdfException? localError,
+    TdfException? remoteError,
+  }) {
+    final locale = config.language.resolveLocale(
+      PlatformDispatcher.instance.locale,
+    );
+    final localizations = lookupAppLocalizations(locale);
+    final localVersion = localError?.sourceVersion;
+    final remoteVersion = remoteError?.sourceVersion;
+    final String versionLabel;
+    final String message;
+    if (localError != null && remoteError != null) {
+      versionLabel =
+          (localVersion != null &&
+              remoteVersion != null &&
+              localVersion != remoteVersion)
+          ? '$localVersion / $remoteVersion'
+          : (localVersion ?? remoteVersion ?? '?');
+      message = localizations.errorUnsupportedTdfVersionBoth(versionLabel);
+    } else if (localError != null) {
+      versionLabel = localVersion ?? '?';
+      message = localizations.errorUnsupportedTdfVersionLocal(versionLabel);
+    } else {
+      versionLabel = remoteVersion ?? '?';
+      message = localizations.errorUnsupportedTdfVersionRemote(versionLabel);
+    }
+    AppLogger.error(
+      LogTag.sync,
+      'Unsupported TDF version detected (local=$localVersion, remote=$remoteVersion): $message',
+    );
+    return UnsupportedTdfVersionException(
+      message,
+      version: versionLabel,
+      cause: localError ?? remoteError,
+    );
+  }
+
   /// Executes a single [pushToRemote] persistence pass for [board].
   Future<void> _executePushToRemote(TaskBoard board) async {
     final workspace = await ref.read(activeWorkspaceProvider.future);
@@ -859,7 +919,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   ) {
     final rawClock = currentDate ?? ref.read(clockProvider)();
     final utcNow = TaskItem.normalizeTimestamp(rawClock.toUtc());
-    final config = _resolveCurrentConfig(ref);
+    final config = _readCurrentConfig(ref);
     final localNow = config.toLocalWallClock(utcNow);
     return (utcNow, localNow);
   }
@@ -920,7 +980,24 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final rawLocal = await ref.read(localFileRepositoryProvider).loadTdf();
       final hasLocalContent = rawLocal.trim().isNotEmpty;
       if (hasLocalContent) {
-        final localBoard = _parseTdf(rawLocal, utcNow, localNow);
+        final TaskBoard localBoard;
+        try {
+          localBoard = _parseTdf(rawLocal, utcNow, localNow);
+        } on TdfException catch (error) {
+          if (error.kind != TdfErrorKind.unsupportedVersion) {
+            rethrow;
+          }
+          final remoteError =
+              (config.storageMode.usesWebDav &&
+                  (requireTargets || config.isWebDavConfigured))
+              ? await _checkRemoteUnsupportedVersion(utcNow, localNow)
+              : null;
+          throw _createUnsupportedVersionException(
+            config: config,
+            localError: error,
+            remoteError: remoteError,
+          );
+        }
         final localBaseline = _tryParseBaseline(
           syncState.lastSyncedLocalTdf,
           utcNow,
@@ -970,7 +1047,18 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
       final hasRemoteContent = rawRemote.trim().isNotEmpty;
       if (hasRemoteContent) {
-        final remoteBoard = _parseTdf(rawRemote, utcNow, localNow);
+        final TaskBoard remoteBoard;
+        try {
+          remoteBoard = _parseTdf(rawRemote, utcNow, localNow);
+        } on TdfException catch (error) {
+          if (error.kind != TdfErrorKind.unsupportedVersion) {
+            rethrow;
+          }
+          throw _createUnsupportedVersionException(
+            config: config,
+            remoteError: error,
+          );
+        }
         final remoteBaseline = _tryParseBaseline(
           syncState.lastSyncedRemoteTdf,
           utcNow,
@@ -1058,6 +1146,29 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       return null;
     }
   }
+}
+
+/// Exception thrown when a local and/or remote `.tdf` file uses an unsupported TDF version.
+@immutable
+class UnsupportedTdfVersionException implements Exception {
+  /// Creates an [UnsupportedTdfVersionException].
+  const UnsupportedTdfVersionException(
+    this.message, {
+    required this.version,
+    this.cause,
+  });
+
+  /// Underlying [TdfException] that triggered this error.
+  final TdfException? cause;
+
+  /// Localized user-facing description recommending an application update.
+  final String message;
+
+  /// Detected unsupported TDF version token.
+  final String version;
+
+  @override
+  String toString() => message;
 }
 
 /// Manages the persisted [WebDavConfig] state for the currently active workspace.
@@ -1211,6 +1322,19 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
       // Preserve primary persistence exception.
     }
   }
+}
+
+/// Disables automatic Riverpod background retries so failed storage loads execute once until explicitly retried.
+Duration? disableProviderRetry(int retryCount, Object error) => null;
+
+/// Reads the active [WebDavConfig] synchronously without registering reactive provider subscriptions.
+WebDavConfig _readCurrentConfig(Ref ref) {
+  final configAsync = ref.read(webDavConfigProvider);
+  if (configAsync.asData?.value case final config?) {
+    return config;
+  }
+  final workspaceAsync = ref.read(activeWorkspaceProvider);
+  return workspaceAsync.asData?.value.config ?? const WebDavConfig();
 }
 
 /// Resolves the active [WebDavConfig] synchronously from [webDavConfigProvider] or [activeWorkspaceProvider].

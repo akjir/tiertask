@@ -23,6 +23,7 @@ import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/services/tdf_service.dart';
 
 class _InMemorySyncLocalRepository extends LocalFileRepository {
   _InMemorySyncLocalRepository({
@@ -494,5 +495,277 @@ task t002 {
     expect(localTdf, contains('task $convertedSecondTaskId {'));
     expect(localTdf, contains('blocked $convertedFirstTaskId'));
     expect(localTdf, contains('labels $convertedLabelId'));
+  });
+
+  test('TdfService.parse populates sourceVersion and targetVersion on TdfException for unsupported TDF versions', () {
+    const service = TdfService();
+    expect(
+      () => service.parse('tdf 0.6.0\n'),
+      throwsA(
+        isA<TdfException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              equals(TdfErrorKind.unsupportedVersion),
+            )
+            .having(
+              (error) => error.sourceVersion,
+              'sourceVersion',
+              equals('0.6.0'),
+            )
+            .having(
+              (error) => error.targetVersion,
+              'targetVersion',
+              equals('0.5.1'),
+            ),
+      ),
+    );
+  });
+
+  test('Unsupported TDF version on remote, local, or both stops retrying, never overwrites unreadable files, and surfaces localized update recommendations', () async {
+    final currentTime = DateTime.utc(2026, 11, 1, 12);
+
+    // 1. Remote-only unsupported version (German locale)
+    var remoteFetchCount = 0;
+    var remoteSaveCount = 0;
+    var remoteTdf = 'tdf 0.6.0\n';
+    const webDavDeConfig = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      language: AppLanguage.german,
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final webDavContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(webDavDeConfig),
+        ),
+        clockProvider.overrideWithValue(() => currentTime),
+        webDavRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncWebDavRepository(
+            config: webDavDeConfig,
+            getTdf: () {
+              remoteFetchCount++;
+              return remoteTdf;
+            },
+            setTdf: (val) {
+              remoteSaveCount++;
+              remoteTdf = val;
+            },
+            isOnline: () => true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(webDavContainer.dispose);
+
+    Object? caughtRemoteError;
+    try {
+      await webDavContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      caughtRemoteError = error;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+
+    expect(
+      remoteFetchCount,
+      equals(1),
+      reason: 'Remote file with unsupported version must be fetched once without automatic retry loop',
+    );
+    expect(
+      remoteSaveCount,
+      equals(0),
+      reason: 'Remote file with unsupported version must never be overwritten',
+    );
+    expect(
+      caughtRemoteError.toString(),
+      equals(
+        'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.6.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+      ),
+    );
+    expect(
+      webDavContainer.read(syncStateProvider).errorMessage,
+      equals(
+        'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.6.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+      ),
+    );
+
+    // 2. Both mode where Local is valid (0.5.1) and Remote has unsupported version (0.6.0)
+    var bothRemoteFetchCount = 0;
+    var bothRemoteSaveCount = 0;
+    var bothLocalTdf = 'tdf 0.5.1\n';
+    var bothRemoteTdf = 'tdf 0.6.0\n';
+    const bothEnConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      language: AppLanguage.english,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final bothRemoteFailContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(bothEnConfig),
+        ),
+        clockProvider.overrideWithValue(() => currentTime),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncLocalRepository(
+            config: bothEnConfig,
+            getTdf: () => bothLocalTdf,
+            setTdf: (val) => bothLocalTdf = val,
+          ),
+        ),
+        webDavRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncWebDavRepository(
+            config: bothEnConfig,
+            getTdf: () {
+              bothRemoteFetchCount++;
+              return bothRemoteTdf;
+            },
+            setTdf: (val) {
+              bothRemoteSaveCount++;
+              bothRemoteTdf = val;
+            },
+            isOnline: () => true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(bothRemoteFailContainer.dispose);
+
+    Object? caughtBothRemoteError;
+    try {
+      await bothRemoteFailContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      caughtBothRemoteError = error;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+
+    expect(bothRemoteFetchCount, equals(1));
+    expect(bothRemoteSaveCount, equals(0));
+    expect(
+      caughtBothRemoteError.toString(),
+      equals(
+        'The remote file uses unsupported file version 0.6.0. Please update TierTask to a newer version.',
+      ),
+    );
+
+    // 3. Both mode where Local has unsupported version (0.6.0) and Remote is valid (0.5.1)
+    var localFailSaveCount = 0;
+    var remoteValidSaveCount = 0;
+    var localUnsupportedTdf = 'tdf 0.6.0\n';
+    var remoteValidTdf = 'tdf 0.5.1\n';
+    final bothLocalFailContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(bothEnConfig),
+        ),
+        clockProvider.overrideWithValue(() => currentTime),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncLocalRepository(
+            config: bothEnConfig,
+            getTdf: () => localUnsupportedTdf,
+            setTdf: (val) {
+              localFailSaveCount++;
+              localUnsupportedTdf = val;
+            },
+          ),
+        ),
+        webDavRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncWebDavRepository(
+            config: bothEnConfig,
+            getTdf: () => remoteValidTdf,
+            setTdf: (val) {
+              remoteValidSaveCount++;
+              remoteValidTdf = val;
+            },
+            isOnline: () => true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(bothLocalFailContainer.dispose);
+
+    Object? caughtLocalError;
+    try {
+      await bothLocalFailContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      caughtLocalError = error;
+    }
+    expect(
+      localFailSaveCount,
+      equals(0),
+      reason: 'Local file with unsupported version must never be overwritten',
+    );
+    expect(remoteValidSaveCount, equals(0));
+    expect(
+      caughtLocalError.toString(),
+      equals(
+        'The local file uses unsupported file version 0.6.0. Please update TierTask to a newer version.',
+      ),
+    );
+
+    // 4. Both mode where BOTH Local and Remote have unsupported versions (0.5.1 example or 0.6.0)
+    var bothFailLocalSaveCount = 0;
+    var bothFailRemoteSaveCount = 0;
+    var bothFailRemoteFetchCount = 0;
+    const bothDeConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      language: AppLanguage.german,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final bothFailContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(bothDeConfig),
+        ),
+        clockProvider.overrideWithValue(() => currentTime),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncLocalRepository(
+            config: bothDeConfig,
+            getTdf: () => 'tdf 0.6.0\n',
+            setTdf: (_) => bothFailLocalSaveCount++,
+          ),
+        ),
+        webDavRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncWebDavRepository(
+            config: bothDeConfig,
+            getTdf: () {
+              bothFailRemoteFetchCount++;
+              return 'tdf 0.6.0\n';
+            },
+            setTdf: (_) => bothFailRemoteSaveCount++,
+            isOnline: () => true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(bothFailContainer.dispose);
+
+    Object? caughtBothFailError;
+    try {
+      await bothFailContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      caughtBothFailError = error;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+
+    expect(bothFailRemoteFetchCount, equals(1));
+    expect(bothFailLocalSaveCount, equals(0));
+    expect(bothFailRemoteSaveCount, equals(0));
+    expect(
+      caughtBothFailError.toString(),
+      equals(
+        'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion 0.6.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+      ),
+    );
   });
 }

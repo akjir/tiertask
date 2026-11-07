@@ -1289,5 +1289,32 @@
   "localFileRenamedBanner": "Local TDF file renamed.",
   "@localFileRenamedBanner": {
     "description": "Status banner message shown after renaming the local TDF file."
+  },
+  "errorUnsupportedTdfVersionLocal": "The local file uses unsupported file version {version}. Please update TierTask to a newer version.",
+  "@errorUnsupportedTdfVersionLocal": {
+    "description": "Error message shown when the local TDF file uses an unsupported version, recommending an application update.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "errorUnsupportedTdfVersionRemote": "The remote file uses unsupported file version {version}. Please update TierTask to a newer version.",
+  "@errorUnsupportedTdfVersionRemote": {
+    "description": "Error message shown when the remote WebDAV TDF file uses an unsupported version, recommending an application update.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "errorUnsupportedTdfVersionBoth": "The local and remote files use unsupported file version {version}. Please update TierTask to a newer version.",
+  "@errorUnsupportedTdfVersionBoth": {
+    "description": "Error message shown when both the local and remote WebDAV TDF files use an unsupported version, recommending an application update.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
   }
 }

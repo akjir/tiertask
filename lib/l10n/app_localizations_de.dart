@@ -978,4 +978,19 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get localFileRenamedBanner => 'Lokale TDF-Datei umbenannt.';
+
+  @override
+  String errorUnsupportedTdfVersionLocal(String version) {
+    return 'Die lokale Datei verwendet die nicht unterstützte Dateiversion $version. Bitte aktualisieren Sie TierTask auf eine neuere Version.';
+  }
+
+  @override
+  String errorUnsupportedTdfVersionRemote(String version) {
+    return 'Die Remote-Datei verwendet die nicht unterstützte Dateiversion $version. Bitte aktualisieren Sie TierTask auf eine neuere Version.';
+  }
+
+  @override
+  String errorUnsupportedTdfVersionBoth(String version) {
+    return 'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion $version. Bitte aktualisieren Sie TierTask auf eine neuere Version.';
+  }
 }

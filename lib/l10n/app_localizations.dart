@@ -1813,6 +1813,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Local TDF file renamed.'**
   String get localFileRenamedBanner;
+
+  /// Error message shown when the local TDF file uses an unsupported version, recommending an application update.
+  ///
+  /// In en, this message translates to:
+  /// **'The local file uses unsupported file version {version}. Please update TierTask to a newer version.'**
+  String errorUnsupportedTdfVersionLocal(String version);
+
+  /// Error message shown when the remote WebDAV TDF file uses an unsupported version, recommending an application update.
+  ///
+  /// In en, this message translates to:
+  /// **'The remote file uses unsupported file version {version}. Please update TierTask to a newer version.'**
+  String errorUnsupportedTdfVersionRemote(String version);
+
+  /// Error message shown when both the local and remote WebDAV TDF files use an unsupported version, recommending an application update.
+  ///
+  /// In en, this message translates to:
+  /// **'The local and remote files use unsupported file version {version}. Please update TierTask to a newer version.'**
+  String errorUnsupportedTdfVersionBoth(String version);
 }
 
 class _AppLocalizationsDelegate

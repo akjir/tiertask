@@ -1215,7 +1215,7 @@ class _LandingScaffoldBody extends StatelessWidget {
           onSearchChanged: onSearchChanged,
           onToggleSearch: onToggleSearch,
         ),
-        if (activeError != null)
+        if (activeError != null && !boardAsync.hasError)
           _SyncErrorBanner(message: activeError, onDismiss: onClearError),
         Expanded(
           child: _LandingContentSwitcher(

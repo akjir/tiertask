@@ -285,5 +285,8 @@
   "localFileNameInputLabel": "Dateiname (.tdf)",
   "localFileNameErrorInvalid": "Bitte einen gültigen Dateinamen ohne Pfadtrennzeichen eingeben.",
   "localFileSelectedBanner": "Lokale TDF-Datei ausgewählt.",
-  "localFileRenamedBanner": "Lokale TDF-Datei umbenannt."
+  "localFileRenamedBanner": "Lokale TDF-Datei umbenannt.",
+  "errorUnsupportedTdfVersionLocal": "Die lokale Datei verwendet die nicht unterstützte Dateiversion {version}. Bitte aktualisieren Sie TierTask auf eine neuere Version.",
+  "errorUnsupportedTdfVersionRemote": "Die Remote-Datei verwendet die nicht unterstützte Dateiversion {version}. Bitte aktualisieren Sie TierTask auf eine neuere Version.",
+  "errorUnsupportedTdfVersionBoth": "Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion {version}. Bitte aktualisieren Sie TierTask auf eine neuere Version."
 }

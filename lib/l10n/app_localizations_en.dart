@@ -960,4 +960,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get localFileRenamedBanner => 'Local TDF file renamed.';
+
+  @override
+  String errorUnsupportedTdfVersionLocal(String version) {
+    return 'The local file uses unsupported file version $version. Please update TierTask to a newer version.';
+  }
+
+  @override
+  String errorUnsupportedTdfVersionRemote(String version) {
+    return 'The remote file uses unsupported file version $version. Please update TierTask to a newer version.';
+  }
+
+  @override
+  String errorUnsupportedTdfVersionBoth(String version) {
+    return 'The local and remote files use unsupported file version $version. Please update TierTask to a newer version.';
+  }
 }

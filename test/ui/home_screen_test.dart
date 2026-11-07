@@ -1414,4 +1414,73 @@ task c20000OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'HomeScreen displays localized unsupported TDF version update hint once without repeated remote fetch retries',
+    (WidgetTester tester) async {
+      var remoteFetchCount = 0;
+      const webDavConfig = WebDavConfig(
+        storageMode: StorageMode.webdav,
+        language: AppLanguage.german,
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+      );
+      final remoteStore = <String, String>{
+        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.6.0\n',
+      };
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(webDavConfig),
+            ),
+            webDavRepositoryProvider.overrideWith(
+              (ref) => _CountingFakeWebDavRepository(
+                config: webDavConfig,
+                remoteStore: remoteStore,
+                onFetch: () => remoteFetchCount++,
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 5));
+
+      expect(
+        remoteFetchCount,
+        equals(1),
+        reason: 'Remote file with unsupported version must only be fetched once without background retry loops',
+      );
+      expect(
+        find.text(
+          'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.6.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+        ),
+        findsOneWidget,
+        reason: 'Localized unsupported version hint must be displayed once in ErrorStateView without duplicate top banner',
+      );
+    },
+  );
+}
+
+class _CountingFakeWebDavRepository extends FakeWebDavRepository {
+  _CountingFakeWebDavRepository({
+    required super.config,
+    required super.remoteStore,
+    required this.onFetch,
+  }) : super(shouldFail: () => false);
+
+  final VoidCallback onFetch;
+
+  @override
+  Future<String> fetchTdf() async {
+    onFetch();
+    return super.fetchTdf();
+  }
 }

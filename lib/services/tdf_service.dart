@@ -1813,10 +1813,13 @@ class TdfService {
           tokens[1].kind != _TokenKind.bareWord ||
           (tokens[1].value != supportedVersion &&
               tokens[1].value != legacySupportedVersion)) {
+        final foundVersion = tokens[1].value;
         throw TdfException(
           kind: TdfErrorKind.unsupportedVersion,
           line: lineNumber,
-          message: 'Unsupported or malformed TDF version "${tokens[1].value}".',
+          message: 'Unsupported or malformed TDF version "$foundVersion".',
+          sourceVersion: foundVersion,
+          targetVersion: supportedVersion,
         );
       }
       state.isLegacy050 = tokens[1].value == legacySupportedVersion;
