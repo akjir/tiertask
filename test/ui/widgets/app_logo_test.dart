@@ -14,34 +14,21 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tiertask/main.dart';
-import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/providers/config_providers.dart';
-import 'package:tiertask/providers/workspace_providers.dart';
-import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/ui/widgets/app_logo.dart';
+import 'package:tiertask/ui/widgets/home_drawer.dart';
+
+import '../test_helpers.dart';
 
 void main() {
   testWidgets(
     'AppLogo renders vector custom paint at default and custom dimensions',
     (WidgetTester tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: Scaffold(
-            body: Column(
-              children: [
-                AppLogo(),
-                AppLogo(key: ValueKey('custom_size_logo'), size: 64),
-              ],
-            ),
-          ),
-        ),
-      );
+      await pumpLeafWidget(tester, const AppLogo());
 
       final defaultLogoFinder = find.byKey(const ValueKey('app_logo'));
-      final customLogoFinder = find.byKey(const ValueKey('custom_size_logo'));
 
       expect(
         defaultLogoFinder,
@@ -52,11 +39,6 @@ void main() {
         tester.getSize(defaultLogoFinder),
         equals(const Size(32, 32)),
         reason: 'Default AppLogo size must be 32x32 logical pixels',
-      );
-      expect(
-        tester.getSize(customLogoFinder),
-        equals(const Size(64, 64)),
-        reason: 'Custom AppLogo size must match the requested 64x64 dimension',
       );
 
       final customPaintFinder = find.descendant(
@@ -79,28 +61,36 @@ void main() {
         isFalse,
         reason: 'Stateless vector logo painter must not repaint unnecessarily',
       );
+
+      await pumpLeafWidget(
+        tester,
+        const AppLogo(key: ValueKey('custom_size_logo'), size: 64),
+      );
+      final customLogoFinder = find.byKey(const ValueKey('custom_size_logo'));
+      expect(
+        tester.getSize(customLogoFinder),
+        equals(const Size(64, 64)),
+        reason: 'Custom AppLogo size must match the requested 64x64 dimension',
+      );
     },
   );
 
   testWidgets(
     'Navigation drawer header displays AppLogo next to the TierTask title',
     (WidgetTester tester) async {
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            settingsRepositoryProvider.overrideWithValue(
-              InMemorySettingsRepository(
-                const WebDavConfig(language: AppLanguage.english),
-              ),
-            ),
-            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
-          ],
-          child: const TierTaskApp(),
+      await pumpLeafWidget(
+        tester,
+        HomeDrawer(
+          activeLabelId: null,
+          activeWorkspace: AppWorkspace.defaultWorkspace,
+          board: TaskBoard.empty(),
+          onManageWorkspaces: () {},
+          onOpenEditLabels: (_) {},
+          onOpenSettings: () {},
+          onSelectLabel: (_) {},
+          onSyncRemote: () {},
         ),
       );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byIcon(Icons.menu_rounded));
       await tester.pumpAndSettle();
 
       final drawerFinder = find.byType(Drawer);

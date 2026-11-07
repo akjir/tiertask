@@ -67,31 +67,11 @@ task 000001OkD2 {
 }
 ''';
       final fixedNow = DateTime.utc(2026, 11, 1, 12, 0);
-      final container = ProviderContainer(
-        overrides: [
-          settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(
-              const WebDavConfig(language: AppLanguage.english),
-            ),
-          ),
-          localFileRepositoryProvider.overrideWith(
-            (ref) => FakeLocalFileRepository(
-              config: const WebDavConfig(language: AppLanguage.english),
-              initialTdf: seededTdf,
-            ),
-          ),
-          clockProvider.overrideWithValue(() => fixedNow),
-        ],
+      final container = await _pumpEditorApp(
+        tester,
+        initialTdf: seededTdf,
+        clock: fixedNow,
       );
-      addTearDown(container.dispose);
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const TierTaskApp(),
-        ),
-      );
-      await tester.pumpAndSettle();
 
       final pillFinder = find.byKey(
         const ValueKey('tier_pill_focus_000001OkD2'),
@@ -103,20 +83,13 @@ task 000001OkD2 {
       final downgradeButtonFinder = find.byKey(
         const ValueKey('downgrade_task_button_000001OkD2'),
       );
-      final dividerFinder = find.byKey(
-        const ValueKey('edit_task_divider_000001OkD2'),
-      );
       final editButtonFinder = find.byKey(
         const ValueKey('edit_task_button_000001OkD2'),
       );
       expect(pillFinder, findsOneWidget);
       expect(taskTitleFinder, findsOneWidget);
-      expect(
-        completeButtonFinder,
-        findsOneWidget,
-        reason:
-            'Task pill must display a clickable completion square at the front',
-      );
+      expect(completeButtonFinder, findsOneWidget);
+
       final theme = Theme.of(tester.element(pillFinder));
       final squareContainers = tester
           .widgetList<Container>(
@@ -126,11 +99,7 @@ task 000001OkD2 {
             ),
           )
           .toList();
-      expect(
-        squareContainers.length,
-        equals(2),
-        reason: 'Completion button must consist of an outer rounded square and an inner circle',
-      );
+      expect(squareContainers.length, equals(2));
       final outerDecoration =
           squareContainers.first.decoration as BoxDecoration?;
       final innerDecoration =
@@ -138,68 +107,41 @@ task 000001OkD2 {
       expect(
         outerDecoration?.color,
         equals(theme.colorScheme.primaryContainer),
-        reason: 'Outer completion square must use the M3 primaryContainer color from the theme',
       );
-      expect(
-        outerDecoration?.borderRadius,
-        equals(BorderRadius.circular(10)),
-        reason: 'Outer completion square must have rounded corners',
-      );
-      expect(
-        innerDecoration?.shape,
-        equals(BoxShape.circle),
-        reason: 'Inner completion indicator must be a circle',
-      );
-      expect(
-        innerDecoration?.border?.top.color,
-        equals(Colors.white),
-        reason: 'Inner completion circle must have a white border',
-      );
+      expect(outerDecoration?.borderRadius, equals(BorderRadius.circular(10)));
+      expect(innerDecoration?.shape, equals(BoxShape.circle));
+      expect(innerDecoration?.border?.top.color, equals(Colors.white));
       expect(
         find.descendant(
           of: completeButtonFinder,
           matching: find.byIcon(Icons.check_rounded),
         ),
         findsNothing,
-        reason:
-            'Open task must not display a checkmark inside the white circle',
       );
-      expect(
-        downgradeButtonFinder,
-        findsOneWidget,
-        reason: 'Task pill must display a right-chevron downgrade button before the edit button',
-      );
+      expect(downgradeButtonFinder, findsOneWidget);
       expect(
         find.descendant(
           of: downgradeButtonFinder,
           matching: find.byIcon(Icons.chevron_right_rounded),
         ),
         findsOneWidget,
-        reason: 'Downgrade button must display a > chevron icon',
       );
       expect(
-        dividerFinder,
+        find.byKey(const ValueKey('edit_task_divider_000001OkD2')),
         findsNothing,
-        reason: 'Task pill must not render a vertical divider before the edit button',
       );
-      expect(
-        editButtonFinder,
-        findsOneWidget,
-        reason: 'Task pill must display an edit button on the right side',
-      );
+      expect(editButtonFinder, findsOneWidget);
       expect(
         find.descendant(
           of: editButtonFinder,
           matching: find.byIcon(Icons.more_vert_rounded),
         ),
         findsOneWidget,
-        reason: 'Edit button must display the three-dots icon',
       );
       expect(
         tester.getTopLeft(completeButtonFinder).dx <
             tester.getTopLeft(taskTitleFinder).dx,
         isTrue,
-        reason: 'Completion square must be positioned at the front before the task title',
       );
       expect(
         tester.getTopLeft(downgradeButtonFinder).dx >
@@ -207,7 +149,6 @@ task 000001OkD2 {
             tester.getTopRight(downgradeButtonFinder).dx <=
                 tester.getTopLeft(editButtonFinder).dx,
         isTrue,
-        reason: 'Downgrade > button must be positioned between the task title and the three-dots edit button',
       );
 
       await tester.tap(taskTitleFinder);
@@ -219,23 +160,13 @@ task 000001OkD2 {
             .focus
             .map((task) => task.id),
         contains('000001OkD2'),
-        reason:
-            'Tapping the task title or pill body must not complete the task',
       );
-      expect(
-        find.byKey(const ValueKey('edit_task_screen')),
-        findsNothing,
-        reason:
-            'Tapping the task title or pill body must not open EditTaskScreen',
-      );
+      expect(find.byKey(const ValueKey('edit_task_screen')), findsNothing);
 
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const ValueKey('quick_add_priority_button')));
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_priority_button', settle: false);
+      await _tapKey(tester, 'quick_add_advanced_button');
 
       final screenFinder = find.byKey(const ValueKey('edit_task_screen'));
       final titleInputFinder = find.byKey(
@@ -248,46 +179,18 @@ task 000001OkD2 {
         const ValueKey('task_editor_save_button'),
       );
 
-      expect(
-        screenFinder,
-        findsOneWidget,
-        reason: 'Tapping Advanced in QuickAddBar must open the dedicated EditTaskScreen panel',
-      );
-      expect(
-        find.byType(Dialog),
-        findsNothing,
-        reason: 'EditTaskScreen must be a full-screen panel rather than a modal dialog',
-      );
-      expect(
-        find.byKey(const ValueKey('task_editor_details_card')),
-        findsOneWidget,
-        reason: 'EditTaskScreen must group task title and note in a Settings-style card',
-      );
-      expect(
-        find.byKey(const ValueKey('task_editor_scheduling_card')),
-        findsOneWidget,
-        reason: 'EditTaskScreen must group scheduling modes in a Settings-style card',
-      );
-      expect(
-        find.byKey(const ValueKey('task_editor_labels_card')),
-        findsOneWidget,
-        reason: 'EditTaskScreen must group labels in a Settings-style card',
-      );
-      expect(
-        find.byKey(const ValueKey('task_editor_subtasks_card')),
-        findsOneWidget,
-        reason: 'EditTaskScreen must group subtasks in a Settings-style card',
-      );
-      expect(
-        find.byKey(const ValueKey('task_editor_blocked_card')),
-        findsOneWidget,
-        reason: 'EditTaskScreen must group prerequisite tasks in a Settings-style card',
-      );
-      expect(
-        find.byKey(const ValueKey('task_editor_conditions_card')),
-        findsOneWidget,
-        reason: 'EditTaskScreen must group activation conditions in a Settings-style card',
-      );
+      expect(screenFinder, findsOneWidget);
+      expect(find.byType(Dialog), findsNothing);
+      for (final cardKey in [
+        'task_editor_details_card',
+        'task_editor_scheduling_card',
+        'task_editor_labels_card',
+        'task_editor_subtasks_card',
+        'task_editor_blocked_card',
+        'task_editor_conditions_card',
+      ]) {
+        expect(find.byKey(ValueKey(cardKey)), findsOneWidget);
+      }
       expect(
         find.descendant(
           of: find.byType(AppBar),
@@ -299,65 +202,37 @@ task 000001OkD2 {
 
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
-      expect(
-        find.text('Please enter a task name.'),
-        findsOneWidget,
-        reason: 'Saving with an empty name in create mode must show error',
-      );
+      expect(find.text('Please enter a task name.'), findsOneWidget);
       expect(screenFinder, findsOneWidget);
 
-      await tester.enterText(titleInputFinder, '  existing server audit  ');
-      await tester.pump();
-      await tester.tap(saveButtonFinder);
-      await tester.pumpAndSettle();
-      expect(
-        find.text('A task with this name already exists.'),
-        findsOneWidget,
-        reason: 'Saving a duplicate name in create mode must show error',
+      await _submitTitleAndExpectError(
+        tester,
+        titleInputFinder,
+        saveButtonFinder,
+        '  existing server audit  ',
+        'A task with this name already exists.',
       );
       expect(screenFinder, findsOneWidget);
 
       await tester.enterText(titleInputFinder, 'Rotate SSH Keys');
       await tester.enterText(noteInputFinder, 'Use ed25519 keys');
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_label_cops00OkD2')),
-      );
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_label_home00OkD2')),
-      );
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_auto_finish_toggle')),
-      );
+      await _tapKey(tester, 'task_editor_label_cops00OkD2', settle: false);
+      await _tapKey(tester, 'task_editor_label_home00OkD2', settle: false);
+      await _tapKey(tester, 'task_editor_auto_finish_toggle', settle: false);
       await tester.enterText(
         find.byKey(const ValueKey('task_editor_subtask_input')),
         'Generate keypair',
       );
       await tester.pump();
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_subtask_add_button')),
-      );
-      await tester.pump();
-
+      await _tapKey(tester, 'task_editor_subtask_add_button', settle: false);
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
 
-      expect(
-        screenFinder,
-        findsNothing,
-        reason: 'Saving a valid new task must close EditTaskScreen',
-      );
-      expect(
-        find.byKey(const ValueKey('quick_add_bar')),
-        findsNothing,
-        reason: 'Creating a task via extended mode must also close QuickAddBar',
-      );
+      expect(screenFinder, findsNothing);
+      expect(find.byKey(const ValueKey('quick_add_bar')), findsNothing);
 
       var board = container.read(taskNotifierProvider).value!;
-      expect(
-        board.focus.first.title,
-        equals('Rotate SSH Keys'),
-        reason: 'Created priority task must be at the top of Focus',
-      );
+      expect(board.focus.first.title, equals('Rotate SSH Keys'));
       expect(board.focus.first.note, equals('Use ed25519 keys'));
       expect(board.focus.first.labelIds, equals(['home00OkD2', 'cops00OkD2']));
       expect(board.focus.first.subtasksAutoFinish, isTrue);
@@ -369,11 +244,7 @@ task 000001OkD2 {
       await tester.tap(editButtonFinder);
       await tester.pumpAndSettle();
 
-      expect(
-        screenFinder,
-        findsOneWidget,
-        reason: 'Clicking the edit button on a task pill must open the dedicated EditTaskScreen panel',
-      );
+      expect(screenFinder, findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(AppBar),
@@ -384,89 +255,58 @@ task 000001OkD2 {
       expect(
         tester.widget<TextField>(titleInputFinder).controller?.text,
         equals('Existing Server Audit'),
-        reason: 'EditTaskScreen must pre-fill the task title',
       );
       expect(
         tester.widget<TextField>(noteInputFinder).controller?.text,
         equals('Initial audit note'),
-        reason: 'EditTaskScreen must pre-fill the task note',
       );
-      expect(
-        find.text('Check firewall rules'),
-        findsOneWidget,
-        reason: 'EditTaskScreen must pre-fill existing subtasks',
-      );
+      expect(find.text('Check firewall rules'), findsOneWidget);
 
-      await tester.enterText(titleInputFinder, '   ');
-      await tester.pump();
-      await tester.tap(saveButtonFinder);
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Please enter a task name.'),
-        findsOneWidget,
-        reason: 'EditTaskScreen must reject empty task names',
+      await _submitTitleAndExpectError(
+        tester,
+        titleInputFinder,
+        saveButtonFinder,
+        '   ',
+        'Please enter a task name.',
       );
-
-      await tester.enterText(titleInputFinder, 'rotate ssh keys');
-      await tester.pump();
-      await tester.tap(saveButtonFinder);
-      await tester.pumpAndSettle();
-      expect(
-        find.text('A task with this name already exists.'),
-        findsOneWidget,
-        reason: 'EditTaskScreen must reject duplicate task names',
+      await _submitTitleAndExpectError(
+        tester,
+        titleInputFinder,
+        saveButtonFinder,
+        'rotate ssh keys',
+        'A task with this name already exists.',
       );
 
       await tester.enterText(titleInputFinder, 'Updated Server Audit');
       await tester.enterText(noteInputFinder, 'Updated audit note');
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_someday_button')),
-      );
+      await _tapKey(tester, 'task_editor_someday_button', settle: false);
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
 
-      expect(
-        screenFinder,
-        findsNothing,
-        reason: 'Saving valid edits must close EditTaskScreen',
-      );
+      expect(screenFinder, findsNothing);
 
       board = container.read(taskNotifierProvider).value!;
       expect(
         board.someday.map((task) => task.title),
         equals(['Updated Server Audit']),
-        reason: 'Edited task with Someday enabled must move to Someday with its new title',
       );
       expect(board.someday.single.note, equals('Updated audit note'));
 
       final rotateTaskId = board.focus.single.id;
-      await tester.tap(
-        find.byKey(ValueKey('complete_task_button_$rotateTaskId')),
-      );
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'complete_task_button_$rotateTaskId');
 
       board = container.read(taskNotifierProvider).value!;
-      expect(
-        board.focus,
-        isEmpty,
-        reason: 'Tapping the front completion circle must remove the task from Focus',
-      );
+      expect(board.focus, isEmpty);
       expect(
         board.completed.map((task) => task.title),
         equals(['Rotate SSH Keys']),
-        reason: 'Tapping the front completion circle must check off the task into Completed',
       );
 
-      await tester.tap(
-        find.byKey(const ValueKey('tier_indicator_item_completed')),
-      );
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'tier_indicator_item_completed');
 
       expect(
         find.byKey(ValueKey('tier_pill_completed_$rotateTaskId')),
         findsOneWidget,
-        reason:
-            'Completed task pill must be rendered in the Completed tier pane',
       );
       final completedButtonFinder = find.byKey(
         ValueKey('complete_task_button_$rotateTaskId'),
@@ -477,36 +317,16 @@ task 000001OkD2 {
           matching: find.byIcon(Icons.check_rounded),
         ),
       );
-      expect(
-        completedCheckIcon.color,
-        equals(Colors.white),
-        reason: 'Completed task must display a white checkmark inside the white circle',
-      );
+      expect(completedCheckIcon.color, equals(Colors.white));
 
       await tester.tap(completedButtonFinder);
       await tester.pumpAndSettle();
 
       board = container.read(taskNotifierProvider).value!;
-      expect(
-        board.completed,
-        isEmpty,
-        reason: 'Tapping the completion circle on a completed task must restore it out of Completed',
-      );
-      expect(
-        board.focus.map((task) => task.id),
-        equals([rotateTaskId]),
-        reason: 'Restored Planned task must cascade into open Focus slot',
-      );
-      expect(
-        board.focus.single.isPriority,
-        isFalse,
-        reason: 'Restoring to Planned via completion circle must strip the priority flag per Section 6.5',
-      );
-      expect(
-        board.queueTaskIds,
-        contains(rotateTaskId),
-        reason: 'Restoring to Planned via completion circle must append task ID to queue per Section 6.5',
-      );
+      expect(board.completed, isEmpty);
+      expect(board.focus.map((task) => task.id), equals([rotateTaskId]));
+      expect(board.focus.single.isPriority, isFalse);
+      expect(board.queueTaskIds, contains(rotateTaskId));
 
       await container
           .read(taskNotifierProvider.notifier)
@@ -516,130 +336,55 @@ task 000001OkD2 {
           );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(ValueKey('edit_task_button_$rotateTaskId')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'edit_task_button_$rotateTaskId');
 
-      expect(
-        screenFinder,
-        findsOneWidget,
-        reason:
-            'Tapping edit on a completed task pill must open EditTaskScreen',
-      );
+      expect(screenFinder, findsOneWidget);
       final priorityChip = tester.widget<FilterChip>(
         find.byKey(const ValueKey('task_editor_priority_button')),
       );
       final somedayChip = tester.widget<FilterChip>(
         find.byKey(const ValueKey('task_editor_someday_button')),
       );
-      expect(
-        priorityChip.selected,
-        isFalse,
-        reason: 'Editing a completed task must default to Planned (Priority unselected) per Section 6.5',
-      );
-      expect(
-        somedayChip.selected,
-        isFalse,
-        reason: 'Editing a completed task must default to Planned (Someday unselected) per Section 6.5',
-      );
+      expect(priorityChip.selected, isFalse);
+      expect(somedayChip.selected, isFalse);
 
-      final editorToggleSubtask0 = find.byKey(
-        const ValueKey('task_editor_toggle_subtask_0'),
-      );
-      expect(
-        find.descendant(
-          of: editorToggleSubtask0,
-          matching: find.byIcon(Icons.check_circle_rounded),
-        ),
-        findsOneWidget,
-        reason: 'Completed subtask must appear checked in EditTaskScreen',
-      );
-      await tester.tap(editorToggleSubtask0);
-      await tester.pumpAndSettle();
-      expect(
-        find.descendant(
-          of: editorToggleSubtask0,
-          matching: find.byIcon(Icons.check_circle_rounded),
-        ),
-        findsOneWidget,
-        reason: 'Completed subtask of a completed task cannot be unlocked in EditTaskScreen',
+      await _expectLockedCompletedSubtask(
+        tester,
+        'task_editor_toggle_subtask_0',
       );
 
       final subtaskInputFinder = find.byKey(
         const ValueKey('task_editor_subtask_input'),
       );
-      await tester.ensureVisible(subtaskInputFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(subtaskInputFinder);
-      await tester.pumpAndSettle();
+      await _tapVisible(tester, subtaskInputFinder);
       await tester.enterText(subtaskInputFinder, 'Verify backup key');
       await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_subtask_add_button')),
-      );
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'task_editor_subtask_add_button');
 
-      final editorToggleSubtask1 = find.byKey(
-        const ValueKey('task_editor_toggle_subtask_1'),
-      );
-      expect(
-        find.descendant(
-          of: editorToggleSubtask1,
-          matching: find.byIcon(Icons.check_circle_rounded),
-        ),
-        findsOneWidget,
-        reason: 'Adding a new subtask to a completed task in EditTaskScreen must immediately mark it as completed and locked',
-      );
-      await tester.tap(editorToggleSubtask1);
-      await tester.pumpAndSettle();
-      expect(
-        find.descendant(
-          of: editorToggleSubtask1,
-          matching: find.byIcon(Icons.check_circle_rounded),
-        ),
-        findsOneWidget,
-        reason: 'Newly added subtask in a completed task must also be locked and cannot be unlocked in EditTaskScreen',
+      await _expectLockedCompletedSubtask(
+        tester,
+        'task_editor_toggle_subtask_1',
       );
 
-      final removeSubtask0Finder = find.byKey(
-        const ValueKey('task_editor_remove_subtask_0'),
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_remove_subtask_0')),
       );
-      await tester.ensureVisible(removeSubtask0Finder);
-      await tester.pumpAndSettle();
-      await tester.tap(removeSubtask0Finder);
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Generate keypair'),
-        findsNothing,
-        reason: 'Deleting a subtask on a completed task in EditTaskScreen must be allowed',
-      );
-      expect(
-        find.text('Verify backup key'),
-        findsOneWidget,
-        reason:
-            'Newly added subtask must remain after deleting the first subtask',
-      );
+      expect(find.text('Generate keypair'), findsNothing);
+      expect(find.text('Verify backup key'), findsOneWidget);
 
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
 
       board = container.read(taskNotifierProvider).value!;
-      expect(
-        board.completed,
-        isEmpty,
-        reason: 'Saving a completed task in EditTaskScreen with default mode must restore it to Planned',
-      );
+      expect(board.completed, isEmpty);
       expect(board.focus.single.id, equals(rotateTaskId));
       expect(board.focus.single.isPriority, isFalse);
       expect(
         board.focus.single.subtasks.map((step) => step.title),
         equals(['Verify backup key']),
       );
-      expect(
-        board.focus.single.subtasks.single.isCompleted,
-        isFalse,
-        reason:
-            'Restoring the completed task must unlock its remaining subtasks',
-      );
+      expect(board.focus.single.subtasks.single.isCompleted, isFalse);
 
       await container
           .read(taskNotifierProvider.notifier)
@@ -649,54 +394,36 @@ task 000001OkD2 {
           );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(ValueKey('edit_task_button_$rotateTaskId')));
-      await tester.pumpAndSettle();
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_priority_button')),
-      );
+      await _tapKey(tester, 'edit_task_button_$rotateTaskId');
+      await _tapKey(tester, 'task_editor_priority_button', settle: false);
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
 
       board = container.read(taskNotifierProvider).value!;
-      expect(
-        board.completed,
-        isEmpty,
-        reason: 'Saving a completed task with Priority selected must restore it to Focus',
-      );
+      expect(board.completed, isEmpty);
       expect(board.focus.single.id, equals(rotateTaskId));
       expect(board.focus.single.isPriority, isTrue);
 
-      await tester.tap(find.byKey(const ValueKey('tier_indicator_item_focus')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'tier_indicator_item_focus');
 
       expect(
         find.byKey(ValueKey('repeat_task_indicator_$rotateTaskId')),
         findsNothing,
-        reason: 'Non-recurring task must not display repeat indicator icon on task card',
       );
 
-      await tester.tap(find.byKey(ValueKey('edit_task_button_$rotateTaskId')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'edit_task_button_$rotateTaskId');
 
       final repeatChipFinder = find.byKey(
         const ValueKey('task_editor_repeat_button'),
       );
-      expect(
-        repeatChipFinder,
-        findsOneWidget,
-        reason: 'EditTaskScreen must render Repeat toggle chip in Scheduling section',
-      );
+      expect(repeatChipFinder, findsOneWidget);
       await tester.tap(repeatChipFinder);
       await tester.pumpAndSettle();
 
       final repeatCountFinder = find.byKey(
         const ValueKey('task_editor_repeat_count_input'),
       );
-      expect(
-        repeatCountFinder,
-        findsOneWidget,
-        reason: 'Enabling Repeat must reveal the repeat interval count input',
-      );
+      expect(repeatCountFinder, findsOneWidget);
       await tester.enterText(repeatCountFinder, '0');
       await tester.pump();
       await tester.tap(saveButtonFinder);
@@ -705,14 +432,10 @@ task 000001OkD2 {
       expect(
         find.text('Please enter an interval between 1 and 3650.'),
         findsOneWidget,
-        reason: 'EditTaskScreen must reject invalid repeat interval counts (< 1 or > 3650)',
       );
 
       await tester.enterText(repeatCountFinder, '2');
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_repeat_unit_weeks')),
-      );
-      await tester.pump();
+      await _tapKey(tester, 'task_editor_repeat_unit_weeks', settle: false);
       await tester.tap(saveButtonFinder);
       await tester.pumpAndSettle();
 
@@ -720,12 +443,10 @@ task 000001OkD2 {
       expect(
         board.focus.single.repeatRule,
         equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
-        reason: 'Saving task with Repeat 2 Weeks must persist TaskRepeatRule on the task',
       );
       expect(
         find.byKey(ValueKey('repeat_task_indicator_$rotateTaskId')),
         findsOneWidget,
-        reason: 'Recurring task must display repeat indicator icon on its task card in HomeScreen',
       );
     },
   );
@@ -733,40 +454,17 @@ task 000001OkD2 {
   testWidgets(
     'EditTaskScreen adds, validates, opens, removes, and saves task links including pending link input on save',
     (WidgetTester tester) async {
-      final fixedNow = DateTime.utc(2026, 11, 1, 10, 0);
       final fakeLauncher = FakeLinkLauncherRepository();
-      final container = ProviderContainer(
-        overrides: [
-          settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(
-              const WebDavConfig(language: AppLanguage.english),
-            ),
-          ),
-          localFileRepositoryProvider.overrideWith(
-            (ref) => FakeLocalFileRepository(
-              config: const WebDavConfig(language: AppLanguage.english),
-              initialTdf:
-                  'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
-            ),
-          ),
-          linkLauncherRepositoryProvider.overrideWithValue(fakeLauncher),
-          clockProvider.overrideWithValue(() => fixedNow),
-        ],
+      final container = await _pumpEditorApp(
+        tester,
+        initialTdf: 'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
+        clock: DateTime.utc(2026, 11, 1, 10, 0),
+        linkLauncher: fakeLauncher,
       );
-      addTearDown(container.dispose);
-
-      await tester.pumpWidget(
-        UncontrolledProviderScope(
-          container: container,
-          child: const TierTaskApp(),
-        ),
-      );
-      await tester.pumpAndSettle();
 
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
 
       await tester.enterText(
         find.byKey(const ValueKey('task_editor_title_input')),
@@ -787,44 +485,30 @@ task 000001OkD2 {
       await tester.enterText(linkTitleFinder, 'Runbook');
       await tester.enterText(linkUriFinder, 'not-a-valid-uri');
       await tester.pumpAndSettle();
-      await tester.ensureVisible(addLinkButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(addLinkButtonFinder);
-      await tester.pumpAndSettle();
+      await _tapVisible(tester, addLinkButtonFinder);
 
       expect(
         find.byKey(const ValueKey('editor_link_error_text')),
         findsOneWidget,
-        reason: 'Invalid link URI must display inline validation error',
       );
 
       await tester.enterText(linkUriFinder, 'https://example.com/k8s-runbook');
       await tester.pumpAndSettle();
-      await tester.ensureVisible(addLinkButtonFinder);
-      await tester.pumpAndSettle();
-      await tester.tap(addLinkButtonFinder);
-      await tester.pumpAndSettle();
+      await _tapVisible(tester, addLinkButtonFinder);
 
       expect(
         find.byKey(const ValueKey('editor_link_error_text')),
         findsNothing,
-        reason: 'Adding a valid link must clear validation error',
       );
-      expect(
-        find.byKey(const ValueKey('editor_link_item_0')),
-        findsOneWidget,
-        reason: 'Added link must appear in the Links section list',
-      );
+      expect(find.byKey(const ValueKey('editor_link_item_0')), findsOneWidget);
 
-      final openLink0Finder = find.byKey(const ValueKey('editor_open_link_0'));
-      await tester.ensureVisible(openLink0Finder);
-      await tester.pumpAndSettle();
-      await tester.tap(openLink0Finder);
-      await tester.pumpAndSettle();
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_open_link_0')),
+      );
       expect(
         fakeLauncher.launchedUris,
         equals(['https://example.com/k8s-runbook']),
-        reason: 'Tapping open on an editor link row must launch its URI',
       );
 
       await tester.enterText(linkTitleFinder, 'Release Notes');
@@ -834,8 +518,7 @@ task 000001OkD2 {
       );
       await tester.pump();
 
-      await tester.tap(find.byKey(const ValueKey('task_editor_save_button')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'task_editor_save_button');
 
       var board = container.read(taskNotifierProvider).value!;
       final createdTask = board.focus.single;
@@ -848,23 +531,14 @@ task 000001OkD2 {
             uri: 'https://example.com/k8s-release-notes',
           ),
         ]),
-        reason: 'Saving must persist added links and any valid pending link in the input fields',
       );
 
-      await tester.tap(
-        find.byKey(ValueKey('edit_task_button_${createdTask.id}')),
+      await _tapKey(tester, 'edit_task_button_${createdTask.id}');
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_remove_link_0')),
       );
-      await tester.pumpAndSettle();
-
-      final removeLink0Finder = find.byKey(
-        const ValueKey('editor_remove_link_0'),
-      );
-      await tester.ensureVisible(removeLink0Finder);
-      await tester.tap(removeLink0Finder);
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const ValueKey('task_editor_save_button')));
-      await tester.pumpAndSettle();
+      await _tapKey(tester, 'task_editor_save_button');
 
       board = container.read(taskNotifierProvider).value!;
       expect(
@@ -875,8 +549,89 @@ task 000001OkD2 {
             uri: 'https://example.com/k8s-release-notes',
           ),
         ]),
-        reason: 'Removing the first link and saving must update the task links',
       );
     },
   );
+}
+
+/// Asserts that the subtask toggle identified by [key] is checked and remains locked when tapped.
+Future<void> _expectLockedCompletedSubtask(
+  WidgetTester tester,
+  String key,
+) async {
+  final toggleFinder = find.byKey(ValueKey(key));
+  final iconFinder = find.descendant(
+    of: toggleFinder,
+    matching: find.byIcon(Icons.check_circle_rounded),
+  );
+  expect(iconFinder, findsOneWidget);
+  await tester.tap(toggleFinder);
+  await tester.pumpAndSettle();
+  expect(iconFinder, findsOneWidget);
+}
+
+/// Pumps [TierTaskApp] inside an [UncontrolledProviderScope] for task editor tests.
+Future<ProviderContainer> _pumpEditorApp(
+  WidgetTester tester, {
+  required String initialTdf,
+  required DateTime clock,
+  LinkLauncherRepository? linkLauncher,
+}) async {
+  const config = WebDavConfig(language: AppLanguage.english);
+  final container = ProviderContainer(
+    overrides: [
+      settingsRepositoryProvider.overrideWithValue(
+        InMemorySettingsRepository(config),
+      ),
+      localFileRepositoryProvider.overrideWith(
+        (ref) =>
+            FakeLocalFileRepository(config: config, initialTdf: initialTdf),
+      ),
+      if (linkLauncher != null)
+        linkLauncherRepositoryProvider.overrideWithValue(linkLauncher),
+      clockProvider.overrideWithValue(() => clock),
+    ],
+  );
+  addTearDown(container.dispose);
+  await tester.pumpWidget(
+    UncontrolledProviderScope(container: container, child: const TierTaskApp()),
+  );
+  await tester.pumpAndSettle();
+  return container;
+}
+
+/// Enters [title] into [titleFinder], taps [saveFinder], and asserts [errorText] is visible.
+Future<void> _submitTitleAndExpectError(
+  WidgetTester tester,
+  Finder titleFinder,
+  Finder saveFinder,
+  String title,
+  String errorText,
+) async {
+  await tester.enterText(titleFinder, title);
+  await tester.pump();
+  await tester.tap(saveFinder);
+  await tester.pumpAndSettle();
+  expect(find.text(errorText), findsOneWidget);
+}
+
+/// Taps the widget with [ValueKey] [key] and pumps or settles.
+Future<void> _tapKey(
+  WidgetTester tester,
+  String key, {
+  bool settle = true,
+}) async {
+  await tester.tap(find.byKey(ValueKey(key)));
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump();
+  }
+}
+
+/// Scrolls [finder] into view, taps it, and settles animations.
+Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.ensureVisible(finder);
+  await tester.tap(finder);
+  await tester.pumpAndSettle();
 }

@@ -120,50 +120,20 @@ task cmp100OkD2 {
 }
 ''';
 
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            settingsRepositoryProvider.overrideWithValue(
-              InMemorySettingsRepository(
-                const WebDavConfig(language: AppLanguage.english),
-              ),
-            ),
-            localFileRepositoryProvider.overrideWith(
-              (ref) => FakeLocalFileRepository(
-                config: const WebDavConfig(language: AppLanguage.english),
-                initialTdf: allTiersTdf,
-              ),
-            ),
-            clockProvider.overrideWithValue(
-              () => DateTime.utc(2026, 11, 1, 12, 0),
-            ),
-          ],
-          child: const TierTaskApp(),
-        ),
-      );
-      await tester.pumpAndSettle();
+      await _pumpAllTiersApp(tester, allTiersTdf);
 
-      final indicatorFinder = find.byKey(const ValueKey('tier_page_indicator'));
-      expect(
+      final indicatorFinder = _byKey('tier_page_indicator');
+      _expectOne(
         indicatorFinder,
-        findsOneWidget,
-        reason: 'Bottom tier indicator must be rendered at the bottom edge',
+        'Bottom tier indicator must be rendered at the bottom edge',
       );
 
-      final focusItem = find.byKey(const ValueKey('tier_indicator_item_focus'));
-      final readyItem = find.byKey(const ValueKey('tier_indicator_item_ready'));
-      final plannedItem = find.byKey(
-        const ValueKey('tier_indicator_item_planned'),
-      );
-      final blockedItem = find.byKey(
-        const ValueKey('tier_indicator_item_blocked'),
-      );
-      final somedayItem = find.byKey(
-        const ValueKey('tier_indicator_item_someday'),
-      );
-      final completedItem = find.byKey(
-        const ValueKey('tier_indicator_item_completed'),
-      );
+      final focusItem = _byKey('tier_indicator_item_focus');
+      final readyItem = _byKey('tier_indicator_item_ready');
+      final plannedItem = _byKey('tier_indicator_item_planned');
+      final blockedItem = _byKey('tier_indicator_item_blocked');
+      final somedayItem = _byKey('tier_indicator_item_someday');
+      final completedItem = _byKey('tier_indicator_item_completed');
 
       expect(focusItem, findsOneWidget);
       expect(readyItem, findsOneWidget);
@@ -189,15 +159,13 @@ task cmp100OkD2 {
         reason: 'Tier indicator items must be ordered left-to-right: Focus, Ready, Planned, Blocked, Someday, Completed',
       );
 
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_focus')),
-        findsOneWidget,
-        reason: 'Active Focus tier must render an icon instead of a dot',
+      _expectOne(
+        _byKey('tier_indicator_icon_focus'),
+        'Active Focus tier must render an icon instead of a dot',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_dot_focus')),
-        findsNothing,
-        reason: 'Active Focus tier must not render a dot',
+      _expectNone(
+        _byKey('tier_indicator_dot_focus'),
+        'Active Focus tier must not render a dot',
       );
       for (final inactiveName in [
         'ready',
@@ -206,27 +174,24 @@ task cmp100OkD2 {
         'someday',
         'completed',
       ]) {
-        expect(
-          find.byKey(ValueKey('tier_indicator_dot_$inactiveName')),
-          findsOneWidget,
-          reason: 'Inactive tier $inactiveName must render a dot',
+        _expectOne(
+          _byKey('tier_indicator_dot_$inactiveName'),
+          'Inactive tier $inactiveName must render a dot',
         );
-        expect(
-          find.byKey(ValueKey('tier_indicator_icon_$inactiveName')),
-          findsNothing,
-          reason: 'Inactive tier $inactiveName must not render an icon',
+        _expectNone(
+          _byKey('tier_indicator_icon_$inactiveName'),
+          'Inactive tier $inactiveName must not render an icon',
         );
       }
 
       await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
-      final quickAddBarFinder = find.byKey(const ValueKey('quick_add_bar'));
+      final quickAddBarFinder = _byKey('quick_add_bar');
       expect(quickAddBarFinder, findsOneWidget);
-      expect(
+      _expectOne(
         indicatorFinder,
-        findsOneWidget,
-        reason: 'Tier indicator must remain visible when QuickAddBar is open',
+        'Tier indicator must remain visible when QuickAddBar is open',
       );
       expect(
         tester.getBottomLeft(indicatorFinder).dy <=
@@ -235,32 +200,29 @@ task cmp100OkD2 {
         reason: 'Tier indicator must be positioned above QuickAddBar when the add button is pressed',
       );
 
-      await tester.tap(find.byKey(const ValueKey('quick_add_cancel_button')));
+      await tester.tap(_byKey('quick_add_cancel_button'));
       await tester.pumpAndSettle();
 
       await tester.drag(find.byType(PageView), const Offset(-500, 0));
       await tester.pumpAndSettle();
 
-      expect(
+      _expectNone(
         find.text("What's up!"),
-        findsNothing,
-        reason: 'Ready pane must not display the legacy greeting',
+        'Ready pane must not display the legacy greeting',
       );
-      expect(
-        find.byKey(const ValueKey('top_bar_title')),
-        findsNothing,
-        reason: 'Top header must not display a title on the Ready pane when no label is selected',
+      _expectNone(
+        _byKey('top_bar_title'),
+        'Top header must not display a title on the Ready pane when no label is selected',
       );
       final readyHeadingFinder = find.text('READY TASKS');
-      expect(
+      _expectOne(
         readyHeadingFinder,
-        findsOneWidget,
-        reason: 'Ready pane must display the uppercase section label matching the Focus screen',
+        'Ready pane must display the uppercase section label matching the Focus screen',
       );
       final readyHeadingText = tester.widget<Text>(readyHeadingFinder);
       final readyHeadingRect = tester.getRect(readyHeadingFinder);
       final readyPillTop = tester
-          .getTopLeft(find.byKey(const ValueKey('tier_pill_ready_r10000OkD2')))
+          .getTopLeft(_byKey('tier_pill_ready_r10000OkD2'))
           .dy;
       final viewportWidth =
           tester.view.physicalSize.width / tester.view.devicePixelRatio;
@@ -279,138 +241,109 @@ task cmp100OkD2 {
         isTrue,
         reason: 'Spacing below Ready tasks heading to the first task pill must be at least 24px',
       );
-      expect(
+      _expectOne(
         find.text('Ready Pane Task'),
-        findsOneWidget,
-        reason: 'Sliding right-to-left from Focus must display Ready tier pane',
+        'Sliding right-to-left from Focus must display Ready tier pane',
       );
-      expect(
-        find.byKey(const ValueKey('tier_pill_ready_r10000OkD2')),
-        findsOneWidget,
-        reason:
-            'Ready task must render as a pill card matching the Focus screen',
+      _expectOne(
+        _byKey('tier_pill_ready_r10000OkD2'),
+        'Ready task must render as a pill card matching the Focus screen',
       );
-      expect(
+      _expectOne(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_task_button_r10000OkD2')),
+          of: _byKey('edit_task_button_r10000OkD2'),
           matching: find.byIcon(Icons.more_vert_rounded),
         ),
-        findsOneWidget,
-        reason: 'Ready task pill must display the three-dots edit button',
+        'Ready task pill must display the three-dots edit button',
       );
-      expect(
-        find.byKey(const ValueKey('downgrade_task_button_r10000OkD2')),
-        findsOneWidget,
-        reason: 'Ready task pill must display the > downgrade button',
+      _expectOne(
+        _byKey('downgrade_task_button_r10000OkD2'),
+        'Ready task pill must display the > downgrade button',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_ready')),
-        findsOneWidget,
-        reason: 'Sliding to Ready must display the Ready icon in the indicator',
+      _expectOne(
+        _byKey('tier_indicator_icon_ready'),
+        'Sliding to Ready must display the Ready icon in the indicator',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_dot_focus')),
-        findsOneWidget,
-        reason: 'Focus must become a dot after sliding to Ready',
+      _expectOne(
+        _byKey('tier_indicator_dot_focus'),
+        'Focus must become a dot after sliding to Ready',
       );
 
       await tester.drag(find.byType(PageView), const Offset(-500, 0));
       await tester.pumpAndSettle();
 
-      expect(
+      _expectOne(
         find.text('PLANNED TASKS'),
-        findsOneWidget,
-        reason: 'Planned pane must display the uppercase section label matching the Focus screen',
+        'Planned pane must display the uppercase section label matching the Focus screen',
       );
-      expect(
+      _expectOne(
         find.text('Planned Pane Task'),
-        findsOneWidget,
-        reason: 'Sliding again must display Planned tier pane',
+        'Sliding again must display Planned tier pane',
       );
-      expect(
-        find.byKey(const ValueKey('tier_pill_planned_p10000OkD2')),
-        findsOneWidget,
-        reason:
-            'Planned task must render as a pill card matching the Focus screen',
+      _expectOne(
+        _byKey('tier_pill_planned_p10000OkD2'),
+        'Planned task must render as a pill card matching the Focus screen',
       );
-      expect(
-        find.byKey(const ValueKey('downgrade_task_button_p10000OkD2')),
-        findsOneWidget,
-        reason: 'Planned task pill must display the > downgrade button',
+      _expectOne(
+        _byKey('downgrade_task_button_p10000OkD2'),
+        'Planned task pill must display the > downgrade button',
       );
-      expect(
+      _expectOne(
         find.byIcon(Icons.chevron_right_rounded),
-        findsOneWidget,
-        reason:
-            'Planned pane must render the > downgrade icon for Planned tasks',
+        'Planned pane must render the > downgrade icon for Planned tasks',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_planned')),
-        findsOneWidget,
-        reason: 'Planned tier must display its icon when active',
+      _expectOne(
+        _byKey('tier_indicator_icon_planned'),
+        'Planned tier must display its icon when active',
       );
 
       await tester.drag(find.byType(PageView), const Offset(-500, 0));
       await tester.pumpAndSettle();
 
-      expect(
+      _expectOne(
         find.text('BLOCKED TASKS'),
-        findsOneWidget,
-        reason: 'Blocked pane must display the uppercase section label matching the Focus screen',
+        'Blocked pane must display the uppercase section label matching the Focus screen',
       );
-      expect(
+      _expectOne(
         find.text('Blocked Pane Task'),
-        findsOneWidget,
-        reason: 'Sliding to Blocked pane must show blocked tasks',
+        'Sliding to Blocked pane must show blocked tasks',
       );
-      expect(
+      _expectOne(
         find.text('Suspended Pane Task'),
-        findsOneWidget,
-        reason: 'Blocked pane must also show suspended tasks',
+        'Blocked pane must also show suspended tasks',
       );
-      expect(
-        find.byKey(const ValueKey('tier_pill_blocked_blk100OkD2')),
-        findsOneWidget,
-        reason:
-            'Blocked task must render as a pill card matching the Focus screen',
+      _expectOne(
+        _byKey('tier_pill_blocked_blk100OkD2'),
+        'Blocked task must render as a pill card matching the Focus screen',
       );
-      expect(
+      _expectNone(
         find.byIcon(Icons.arrow_upward_rounded),
-        findsNothing,
-        reason: 'Blocked task pill must not display the legacy promote arrow button',
+        'Blocked task pill must not display the legacy promote arrow button',
       );
-      expect(
-        find.byKey(const ValueKey('downgrade_task_button_blk100OkD2')),
-        findsNothing,
-        reason: 'Blocked task pill must not display a downgrade button',
+      _expectNone(
+        _byKey('downgrade_task_button_blk100OkD2'),
+        'Blocked task pill must not display a downgrade button',
       );
-      expect(
+      _expectNone(
         find.byIcon(Icons.chevron_right_rounded),
-        findsNothing,
-        reason: 'Blocked pane must not render any > downgrade icons',
+        'Blocked pane must not render any > downgrade icons',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_blocked')),
-        findsOneWidget,
-        reason: 'Blocked tier must display its icon when active',
+      _expectOne(
+        _byKey('tier_indicator_icon_blocked'),
+        'Blocked tier must display its icon when active',
       );
 
       final gesture = await tester.startGesture(tester.getCenter(blockedItem));
       await tester.pump(const Duration(milliseconds: 600));
 
-      final waveLabelFinder = find.byKey(
-        const ValueKey('tier_indicator_wave_label'),
-      );
-      expect(
+      final waveLabelFinder = _byKey('tier_indicator_wave_label');
+      _expectOne(
         waveLabelFinder,
-        findsOneWidget,
-        reason:
-            'Holding the indicator must display the tier name above the wave',
+        'Holding the indicator must display the tier name above the wave',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_wave_arc')),
-        findsNothing,
-        reason: 'Connecting line and dark-blue bottom wave background must not be rendered',
+      _expectNone(
+        _byKey('tier_indicator_wave_arc'),
+        'Connecting line and dark-blue bottom wave background must not be rendered',
       );
       final waveLabelContainer = tester.widget<Container>(waveLabelFinder);
       final waveLabelDecoration =
@@ -420,28 +353,16 @@ task cmp100OkD2 {
         isNull,
         reason: 'Overlay tier name label must not have a border',
       );
-      expect(
+      _expectOne(
         find.descendant(of: waveLabelFinder, matching: find.text('Blocked')),
-        findsOneWidget,
-        reason:
-            'Wave label must initially show Blocked while holding over Blocked',
+        'Wave label must initially show Blocked while holding over Blocked',
       );
 
-      final focusDotFinder = find.byKey(
-        const ValueKey('tier_indicator_dot_focus'),
-      );
-      final readyDotFinder = find.byKey(
-        const ValueKey('tier_indicator_dot_ready'),
-      );
-      final plannedDotFinder = find.byKey(
-        const ValueKey('tier_indicator_dot_planned'),
-      );
-      final somedayDotFinder = find.byKey(
-        const ValueKey('tier_indicator_dot_someday'),
-      );
-      final completedDotFinder = find.byKey(
-        const ValueKey('tier_indicator_dot_completed'),
-      );
+      final focusDotFinder = _byKey('tier_indicator_dot_focus');
+      final readyDotFinder = _byKey('tier_indicator_dot_ready');
+      final plannedDotFinder = _byKey('tier_indicator_dot_planned');
+      final somedayDotFinder = _byKey('tier_indicator_dot_someday');
+      final completedDotFinder = _byKey('tier_indicator_dot_completed');
 
       final focusDotSize = tester.getSize(focusDotFinder);
       final readyDotSize = tester.getSize(readyDotFinder);
@@ -498,16 +419,15 @@ task cmp100OkD2 {
       await gesture.moveTo(completedTarget);
       await tester.pump();
 
-      expect(
+      _expectOne(
         find.descendant(of: waveLabelFinder, matching: find.text('Completed')),
-        findsOneWidget,
-        reason: 'Dragging the held indicator to Completed must update the wave label to Completed',
+        'Dragging the held indicator to Completed must update the wave label to Completed',
       );
       final somedayNeighborSize = tester.getSize(
-        find.byKey(const ValueKey('tier_indicator_dot_someday')),
+        _byKey('tier_indicator_dot_someday'),
       );
       final blockedNonNeighborSize = tester.getSize(
-        find.byKey(const ValueKey('tier_indicator_dot_blocked')),
+        _byKey('tier_indicator_dot_blocked'),
       );
       expect(
         somedayNeighborSize.width,
@@ -525,49 +445,40 @@ task cmp100OkD2 {
       await gesture.up();
       await tester.pumpAndSettle();
 
-      expect(
+      _expectNone(
         waveLabelFinder,
-        findsNothing,
-        reason: 'Releasing the indicator must hide the wave label',
+        'Releasing the indicator must hide the wave label',
       );
-      expect(
+      _expectOne(
         find.text('COMPLETED TASKS'),
-        findsOneWidget,
-        reason: 'Completed pane must display the uppercase section label matching the Focus screen',
+        'Completed pane must display the uppercase section label matching the Focus screen',
       );
-      expect(
+      _expectOne(
         find.text('Completed Pane Task'),
-        findsOneWidget,
-        reason: 'Releasing the indicator on Completed must jump directly to the Completed pane',
+        'Releasing the indicator on Completed must jump directly to the Completed pane',
       );
-      expect(
-        find.byKey(const ValueKey('tier_pill_completed_cmp100OkD2')),
-        findsOneWidget,
-        reason: 'Completed task must render as a pill card matching the Focus screen',
+      _expectOne(
+        _byKey('tier_pill_completed_cmp100OkD2'),
+        'Completed task must render as a pill card matching the Focus screen',
       );
-      expect(
+      _expectOne(
         find.descendant(
-          of: find.byKey(const ValueKey('edit_task_button_cmp100OkD2')),
+          of: _byKey('edit_task_button_cmp100OkD2'),
           matching: find.byIcon(Icons.more_vert_rounded),
         ),
-        findsOneWidget,
-        reason: 'Completed task pill must render the three-dots edit button',
+        'Completed task pill must render the three-dots edit button',
       );
-      expect(
-        find.byKey(const ValueKey('downgrade_task_button_cmp100OkD2')),
-        findsNothing,
-        reason: 'Completed task pill must not display a downgrade button',
+      _expectNone(
+        _byKey('downgrade_task_button_cmp100OkD2'),
+        'Completed task pill must not display a downgrade button',
       );
-      expect(
+      _expectNone(
         find.byIcon(Icons.chevron_right_rounded),
-        findsNothing,
-        reason: 'Completed pane must not render any > downgrade icons',
+        'Completed pane must not render any > downgrade icons',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_completed')),
-        findsOneWidget,
-        reason:
-            'Completed tier must display its icon after jumping to Completed',
+      _expectOne(
+        _byKey('tier_indicator_icon_completed'),
+        'Completed tier must display its icon after jumping to Completed',
       );
 
       final mouseGesture = await tester.createGesture(
@@ -584,22 +495,18 @@ task cmp100OkD2 {
         closeTo(tester.getCenter(focusItem).dy, 0.1),
         reason: 'Desktop mouse-over must keep indicator items flat without vertical wave displacement',
       );
-      final hoveredSomedayIconFinder = find.byKey(
-        const ValueKey('tier_indicator_icon_someday'),
-      );
-      expect(
+      final hoveredSomedayIconFinder = _byKey('tier_indicator_icon_someday');
+      _expectOne(
         hoveredSomedayIconFinder,
-        findsOneWidget,
-        reason: 'Desktop mouse-over on an inactive indicator must display its icon instead of a dot',
+        'Desktop mouse-over on an inactive indicator must display its icon instead of a dot',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_dot_someday')),
-        findsNothing,
-        reason: 'Desktop mouse-over on an inactive indicator must replace the dot with the icon',
+      _expectNone(
+        _byKey('tier_indicator_dot_someday'),
+        'Desktop mouse-over on an inactive indicator must replace the dot with the icon',
       );
       final hoveredSomedayIcon = tester.widget<Icon>(hoveredSomedayIconFinder);
       final activeCompletedIcon = tester.widget<Icon>(
-        find.byKey(const ValueKey('tier_indicator_icon_completed')),
+        _byKey('tier_indicator_icon_completed'),
       );
       expect(
         hoveredSomedayIcon.color,
@@ -611,75 +518,94 @@ task cmp100OkD2 {
         equals(activeAppTheme.indicatorActiveIconColor),
         reason: 'Active indicator icon must keep the active icon color',
       );
-      expect(
+      _expectOne(
         find.descendant(of: indicatorFinder, matching: find.text('Someday')),
-        findsOneWidget,
-        reason: 'Desktop mouse-over must display the hovered tier name without wave animation',
+        'Desktop mouse-over must display the hovered tier name without wave animation',
       );
 
       await tester.tap(somedayItem);
       await tester.pumpAndSettle();
 
-      expect(
+      _expectOne(
         find.text('SOMEDAY TASKS'),
-        findsOneWidget,
-        reason: 'Someday pane must display the uppercase section label matching the Focus screen',
+        'Someday pane must display the uppercase section label matching the Focus screen',
       );
-      expect(
+      _expectOne(
         find.text('Someday Pane Task'),
-        findsOneWidget,
-        reason: 'Clicking a tier indicator item on desktop must jump to that tier pane',
+        'Clicking a tier indicator item on desktop must jump to that tier pane',
       );
-      expect(
-        find.byKey(const ValueKey('tier_pill_someday_smd100OkD2')),
-        findsOneWidget,
-        reason:
-            'Someday task must render as a pill card matching the Focus screen',
+      _expectOne(
+        _byKey('tier_pill_someday_smd100OkD2'),
+        'Someday task must render as a pill card matching the Focus screen',
       );
-      expect(
-        find.byKey(const ValueKey('downgrade_task_button_smd100OkD2')),
-        findsNothing,
-        reason: 'Someday task pill must not display a downgrade button',
+      _expectNone(
+        _byKey('downgrade_task_button_smd100OkD2'),
+        'Someday task pill must not display a downgrade button',
       );
-      expect(
+      _expectNone(
         find.byIcon(Icons.chevron_right_rounded),
-        findsNothing,
-        reason: 'Someday pane must not render any > downgrade icons',
+        'Someday pane must not render any > downgrade icons',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_someday')),
-        findsOneWidget,
-        reason: 'Someday tier must display its icon after selecting Someday',
+      _expectOne(
+        _byKey('tier_indicator_icon_someday'),
+        'Someday tier must display its icon after selecting Someday',
       );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
       await tester.pumpAndSettle();
 
-      expect(
+      _expectOne(
         find.text('Blocked Pane Task'),
-        findsOneWidget,
-        reason: 'Pressing Left Arrow on desktop must navigate to the previous tier pane (Blocked)',
+        'Pressing Left Arrow on desktop must navigate to the previous tier pane (Blocked)',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_blocked')),
-        findsOneWidget,
-        reason: 'Active indicator icon must update to Blocked after Left Arrow',
+      _expectOne(
+        _byKey('tier_indicator_icon_blocked'),
+        'Active indicator icon must update to Blocked after Left Arrow',
       );
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
 
-      expect(
+      _expectOne(
         find.text('Someday Pane Task'),
-        findsOneWidget,
-        reason: 'Pressing Right Arrow on desktop must navigate to the next tier pane (Someday)',
+        'Pressing Right Arrow on desktop must navigate to the next tier pane (Someday)',
       );
-      expect(
-        find.byKey(const ValueKey('tier_indicator_icon_someday')),
-        findsOneWidget,
-        reason:
-            'Active indicator icon must update to Someday after Right Arrow',
+      _expectOne(
+        _byKey('tier_indicator_icon_someday'),
+        'Active indicator icon must update to Someday after Right Arrow',
       );
     },
   );
+}
+
+/// Finds a widget by its string [ValueKey].
+Finder _byKey(String key) => find.byKey(ValueKey(key));
+
+/// Asserts that [finder] matches zero widgets with [reason].
+void _expectNone(Finder finder, String reason) =>
+    expect(finder, findsNothing, reason: reason);
+
+/// Asserts that [finder] matches exactly one widget with [reason].
+void _expectOne(Finder finder, String reason) =>
+    expect(finder, findsOneWidget, reason: reason);
+
+/// Pumps [TierTaskApp] seeded with [seededTdf] across all six task tiers at `2026-11-01 12:00` UTC.
+Future<void> _pumpAllTiersApp(WidgetTester tester, String seededTdf) async {
+  const config = WebDavConfig(language: AppLanguage.english);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(config),
+        ),
+        localFileRepositoryProvider.overrideWith(
+          (ref) =>
+              FakeLocalFileRepository(config: config, initialTdf: seededTdf),
+        ),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 12, 0)),
+      ],
+      child: const TierTaskApp(),
+    ),
+  );
+  await tester.pumpAndSettle();
 }

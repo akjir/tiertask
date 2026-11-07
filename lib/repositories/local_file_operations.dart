@@ -21,14 +21,13 @@ import 'package:flutter/foundation.dart';
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
-import 'local_file_repository.dart';
 
 /// Stateless helper operations for local `.tdf` path validation, `.bak` backup
 /// rotation, safe cross-device file moves, and synchronous diagnostic log I/O.
 @immutable
-class LocalFileOperations {
-  /// Private constructor for static filesystem helper methods.
-  const LocalFileOperations._();
+class LocalFileOperations<E extends Exception> {
+  /// Creates a const [LocalFileOperations] helper using [createException] to build domain errors.
+  const LocalFileOperations(this.createException);
 
   /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
   static const int maxBackupSuffix = 999;
@@ -36,11 +35,11 @@ class LocalFileOperations {
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
   static final RegExp _windowsDrivePattern = RegExp(r'^[a-zA-Z]:[\\/]');
 
+  /// Factory function that constructs a typed domain exception with an optional cause.
+  final E Function(String message, {Object? cause}) createException;
+
   /// Combines [directoryPath] and [fileName] into a normalized local `.tdf` file path.
-  static String combineDirectoryAndFileName(
-    String directoryPath,
-    String fileName,
-  ) {
+  String combineDirectoryAndFileName(String directoryPath, String fileName) {
     final cleanDir = trimTrailingSeparators(directoryPath.trim());
     final cleanName = extractFileNameFromPath(fileName);
     if (cleanDir.isEmpty) return cleanName;
@@ -49,14 +48,14 @@ class LocalFileOperations {
   }
 
   /// Resolves the default filesystem path for `tiertask.log` inside [baseDirectoryPath] or the user data directory.
-  static String defaultLogFilePath({String? baseDirectoryPath}) {
+  String defaultLogFilePath({String? baseDirectoryPath}) {
     final trimmed = baseDirectoryPath?.trim() ?? '';
     final base = trimmed.isNotEmpty ? trimmed : resolveDefaultDirectoryPath();
     return '${trimTrailingSeparators(base)}${Platform.pathSeparator}${AppLogger.defaultLogFileName}';
   }
 
   /// Synchronously deletes the diagnostic log file at [path] if it exists.
-  static void deleteLogFileSync(String path) {
+  void deleteLogFileSync(String path) {
     try {
       final file = File(path);
       if (file.existsSync()) file.deleteSync();
@@ -65,24 +64,24 @@ class LocalFileOperations {
     }
   }
 
-  /// Deletes the local `.tdf` file for [repository] if it exists, rejecting directories and symbolic links.
-  static void deleteTdf(
-    LocalFileRepository repository,
+  /// Deletes the local `.tdf` file at [path] if it exists, rejecting directories and symbolic links.
+  void deleteTdf(
+    String path,
     AppLocalizations messages, {
     required bool inMemory,
+    Map<String, String>? inMemoryStore,
   }) {
-    final path = repository.resolveFilePath();
     if (inMemory) {
-      repository.inMemoryStore?.remove(path);
+      inMemoryStore?.remove(path);
       return;
     }
     final sourceType = FileSystemEntity.typeSync(path, followLinks: false);
     if (sourceType == FileSystemEntityType.notFound) return;
     if (sourceType == FileSystemEntityType.directory) {
-      throw LocalFileException(messages.errorMoveSourceIsDirectory(path));
+      throw createException(messages.errorMoveSourceIsDirectory(path));
     }
     if (sourceType == FileSystemEntityType.link) {
-      throw LocalFileException(messages.errorMoveSourceIsSymlink(path));
+      throw createException(messages.errorMoveSourceIsSymlink(path));
     }
     try {
       File(path).deleteSync();
@@ -93,7 +92,7 @@ class LocalFileOperations {
   }
 
   /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
-  static String ensureTdfExtension(String rawName) {
+  String ensureTdfExtension(String rawName) {
     final trimmed = rawName.trim();
     if (trimmed.isEmpty) return WebDavConfig.defaultFileName;
     if (trimmed.length > 4 &&
@@ -104,11 +103,11 @@ class LocalFileOperations {
   }
 
   /// Extracts the parent directory portion from [rawPath], or an empty string when [rawPath] is a bare file name.
-  static String extractDirectoryFromPath(String rawPath) {
+  String extractDirectoryFromPath(String rawPath) {
     final trimmed = trimTrailingSeparators(rawPath.trim());
     if (trimmed.isEmpty) return '';
     final lastSlash = trimmed.lastIndexOf('/');
-    final lastBackslash = trimmed.lastIndexOf(r'\');
+    final lastBackslash = trimmed.lastIndexOf('\\');
     final splitIndex = lastSlash > lastBackslash ? lastSlash : lastBackslash;
     if (splitIndex < 0) return '';
     if (splitIndex == 0) return '/';
@@ -119,7 +118,7 @@ class LocalFileOperations {
   }
 
   /// Extracts the base file name without a trailing `.tdf` extension from [rawPath].
-  static String extractFileBaseName(String rawPath) {
+  String extractFileBaseName(String rawPath) {
     final fileName = extractFileNameFromPath(rawPath);
     if (fileName.length > 4 &&
         fileName.substring(fileName.length - 4).toLowerCase() == '.tdf') {
@@ -129,7 +128,7 @@ class LocalFileOperations {
   }
 
   /// Extracts the trailing file name segment from [rawPath], defaulting to [WebDavConfig.defaultFileName].
-  static String extractFileNameFromPath(String rawPath) {
+  String extractFileNameFromPath(String rawPath) {
     final parts = rawPath.trim().split(_pathSeparatorPattern);
     for (var i = parts.length - 1; i >= 0; i--) {
       if (parts[i].isNotEmpty) return parts[i];
@@ -138,35 +137,37 @@ class LocalFileOperations {
   }
 
   /// Formats the candidate backup path or URI suffix for [basePath] at [attemptIndex].
-  static String formatBackupPath(String basePath, int attemptIndex) =>
+  String formatBackupPath(String basePath, int attemptIndex) =>
       attemptIndex <= 0
       ? '$basePath.bak'
       : '$basePath.bak.${attemptIndex.toString().padLeft(3, '0')}';
 
   /// Returns `true` if [rawPath] starts with a POSIX root `/` or Windows drive prefix.
-  static bool isAbsolutePath(String rawPath) =>
+  bool isAbsolutePath(String rawPath) =>
       rawPath.startsWith('/') || _windowsDrivePattern.hasMatch(rawPath);
 
   /// Returns `true` when [rawName] is a valid single `.tdf` file name or base name without path separators or control characters.
-  static bool isValidSingleFileName(String rawName) {
+  bool isValidSingleFileName(String rawName) {
     final trimmed = rawName.trim();
     return trimmed.isNotEmpty &&
         trimmed != '.' &&
         trimmed != '..' &&
         trimmed.toLowerCase() != '.tdf' &&
         !trimmed.contains('/') &&
-        !trimmed.contains(r'\') &&
+        !trimmed.contains('\\') &&
         !_hasControlCharacters(trimmed);
   }
 
-  /// Maps a [FileSystemException] during a `.tdf` file move into a specific localized [LocalFileException].
-  static LocalFileException mapMoveFileSystemException(
+  /// Maps a [FileSystemException] during a `.tdf` file move into a specific localized exception.
+  E mapMoveFileSystemException(
     FileSystemException error,
     String fallbackPath,
     AppLocalizations messages,
   ) {
-    final errorPath = error.path?.trim() ?? '';
-    final path = errorPath.isNotEmpty ? error.path! : fallbackPath;
+    final rawErrorPath = error.path;
+    final path = rawErrorPath != null && rawErrorPath.trim().isNotEmpty
+        ? rawErrorPath
+        : fallbackPath;
     final text = switch (error.osError?.errorCode) {
       13 || 1 || 5 || 1314 => messages.errorMovePermissionDenied(path),
       30 || 19 => messages.errorMoveReadOnlyFileSystem(path),
@@ -179,43 +180,43 @@ class LocalFileOperations {
       36 || 206 => messages.errorMovePathTooLong(path),
       _ => _mapMoveErrorByText(error, path, messages),
     };
-    return LocalFileException(text, cause: error);
+    return createException(text, cause: error);
   }
 
-  /// Safely moves the `.tdf` file from [source] to [target] without overwriting existing entities.
-  static void moveTdfFile(
-    LocalFileRepository source,
-    LocalFileRepository target,
+  /// Safely moves the `.tdf` file from [fromPath] to [toPath] inside [targetDirPath] without overwriting existing entities.
+  void moveTdfFile(
+    String fromPath,
+    String toPath,
+    String targetDirPath,
+    int maxFileBytes,
     AppLocalizations messages, {
     required bool inMemory,
+    Map<String, String>? inMemoryStore,
   }) {
-    final fromPath = source.resolveFilePath();
-    final toPath = target.resolveFilePath();
     if (fromPath == toPath) return;
     if (inMemory) {
-      _moveInMemoryEntry(source.inMemoryStore, fromPath, toPath, messages);
+      _moveInMemoryEntry(inMemoryStore, fromPath, toPath, messages);
       return;
     }
-    final targetDirPath = target.resolveDirectoryPath();
     _validateTargetDirectory(targetDirPath, messages);
     _ensureTargetDoesNotExist(toPath, messages);
     switch (FileSystemEntity.typeSync(fromPath, followLinks: false)) {
       case FileSystemEntityType.link:
-        throw LocalFileException(messages.errorMoveSourceIsSymlink(fromPath));
+        throw createException(messages.errorMoveSourceIsSymlink(fromPath));
       case FileSystemEntityType.directory:
-        throw LocalFileException(messages.errorMoveSourceIsDirectory(fromPath));
+        throw createException(messages.errorMoveSourceIsDirectory(fromPath));
       case FileSystemEntityType.notFound:
         _verifyDirectoryWritable(targetDirPath, messages);
       case FileSystemEntityType.file:
       case FileSystemEntityType.pipe:
       case FileSystemEntityType.unixDomainSock:
-        _performFileMove(fromPath, toPath, source.maxFileBytes, messages);
+        _performFileMove(fromPath, toPath, maxFileBytes, messages);
     }
     AppLogger.info(LogTag.storage, 'moveTdfFile $fromPath -> $toPath');
   }
 
   /// Synchronously reads up to [maxBytes] from the diagnostic log file at [path].
-  static String readLogFileSync(String path, {required int maxBytes}) {
+  String readLogFileSync(String path, {required int maxBytes}) {
     try {
       final file = File(path);
       if (!file.existsSync()) return '';
@@ -230,29 +231,32 @@ class LocalFileOperations {
     }
   }
 
-  /// Renames the local `.tdf` file of [repository] to [newFileName] inside the same directory and returns the new resolved path.
-  static Future<String> renameTdf(
-    LocalFileRepository repository,
+  /// Renames the local `.tdf` file at [fromPath] inside [directoryPath] to [newFileName] and returns the new resolved path.
+  String renameTdf(
+    String fromPath,
+    String directoryPath,
     String newFileName,
-    AppLocalizations messages,
-  ) async {
+    int maxFileBytes,
+    AppLocalizations messages, {
+    required bool inMemory,
+    Map<String, String>? inMemoryStore,
+  }) {
     final normalizedName = validateFileName(newFileName, messages);
-    final targetPath = combineDirectoryAndFileName(
-      repository.resolveDirectoryPath(),
-      normalizedName,
+    final toPath = combineDirectoryAndFileName(directoryPath, normalizedName);
+    moveTdfFile(
+      fromPath,
+      toPath,
+      resolveDirectoryPath(toPath),
+      maxFileBytes,
+      messages,
+      inMemory: inMemory,
+      inMemoryStore: inMemoryStore,
     );
-    final targetRepository = LocalFileRepository(
-      config: repository.config.copyWith(localFilePath: targetPath),
-      baseDirectoryPath: repository.baseDirectoryPath,
-      inMemoryStore: repository.inMemoryStore,
-      maxFileBytes: repository.maxFileBytes,
-    );
-    await repository.moveTdfFile(targetRepository);
-    return targetRepository.resolveFilePath();
+    return toPath;
   }
 
   /// Resolves the platform-appropriate user data directory for relative local file names.
-  static String resolveDefaultDirectoryPath() {
+  String resolveDefaultDirectoryPath() {
     final env = Platform.environment;
     final sep = Platform.pathSeparator;
     final candidates = <String?>[
@@ -277,7 +281,7 @@ class LocalFileOperations {
   }
 
   /// Resolves the parent directory path of [resolvedFilePath].
-  static String resolveDirectoryPath(String resolvedFilePath) {
+  String resolveDirectoryPath(String resolvedFilePath) {
     final sep = Platform.pathSeparator;
     final lastIndex = resolvedFilePath.lastIndexOf(sep);
     if (lastIndex <= 0) return sep;
@@ -287,8 +291,8 @@ class LocalFileOperations {
     return resolvedFilePath.substring(0, lastIndex);
   }
 
-  /// Validates and resolves [rawPath] against [baseDirectoryPath], throwing [LocalFileException] if invalid.
-  static String resolveFilePath(
+  /// Validates and resolves [rawPath] against [baseDirectoryPath], throwing via [createException] if invalid.
+  String resolveFilePath(
     String rawPath,
     String? baseDirectoryPath,
     AppLocalizations messages,
@@ -303,7 +307,7 @@ class LocalFileOperations {
   }
 
   /// Resolves the first available `<filePath>.bak` or `<filePath>.bak.NNN` backup path on disk.
-  static String resolveNextLocalBackupPath(
+  String resolveNextLocalBackupPath(
     String filePath,
     AppLocalizations messages,
   ) {
@@ -314,13 +318,13 @@ class LocalFileOperations {
         return candidate;
       }
     }
-    throw LocalFileException(
+    throw createException(
       messages.errorSaveLocalFileFailed('Maximum backup files reached'),
     );
   }
 
   /// Strips trailing `/` and `\` characters from [path].
-  static String trimTrailingSeparators(String path) {
+  String trimTrailingSeparators(String path) {
     var end = path.length;
     while (end > 1 &&
         (path.codeUnitAt(end - 1) == 0x2F ||
@@ -331,15 +335,15 @@ class LocalFileOperations {
   }
 
   /// Validates that [rawName] is a single `.tdf` file name and returns it with a `.tdf` extension.
-  static String validateFileName(String rawName, AppLocalizations messages) {
+  String validateFileName(String rawName, AppLocalizations messages) {
     if (!isValidSingleFileName(rawName)) {
-      throw LocalFileException(messages.localFileNameErrorInvalid);
+      throw createException(messages.localFileNameErrorInvalid);
     }
     return ensureTdfExtension(rawName);
   }
 
   /// Validates [rawPath] against traversal and control characters and returns the normalized path string.
-  static String validateRelativeOrAbsolutePath(
+  String validateRelativeOrAbsolutePath(
     String rawPath,
     AppLocalizations messages,
   ) {
@@ -351,7 +355,7 @@ class LocalFileOperations {
     if (_windowsDrivePattern.hasMatch(trimmed)) {
       final remaining = segments.skip(1).join(sep);
       if (remaining.isEmpty) {
-        throw LocalFileException(messages.errorInvalidLocalFilePath);
+        throw createException(messages.errorInvalidLocalFilePath);
       }
       return '${trimmed.substring(0, 2)}$sep$remaining';
     }
@@ -359,11 +363,7 @@ class LocalFileOperations {
   }
 
   /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
-  static void writeLogFileSync(
-    String path,
-    String content, {
-    required bool append,
-  }) {
+  void writeLogFileSync(String path, String content, {required bool append}) {
     try {
       final file = File(path);
       file.parent.createSync(recursive: true);
@@ -378,7 +378,7 @@ class LocalFileOperations {
   }
 
   /// Copies [sourcePath] to [targetPath] and deletes [sourcePath] when moving across mount points (`EXDEV`).
-  static void _copyAndDeleteCrossDevice(
+  void _copyAndDeleteCrossDevice(
     String sourcePath,
     String targetPath,
     int maxBytes,
@@ -389,15 +389,13 @@ class LocalFileOperations {
     final targetFile = File(targetPath);
     try {
       if (sourceFile.lengthSync() > maxBytes) {
-        throw LocalFileException(messages.errorLocalFileTooLarge);
+        throw createException(messages.errorLocalFileTooLarge);
       }
       final bytes = sourceFile.readAsBytesSync();
       if (bytes.length > maxBytes) {
-        throw LocalFileException(messages.errorLocalFileTooLarge);
+        throw createException(messages.errorLocalFileTooLarge);
       }
       targetFile.writeAsBytesSync(bytes, flush: true);
-    } on LocalFileException {
-      rethrow;
     } on FileSystemException catch (error) {
       throw mapMoveFileSystemException(error, targetPath, messages);
     }
@@ -414,26 +412,23 @@ class LocalFileOperations {
   }
 
   /// Verifies that no file, directory, or symbolic link exists at [path].
-  static void _ensureTargetDoesNotExist(
-    String path,
-    AppLocalizations messages,
-  ) {
+  void _ensureTargetDoesNotExist(String path, AppLocalizations messages) {
     switch (FileSystemEntity.typeSync(path, followLinks: false)) {
       case FileSystemEntityType.notFound:
         return;
       case FileSystemEntityType.link:
-        throw LocalFileException(messages.errorMoveTargetSymlinkExists(path));
+        throw createException(messages.errorMoveTargetSymlinkExists(path));
       case FileSystemEntityType.directory:
-        throw LocalFileException(messages.errorMoveTargetDirectoryExists(path));
+        throw createException(messages.errorMoveTargetDirectoryExists(path));
       case FileSystemEntityType.file:
       case FileSystemEntityType.pipe:
       case FileSystemEntityType.unixDomainSock:
-        throw LocalFileException(messages.errorMoveTargetFileExists(path));
+        throw createException(messages.errorMoveTargetFileExists(path));
     }
   }
 
   /// Checks whether [value] contains ASCII control characters or null bytes.
-  static bool _hasControlCharacters(String value) {
+  bool _hasControlCharacters(String value) {
     for (var i = 0; i < value.length; i++) {
       final codeUnit = value.codeUnitAt(i);
       if (codeUnit < 0x20 || codeUnit == 0x7F) return true;
@@ -442,13 +437,13 @@ class LocalFileOperations {
   }
 
   /// Returns `true` when [error] indicates a cross-device link (`EXDEV` on Linux, `ERROR_NOT_SAME_DEVICE` on Windows).
-  static bool _isCrossDeviceError(FileSystemException error) {
+  bool _isCrossDeviceError(FileSystemException error) {
     final code = error.osError?.errorCode;
     return code == 18 || code == 17 && Platform.isWindows;
   }
 
   /// Fallback text matcher when `osError.errorCode` is not populated or uses a non-standard code.
-  static String _mapMoveErrorByText(
+  String _mapMoveErrorByText(
     FileSystemException error,
     String path,
     AppLocalizations messages,
@@ -473,7 +468,7 @@ class LocalFileOperations {
   }
 
   /// Moves a `.tdf` entry inside [store] during hermetic widget tests.
-  static void _moveInMemoryEntry(
+  void _moveInMemoryEntry(
     Map<String, String>? store,
     String sourcePath,
     String targetPath,
@@ -481,14 +476,14 @@ class LocalFileOperations {
   ) {
     if (store == null) return;
     if (store.containsKey(targetPath)) {
-      throw LocalFileException(messages.errorMoveTargetFileExists(targetPath));
+      throw createException(messages.errorMoveTargetFileExists(targetPath));
     }
     final existing = store.remove(sourcePath);
     if (existing != null) store[targetPath] = existing;
   }
 
   /// Moves [sourcePath] to [targetPath] via `File.renameSync` with cross-device copy-and-delete fallback.
-  static void _performFileMove(
+  void _performFileMove(
     String sourcePath,
     String targetPath,
     int maxBytes,
@@ -506,41 +501,41 @@ class LocalFileOperations {
   }
 
   /// Validates [rawPath] against traversal and control characters and returns normalized path segments.
-  static List<String> _validateAndSplitSegments(
+  List<String> _validateAndSplitSegments(
     String rawPath,
     AppLocalizations messages,
   ) {
     if (rawPath.isEmpty || _hasControlCharacters(rawPath)) {
-      throw LocalFileException(messages.errorInvalidLocalFilePath);
+      throw createException(messages.errorInvalidLocalFilePath);
     }
     final segments = <String>[];
     for (final segment in rawPath.split(_pathSeparatorPattern)) {
       if (segment.isEmpty) continue;
       if (segment == '.' || segment == '..') {
-        throw LocalFileException(messages.errorInvalidLocalFilePath);
+        throw createException(messages.errorInvalidLocalFilePath);
       }
       segments.add(segment);
     }
     if (segments.isEmpty) {
-      throw LocalFileException(messages.errorInvalidLocalFilePath);
+      throw createException(messages.errorInvalidLocalFilePath);
     }
     return segments;
   }
 
   /// Verifies that [path] exists and resolves to a directory rather than a file or broken link.
-  static void _validateTargetDirectory(String path, AppLocalizations messages) {
+  void _validateTargetDirectory(String path, AppLocalizations messages) {
     if (FileSystemEntity.typeSync(path, followLinks: false) ==
         FileSystemEntityType.notFound) {
-      throw LocalFileException(messages.errorMoveTargetDirectoryNotFound(path));
+      throw createException(messages.errorMoveTargetDirectoryNotFound(path));
     }
     if (FileSystemEntity.typeSync(path, followLinks: true) !=
         FileSystemEntityType.directory) {
-      throw LocalFileException(messages.errorMoveTargetNotADirectory(path));
+      throw createException(messages.errorMoveTargetNotADirectory(path));
     }
   }
 
   /// Verifies write access in [path] when no `.tdf` file exists on disk yet.
-  static void _verifyDirectoryWritable(String path, AppLocalizations messages) {
+  void _verifyDirectoryWritable(String path, AppLocalizations messages) {
     final probe =
         '$path${Platform.pathSeparator}.tiertask_write_probe_${DateTime.now().microsecondsSinceEpoch}';
     if (FileSystemEntity.typeSync(probe, followLinks: false) !=

@@ -60,6 +60,8 @@ _DART_PROVIDER_RE = re.compile(
     r"^final\s+([A-Za-z_][A-Za-z0-9_]*Provider)\s*=",
 )
 _DART_IMPORT_RE = re.compile(r"^\s*import\s+['\"]([^'\"]+)['\"]")
+_DART_FORBIDDEN_DIRECTIVE_RE = re.compile(r"^\s*(?:export\s+['\"]|part\s+['\"]|part\s+of\s+)")
+_TRAILING_GENERIC_RE = re.compile(r"<[^>]*>$")
 _TEST_CALL_START_RE = re.compile(r"^(\s*)(group|test|testWidgets)\(\s*(.*)$")
 _STRING_LITERAL_RE = re.compile(r"(['\"])((?:\\.|(?!\1).)*)\1")
 _VALUE_KEY_RE = re.compile(r"(?:ValueKey|Key)\(\s*['\"]([^'\"$]+)['\"]\s*\)")
@@ -254,9 +256,22 @@ def outline_dart_lib(lines: list[str]) -> list[str]:
             kind = tm.group(2)
             name = tm.group(3)
             end_idx = _find_matching_brace_line(lines, idx)
-            out.append(f"  {idx + 1}-{end_idx + 1}: {kind} {name}")
             if kind in ("class", "enum", "extension", "mixin"):
-                _outline_class_members(lines, idx + 1, end_idx, name, out)
+                member_entries: list[str] = []
+                priv_count = _outline_class_members(
+                    lines,
+                    idx + 1,
+                    end_idx,
+                    name,
+                    member_entries,
+                )
+                span_len = end_idx - idx + 1
+                out.append(
+                    f"  {idx + 1}-{end_idx + 1}: {kind} {name} ({span_len}L, {priv_count} private methods)"
+                )
+                out.extend(member_entries)
+            else:
+                out.append(f"  {idx + 1}-{end_idx + 1}: {kind} {name}")
             idx = end_idx + 1
             continue
 
@@ -277,9 +292,10 @@ def _outline_class_members(
     body_end: int,
     class_name: str,
     out: list[str],
-) -> None:
-    """Extracts constructors, getters, and methods inside a class body."""
+) -> int:
+    """Extracts constructors, getters, and methods inside a class body and returns private method count."""
     idx = body_start
+    priv_count = 0
     while idx < body_end:
         line = lines[idx]
         if not line.startswith("  ") or line.startswith("    "):
@@ -311,10 +327,16 @@ def _outline_class_members(
             sig, _ = _collect_signature(lines, idx)
             end_idx = _find_matching_brace_line(lines, idx)
             out.append(f"    {idx + 1}-{end_idx + 1}: {sig}")
+            if not is_ctor and not is_getter and "(" in sig:
+                before_paren = _TRAILING_GENERIC_RE.sub("", sig.split("(", 1)[0].strip()).strip()
+                tokens = before_paren.split()
+                if tokens and tokens[-1].startswith("_"):
+                    priv_count += 1
             idx = max(idx + 1, end_idx + 1)
             continue
 
         idx += 1
+    return priv_count
 
 
 def _extract_test_call_title(lines: list[str], start_idx: int) -> str | None:
@@ -374,7 +396,12 @@ def outline_repo_overview(root: Path) -> str:
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
         lines = p.read_text(encoding="utf-8").splitlines()
-        flag = " [>1000L]" if len(lines) > 1000 else ""
+        if len(lines) > 900:
+            flag = " [>900L]"
+        elif len(lines) > 750:
+            flag = " [>750L]"
+        else:
+            flag = ""
         if rel.startswith("test/"):
             test_entries = outline_dart_test(lines)
             test_count = sum(1 for e in test_entries if ": test(" in e or ": testWidgets(" in e)
@@ -447,7 +474,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
             stripped_item = item.strip()
             if not item.startswith("    "):
                 parts = stripped_item.split()
-                current_type = parts[-1].lower() if len(parts) >= 3 else ""
+                current_type = parts[2].lower() if len(parts) >= 3 else ""
             if pattern.search(item) or (
                 qual_class is not None
                 and qual_member is not None
@@ -524,11 +551,103 @@ def _extract_top_symbols(file_path: Path) -> list[str]:
     return symbols
 
 
+_SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
+    "lib/main.dart": ["test/ui/home_screen_test.dart"],
+    "lib/l10n/tier_localization_extension.dart": ["test/ui/home_screen_test.dart"],
+    "lib/models/task_board.dart": [
+        "test/models/task_board_evaluation_test.dart",
+        "test/models/task_board_lifecycle_test.dart",
+        "test/models/task_board_v050_rules_test.dart",
+    ],
+    "lib/models/task_board_evaluator.dart": [
+        "test/models/task_board_evaluation_test.dart",
+        "test/models/task_board_lifecycle_test.dart",
+        "test/models/task_board_v050_rules_test.dart",
+    ],
+    "lib/models/task_board_mutator.dart": [
+        "test/models/task_board_mutation_test.dart",
+        "test/models/task_board_lifecycle_test.dart",
+    ],
+    "lib/models/task_board_queue_mutator.dart": [
+        "test/models/task_board_downgrade_test.dart",
+        "test/models/task_board_mutation_test.dart",
+    ],
+    "lib/models/task_board_sync.dart": ["test/models/task_board_sync_test.dart"],
+    "lib/models/task_board_reconciler.dart": ["test/models/task_board_sync_test.dart"],
+    "lib/models/workspace_sync_state.dart": ["test/models/task_board_sync_test.dart"],
+    "lib/models/tdf_payload_comparison.dart": [
+        "test/models/task_board_v050_rules_test.dart",
+        "test/models/task_board_sync_test.dart",
+    ],
+    "lib/models/tdf_sync_metadata.dart": [
+        "test/models/task_board_v050_rules_test.dart",
+        "test/models/task_board_sync_test.dart",
+    ],
+    "lib/models/task_item.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/models/task_tier.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/models/tdf_error.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/models/tdf_metadata.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/models/tdf_timezone.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/models/webdav_config.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/services/tdf_service.dart": [
+        "test/services/tdf_service_parser_test.dart",
+        "test/services/tdf_service_bounds_test.dart",
+    ],
+    "lib/services/tdf_scanner.dart": [
+        "test/services/tdf_service_parser_test.dart",
+        "test/services/tdf_service_bounds_test.dart",
+    ],
+    "lib/services/tdf_parser.dart": [
+        "test/services/tdf_service_parser_test.dart",
+        "test/services/tdf_service_bounds_test.dart",
+    ],
+    "lib/services/tdf_directive_parser.dart": [
+        "test/services/tdf_service_parser_test.dart",
+        "test/services/tdf_service_bounds_test.dart",
+    ],
+    "lib/services/tdf_serializer.dart": [
+        "test/services/tdf_service_parser_test.dart",
+        "test/services/tdf_service_bounds_test.dart",
+    ],
+    "lib/services/tdf_importer.dart": ["test/services/tdf_migration_test.dart"],
+    "lib/services/tdf_historical_parser.dart": ["test/services/tdf_migration_test.dart"],
+    "lib/services/tdf_historical_serializer.dart": ["test/services/tdf_migration_test.dart"],
+    "lib/services/tdf_id_migration.dart": ["test/services/tdf_migration_test.dart"],
+    "lib/repositories/local_file_operations.dart": ["test/repositories/local_file_repository_test.dart"],
+    "lib/providers/location_providers.dart": [
+        "test/providers/workspace_providers_test.dart",
+        "test/ui/location_ui_test.dart",
+    ],
+    "lib/ui/widgets/home_top_bar.dart": ["test/ui/home_screen_test.dart"],
+    "lib/ui/widgets/home_tier_pane.dart": ["test/ui/home_screen_test.dart"],
+    "lib/ui/widgets/home_drawer.dart": ["test/ui/home_drawer_test.dart"],
+    "lib/ui/widgets/settings_preference_cards.dart": ["test/ui/settings_screen_test.dart"],
+    "lib/ui/widgets/settings_webdav_storage_section.dart": ["test/ui/settings_screen_test.dart"],
+    "lib/ui/widgets/log_viewer_dialog.dart": ["test/ui/settings_screen_test.dart"],
+    "lib/ui/widgets/settings_local_storage_section.dart": ["test/ui/local_directory_picker_test.dart"],
+    "lib/ui/widgets/local_tdf_file_dialogs.dart": ["test/ui/local_directory_picker_test.dart"],
+    "lib/ui/widgets/task_editor_sections.dart": ["test/ui/edit_task_screen_test.dart"],
+    "lib/ui/widgets/task_editor_scheduling_card.dart": ["test/ui/edit_task_screen_test.dart"],
+    "lib/ui/widgets/task_editor_subtasks_and_blockers.dart": ["test/ui/edit_task_screen_test.dart"],
+    "lib/ui/widgets/task_editor_links_section.dart": ["test/ui/edit_task_screen_test.dart"],
+    "lib/ui/widgets/condition_editor_controller.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
+    "lib/ui/widgets/task_editor_conditions_section.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
+    "lib/ui/widgets/workspace_row_card.dart": ["test/ui/widgets/workspace_dialog_test.dart"],
+    "lib/ui/widgets/tier_task_subtasks_section.dart": ["test/ui/widgets/tier_task_subtasks_test.dart"],
+}
+
+
 def _find_mirror_tests(root: Path, lib_rel: str) -> set[str]:
-    """Finds direct mirror or stem-matched test files for a lib/ Dart file."""
+    """Finds direct mirror or subsystem-mapped test files for a lib/ Dart file."""
     matched: set[str] = set()
     if not lib_rel.startswith("lib/") or not lib_rel.endswith(".dart"):
         return matched
+    if lib_rel in _SUBSYSTEM_TEST_MAP:
+        for cand_rel in _SUBSYSTEM_TEST_MAP[lib_rel]:
+            if (root / cand_rel).exists():
+                matched.add(cand_rel)
+        if matched:
+            return matched
     sub_rel = lib_rel[len("lib/") : -len(".dart")]
     exact = f"test/{sub_rel}_test.dart"
     if (root / exact).exists():
@@ -558,6 +677,8 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
     app_hubs = {
         "lib/main.dart",
         "lib/ui/home_screen.dart",
+        "lib/providers/config_providers.dart",
+        "lib/providers/sync_providers.dart",
         "lib/providers/task_providers.dart",
         "lib/providers/workspace_providers.dart",
         "lib/services/app_logger.dart",
@@ -591,12 +712,20 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
                 queue_all.append(dep)
 
     reverse_lib = sorted(f for f in visited_all if f.startswith("lib/"))
-    impacted_tests: set[str] = set(_find_mirror_tests(root, norm_target))
+    mirror_tests = _find_mirror_tests(root, norm_target)
+    if mirror_tests:
+        return {
+            "target": [norm_target],
+            "direct_imports": direct_imports,
+            "reverse_lib": reverse_lib,
+            "reverse_tests": sorted(mirror_tests),
+        }
+
+    impacted_tests: set[str] = set()
     for direct_lib in visited_direct:
         if not is_pure_core and direct_lib.startswith("lib/ui/"):
             impacted_tests.update(_find_mirror_tests(root, direct_lib))
 
-    is_pure_core = norm_target.startswith(("lib/models/", "lib/services/"))
     for f in sorted(visited_all):
         if not (f.startswith("test/") and f.endswith("_test.dart")):
             continue
@@ -951,6 +1080,98 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
     return issues
 
 
+def _lib_layer_rank(rel_path: str) -> int | None:
+    """Returns the DAG architectural layer rank (0-7) for a non-generated lib/ Dart file."""
+    if not rel_path.startswith("lib/") or _is_generated_dart(rel_path):
+        return None
+    if rel_path == "lib/services/app_logger.dart":
+        return 0
+    if rel_path.startswith("lib/models/"):
+        return 1
+    if rel_path.startswith("lib/l10n/"):
+        return 2
+    if rel_path.startswith("lib/services/"):
+        return 3
+    if rel_path.startswith("lib/repositories/"):
+        return 4
+    if rel_path.startswith("lib/providers/"):
+        return 5
+    if rel_path.startswith("lib/ui/"):
+        return 6
+    if rel_path == "lib/main.dart":
+        return 7
+    return None
+
+
+def _check_acyclic_dag(root: Path) -> list[str]:
+    """Enforces P-ACYCLIC-DAG via Tarjan SCC cycle detection and strict layer rank ordering."""
+    forward, _ = build_import_graph(root)
+    lib_nodes = sorted(
+        rel for rel in forward if rel.startswith("lib/") and not _is_generated_dart(rel)
+    )
+    lib_set = set(lib_nodes)
+    issues: list[str] = []
+
+    index_counter = 0
+    indices: dict[str, int] = {}
+    lowlink: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    sccs: list[list[str]] = []
+
+    def strongconnect(node: str) -> None:
+        nonlocal index_counter
+        indices[node] = index_counter
+        lowlink[node] = index_counter
+        index_counter += 1
+        stack.append(node)
+        on_stack.add(node)
+
+        for dst in sorted(forward.get(node, set())):
+            if dst not in lib_set:
+                continue
+            if dst not in indices:
+                strongconnect(dst)
+                lowlink[node] = min(lowlink[node], lowlink[dst])
+            elif dst in on_stack:
+                lowlink[node] = min(lowlink[node], indices[dst])
+
+        if lowlink[node] == indices[node]:
+            scc: list[str] = []
+            while True:
+                w = stack.pop()
+                on_stack.remove(w)
+                scc.append(w)
+                if w == node:
+                    break
+            sccs.append(scc)
+
+    for node in lib_nodes:
+        if node not in indices:
+            strongconnect(node)
+
+    for scc in sccs:
+        if len(scc) > 1 or (len(scc) == 1 and scc[0] in forward.get(scc[0], set())):
+            issues.append(
+                f"P-ACYCLIC-DAG: Circular import cycle detected: {' <-> '.join(sorted(scc))}"
+            )
+
+    for src in lib_nodes:
+        src_rank = _lib_layer_rank(src)
+        if src_rank is None:
+            continue
+        for dst in sorted(forward.get(src, set())):
+            if dst not in lib_set:
+                continue
+            dst_rank = _lib_layer_rank(dst)
+            if dst_rank is not None and src_rank < dst_rank:
+                issues.append(
+                    f"P-ACYCLIC-DAG: Upward cross-layer import `{src} -> {dst}` (rank {src_rank} -> {dst_rank})"
+                )
+
+    return issues
+
+
 def run_static_checks(root: Path, fix: bool = False) -> list[str]:
     """Runs fast static compliance checks for AGENTS.md rules, L10N, and ARCHITECTURE.md."""
     if fix:
@@ -976,18 +1197,31 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
             else:
                 issues.append(f"P-LICENSE-HEADER: Missing verbatim GPL-3.0 header in `{rel}`")
 
-        for idx, line in enumerate(text.splitlines(), 1):
+        lines = text.splitlines()
+        if len(lines) > 900:
+            issues.append(
+                f"P-FILE-SIZE: `{rel}` has {len(lines)} lines (exceeds 900-line hard ceiling)"
+            )
+        elif len(lines) > 750:
+            print(
+                f"[WARN] P-FILE-SIZE: `{rel}` has {len(lines)} lines (750-line pre-edit split trigger; target 300-650L)",
+                file=sys.stderr,
+            )
+
+        for idx, line in enumerate(lines, 1):
             if _IGNORE_COMMENT_RE.search(line):
                 issues.append(f"P-NO-IGNORE: Forbidden analyzer ignore directive in `{rel}:{idx}`")
+            if _DART_FORBIDDEN_DIRECTIVE_RE.match(line):
+                issues.append(f"P-FILE-SIZE: Forbidden `export`/`part` directive in `{rel}:{idx}`")
             if rel.startswith(("lib/models/", "lib/services/", "lib/ui/")):
                 m = _DART_IMPORT_RE.match(line)
                 if m and m.group(1) == "dart:io":
-                    if not (rel.startswith("lib/services/") and line.strip() == "import 'dart:io' show Platform;"):
-                        issues.append(f"P-IO-ISOLATION: Forbidden `dart:io` import in `{rel}:{idx}`")
+                    issues.append(f"P-IO-ISOLATION: Forbidden `dart:io` import in `{rel}:{idx}`")
             if rel.startswith("lib/") and not rel.startswith("lib/repositories/"):
                 if "HttpClient" in line and not line.strip().startswith("//"):
                     issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage outside repositories in `{rel}:{idx}`")
 
+    issues.extend(_check_acyclic_dag(root))
     issues.extend(audit_l10n(root))
     issues.extend(audit_architecture(root))
     return issues
@@ -1040,10 +1274,18 @@ def resolve_impacted_tests(root: Path, changed_files: list[str]) -> list[str]:
     """Maps changed lib/ and test/ files to all impacted test/**/*_test.dart suites."""
     impacted: set[str] = set()
     for rel in changed_files:
-        if rel.startswith("test/") and rel.endswith("_test.dart") and (root / rel).exists():
-            impacted.add(rel)
-        elif rel.startswith(("lib/", "test/")) and rel.endswith(".dart") and (root / rel).exists():
-            deps = compute_dependencies(root, rel)
+        norm_rel = Path(rel).as_posix()
+        if norm_rel.startswith("test/") and norm_rel.endswith("_test.dart") and (root / norm_rel).exists():
+            impacted.add(norm_rel)
+        elif norm_rel.startswith("lib/") and norm_rel.endswith(".dart") and (root / norm_rel).exists():
+            mirrors = _find_mirror_tests(root, norm_rel)
+            if mirrors:
+                impacted.update(mirrors)
+            else:
+                deps = compute_dependencies(root, norm_rel)
+                impacted.update(deps["reverse_tests"])
+        elif norm_rel.startswith("test/") and norm_rel.endswith(".dart") and (root / norm_rel).exists():
+            deps = compute_dependencies(root, norm_rel)
             impacted.update(deps["reverse_tests"])
     return sorted(impacted)
 
@@ -1175,7 +1417,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_outline.add_argument("targets", nargs="*", help="Files to outline (omit for repo overview).")
 
     p_find = sub.add_parser("find", help="Locate symbols, ARB keys, test blocks, and spec sections.")
-    p_find.add_argument("query", help="Substring to search for.")
+    p_find.add_argument("queries", nargs="+", help="One or more substrings to search for.")
     p_find.add_argument("--layer", help="Optional layer filter (models, services, repositories, providers, ui, l10n, spec).")
 
     p_deps = sub.add_parser("deps", help="Show direct imports and transitive reverse lib/ and test/ dependents.")
@@ -1245,7 +1487,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "find":
-        matches = find_in_repo(root, args.query, layer=args.layer)
+        seen: set[str] = set()
+        matches: list[str] = []
+        for query in args.queries:
+            for m in find_in_repo(root, query, layer=args.layer):
+                if m not in seen:
+                    seen.add(m)
+                    matches.append(m)
         for m in matches:
             print(m)
         return 0 if matches else 1

@@ -85,6 +85,9 @@ class LocalFileRepository {
   /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
   static const int maxBackupSuffix = LocalFileOperations.maxBackupSuffix;
 
+  static const LocalFileOperations<LocalFileException> _operations =
+      LocalFileOperations<LocalFileException>(LocalFileException.new);
+
   /// Optional base directory path where relative local file names are stored.
   final String? baseDirectoryPath;
 
@@ -105,7 +108,7 @@ class LocalFileRepository {
   /// Whether to use the isolated in-memory store during hermetic widget tests.
   bool get _useInMemoryFallback =>
       baseDirectoryPath == null &&
-      !LocalFileOperations.isAbsolutePath(config.localFilePath.trim()) &&
+      !_operations.isAbsolutePath(config.localFilePath.trim()) &&
       inMemoryStore != null &&
       Platform.environment.containsKey('FLUTTER_TEST');
 
@@ -113,43 +116,42 @@ class LocalFileRepository {
   static String combineDirectoryAndFileName(
     String directoryPath,
     String fileName,
-  ) => LocalFileOperations.combineDirectoryAndFileName(directoryPath, fileName);
+  ) => _operations.combineDirectoryAndFileName(directoryPath, fileName);
 
   /// Resolves the default filesystem path for `tiertask.log` inside [baseDirectoryPath] or the user data directory.
   static String defaultLogFilePath({String? baseDirectoryPath}) =>
-      LocalFileOperations.defaultLogFilePath(
-        baseDirectoryPath: baseDirectoryPath,
-      );
+      _operations.defaultLogFilePath(baseDirectoryPath: baseDirectoryPath);
 
   /// Synchronously deletes the diagnostic log file at [path] if it exists.
   static void deleteLogFileSync(String path) =>
-      LocalFileOperations.deleteLogFileSync(path);
+      _operations.deleteLogFileSync(path);
 
   /// Deletes the configured local `.tdf` file if it exists, rejecting directories and symbolic links.
-  Future<void> deleteTdf() async => LocalFileOperations.deleteTdf(
-    this,
+  Future<void> deleteTdf() async => _operations.deleteTdf(
+    resolveFilePath(),
     _messages,
     inMemory: _useInMemoryFallback,
+    inMemoryStore: inMemoryStore,
   );
 
   /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
   static String ensureTdfExtension(String rawName) =>
-      LocalFileOperations.ensureTdfExtension(rawName);
+      _operations.ensureTdfExtension(rawName);
 
   /// Extracts the parent directory portion from [rawPath], or an empty string when [rawPath] is a bare file name.
   static String extractDirectoryFromPath(String rawPath) =>
-      LocalFileOperations.extractDirectoryFromPath(rawPath);
+      _operations.extractDirectoryFromPath(rawPath);
 
   /// Extracts the base file name without a trailing `.tdf` extension from [rawPath].
   static String extractFileBaseName(String rawPath) =>
-      LocalFileOperations.extractFileBaseName(rawPath);
+      _operations.extractFileBaseName(rawPath);
 
   /// Extracts the trailing `.tdf` file name segment from [config.localFilePath].
   String extractFileName() => extractFileNameFromPath(config.localFilePath);
 
   /// Extracts the trailing file name segment from [rawPath], defaulting to [WebDavConfig.defaultFileName].
   static String extractFileNameFromPath(String rawPath) =>
-      LocalFileOperations.extractFileNameFromPath(rawPath);
+      _operations.extractFileNameFromPath(rawPath);
 
   /// Returns `true` when the resolved local `.tdf` file exists on disk or in [inMemoryStore].
   bool fileExists() {
@@ -161,7 +163,7 @@ class LocalFileRepository {
 
   /// Formats the candidate backup path or URI suffix for [basePath] at [attemptIndex].
   static String formatBackupPath(String basePath, int attemptIndex) =>
-      LocalFileOperations.formatBackupPath(basePath, attemptIndex);
+      _operations.formatBackupPath(basePath, attemptIndex);
 
   /// Creates an empty `.tdf` document at [resolveFilePath] when the file does not exist yet, leaving existing files untouched.
   Future<void> initializeIfMissing() async {
@@ -190,7 +192,7 @@ class LocalFileRepository {
 
   /// Returns `true` when [rawName] is a valid single `.tdf` file name or base name without path separators or control characters.
   static bool isValidSingleFileName(String rawName) =>
-      LocalFileOperations.isValidSingleFileName(rawName);
+      _operations.isValidSingleFileName(rawName);
 
   /// Returns the sorted list of `.tdf` file names present in [resolveDirectoryPath].
   List<String> listTdfFileNamesInDirectory() {
@@ -271,19 +273,18 @@ class LocalFileRepository {
   LocalFileException mapMoveFileSystemException(
     FileSystemException error, {
     required String fallbackPath,
-  }) => LocalFileOperations.mapMoveFileSystemException(
-    error,
-    fallbackPath,
-    _messages,
-  );
+  }) => _operations.mapMoveFileSystemException(error, fallbackPath, _messages);
 
   /// Safely moves the local `.tdf` file to [targetRepository]'s resolved path without overwriting existing entities.
   Future<void> moveTdfFile(LocalFileRepository targetRepository) async {
-    LocalFileOperations.moveTdfFile(
-      this,
-      targetRepository,
+    _operations.moveTdfFile(
+      resolveFilePath(),
+      targetRepository.resolveFilePath(),
+      targetRepository.resolveDirectoryPath(),
+      maxFileBytes,
       _messages,
       inMemory: _useInMemoryFallback && targetRepository._useInMemoryFallback,
+      inMemoryStore: inMemoryStore,
     );
   }
 
@@ -295,7 +296,7 @@ class LocalFileRepository {
         <String, Object?>{'initialDirectory': initialDirectory},
       );
       if (selected == null || selected.trim().isEmpty) return null;
-      return LocalFileOperations.trimTrailingSeparators(selected.trim());
+      return _operations.trimTrailingSeparators(selected.trim());
     } on PlatformException catch (error) {
       throw LocalFileException(
         _messages.errorMoveLocalFileFailed(error.message ?? error.code),
@@ -321,7 +322,7 @@ class LocalFileRepository {
       );
       if (selected == null || selected.trim().isEmpty) return null;
       return ensureTdfExtension(
-        LocalFileOperations.trimTrailingSeparators(selected.trim()),
+        _operations.trimTrailingSeparators(selected.trim()),
       );
     } on PlatformException catch (error) {
       throw LocalFileException(
@@ -335,22 +336,29 @@ class LocalFileRepository {
 
   /// Synchronously reads up to [maxBytes] from the diagnostic log file at [path].
   static String readLogFileSync(String path, {required int maxBytes}) =>
-      LocalFileOperations.readLogFileSync(path, maxBytes: maxBytes);
+      _operations.readLogFileSync(path, maxBytes: maxBytes);
 
   /// Renames the local `.tdf` file to [newFileName] inside its current directory and returns the new resolved path.
-  Future<String> renameTdf(String newFileName) =>
-      LocalFileOperations.renameTdf(this, newFileName, _messages);
+  Future<String> renameTdf(String newFileName) async => _operations.renameTdf(
+    resolveFilePath(),
+    resolveDirectoryPath(),
+    newFileName,
+    maxFileBytes,
+    _messages,
+    inMemory: _useInMemoryFallback,
+    inMemoryStore: inMemoryStore,
+  );
 
   /// Resolves the platform-appropriate user data directory for relative local file names.
   static String resolveDefaultDirectoryPath() =>
-      LocalFileOperations.resolveDefaultDirectoryPath();
+      _operations.resolveDefaultDirectoryPath();
 
   /// Resolves the parent directory path of [resolveFilePath].
   String resolveDirectoryPath() =>
-      LocalFileOperations.resolveDirectoryPath(resolveFilePath());
+      _operations.resolveDirectoryPath(resolveFilePath());
 
   /// Validates and resolves the target local file path, throwing [LocalFileException] if invalid.
-  String resolveFilePath() => LocalFileOperations.resolveFilePath(
+  String resolveFilePath() => _operations.resolveFilePath(
     config.localFilePath,
     baseDirectoryPath,
     _messages,
@@ -422,7 +430,7 @@ class LocalFileRepository {
   static String validateFileName(
     String rawName, {
     AppLocalizations? localizations,
-  }) => LocalFileOperations.validateFileName(
+  }) => _operations.validateFileName(
     rawName,
     localizations ??
         lookupAppLocalizations(
@@ -434,7 +442,7 @@ class LocalFileRepository {
   static String validateRelativeOrAbsolutePath(
     String rawPath, {
     AppLocalizations? localizations,
-  }) => LocalFileOperations.validateRelativeOrAbsolutePath(
+  }) => _operations.validateRelativeOrAbsolutePath(
     rawPath,
     localizations ??
         lookupAppLocalizations(
@@ -465,7 +473,7 @@ class LocalFileRepository {
       }
       final file = File(filePath);
       if (sourceType != FileSystemEntityType.notFound && createBackup) {
-        final backupPath = LocalFileOperations.resolveNextLocalBackupPath(
+        final backupPath = _operations.resolveNextLocalBackupPath(
           filePath,
           messages,
         );
@@ -501,7 +509,7 @@ class LocalFileRepository {
     String path,
     String content, {
     required bool append,
-  }) => LocalFileOperations.writeLogFileSync(path, content, append: append);
+  }) => _operations.writeLogFileSync(path, content, append: append);
 
   /// Lists sorted `.tdf` file names stored under [dirPath] in [inMemoryStore].
   List<String> _listInMemoryTdfFileNames(String dirPath) {

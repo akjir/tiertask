@@ -15,7 +15,6 @@
 
 import 'package:flutter/foundation.dart';
 
-import '../services/app_logger.dart';
 import 'task_board_evaluator.dart';
 import 'task_board_mutator.dart';
 import 'task_board_queue_mutator.dart';
@@ -24,18 +23,6 @@ import 'task_tier.dart';
 import 'tdf_metadata.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
-
-/// Normalized task lists and precomputed label/queue metadata for [TaskBoard] construction.
-typedef NormalizedTierSlices = ({
-  List<TaskItem> focus,
-  List<TaskItem> ready,
-  List<TaskItem> planned,
-  List<TaskItem> blocked,
-  List<TaskItem> someday,
-  List<TaskItem> completed,
-  Map<String, int> openTaskCountsByLabel,
-  TdfQueueBlock queueBlock,
-});
 
 /// Immutable domain model representing the TierTask board across all 6 derived tiers (`1` to `6`).
 @immutable
@@ -60,26 +47,24 @@ class TaskBoard {
            someday: someday,
            completed: completed,
            labels: labels,
+           deletedBlock: deletedBlock ?? TdfDeletedBlock.empty,
            explicitQueueBlock: queueBlock,
          ),
-         labels: labels,
-         deletedBlock: deletedBlock ?? TdfDeletedBlock.empty,
        );
 
-  TaskBoard._normalized(
-    NormalizedTierSlices slices, {
-    required List<TdfLabel> labels,
-    required this.deletedBlock,
-  }) : focus = List<TaskItem>.unmodifiable(slices.focus),
-       ready = List<TaskItem>.unmodifiable(slices.ready),
-       planned = List<TaskItem>.unmodifiable(slices.planned),
-       blocked = List<TaskItem>.unmodifiable(slices.blocked),
-       someday = List<TaskItem>.unmodifiable(slices.someday),
-       completed = List<TaskItem>.unmodifiable(slices.completed),
-       labels = List<TdfLabel>.unmodifiable(labels),
-       queueBlock = slices.queueBlock,
-       openTaskCountsByLabel = Map.unmodifiable(slices.openTaskCountsByLabel),
-       sortedLabels = TaskBoardEvaluator.sortLabelsAlphabetically(labels);
+  /// Creates an immutable [TaskBoard] from pre-normalized [slices].
+  TaskBoard._normalized(NormalizedTierSlices slices)
+    : focus = List<TaskItem>.unmodifiable(slices.focus),
+      ready = List<TaskItem>.unmodifiable(slices.ready),
+      planned = List<TaskItem>.unmodifiable(slices.planned),
+      blocked = List<TaskItem>.unmodifiable(slices.blocked),
+      someday = List<TaskItem>.unmodifiable(slices.someday),
+      completed = List<TaskItem>.unmodifiable(slices.completed),
+      labels = List<TdfLabel>.unmodifiable(slices.labels),
+      deletedBlock = slices.deletedBlock,
+      queueBlock = slices.queueBlock,
+      openTaskCountsByLabel = Map.unmodifiable(slices.openTaskCountsByLabel),
+      sortedLabels = TaskBoardEvaluator.sortLabelsAlphabetically(slices.labels);
 
   /// Creates an empty [TaskBoard] across all 6 tiers.
   factory TaskBoard.empty() => TaskBoard();
@@ -97,31 +82,35 @@ class TaskBoard {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
-  }) => TaskBoardEvaluator.evaluate(
-    tasks: tasks,
-    evaluationTime: evaluationTime,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
-    labels: labels,
-    deletedBlock: deletedBlock,
-    queueBlock: queueBlock,
-    activeLabelId: activeLabelId,
-    currentLatitude: currentLatitude,
-    currentLongitude: currentLongitude,
-    pruneExpiredCompleted: pruneExpiredCompleted,
+  }) => TaskBoard._normalized(
+    TaskBoardEvaluator.evaluate(
+      tasks: tasks,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      labels: labels,
+      deletedBlock: deletedBlock,
+      queueBlock: queueBlock,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+    ),
   );
 
   /// Retention period in days for completed tasks in Tier 6 (`Completed`) and deletion records.
-  static const int completedRetentionDays = 30;
+  static const int completedRetentionDays =
+      TaskBoardEvaluator.completedRetentionDays;
 
   /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC.md` Section 6.8.
-  static const int completedRetentionSeconds = 2592000;
+  static const int completedRetentionSeconds =
+      TaskBoardEvaluator.completedRetentionSeconds;
 
   /// Soft WIP limit for Tier 1 (`Focus`).
-  static const int focusSoftLimit = 3;
+  static const int focusSoftLimit = TaskBoardEvaluator.focusSoftLimit;
 
   /// Soft WIP limit for Tier 2 (`Ready`).
-  static const int readySoftLimit = 5;
+  static const int readySoftLimit = TaskBoardEvaluator.readySoftLimit;
 
   /// Tier 4 (`Blocked`) task items.
   final List<TaskItem> blocked;
@@ -157,20 +146,27 @@ class TaskBoard {
   final List<TdfLabel> sortedLabels;
 
   /// Returns all tasks across all 6 tiers in canonical document order.
-  List<TaskItem> get allTasks => List<TaskItem>.unmodifiable([
-    ...focus,
-    ...ready,
-    ...planned,
-    ...blocked,
-    ...someday,
-    ...completed,
-  ]);
+  List<TaskItem> get allTasks => _slices.allTasks;
 
   /// UTC timestamp of the last shared queue order modification (`queue.modified`).
   DateTime get queueModifiedAt => queueBlock.modifiedAt;
 
   /// Ordered list of scheduled open task IDs in the shared `queue` block.
   List<String> get queueTaskIds => queueBlock.taskIds;
+
+  /// Normalized slice record view of this board.
+  NormalizedTierSlices get _slices => (
+    focus: focus,
+    ready: ready,
+    planned: planned,
+    blocked: blocked,
+    someday: someday,
+    completed: completed,
+    labels: labels,
+    deletedBlock: deletedBlock,
+    openTaskCountsByLabel: openTaskCountsByLabel,
+    queueBlock: queueBlock,
+  );
 
   /// Adds a new TDF `label` block with a unique identifier and optional `#RRGGBB` [color].
   TaskBoard addLabel(
@@ -181,15 +177,17 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? modifiedAt,
     List<TaskCondition> conditions = const [],
-  }) => TaskBoardMutator.addLabel(
-    this,
-    name,
-    color: color,
-    id: id,
-    note: note,
-    currentDate: currentDate,
-    modifiedAt: modifiedAt,
-    conditions: conditions,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.addLabel(
+      slices,
+      name,
+      color: color,
+      id: id,
+      note: note,
+      currentDate: currentDate,
+      modifiedAt: modifiedAt,
+      conditions: conditions,
+    ),
   );
 
   /// Adds a new task per `TDF_SPEC.md` Section 6.1, prunes expired completed tasks, and evaluates tiers.
@@ -213,33 +211,35 @@ class TaskBoard {
     List<TdfTaskDependency>? dependencies,
     List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
-  }) => TaskBoardMutator.addTask(
-    this,
-    title,
-    id: id,
-    currentDate: currentDate,
-    mutate: (taskId, now) => TaskBoardMutator.updateTask(
-      this,
-      taskId,
-      title: title,
-      note: note,
-      targetTier: targetTier,
-      isPriority: isPriority,
-      subtasksAutoFinish: subtasksAutoFinish,
-      subtasks: subtasks,
-      labelIds: labelIds,
-      suspendedAt: suspendedAt,
-      isSuspendedForever: isSuspendedForever,
-      repeatRule: repeatRule,
-      blockedByTaskIds: blockedByTaskIds,
-      dependencies: dependencies,
-      links: links,
-      conditions: conditions,
-      currentDate: now,
-      localEvaluationTime: localEvaluationTime,
-      timeZone: timeZone,
-      modifiedAt: modifiedAt,
-      isNewTask: true,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.addTask(
+      slices,
+      title,
+      id: id,
+      currentDate: currentDate,
+      mutate: (taskId, now) => TaskBoardMutator.updateTask(
+        slices,
+        taskId,
+        title: title,
+        note: note,
+        targetTier: targetTier,
+        isPriority: isPriority,
+        subtasksAutoFinish: subtasksAutoFinish,
+        subtasks: subtasks,
+        labelIds: labelIds,
+        suspendedAt: suspendedAt,
+        isSuspendedForever: isSuspendedForever,
+        repeatRule: repeatRule,
+        blockedByTaskIds: blockedByTaskIds,
+        dependencies: dependencies,
+        links: links,
+        conditions: conditions,
+        currentDate: now,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        modifiedAt: modifiedAt,
+        isNewTask: true,
+      ),
     ),
   );
 
@@ -248,11 +248,14 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardEvaluator.applyAutoPull(
-    this,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardEvaluator.reevaluateBoard(
+      slices,
+      now: TaskItem.normalizeTimestamp(currentDate ?? DateTime.now().toUtc()),
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      pruneExpiredCompleted: false,
+    ),
   );
 
   /// Moves an active task immediately to Tier 4 (`Blocked`) and refills vacated active slots.
@@ -262,21 +265,24 @@ class TaskBoard {
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
     DateTime? suspendedUntil,
-  }) => TaskBoardQueueMutator.blockTask(
-    this,
-    taskId,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
-    suspendedUntil: suspendedUntil,
+  }) => _mutate(
+    (slices) => TaskBoardQueueMutator.blockTask(
+      slices,
+      taskId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      suspendedUntil: suspendedUntil,
+    ),
   );
 
   /// Removes expired deletion records (`now - deletedAt > 2,592,000` seconds) and increments `deletedBlock.generation`.
-  TaskBoard cleanupExpiredDeletions({DateTime? currentDate}) =>
-      TaskBoardEvaluator.cleanupExpiredDeletions(
-        this,
-        currentDate: currentDate,
-      );
+  TaskBoard cleanupExpiredDeletions({DateTime? currentDate}) => _mutate(
+    (slices) => TaskBoardEvaluator.cleanupExpiredDeletions(
+      slices,
+      currentDate: currentDate,
+    ),
+  );
 
   /// Marks an active task as done per `TDF_SPEC.md` Sections 6.4 and 6.9.4.
   TaskBoard completeTask(
@@ -285,13 +291,15 @@ class TaskBoard {
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
     int? expectedCompletions,
-  }) => TaskBoardMutator.completeTask(
-    this,
-    taskId,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
-    expectedCompletions: expectedCompletions,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.completeTask(
+      slices,
+      taskId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      expectedCompletions: expectedCompletions,
+    ),
   );
 
   /// Returns a copy of this [TaskBoard] with the specified collections replaced.
@@ -337,8 +345,9 @@ class TaskBoard {
   }
 
   /// Deletes the label with [labelId], removes its reference from all tasks, and records the deletion in [deletedBlock].
-  TaskBoard deleteLabel(String labelId, {DateTime? currentDate}) =>
-      TaskBoardMutator.deleteLabel(this, labelId, currentDate);
+  TaskBoard deleteLabel(String labelId, {DateTime? currentDate}) => _mutate(
+    (slices) => TaskBoardMutator.deleteLabel(slices, labelId, currentDate),
+  );
 
   /// Deletes the task with [taskId], removes its `queue` entry, and records the deletion in [deletedBlock].
   TaskBoard deleteTask(
@@ -346,12 +355,14 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardMutator.deleteTask(
-    this,
-    taskId,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.deleteTask(
+      slices,
+      taskId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
@@ -360,12 +371,14 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardQueueMutator.downgradeTask(
-    this,
-    taskId,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardQueueMutator.downgradeTask(
+      slices,
+      taskId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Derives a filtered [TaskBoard] considering only tasks matching [activeLabelId] and optional GPS coordinates.
@@ -376,70 +389,42 @@ class TaskBoard {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardEvaluator.evaluateForContext(
-    this,
-    activeLabelId: activeLabelId,
-    currentLatitude: currentLatitude,
-    currentLongitude: currentLongitude,
-    evaluationTime: evaluationTime,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
-  );
+  }) =>
+      TaskBoard.evaluate(
+        tasks: allTasks,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        labels: labels,
+        deletedBlock: deletedBlock,
+        queueBlock: queueBlock,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      ).logDomainMutation(
+        'evaluateForContext activeLabel=${activeLabelId ?? "all"}',
+      );
 
   /// Finds the [TdfLabel] with [labelId], or `null` if not found.
-  TdfLabel? findLabel(String labelId) {
-    for (final label in labels) {
-      if (label.id == labelId) return label;
-    }
-    return null;
-  }
+  TdfLabel? findLabel(String labelId) => _slices.findLabel(labelId);
 
   /// Finds the [TaskItem] with [taskId], or `null` if not found.
-  TaskItem? findTask(String taskId) {
-    for (final tier in TaskTier.values) {
-      if (_findInList(tasksForTier(tier), taskId) case final found?) {
-        return found;
-      }
-    }
-    return null;
-  }
+  TaskItem? findTask(String taskId) => _slices.findTask(taskId);
 
   /// Finds which [TaskTier] currently contains [taskId], or `null` if not found.
-  TaskTier? findTierOfTask(String taskId) {
-    for (final tier in TaskTier.values) {
-      if (_findInList(tasksForTier(tier), taskId) != null) return tier;
-    }
-    return null;
-  }
+  TaskTier? findTierOfTask(String taskId) => _slices.findTierOfTask(taskId);
 
   /// Returns whether any label on the board (excluding [excludingLabelId]) already uses [name].
-  bool hasDuplicateLabelName(String name, {String? excludingLabelId}) {
-    final target = name.trim().toLowerCase();
-    return target.isNotEmpty &&
-        labels.any(
-          (item) =>
-              item.id != excludingLabelId &&
-              item.name.trim().toLowerCase() == target,
-        );
-  }
+  bool hasDuplicateLabelName(String name, {String? excludingLabelId}) =>
+      _slices.hasDuplicateLabelName(name, excludingLabelId: excludingLabelId);
 
   /// Returns whether any task on the board (excluding [excludingTaskId]) already uses [title].
-  bool hasDuplicateTaskTitle(String title, {String? excludingTaskId}) {
-    final target = title.trim().toLowerCase();
-    return target.isNotEmpty &&
-        allTasks.any(
-          (item) =>
-              item.id != excludingTaskId &&
-              item.title.trim().toLowerCase() == target,
-        );
-  }
+  bool hasDuplicateTaskTitle(String title, {String? excludingTaskId}) =>
+      _slices.hasDuplicateTaskTitle(title, excludingTaskId: excludingTaskId);
 
-  /// Logs [action] with the resulting 6-tier task distribution under [LogTag.domain] and returns `this`.
+  /// Logs [action] with the resulting 6-tier task distribution under `LogTag.domain` and returns `this`.
   TaskBoard logDomainMutation(String action) {
-    AppLogger.info(
-      LogTag.domain,
-      '$action | tiers: Focus=${focus.length}, Ready=${ready.length}, Planned=${planned.length}, Blocked=${blocked.length}, Someday=${someday.length}, Completed=${completed.length}',
-    );
+    _slices.logDomainMutation(action);
     return this;
   }
 
@@ -451,14 +436,16 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardQueueMutator.moveTaskInQueue(
-    this,
-    taskId,
-    beforeTaskId: beforeTaskId,
-    afterTaskId: afterTaskId,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardQueueMutator.moveTaskInQueue(
+      slices,
+      taskId,
+      beforeTaskId: beforeTaskId,
+      afterTaskId: afterTaskId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Returns the precomputed count of open (non-completed) tasks across tiers `1` to `5` referencing [labelId].
@@ -466,8 +453,12 @@ class TaskBoard {
       openTaskCountsByLabel[labelId] ?? 0;
 
   /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (`2,592,000` seconds UTC) per `TDF_SPEC.md` Sections 5.2 and 6.8.1.
-  TaskBoard pruneCompletedTasks({DateTime? currentDate}) =>
-      TaskBoardEvaluator.pruneCompletedTasks(this, currentDate: currentDate);
+  TaskBoard pruneCompletedTasks({DateTime? currentDate}) => _mutate(
+    (slices) => TaskBoardEvaluator.pruneCompletedTasks(
+      slices,
+      currentDate: currentDate,
+    ),
+  );
 
   /// Restores a completed task back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
   TaskBoard restoreTask(
@@ -476,13 +467,15 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardQueueMutator.restoreTask(
-    this,
-    taskId,
-    targetTier: targetTier,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardQueueMutator.restoreTask(
+      slices,
+      taskId,
+      targetTier: targetTier,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Schedules a task from `Someday` into the active pull cycle per `TDF_SPEC.md` Section 6.2.
@@ -492,24 +485,19 @@ class TaskBoard {
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
     bool isPriority = false,
-  }) => TaskBoardQueueMutator.scheduleTask(
-    this,
-    taskId,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
-    isPriority: isPriority,
+  }) => _mutate(
+    (slices) => TaskBoardQueueMutator.scheduleTask(
+      slices,
+      taskId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      isPriority: isPriority,
+    ),
   );
 
   /// Returns the task list for a given [tier].
-  List<TaskItem> tasksForTier(TaskTier tier) => switch (tier) {
-    TaskTier.focus => focus,
-    TaskTier.ready => ready,
-    TaskTier.planned => planned,
-    TaskTier.blocked => blocked,
-    TaskTier.someday => someday,
-    TaskTier.completed => completed,
-  };
+  List<TaskItem> tasksForTier(TaskTier tier) => _slices.tasksForTier(tier);
 
   /// Toggles the subtask step at [stepIndex] on [taskId], auto-completing the task when `subtasks auto-finish` is enabled.
   TaskBoard toggleSubtask(
@@ -518,13 +506,15 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardMutator.toggleSubtask(
-    this,
-    taskId,
-    stepIndex,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.toggleSubtask(
+      slices,
+      taskId,
+      stepIndex,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Updates an existing label with [labelId], re-evaluates the 6-tier pipeline, and ignores empty or duplicate label names.
@@ -539,18 +529,20 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardMutator.updateLabel(
-    this,
-    labelId,
-    name: name,
-    color: color,
-    clearColor: clearColor,
-    note: note,
-    clearNote: clearNote,
-    conditions: conditions,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.updateLabel(
+      slices,
+      labelId,
+      name: name,
+      color: color,
+      clearColor: clearColor,
+      note: note,
+      clearNote: clearNote,
+      conditions: conditions,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Updates an existing task with [taskId], re-evaluates the 6-tier pipeline, and ignores empty or duplicate task titles.
@@ -575,43 +567,46 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
-  }) => TaskBoardMutator.updateTask(
-    this,
-    taskId,
-    title: title,
-    note: note,
-    targetTier: targetTier,
-    isPriority: isPriority,
-    subtasksAutoFinish: subtasksAutoFinish,
-    subtasks: subtasks,
-    labelIds: labelIds,
-    suspendedAt: suspendedAt,
-    isSuspendedForever: isSuspendedForever,
-    clearSuspendedAt: clearSuspendedAt,
-    repeatRule: repeatRule,
-    clearRepeatRule: clearRepeatRule,
-    blockedByTaskIds: blockedByTaskIds,
-    dependencies: dependencies,
-    links: links,
-    conditions: conditions,
-    currentDate: currentDate,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.updateTask(
+      slices,
+      taskId,
+      title: title,
+      note: note,
+      targetTier: targetTier,
+      isPriority: isPriority,
+      subtasksAutoFinish: subtasksAutoFinish,
+      subtasks: subtasks,
+      labelIds: labelIds,
+      suspendedAt: suspendedAt,
+      isSuspendedForever: isSuspendedForever,
+      clearSuspendedAt: clearSuspendedAt,
+      repeatRule: repeatRule,
+      clearRepeatRule: clearRepeatRule,
+      blockedByTaskIds: blockedByTaskIds,
+      dependencies: dependencies,
+      links: links,
+      conditions: conditions,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
   );
 
   /// Returns whether adding [candidateBlockerId] as a prerequisite of [taskId] would create a dependency cycle.
   bool wouldCreateDependencyCycle(String taskId, String candidateBlockerId) =>
       TaskBoardEvaluator.wouldCreateDependencyCycle(
-        this,
+        _slices,
         taskId,
         candidateBlockerId,
       );
 
-  /// Finds a task with [taskId] inside [list], or `null` if absent.
-  static TaskItem? _findInList(List<TaskItem> list, String taskId) {
-    for (final task in list) {
-      if (task.id == taskId) return task;
-    }
-    return null;
+  /// Applies [mutate] to `_slices` and returns `this` when the slices are unchanged.
+  TaskBoard _mutate(
+    NormalizedTierSlices Function(NormalizedTierSlices slices) mutate,
+  ) {
+    final current = _slices;
+    final next = mutate(current);
+    return identical(current, next) ? this : TaskBoard._normalized(next);
   }
 }

@@ -16,7 +16,6 @@
 import 'package:flutter/foundation.dart';
 
 import '../services/app_logger.dart';
-import 'task_board.dart';
 import 'task_board_evaluator.dart';
 import 'task_board_queue_mutator.dart';
 import 'task_item.dart';
@@ -25,16 +24,49 @@ import 'tdf_metadata.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
 
+/// Label lookup and duplicate validation helpers on [NormalizedTierSlices].
+extension TaskBoardMutationSlicesX on NormalizedTierSlices {
+  /// Finds the [TdfLabel] with [labelId], or `null` if not found.
+  TdfLabel? findLabel(String labelId) {
+    for (final label in labels) {
+      if (label.id == labelId) return label;
+    }
+    return null;
+  }
+
+  /// Returns whether any label on the board (excluding [excludingLabelId]) already uses [name].
+  bool hasDuplicateLabelName(String name, {String? excludingLabelId}) {
+    final target = name.trim().toLowerCase();
+    return target.isNotEmpty &&
+        labels.any(
+          (item) =>
+              item.id != excludingLabelId &&
+              item.name.trim().toLowerCase() == target,
+        );
+  }
+
+  /// Returns whether any task on the board (excluding [excludingTaskId]) already uses [title].
+  bool hasDuplicateTaskTitle(String title, {String? excludingTaskId}) {
+    final target = title.trim().toLowerCase();
+    return target.isNotEmpty &&
+        allTasks.any(
+          (item) =>
+              item.id != excludingTaskId &&
+              item.title.trim().toLowerCase() == target,
+        );
+  }
+}
+
 /// Stateless task, subtask, label CRUD, prerequisite arming, and recurrence
-/// mutation engine for [TaskBoard] per `TDF_SPEC.md` Sections 6.1, 6.4, and 6.8–6.10.
+/// mutation engine per `TDF_SPEC.md` Sections 6.1, 6.4, and 6.8–6.10.
 @immutable
 class TaskBoardMutator {
   /// Private constructor for static task and label mutation helpers.
   const TaskBoardMutator._();
 
   /// Adds a new TDF `label` block to [board] with a unique identifier and optional `#RRGGBB` [color].
-  static TaskBoard addLabel(
-    TaskBoard board,
+  static NormalizedTierSlices addLabel(
+    NormalizedTierSlices board,
     String name, {
     String? color,
     String? id,
@@ -63,17 +95,17 @@ class TaskBoardMutator {
       conditions: _sanitizeLabelRules(conditions) ?? const [],
     );
     return board
-        .copyWith(labels: [...board.labels, newLabel])
+        .copyWithSlices(labels: [...board.labels, newLabel])
         .logDomainMutation('addLabel id=$labelId name="$trimmed"');
   }
 
   /// Validates [title], allocates a task ID when [id] is `null`, and runs [mutate].
-  static TaskBoard addTask(
-    TaskBoard board,
+  static NormalizedTierSlices addTask(
+    NormalizedTierSlices board,
     String title, {
     String? id,
     DateTime? currentDate,
-    required TaskBoard Function(String taskId, DateTime now) mutate,
+    required NormalizedTierSlices Function(String taskId, DateTime now) mutate,
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty || board.hasDuplicateTaskTitle(trimmed)) return board;
@@ -83,8 +115,8 @@ class TaskBoardMutator {
   }
 
   /// Marks an active task on [board] as done per `TDF_SPEC.md` Sections 6.4 and 6.9.4.
-  static TaskBoard completeTask(
-    TaskBoard board,
+  static NormalizedTierSlices completeTask(
+    NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
@@ -128,8 +160,8 @@ class TaskBoardMutator {
   }
 
   /// Deletes the label with [labelId] from [board], removes its reference from all tasks, and records the deletion.
-  static TaskBoard deleteLabel(
-    TaskBoard board,
+  static NormalizedTierSlices deleteLabel(
+    NormalizedTierSlices board,
     String labelId, [
     DateTime? currentDate,
   ]) {
@@ -161,8 +193,8 @@ class TaskBoardMutator {
   }
 
   /// Deletes the task with [taskId] from [board], removes its `queue` entry, and records the deletion in `deletedBlock`.
-  static TaskBoard deleteTask(
-    TaskBoard board,
+  static NormalizedTierSlices deleteTask(
+    NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
@@ -198,35 +230,9 @@ class TaskBoardMutator {
     ).logDomainMutation('deleteTask id=$taskId');
   }
 
-  /// Rearms [dependencies] on [board] for the next occurrence of a recurring or restored task per `TDF_SPEC.md` Section 6.9.3.
-  static List<TdfTaskDependency> rearmDependencies(
-    TaskBoard board,
-    List<TdfTaskDependency> dependencies,
-  ) => List.unmodifiable([
-    for (final item in dependencies)
-      if (board.findTask(item.taskId) case final target?)
-        TdfTaskDependency(
-          taskId: item.taskId,
-          requiredCompletion: _captureRequirement(target),
-        )
-      else
-        item,
-  ]);
-
-  /// Returns a list of [steps] with every step's `isCompleted` state set to [isCompleted].
-  static List<SubtaskItem> setAllSubtasksCompleted(
-    List<SubtaskItem> steps,
-    bool isCompleted,
-  ) => [
-    for (final step in steps)
-      step.isCompleted == isCompleted
-          ? step
-          : step.copyWith(isCompleted: isCompleted),
-  ];
-
   /// Toggles the subtask step at [stepIndex] on [taskId] in [board], auto-completing the task when `subtasks auto-finish` is enabled.
-  static TaskBoard toggleSubtask(
-    TaskBoard board,
+  static NormalizedTierSlices toggleSubtask(
+    NormalizedTierSlices board,
     String taskId,
     int stepIndex, {
     DateTime? currentDate,
@@ -266,8 +272,8 @@ class TaskBoardMutator {
   }
 
   /// Updates an existing label with [labelId] on [board], re-evaluates the 6-tier pipeline, and ignores empty/duplicate names.
-  static TaskBoard updateLabel(
-    TaskBoard board,
+  static NormalizedTierSlices updateLabel(
+    NormalizedTierSlices board,
     String labelId, {
     String? name,
     String? color,
@@ -317,8 +323,8 @@ class TaskBoardMutator {
   }
 
   /// Updates an existing task (or creates a new task when [isNewTask] is `true`) with [taskId] on [board].
-  static TaskBoard updateTask(
-    TaskBoard board,
+  static NormalizedTierSlices updateTask(
+    NormalizedTierSlices board,
     String taskId, {
     String? title,
     String? note,
@@ -413,13 +419,15 @@ class TaskBoardMutator {
       suspendedAt: nextSuspended,
       isSuspendedForever: isForever,
       repeatRule: repeat,
-      dependencies: isRestoring ? rearmDependencies(board, armed) : armed,
+      dependencies: isRestoring
+          ? TaskBoardQueueMutator.rearmDependencies(board, armed)
+          : armed,
       labelIds: labelIds ?? prior?.labelIds ?? const [],
       links: links != null ? _cleanLinks(links) : (prior?.links ?? const []),
       conditions: _sanitizeTaskRules(conditions, prior?.conditions ?? const []),
       subtasksAutoFinish: autoFinish,
       subtasks: (isRestoring || isDone)
-          ? setAllSubtasksCompleted(steps, isDone)
+          ? TaskBoardQueueMutator.setAllSubtasksCompleted(steps, isDone)
           : steps,
     );
     final zone = _zone(now, localEvaluationTime, timeZone);
@@ -456,7 +464,7 @@ class TaskBoardMutator {
 
   /// Arms prerequisite requirements for [taskId] on [board] per `TDF_SPEC.md` Section 6.9.3.
   static List<TdfTaskDependency> _armDeps(
-    TaskBoard board,
+    NormalizedTierSlices board,
     String taskId,
     List<String>? blockedIds,
     List<TdfTaskDependency>? explicitDeps,
@@ -469,7 +477,7 @@ class TaskBoardMutator {
     bool allow(String id) =>
         id.isNotEmpty &&
         seen.add(id) &&
-        !board.wouldCreateDependencyCycle(taskId, id);
+        !TaskBoardEvaluator.wouldCreateDependencyCycle(board, taskId, id);
     final priorMap = <String, int>{
       for (final item in prior?.dependencies ?? const <TdfTaskDependency>[])
         item.taskId: item.requiredCompletion,
@@ -486,22 +494,13 @@ class TaskBoardMutator {
                 TdfTaskDependency(
                   taskId: id,
                   requiredCompletion:
-                      priorMap[id] ?? _captureRequirement(board.findTask(id)),
+                      priorMap[id] ??
+                      TaskBoardQueueMutator.captureDependencyRequirement(
+                        board.findTask(id),
+                      ),
                 ),
           ];
     return List<TdfTaskDependency>.unmodifiable(items);
-  }
-
-  /// Captures the required completion number for a newly added or rearmed prerequisite [target] per `TDF_SPEC.md` Section 6.9.3.
-  static int _captureRequirement(TaskItem? target) {
-    if (target == null) return 1;
-    if (target.isCompleted || target.completedAt != null) {
-      return target.completions >= 1 ? target.completions : 1;
-    }
-    if (target.completions >= TdfTaskDependency.maxCompletions) {
-      throw const FormatException('LimitExceeded');
-    }
-    return target.completions + 1;
   }
 
   /// Trims, validates, and caps [links] at [TaskLink.maxLinksPerTask] while preserving order.
@@ -523,14 +522,15 @@ class TaskBoardMutator {
   ];
 
   /// Collects all task IDs, label IDs, and retained deletion record IDs on [board] (`TDF_SPEC.md` Section 2.9).
-  static Set<String> _collectAllUsedEntityIds(TaskBoard board) => <String>{
-    for (final task in board.allTasks) task.id,
-    for (final task in board.allTasks) ...task.blockedByTaskIds,
-    for (final task in board.allTasks) ...task.labelIds,
-    for (final label in board.labels) label.id,
-    for (final record in board.deletedBlock.tasks) record.taskId,
-    for (final record in board.deletedBlock.labels) record.labelId,
-  };
+  static Set<String> _collectAllUsedEntityIds(NormalizedTierSlices board) =>
+      <String>{
+        for (final task in board.allTasks) task.id,
+        for (final task in board.allTasks) ...task.blockedByTaskIds,
+        for (final task in board.allTasks) ...task.labelIds,
+        for (final label in board.labels) label.id,
+        for (final record in board.deletedBlock.tasks) record.taskId,
+        for (final record in board.deletedBlock.labels) record.labelId,
+      };
 
   /// Filters and orders task condition rules of type [T] for [group], or returns a single [GroupResetTaskCondition] when reset.
   static Iterable<TaskCondition> _groupRules<T extends TaskCondition>(
@@ -544,25 +544,26 @@ class TaskBoardMutator {
       : rules.whereType<T>();
 
   /// Applies [transform] to every task across all six slices of [board].
-  static TaskBoard _mapBoardTasks(
-    TaskBoard board,
+  static NormalizedTierSlices _mapBoardTasks(
+    NormalizedTierSlices board,
     TaskItem Function(TaskItem task) transform, {
     List<TdfLabel>? labels,
     TdfDeletedBlock? deletedBlock,
-  }) => board.copyWith(
+  }) => TaskBoardEvaluator.normalizeTierSlices(
     focus: board.focus.map(transform).toList(),
     ready: board.ready.map(transform).toList(),
     planned: board.planned.map(transform).toList(),
     blocked: board.blocked.map(transform).toList(),
     someday: board.someday.map(transform).toList(),
     completed: board.completed.map(transform).toList(),
-    labels: labels,
-    deletedBlock: deletedBlock,
+    labels: labels ?? board.labels,
+    deletedBlock: deletedBlock ?? board.deletedBlock,
+    explicitQueueBlock: board.queueBlock,
   );
 
   /// Reschedules a completed recurring [task] on [board] for its next cycle per `TDF_SPEC.md` Sections 6.4, 6.9.3, and 6.10.3.
   static TaskItem? _reschedule(
-    TaskBoard board,
+    NormalizedTierSlices board,
     TaskItem task,
     DateTime now,
     TdfTimeZoneContext zone, [
@@ -586,8 +587,14 @@ class TaskBoardMutator {
       suspendedAt: nextDue,
       isSuspendedForever: false,
       repeatRule: repeatRule,
-      dependencies: rearmDependencies(board, task.dependencies),
-      subtasks: setAllSubtasksCompleted(task.subtasks, false),
+      dependencies: TaskBoardQueueMutator.rearmDependencies(
+        board,
+        task.dependencies,
+      ),
+      subtasks: TaskBoardQueueMutator.setAllSubtasksCompleted(
+        task.subtasks,
+        false,
+      ),
       modifiedAt:
           preserveModifiedAt ??
           TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),

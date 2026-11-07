@@ -16,7 +16,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -38,34 +37,29 @@ void main() {
       String? lastChanged;
       var clearedCount = 0;
 
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(
-            body: Column(
-              children: [
-                ClearableTextField(
-                  fieldKey: const ValueKey('sample_field'),
-                  clearButtonKey: const ValueKey('sample_clear_button'),
-                  controller: controller,
-                  onChanged: (value) => lastChanged = value,
-                  onCleared: () => clearedCount++,
-                  decoration: const InputDecoration(
-                    labelText: 'Sample',
-                    suffixIcon: Icon(
-                      Icons.visibility_outlined,
-                      key: ValueKey('trailing_icon'),
-                    ),
-                  ),
+      await pumpLeafWidget(
+        tester,
+        Column(
+          children: [
+            ClearableTextField(
+              fieldKey: const ValueKey('sample_field'),
+              clearButtonKey: const ValueKey('sample_clear_button'),
+              controller: controller,
+              onChanged: (value) => lastChanged = value,
+              onCleared: () => clearedCount++,
+              decoration: const InputDecoration(
+                labelText: 'Sample',
+                suffixIcon: Icon(
+                  Icons.visibility_outlined,
+                  key: ValueKey('trailing_icon'),
                 ),
-                TextField(
-                  key: const ValueKey('other_field'),
-                  focusNode: otherFocusNode,
-                ),
-              ],
+              ),
             ),
-          ),
+            TextField(
+              key: const ValueKey('other_field'),
+              focusNode: otherFocusNode,
+            ),
+          ],
         ),
       );
 

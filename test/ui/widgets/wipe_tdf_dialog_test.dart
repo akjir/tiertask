@@ -18,7 +18,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -293,19 +292,14 @@ task 000001OkD2 {
         isNot(equals(const WipeTdfDialogResult(createBackup: false))),
       );
 
-      await tester.pumpWidget(
-        const MaterialApp(
-          locale: Locale('de'),
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(
-            body: WipeTdfDialog(
-              target: WipeTdfTarget.local,
-              fileName: 'aufgaben.tdf',
-              expectedBaseName: 'aufgaben',
-            ),
-          ),
+      await pumpLeafWidget(
+        tester,
+        const WipeTdfDialog(
+          target: WipeTdfTarget.local,
+          fileName: 'aufgaben.tdf',
+          expectedBaseName: 'aufgaben',
         ),
+        locale: const Locale('de'),
       );
       await tester.pumpAndSettle();
 

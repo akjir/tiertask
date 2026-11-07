@@ -14,9 +14,18 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
+import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
+import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/ui/app_theme.dart';
 
 /// Fake [LocalFileRepository] returning an in-memory `.tdf` document for widget tests.
 class FakeLocalFileRepository extends LocalFileRepository {
@@ -33,6 +42,19 @@ class FakeLocalFileRepository extends LocalFileRepository {
   Future<void> saveTdf(String tdfContent) async {
     initialTdf = tdfContent;
   }
+}
+
+/// In-memory [TaskNotifier] test double that returns [initialBoard] without filesystem or network I/O.
+class FakeTaskNotifier extends TaskNotifier {
+  /// Creates a [FakeTaskNotifier] seeded with [initialBoard].
+  FakeTaskNotifier([TaskBoard? initialBoard])
+    : initialBoard = initialBoard ?? TaskBoard.empty();
+
+  /// Initial [TaskBoard] snapshot returned by [build].
+  final TaskBoard initialBoard;
+
+  @override
+  Future<TaskBoard> build() async => initialBoard;
 }
 
 /// Fake [WebDavRepository] for deterministic widget tests of connection status banners.
@@ -115,4 +137,43 @@ Future<void> openSettingsFromMenu(WidgetTester tester) async {
   await tester.pumpAndSettle();
   await tester.tap(find.byIcon(Icons.settings_outlined));
   await tester.pumpAndSettle();
+}
+
+/// Mounts [child] inside an isolated in-memory [ProviderScope] and [MaterialApp] without booting `HomeScreen` or `TdfService.parse`.
+Future<void> pumpLeafWidget(
+  WidgetTester tester,
+  Widget child, {
+  TaskBoard? board,
+  WebDavConfig config = const WebDavConfig(),
+  Locale locale = const Locale('en'),
+  AppThemeSet? themeSet,
+  ThemeMode themeMode = ThemeMode.light,
+  DateTime Function()? clock,
+  bool wrapInScaffold = true,
+}) async {
+  final effectiveThemeSet =
+      themeSet ?? AppThemeSet.forPalette(config.themePalette);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(config),
+        ),
+        clockProvider.overrideWithValue(
+          clock ?? () => DateTime.utc(2026, 11, 1, 12, 0),
+        ),
+        if (board != null)
+          taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+      ],
+      child: MaterialApp(
+        locale: locale,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: effectiveThemeSet.light.toThemeData(),
+        darkTheme: effectiveThemeSet.dark.toThemeData(),
+        themeMode: themeMode,
+        home: wrapInScaffold ? Scaffold(body: child) : child,
+      ),
+    ),
+  );
 }

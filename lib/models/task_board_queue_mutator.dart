@@ -15,16 +15,53 @@
 
 import 'package:flutter/foundation.dart';
 
-import 'task_board.dart';
 import 'task_board_evaluator.dart';
-import 'task_board_mutator.dart';
 import 'task_item.dart';
 import 'task_tier.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
 
+/// Task lookup and tier slice indexing helpers on [NormalizedTierSlices].
+extension TaskBoardQueueSlicesX on NormalizedTierSlices {
+  /// Finds the [TaskItem] with [taskId], or `null` if not found.
+  TaskItem? findTask(String taskId) {
+    for (final tier in TaskTier.values) {
+      if (_findInList(tasksForTier(tier), taskId) case final found?) {
+        return found;
+      }
+    }
+    return null;
+  }
+
+  /// Finds which [TaskTier] currently contains [taskId], or `null` if not found.
+  TaskTier? findTierOfTask(String taskId) {
+    for (final tier in TaskTier.values) {
+      if (_findInList(tasksForTier(tier), taskId) != null) return tier;
+    }
+    return null;
+  }
+
+  /// Returns the task list for a given [tier].
+  List<TaskItem> tasksForTier(TaskTier tier) => switch (tier) {
+    TaskTier.focus => focus,
+    TaskTier.ready => ready,
+    TaskTier.planned => planned,
+    TaskTier.blocked => blocked,
+    TaskTier.someday => someday,
+    TaskTier.completed => completed,
+  };
+
+  /// Finds a task with [taskId] inside [list], or `null` if absent.
+  static TaskItem? _findInList(List<TaskItem> list, String taskId) {
+    for (final task in list) {
+      if (task.id == taskId) return task;
+    }
+    return null;
+  }
+}
+
 /// Stateless scheduling, blocking, downgrade, restore, and shared queue ordering
-/// mutation engine for [TaskBoard] per `TDF_SPEC.md` Sections 6.2, 6.3, 6.5, and 6.11.
+/// mutation engine per `TDF_SPEC.md` Sections 6.2, 6.3, 6.5, and 6.11.
 @immutable
 class TaskBoardQueueMutator {
   /// Private constructor for static queue and tier transition helpers.
@@ -47,8 +84,8 @@ class TaskBoardQueueMutator {
   }
 
   /// Moves an active task on [board] immediately to Tier 4 (`Blocked`) and refills vacated active slots.
-  static TaskBoard blockTask(
-    TaskBoard board,
+  static NormalizedTierSlices blockTask(
+    NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
@@ -75,7 +112,7 @@ class TaskBoardQueueMutator {
       clearSuspendedAt: useForever,
       isSuspendedForever: useForever,
       subtasks: wasCompleted
-          ? TaskBoardMutator.setAllSubtasksCompleted(task.subtasks, false)
+          ? setAllSubtasksCompleted(task.subtasks, false)
           : task.subtasks,
       modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
@@ -92,34 +129,21 @@ class TaskBoardQueueMutator {
     ).logDomainMutation('blockTask id=$taskId');
   }
 
-  /// Derives a [TdfQueueBlock] preserving the slice order of `[focus, ready, planned, blocked]`.
-  static TdfQueueBlock deriveSliceQueueBlock({
-    required List<TaskItem> focus,
-    required List<TaskItem> ready,
-    required List<TaskItem> planned,
-    required List<TaskItem> blocked,
-  }) {
-    final ids = <String>[];
-    final seen = <String>{};
-    DateTime? latestModified;
-    for (final task in <TaskItem>[...focus, ...ready, ...planned, ...blocked]) {
-      if (!task.isCompleted && task.completedAt == null && seen.add(task.id)) {
-        ids.add(task.id);
-        final effectiveMod = task.effectiveModifiedAt;
-        if (latestModified == null || effectiveMod.isAfter(latestModified)) {
-          latestModified = effectiveMod;
-        }
-      }
+  /// Captures the required completion number for a newly added or rearmed prerequisite [target] per `TDF_SPEC.md` Section 6.9.3.
+  static int captureDependencyRequirement(TaskItem? target) {
+    if (target == null) return 1;
+    if (target.isCompleted || target.completedAt != null) {
+      return target.completions >= 1 ? target.completions : 1;
     }
-    return TdfQueueBlock(
-      modifiedAt: latestModified ?? TdfQueueBlock.epochModifiedAt,
-      taskIds: ids,
-    );
+    if (target.completions >= TdfTaskDependency.maxCompletions) {
+      throw const FormatException('LimitExceeded');
+    }
+    return target.completions + 1;
   }
 
   /// Downgrades a task on [board] in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
-  static TaskBoard downgradeTask(
-    TaskBoard board,
+  static NormalizedTierSlices downgradeTask(
+    NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
@@ -142,7 +166,7 @@ class TaskBoardQueueMutator {
       ).logDomainMutation('downgradeTask id=$taskId from=Focus');
     }
     if (sourceTier == TaskTier.ready) {
-      return _downgradeToPlanned(
+      return _downgradeToQueueTail(
         board,
         task,
         now,
@@ -163,8 +187,8 @@ class TaskBoardQueueMutator {
   }
 
   /// Moves [taskId] within [board.queueBlock] before [beforeTaskId], after [afterTaskId], or to the end per `TDF_SPEC.md` Section 6.11.1.
-  static TaskBoard moveTaskInQueue(
-    TaskBoard board,
+  static NormalizedTierSlices moveTaskInQueue(
+    NormalizedTierSlices board,
     String taskId, {
     String? beforeTaskId,
     String? afterTaskId,
@@ -213,6 +237,21 @@ class TaskBoardQueueMutator {
       pruneExpiredCompleted: false,
     ).logDomainMutation('moveTaskInQueue id=$taskId');
   }
+
+  /// Rearms [dependencies] on [board] for the next occurrence of a recurring or restored task per `TDF_SPEC.md` Section 6.9.3.
+  static List<TdfTaskDependency> rearmDependencies(
+    NormalizedTierSlices board,
+    List<TdfTaskDependency> dependencies,
+  ) => List.unmodifiable([
+    for (final item in dependencies)
+      if (board.findTask(item.taskId) case final target?)
+        TdfTaskDependency(
+          taskId: item.taskId,
+          requiredCompletion: captureDependencyRequirement(target),
+        )
+      else
+        item,
+  ]);
 
   /// Reconciles [currentQueue] when `copyWith` replaces tier slices without providing an explicit `queueBlock`.
   static TdfQueueBlock reconcileQueueWithSlices({
@@ -271,8 +310,8 @@ class TaskBoardQueueMutator {
   }
 
   /// Restores a completed task on [board] back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
-  static TaskBoard restoreTask(
-    TaskBoard board,
+  static NormalizedTierSlices restoreTask(
+    NormalizedTierSlices board,
     String taskId, {
     TaskTier targetTier = TaskTier.planned,
     DateTime? currentDate,
@@ -296,14 +335,8 @@ class TaskBoardQueueMutator {
       clearSuspendedAt: true,
       isSuspendedForever: false,
       isPriority: targetTier == TaskTier.focus,
-      dependencies: TaskBoardMutator.rearmDependencies(
-        board,
-        existing.dependencies,
-      ),
-      subtasks: TaskBoardMutator.setAllSubtasksCompleted(
-        existing.subtasks,
-        false,
-      ),
+      dependencies: rearmDependencies(board, existing.dependencies),
+      subtasks: setAllSubtasksCompleted(existing.subtasks, false),
       modifiedAt: TaskItem.nextModifiedTimestamp(
         now,
         existing.effectiveModifiedAt,
@@ -325,8 +358,8 @@ class TaskBoardQueueMutator {
   }
 
   /// Schedules a task on [board] from `Someday` into the active pull cycle per `TDF_SPEC.md` Section 6.2.
-  static TaskBoard scheduleTask(
-    TaskBoard board,
+  static NormalizedTierSlices scheduleTask(
+    NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
@@ -353,16 +386,10 @@ class TaskBoardQueueMutator {
                 : existing.isSuspendedForever,
             isPriority: effectivePriority,
             dependencies: wasCompleted
-                ? TaskBoardMutator.rearmDependencies(
-                    board,
-                    existing.dependencies,
-                  )
+                ? rearmDependencies(board, existing.dependencies)
                 : existing.dependencies,
             subtasks: wasCompleted
-                ? TaskBoardMutator.setAllSubtasksCompleted(
-                    existing.subtasks,
-                    false,
-                  )
+                ? setAllSubtasksCompleted(existing.subtasks, false)
                 : existing.subtasks,
             modifiedAt: TaskItem.nextModifiedTimestamp(
               now,
@@ -383,6 +410,17 @@ class TaskBoardQueueMutator {
     ).logDomainMutation('scheduleTask id=$taskId');
   }
 
+  /// Returns a list of [steps] with every step's `isCompleted` state set to [isCompleted].
+  static List<SubtaskItem> setAllSubtasksCompleted(
+    List<SubtaskItem> steps,
+    bool isCompleted,
+  ) => [
+    for (final step in steps)
+      step.isCompleted == isCompleted
+          ? step
+          : step.copyWith(isCompleted: isCompleted),
+  ];
+
   /// Updates [currentQueue] after [existingTask] is edited or added as [updatedTask].
   static TdfQueueBlock updateQueueForEditedTask(
     TdfQueueBlock currentQueue,
@@ -391,26 +429,21 @@ class TaskBoardQueueMutator {
     bool shouldBeQueued,
     DateTime now,
   ) {
-    final wasCompleted =
-        existingTask != null &&
-        (existingTask.isCompleted || existingTask.completedAt != null);
     if (!shouldBeQueued) {
       return removeTaskFromQueue(currentQueue, updatedTask.id, now);
     }
-    if (wasCompleted) {
-      final withoutTask = removeTaskFromQueue(
-        currentQueue,
-        updatedTask.id,
-        now,
-      );
-      return appendTaskToQueue(withoutTask, updatedTask.id, now);
-    }
-    return appendTaskToQueue(currentQueue, updatedTask.id, now);
+    final wasDone =
+        (existingTask?.isCompleted ?? false) ||
+        existingTask?.completedAt != null;
+    final baseQueue = wasDone
+        ? removeTaskFromQueue(currentQueue, updatedTask.id, now)
+        : currentQueue;
+    return appendTaskToQueue(baseQueue, updatedTask.id, now);
   }
 
   /// Downgrades [task] on [board] from Tier 1 (`Focus`) to Tier 2 (`Ready`) per `TDF_SPEC.md` Section 6.3.
-  static TaskBoard _downgradeFromFocus(
-    TaskBoard board,
+  static NormalizedTierSlices _downgradeFromFocus(
+    NormalizedTierSlices board,
     TaskItem task,
     DateTime now, {
     required DateTime? localEvaluationTime,
@@ -419,7 +452,7 @@ class TaskBoardQueueMutator {
     final totalEligibleCount =
         board.focus.length + board.ready.length + board.planned.length;
     if (totalEligibleCount <
-        TaskBoard.focusSoftLimit + TaskBoard.readySoftLimit) {
+        TaskBoardEvaluator.focusSoftLimit + TaskBoardEvaluator.readySoftLimit) {
       return _downgradeToQueueTail(
         board,
         task,
@@ -429,7 +462,7 @@ class TaskBoardQueueMutator {
       );
     }
 
-    final slot8Anchor = board.ready[TaskBoard.readySoftLimit - 1];
+    final slot8Anchor = board.ready[TaskBoardEvaluator.readySoftLimit - 1];
     final alignedPriority = slot8Anchor.isPriority;
     final priorityChanged = task.isPriority != alignedPriority;
     final updatedTask = priorityChanged
@@ -474,24 +507,9 @@ class TaskBoardQueueMutator {
     );
   }
 
-  /// Downgrades [task] on [board] from Tier 2 (`Ready`) to Tier 3 (`Planned`) per `TDF_SPEC.md` Section 6.3.
-  static TaskBoard _downgradeToPlanned(
-    TaskBoard board,
-    TaskItem task,
-    DateTime now, {
-    required DateTime? localEvaluationTime,
-    required TdfTimeZoneContext? timeZone,
-  }) => _downgradeToQueueTail(
-    board,
-    task,
-    now,
-    localEvaluationTime: localEvaluationTime,
-    timeZone: timeZone,
-  );
-
   /// Removes `priority` from [task] on [board] and moves its queue entry to the end of `queue` (`TDF_SPEC.md` Section 6.3).
-  static TaskBoard _downgradeToQueueTail(
-    TaskBoard board,
+  static NormalizedTierSlices _downgradeToQueueTail(
+    NormalizedTierSlices board,
     TaskItem task,
     DateTime now, {
     required DateTime? localEvaluationTime,
@@ -537,8 +555,8 @@ class TaskBoardQueueMutator {
   }
 
   /// Downgrades [task] on [board] from Tier 3 (`Planned`) to Tier 5 (`Someday`) per `TDF_SPEC.md` Section 6.3.
-  static TaskBoard _downgradeToSomeday(
-    TaskBoard board,
+  static NormalizedTierSlices _downgradeToSomeday(
+    NormalizedTierSlices board,
     TaskItem task,
     DateTime now, {
     required DateTime? localEvaluationTime,
