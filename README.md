@@ -7,12 +7,11 @@
 
 ## Overview
 
-`TierTask` stores objective task facts (`tdf 0.5.1`, `queue`, `deleted`, `label`, `task`) in one `.tdf` document and derives operational tiers automatically in a deterministic pull system.
+`TierTask` stores objective task facts in one `.tdf` document and derives operational tiers automatically in a deterministic pull system.
 
 - **Cross-Platform Desktop & Mobile:** Supports Linux (`linux/`), Android (`android/`), and Windows (`windows/`) with English (`en`, default) and German (`de`) localization and Material 3 `Slate` and `Navy` color palettes.
-- **Unified Block DSL (`TDF`):** Scans, parses, and serializes `.tdf` documents (`tdf 0.5.1`, with automatic `tdf 0.5.0` load conversion) in a single $O(N)$ pass with strict resource bounds and explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1` version migration.
 - **Deterministic 6-Tier Derivation:** Evaluates `Completed`, `Someday`, and `Blocked` automatically, slices active tasks in `queue` block order into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`, and prunes completed tasks and `deleted` tombstones older than `30` days (UTC).
-- **Context-Aware Conditions & Recurrence:** Evaluates completion-count dependencies (`blocked <task-id>[:<required-completion>]`), `suspended`, and `day`, `time`, and foreground GPS `location` conditions with label inheritance, and reschedules completed `repeat` tasks into `Focus` via `Blocked`.
+- **Context-Aware Conditions & Recurrence:** Evaluates completion-count dependencies, `suspended`, and `day`, `time`, and foreground GPS `location` conditions with label inheritance, and reschedules completed `repeat` tasks into `Focus` via `Blocked`.
 - **Two-Stage Three-Way Synchronization:** Reconciles in-memory state, local `.tdf` files, and WebDAV servers using 10-character Base62 entity identifiers, monotonic UTC `modified` timestamps, and `deleted.generation` counters across `Local`, `WebDAV`, and `Both` storage modes.
 - **Multi-Workspace & Encrypted Settings:** Isolates independent `.tdf` task boards and storage settings into switchable workspaces persisted via `flutter_secure_storage`.
 - **Opt-In Diagnostic Logging:** Records sanitized runtime events and crash stack traces into a 5,000-line rolling `tiertask.log` ring buffer with an in-app log viewer when enabled.
