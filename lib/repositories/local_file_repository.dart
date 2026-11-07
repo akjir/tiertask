@@ -131,6 +131,19 @@ class LocalFileRepository {
     }
   }
 
+  /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
+  static String ensureTdfExtension(String rawName) {
+    final trimmed = rawName.trim();
+    if (trimmed.isEmpty) {
+      return WebDavConfig.defaultFileName;
+    }
+    if (trimmed.length > 4 &&
+        trimmed.substring(trimmed.length - 4).toLowerCase() == '.tdf') {
+      return trimmed;
+    }
+    return '$trimmed.tdf';
+  }
+
   /// Extracts the base file name without a trailing `.tdf` extension from [rawPath].
   static String extractFileBaseName(String rawPath) {
     final fileName = extractFileNameFromPath(rawPath);
@@ -167,6 +180,90 @@ class LocalFileRepository {
     }
     final suffix = attemptIndex.toString().padLeft(3, '0');
     return '$basePath.bak.$suffix';
+  }
+
+  /// Creates an empty `.tdf` document at [resolveFilePath] when the file does not exist yet, leaving existing files untouched.
+  Future<void> initializeIfMissing() async {
+    final localizations = _localizations;
+    final filePath = resolveFilePath();
+    const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
+
+    if (_useInMemoryFallback) {
+      final store = inMemoryStore;
+      if (store != null && !store.containsKey(filePath)) {
+        store[filePath] = emptyContent;
+        AppLogger.info(
+          LogTag.storage,
+          'LocalFileRepository.initializeIfMissing (in-memory) created path=$filePath',
+        );
+      }
+      return;
+    }
+
+    final entityType = FileSystemEntity.typeSync(filePath, followLinks: false);
+    if (entityType == FileSystemEntityType.directory) {
+      throw LocalFileException(
+        localizations.errorMoveSourceIsDirectory(filePath),
+      );
+    }
+    if (entityType == FileSystemEntityType.link) {
+      throw LocalFileException(
+        localizations.errorMoveSourceIsSymlink(filePath),
+      );
+    }
+    if (entityType == FileSystemEntityType.notFound) {
+      await saveTdf(emptyContent);
+      AppLogger.info(
+        LogTag.storage,
+        'LocalFileRepository.initializeIfMissing created path=$filePath',
+      );
+    }
+  }
+
+  /// Returns `true` when [rawName] is a valid single `.tdf` file name or base name without path separators or control characters.
+  static bool isValidSingleFileName(String rawName) {
+    final trimmed = rawName.trim();
+    if (trimmed.isEmpty ||
+        trimmed == '.' ||
+        trimmed == '..' ||
+        trimmed.toLowerCase() == '.tdf' ||
+        trimmed.contains('/') ||
+        trimmed.contains(r'\') ||
+        _hasControlCharacters(trimmed)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Returns the sorted list of `.tdf` file names present in [resolveDirectoryPath].
+  List<String> listTdfFileNamesInDirectory() {
+    final dirPath = tryResolveDirectoryPath();
+    if (dirPath == null) {
+      return const <String>[];
+    }
+    if (_useInMemoryFallback) {
+      return _listInMemoryTdfFileNames(dirPath);
+    }
+    try {
+      final directory = Directory(dirPath);
+      if (!directory.existsSync()) {
+        return const <String>[];
+      }
+      final names = <String>[];
+      for (final entity in directory.listSync(followLinks: false)) {
+        if (entity is File) {
+          final name = extractFileNameFromPath(entity.path);
+          if (name.length > 4 &&
+              name.substring(name.length - 4).toLowerCase() == '.tdf') {
+            names.add(name);
+          }
+        }
+      }
+      names.sort();
+      return List<String>.unmodifiable(names);
+    } on FileSystemException {
+      return const <String>[];
+    }
   }
 
   /// Reads the local `.tdf` file and returns its contents, or an empty string if the file does not exist.
@@ -314,6 +411,33 @@ class LocalFileRepository {
         return null;
       }
       return _trimTrailingSeparators(selected.trim());
+    } on PlatformException catch (error) {
+      throw LocalFileException(
+        _localizations.errorMoveLocalFileFailed(error.message ?? error.code),
+        cause: error,
+      );
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Opens the native desktop file selection/creation dialog and returns the normalized `.tdf` path, or `null` if cancelled.
+  Future<String?> pickTdfFile({
+    String? initialDirectory,
+    String? currentFileName,
+  }) async {
+    try {
+      final selected = await directoryPickerChannel.invokeMethod<String>(
+        'pickFile',
+        <String, Object?>{
+          'initialDirectory': initialDirectory,
+          'currentFileName': currentFileName,
+        },
+      );
+      if (selected == null || selected.trim().isEmpty) {
+        return null;
+      }
+      return ensureTdfExtension(_trimTrailingSeparators(selected.trim()));
     } on PlatformException catch (error) {
       throw LocalFileException(
         _localizations.errorMoveLocalFileFailed(error.message ?? error.code),
@@ -670,6 +794,28 @@ class LocalFileRepository {
   static bool _isCrossDeviceError(FileSystemException error) {
     final code = error.osError?.errorCode;
     return code == 18 || code == 17 && Platform.isWindows;
+  }
+
+  /// Lists sorted `.tdf` file names stored under [dirPath] in [inMemoryStore].
+  List<String> _listInMemoryTdfFileNames(String dirPath) {
+    final store = inMemoryStore;
+    if (store == null) {
+      return const <String>[];
+    }
+    final prefix = '$dirPath${Platform.pathSeparator}';
+    final names = <String>{};
+    for (final key in store.keys) {
+      if (key.startsWith(prefix)) {
+        final rest = key.substring(prefix.length);
+        if (!rest.contains(Platform.pathSeparator) &&
+            rest.length > 4 &&
+            rest.substring(rest.length - 4).toLowerCase() == '.tdf') {
+          names.add(rest);
+        }
+      }
+    }
+    final sorted = names.toList()..sort();
+    return List<String>.unmodifiable(sorted);
   }
 
   /// Fallback text matcher when `osError.errorCode` is not populated or uses a non-standard code.

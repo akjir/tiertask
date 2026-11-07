@@ -108,6 +108,22 @@ final directoryPickerProvider =
           .pickDirectory(initialDirectory: initialDirectory);
     });
 
+/// Provides the native file picker function for selecting or creating a `.tdf` file, overridable in widget tests.
+final filePickerProvider =
+    Provider<
+      Future<String?> Function({
+        String? initialDirectory,
+        String? currentFileName,
+      })
+    >((ref) {
+      return ({String? initialDirectory, String? currentFileName}) => ref
+          .read(localFileRepositoryProvider)
+          .pickTdfFile(
+            initialDirectory: initialDirectory,
+            currentFileName: currentFileName,
+          );
+    });
+
 /// Provides the [LinkLauncherRepository] for opening task link URIs via the OS handler.
 final linkLauncherRepositoryProvider = Provider<LinkLauncherRepository>((ref) {
   return const PlatformLinkLauncherRepository();
@@ -486,6 +502,71 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       localEvaluationTime: localNow,
     );
     await _commitMutation(updated);
+  }
+
+  /// Switches the active workspace's local `.tdf` file to [newConfig] without moving or deleting the previous file, initializes the target file if missing, and reloads the board.
+  Future<void> selectLocalFile(WebDavConfig newConfig) async {
+    await prepareForWorkspaceUnload();
+    final previousConfig = _resolveCurrentConfig(ref);
+    final localizations = lookupAppLocalizations(
+      newConfig.language.resolveLocale(PlatformDispatcher.instance.locale),
+    );
+    final settingsRepo = ref.read(settingsRepositoryProvider);
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final inMemoryStore = ref.read(_inMemoryLocalStoreProvider);
+    final targetRepo = LocalFileRepository(
+      config: newConfig,
+      baseDirectoryPath: baseDirectoryPath,
+      inMemoryStore: inMemoryStore,
+    );
+    final targetPath = targetRepo.resolveFilePath();
+
+    try {
+      await settingsRepo.saveConfig(newConfig);
+    } on WorkspaceException catch (error) {
+      final message = switch (error.kind) {
+        WorkspaceErrorKind.duplicateFilePath =>
+          localizations.errorDuplicateWorkspaceFilePath,
+        WorkspaceErrorKind.invalidFilePath =>
+          localizations.errorInvalidLocalFilePath,
+        _ => error.message,
+      };
+      throw LocalFileException(message, cause: error);
+    }
+
+    try {
+      await targetRepo.initializeIfMissing();
+    } on Object {
+      await settingsRepo.saveConfig(previousConfig);
+      rethrow;
+    }
+
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final currentSyncState = await settingsRepo.loadWorkspaceSyncState(
+      workspace.id,
+    );
+    _pendingDeletedLabelTimestamps.clear();
+    await settingsRepo.saveWorkspaceSyncState(
+      workspace.id,
+      WorkspaceSyncState(
+        lastSyncedLocalTdf: null,
+        lastSyncedRemoteTdf: currentSyncState.lastSyncedRemoteTdf,
+        acknowledgedLocalGeneration: 0,
+        acknowledgedRemoteGeneration:
+            currentSyncState.acknowledgedRemoteGeneration,
+      ),
+    );
+    await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
+    final updatedConfig = await ref.read(webDavConfigProvider.future);
+    final converged = await _runSyncWithStatus(
+      updatedConfig,
+      isInitialLoad: true,
+    );
+    state = AsyncData(converged);
+    AppLogger.info(
+      LogTag.sync,
+      'Selected local TDF file workspace=${workspace.id} path=$targetPath',
+    );
   }
 
   /// Synchronizes the in-memory board with the configured local and/or WebDAV storage backends.

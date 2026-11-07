@@ -1747,6 +1747,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Remote TDF file wiped and re-initialized on WebDAV.'**
   String get remoteFileWipedBanner;
+
+  /// Button label to select an existing local TDF file or create a new one.
+  ///
+  /// In en, this message translates to:
+  /// **'Select'**
+  String get actionSelectLocalFile;
+
+  /// Button label to move the local TDF file into another directory.
+  ///
+  /// In en, this message translates to:
+  /// **'Move'**
+  String get actionMoveLocalFile;
+
+  /// Button label to rename the local TDF file in the same directory.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename'**
+  String get actionRenameLocalFile;
+
+  /// Dialog title for selecting an existing local TDF file or creating a new one.
+  ///
+  /// In en, this message translates to:
+  /// **'Select or Create Local TDF File'**
+  String get selectLocalDialogTitle;
+
+  /// Dialog description for selecting or creating a local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Select an existing TDF file in the storage directory or enter a new file name.'**
+  String get selectLocalDialogDescription;
+
+  /// Dialog title for renaming the local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename Local TDF File'**
+  String get renameLocalDialogTitle;
+
+  /// Dialog description instructing the user to enter a new file name for the local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a new file name for \"{fileName}\" in the current directory.'**
+  String renameLocalDialogDescription(String fileName);
+
+  /// Input field label for entering a TDF file name.
+  ///
+  /// In en, this message translates to:
+  /// **'File Name (.tdf)'**
+  String get localFileNameInputLabel;
+
+  /// Validation error shown when an entered TDF file name is empty or contains path separators.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a valid file name without path separators.'**
+  String get localFileNameErrorInvalid;
+
+  /// Status banner message shown after selecting or creating a local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Local TDF file selected.'**
+  String get localFileSelectedBanner;
+
+  /// Status banner message shown after renaming the local TDF file.
+  ///
+  /// In en, this message translates to:
+  /// **'Local TDF file renamed.'**
+  String get localFileRenamedBanner;
 }
 
 class _AppLocalizationsDelegate

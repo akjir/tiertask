@@ -1240,5 +1240,54 @@
   "remoteFileWipedBanner": "Remote TDF file wiped and re-initialized on WebDAV.",
   "@remoteFileWipedBanner": {
     "description": "Status banner message shown after wiping and re-initializing the remote WebDAV TDF file."
+  },
+  "actionSelectLocalFile": "Select",
+  "@actionSelectLocalFile": {
+    "description": "Button label to select an existing local TDF file or create a new one."
+  },
+  "actionMoveLocalFile": "Move",
+  "@actionMoveLocalFile": {
+    "description": "Button label to move the local TDF file into another directory."
+  },
+  "actionRenameLocalFile": "Rename",
+  "@actionRenameLocalFile": {
+    "description": "Button label to rename the local TDF file in the same directory."
+  },
+  "selectLocalDialogTitle": "Select or Create Local TDF File",
+  "@selectLocalDialogTitle": {
+    "description": "Dialog title for selecting an existing local TDF file or creating a new one."
+  },
+  "selectLocalDialogDescription": "Select an existing TDF file in the storage directory or enter a new file name.",
+  "@selectLocalDialogDescription": {
+    "description": "Dialog description for selecting or creating a local TDF file."
+  },
+  "renameLocalDialogTitle": "Rename Local TDF File",
+  "@renameLocalDialogTitle": {
+    "description": "Dialog title for renaming the local TDF file."
+  },
+  "renameLocalDialogDescription": "Enter a new file name for \"{fileName}\" in the current directory.",
+  "@renameLocalDialogDescription": {
+    "description": "Dialog description instructing the user to enter a new file name for the local TDF file.",
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "localFileNameInputLabel": "File Name (.tdf)",
+  "@localFileNameInputLabel": {
+    "description": "Input field label for entering a TDF file name."
+  },
+  "localFileNameErrorInvalid": "Please enter a valid file name without path separators.",
+  "@localFileNameErrorInvalid": {
+    "description": "Validation error shown when an entered TDF file name is empty or contains path separators."
+  },
+  "localFileSelectedBanner": "Local TDF file selected.",
+  "@localFileSelectedBanner": {
+    "description": "Status banner message shown after selecting or creating a local TDF file."
+  },
+  "localFileRenamedBanner": "Local TDF file renamed.",
+  "@localFileRenamedBanner": {
+    "description": "Status banner message shown after renaming the local TDF file."
   }
 }

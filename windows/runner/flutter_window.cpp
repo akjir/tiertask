@@ -259,6 +259,71 @@ std::optional<std::string> PickFolderDialog(
   return selected_path;
 }
 
+std::optional<std::string> PickFileDialog(
+    HWND owner_window,
+    const std::string& initial_directory,
+    const std::string& current_file_name) {
+  IFileOpenDialog* file_dialog = nullptr;
+  HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr,
+                                CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&file_dialog));
+  if (FAILED(hr) || file_dialog == nullptr) {
+    return std::nullopt;
+  }
+
+  DWORD options = 0;
+  if (SUCCEEDED(file_dialog->GetOptions(&options))) {
+    options &= ~FOS_FILEMUSTEXIST;
+    file_dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+  }
+
+  const COMDLG_FILTERSPEC filter_specs[] = {
+      {L"TDF Files (*.tdf)", L"*.tdf"},
+      {L"All Files (*.*)", L"*.*"},
+  };
+  file_dialog->SetFileTypes(2, filter_specs);
+  file_dialog->SetDefaultExtension(L"tdf");
+
+  if (!initial_directory.empty()) {
+    std::wstring wide_initial = Utf16FromUtf8(initial_directory);
+    if (!wide_initial.empty()) {
+      IShellItem* initial_folder = nullptr;
+      if (SUCCEEDED(SHCreateItemFromParsingName(
+              wide_initial.c_str(), nullptr, IID_PPV_ARGS(&initial_folder))) &&
+          initial_folder != nullptr) {
+        file_dialog->SetFolder(initial_folder);
+        initial_folder->Release();
+      }
+    }
+  }
+
+  if (!current_file_name.empty()) {
+    std::wstring wide_name = Utf16FromUtf8(current_file_name);
+    if (!wide_name.empty()) {
+      file_dialog->SetFileName(wide_name.c_str());
+    }
+  }
+
+  std::optional<std::string> selected_path = std::nullopt;
+  hr = file_dialog->Show(owner_window);
+  if (SUCCEEDED(hr)) {
+    IShellItem* item = nullptr;
+    if (SUCCEEDED(file_dialog->GetResult(&item)) && item != nullptr) {
+      PWSTR psz_file_path = nullptr;
+      if (SUCCEEDED(
+              item->GetDisplayName(SIGDN_FILESYSPATH, &psz_file_path)) &&
+          psz_file_path != nullptr) {
+        selected_path = Utf8FromUtf16(psz_file_path);
+        CoTaskMemFree(psz_file_path);
+      }
+      item->Release();
+    }
+  }
+
+  file_dialog->Release();
+  return selected_path;
+}
+
 }  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -309,11 +374,13 @@ bool FlutterWindow::OnCreate() {
       [this](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) {
-        if (call.method_name() != "pickDirectory") {
+        const auto& method = call.method_name();
+        if (method != "pickDirectory" && method != "pickFile") {
           result->NotImplemented();
           return;
         }
         std::string initial_directory;
+        std::string current_file_name;
         if (const auto* arguments =
                 std::get_if<flutter::EncodableMap>(call.arguments())) {
           auto it =
@@ -323,8 +390,19 @@ bool FlutterWindow::OnCreate() {
               initial_directory = *dir_str;
             }
           }
+          auto name_it =
+              arguments->find(flutter::EncodableValue("currentFileName"));
+          if (name_it != arguments->end()) {
+            if (const auto* name_str =
+                    std::get_if<std::string>(&name_it->second)) {
+              current_file_name = *name_str;
+            }
+          }
         }
-        auto picked = PickFolderDialog(GetHandle(), initial_directory);
+        auto picked = method == "pickFile"
+                          ? PickFileDialog(GetHandle(), initial_directory,
+                                           current_file_name)
+                          : PickFolderDialog(GetHandle(), initial_directory);
         if (picked.has_value()) {
           result->Success(flutter::EncodableValue(picked.value()));
         } else {

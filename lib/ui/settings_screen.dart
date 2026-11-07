@@ -23,6 +23,7 @@ import '../models/webdav_config.dart';
 import '../providers/task_providers.dart';
 import '../repositories/local_file_repository.dart';
 import 'widgets/clearable_text_field.dart';
+import 'widgets/local_tdf_file_dialogs.dart';
 import 'widgets/wipe_tdf_dialog.dart';
 
 /// Settings screen for language, color theme, storage mode, local file name, and WebDAV parameters.
@@ -123,21 +124,111 @@ class _LanguageSelectionCard extends StatelessWidget {
   }
 }
 
-/// Card for configuring the local Markdown file name and previewing its resolved path.
-class _LocalStorageSection extends StatelessWidget {
-  /// Creates a [_LocalStorageSection].
-  const _LocalStorageSection({
-    required this.localFilePathController,
-    required this.resolvedLocalPath,
-    this.onChangeDirectory,
+/// Horizontal row of four local TDF file action buttons (`Select`, `Move`, `Rename`, `Delete`).
+class _LocalStorageActionsRow extends StatelessWidget {
+  /// Creates a [_LocalStorageActionsRow].
+  const _LocalStorageActionsRow({
+    this.onSelectLocalFile,
+    this.onMoveLocalFile,
+    this.onRenameLocalFile,
     this.onWipeLocalFile,
   });
 
-  /// Controller for the local Markdown file name or path field.
-  final TextEditingController localFilePathController;
+  /// Optional callback to move the existing local `.tdf` file to another folder.
+  final VoidCallback? onMoveLocalFile;
 
-  /// Optional callback to open the native desktop directory picker on Linux and Windows.
-  final VoidCallback? onChangeDirectory;
+  /// Optional callback to rename the local `.tdf` file inside its current folder.
+  final VoidCallback? onRenameLocalFile;
+
+  /// Optional callback to select an existing `.tdf` file or create a new one.
+  final VoidCallback? onSelectLocalFile;
+
+  /// Optional callback to open the confirmation dialog and wipe the local `.tdf` file.
+  final VoidCallback? onWipeLocalFile;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final compactStyle = OutlinedButton.styleFrom(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+    );
+
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const ValueKey('settings_select_local_button'),
+            style: compactStyle,
+            onPressed: onSelectLocalFile,
+            icon: const Icon(Icons.file_open_outlined, size: 18),
+            label: Text(
+              localizations.actionSelectLocalFile,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const ValueKey('settings_move_local_button'),
+            style: compactStyle,
+            onPressed: onMoveLocalFile,
+            icon: const Icon(Icons.drive_file_move_outlined, size: 18),
+            label: Text(
+              localizations.actionMoveLocalFile,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: OutlinedButton.icon(
+            key: const ValueKey('settings_rename_local_button'),
+            style: compactStyle,
+            onPressed: onRenameLocalFile,
+            icon: const Icon(Icons.drive_file_rename_outline, size: 18),
+            label: Text(
+              localizations.actionRenameLocalFile,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _WipeStorageButton(
+            buttonKey: const ValueKey('settings_wipe_local_button'),
+            compact: true,
+            label: localizations.actionDelete,
+            onPressed: onWipeLocalFile,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Card for previewing the resolved local `.tdf` file path and managing the file via four side-by-side actions.
+class _LocalStorageSection extends StatelessWidget {
+  /// Creates a [_LocalStorageSection].
+  const _LocalStorageSection({
+    required this.resolvedLocalPath,
+    this.onSelectLocalFile,
+    this.onMoveLocalFile,
+    this.onRenameLocalFile,
+    this.onWipeLocalFile,
+  });
+
+  /// Optional callback to move the local `.tdf` file into another directory.
+  final VoidCallback? onMoveLocalFile;
+
+  /// Optional callback to rename the local `.tdf` file in the current directory.
+  final VoidCallback? onRenameLocalFile;
+
+  /// Optional callback to select an existing `.tdf` file or create a new one.
+  final VoidCallback? onSelectLocalFile;
 
   /// Optional callback to open the confirmation dialog and wipe the local `.tdf` file.
   final VoidCallback? onWipeLocalFile;
@@ -157,40 +248,18 @@ class _LocalStorageSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ClearableTextField(
-            useFormField: true,
-            controller: localFilePathController,
-            autocorrect: false,
-            decoration: InputDecoration(
-              labelText: localizations.localFilePathLabel,
-              hintText: localizations.localFilePathHint,
-              prefixIcon: const Icon(Icons.insert_drive_file_outlined),
-              border: const OutlineInputBorder(),
-            ),
-            validator: (value) => (value == null || value.trim().isEmpty)
-                ? localizations.localFilePathErrorEmpty
-                : null,
-          ),
-          if (onChangeDirectory != null) ...[
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: onChangeDirectory,
-              icon: const Icon(Icons.folder_open_outlined),
-              label: Text(localizations.actionChangeDirectory),
-            ),
-          ],
           if (previewPath != null) ...[
-            const SizedBox(height: 12),
             _ResolvedPathPreview(
               label: localizations.resolvedLocalPathLabel,
               value: previewPath,
             ),
+            const SizedBox(height: 12),
           ],
-          const SizedBox(height: 12),
-          _WipeStorageButton(
-            buttonKey: const ValueKey('settings_wipe_local_button'),
-            label: localizations.actionWipeLocalFile,
-            onPressed: onWipeLocalFile,
+          _LocalStorageActionsRow(
+            onSelectLocalFile: onSelectLocalFile,
+            onMoveLocalFile: onMoveLocalFile,
+            onRenameLocalFile: onRenameLocalFile,
+            onWipeLocalFile: onWipeLocalFile,
           ),
         ],
       ),
@@ -499,10 +568,8 @@ class _SettingsPreferenceCards extends StatelessWidget {
 /// State for [SettingsScreen].
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Timer? _bannerTimer;
-  String? _customDirectoryPath;
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _filePathController;
-  late final TextEditingController _localFilePathController;
   late final TextEditingController _passwordController;
   late final TextEditingController _serverUrlController;
   late final TextEditingController _usernameController;
@@ -510,6 +577,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _initialized = false;
   bool _isBannerVisible = false;
   bool _isTesting = false;
+  String _localFilePath = WebDavConfig.defaultFileName;
   int _manualTimeZoneOffsetMinutes = 0;
   bool _obscurePassword = true;
   bool _selectedDiagnosticsEnabled = false;
@@ -531,9 +599,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _filePathController = TextEditingController(
       text: WebDavConfig.defaultFileName,
     );
-    _localFilePathController = TextEditingController(
-      text: WebDavConfig.defaultFileName,
-    );
   }
 
   @override
@@ -543,7 +608,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _usernameController.dispose();
     _passwordController.dispose();
     _filePathController.dispose();
-    _localFilePathController.dispose();
     super.dispose();
   }
 
@@ -597,6 +661,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  /// Moves or renames the local `.tdf` file to [targetFilePath] and updates the status banner.
+  Future<void> _applyLocalLocationChange(
+    String targetFilePath, {
+    required String Function(AppLocalizations) bannerSelector,
+  }) async {
+    final candidateConfig = _buildCurrentConfig(
+      localFilePathOverride: targetFilePath,
+    );
+    try {
+      await ref
+          .read(webDavConfigProvider.notifier)
+          .changeLocalFileLocation(candidateConfig);
+      if (!mounted) {
+        return;
+      }
+      final localizations = AppLocalizations.of(context);
+      setState(() {
+        _localFilePath = targetFilePath;
+      });
+      _showStatusBanner(
+        bannerSelector(localizations),
+        _StatusBannerTone.success,
+      );
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+    }
+  }
+
   /// Starts fading out the active status banner after the display timer expires.
   void _beginStatusBannerFadeOut() {
     if (!mounted) {
@@ -608,19 +703,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// Constructs a [WebDavConfig] from the current form field values.
-  WebDavConfig _buildCurrentConfig({String? directoryOverride}) {
-    final rawLocalInput = _localFilePathController.text.trim().isEmpty
+  WebDavConfig _buildCurrentConfig({String? localFilePathOverride}) {
+    final rawLocal = (localFilePathOverride ?? _localFilePath).trim();
+    final resolvedLocalFilePath = rawLocal.isEmpty
         ? WebDavConfig.defaultFileName
-        : _localFilePathController.text.trim();
-    final effectiveDir = directoryOverride ?? _customDirectoryPath;
-    final hasExplicitPath =
-        rawLocalInput.contains('/') || rawLocalInput.contains(r'\');
-    final resolvedLocalFilePath = (effectiveDir != null && !hasExplicitPath)
-        ? LocalFileRepository.combineDirectoryAndFileName(
-            effectiveDir,
-            rawLocalInput,
-          )
-        : rawLocalInput;
+        : rawLocal;
 
     return WebDavConfig(
       serverUrl: _serverUrlController.text.trim(),
@@ -643,6 +730,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Builds the scrollable preference and storage section card column for [currentConfig].
   Widget _buildFormColumn(WebDavConfig currentConfig) {
+    final canPickDirectory = ref.watch(supportsDirectoryPickerProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -660,11 +748,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         if (_selectedStorageMode.usesLocal) ...[
           const SizedBox(height: 10),
           _LocalStorageSection(
-            localFilePathController: _localFilePathController,
             resolvedLocalPath: _resolvePreviewLocalPath(currentConfig),
-            onChangeDirectory: ref.watch(supportsDirectoryPickerProvider)
-                ? _handleChangeDirectory
-                : null,
+            onSelectLocalFile: _isTesting ? null : _handleSelectLocalFile,
+            onMoveLocalFile: (!canPickDirectory || _isTesting)
+                ? null
+                : _handleMoveLocalFile,
+            onRenameLocalFile: _isTesting ? null : _handleRenameLocalFile,
             onWipeLocalFile: _isTesting ? null : _handleWipeLocalFile,
           ),
         ],
@@ -781,50 +870,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  /// Opens the native directory picker, moves the `.tdf` file to the chosen directory, and updates state or displays an error.
-  Future<void> _handleChangeDirectory() async {
-    setState(_clearStatusBanner);
-    final currentConfig = _buildCurrentConfig();
-    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
-    final currentDirectory = LocalFileRepository(
-      config: currentConfig,
-      baseDirectoryPath: baseDirectoryPath,
-    ).tryResolveDirectoryPath();
-    final selectedDirectory = await ref.read(directoryPickerProvider)(
-      initialDirectory: currentDirectory,
-    );
-    if (!mounted ||
-        selectedDirectory == null ||
-        selectedDirectory.trim().isEmpty ||
-        selectedDirectory == currentDirectory) {
-      return;
-    }
-    final candidateConfig = _buildCurrentConfig(
-      directoryOverride: selectedDirectory,
-    );
-    try {
-      await ref
-          .read(webDavConfigProvider.notifier)
-          .changeLocalFileLocation(candidateConfig);
-      if (!mounted) {
-        return;
-      }
-      final localizations = AppLocalizations.of(context);
-      setState(() {
-        _customDirectoryPath = selectedDirectory;
-      });
-      _showStatusBanner(
-        localizations.localDirectoryMovedBanner,
-        _StatusBannerTone.success,
-      );
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      _showStatusBanner(error.toString(), _StatusBannerTone.error);
-    }
-  }
-
   /// Updates [_selectedDiagnosticsEnabled], synchronizes [AppLogger], and persists it immediately.
   Future<void> _handleDiagnosticsEnabledChanged(bool diagnosticsEnabled) async {
     setState(() {
@@ -870,6 +915,100 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref
         .read(webDavConfigProvider.notifier)
         .updateManualTimeZoneOffsetMinutes(newOffsetMinutes);
+  }
+
+  /// Opens the native directory picker, moves the existing `.tdf` file into the chosen folder, and updates state or displays an error.
+  Future<void> _handleMoveLocalFile() async {
+    setState(_clearStatusBanner);
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final currentRepo = LocalFileRepository(
+      config: _buildCurrentConfig(),
+      baseDirectoryPath: baseDirectoryPath,
+    );
+    final currentDirectory = currentRepo.tryResolveDirectoryPath();
+    final selectedDirectory = await ref.read(directoryPickerProvider)(
+      initialDirectory: currentDirectory,
+    );
+    if (!mounted ||
+        selectedDirectory == null ||
+        selectedDirectory.trim().isEmpty ||
+        selectedDirectory == currentDirectory) {
+      return;
+    }
+    final targetFilePath = LocalFileRepository.combineDirectoryAndFileName(
+      selectedDirectory,
+      currentRepo.extractFileName(),
+    );
+    await _applyLocalLocationChange(
+      targetFilePath,
+      bannerSelector: (localizations) =>
+          localizations.localDirectoryMovedBanner,
+    );
+  }
+
+  /// Opens [RenameLocalTdfDialog] and renames the `.tdf` file inside its current directory (`mv source target`).
+  Future<void> _handleRenameLocalFile() async {
+    setState(_clearStatusBanner);
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final currentRepo = LocalFileRepository(
+      config: _buildCurrentConfig(),
+      baseDirectoryPath: baseDirectoryPath,
+    );
+    final currentFileName = currentRepo.extractFileName();
+    final newFileName = await showRenameLocalTdfDialog(
+      context,
+      currentFileName: currentFileName,
+    );
+    if (!mounted ||
+        newFileName == null ||
+        newFileName.trim().isEmpty ||
+        newFileName == currentFileName) {
+      return;
+    }
+    final targetFilePath = _resolveLocalTargetPathInCurrentDir(
+      currentRepo,
+      baseDirectoryPath,
+      newFileName,
+    );
+    await _applyLocalLocationChange(
+      targetFilePath,
+      bannerSelector: (localizations) => localizations.localFileRenamedBanner,
+    );
+  }
+
+  /// Opens the native file chooser (or in-app dialog fallback on Android) to select an existing `.tdf` file or create a new one.
+  Future<void> _handleSelectLocalFile() async {
+    setState(_clearStatusBanner);
+    final selectedFilePath = await _pickOrDialogSelectLocalFile();
+    if (!mounted ||
+        selectedFilePath == null ||
+        selectedFilePath.trim().isEmpty) {
+      return;
+    }
+    final candidateConfig = _buildCurrentConfig(
+      localFilePathOverride: selectedFilePath,
+    );
+    try {
+      await ref
+          .read(taskNotifierProvider.notifier)
+          .selectLocalFile(candidateConfig);
+      if (!mounted) {
+        return;
+      }
+      final localizations = AppLocalizations.of(context);
+      setState(() {
+        _localFilePath = selectedFilePath;
+      });
+      _showStatusBanner(
+        localizations.localFileSelectedBanner,
+        _StatusBannerTone.success,
+      );
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showStatusBanner(error.toString(), _StatusBannerTone.error);
+    }
   }
 
   /// Removes the status banner from the widget tree once its fade-out animation finishes.
@@ -930,10 +1069,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _handleWipeLocalFile() async {
     setState(_clearStatusBanner);
     final localizations = AppLocalizations.of(context);
-    if (_localFilePathController.text.trim().isEmpty) {
-      _formKey.currentState?.validate();
-      return;
-    }
     final currentConfig = _buildCurrentConfig();
     if (_resolvePreviewLocalPath(currentConfig) == null) {
       _showStatusBanner(
@@ -999,6 +1134,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
+  /// Opens the native file chooser on desktop or [SelectLocalTdfDialog] on Android and returns the chosen `.tdf` path.
+  Future<String?> _pickOrDialogSelectLocalFile() async {
+    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final currentRepo = LocalFileRepository(
+      config: _buildCurrentConfig(),
+      baseDirectoryPath: baseDirectoryPath,
+    );
+    final currentDirectory = currentRepo.tryResolveDirectoryPath();
+    final currentFileName = currentRepo.extractFileName();
+    if (ref.read(supportsDirectoryPickerProvider)) {
+      return ref.read(filePickerProvider)(
+        initialDirectory: currentDirectory,
+        currentFileName: currentFileName,
+      );
+    }
+    final existingNames = ref
+        .read(localFileRepositoryProvider)
+        .listTdfFileNamesInDirectory();
+    final selectedName = await showSelectLocalTdfDialog(
+      context,
+      currentFileName: currentFileName,
+      existingFileNames: existingNames,
+    );
+    if (selectedName == null || selectedName.trim().isEmpty) {
+      return null;
+    }
+    return _resolveLocalTargetPathInCurrentDir(
+      currentRepo,
+      baseDirectoryPath,
+      selectedName,
+    );
+  }
+
   /// Initializes the text controllers and selections once when [config] finishes loading.
   void _populateFieldsIfNeeded(WebDavConfig config) {
     _selectedLanguage = config.language;
@@ -1009,6 +1177,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _selectedLocationEnabled = config.locationEnabled;
     _selectedDiagnosticsEnabled = config.diagnosticsEnabled;
     _selectedStorageMode = config.storageMode;
+    final rawLocal = config.localFilePath.trim();
+    _localFilePath = rawLocal.isEmpty ? WebDavConfig.defaultFileName : rawLocal;
     if (_initialized) {
       return;
     }
@@ -1019,27 +1189,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _filePathController.text = config.filePath.isEmpty
         ? WebDavConfig.defaultFileName
         : config.filePath;
-    final rawLocal = config.localFilePath.trim();
-    if (rawLocal.contains('/') || rawLocal.contains(r'\')) {
-      final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
-      _customDirectoryPath = LocalFileRepository(
-        config: config,
-        baseDirectoryPath: baseDirectoryPath,
-      ).tryResolveDirectoryPath();
-      _localFilePathController.text =
-          LocalFileRepository.extractFileNameFromPath(rawLocal);
-    } else {
-      _localFilePathController.text = rawLocal.isEmpty
-          ? WebDavConfig.defaultFileName
-          : rawLocal;
+  }
+
+  /// Combines [newFileName] with [currentRepo]'s directory when an explicit directory path is configured.
+  String _resolveLocalTargetPathInCurrentDir(
+    LocalFileRepository currentRepo,
+    String? baseDirectoryPath,
+    String newFileName,
+  ) {
+    final currentDirectory = currentRepo.tryResolveDirectoryPath();
+    final hasExplicitDirectory =
+        _localFilePath.contains('/') ||
+        _localFilePath.contains(r'\') ||
+        baseDirectoryPath != null;
+    if (hasExplicitDirectory && currentDirectory != null) {
+      return LocalFileRepository.combineDirectoryAndFileName(
+        currentDirectory,
+        newFileName,
+      );
     }
+    return newFileName;
   }
 
   /// Resolves the preview local file path for [config], or `null` if invalid.
   String? _resolvePreviewLocalPath(WebDavConfig config) {
-    if (_localFilePathController.text.trim().isEmpty) {
-      return null;
-    }
     final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
     return LocalFileRepository(
       config: config,
@@ -1696,10 +1869,14 @@ class _WipeStorageButton extends StatelessWidget {
     required this.buttonKey,
     required this.label,
     required this.onPressed,
+    this.compact = false,
   });
 
   /// Widget key for the button.
   final Key buttonKey;
+
+  /// Whether to use compact horizontal padding for side-by-side button rows.
+  final bool compact;
 
   /// Localized button label.
   final String label;
@@ -1715,10 +1892,13 @@ class _WipeStorageButton extends StatelessWidget {
       style: OutlinedButton.styleFrom(
         foregroundColor: colorScheme.error,
         side: BorderSide(color: colorScheme.error),
+        padding: compact
+            ? const EdgeInsets.symmetric(horizontal: 8, vertical: 10)
+            : null,
       ),
       onPressed: onPressed,
-      icon: const Icon(Icons.delete_sweep_outlined),
-      label: Text(label),
+      icon: Icon(Icons.delete_sweep_outlined, size: compact ? 18 : null),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }
 }

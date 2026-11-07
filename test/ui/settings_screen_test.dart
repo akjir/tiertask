@@ -253,16 +253,22 @@ task 000004OkD2 {
       expect(find.text('Local'), findsOneWidget);
       expect(find.text('WebDAV'), findsOneWidget);
       expect(find.text('Both'), findsOneWidget);
-      expect(find.text('Local TDF File Name'), findsOneWidget);
+      expect(
+        find.text('Local TDF File Name'),
+        findsNothing,
+        reason:
+            'Direct text input for Local TDF File Name must not be rendered',
+      );
+      expect(find.text('Resolved Local File Path:'), findsOneWidget);
 
       await tester.ensureVisible(find.text('Both'));
       await tester.tap(find.text('Both'));
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Local TDF File Name'),
+        find.text('Resolved Local File Path:'),
         findsOneWidget,
-        reason: 'Both mode must show local file name field',
+        reason: 'Both mode must show resolved local file path preview',
       );
       expect(
         find.text('WebDAV Server URL'),
@@ -287,10 +293,42 @@ task 000004OkD2 {
       expect(
         find.descendant(
           of: localSectionCard,
-          matching: find.widgetWithText(TextFormField, 'Local TDF File Name'),
+          matching: find.text('Resolved Local File Path:'),
         ),
         findsOneWidget,
-        reason: 'Local TDF File Name field must be grouped inside the Local TDF File card',
+        reason: 'Resolved Local File Path preview must be grouped inside the Local TDF File card',
+      );
+      expect(
+        find.descendant(
+          of: localSectionCard,
+          matching: find.byKey(const ValueKey('settings_select_local_button')),
+        ),
+        findsOneWidget,
+        reason: 'Select button must be grouped inside the Local TDF File card',
+      );
+      expect(
+        find.descendant(
+          of: localSectionCard,
+          matching: find.byKey(const ValueKey('settings_move_local_button')),
+        ),
+        findsOneWidget,
+        reason: 'Move button must be grouped inside the Local TDF File card',
+      );
+      expect(
+        find.descendant(
+          of: localSectionCard,
+          matching: find.byKey(const ValueKey('settings_rename_local_button')),
+        ),
+        findsOneWidget,
+        reason: 'Rename button must be grouped inside the Local TDF File card',
+      );
+      expect(
+        find.descendant(
+          of: localSectionCard,
+          matching: find.byKey(const ValueKey('settings_wipe_local_button')),
+        ),
+        findsOneWidget,
+        reason: 'Delete button must be grouped inside the Local TDF File card',
       );
 
       final webdavSectionCard = find.ancestor(
@@ -342,10 +380,22 @@ task 000004OkD2 {
         findsNothing,
         reason: 'Local-only mode must hide WebDAV server URL field',
       );
+      final renameBtn = find.byKey(
+        const ValueKey('settings_rename_local_button'),
+      );
+      await tester.ensureVisible(renameBtn);
+      await tester.tap(renameBtn);
+      await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Local TDF File Name'),
+        find.byKey(const ValueKey('rename_local_tdf_input')),
         'custom_local_tasks.tdf',
       );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('rename_local_tdf_confirm_button')),
+      );
+      await tester.pumpAndSettle();
+
       await tester.ensureVisible(find.text('Save'));
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -366,9 +416,8 @@ task 000004OkD2 {
       final savedConfig = await settingsRepository.loadConfig();
       expect(
         savedConfig.localFilePath,
-        equals('custom_local_tasks.tdf'),
-        reason:
-            'Saving settings in Local mode must persist custom localFilePath',
+        endsWith('custom_local_tasks.tdf'),
+        reason: 'Renaming local file in Local mode must persist custom localFilePath',
       );
       expect(
         savedConfig.storageMode,

@@ -134,6 +134,124 @@ void main() {
         reason: 'pickDirectory must return null when dialog is cancelled',
       );
     });
+
+    test('ensureTdfExtension, isValidSingleFileName, pickTdfFile, listTdfFileNamesInDirectory, and initializeIfMissing handle local file selection and creation', () async {
+      expect(
+        LocalFileRepository.ensureTdfExtension('board'),
+        equals('board.tdf'),
+        reason: 'Missing .tdf extension must be appended',
+      );
+      expect(
+        LocalFileRepository.ensureTdfExtension('board.tdf'),
+        equals('board.tdf'),
+        reason: 'Existing .tdf extension must be preserved',
+      );
+      expect(
+        LocalFileRepository.ensureTdfExtension('board.TDF'),
+        equals('board.TDF'),
+        reason: 'Case-insensitive .TDF extension must be preserved',
+      );
+
+      expect(
+        LocalFileRepository.isValidSingleFileName('tasks'),
+        isTrue,
+        reason: 'Alphanumeric base name must be valid',
+      );
+      expect(
+        LocalFileRepository.isValidSingleFileName('my_tasks-2.tdf'),
+        isTrue,
+        reason: 'Full .tdf file name without separators must be valid',
+      );
+      for (final invalid in <String>[
+        '',
+        '   ',
+        '.',
+        '..',
+        '.tdf',
+        'sub/tasks.tdf',
+        r'sub\tasks.tdf',
+        'bad\x00name.tdf',
+      ]) {
+        expect(
+          LocalFileRepository.isValidSingleFileName(invalid),
+          isFalse,
+          reason: 'Invalid single file name "$invalid" must be rejected',
+        );
+      }
+
+      MethodCall? recordedCall;
+      String? mockFileResponse = '${tempDir.path}/custom_board';
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            LocalFileRepository.directoryPickerChannel,
+            (call) async {
+              recordedCall = call;
+              return mockFileResponse;
+            },
+          );
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              LocalFileRepository.directoryPickerChannel,
+              null,
+            );
+      });
+
+      final repo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: tempDir.path,
+      );
+
+      final pickedFile = await repo.pickTdfFile(
+        initialDirectory: tempDir.path,
+        currentFileName: 'tasks.tdf',
+      );
+      expect(
+        pickedFile,
+        equals('${tempDir.path}/custom_board.tdf'),
+        reason: 'pickTdfFile must append .tdf when missing',
+      );
+      expect(
+        recordedCall?.method,
+        equals('pickFile'),
+        reason: 'MethodChannel method name must be pickFile',
+      );
+
+      mockFileResponse = null;
+      expect(
+        await repo.pickTdfFile(),
+        isNull,
+        reason: 'pickTdfFile must return null when cancelled',
+      );
+
+      final newRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'newly_created.tdf'),
+        baseDirectoryPath: tempDir.path,
+      );
+      await newRepo.initializeIfMissing();
+      final createdPath =
+          '${tempDir.path}${Platform.pathSeparator}newly_created.tdf';
+      expect(
+        File(createdPath).existsSync(),
+        isTrue,
+        reason: 'initializeIfMissing must create a new .tdf file when missing',
+      );
+      expect(
+        File(createdPath).readAsStringSync(),
+        startsWith('tdf '),
+        reason: 'Created .tdf file must contain canonical header',
+      );
+
+      File('${tempDir.path}${Platform.pathSeparator}alpha.tdf')
+          .writeAsStringSync('tdf 0.5.1\n', flush: true);
+      File('${tempDir.path}${Platform.pathSeparator}ignore.txt')
+          .writeAsStringSync('not tdf', flush: true);
+      expect(
+        repo.listTdfFileNamesInDirectory(),
+        equals(<String>['alpha.tdf', 'newly_created.tdf']),
+        reason: 'listTdfFileNamesInDirectory must return sorted .tdf file names only',
+      );
+    });
   });
 
   group('LocalFileRepository Safe Non-Destructive File Move & Error Reasons', () {
@@ -633,6 +751,96 @@ void main() {
           ),
         ),
         reason: 'Unwritable target directory must be rejected with Permission denied even when source file was not created yet',
+      );
+    });
+
+    test('TaskNotifier.selectLocalFile switches to an existing .tdf file or initializes a new .tdf file without moving or deleting the previous file', () async {
+      final firstPath = '${sourceDir.path}${Platform.pathSeparator}first.tdf';
+      final existingSecondPath =
+          '${sourceDir.path}${Platform.pathSeparator}second.tdf';
+      final newThirdPath =
+          '${sourceDir.path}${Platform.pathSeparator}third.tdf';
+
+      await File(firstPath).writeAsString(
+        'tdf 0.5.1\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "First File Task"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n',
+        flush: true,
+      );
+      await File(existingSecondPath).writeAsString(
+        'tdf 0.5.1\n\nqueue {\n    modified 2026-11-01 09:00:00\n    task 000002OkD2\n}\n\ntask 000002OkD2 {\n    name "Second File Task"\n    created 2026-11-01 09:00:00\n    modified 2026-11-01 09:00:00\n}\n',
+        flush: true,
+      );
+
+      final settingsRepository = InMemorySettingsRepository(
+        WebDavConfig(
+          localFilePath: firstPath,
+          storageMode: StorageMode.local,
+          language: AppLanguage.english,
+        ),
+      );
+      final container = ProviderContainer(
+        retry: (retryCount, error) => null,
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 10)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final initialBoard = await container.read(taskNotifierProvider.future);
+      expect(
+        initialBoard.allTasks.map((task) => task.title),
+        equals(<String>['First File Task']),
+      );
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .selectLocalFile(
+            WebDavConfig(
+              localFilePath: existingSecondPath,
+              storageMode: StorageMode.local,
+              language: AppLanguage.english,
+            ),
+          );
+
+      final secondBoard = await container.read(taskNotifierProvider.future);
+      expect(
+        secondBoard.allTasks.map((task) => task.title),
+        equals(<String>['Second File Task']),
+        reason: 'Selecting an existing .tdf file must load its tasks into the board',
+      );
+      expect(
+        await File(firstPath).exists(),
+        isTrue,
+        reason: 'Selecting another file must leave the previous .tdf file on disk untouched',
+      );
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .selectLocalFile(
+            WebDavConfig(
+              localFilePath: newThirdPath,
+              storageMode: StorageMode.local,
+              language: AppLanguage.english,
+            ),
+          );
+
+      final thirdBoard = await container.read(taskNotifierProvider.future);
+      expect(
+        thirdBoard.allTasks,
+        isEmpty,
+        reason:
+            'Selecting a new non-existent .tdf file must load an empty board',
+      );
+      expect(
+        await File(newThirdPath).exists(),
+        isTrue,
+        reason:
+            'Selecting a new non-existent .tdf file must initialize it on disk',
+      );
+      expect(
+        await File(existingSecondPath).exists(),
+        isTrue,
+        reason: 'Previous .tdf file must remain untouched on disk',
       );
     });
   });

@@ -923,4 +923,41 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get remoteFileWipedBanner =>
       'Remote TDF file wiped and re-initialized on WebDAV.';
+
+  @override
+  String get actionSelectLocalFile => 'Select';
+
+  @override
+  String get actionMoveLocalFile => 'Move';
+
+  @override
+  String get actionRenameLocalFile => 'Rename';
+
+  @override
+  String get selectLocalDialogTitle => 'Select or Create Local TDF File';
+
+  @override
+  String get selectLocalDialogDescription =>
+      'Select an existing TDF file in the storage directory or enter a new file name.';
+
+  @override
+  String get renameLocalDialogTitle => 'Rename Local TDF File';
+
+  @override
+  String renameLocalDialogDescription(String fileName) {
+    return 'Enter a new file name for \"$fileName\" in the current directory.';
+  }
+
+  @override
+  String get localFileNameInputLabel => 'File Name (.tdf)';
+
+  @override
+  String get localFileNameErrorInvalid =>
+      'Please enter a valid file name without path separators.';
+
+  @override
+  String get localFileSelectedBanner => 'Local TDF file selected.';
+
+  @override
+  String get localFileRenamedBanner => 'Local TDF file renamed.';
 }

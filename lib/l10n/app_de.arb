@@ -274,5 +274,16 @@
   "wipeCreateBackupLabel": "Sicherungskopie (.bak / .bak.001+) anlegen, falls Datei vorhanden ist",
   "actionWipeConfirm": "Datei zurücksetzen",
   "localFileWipedBanner": "Lokale TDF-Datei wurde geleert und neu angelegt.",
-  "remoteFileWipedBanner": "Remote-TDF-Datei auf WebDAV wurde geleert und neu angelegt."
+  "remoteFileWipedBanner": "Remote-TDF-Datei auf WebDAV wurde geleert und neu angelegt.",
+  "actionSelectLocalFile": "Auswählen",
+  "actionMoveLocalFile": "Verschieben",
+  "actionRenameLocalFile": "Umbenennen",
+  "selectLocalDialogTitle": "Lokale TDF-Datei auswählen oder neu anlegen",
+  "selectLocalDialogDescription": "Wähle eine vorhandene TDF-Datei im Speicherverzeichnis aus oder gib einen neuen Dateinamen ein.",
+  "renameLocalDialogTitle": "Lokale TDF-Datei umbenennen",
+  "renameLocalDialogDescription": "Gib einen neuen Dateinamen für „{fileName}“ im aktuellen Verzeichnis ein.",
+  "localFileNameInputLabel": "Dateiname (.tdf)",
+  "localFileNameErrorInvalid": "Bitte einen gültigen Dateinamen ohne Pfadtrennzeichen eingeben.",
+  "localFileSelectedBanner": "Lokale TDF-Datei ausgewählt.",
+  "localFileRenamedBanner": "Lokale TDF-Datei umbenannt."
 }

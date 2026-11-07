@@ -52,8 +52,10 @@ static void on_directory_picker_method_call(FlMethodChannel* channel,
                                             gpointer user_data) {
   MyApplication* self = MY_APPLICATION(user_data);
   const gchar* method = fl_method_call_get_name(method_call);
+  const gboolean is_pick_directory = g_strcmp0(method, "pickDirectory") == 0;
+  const gboolean is_pick_file = g_strcmp0(method, "pickFile") == 0;
 
-  if (g_strcmp0(method, "pickDirectory") != 0) {
+  if (!is_pick_directory && !is_pick_file) {
     g_autoptr(FlMethodResponse) response =
         FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
     fl_method_call_respond(method_call, response, nullptr);
@@ -61,8 +63,25 @@ static void on_directory_picker_method_call(FlMethodChannel* channel,
   }
 
   GtkFileChooserNative* dialog = gtk_file_chooser_native_new(
-      "Select Directory", self->main_window,
-      GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Open", "_Cancel");
+      is_pick_file ? "Select or Create TDF File" : "Select Directory",
+      self->main_window,
+      is_pick_file ? GTK_FILE_CHOOSER_ACTION_SAVE
+                   : GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
+      is_pick_file ? "_Select" : "_Open", "_Cancel");
+
+  if (is_pick_file) {
+    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog),
+                                                   FALSE);
+    GtkFileFilter* tdf_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(tdf_filter, "TDF Files (*.tdf)");
+    gtk_file_filter_add_pattern(tdf_filter, "*.tdf");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), tdf_filter);
+
+    GtkFileFilter* all_filter = gtk_file_filter_new();
+    gtk_file_filter_set_name(all_filter, "All Files");
+    gtk_file_filter_add_pattern(all_filter, "*");
+    gtk_file_chooser_add_filter(GTK_FILE_CHOOSER(dialog), all_filter);
+  }
 
   FlValue* args = fl_method_call_get_args(method_call);
   if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_MAP) {
@@ -72,6 +91,16 @@ static void on_directory_picker_method_call(FlMethodChannel* channel,
       const gchar* dir_str = fl_value_get_string(initial_dir);
       if (dir_str != nullptr && dir_str[0] != '\0') {
         gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), dir_str);
+      }
+    }
+    if (is_pick_file) {
+      FlValue* current_name = fl_value_lookup_string(args, "currentFileName");
+      if (current_name != nullptr &&
+          fl_value_get_type(current_name) == FL_VALUE_TYPE_STRING) {
+        const gchar* name_str = fl_value_get_string(current_name);
+        if (name_str != nullptr && name_str[0] != '\0') {
+          gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), name_str);
+        }
       }
     }
   }

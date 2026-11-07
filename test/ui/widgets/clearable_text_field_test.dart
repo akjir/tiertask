@@ -178,31 +178,36 @@ void main() {
 
       await openSettingsFromMenu(tester);
 
-      final localFileField = find.widgetWithText(
-        TextFormField,
-        'Local TDF File Name',
+      final renameButton = find.byKey(
+        const ValueKey('settings_rename_local_button'),
       );
-      await tester.ensureVisible(localFileField);
+      await tester.ensureVisible(renameButton);
       await tester.pumpAndSettle();
-      await tester.tap(localFileField);
+      await tester.tap(renameButton);
       await tester.pumpAndSettle();
 
-      final localClearBtn = find.descendant(
-        of: localFileField,
-        matching: find.byIcon(Icons.close_rounded),
+      final renameInput = find.byKey(const ValueKey('rename_local_tdf_input'));
+      await tester.tap(renameInput);
+      await tester.pumpAndSettle();
+      final renameClearBtn = find.byKey(
+        const ValueKey('rename_local_tdf_input_clear_button'),
       );
       expect(
-        localClearBtn,
+        renameClearBtn,
         findsOneWidget,
-        reason: 'Focused Local TDF File Name field must show a clear button on the right',
+        reason: 'Focused RenameLocalTdfDialog field must show a clear button on the right',
       );
-      await tester.tap(localClearBtn);
+      await tester.tap(renameClearBtn);
       await tester.pump();
       expect(
-        tester.widget<TextFormField>(localFileField).controller?.text,
+        tester.widget<TextField>(renameInput).controller?.text,
         isEmpty,
-        reason: 'Clicking clear on Local TDF File Name must delete its text',
+        reason: 'Clicking clear in RenameLocalTdfDialog must delete its text',
       );
+      await tester.tap(
+        find.byKey(const ValueKey('rename_local_tdf_cancel_button')),
+      );
+      await tester.pumpAndSettle();
 
       for (final label in [
         'WebDAV Server URL',

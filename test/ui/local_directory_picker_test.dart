@@ -44,16 +44,27 @@ void main() {
   });
 
   testWidgets(
-    'SettingsScreen hides Change Directory button on Android and shows it on desktop (Linux/Windows)',
+    'SettingsScreen removes direct local file name input, keeps resolved path preview, and renders Select, Move, Rename, and Delete buttons side-by-side',
     (WidgetTester tester) async {
+      final initialFilePath =
+          '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
+      File(initialFilePath).writeAsStringSync('tdf 0.5.1\n', flush: true);
+      File('${sourceDir.path}${Platform.pathSeparator}other.tdf')
+          .writeAsStringSync('tdf 0.5.1\n', flush: true);
+
       final settingsRepository = InMemorySettingsRepository(
-        const WebDavConfig(language: AppLanguage.english),
+        WebDavConfig(
+          localFilePath: initialFilePath,
+          storageMode: StorageMode.local,
+          language: AppLanguage.english,
+        ),
       );
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localStorageDirectoryPathProvider.overrideWithValue(sourceDir.path),
             supportsDirectoryPickerProvider.overrideWithValue(false),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
@@ -64,15 +75,112 @@ void main() {
       await openSettingsFromMenu(tester);
 
       expect(
-        find.text('Change Directory'),
+        find.text('Local TDF File Name'),
         findsNothing,
-        reason: 'Change Directory button must not be rendered on Android',
+        reason: 'Direct text input for Local TDF File Name must be removed',
+      );
+      expect(
+        find.text('Resolved Local File Path:'),
+        findsOneWidget,
+        reason: 'Resolved path preview label must remain visible',
+      );
+      expect(
+        find.text(initialFilePath),
+        findsOneWidget,
+        reason: 'Resolved path preview value must remain visible',
+      );
+
+      final selectBtn = find.byKey(
+        const ValueKey('settings_select_local_button'),
+      );
+      final moveBtn = find.byKey(const ValueKey('settings_move_local_button'));
+      final renameBtn = find.byKey(
+        const ValueKey('settings_rename_local_button'),
+      );
+      final deleteBtn = find.byKey(
+        const ValueKey('settings_wipe_local_button'),
+      );
+
+      await tester.ensureVisible(selectBtn);
+      expect(selectBtn, findsOneWidget);
+      expect(moveBtn, findsOneWidget);
+      expect(renameBtn, findsOneWidget);
+      expect(deleteBtn, findsOneWidget);
+
+      expect(find.text('Select'), findsOneWidget);
+      expect(find.text('Move'), findsOneWidget);
+      expect(find.text('Rename'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
+
+      final selectRect = tester.getRect(selectBtn);
+      final moveRect = tester.getRect(moveBtn);
+      final renameRect = tester.getRect(renameBtn);
+      final deleteRect = tester.getRect(deleteBtn);
+
+      expect(
+        selectRect.center.dy,
+        closeTo(moveRect.center.dy, 1.0),
+        reason:
+            'Select and Move buttons must be aligned horizontally side-by-side',
+      );
+      expect(
+        moveRect.center.dy,
+        closeTo(renameRect.center.dy, 1.0),
+        reason:
+            'Move and Rename buttons must be aligned horizontally side-by-side',
+      );
+      expect(
+        renameRect.center.dy,
+        closeTo(deleteRect.center.dy, 1.0),
+        reason: 'Rename and Delete buttons must be aligned horizontally side-by-side',
+      );
+      expect(
+        selectRect.left,
+        lessThan(moveRect.left),
+        reason: 'Select must appear to the left of Move',
+      );
+      expect(
+        moveRect.left,
+        lessThan(renameRect.left),
+        reason: 'Move must appear to the left of Rename',
+      );
+      expect(
+        renameRect.left,
+        lessThan(deleteRect.left),
+        reason: 'Rename must appear to the left of Delete',
+      );
+
+      await tester.tap(selectBtn);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('select_local_tdf_dialog')),
+        findsOneWidget,
+        reason: 'Tapping Select on Android must open SelectLocalTdfDialog',
+      );
+      expect(find.text('other.tdf'), findsOneWidget);
+      await tester.tap(find.text('other.tdf'));
+      await tester.tap(
+        find.byKey(const ValueKey('select_local_tdf_confirm_button')),
+      );
+      await tester.pumpAndSettle();
+
+      final expectedOtherPath =
+          '${sourceDir.path}${Platform.pathSeparator}other.tdf';
+      expect(
+        find.text(expectedOtherPath),
+        findsOneWidget,
+        reason: 'Selecting other.tdf must update resolved path preview',
+      );
+      expect(
+        (await settingsRepository.loadConfig()).localFilePath,
+        equals(expectedOtherPath),
       );
     },
   );
 
   testWidgets(
-    'SettingsScreen Change Directory button moves .tdf file on desktop and keeps directory unchanged with detailed error when target has a file, folder, or symlink',
+    'SettingsScreen Select, Move, and Rename buttons work on desktop and handle target conflicts safely',
     (WidgetTester tester) async {
       final initialFilePath =
           '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
@@ -91,6 +199,7 @@ void main() {
 
       String? nextPickedDirectory;
       String? lastInitialDirectory;
+      String? nextPickedFile;
 
       await tester.pumpWidget(
         ProviderScope(
@@ -103,6 +212,12 @@ void main() {
               lastInitialDirectory = initialDirectory;
               return nextPickedDirectory;
             }),
+            filePickerProvider.overrideWithValue(({
+              String? initialDirectory,
+              String? currentFileName,
+            }) async {
+              return nextPickedFile;
+            }),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
           child: const TierTaskApp(),
@@ -111,15 +226,21 @@ void main() {
       await tester.pumpAndSettle();
       await openSettingsFromMenu(tester);
 
-      final changeDirButton = find.widgetWithText(
-        OutlinedButton,
-        'Change Directory',
+      final selectButton = find.byKey(
+        const ValueKey('settings_select_local_button'),
       );
-      await tester.ensureVisible(changeDirButton);
+      final moveButton = find.byKey(
+        const ValueKey('settings_move_local_button'),
+      );
+      final renameButton = find.byKey(
+        const ValueKey('settings_rename_local_button'),
+      );
+
+      await tester.ensureVisible(moveButton);
       expect(
-        changeDirButton,
+        moveButton,
         findsOneWidget,
-        reason: 'Change Directory button must be visible on Linux and Windows',
+        reason: 'Move button must be visible on Linux and Windows',
       );
       expect(
         find.text(initialFilePath),
@@ -133,7 +254,7 @@ void main() {
           .createSync('${targetDir.path}${Platform.pathSeparator}nowhere');
 
       nextPickedDirectory = targetDir.path;
-      await tester.tap(changeDirButton);
+      await tester.tap(moveButton);
       await tester.pumpAndSettle();
 
       expect(
@@ -162,9 +283,12 @@ void main() {
             'Persisted localFilePath must remain unchanged after failed move',
       );
 
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+
       Link(symlinkConflictPath).deleteSync();
 
-      await tester.tap(changeDirButton);
+      await tester.tap(moveButton);
       await tester.pumpAndSettle();
 
       expect(
@@ -197,19 +321,73 @@ void main() {
       await tester.pump(const Duration(seconds: 4));
       await tester.pumpAndSettle();
 
-      nextPickedDirectory = null;
-      await tester.tap(changeDirButton);
+      await tester.tap(renameButton);
+      await tester.pumpAndSettle();
+
+      final renameInput = find.byKey(const ValueKey('rename_local_tdf_input'));
+      final renameConfirm = find.byKey(
+        const ValueKey('rename_local_tdf_confirm_button'),
+      );
+      expect(renameInput, findsOneWidget);
+
+      await tester.enterText(renameInput, 'renamed_tasks');
+      await tester.pump();
+      await tester.tap(renameConfirm);
+      await tester.pumpAndSettle();
+
+      final renamedPath =
+          '${targetDir.path}${Platform.pathSeparator}renamed_tasks.tdf';
+      expect(
+        find.text('Local TDF file renamed.'),
+        findsOneWidget,
+        reason: 'Success banner must appear after renaming TDF file',
+      );
+      expect(
+        find.text(renamedPath),
+        findsOneWidget,
+        reason:
+            'Resolved path preview must show renamed file in same directory',
+      );
+      expect(
+        File(symlinkConflictPath).existsSync(),
+        isFalse,
+        reason: 'Previous file name must no longer exist after rename',
+      );
+      expect(
+        File(renamedPath).existsSync(),
+        isTrue,
+        reason: 'Renamed file must exist in the same directory',
+      );
+
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+
+      final newlySelectedPath =
+          '${sourceDir.path}${Platform.pathSeparator}brand_new.tdf';
+      nextPickedFile = newlySelectedPath;
+      await tester.tap(selectButton);
       await tester.pumpAndSettle();
 
       expect(
-        find.text(symlinkConflictPath),
+        find.text('Local TDF file selected.'),
         findsOneWidget,
-        reason: 'Cancelling native directory picker must keep current resolved path unchanged',
+        reason:
+            'Success banner must appear after selecting or creating TDF file',
       );
       expect(
-        (await settingsRepository.loadConfig()).localFilePath,
-        equals(symlinkConflictPath),
-        reason: 'Cancelling native directory picker must keep persisted localFilePath unchanged',
+        find.text(newlySelectedPath),
+        findsOneWidget,
+        reason: 'Resolved path preview must update to newly selected file',
+      );
+      expect(
+        File(renamedPath).existsSync(),
+        isTrue,
+        reason: 'Select must not delete or move the previous TDF file',
+      );
+      expect(
+        File(newlySelectedPath).existsSync(),
+        isTrue,
+        reason: 'Select must initialize the newly selected TDF file on disk',
       );
     },
   );
