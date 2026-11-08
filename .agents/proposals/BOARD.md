@@ -11,6 +11,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
+| TEP-003 | TDF Specification 0.6.0 Exploratory Design and Conformance Roadmap | spec | concept | [`tep-003-tdf-spec-0-6-0.md`](tep-003-tdf-spec-0-6-0.md) |
 
 ### Completed Proposals
 
