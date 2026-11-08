@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/repositories/app_version_repository.dart';
@@ -179,5 +181,20 @@ void main() {
         );
       },
     );
+
+    test('Android build configuration enables resValues for tiertask_full_version resource injection', () {
+      final androidAppGradle = File('android/app/build.gradle.kts')
+          .readAsStringSync();
+      expect(
+        androidAppGradle,
+        contains('resValues = true'),
+        reason: 'AGP 9 requires buildFeatures.resValues = true when defaultConfig declares resValue',
+      );
+      expect(
+        androidAppGradle,
+        contains('"tiertask_full_version"'),
+        reason: 'Android build configuration must inject the tiertask_full_version string resource',
+      );
+    });
   });
 }

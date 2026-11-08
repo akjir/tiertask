@@ -449,6 +449,138 @@ task cmp100OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'Navigation drawer displays a task-style scoped indicator directly next to the task count badge only for scoped labels',
+    (WidgetTester tester) async {
+      const scopedLabelsTdf = '''
+tdf 0.6.0
+
+queue {
+  modified 2026-11-01 08:10:00
+  task tskScpOkD2
+  task tskRegOkD2
+}
+
+label scp000OkD2 scoped {
+  name "Focused Project"
+}
+
+label reg000OkD2 {
+  name "General"
+}
+
+task tskScpOkD2 {
+  name "Scoped Task"
+  created 2026-11-01 08:00
+  labels scp000OkD2
+}
+
+task tskRegOkD2 {
+  name "Regular Task"
+  created 2026-11-01 08:05
+  labels reg000OkD2
+}
+''';
+
+      await _pumpDrawerApp(
+        tester,
+        initialTdf: scopedLabelsTdf,
+        clock: DateTime.utc(2026, 11, 1, 12, 0),
+      );
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+
+      final scopedIndicatorFinder = find.byKey(
+        const ValueKey('drawer_label_scoped_indicator_scp000OkD2'),
+      );
+      final regularIndicatorFinder = find.byKey(
+        const ValueKey('drawer_label_scoped_indicator_reg000OkD2'),
+      );
+      final scopedBadgeFinder = find.byKey(
+        const ValueKey('drawer_label_badge_scp000OkD2'),
+      );
+      final regularBadgeFinder = find.byKey(
+        const ValueKey('drawer_label_badge_reg000OkD2'),
+      );
+
+      expect(
+        scopedIndicatorFinder,
+        findsOneWidget,
+        reason: 'Scoped label in drawer must display the scoped indicator icon',
+      );
+      expect(
+        regularIndicatorFinder,
+        findsNothing,
+        reason: 'Unscoped label in drawer must not display the scoped indicator icon',
+      );
+      expect(
+        scopedBadgeFinder,
+        findsOneWidget,
+        reason:
+            'Scoped label in drawer must still display its task count badge',
+      );
+      expect(
+        regularBadgeFinder,
+        findsOneWidget,
+        reason: 'Unscoped label in drawer must display its task count badge',
+      );
+
+      final tileContext = tester.element(
+        find.byKey(const ValueKey('drawer_label_tile_scp000OkD2')),
+      );
+      final expectedColor = Theme.of(tileContext).colorScheme.onSurfaceVariant
+          .withValues(alpha: 0.55);
+
+      final scopedIcon = tester.widget<Icon>(scopedIndicatorFinder);
+      expect(
+        scopedIcon.icon,
+        equals(Icons.filter_center_focus_rounded),
+        reason: 'Scoped label indicator must use the scoped focus icon',
+      );
+      expect(
+        scopedIcon.size,
+        equals(16),
+        reason: 'Scoped label indicator must match the 16px passive task indicator size',
+      );
+      expect(
+        scopedIcon.color,
+        equals(expectedColor),
+        reason: 'Scoped label indicator must match the dimmed passive task indicator color',
+      );
+
+      final tooltip = tester.widget<Tooltip>(
+        find.ancestor(
+          of: scopedIndicatorFinder,
+          matching: find.byType(Tooltip),
+        ),
+      );
+      expect(
+        tooltip.message,
+        equals('Scoped Label'),
+        reason: 'Scoped label indicator must expose the localized Scoped Label tooltip',
+      );
+
+      final labelTitleRight = tester
+          .getTopRight(find.text('Focused Project'))
+          .dx;
+      final indicatorLeft = tester.getTopLeft(scopedIndicatorFinder).dx;
+      final indicatorRight = tester.getTopRight(scopedIndicatorFinder).dx;
+      final badgeLeft = tester.getTopLeft(scopedBadgeFinder).dx;
+
+      expect(
+        indicatorLeft >= labelTitleRight,
+        isTrue,
+        reason: 'Scoped indicator must be positioned to the right of the label name',
+      );
+      expect(
+        indicatorRight <= badgeLeft,
+        isTrue,
+        reason: 'Scoped indicator must be positioned directly to the left of the task count badge',
+      );
+    },
+  );
 }
 
 /// Pumps [TierTaskApp] with optional [config], [initialTdf], [version], and [clock] overrides.

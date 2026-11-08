@@ -259,10 +259,7 @@ class _DrawerLabelTile extends StatelessWidget {
         visualDensity: const VisualDensity(vertical: -2),
         leading: Icon(Icons.label_outline_rounded, color: leadingColor),
         title: Text(label.name, style: TextStyle(fontWeight: weight)),
-        trailing: Badge.count(
-          key: ValueKey('drawer_label_badge_${label.id}'),
-          count: count,
-        ),
+        trailing: _DrawerLabelTrailing(count: count, label: label),
         onTap: () {
           Navigator.of(context).pop();
           onTap();
@@ -277,6 +274,47 @@ class _DrawerLabelTile extends StatelessWidget {
         final argb? => Color(argb),
         null => null,
       };
+}
+
+/// Trailing row inside [_DrawerLabelTile] displaying the optional scoped indicator and task count badge.
+class _DrawerLabelTrailing extends StatelessWidget {
+  /// Creates a [_DrawerLabelTrailing].
+  const _DrawerLabelTrailing({required this.count, required this.label});
+
+  /// Open task count for [label].
+  final int count;
+
+  /// Label rendered by the parent drawer tile.
+  final TdfLabel label;
+
+  @override
+  Widget build(BuildContext context) {
+    final badge = Badge.count(
+      key: ValueKey('drawer_label_badge_${label.id}'),
+      count: count,
+    );
+    if (!label.isScoped) {
+      return badge;
+    }
+    final color = Theme.of(context).colorScheme.onSurfaceVariant
+        .withValues(alpha: 0.55);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Tooltip(
+          message: AppLocalizations.of(context).labelScopedSwitchTitle,
+          child: Icon(
+            Icons.filter_center_focus_rounded,
+            key: ValueKey('drawer_label_scoped_indicator_${label.id}'),
+            size: 16,
+            color: color,
+          ),
+        ),
+        const SizedBox(width: 6),
+        badge,
+      ],
+    );
+  }
 }
 
 /// Labels section inside [HomeDrawer] rendering sorted label filter tiles.
