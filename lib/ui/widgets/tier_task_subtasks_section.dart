@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
+import '../../models/tdf_metadata.dart';
 import '../../repositories/link_launcher_repository.dart';
 import '../../services/app_logger.dart';
 
@@ -510,6 +511,20 @@ resolveTaskIndicatorSpecs(TaskItem task, AppLocalizations localizations) {
             ? localizations.tooltipIndicatorSubtasksAutoFinish
             : localizations.tooltipIndicatorSubtasks,
       ),
+  ];
+}
+
+/// Resolves the ordered [TdfLabel] definitions matching [labelIds] from [sortedLabels].
+List<TdfLabel> resolveTaskLabels(
+  List<TdfLabel> sortedLabels,
+  List<String> labelIds,
+) {
+  if (labelIds.isEmpty || sortedLabels.isEmpty) {
+    return const <TdfLabel>[];
+  }
+  return <TdfLabel>[
+    for (final label in sortedLabels)
+      if (labelIds.contains(label.id)) label,
   ];
 }
 

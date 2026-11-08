@@ -13,12 +13,15 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -461,6 +464,273 @@ task c20000OkD2 {
       expect(
         updatedBoard.completed.map((item) => item.id),
         equals(['leaf01OkD2']),
+      );
+    },
+  );
+
+  testWidgets(
+    'Task pill renders uniform bottom label indicator blocks with hover tooltips aligned under the title without altering any other element geometry',
+    (WidgetTester tester) async {
+      final createdAt = DateTime.utc(2026, 11, 1, 8, 0);
+      const labelAlpha = TdfLabel(
+        id: 'lblAlpha01',
+        name: 'Alpha Label',
+        color: '#FFEB3B',
+      );
+      const labelBeta = TdfLabel(
+        id: 'lblBeta002',
+        name: 'Beta Label',
+        color: '#4CAF50',
+      );
+      const labelGamma = TdfLabel(id: 'lblGamma03', name: 'Gamma Uncolored');
+      final labeledTask = TaskItem(
+        id: 'taskLbl001',
+        title: 'Task Alignment Check',
+        createdAt: createdAt,
+        isPriority: true,
+        labelIds: const ['lblGamma03', 'lblAlpha01', 'lblBeta002'],
+      );
+      final plainTask = TaskItem(
+        id: 'taskPln002',
+        title: 'Task Alignment Check',
+        createdAt: createdAt,
+        isPriority: true,
+      );
+      final initialBoard = TaskBoard(
+        focus: [labeledTask, plainTask],
+        labels: const [labelBeta, labelGamma, labelAlpha],
+      );
+
+      await pumpLeafWidget(
+        tester,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TierTaskPill(
+              key: const ValueKey('pill_labeled'),
+              task: labeledTask,
+              canDowngrade: true,
+              isCompleted: false,
+            ),
+            TierTaskPill(
+              key: const ValueKey('pill_plain'),
+              task: plainTask,
+              canDowngrade: true,
+              isCompleted: false,
+            ),
+          ],
+        ),
+        board: initialBoard,
+      );
+      await tester.pumpAndSettle();
+
+      final alphaBlockFinder = find.byKey(
+        const ValueKey('label_task_indicator_taskLbl001_lblAlpha01'),
+      );
+      final betaBlockFinder = find.byKey(
+        const ValueKey('label_task_indicator_taskLbl001_lblBeta002'),
+      );
+      final gammaBlockFinder = find.byKey(
+        const ValueKey('label_task_indicator_taskLbl001_lblGamma03'),
+      );
+
+      expect(
+        alphaBlockFinder,
+        findsOneWidget,
+        reason: 'Assigned Alpha label must render an indicator block',
+      );
+      expect(
+        betaBlockFinder,
+        findsOneWidget,
+        reason: 'Assigned Beta label must render an indicator block',
+      );
+      expect(
+        gammaBlockFinder,
+        findsOneWidget,
+        reason: 'Assigned uncolored Gamma label must render an indicator block',
+      );
+      expect(
+        find.byKey(
+          const ValueKey('label_task_indicator_taskPln002_lblAlpha01'),
+        ),
+        findsNothing,
+        reason:
+            'Task without labels must not render any label indicator blocks',
+      );
+
+      final alphaRect = tester.getRect(alphaBlockFinder);
+      final betaRect = tester.getRect(betaBlockFinder);
+      final gammaRect = tester.getRect(gammaBlockFinder);
+
+      expect(
+        alphaRect.size,
+        equals(betaRect.size),
+        reason: 'All label indicator blocks must have identical dimensions',
+      );
+      expect(
+        betaRect.size,
+        equals(gammaRect.size),
+        reason: 'All label indicator blocks must have identical dimensions',
+      );
+
+      final gapAlphaBeta = betaRect.left - alphaRect.right;
+      final gapBetaGamma = gammaRect.left - betaRect.right;
+      expect(
+        gapAlphaBeta,
+        closeTo(gapBetaGamma, 0.01),
+        reason:
+            'Horizontal spacing between adjacent label blocks must be uniform',
+      );
+      expect(
+        alphaRect.width,
+        greaterThan(gapAlphaBeta),
+        reason:
+            'Each label block must be wider than the spacing between blocks',
+      );
+
+      final labeledTitleRect = tester.getRect(
+        find.descendant(
+          of: find.byKey(const ValueKey('pill_labeled')),
+          matching: find.text('Task Alignment Check'),
+        ),
+      );
+      final labeledMaterialRect = tester.getRect(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('pill_labeled')),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      expect(
+        alphaRect.left,
+        closeTo(labeledTitleRect.left, 0.01),
+        reason: 'First label indicator block must start directly aligned with the left edge of the task title',
+      );
+      expect(
+        alphaRect.bottom,
+        closeTo(labeledMaterialRect.bottom, 0.01),
+        reason: 'Label indicator blocks must sit flush at the bottom of the task pill row',
+      );
+
+      final pillContext = tester.element(
+        find.byKey(const ValueKey('pill_labeled')),
+      );
+      final expectedFallbackColor = Theme.of(pillContext)
+          .colorScheme
+          .onSurfaceVariant
+          .withValues(alpha: 0.55);
+
+      final alphaDecoration =
+          tester.widget<Container>(alphaBlockFinder).decoration!
+              as BoxDecoration;
+      final betaDecoration =
+          tester.widget<Container>(betaBlockFinder).decoration!
+              as BoxDecoration;
+      final gammaDecoration =
+          tester.widget<Container>(gammaBlockFinder).decoration!
+              as BoxDecoration;
+
+      expect(alphaDecoration.color, equals(const Color(0xFFFFEB3B)));
+      expect(betaDecoration.color, equals(const Color(0xFF4CAF50)));
+      expect(gammaDecoration.color, equals(expectedFallbackColor));
+
+      final alphaTooltip = tester.widget<Tooltip>(
+        find.ancestor(of: alphaBlockFinder, matching: find.byType(Tooltip)),
+      );
+      final betaTooltip = tester.widget<Tooltip>(
+        find.ancestor(of: betaBlockFinder, matching: find.byType(Tooltip)),
+      );
+      final gammaTooltip = tester.widget<Tooltip>(
+        find.ancestor(of: gammaBlockFinder, matching: find.byType(Tooltip)),
+      );
+      expect(alphaTooltip.message, equals('Alpha Label'));
+      expect(betaTooltip.message, equals('Beta Label'));
+      expect(gammaTooltip.message, equals('Gamma Uncolored'));
+
+      final mouseGesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+      );
+      await mouseGesture.addPointer(location: Offset.zero);
+      addTearDown(mouseGesture.removePointer);
+
+      await mouseGesture.moveTo(tester.getCenter(alphaBlockFinder));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Alpha Label'),
+        findsOneWidget,
+        reason:
+            'Hovering the mouse over a label block must display the label name',
+      );
+
+      final plainTitleRect = tester.getRect(
+        find.descendant(
+          of: find.byKey(const ValueKey('pill_plain')),
+          matching: find.text('Task Alignment Check'),
+        ),
+      );
+      final plainMaterialRect = tester.getRect(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('pill_plain')),
+              matching: find.byType(Material),
+            )
+            .first,
+      );
+      final labeledCompleteRect = tester.getRect(
+        find.byKey(const ValueKey('complete_task_button_taskLbl001')),
+      );
+      final plainCompleteRect = tester.getRect(
+        find.byKey(const ValueKey('complete_task_button_taskPln002')),
+      );
+      final labeledPriorityRect = tester.getRect(
+        find.byKey(const ValueKey('priority_task_indicator_taskLbl001')),
+      );
+      final plainPriorityRect = tester.getRect(
+        find.byKey(const ValueKey('priority_task_indicator_taskPln002')),
+      );
+      final labeledDowngradeRect = tester.getRect(
+        find.byKey(const ValueKey('downgrade_task_button_taskLbl001')),
+      );
+      final plainDowngradeRect = tester.getRect(
+        find.byKey(const ValueKey('downgrade_task_button_taskPln002')),
+      );
+      final labeledEditRect = tester.getRect(
+        find.byKey(const ValueKey('edit_task_button_taskLbl001')),
+      );
+      final plainEditRect = tester.getRect(
+        find.byKey(const ValueKey('edit_task_button_taskPln002')),
+      );
+
+      expect(
+        labeledMaterialRect.size,
+        equals(plainMaterialRect.size),
+        reason: 'Task card dimensions must remain pixel-identical when label indicators are present',
+      );
+      expect(
+        labeledTitleRect.topLeft - labeledMaterialRect.topLeft,
+        equals(plainTitleRect.topLeft - plainMaterialRect.topLeft),
+        reason: 'Task title position must remain pixel-identical when label indicators are present',
+      );
+      expect(
+        labeledCompleteRect.topLeft - labeledMaterialRect.topLeft,
+        equals(plainCompleteRect.topLeft - plainMaterialRect.topLeft),
+        reason: 'Completion button position must remain pixel-identical when label indicators are present',
+      );
+      expect(
+        labeledPriorityRect.topLeft - labeledMaterialRect.topLeft,
+        equals(plainPriorityRect.topLeft - plainMaterialRect.topLeft),
+        reason: 'Passive status indicator position must remain pixel-identical when label indicators are present',
+      );
+      expect(
+        labeledDowngradeRect.topLeft - labeledMaterialRect.topLeft,
+        equals(plainDowngradeRect.topLeft - plainMaterialRect.topLeft),
+        reason: 'Downgrade button position must remain pixel-identical when label indicators are present',
+      );
+      expect(
+        labeledEditRect.topLeft - labeledMaterialRect.topLeft,
+        equals(plainEditRect.topLeft - plainMaterialRect.topLeft),
+        reason: 'Edit button position must remain pixel-identical when label indicators are present',
       );
     },
   );

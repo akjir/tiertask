@@ -21,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
+import '../../models/tdf_metadata.dart';
 import '../../providers/config_providers.dart';
 import '../../providers/task_providers.dart';
 import '../edit_task_screen.dart';
@@ -221,11 +222,68 @@ class _TierTaskIndicators extends StatelessWidget {
   }
 }
 
+/// Bottom-aligned row of uniform color blocks representing the labels assigned to [taskId].
+class _TierTaskLabelIndicators extends StatelessWidget {
+  /// Creates a [_TierTaskLabelIndicators] row.
+  const _TierTaskLabelIndicators({required this.labels, required this.taskId});
+
+  /// Height of each individual label indicator block.
+  static const double blockHeight = 5;
+
+  /// Horizontal spacing between adjacent label indicator blocks.
+  static const double blockSpacing = 8;
+
+  /// Width of each individual label indicator block.
+  static const double blockWidth = 24;
+
+  /// Ordered labels assigned to [taskId].
+  final List<TdfLabel> labels;
+
+  /// Identifier of the task owning these label indicators.
+  final String taskId;
+
+  @override
+  Widget build(BuildContext context) {
+    final fallbackColor = Theme.of(context).colorScheme.onSurfaceVariant
+        .withValues(alpha: 0.55);
+    return ClipRect(
+      child: Row(
+        children: [
+          for (var i = 0; i < labels.length; i++) ...[
+            if (i > 0) const SizedBox(width: blockSpacing),
+            Tooltip(
+              message: labels[i].name,
+              child: Container(
+                key: ValueKey('label_task_indicator_${taskId}_${labels[i].id}'),
+                width: blockWidth,
+                height: blockHeight,
+                decoration: BoxDecoration(
+                  color: _resolveColor(labels[i].color, fallbackColor),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(3),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Resolves the `#RRGGBB` color of [rawHex] or returns [fallback].
+  static Color _resolveColor(String? rawHex, Color fallback) {
+    final parsed = TdfColor.tryParseArgb(rawHex);
+    return parsed != null ? Color(parsed) : fallback;
+  }
+}
+
 /// Row layout inside [TierTaskPill] combining the task content area, right-chevron downgrade button, and three-dots edit button.
 class _TierTaskPillRow extends StatelessWidget {
   /// Creates a [_TierTaskPillRow].
   const _TierTaskPillRow({
     required this.isCompleted,
+    required this.labels,
     required this.task,
     required this.onComplete,
     required this.onDowngrade,
@@ -235,6 +293,9 @@ class _TierTaskPillRow extends StatelessWidget {
 
   /// Whether the task is completed.
   final bool isCompleted;
+
+  /// Ordered labels assigned to [task].
+  final List<TdfLabel> labels;
 
   /// Callback invoked when the leading completion square is pressed.
   final VoidCallback onComplete;
@@ -336,34 +397,38 @@ class _TierTaskPillRow extends StatelessWidget {
     );
   }
 
-  /// Builds the tappable left content area containing the completion circle, title, and passive indicators.
+  /// Builds the tappable left content area containing the completion circle, title, passive indicators, and bottom label blocks.
   Widget _buildContentArea(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final titleColor = isCompleted
-        ? colorScheme.onSurfaceVariant
-        : colorScheme.onSurface;
+    final titleStyle = TextStyle(
+      color: isCompleted ? colorScheme.onSurfaceVariant : colorScheme.onSurface,
+      fontSize: 16,
+      fontWeight: FontWeight.w500,
+      decoration: isCompleted ? TextDecoration.lineThrough : null,
+    );
     return InkWell(
       onTap: onToggleExpand,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
-        child: Row(
-          children: [
-            _buildCompletionButton(context),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                task.title,
-                style: TextStyle(
-                  color: titleColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  decoration: isCompleted ? TextDecoration.lineThrough : null,
-                ),
-              ),
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 8, 14),
+            child: Row(
+              children: [
+                _buildCompletionButton(context),
+                const SizedBox(width: 16),
+                Expanded(child: Text(task.title, style: titleStyle)),
+                _TierTaskIndicators(task: task),
+              ],
             ),
-            _TierTaskIndicators(task: task),
-          ],
-        ),
+          ),
+          if (labels.isNotEmpty)
+            Positioned(
+              left: 66,
+              right: 8,
+              bottom: 0,
+              child: _TierTaskLabelIndicators(labels: labels, taskId: task.id),
+            ),
+        ],
       ),
     );
   }
@@ -458,12 +523,20 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
 
   /// Builds the pill header row and expandable details section for [task].
   Widget _buildCardColumn(TaskItem task, bool hasExpandableDetails) {
+    final sortedLabels = task.labelIds.isEmpty
+        ? const <TdfLabel>[]
+        : ref.watch(
+            taskNotifierProvider.select(
+              (board) => board.asData?.value.sortedLabels ?? const <TdfLabel>[],
+            ),
+          );
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _TierTaskPillRow(
           isCompleted: _effectiveCompleted,
+          labels: resolveTaskLabels(sortedLabels, task.labelIds),
           task: task,
           onComplete: _handleCompletePressed,
           onDowngrade: widget.canDowngrade ? _handleDowngradePressed : null,

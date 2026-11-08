@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Configurable diagnostic log severity levels (`Debug`, `Info`, `Warning`, `Error`) and independent log storage targets (`Local`, `WebDAV`, `Both`) in Settings (`TEP-002`).
 - Dated per-workspace diagnostic log files (`tiertask_<YYYY-MM-DD>_<platform>_<workspaceId>.log`) with `@meta` session headers, 7-day / 5-file local retention pruning, and debounced WebDAV log synchronization.
 - Metadata summary card, minimum severity and subsystem tag filters, and manual WebDAV log upload button in the in-app Diagnostic Log viewer.
+- Added colored label indicator blocks with hover tooltips along the bottom edge of task cards.
 
 ### Changed
 
