@@ -2,7 +2,7 @@ name: tiertask
 description: "Task manager for Linux, Android, and Windows using a tiered pull-system and a single local or WebDAV-synchronized TDF (.tdf) file."
 publish_to: 'none'
 
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.13.7

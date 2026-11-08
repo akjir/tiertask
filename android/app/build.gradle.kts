@@ -65,7 +65,7 @@ android {
         resValue(
             "string",
             "tiertask_full_version",
-            resolveFullAppVersion(rootProject.projectDir.parentFile, flutter.versionName ?: "0.1.0"),
+            resolveFullAppVersion(rootProject.projectDir.parentFile, flutter.versionName ?: "0.2.0"),
         )
     }
 

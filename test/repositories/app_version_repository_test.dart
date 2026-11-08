@@ -27,7 +27,7 @@ void main() {
     var shouldThrowPlatformException = false;
 
     setUp(() {
-      channelVersionResult = 'v0.1.0+55.e64e6a5';
+      channelVersionResult = 'v0.2.0+55.e64e6a5';
       shouldThrowPlatformException = false;
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -61,12 +61,12 @@ void main() {
       () {
         expect(
           AppVersionRepository.packageVersion,
-          equals('0.1.0'),
-          reason: 'Package version must be fixed to 0.1.0',
+          equals('0.2.0'),
+          reason: 'Package version must be fixed to 0.2.0',
         );
         expect(
           AppVersionRepository.defaultFullVersion,
-          equals('v0.1.0+0.unknown'),
+          equals('v0.2.0+0.unknown'),
           reason: 'Default fallback version must match Podoxide fallback',
         );
         expect(
@@ -75,7 +75,7 @@ void main() {
             commitHash: 'e64e6a5',
             isDirty: false,
           ),
-          equals('v0.1.0+55.e64e6a5'),
+          equals('v0.2.0+55.e64e6a5'),
           reason: 'Clean working tree must format without .dev suffix',
         );
         expect(
@@ -84,7 +84,7 @@ void main() {
             commitHash: 'e64e6a5',
             isDirty: true,
           ),
-          equals('v0.1.0+55.e64e6a5.dev'),
+          equals('v0.2.0+55.e64e6a5.dev'),
           reason: 'Dirty working tree must append .dev suffix',
         );
       },
@@ -104,7 +104,7 @@ void main() {
             commitCount: invalidCount,
             commitHash: 'abc1234',
           ),
-          equals('v0.1.0+0.abc1234'),
+          equals('v0.2.0+0.abc1234'),
           reason:
               'Non-digit or empty commit count "$invalidCount" must fall back to 0',
         );
@@ -124,7 +124,7 @@ void main() {
             commitCount: '42',
             commitHash: invalidHash,
           ),
-          equals('v0.1.0+42.unknown'),
+          equals('v0.2.0+42.unknown'),
           reason:
               'Empty or non-hex commit hash "$invalidHash" must fall back to unknown',
         );
@@ -135,14 +135,14 @@ void main() {
       const repository = PlatformAppVersionRepository();
       expect(
         await repository.loadAppVersion(),
-        equals('v0.1.0+55.e64e6a5'),
+        equals('v0.2.0+55.e64e6a5'),
         reason: 'Valid native channel response must be returned trimmed',
       );
 
-      channelVersionResult = '  v0.1.0+56.1a2b3c4.dev  ';
+      channelVersionResult = '  v0.2.0+56.1a2b3c4.dev  ';
       expect(
         await repository.loadAppVersion(),
-        equals('v0.1.0+56.1a2b3c4.dev'),
+        equals('v0.2.0+56.1a2b3c4.dev'),
         reason: 'Dirty build metadata from native channel must be accepted',
       );
 
@@ -150,8 +150,8 @@ void main() {
         null,
         '',
         '   ',
-        '0.1.0',
-        'v0.1.0+\nmalformed',
+        '0.2.0',
+        'v0.2.0+\nmalformed',
       ]) {
         channelVersionResult = malformed;
         expect(
@@ -173,10 +173,10 @@ void main() {
     test(
       'FakeAppVersionRepository returns configured version string',
       () async {
-        const fake = FakeAppVersionRepository(version: 'v0.1.0+99.deadbee.dev');
+        const fake = FakeAppVersionRepository(version: 'v0.2.0+99.deadbee.dev');
         expect(
           await fake.loadAppVersion(),
-          equals('v0.1.0+99.deadbee.dev'),
+          equals('v0.2.0+99.deadbee.dev'),
           reason: 'FakeAppVersionRepository must return its configured version',
         );
       },

@@ -19,11 +19,11 @@ import '../services/app_logger.dart';
 
 /// Contract for loading and formatting the application version and SemVer 2.0.0 Git build metadata.
 abstract interface class AppVersionRepository {
-  /// Default fallback version string when Git build metadata is unavailable (`v0.1.0+0.unknown`).
+  /// Default fallback version string when Git build metadata is unavailable (`v0.2.0+0.unknown`).
   static const String defaultFullVersion = 'v$packageVersion+0.unknown';
 
   /// Fixed SemVer 2.0.0 package version for TierTask.
-  static const String packageVersion = '0.1.0';
+  static const String packageVersion = '0.2.0';
 
   /// Maximum allowed length for a formatted full version string.
   static const int _maxVersionLength = 64;
@@ -58,7 +58,7 @@ abstract interface class AppVersionRepository {
     return true;
   }
 
-  /// Loads the formatted application version string (`v0.1.0+<count>.<hash>[.dev]`).
+  /// Loads the formatted application version string (`v0.2.0+<count>.<hash>[.dev]`).
   Future<String> loadAppVersion();
 
   /// Returns `true` when [value] is non-empty and consists strictly of ASCII digits (`0-9`).
