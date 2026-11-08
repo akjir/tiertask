@@ -77,14 +77,16 @@ class TdfContextException implements Exception {
   String toString() => 'TdfContextException(${kind.name}): $message';
 }
 
-/// Immutable root `deleted` block storing the deletion history generation and active deletion records per `TDF_SPEC.md` Section 4.4.
+/// Immutable root `deleted` block storing the deletion history generation and active deletion records per `spec/TDF_SPEC_0.6.0.md` Section 4.5.
 @immutable
 class TdfDeletedBlock {
-  /// Creates a [TdfDeletedBlock] with sorted, unmodifiable task and label deletion records.
+  /// Creates a [TdfDeletedBlock] with sorted, unmodifiable task, label, and location deletion records.
   TdfDeletedBlock({
     this.generation = 0,
     Iterable<TdfDeletedTaskRecord> tasks = const <TdfDeletedTaskRecord>[],
     Iterable<TdfDeletedLabelRecord> labels = const <TdfDeletedLabelRecord>[],
+    Iterable<TdfDeletedLocationRecord> locations =
+        const <TdfDeletedLocationRecord>[],
   }) : assert(
          generation >= 0 && generation <= maxGeneration,
          'generation must be within 0..$maxGeneration',
@@ -92,12 +94,15 @@ class TdfDeletedBlock {
        tasks = List<TdfDeletedTaskRecord>.unmodifiable(_sortTaskRecords(tasks)),
        labels = List<TdfDeletedLabelRecord>.unmodifiable(
          _sortLabelRecords(labels),
+       ),
+       locations = List<TdfDeletedLocationRecord>.unmodifiable(
+         _sortLocationRecords(locations),
        );
 
   /// Empty default `deleted` block (`generation = 0`, no records).
   static final TdfDeletedBlock empty = TdfDeletedBlock();
 
-  /// Maximum allowed `deleted` records (`task` + `label` combined) per `TDF_SPEC.md` Section 3.3.
+  /// Maximum allowed `deleted` records (`task` + `label` + `location` combined) per `spec/TDF_SPEC_0.6.0.md` Section 7.
   static const int maxDeletedRecords = 4096;
 
   /// Maximum allowed `generation` value (`2^53 - 1`) per `TDF_SPEC.md` Section 4.4.
@@ -109,25 +114,31 @@ class TdfDeletedBlock {
   /// Deleted label records sorted by ascending ASCII `labelId`.
   final List<TdfDeletedLabelRecord> labels;
 
+  /// Deleted location records sorted by ascending ASCII `locationId`.
+  final List<TdfDeletedLocationRecord> locations;
+
   /// Deleted task records sorted by ascending ASCII `taskId`.
   final List<TdfDeletedTaskRecord> tasks;
 
   /// Whether this block can be omitted during canonical serialization (`generation == 0` and no records).
-  bool get isDefaultEmpty => generation == 0 && tasks.isEmpty && labels.isEmpty;
+  bool get isDefaultEmpty =>
+      generation == 0 && tasks.isEmpty && labels.isEmpty && locations.isEmpty;
 
-  /// Total number of task and label deletion records in this block.
-  int get totalRecords => tasks.length + labels.length;
+  /// Total number of task, label, and location deletion records in this block.
+  int get totalRecords => tasks.length + labels.length + locations.length;
 
   /// Returns a copy of this [TdfDeletedBlock] with updated fields.
   TdfDeletedBlock copyWith({
     int? generation,
     Iterable<TdfDeletedTaskRecord>? tasks,
     Iterable<TdfDeletedLabelRecord>? labels,
+    Iterable<TdfDeletedLocationRecord>? locations,
   }) {
     return TdfDeletedBlock(
       generation: generation ?? this.generation,
       tasks: tasks ?? this.tasks,
       labels: labels ?? this.labels,
+      locations: locations ?? this.locations,
     );
   }
 
@@ -135,6 +146,16 @@ class TdfDeletedBlock {
   TdfDeletedLabelRecord? findLabelRecord(String labelId) {
     for (final record in labels) {
       if (record.labelId == labelId) {
+        return record;
+      }
+    }
+    return null;
+  }
+
+  /// Looks up the deletion record for [locationId], or returns `null` if absent.
+  TdfDeletedLocationRecord? findLocationRecord(String locationId) {
+    for (final record in locations) {
+      if (record.locationId == locationId) {
         return record;
       }
     }
@@ -167,6 +188,22 @@ class TdfDeletedBlock {
     return sorted;
   }
 
+  /// Sorts location deletion records by ascending ASCII `locationId`, keeping the latest deletion per ID.
+  static List<TdfDeletedLocationRecord> _sortLocationRecords(
+    Iterable<TdfDeletedLocationRecord> records,
+  ) {
+    final byId = <String, TdfDeletedLocationRecord>{};
+    for (final record in records) {
+      final existing = byId[record.locationId];
+      if (existing == null || record.deletedAt.isAfter(existing.deletedAt)) {
+        byId[record.locationId] = record;
+      }
+    }
+    final sorted = byId.values.toList()
+      ..sort((left, right) => left.locationId.compareTo(right.locationId));
+    return sorted;
+  }
+
   /// Sorts task deletion records by ascending ASCII `taskId`, keeping the latest deletion timestamp and greatest completion checkpoint per ID.
   static List<TdfDeletedTaskRecord> _sortTaskRecords(
     Iterable<TdfDeletedTaskRecord> records,
@@ -189,12 +226,17 @@ class TdfDeletedBlock {
     return other is TdfDeletedBlock &&
         other.generation == generation &&
         listEquals(other.tasks, tasks) &&
-        listEquals(other.labels, labels);
+        listEquals(other.labels, labels) &&
+        listEquals(other.locations, locations);
   }
 
   @override
-  int get hashCode =>
-      Object.hash(generation, Object.hashAll(tasks), Object.hashAll(labels));
+  int get hashCode => Object.hash(
+    generation,
+    Object.hashAll(tasks),
+    Object.hashAll(labels),
+    Object.hashAll(locations),
+  );
 }
 
 /// Immutable deletion record for a label (`label <label-id> <timestamp>`) inside a `deleted` block.
@@ -219,6 +261,33 @@ class TdfDeletedLabelRecord {
 
   @override
   int get hashCode => Object.hash(labelId, deletedAt);
+}
+
+/// Immutable deletion record for a location (`location <location-id> <timestamp>`) inside a `deleted` block.
+@immutable
+class TdfDeletedLocationRecord {
+  /// Creates a [TdfDeletedLocationRecord].
+  const TdfDeletedLocationRecord({
+    required this.locationId,
+    required this.deletedAt,
+  });
+
+  /// UTC deletion timestamp.
+  final DateTime deletedAt;
+
+  /// Canonical 10-character Base62 location identifier.
+  final String locationId;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TdfDeletedLocationRecord &&
+        other.locationId == locationId &&
+        other.deletedAt == deletedAt;
+  }
+
+  @override
+  int get hashCode => Object.hash(locationId, deletedAt);
 }
 
 /// Immutable deletion record for a task (`task <task-id> <timestamp> [<completion-count>]`) inside a `deleted` block.
@@ -320,7 +389,7 @@ class TdfQueueBlock {
   int get hashCode => Object.hash(modifiedAt, Object.hashAll(taskIds));
 }
 
-/// Typed exception representing a `TDF_SPEC.md` Section 8.1 synchronization or recovery outcome.
+/// Typed exception representing a `spec/TDF_SPEC_0.6.0.md` Section 8.1 synchronization or recovery outcome.
 @immutable
 class TdfSyncOutcomeException implements Exception {
   /// Creates a [TdfSyncOutcomeException].
@@ -329,18 +398,26 @@ class TdfSyncOutcomeException implements Exception {
     required this.message,
     this.conflictedTaskIds = const <String>[],
     this.conflictedLabelIds = const <String>[],
+    this.conflictedLocationIds = const <String>[],
     this.ambiguousTaskIds = const <String>[],
     this.ambiguousLabelIds = const <String>[],
+    this.ambiguousLocationIds = const <String>[],
   });
 
   /// Local-only label IDs requiring explicit user recovery when deletion history expired.
   final List<String> ambiguousLabelIds;
+
+  /// Local-only location IDs requiring explicit user recovery when deletion history expired.
+  final List<String> ambiguousLocationIds;
 
   /// Local-only task IDs requiring explicit user recovery when deletion history expired.
   final List<String> ambiguousTaskIds;
 
   /// Label IDs involved in a deletion vs. edit conflict.
   final List<String> conflictedLabelIds;
+
+  /// Location IDs involved in a deletion vs. edit conflict.
+  final List<String> conflictedLocationIds;
 
   /// Task IDs involved in a deletion vs. edit conflict.
   final List<String> conflictedTaskIds;

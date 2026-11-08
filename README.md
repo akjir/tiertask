@@ -73,12 +73,19 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 Canonical `tasks.tdf` example:
 
 ```text
-tdf 0.5.1
+tdf 0.6.0
 
 queue {
     modified 2026-11-01 09:15:00
     task 8jKaCdOkD2
     task 3nR8vWOkD8
+}
+
+location 9vP2mKOkD2 {
+    name        "Home"
+    coordinates 52.52 13.405
+    radius      150
+    modified    2026-11-01 08:30
 }
 
 label 4x9p2mOkD2 {

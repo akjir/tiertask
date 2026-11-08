@@ -23,7 +23,7 @@ import 'tdf_importer.dart';
 import 'tdf_parser.dart';
 import 'tdf_serializer.dart';
 
-/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.5.1` documents
+/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.6.0` documents
 /// in a single $O(N)$ linear pass without regular expressions.
 class TdfService {
   /// Creates a const [TdfService].
@@ -32,6 +32,10 @@ class TdfService {
   /// Legacy TDF specification version string (`tdf 0.5.0`) converted in memory at load time per Section 10.6.
   static const String legacySupportedVersion =
       TdfBlockParser.legacySupportedVersion;
+
+  /// Legacy TDF specification version string (`tdf 0.5.1`) converted in memory at load time per Section 10.7.
+  static const String legacySupportedVersion051 =
+      TdfBlockParser.legacyLoadableVersion051;
 
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = maxTdfArgsPerStmt;
@@ -45,7 +49,7 @@ class TdfService {
   /// Maximum stored condition rules across all inline directives and condition blocks on one entity (`MAX_CONDITION_RULES_PER_ENTITY`).
   static const int maxConditionRulesPerEntity = maxTdfConditionRulesPerEntity;
 
-  /// Maximum task and label deletion records in the shared `deleted` block (`MAX_DELETED_RECORDS`).
+  /// Maximum task, label, and location deletion records in the shared `deleted` block (`MAX_DELETED_RECORDS`).
   static const int maxDeletedRecords = TdfDeletedBlock.maxDeletedRecords;
 
   /// Maximum input or serialized output size in UTF-8 bytes (`MAX_FILE_BYTES`, 1 MiB).
@@ -57,11 +61,23 @@ class TdfService {
   /// Maximum `link` directives per `task` block (`MAX_LINKS_PER_TASK`).
   static const int maxLinksPerTask = TaskLink.maxLinksPerTask;
 
+  /// Maximum `radius` in meters (`100 km`) for a `location` block (`MAX_LOCATION_RADIUS`).
+  static const int maxLocationRadius = maxTdfLocationRadius;
+
+  /// Maximum `<location-id>` references across all `location` condition rules on one entity (`MAX_LOCATION_REFS_PER_ENTITY`).
+  static const int maxLocationRefsPerEntity = maxTdfLocationRefsPerEntity;
+
+  /// Maximum root-level `location` blocks per `.tdf` document (`MAX_LOCATIONS`).
+  static const int maxLocations = maxTdfLocations;
+
   /// Maximum `{ ... }` block nesting depth (`MAX_NESTING_DEPTH`).
   static const int maxNestingDepth = maxTdfNestingDepth;
 
   /// Maximum decoded Unicode scalar values in a `note` text value (`MAX_NOTE_LENGTH`).
   static const int maxNoteLength = maxTdfNoteLength;
+
+  /// Maximum raw ASCII characters in a `<number>` token (`MAX_NUMBER_LENGTH`).
+  static const int maxNumberLength = maxTdfNumberLength;
 
   /// Maximum `task` entries in the shared `queue` block (`MAX_QUEUE_ENTRIES`).
   static const int maxQueueEntries = TdfQueueBlock.maxQueueEntries;
@@ -81,7 +97,7 @@ class TdfService {
   /// Maximum decoded Unicode scalar values in a `link` `<uri>` (`MAX_URI_LENGTH`).
   static const int maxUriLength = TaskLink.maxUriLength;
 
-  /// Canonical TDF specification version string (`tdf 0.5.1`).
+  /// Canonical TDF specification version string (`tdf 0.6.0`).
   static const String supportedVersion = TdfBlockParser.supportedVersion;
 
   /// Explicitly imports and migrates [sourceContent] (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, or `0.5.1`)
@@ -137,6 +153,7 @@ class TdfService {
           'version': supportedVersion,
           'tasks': board.allTasks.length,
           'labels': board.labels.length,
+          'locations': board.locations.length,
           'elapsed_ms': stopwatch.elapsedMilliseconds,
         },
       );
@@ -191,6 +208,7 @@ class TdfService {
           'target_version': supportedVersion,
           'tasks': result.board.allTasks.length,
           'labels': result.board.labels.length,
+          'locations': result.board.locations.length,
           'elapsed_ms': stopwatch.elapsedMilliseconds,
         },
       );
@@ -245,6 +263,7 @@ class TdfService {
         'version': supportedVersion,
         'tasks': board.allTasks.length,
         'labels': board.labels.length,
+        'locations': board.locations.length,
         'bytes': output.length,
         'elapsed_ms': stopwatch.elapsedMilliseconds,
       },

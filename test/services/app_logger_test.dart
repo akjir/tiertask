@@ -562,11 +562,17 @@ void main() {
       );
 
       const locationCondition = LocationTaskCondition(
-        latitude: 48.137154,
-        longitude: 11.576124,
-        radiusMeters: 200,
+        locationIds: <String>['munichOkD2'],
       );
       var board = TaskBoard.empty()
+          .addLocation(
+            'Munich',
+            latitude: 48.137154,
+            longitude: 11.576124,
+            radius: 200,
+            currentDate: fixedUtc,
+            id: 'munichOkD2',
+          )
           .addLabel('Work', color: '#4CAF50', currentDate: fixedUtc)
           .addTask(
             'Recurring backup',

@@ -134,7 +134,7 @@ class FakeWebDavRepository extends WebDavRepository {
           }
         }
       }
-      store[path] = 'tdf 0.5.1\n';
+      store[path] = 'tdf 0.6.0\n';
     }
   }
 }
@@ -143,7 +143,10 @@ class FakeWebDavRepository extends WebDavRepository {
 Future<void> openSettingsFromMenu(WidgetTester tester) async {
   await tester.tap(find.byIcon(Icons.menu_rounded));
   await tester.pumpAndSettle();
-  await tester.tap(find.byIcon(Icons.settings_outlined));
+  final settingsIcon = find.byIcon(Icons.settings_outlined);
+  await tester.ensureVisible(settingsIcon);
+  await tester.pumpAndSettle();
+  await tester.tap(settingsIcon);
   await tester.pumpAndSettle();
 }
 
@@ -168,7 +171,7 @@ Future<ProviderContainer> pumpLeafWidget(
       ),
       localFileRepositoryProvider.overrideWith(
         (ref) =>
-            FakeLocalFileRepository(config: config, initialTdf: 'tdf 0.5.1\n'),
+            FakeLocalFileRepository(config: config, initialTdf: 'tdf 0.6.0\n'),
       ),
       webDavRepositoryProvider.overrideWith(
         (ref) => FakeWebDavRepository(config: config, shouldFail: () => false),

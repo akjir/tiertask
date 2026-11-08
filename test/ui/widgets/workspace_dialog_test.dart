@@ -91,8 +91,8 @@ void main() {
       );
       expect(
         dividersInDrawer,
-        findsNWidgets(3),
-        reason: 'Navigation drawer must render a Divider above and below DrawerWorkspaceCard plus one before footer actions',
+        findsNWidgets(4),
+        reason: 'Navigation drawer must render Dividers around DrawerWorkspaceCard, between Labels and Locations, and before footer actions',
       );
       expect(
         find.descendant(of: switcherFinder, matching: find.text('Tasks')),

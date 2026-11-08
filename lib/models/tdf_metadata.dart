@@ -17,6 +17,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'tdf_location.dart';
+
 /// Canonical Base62 character alphabet (`0-9`, `A-Z`, `a-z`) defined in `TDF_SPEC.md` Section 2.9.
 const String tdfBase62Alphabet =
     '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
@@ -53,6 +55,7 @@ sealed class TaskCondition {
     DateTime evaluationTime, {
     double? currentLatitude,
     double? currentLongitude,
+    Map<String, TdfLocation> locations = const <String, TdfLocation>{},
   });
 
   /// Formats the condition arguments as a canonical TDF directive suffix.
@@ -111,6 +114,7 @@ class DayTaskCondition extends TaskCondition {
     DateTime evaluationTime, {
     double? currentLatitude,
     double? currentLongitude,
+    Map<String, TdfLocation> locations = const <String, TdfLocation>{},
   }) {
     return weekdays.contains(evaluationTime.weekday);
   }
@@ -191,6 +195,7 @@ class GlobalResetTaskCondition extends TaskCondition {
     DateTime evaluationTime, {
     double? currentLatitude,
     double? currentLongitude,
+    Map<String, TdfLocation> locations = const <String, TdfLocation>{},
   }) {
     return true;
   }
@@ -225,6 +230,7 @@ class GroupResetTaskCondition extends TaskCondition {
     DateTime evaluationTime, {
     double? currentLatitude,
     double? currentLongitude,
+    Map<String, TdfLocation> locations = const <String, TdfLocation>{},
   }) {
     return true;
   }
@@ -245,20 +251,22 @@ class GroupResetTaskCondition extends TaskCondition {
   String toString() => 'condition ${toTdfDirectiveArgs()}';
 }
 
-/// Geographic proximity activation condition (`location <lat> <lon> <radius>`).
+/// Geographic proximity activation condition (`location <loc-1> [<loc-2> ...]` in TDF `0.6.0`, or legacy inline `location <lat> <lon> <radius>`).
 @immutable
 class LocationTaskCondition extends TaskCondition {
-  /// Creates a [LocationTaskCondition] for [latitude], [longitude], and [radiusMeters].
+  /// Creates a [LocationTaskCondition] for [locationIds] (or legacy inline [latitude], [longitude], and [radiusMeters]).
   const LocationTaskCondition({
-    required this.latitude,
-    required this.longitude,
-    required this.radiusMeters,
+    this.locationIds = const <String>[],
+    this.latitude = 0.0,
+    this.longitude = 0.0,
+    this.radiusMeters = 0.0,
   }) : _latitudeText = null,
        _longitudeText = null,
        _radiusText = null;
 
   /// Creates a [LocationTaskCondition] preserving canonical raw decimal token texts.
   const LocationTaskCondition._(
+    this.locationIds,
     this.latitude,
     this.longitude,
     this.radiusMeters,
@@ -267,16 +275,33 @@ class LocationTaskCondition extends TaskCondition {
     this._radiusText,
   );
 
-  /// Mean Earth radius in meters used for Haversine distance evaluation (`TDF_SPEC.md` Section 4.3.1).
+  /// Creates a `0.6.0` ID-referenced [LocationTaskCondition] by deduplicating [rawLocationIds] in first-seen declaration order.
+  factory LocationTaskCondition.fromIds(Iterable<String> rawLocationIds) {
+    final deduplicated = <String>[];
+    final seen = <String>{};
+    for (final id in rawLocationIds) {
+      if (seen.add(id)) {
+        deduplicated.add(id);
+      }
+    }
+    return LocationTaskCondition(
+      locationIds: List<String>.unmodifiable(deduplicated),
+    );
+  }
+
+  /// Mean Earth radius in meters used for Haversine distance evaluation (`spec/TDF_SPEC_0.6.0.md` Section 4.4.2).
   static const double earthRadiusMeters = 6371000.0;
 
-  /// Target WGS-84 latitude in decimal degrees (`-90.0..90.0`).
+  /// Legacy target WGS-84 latitude in decimal degrees (`-90.0..90.0`) for historical `0.2.0..0.5.1` rules.
   final double latitude;
 
-  /// Target WGS-84 longitude in decimal degrees (`-180.0..180.0`).
+  /// Referenced 10-character Base62 `<location-id>` tokens (`1..63`, deduplicated in first-seen declaration order).
+  final List<String> locationIds;
+
+  /// Legacy target WGS-84 longitude in decimal degrees (`-180.0..180.0`) for historical `0.2.0..0.5.1` rules.
   final double longitude;
 
-  /// Inclusive geofencing radius in meters (`> 0.0`).
+  /// Legacy inclusive geofencing radius in meters (`> 0.0`) for historical `0.2.0..0.5.1` rules.
   final double radiusMeters;
 
   final String? _latitudeText;
@@ -322,9 +347,26 @@ class LocationTaskCondition extends TaskCondition {
     DateTime evaluationTime, {
     double? currentLatitude,
     double? currentLongitude,
+    Map<String, TdfLocation> locations = const <String, TdfLocation>{},
   }) {
     if (currentLatitude == null || currentLongitude == null) {
       return true;
+    }
+    if (locationIds.isNotEmpty) {
+      for (final id in locationIds) {
+        if (locations[id] case final location?) {
+          final distance = haversineDistanceMeters(
+            location.latitude,
+            location.longitude,
+            currentLatitude,
+            currentLongitude,
+          );
+          if (distance <= location.radius) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
     final distance = haversineDistanceMeters(
       latitude,
@@ -338,46 +380,18 @@ class LocationTaskCondition extends TaskCondition {
   /// Normalizes a valid ASCII decimal literal per `TDF_SPEC.md` Section 6.7.3
   /// (strips redundant leading integer zeros, trailing fractional zeros, empty
   /// fractional part, and normalizes `-0` to `0`).
-  static String normalizeDecimalText(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) {
-      return '0';
-    }
-    final isNegative = trimmed.codeUnitAt(0) == 0x2D;
-    final unsigned = isNegative ? trimmed.substring(1) : trimmed;
-    final dotIndex = unsigned.indexOf('.');
-    final rawInt = dotIndex < 0 ? unsigned : unsigned.substring(0, dotIndex);
-    final rawFrac = dotIndex < 0 ? '' : unsigned.substring(dotIndex + 1);
-
-    var intStart = 0;
-    while (intStart < rawInt.length - 1 &&
-        rawInt.codeUnitAt(intStart) == 0x30) {
-      intStart++;
-    }
-    final normInt = rawInt.isEmpty ? '0' : rawInt.substring(intStart);
-
-    var fracEnd = rawFrac.length;
-    while (fracEnd > 0 && rawFrac.codeUnitAt(fracEnd - 1) == 0x30) {
-      fracEnd--;
-    }
-    final normFrac = rawFrac.substring(0, fracEnd);
-
-    if (normInt == '0' && normFrac.isEmpty) {
-      return '0';
-    }
-    final sign = isNegative ? '-' : '';
-    if (normFrac.isEmpty) {
-      return '$sign$normInt';
-    }
-    return '$sign$normInt.$normFrac';
-  }
+  static String normalizeDecimalText(String raw) =>
+      TdfLocation.normalizeDecimalText(raw);
 
   @override
   String toTdfDirectiveArgs() {
+    if (locationIds.isNotEmpty) {
+      return 'location ${locationIds.join(' ')}';
+    }
     return 'location $latitudeText $longitudeText $radiusText';
   }
 
-  /// Parses and validates [rawLatitude], [rawLongitude], and [rawRadius] into a [LocationTaskCondition].
+  /// Parses and validates [rawLatitude], [rawLongitude], and [rawRadius] into a legacy inline [LocationTaskCondition].
   static LocationTaskCondition? tryParse(
     String rawLatitude,
     String rawLongitude,
@@ -400,6 +414,7 @@ class LocationTaskCondition extends TaskCondition {
       return null;
     }
     return LocationTaskCondition._(
+      const <String>[],
       latitude == 0.0 ? 0.0 : latitude,
       longitude == 0.0 ? 0.0 : longitude,
       radius,
@@ -427,60 +442,28 @@ class LocationTaskCondition extends TaskCondition {
 
   /// Parses a strict ASCII decimal literal (`-?[0-9]+(\.[0-9]+)?`) without regular expressions.
   static double? _tryParseDecimal(String raw) {
-    if (raw.isEmpty) {
+    if (!TdfLocation.isValidNumberToken(raw)) {
       return null;
     }
-    var index = 0;
-    if (raw.codeUnitAt(0) == 0x2D) {
-      if (raw.length == 1) {
-        return null;
-      }
-      index = 1;
-    }
-    var hasLeadingDigits = false;
-    while (index < raw.length) {
-      final unit = raw.codeUnitAt(index);
-      if (unit >= 0x30 && unit <= 0x39) {
-        hasLeadingDigits = true;
-        index++;
-      } else {
-        break;
-      }
-    }
-    if (!hasLeadingDigits) {
-      return null;
-    }
-    if (index < raw.length) {
-      if (raw.codeUnitAt(index) != 0x2E || index == raw.length - 1) {
-        return null;
-      }
-      index++;
-      while (index < raw.length) {
-        final unit = raw.codeUnitAt(index);
-        if (unit < 0x30 || unit > 0x39) {
-          return null;
-        }
-        index++;
-      }
-    }
-    final parsed = double.tryParse(raw);
-    if (parsed == null || parsed.isNaN || parsed.isInfinite) {
-      return null;
-    }
-    return parsed;
+    return double.tryParse(raw);
   }
 
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    return other is LocationTaskCondition &&
-        other.latitudeText == latitudeText &&
+    if (other is! LocationTaskCondition) return false;
+    if (locationIds.isNotEmpty || other.locationIds.isNotEmpty) {
+      return listEquals(other.locationIds, locationIds);
+    }
+    return other.latitudeText == latitudeText &&
         other.longitudeText == longitudeText &&
         other.radiusText == radiusText;
   }
 
   @override
-  int get hashCode => Object.hash(latitudeText, longitudeText, radiusText);
+  int get hashCode => locationIds.isNotEmpty
+      ? Object.hashAll(locationIds)
+      : Object.hash(latitudeText, longitudeText, radiusText);
 
   @override
   String toString() => 'condition ${toTdfDirectiveArgs()}';
@@ -517,6 +500,7 @@ class TimeWindowTaskCondition extends TaskCondition {
     DateTime evaluationTime, {
     double? currentLatitude,
     double? currentLongitude,
+    Map<String, TdfLocation> locations = const <String, TdfLocation>{},
   }) {
     final currentMinutes = evaluationTime.hour * 60 + evaluationTime.minute;
     if (startMinutes <= endMinutes) {
@@ -660,13 +644,14 @@ class TdfColor {
   }
 }
 
-/// Immutable representation of a TDF `label` root block (`TDF_SPEC.md` Section 4.1).
+/// Immutable representation of a TDF `label` root block (`spec/TDF_SPEC_0.6.0.md` Section 4.2).
 @immutable
 class TdfLabel {
   /// Creates a [TdfLabel] definition.
   const TdfLabel({
     required this.id,
     required this.name,
+    this.isScoped = false,
     this.color,
     this.note,
     this.modifiedAt,
@@ -685,6 +670,9 @@ class TdfLabel {
   /// Unique label identifier (`<id>`).
   final String id;
 
+  /// Whether the label carries the `scoped` header flag (`label <id> scoped {`).
+  final bool isScoped;
+
   /// Optional UTC modification timestamp (`modified` directive).
   final DateTime? modifiedAt;
 
@@ -701,6 +689,7 @@ class TdfLabel {
   TdfLabel copyWith({
     String? id,
     String? name,
+    bool? isScoped,
     String? color,
     bool clearColor = false,
     String? note,
@@ -712,6 +701,7 @@ class TdfLabel {
     return TdfLabel(
       id: id ?? this.id,
       name: name ?? this.name,
+      isScoped: isScoped ?? this.isScoped,
       color: clearColor ? null : (color ?? this.color),
       note: clearNote ? null : (note ?? this.note),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
@@ -727,6 +717,7 @@ class TdfLabel {
     return other is TdfLabel &&
         other.id == id &&
         other.name == name &&
+        other.isScoped == isScoped &&
         other.color == color &&
         other.note == note &&
         other.modifiedAt == modifiedAt &&
@@ -737,6 +728,7 @@ class TdfLabel {
   int get hashCode => Object.hash(
     id,
     name,
+    isScoped,
     color,
     note,
     modifiedAt,

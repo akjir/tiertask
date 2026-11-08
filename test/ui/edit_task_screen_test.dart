@@ -224,6 +224,10 @@ task 000001OkD2 {
       await _tapKey(tester, 'task_editor_label_cops00OkD2', settle: false);
       await _tapKey(tester, 'task_editor_label_home00OkD2', settle: false);
       await _tapKey(tester, 'task_editor_auto_finish_toggle', settle: false);
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_subtask_input')),
+      );
       await tester.enterText(
         find.byKey(const ValueKey('task_editor_subtask_input')),
         'Generate keypair',
@@ -728,6 +732,62 @@ task 000001OkD2 {
         ),
         findsOneWidget,
         reason: 'Auto-finish chip must provide German tooltip',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen supports due date/time input and preserves task origin across edits',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.6.0
+
+queue {
+  modified 2026-11-01 08:00
+  task 000001OkD2
+}
+
+task 000001OkD2 {
+  name "Imported Ticket"
+  created 2026-11-01 08:00
+  origin "jira" "OPS-99"
+}
+''';
+      final fixedNow = DateTime.utc(2026, 11, 1, 12, 0);
+      final container = await _pumpEditorApp(
+        tester,
+        initialTdf: seededTdf,
+        clock: fixedNow,
+      );
+
+      await _tapKey(tester, 'edit_task_button_000001OkD2');
+
+      final dueChipFinder = find.byKey(
+        const ValueKey('task_editor_due_button'),
+      );
+      expect(dueChipFinder, findsOneWidget);
+      await _tapVisible(tester, dueChipFinder);
+
+      final dueInputFinder = find.byKey(
+        const ValueKey('task_editor_due_input'),
+      );
+      expect(dueInputFinder, findsOneWidget);
+      await tester.enterText(dueInputFinder, '2026-11-10 15:30');
+      await tester.pump();
+
+      await _tapKey(tester, 'task_editor_save_button');
+
+      final board = container.read(taskNotifierProvider).requireValue;
+      final updated = board.findTask('000001OkD2')!;
+      expect(
+        updated.dueAt,
+        equals(DateTime.utc(2026, 11, 10, 15, 30)),
+        reason: 'Saving a valid due timestamp must store dueAt on the task',
+      );
+      expect(
+        updated.origin,
+        equals(const TaskOrigin(namespace: 'jira', externalKey: 'OPS-99')),
+        reason: 'Editing a task must preserve its origin attribute',
       );
     },
   );

@@ -30,11 +30,23 @@ const int maxTdfFileBytes = 1048576;
 /// Maximum logical lines per `.tdf` document (`MAX_LINE_COUNT` = `16,384`).
 const int maxTdfLineCount = 16384;
 
+/// Maximum `radius` in meters (`100 km`) for a `location` block (`MAX_LOCATION_RADIUS` = `100,000`).
+const int maxTdfLocationRadius = 100000;
+
+/// Maximum `<location-id>` references across all `location` condition rules on one entity before deduplication (`MAX_LOCATION_REFS_PER_ENTITY` = `63`).
+const int maxTdfLocationRefsPerEntity = 63;
+
+/// Maximum root-level `location` blocks per `.tdf` document (`MAX_LOCATIONS` = `200`).
+const int maxTdfLocations = 200;
+
 /// Maximum `{ ... }` block nesting depth (`MAX_NESTING_DEPTH` = `2`).
 const int maxTdfNestingDepth = 2;
 
 /// Maximum decoded Unicode scalar values in a `note` text value (`MAX_NOTE_LENGTH` = `2,000`).
 const int maxTdfNoteLength = 2000;
+
+/// Maximum raw ASCII characters in a `<number>` token (`MAX_NUMBER_LENGTH` = `24`).
+const int maxTdfNumberLength = 24;
 
 /// Maximum direct child statements per ordinary block (`MAX_STMTS_PER_BLOCK` = `512`).
 const int maxTdfStmtsPerBlock = 512;
@@ -124,6 +136,9 @@ enum TdfErrorKind {
 
   /// A task's `labels` directive references an `<id>` that does not match any `label` block in the document.
   unknownLabelReference,
+
+  /// A `condition` `location` rule references a `<location-id>` that does not match any live `location` block in the document.
+  unknownLocationReference,
 
   /// The initial `tdf <version>` header specifies an unsupported or malformed version.
   unsupportedVersion,

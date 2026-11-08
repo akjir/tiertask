@@ -1107,4 +1107,86 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get tooltipTaskEditorAutoFinish =>
       'Schließt die gesamte Aufgabe automatisch ab, sobald alle Unteraufgaben abgehakt sind.';
+
+  @override
+  String get drawerLocations => 'Orte';
+
+  @override
+  String get createNewLocation => 'Neuen Ort erstellen';
+
+  @override
+  String get editLocationsTitle => 'Orte bearbeiten';
+
+  @override
+  String get editLocationTitle => 'Ort bearbeiten';
+
+  @override
+  String get emptyLocationsHint => 'Noch keine Orte erstellt.';
+
+  @override
+  String get tooltipDeleteLocation => 'Ort löschen';
+
+  @override
+  String get tooltipEditLocation => 'Ort bearbeiten';
+
+  @override
+  String get locationDetailsSectionTitle => 'Ortsdetails';
+
+  @override
+  String get locationNameLabel => 'Ortsname';
+
+  @override
+  String get locationCoordinatesSectionTitle => 'Koordinaten & Radius';
+
+  @override
+  String get locationLatitudeLabel => 'Breitengrad (-90 bis 90)';
+
+  @override
+  String get locationLongitudeLabel => 'Längengrad (-180 bis 180)';
+
+  @override
+  String get locationRadiusLabel => 'Radius (m/km)';
+
+  @override
+  String get locationUseCurrentGpsButton => 'Aktuelle GPS-Position übernehmen';
+
+  @override
+  String get locationNameErrorEmpty => 'Bitte einen Ortsnamen eingeben.';
+
+  @override
+  String get locationSourceErrorEmpty =>
+      'Bitte eine gültige Quelle eingeben oder leer lassen.';
+
+  @override
+  String get locationCoordinatesErrorInvalid =>
+      'Gültigen Breitengrad (-90..90) und Längengrad (-180..180) eingeben.';
+
+  @override
+  String get locationRadiusErrorInvalid =>
+      'Gültigen Radius zwischen 0,01m und 100km eingeben.';
+
+  @override
+  String get labelScopedSectionTitle => 'Board-Fokus';
+
+  @override
+  String get labelScopedSwitchTitle => 'Fokussiertes Label';
+
+  @override
+  String get labelScopedSwitchSubtitle =>
+      'Aufgaben mit diesem Label ausblenden, solange dieser Filter nicht aktiv ist.';
+
+  @override
+  String get taskDueButtonLabel => 'Fällig am (optional)';
+
+  @override
+  String get taskDueClearTooltip => 'Fälligkeit löschen';
+
+  @override
+  String pillDuePrefix(String date) {
+    return 'Fällig: $date';
+  }
+
+  @override
+  String get errorLocalFileCasExhausted =>
+      'Die lokale Datei wurde gleichzeitig geändert und hat die maximale Anzahl an Merge-Versuchen überschritten.';
 }

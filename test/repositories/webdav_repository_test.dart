@@ -270,24 +270,24 @@ void main() {
 
       // Wiping a non-existent remote file initializes it without creating .bak.
       await repository.wipeTdf(createBackup: true);
-      expect(remoteFiles[remotePath], equals('tdf 0.5.1\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.6.0\n'));
       expect(remoteFiles.containsKey('$remotePath.bak'), isFalse);
 
       // First wipe with createBackup: true writes .bak.
-      remoteFiles[remotePath] = 'tdf 0.5.1\n# state 1\n';
+      remoteFiles[remotePath] = 'tdf 0.6.0\n# state 1\n';
       await repository.wipeTdf(createBackup: true);
-      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.5.1\n# state 1\n'));
-      expect(remoteFiles[remotePath], equals('tdf 0.5.1\n'));
+      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.6.0\n# state 1\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.6.0\n'));
 
       // Second wipe with createBackup: true writes .bak.001 without overwriting .bak.
-      remoteFiles[remotePath] = 'tdf 0.5.1\n# state 2\n';
+      remoteFiles[remotePath] = 'tdf 0.6.0\n# state 2\n';
       await repository.wipeTdf(createBackup: true);
       expect(
         remoteFiles['$remotePath.bak.001'],
-        equals('tdf 0.5.1\n# state 2\n'),
+        equals('tdf 0.6.0\n# state 2\n'),
       );
-      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.5.1\n# state 1\n'));
-      expect(remoteFiles[remotePath], equals('tdf 0.5.1\n'));
+      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.6.0\n# state 1\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.6.0\n'));
     });
 
     test('validates WebDAV configuration and endpoint URIs and emits sanitized [STORAGE] logs to AppLogger', () async {

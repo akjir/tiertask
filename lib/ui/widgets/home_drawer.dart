@@ -19,15 +19,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/app_workspace.dart';
 import '../../models/task_board.dart';
+import '../../models/tdf_location.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/config_providers.dart';
 import '../../repositories/app_version_repository.dart';
-import '../../services/app_logger.dart';
+import '../edit_locations_screen.dart';
 import 'app_logo.dart';
 import 'log_viewer_dialog.dart';
 import 'workspace_dialog.dart';
 
-/// Left-side navigation drawer for workspace switching, labels, and settings.
+/// Left-side navigation drawer for workspace switching, labels, locations, and settings.
 class HomeDrawer extends StatelessWidget {
   /// Creates a [HomeDrawer].
   const HomeDrawer({
@@ -40,6 +41,7 @@ class HomeDrawer extends StatelessWidget {
     required this.onOpenSettings,
     required this.onSelectLabel,
     required this.onSyncRemote,
+    this.onOpenEditLocations,
   });
 
   final String? activeLabelId;
@@ -47,6 +49,7 @@ class HomeDrawer extends StatelessWidget {
   final TaskBoard board;
   final VoidCallback onManageWorkspaces;
   final ValueChanged<bool> onOpenEditLabels;
+  final ValueChanged<bool>? onOpenEditLocations;
   final VoidCallback onOpenSettings;
   final ValueChanged<String?> onSelectLabel;
   final VoidCallback onSyncRemote;
@@ -71,6 +74,10 @@ class HomeDrawer extends StatelessWidget {
                     board: board,
                     onOpenEditLabels: onOpenEditLabels,
                     onSelectLabel: onSelectLabel,
+                  ),
+                  _DrawerLocationsSection(
+                    board: board,
+                    onOpenEditLocations: onOpenEditLocations,
                   ),
                   _DrawerFooterSection(
                     board: board,
@@ -294,7 +301,11 @@ class _DrawerLabelsSection extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         const Divider(height: 8),
-        _DrawerSectionHeader(onEditLabels: () => onOpenEditLabels(false)),
+        _DrawerSectionHeader(
+          title: localizations.drawerLabels,
+          editButtonKey: const ValueKey('drawer_edit_labels_button'),
+          onEdit: () => onOpenEditLabels(false),
+        ),
         for (final label in board.sortedLabels)
           _DrawerLabelTile(
             key: ValueKey('drawer_label_tile_${label.id}'),
@@ -316,12 +327,113 @@ class _DrawerLabelsSection extends StatelessWidget {
   }
 }
 
-/// Section header row inside [HomeDrawer] displaying `Labels` and `Edit`.
+/// Location row inside [HomeDrawer] with open task count badge.
+class _DrawerLocationTile extends StatelessWidget {
+  /// Creates a [_DrawerLocationTile].
+  const _DrawerLocationTile({
+    super.key,
+    required this.count,
+    required this.location,
+    required this.onTap,
+  });
+
+  final int count;
+  final TdfLocation location;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      child: ListTile(
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        visualDensity: const VisualDensity(vertical: -2),
+        leading: const Icon(Icons.place_outlined),
+        title: Text(location.name),
+        trailing: Badge.count(
+          key: ValueKey('drawer_location_badge_${location.id}'),
+          count: count,
+        ),
+        onTap: () {
+          Navigator.of(context).pop();
+          onTap();
+        },
+      ),
+    );
+  }
+}
+
+/// Locations section inside [HomeDrawer] rendering sorted location tiles below [_DrawerLabelsSection].
+class _DrawerLocationsSection extends StatelessWidget {
+  /// Creates a [_DrawerLocationsSection].
+  const _DrawerLocationsSection({
+    required this.board,
+    required this.onOpenEditLocations,
+  });
+
+  final TaskBoard board;
+  final ValueChanged<bool>? onOpenEditLocations;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _DrawerSectionHeader(
+          title: localizations.drawerLocations,
+          editButtonKey: const ValueKey('drawer_edit_locations_button'),
+          onEdit: () => _openLocationsOverview(context, autofocusCreate: false),
+        ),
+        for (final location in board.sortedLocations)
+          _DrawerLocationTile(
+            key: ValueKey('drawer_location_tile_${location.id}'),
+            count: board.openTaskCountForLocation(location.id),
+            location: location,
+            onTap: () => openEditLocationScreen(context, location: location),
+          ),
+        _DrawerActionTile(
+          tileKey: const ValueKey('drawer_create_location_tile'),
+          icon: Icons.add_location_alt_outlined,
+          title: localizations.createNewLocation,
+          onAction: () =>
+              _openLocationsOverview(context, autofocusCreate: true),
+        ),
+        const Divider(height: 8),
+      ],
+    );
+  }
+
+  /// Invokes [onOpenEditLocations] or pushes [EditLocationsScreen] directly.
+  void _openLocationsOverview(
+    BuildContext context, {
+    required bool autofocusCreate,
+  }) {
+    if (onOpenEditLocations case final callback?) {
+      callback(autofocusCreate);
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditLocationsScreen(autofocusCreate: autofocusCreate),
+      ),
+    );
+  }
+}
+
+/// Section header row inside [HomeDrawer] displaying [title] and `Edit`.
 class _DrawerSectionHeader extends StatelessWidget {
   /// Creates a [_DrawerSectionHeader].
-  const _DrawerSectionHeader({required this.onEditLabels});
+  const _DrawerSectionHeader({
+    required this.editButtonKey,
+    required this.title,
+    required this.onEdit,
+  });
 
-  final VoidCallback onEditLabels;
+  final Key editButtonKey;
+  final VoidCallback onEdit;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
@@ -333,12 +445,12 @@ class _DrawerSectionHeader extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(localizations.drawerLabels, style: labelStyle),
+          Text(title, style: labelStyle),
           TextButton(
-            key: const ValueKey('drawer_edit_labels_button'),
+            key: editButtonKey,
             onPressed: () {
               Navigator.of(context).pop();
-              onEditLabels();
+              onEdit();
             },
             child: Text(localizations.actionEdit),
           ),
@@ -448,7 +560,6 @@ Future<void> showTdfMarkdownDialog(
   BuildContext context, {
   required TaskBoard board,
 }) {
-  AppLogger.info(LogTag.ui, 'Opened Raw TDF preview dialog');
   return showDialog<void>(
     context: context,
     builder: (_) => _TdfMarkdownDialog(board: board),

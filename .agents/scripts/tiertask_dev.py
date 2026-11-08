@@ -622,8 +622,14 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/models/task_board_downgrade_test.dart",
         "test/models/task_board_mutation_test.dart",
     ],
-    "lib/models/task_board_sync.dart": ["test/models/task_board_sync_test.dart"],
-    "lib/models/task_board_reconciler.dart": ["test/models/task_board_sync_test.dart"],
+    "lib/models/task_board_sync.dart": [
+        "test/models/task_board_sync_test.dart",
+        "test/models/tdf_v060_merge_conformance_test.dart",
+    ],
+    "lib/models/task_board_reconciler.dart": [
+        "test/models/task_board_sync_test.dart",
+        "test/models/tdf_v060_merge_conformance_test.dart",
+    ],
     "lib/models/workspace_sync_state.dart": ["test/models/task_board_sync_test.dart"],
     "lib/models/tdf_payload_comparison.dart": [
         "test/models/task_board_v050_rules_test.dart",
@@ -636,12 +642,14 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/models/task_item.dart": ["test/models/tdf_v050_primitives_test.dart"],
     "lib/models/task_tier.dart": ["test/models/tdf_v050_primitives_test.dart"],
     "lib/models/tdf_error.dart": ["test/models/tdf_v050_primitives_test.dart"],
+    "lib/models/tdf_location.dart": ["test/models/tdf_location_test.dart"],
     "lib/models/tdf_metadata.dart": ["test/models/tdf_v050_primitives_test.dart"],
     "lib/models/tdf_timezone.dart": ["test/models/tdf_v050_primitives_test.dart"],
     "lib/models/webdav_config.dart": ["test/models/tdf_v050_primitives_test.dart"],
     "lib/services/tdf_service.dart": [
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
     ],
     "lib/services/tdf_scanner.dart": [
         "test/services/tdf_service_parser_test.dart",
@@ -650,24 +658,40 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/services/tdf_parser.dart": [
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
     ],
     "lib/services/tdf_directive_parser.dart": [
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
     ],
     "lib/services/tdf_serializer.dart": [
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
     ],
-    "lib/services/tdf_importer.dart": ["test/services/tdf_migration_test.dart"],
-    "lib/services/tdf_historical_parser.dart": ["test/services/tdf_migration_test.dart"],
-    "lib/services/tdf_historical_serializer.dart": ["test/services/tdf_migration_test.dart"],
-    "lib/services/tdf_id_migration.dart": ["test/services/tdf_migration_test.dart"],
+    "lib/services/tdf_importer.dart": [
+        "test/services/tdf_migration_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
+    ],
+    "lib/services/tdf_historical_parser.dart": [
+        "test/services/tdf_migration_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
+    ],
+    "lib/services/tdf_historical_serializer.dart": [
+        "test/services/tdf_migration_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
+    ],
+    "lib/services/tdf_id_migration.dart": [
+        "test/services/tdf_migration_test.dart",
+        "test/services/tdf_v060_conformance_test.dart",
+    ],
     "lib/repositories/local_file_operations.dart": ["test/repositories/local_file_repository_test.dart"],
     "lib/providers/location_providers.dart": [
         "test/providers/workspace_providers_test.dart",
         "test/ui/location_ui_test.dart",
     ],
+    "lib/ui/edit_locations_screen.dart": ["test/ui/edit_locations_screen_test.dart"],
     "lib/ui/widgets/home_top_bar.dart": ["test/ui/home_screen_test.dart"],
     "lib/ui/widgets/home_tier_pane.dart": ["test/ui/home_screen_test.dart"],
     "lib/ui/widgets/home_drawer.dart": ["test/ui/home_drawer_test.dart"],

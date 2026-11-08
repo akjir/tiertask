@@ -14,8 +14,12 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_location.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -616,6 +620,166 @@ task suslocOkD2 {
       expect(
         boardInPlusTwo.blocked.map((task) => task.id),
         equals(['suslocOkD2']),
+      );
+    });
+
+    test('evaluates TDF 0.6.0 scoped labels, ID-referenced locations, sortedLocations, and openTaskCountForLocation inheritance', () {
+      const locOffice = TdfLocation(
+        id: '7pQr9mOkD2',
+        name: 'Office',
+        latitude: 50.9787,
+        longitude: 11.0328,
+        radius: 150,
+      );
+      const locHome = TdfLocation(
+        id: '3kLm8nOkD2',
+        name: 'Home',
+        latitude: 52.5200,
+        longitude: 13.4050,
+        radius: 200,
+      );
+
+      final lblScopedWeekend = TdfLabel(
+        id: 'scpWk0OkD2',
+        name: 'Scoped Weekend',
+        isScoped: true,
+        conditions: [
+          DayTaskCondition(
+            weekdays: const [DateTime.saturday, DateTime.sunday],
+            dayTokens: const ['sat', 'sun'],
+          ),
+        ],
+      );
+      final lblWorkWeekday = TdfLabel(
+        id: 'wrkDayOkD2',
+        name: 'Work Weekday',
+        conditions: [
+          DayTaskCondition(
+            weekdays: const [DateTime.monday],
+            dayTokens: const ['mon'],
+          ),
+          LocationTaskCondition.fromIds(const ['7pQr9mOkD2']),
+        ],
+      );
+
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final tasks = <TaskItem>[
+        TaskItem(
+          id: 'tScopedOnl',
+          title: 'Scoped Only Task',
+          createdAt: sundayNoon,
+          labelIds: const ['scpWk0OkD2'],
+        ),
+        TaskItem(
+          id: 'tMixedLbls',
+          title: 'Mixed Scoped and Regular Label Task',
+          createdAt: sundayNoon,
+          labelIds: const ['scpWk0OkD2', 'wrkDayOkD2'],
+        ),
+        TaskItem(
+          id: 'tOvrLocHom',
+          title: 'Task Overriding Location to Home',
+          createdAt: sundayNoon,
+          labelIds: const ['wrkDayOkD2'],
+          conditions: [
+            const GroupResetTaskCondition(targetGroup: ConditionGroup.day),
+            LocationTaskCondition.fromIds(const ['3kLm8nOkD2']),
+          ],
+        ),
+        TaskItem(
+          id: 'tRstLocAny',
+          title: 'Task Resetting Location to Any',
+          createdAt: sundayNoon,
+          labelIds: const ['wrkDayOkD2'],
+          conditions: const [
+            GroupResetTaskCondition(targetGroup: ConditionGroup.day),
+            GroupResetTaskCondition(targetGroup: ConditionGroup.location),
+          ],
+        ),
+        TaskItem(
+          id: 'tRstGlbAny',
+          title: 'Task With Global Condition Any',
+          createdAt: sundayNoon,
+          labelIds: const ['wrkDayOkD2'],
+          conditions: const [GlobalResetTaskCondition()],
+        ),
+      ];
+
+      final globalBoard = TaskBoard.evaluate(
+        tasks: tasks,
+        labels: [lblScopedWeekend, lblWorkWeekday],
+        locations: const [locOffice, locHome],
+        evaluationTime: sundayNoon,
+        localEvaluationTime: sundayNoon,
+        currentLatitude: 52.5200,
+        currentLongitude: 13.4050,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: sundayNoon,
+          taskIds: tasks.map((task) => task.id).toList(),
+        ),
+      );
+
+      expect(
+        globalBoard.sortedLocations.map((location) => location.id),
+        equals(['3kLm8nOkD2', '7pQr9mOkD2']),
+        reason: 'sortedLocations must sort case-insensitively by name (Home before Office)',
+      );
+      expect(globalBoard.findLocation('7pQr9mOkD2'), equals(locOffice));
+      expect(globalBoard.findLocation('missingLoc'), isNull);
+
+      final globalTierTaskIds = <TaskItem>[
+        ...globalBoard.focus,
+        ...globalBoard.ready,
+        ...globalBoard.planned,
+        ...globalBoard.blocked,
+        ...globalBoard.someday,
+        ...globalBoard.completed,
+      ].map((task) => task.id);
+      expect(
+        globalTierTaskIds,
+        isNot(contains('tScopedOnl')),
+        reason: 'Section 5.1: Tasks whose assigned labels are all scoped must be excluded from all 6 tiers in the global view',
+      );
+      expect(
+        globalBoard.findTask('tScopedOnl'),
+        isNotNull,
+        reason: 'Document model must retain scoped-only tasks in allTasks for serialization, search, and scoped label context evaluation',
+      );
+      expect(
+        globalBoard.blocked.map((task) => task.id),
+        contains('tMixedLbls'),
+        reason: 'Section 4.4.3 Rule 4: In global view, scoped labels are ignored in L_global(T), so tMixedLbls evaluates only against wrkDayOkD2 (which fails on Sunday)',
+      );
+      expect(
+        globalBoard.focus.map((task) => task.id),
+        equals(['tOvrLocHom', 'tRstLocAny', 'tRstGlbAny']),
+        reason: 'At Home GPS coordinates on Sunday, tOvrLocHom (day any + Home location), tRstLocAny (day any + location any), and tRstGlbAny (condition any) are all satisfied',
+      );
+
+      expect(
+        globalBoard.openTaskCountForLocation('7pQr9mOkD2'),
+        equals(1),
+        reason: 'Only tMixedLbls inherits 7pQr9mOkD2 from wrkDayOkD2; tOvrLocHom overrides location, tRstLocAny resets location any, and tRstGlbAny has condition any',
+      );
+      expect(
+        globalBoard.openTaskCountForLocation('3kLm8nOkD2'),
+        equals(1),
+        reason: 'tOvrLocHom directly references 3kLm8nOkD2',
+      );
+      expect(
+        globalBoard.openTaskCountsByLocation,
+        equals({'7pQr9mOkD2': 1, '3kLm8nOkD2': 1}),
+      );
+
+      final scopedView = globalBoard.evaluateForContext(
+        activeLabelId: 'scpWk0OkD2',
+        evaluationTime: sundayNoon,
+        localEvaluationTime: sundayNoon,
+      );
+      expect(
+        scopedView.focus.map((task) => task.id),
+        equals(['tScopedOnl', 'tMixedLbls']),
+        reason: 'When activeLabelId selects a scoped label, both tScopedOnl and tMixedLbls are included and satisfied on Sunday',
       );
     });
   });

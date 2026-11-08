@@ -20,7 +20,7 @@ import 'package:flutter/foundation.dart';
 
 import 'task_item.dart';
 
-/// Immutable per-workspace synchronization baseline, acknowledged generations, and label deletion state.
+/// Immutable per-workspace synchronization baseline, acknowledged generations, source digest, and pending deletion state.
 @immutable
 class WorkspaceSyncState {
   /// Creates a [WorkspaceSyncState].
@@ -28,11 +28,19 @@ class WorkspaceSyncState {
     this.lastSyncedLocalTdf,
     this.lastSyncedRemoteTdf,
     Map<String, DateTime> deletedLabelTimestamps = const {},
+    Map<String, DateTime> deletedLocationTimestamps = const {},
     this.acknowledgedLocalGeneration = 0,
     this.acknowledgedRemoteGeneration = 0,
+    this.localSourceDigest,
   }) : deletedLabelTimestamps = Map<String, DateTime>.unmodifiable(
          <String, DateTime>{
            for (final entry in deletedLabelTimestamps.entries)
+             entry.key: TaskItem.normalizeTimestamp(entry.value),
+         },
+       ),
+       deletedLocationTimestamps = Map<String, DateTime>.unmodifiable(
+         <String, DateTime>{
+           for (final entry in deletedLocationTimestamps.entries)
              entry.key: TaskItem.normalizeTimestamp(entry.value),
          },
        );
@@ -42,64 +50,74 @@ class WorkspaceSyncState {
     : lastSyncedLocalTdf = null,
       lastSyncedRemoteTdf = null,
       deletedLabelTimestamps = const <String, DateTime>{},
+      deletedLocationTimestamps = const <String, DateTime>{},
       acknowledgedLocalGeneration = 0,
-      acknowledgedRemoteGeneration = 0;
+      acknowledgedRemoteGeneration = 0,
+      localSourceDigest = null;
 
-  /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x01` or `TTS\x02` binary payload,
+  /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x01`, `TTS\x02`, or `TTS\x03` binary payload,
   /// returning [empty] if [bytes] is empty or malformed.
   factory WorkspaceSyncState.fromBytes(List<int> bytes) {
     if (bytes.length < 6 ||
         bytes[0] != 0x54 ||
         bytes[1] != 0x54 ||
-        bytes[2] != 0x53 ||
-        (bytes[3] != _binaryVersionV1 && bytes[3] != _binaryVersionV2)) {
+        bytes[2] != 0x53) {
       return empty;
     }
     final version = bytes[3];
+    if (version != _binaryVersionV1 &&
+        version != _binaryVersionV2 &&
+        version != _binaryVersionV3) {
+      return empty;
+    }
     final source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     try {
       final (localTdf, afterLocal) = _readNullableString(source, 4);
       final (remoteTdf, afterRemote) = _readNullableString(source, afterLocal);
-      if (afterRemote + 2 > source.length) {
-        return empty;
-      }
-      final count = (source[afterRemote] << 8) | source[afterRemote + 1];
-      var cursor = afterRemote + 2;
-      final deletedMap = <String, DateTime>{};
-      for (var i = 0; i < count; i++) {
-        final (labelId, dateVal, nextCursor) = _readDeletedLabelEntry(
-          source,
-          cursor,
-        );
-        deletedMap[labelId] = dateVal;
-        cursor = nextCursor;
-      }
+      final (deletedLabels, afterLabels) = _readDeletedEntityMap(
+        source,
+        afterRemote,
+      );
+      var cursor = afterLabels;
       var localGen = 0;
       var remoteGen = 0;
-      if (version == _binaryVersionV2) {
-        if (cursor + 16 != source.length) {
-          return empty;
-        }
+      if (version >= _binaryVersionV2) {
+        if (cursor + 16 > source.length) return empty;
         localGen = _readInt64(source, cursor);
         remoteGen = _readInt64(source, cursor + 8);
         cursor += 16;
       }
-      if (cursor != source.length) {
-        return empty;
+      var deletedLocations = const <String, DateTime>{};
+      String? localDigest;
+      if (version >= _binaryVersionV3) {
+        final (locations, afterLocations) = _readDeletedEntityMap(
+          source,
+          cursor,
+        );
+        final (digest, afterDigest) = _readNullableString(
+          source,
+          afterLocations,
+        );
+        deletedLocations = locations;
+        localDigest = digest;
+        cursor = afterDigest;
       }
+      if (cursor != source.length) return empty;
       return WorkspaceSyncState(
         lastSyncedLocalTdf: localTdf,
         lastSyncedRemoteTdf: remoteTdf,
-        deletedLabelTimestamps: deletedMap,
+        deletedLabelTimestamps: deletedLabels,
+        deletedLocationTimestamps: deletedLocations,
         acknowledgedLocalGeneration: localGen,
         acknowledgedRemoteGeneration: remoteGen,
+        localSourceDigest: localDigest,
       );
     } on FormatException {
       return empty;
     }
   }
 
-  /// Empty synchronization state with no baselines and no pending label deletions.
+  /// Empty synchronization state with no baselines and no pending entity deletions.
   static const WorkspaceSyncState empty = WorkspaceSyncState._empty();
 
   /// Binary wire format version 1 identifier.
@@ -107,6 +125,9 @@ class WorkspaceSyncState {
 
   /// Binary wire format version 2 identifier.
   static const int _binaryVersionV2 = 2;
+
+  /// Binary wire format version 3 identifier.
+  static const int _binaryVersionV3 = 3;
 
   /// Strict UTF-8 codec that rejects malformed byte sequences.
   static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
@@ -120,11 +141,17 @@ class WorkspaceSyncState {
   /// UTC deletion timestamps (`T_del`) for labels deleted since the last full sync.
   final Map<String, DateTime> deletedLabelTimestamps;
 
+  /// UTC deletion timestamps (`T_del`) for locations deleted since the last full sync.
+  final Map<String, DateTime> deletedLocationTimestamps;
+
   /// Canonical `.tdf` snapshot from the last successful local file synchronization.
   final String? lastSyncedLocalTdf;
 
   /// Canonical `.tdf` snapshot from the last successful WebDAV synchronization.
   final String? lastSyncedRemoteTdf;
+
+  /// SHA-256 hex digest of the local `.tdf` file from the last successful local publication.
+  final String? localSourceDigest;
 
   /// Returns a copy of this [WorkspaceSyncState] with updated fields.
   WorkspaceSyncState copyWith({
@@ -133,8 +160,11 @@ class WorkspaceSyncState {
     String? lastSyncedRemoteTdf,
     bool clearLastSyncedRemoteTdf = false,
     Map<String, DateTime>? deletedLabelTimestamps,
+    Map<String, DateTime>? deletedLocationTimestamps,
     int? acknowledgedLocalGeneration,
     int? acknowledgedRemoteGeneration,
+    String? localSourceDigest,
+    bool clearLocalSourceDigest = false,
   }) {
     return WorkspaceSyncState(
       lastSyncedLocalTdf: clearLastSyncedLocalTdf
@@ -145,31 +175,52 @@ class WorkspaceSyncState {
           : (lastSyncedRemoteTdf ?? this.lastSyncedRemoteTdf),
       deletedLabelTimestamps:
           deletedLabelTimestamps ?? this.deletedLabelTimestamps,
+      deletedLocationTimestamps:
+          deletedLocationTimestamps ?? this.deletedLocationTimestamps,
       acknowledgedLocalGeneration:
           acknowledgedLocalGeneration ?? this.acknowledgedLocalGeneration,
       acknowledgedRemoteGeneration:
           acknowledgedRemoteGeneration ?? this.acknowledgedRemoteGeneration,
+      localSourceDigest: clearLocalSourceDigest
+          ? null
+          : (localSourceDigest ?? this.localSourceDigest),
     );
   }
 
-  /// Encodes this [WorkspaceSyncState] into a compact `TTS\x02` binary [Uint8List].
+  /// Encodes this [WorkspaceSyncState] into a compact `TTS\x03` binary [Uint8List].
   Uint8List toBytes() {
     final builder = BytesBuilder(copy: false)
-      ..add(const <int>[0x54, 0x54, 0x53, _binaryVersionV2]);
+      ..add(const <int>[0x54, 0x54, 0x53, _binaryVersionV3]);
     _writeNullableString(builder, lastSyncedLocalTdf);
     _writeNullableString(builder, lastSyncedRemoteTdf);
-
-    final entries = deletedLabelTimestamps.entries.toList();
-    final count = entries.length <= 0xFFFF ? entries.length : 0xFFFF;
-    builder
-      ..addByte((count >> 8) & 0xFF)
-      ..addByte(count & 0xFF);
-    for (var i = 0; i < count; i++) {
-      _writeDeletedLabelEntry(builder, entries[i].key, entries[i].value);
-    }
+    _writeDeletedEntityMap(builder, deletedLabelTimestamps);
     _writeInt64(builder, acknowledgedLocalGeneration);
     _writeInt64(builder, acknowledgedRemoteGeneration);
+    _writeDeletedEntityMap(builder, deletedLocationTimestamps);
+    _writeNullableString(builder, localSourceDigest);
     return builder.toBytes();
+  }
+
+  /// Reads a 16-bit count-prefixed map of `(entityId, deletedAt)` entries from [source] at [offset].
+  static (Map<String, DateTime>, int) _readDeletedEntityMap(
+    Uint8List source,
+    int offset,
+  ) {
+    if (offset + 2 > source.length) {
+      throw const FormatException('Truncated deleted entity map count.');
+    }
+    final count = (source[offset] << 8) | source[offset + 1];
+    var cursor = offset + 2;
+    final deletedMap = <String, DateTime>{};
+    for (var i = 0; i < count; i++) {
+      final (entityId, dateVal, nextCursor) = _readDeletedLabelEntry(
+        source,
+        cursor,
+      );
+      deletedMap[entityId] = dateVal;
+      cursor = nextCursor;
+    }
+    return (deletedMap, cursor);
   }
 
   /// Reads a single `(labelId, deletedAt, nextOffset)` entry from [source] at [offset].
@@ -226,6 +277,21 @@ class WorkspaceSyncState {
     return (decoded, end);
   }
 
+  /// Appends a 16-bit count-prefixed map of `(entityId, deletedAt)` entries to [builder].
+  static void _writeDeletedEntityMap(
+    BytesBuilder builder,
+    Map<String, DateTime> timestamps,
+  ) {
+    final entries = timestamps.entries.toList();
+    final count = entries.length <= 0xFFFF ? entries.length : 0xFFFF;
+    builder
+      ..addByte((count >> 8) & 0xFF)
+      ..addByte(count & 0xFF);
+    for (var i = 0; i < count; i++) {
+      _writeDeletedLabelEntry(builder, entries[i].key, entries[i].value);
+    }
+  }
+
   /// Appends a single `(labelId, deletedAt)` entry to [builder].
   static void _writeDeletedLabelEntry(
     BytesBuilder builder,
@@ -270,7 +336,9 @@ class WorkspaceSyncState {
         other.lastSyncedRemoteTdf == lastSyncedRemoteTdf &&
         other.acknowledgedLocalGeneration == acknowledgedLocalGeneration &&
         other.acknowledgedRemoteGeneration == acknowledgedRemoteGeneration &&
-        mapEquals(other.deletedLabelTimestamps, deletedLabelTimestamps);
+        other.localSourceDigest == localSourceDigest &&
+        mapEquals(other.deletedLabelTimestamps, deletedLabelTimestamps) &&
+        mapEquals(other.deletedLocationTimestamps, deletedLocationTimestamps);
   }
 
   @override
@@ -279,8 +347,14 @@ class WorkspaceSyncState {
     lastSyncedRemoteTdf,
     acknowledgedLocalGeneration,
     acknowledgedRemoteGeneration,
+    localSourceDigest,
     Object.hashAllUnordered(
       deletedLabelTimestamps.entries.map(
+        (entry) => Object.hash(entry.key, entry.value),
+      ),
+    ),
+    Object.hashAllUnordered(
+      deletedLocationTimestamps.entries.map(
         (entry) => Object.hash(entry.key, entry.value),
       ),
     ),

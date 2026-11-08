@@ -23,19 +23,24 @@ import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
 
-/// Row of Priority, Someday, Suspended, and Repeat chips inside the task editor.
+/// Row of Priority, Someday, Suspended, Due, and Repeat chips inside the task editor.
 class TaskEditorModeRow extends StatelessWidget {
   /// Creates a [TaskEditorModeRow].
   const TaskEditorModeRow({
     super.key,
+    this.hasDue = false,
     required this.isRepeating,
     required this.isSuspended,
     required this.mode,
+    this.onToggleDue,
     required this.onTogglePriority,
     required this.onToggleRepeat,
     required this.onToggleSomeday,
     required this.onToggleSuspended,
   });
+
+  /// Whether the task has a due date/time enabled.
+  final bool hasDue;
 
   /// Whether the task has recurrence enabled.
   final bool isRepeating;
@@ -45,6 +50,9 @@ class TaskEditorModeRow extends StatelessWidget {
 
   /// Active scheduling mode.
   final QuickAddMode mode;
+
+  /// Callback invoked when Due is tapped.
+  final VoidCallback? onToggleDue;
 
   /// Callback invoked when Priority is tapped.
   final VoidCallback onTogglePriority;
@@ -92,6 +100,14 @@ class TaskEditorModeRow extends StatelessWidget {
           isSelected: isSuspended,
           accentColor: appTheme.warningAccent,
           onTap: onToggleSuspended,
+        ),
+        TaskEditorChip(
+          chipKey: const ValueKey('task_editor_due_button'),
+          icon: Icons.event_rounded,
+          label: localizations.taskDueButtonLabel,
+          isSelected: hasDue,
+          accentColor: appTheme.secondaryAccent,
+          onTap: onToggleDue ?? () {},
         ),
         TaskEditorChip(
           chipKey: const ValueKey('task_editor_repeat_button'),
@@ -235,11 +251,14 @@ class TaskEditorRepeatField extends StatelessWidget {
   }
 }
 
-/// Card grouping the scheduling mode chips, optional `suspended` timestamp field, and optional `repeat` rule.
+/// Card grouping the scheduling mode chips, optional `suspended` timestamp field, optional `due` timestamp field, and optional `repeat` rule.
 class TaskEditorSchedulingCard extends StatelessWidget {
   /// Creates a [TaskEditorSchedulingCard].
   const TaskEditorSchedulingCard({
     super.key,
+    this.dueController,
+    this.dueErrorMessage,
+    this.hasDue = false,
     required this.isRepeating,
     required this.isSuspended,
     required this.mode,
@@ -248,15 +267,28 @@ class TaskEditorSchedulingCard extends StatelessWidget {
     required this.repeatUnit,
     required this.suspendedController,
     required this.suspendedErrorMessage,
+    this.onClearDue,
     required this.onClearSuspended,
+    this.onPickDueDate,
+    this.onPickDueTime,
     required this.onPickSuspendedDate,
     required this.onPickSuspendedTime,
     required this.onSelectRepeatUnit,
+    this.onToggleDue,
     required this.onTogglePriority,
     required this.onToggleRepeat,
     required this.onToggleSomeday,
     required this.onToggleSuspended,
   });
+
+  /// Controller for the optional `due` timestamp input.
+  final TextEditingController? dueController;
+
+  /// Optional validation error message for the `due` timestamp.
+  final String? dueErrorMessage;
+
+  /// Whether the task has a `due` timestamp enabled.
+  final bool hasDue;
 
   /// Whether the task has recurrence enabled.
   final bool isRepeating;
@@ -267,8 +299,17 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Active scheduling mode.
   final QuickAddMode mode;
 
+  /// Callback invoked to clear the `due` timestamp field.
+  final VoidCallback? onClearDue;
+
   /// Callback invoked to clear the suspended timestamp field.
   final VoidCallback onClearSuspended;
+
+  /// Callback invoked to open the date picker for the `due` timestamp.
+  final VoidCallback? onPickDueDate;
+
+  /// Callback invoked to open the time picker for the `due` timestamp.
+  final VoidCallback? onPickDueTime;
 
   /// Callback invoked to open the date picker for the suspended timestamp.
   final VoidCallback onPickSuspendedDate;
@@ -278,6 +319,9 @@ class TaskEditorSchedulingCard extends StatelessWidget {
 
   /// Callback invoked when a [RepeatUnit] is selected.
   final ValueChanged<RepeatUnit> onSelectRepeatUnit;
+
+  /// Callback invoked when Due is tapped.
+  final VoidCallback? onToggleDue;
 
   /// Callback invoked when Priority is tapped.
   final VoidCallback onTogglePriority;
@@ -309,6 +353,7 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final activeDueController = dueController;
     return TaskEditorSectionCard(
       cardKey: const ValueKey('task_editor_scheduling_card'),
       icon: Icons.tune_rounded,
@@ -318,9 +363,11 @@ class TaskEditorSchedulingCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           TaskEditorModeRow(
+            hasDue: hasDue,
             isRepeating: isRepeating,
             isSuspended: isSuspended,
             mode: mode,
+            onToggleDue: onToggleDue,
             onTogglePriority: onTogglePriority,
             onToggleRepeat: onToggleRepeat,
             onToggleSomeday: onToggleSomeday,
@@ -334,6 +381,26 @@ class TaskEditorSchedulingCard extends StatelessWidget {
               onClear: onClearSuspended,
               onPickDate: onPickSuspendedDate,
               onPickTime: onPickSuspendedTime,
+            ),
+          ],
+          if (hasDue && activeDueController != null) ...[
+            const SizedBox(height: 8),
+            TaskEditorSuspendedField(
+              controller: activeDueController,
+              errorMessage: dueErrorMessage,
+              fieldKey: const ValueKey('task_editor_due_input'),
+              clearButtonKey: const ValueKey('task_editor_due_clear_button'),
+              datePickerKey: const ValueKey(
+                'task_editor_due_date_picker_button',
+              ),
+              timePickerKey: const ValueKey(
+                'task_editor_due_time_picker_button',
+              ),
+              labelTextOverride: localizations.taskDueButtonLabel,
+              clearTooltipOverride: localizations.taskDueClearTooltip,
+              onClear: onClearDue ?? activeDueController.clear,
+              onPickDate: onPickDueDate ?? () {},
+              onPickTime: onPickDueTime ?? () {},
             ),
           ],
           if (isRepeating) ...[
@@ -351,23 +418,48 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   }
 }
 
-/// Optional `suspended` timestamp input field with modern date and time picker options.
+/// Optional `suspended` (or `due`) timestamp input field with modern date and time picker options.
 class TaskEditorSuspendedField extends StatelessWidget {
   /// Creates a [TaskEditorSuspendedField].
   const TaskEditorSuspendedField({
     super.key,
+    this.clearButtonKey = const ValueKey('task_editor_suspended_clear_button'),
+    this.clearTooltipOverride,
     required this.controller,
+    this.datePickerKey = const ValueKey(
+      'task_editor_suspended_date_picker_button',
+    ),
     required this.errorMessage,
+    this.fieldKey = const ValueKey('task_editor_suspended_input'),
+    this.labelTextOverride,
     required this.onClear,
     required this.onPickDate,
     required this.onPickTime,
+    this.timePickerKey = const ValueKey(
+      'task_editor_suspended_time_picker_button',
+    ),
   });
 
-  /// Controller for the optional `suspended` timestamp input.
+  /// Widget key for the clear button.
+  final Key clearButtonKey;
+
+  /// Optional custom tooltip for the clear button.
+  final String? clearTooltipOverride;
+
+  /// Controller for the timestamp input.
   final TextEditingController controller;
+
+  /// Widget key for the date picker button.
+  final Key datePickerKey;
 
   /// Optional validation error message.
   final String? errorMessage;
+
+  /// Widget key for the text field.
+  final Key fieldKey;
+
+  /// Optional custom label text.
+  final String? labelTextOverride;
 
   /// Callback invoked to clear the timestamp input.
   final VoidCallback onClear;
@@ -378,14 +470,17 @@ class TaskEditorSuspendedField extends StatelessWidget {
   /// Callback invoked to open the Material 3 time picker.
   final VoidCallback onPickTime;
 
+  /// Widget key for the time picker button.
+  final Key timePickerKey;
+
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final appTheme = AppTheme.of(context);
     return ClearableTextField(
-      fieldKey: const ValueKey('task_editor_suspended_input'),
-      clearButtonKey: const ValueKey('task_editor_suspended_clear_button'),
-      clearTooltip: localizations.tooltipClearDate,
+      fieldKey: fieldKey,
+      clearButtonKey: clearButtonKey,
+      clearTooltip: clearTooltipOverride ?? localizations.tooltipClearDate,
       clearIconColor: appTheme.mutedTextColor,
       showClearWhenUnfocused: true,
       onCleared: onClear,
@@ -488,7 +583,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
       ),
     );
     return InputDecoration(
-      labelText: localizations.taskSuspendedUntilLabel,
+      labelText: labelTextOverride ?? localizations.taskSuspendedUntilLabel,
       labelStyle: TextStyle(color: appTheme.mutedTextColor),
       hintText: localizations.taskSuspendedUntilHint,
       hintStyle: TextStyle(color: appTheme.mutedTextColor),
@@ -516,7 +611,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          key: const ValueKey('task_editor_suspended_date_picker_button'),
+          key: datePickerKey,
           visualDensity: VisualDensity.compact,
           tooltip: localizations.tooltipPickDate,
           icon: Icon(
@@ -527,7 +622,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
           onPressed: onPickDate,
         ),
         IconButton(
-          key: const ValueKey('task_editor_suspended_time_picker_button'),
+          key: timePickerKey,
           visualDensity: VisualDensity.compact,
           tooltip: localizations.tooltipPickTime,
           icon: Icon(

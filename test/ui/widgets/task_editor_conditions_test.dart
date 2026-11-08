@@ -32,15 +32,21 @@ void main() {
     'EditTaskScreen supports Suspended with date/time pickers, search-based multi-select Prerequisite tasks (blocked), and Activation Conditions (any, day, time with pickers, location)',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.6.0
 
 queue {
-  modified 2026-11-01 08:10:00
+  modified 2026-11-01 08:10
   task 000001OkD2
   task 000002OkD2
   task 000003OkD2
 }
 
+location locCampOk2 {
+  name "Campground"
+  coordinates 50.9787 11.0328
+  radius 150
+  source "gps"
+}
 label officeOkD2 {
   name "Office"
   color "#2196F3"
@@ -52,17 +58,14 @@ label officeOkD2 {
 task 000001OkD2 {
   name "Prepare Database Migration"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
 }
 task 000002OkD2 {
   name "Prepare Backup Verification"
   created 2026-11-01 08:05
-  queued 2026-11-01 08:05
 }
 task 000003OkD2 {
   name "Write Release Notes"
   created 2026-11-01 08:10
-  queued 2026-11-01 08:10
 }
 ''';
       final fixedNow = DateTime.utc(2026, 11, 1, 12, 0);
@@ -410,25 +413,11 @@ task 000003OkD2 {
       );
       await tester.pump();
 
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('task_editor_location_lat_input')),
+      final locChipFinder = find.byKey(
+        const ValueKey('task_editor_condition_location_locCampOk2'),
       );
-      await tester.enterText(
-        find.byKey(const ValueKey('task_editor_location_lat_input')),
-        '50.9787',
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('task_editor_location_lon_input')),
-        '11.0328',
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('task_editor_location_radius_input')),
-        '150',
-      );
-      await tester.pump();
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_add_location_condition_button')),
-      );
+      await tester.ensureVisible(locChipFinder);
+      await tester.tap(locChipFinder);
       await tester.pump();
 
       await tester.ensureVisible(saveButtonFinder);

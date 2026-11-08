@@ -16,6 +16,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/tdf_location.dart';
 import '../../models/tdf_metadata.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
@@ -28,9 +29,14 @@ class TaskEditorConditionsSection extends StatelessWidget {
   const TaskEditorConditionsSection({
     super.key,
     required this.controller,
+    this.availableLocations = const <TdfLocation>[],
     this.descriptionOverride,
     this.isSuspended = false,
+    this.onManageLocations,
   });
+
+  /// Defined [TdfLocation] blocks available for selection.
+  final List<TdfLocation> availableLocations;
 
   /// Controller managing the condition form state.
   final ConditionEditorController controller;
@@ -40,6 +46,9 @@ class TaskEditorConditionsSection extends StatelessWidget {
 
   /// Whether the enclosing task is suspended (disabling condition evaluation and editing).
   final bool isSuspended;
+
+  /// Optional callback invoked when the user taps the manage locations button.
+  final VoidCallback? onManageLocations;
 
   @override
   Widget build(BuildContext context) {
@@ -130,15 +139,11 @@ class TaskEditorConditionsSection extends StatelessWidget {
         const SizedBox(height: 12),
         _TaskEditorConditionLocationSection(
           allowResets: controller.allowResets,
+          availableLocations: availableLocations,
           conditionLocationAny: controller.conditionLocationAny,
-          latController: controller.locationLatController,
-          lonController: controller.locationLonController,
-          radiusController: controller.locationRadiusController,
-          errorMessage: controller.locationErrorMessage,
-          rules: controller.locationRules,
-          onAddLocationCondition: () =>
-              controller.addLocationCondition(localizations),
-          onRemoveLocationCondition: controller.removeLocationCondition,
+          selectedLocationIds: controller.selectedLocationIds,
+          onManageLocations: onManageLocations,
+          onToggleLocation: controller.toggleLocation,
           onToggleLocationAny: controller.toggleLocationAny,
         ),
       ],
@@ -228,51 +233,39 @@ class _TaskEditorConditionDaySection extends StatelessWidget {
   }
 }
 
-/// GPS location (`condition location`) editor subgroup inside [TaskEditorConditionsSection].
+/// Location (`condition location`) chip-selector subgroup inside [TaskEditorConditionsSection].
 class _TaskEditorConditionLocationSection extends StatelessWidget {
   /// Creates a [_TaskEditorConditionLocationSection].
   const _TaskEditorConditionLocationSection({
     required this.allowResets,
+    required this.availableLocations,
     required this.conditionLocationAny,
-    required this.errorMessage,
-    required this.latController,
-    required this.lonController,
-    required this.radiusController,
-    required this.rules,
-    required this.onAddLocationCondition,
-    required this.onRemoveLocationCondition,
+    required this.selectedLocationIds,
+    required this.onManageLocations,
+    required this.onToggleLocation,
     required this.onToggleLocationAny,
   });
 
   /// Whether the `condition location any` reset chip is shown.
   final bool allowResets;
 
+  /// Available [TdfLocation] blocks on the board.
+  final List<TdfLocation> availableLocations;
+
   /// Whether `condition location any` is active.
   final bool conditionLocationAny;
 
-  /// Validation error message for GPS input, or `null` when valid.
-  final String? errorMessage;
+  /// Optional callback to open the location management screen.
+  final VoidCallback? onManageLocations;
 
-  /// Controller for latitude input.
-  final TextEditingController latController;
-
-  /// Controller for longitude input.
-  final TextEditingController lonController;
-
-  /// Callback to add a GPS location condition.
-  final VoidCallback onAddLocationCondition;
-
-  /// Callback to remove the GPS location condition at the given index.
-  final ValueChanged<int> onRemoveLocationCondition;
+  /// Callback to toggle selection of a location ID.
+  final ValueChanged<String> onToggleLocation;
 
   /// Callback to toggle `condition location any`.
   final VoidCallback onToggleLocationAny;
 
-  /// Controller for radius input.
-  final TextEditingController radiusController;
-
-  /// Configured GPS location conditions.
-  final List<LocationTaskCondition> rules;
+  /// Selected location IDs.
+  final Set<String> selectedLocationIds;
 
   @override
   Widget build(BuildContext context) {
@@ -296,72 +289,40 @@ class _TaskEditorConditionLocationSection extends StatelessWidget {
           onToggleReset: onToggleLocationAny,
         ),
         const SizedBox(height: 6),
-        for (var i = 0; i < rules.length; i++)
-          _TaskEditorRuleRow(
-            removeKey: ValueKey('task_editor_remove_location_condition_$i'),
-            icon: Icons.place_outlined,
-            label:
-                '${rules[i].latitude}, ${rules[i].longitude} (${rules[i].radiusMeters}m)',
-            tooltip: localizations.tooltipRemoveLocationCondition,
-            onRemove: () => onRemoveLocationCondition(i),
+        if (availableLocations.isEmpty)
+          Text(
+            localizations.emptyLocationsHint,
+            style: TextStyle(color: appTheme.mutedTextColor, fontSize: 12),
+          )
+        else
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final location in availableLocations)
+                TaskEditorChip(
+                  chipKey: ValueKey(
+                    'task_editor_condition_location_${location.id}',
+                  ),
+                  icon: Icons.place_outlined,
+                  label: location.name,
+                  isSelected:
+                      !conditionLocationAny &&
+                      selectedLocationIds.contains(location.id),
+                  accentColor: appTheme.secondaryAccent,
+                  onTap: () => onToggleLocation(location.id),
+                ),
+            ],
           ),
-        _buildLocationInputRow(localizations, appTheme),
-        if (errorMessage != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              errorMessage ?? '',
-              style: TextStyle(color: appTheme.errorColor, fontSize: 12),
-            ),
+        if (onManageLocations != null) ...[
+          const SizedBox(height: 6),
+          TextButton.icon(
+            key: const ValueKey('task_editor_manage_locations_button'),
+            onPressed: onManageLocations,
+            icon: const Icon(Icons.edit_location_alt_outlined, size: 16),
+            label: Text(localizations.editLocationsTitle),
           ),
-      ],
-    );
-  }
-
-  /// Builds the latitude, longitude, radius input fields and add button row.
-  Widget _buildLocationInputRow(
-    AppLocalizations localizations,
-    AppTheme appTheme,
-  ) {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildConditionTextField(
-            appTheme: appTheme,
-            fieldKey: const ValueKey('task_editor_location_lat_input'),
-            controller: latController,
-            hintText: localizations.conditionLocationLatHint,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: _buildConditionTextField(
-            appTheme: appTheme,
-            fieldKey: const ValueKey('task_editor_location_lon_input'),
-            controller: lonController,
-            hintText: localizations.conditionLocationLonHint,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: _buildConditionTextField(
-            appTheme: appTheme,
-            fieldKey: const ValueKey('task_editor_location_radius_input'),
-            controller: radiusController,
-            hintText: localizations.conditionLocationRadiusHint,
-          ),
-        ),
-        const SizedBox(width: 6),
-        IconButton.filledTonal(
-          key: const ValueKey('task_editor_add_location_condition_button'),
-          style: IconButton.styleFrom(
-            backgroundColor: appTheme.secondaryContainerColor,
-            foregroundColor: appTheme.onSecondaryContainerColor,
-          ),
-          tooltip: localizations.tooltipAddLocationCondition,
-          onPressed: onAddLocationCondition,
-          icon: const Icon(Icons.add_location_alt_rounded),
-        ),
+        ],
       ],
     );
   }

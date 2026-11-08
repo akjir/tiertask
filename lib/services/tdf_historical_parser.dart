@@ -171,13 +171,20 @@ class TdfHistoricalParser {
           for (final argument in arguments) ?double.tryParse(argument.value),
         ];
         final validLocation =
-            arguments.length == 3 && values.length == 3 && values[2] > 0;
+            arguments.length == 3 &&
+            values.length == 3 &&
+            values[0] >= -90.0 &&
+            values[0] <= 90.0 &&
+            values[1] >= -180.0 &&
+            values[1] <= 180.0 &&
+            values[2] > 0;
         state.check(validLocation, TdfErrorKind.invalidCondition);
-        final lat = values[0], lon = values[1], rad = values[2];
         rule = LocationTaskCondition(
-          latitude: lat,
-          longitude: lon,
-          radiusMeters: rad,
+          locationIds: <String>[
+            arguments[0].value,
+            arguments[1].value,
+            arguments[2].value,
+          ],
         );
       default:
         state.fail(TdfErrorKind.unknownDirective);

@@ -113,7 +113,7 @@ void main() {
       expect(serialized, contains('task 000004OkD2 priority {'));
       expect(serialized, contains('subtasks auto-finish {'));
       expect(serialized, contains('step false "Patch vulnerability"'));
-      expect(serialized, contains('step true "Verify regression tests"'));
+      expect(serialized, contains('step true  "Verify regression tests"'));
 
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
       expect(
@@ -616,6 +616,88 @@ task manualOkD2 {
         equals(DateTime.utc(2028, 2, 29, 0, 0)),
         reason:
             '2028-01-31 + 1 month in leap year must clamp to 2028-02-29 00:00',
+      );
+    });
+
+    test('completes TDF 0.6.0 standard task preserving dueAt and origin, and completes Mode 2 recurring task with dueAt advancing dueAt and suspendedAt along fixed schedule', () {
+      const origin = TaskOrigin(namespace: 'jira', externalKey: 'OPS-42');
+      final dueTime = DateTime.utc(2026, 3, 28, 16, 0);
+      final standardTask = TaskItem(
+        id: 'tStdDue001',
+        title: 'Standard Task With Due and Origin',
+        createdAt: DateTime.utc(2026, 3, 20, 8, 0),
+        dueAt: dueTime,
+        origin: origin,
+      );
+      final recurringDueTask = TaskItem(
+        id: 'tRecDue001',
+        title: 'Mode 2 Recurring Task With Lead Window',
+        createdAt: DateTime.utc(2026, 3, 20, 8, 0),
+        suspendedAt: DateTime.utc(2026, 3, 26, 8, 0),
+        dueAt: dueTime,
+        origin: origin,
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.weeks,
+          clock: TdfRepeatClock(hour: 9, minute: 0),
+        ),
+      );
+
+      const berlinZone = TdfTimeZoneContext.europeBerlin;
+      final completionUtc = DateTime.utc(2026, 3, 28, 10, 0);
+      final completionLocal = berlinZone.toLocalWallClock(completionUtc);
+
+      var board = TaskBoard.evaluate(
+        tasks: [standardTask, recurringDueTask],
+        evaluationTime: completionUtc,
+        localEvaluationTime: completionLocal,
+        timeZone: berlinZone,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 3, 20, 8, 0),
+          taskIds: const ['tStdDue001', 'tRecDue001'],
+        ),
+      );
+
+      board = board.completeTask(
+        'tStdDue001',
+        currentDate: completionUtc,
+        localEvaluationTime: completionLocal,
+        timeZone: berlinZone,
+      );
+      final completedStd = board.findTask('tStdDue001')!;
+      expect(completedStd.isCompleted, isTrue);
+      expect(
+        completedStd.dueAt,
+        equals(dueTime),
+        reason:
+            'Section 6.4: Standard completion must preserve dueAt unchanged',
+      );
+      expect(
+        completedStd.origin,
+        equals(origin),
+        reason:
+            'Section 6.4: Standard completion must preserve origin unchanged',
+      );
+
+      board = board.completeTask(
+        'tRecDue001',
+        currentDate: completionUtc,
+        localEvaluationTime: completionLocal,
+        timeZone: berlinZone,
+      );
+      final rescheduled = board.findTask('tRecDue001')!;
+      expect(rescheduled.isCompleted, isFalse);
+      expect(rescheduled.completions, equals(1));
+      expect(rescheduled.origin, equals(origin));
+      expect(
+        rescheduled.dueAt,
+        equals(DateTime.utc(2026, 4, 4, 15, 0)),
+        reason: 'Section 6.4 & 6.10.3: Mode 2 must advance due to 2026-04-04 17:00 CEST (15:00 UTC)',
+      );
+      expect(
+        rescheduled.suspendedAt,
+        equals(DateTime.utc(2026, 4, 2, 7, 0)),
+        reason: 'Section 6.4 & 6.10.3: Mode 2 must preserve 2-day local calendar lead window to 2026-04-02 09:00 CEST (07:00 UTC)',
       );
     });
   });

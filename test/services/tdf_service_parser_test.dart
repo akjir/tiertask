@@ -154,16 +154,16 @@ task 7mPr4T09xY {
       expect(board.completed.single.completions, equals(1));
 
       final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.5.1\n\ndeleted {\n'));
+      expect(serialized, startsWith('tdf 0.6.0\n\ndeleted {\n'));
       expect(serialized.contains('    queued '), isFalse);
       expect(
         serialized,
         contains('    suspended 2026-11-04 23:00:00\n'),
         reason: 'Section 6.10.3 requires emitting finite deferrals as YYYY-MM-DD HH:MM:SS',
       );
-      final repeatIdx = serialized.indexOf('    repeat 30 days\n');
+      final repeatIdx = serialized.indexOf('    repeat   30 days\n');
       final labelsIdx = serialized.indexOf(
-        '    labels 4x9p2mOkD2 9kLm2P0aBc\n',
+        '    labels   4x9p2mOkD2 9kLm2P0aBc\n',
       );
       expect(
         repeatIdx,
@@ -305,17 +305,17 @@ task 333333OkD2 {
         reason: 'deleted block must emit task records before label records, sorted by ascending ASCII ID, with explicit seconds and omitting zero checkpoints',
       );
       expect(serialized, contains('    completions 3\n'));
-      expect(serialized, contains('    repeat 1 days 09:30\n'));
+      expect(serialized, contains('    repeat      1 days 09:30\n'));
       expect(
         serialized,
         contains('    blocked 111111OkD2:5 999999OkD2\n'),
         reason: 'Canonical blocked directive must sort by ascending ASCII target ID and omit :1 suffix',
       );
-      expect(serialized, contains('    repeat 2 weeks 14:15:30\n'));
+      expect(serialized, contains('    repeat  2 weeks 14:15:30\n'));
       expect(serialized, contains('    suspended forever\n'));
       expect(
         serialized,
-        contains('    repeat 1 months\n'),
+        contains('    repeat    1 months\n'),
         reason: 'Default midnight clock 00:00:00 must be omitted canonically',
       );
     });
@@ -362,8 +362,8 @@ task 333333OkD2 {
         serialized,
         contains(
           '    condition {\n'
-          '        day mon\n'
-          '        day wed fri\n'
+          '        day  mon\n'
+          '        day  wed fri\n'
           '        time 09:00 17:00\n'
           '    }\n',
         ),
@@ -373,21 +373,22 @@ task 333333OkD2 {
       expect(reparsed.labels.single.conditions.length, equals(3));
     });
 
-    test('accepts tdf 0.5.1 and tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
+    test('accepts tdf 0.6.0, tdf 0.5.1, and tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
       expect(
         TdfService.supportedVersion,
-        equals('0.5.1'),
-        reason: 'Supported TDF version must be 0.5.1',
+        equals('0.6.0'),
+        reason: 'Supported TDF version must be 0.6.0',
       );
+      expect(tdfService.parse('tdf 0.6.0\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.5.1\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.5.0\n').focus, isEmpty);
       expect(
         tdfService
-            .parse('   \t  \n# only comment\r\ntdf 0.5.1  # version\n')
+            .parse('   \t  \n# only comment\r\ntdf 0.6.0  # version\n')
             .focus,
         isEmpty,
       );
-      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.5.1\n'));
+      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.6.0\n'));
 
       for (final legacyVersion in ['0.4.0', '0.3.0', '0.2.0', '0.1.0']) {
         expect(
@@ -496,11 +497,11 @@ task somdayOkD2 {
       expect(board.someday.map((task) => task.id), equals(['somdayOkD2']));
 
       final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.5.1\n'));
+      expect(serialized, startsWith('tdf 0.6.0\n'));
       expect(
         serialized.contains('\n    queued '),
         isFalse,
-        reason: 'Serializing a converted 0.5.0 document must emit tdf 0.5.1 with zero queued directives',
+        reason: 'Serializing a converted 0.5.0 document must emit tdf 0.6.0 with zero queued directives',
       );
     });
 
@@ -533,9 +534,9 @@ task link01OkD2 {
       expect(task.links.length, equals(3));
 
       final serialized = tdfService.serialize(board);
-      final repeatIndex = serialized.indexOf('    repeat 1 weeks 08:30\n');
+      final repeatIndex = serialized.indexOf('    repeat    1 weeks 08:30\n');
       final firstLinkIndex = serialized.indexOf(
-        '    link "Runbook \\"Prod\\"" "https://example.com/docs/db?env=prod&v=1"\n',
+        '    link      "Runbook \\"Prod\\"" "https://example.com/docs/db?env=prod&v=1"\n',
       );
       final conditionIndex = serialized.indexOf('    condition day mon\n');
       final subtasksIndex = serialized.indexOf('    subtasks {\n');

@@ -1476,5 +1476,110 @@
   "tooltipTaskEditorAutoFinish": "Automatically completes the entire task as soon as all subtasks are checked off.",
   "@tooltipTaskEditorAutoFinish": {
     "description": "Tooltip for the Auto-finish toggle chip in the subtasks section of the task editor."
+  },
+  "drawerLocations": "Locations",
+  "@drawerLocations": {
+    "description": "Section title for locations in the navigation drawer."
+  },
+  "createNewLocation": "Create new location",
+  "@createNewLocation": {
+    "description": "Action label and input hint for creating a new location."
+  },
+  "editLocationsTitle": "Edit locations",
+  "@editLocationsTitle": {
+    "description": "Screen title for the location management screen."
+  },
+  "editLocationTitle": "Edit Location",
+  "@editLocationTitle": {
+    "description": "Header title when editing a location in the location editor screen."
+  },
+  "emptyLocationsHint": "No locations created yet.",
+  "@emptyLocationsHint": {
+    "description": "Empty-state hint shown when no locations exist."
+  },
+  "tooltipDeleteLocation": "Delete location",
+  "@tooltipDeleteLocation": {
+    "description": "Tooltip for the button that deletes a location."
+  },
+  "tooltipEditLocation": "Edit location",
+  "@tooltipEditLocation": {
+    "description": "Tooltip for the edit button on a location row."
+  },
+  "locationDetailsSectionTitle": "Location Details",
+  "@locationDetailsSectionTitle": {
+    "description": "Section card title for location name, source, and note in the location editor."
+  },
+  "locationNameLabel": "Location Name",
+  "@locationNameLabel": {
+    "description": "Input label for the location name field in the location editor."
+  },
+  "locationCoordinatesSectionTitle": "Coordinates & Radius",
+  "@locationCoordinatesSectionTitle": {
+    "description": "Section card title for GPS coordinates and radius in the location editor."
+  },
+  "locationLatitudeLabel": "Latitude (-90 to 90)",
+  "@locationLatitudeLabel": {
+    "description": "Input label for latitude in the location editor."
+  },
+  "locationLongitudeLabel": "Longitude (-180 to 180)",
+  "@locationLongitudeLabel": {
+    "description": "Input label for longitude in the location editor."
+  },
+  "locationRadiusLabel": "Radius (m/km)",
+  "@locationRadiusLabel": {
+    "description": "Input label for radius in the location editor."
+  },
+  "locationUseCurrentGpsButton": "Use Current GPS Position",
+  "@locationUseCurrentGpsButton": {
+    "description": "Button label to populate location coordinates from the current foreground GPS fix."
+  },
+  "locationNameErrorEmpty": "Please enter a location name.",
+  "@locationNameErrorEmpty": {
+    "description": "Validation error shown when the location name is empty."
+  },
+  "locationSourceErrorEmpty": "Please enter a valid source or leave it empty.",
+  "@locationSourceErrorEmpty": {
+    "description": "Validation error shown when the location source is invalid."
+  },
+  "locationCoordinatesErrorInvalid": "Enter valid latitude (-90..90) and longitude (-180..180).",
+  "@locationCoordinatesErrorInvalid": {
+    "description": "Validation error shown when location latitude or longitude is invalid."
+  },
+  "locationRadiusErrorInvalid": "Enter a valid radius between 0.01m and 100km.",
+  "@locationRadiusErrorInvalid": {
+    "description": "Validation error shown when location radius is invalid."
+  },
+  "labelScopedSectionTitle": "Board Scope",
+  "@labelScopedSectionTitle": {
+    "description": "Section card title for the scoped label switch in the label editor."
+  },
+  "labelScopedSwitchTitle": "Scoped Label",
+  "@labelScopedSwitchTitle": {
+    "description": "Switch title for marking a label as scoped in the label editor."
+  },
+  "labelScopedSwitchSubtitle": "Hide tasks with this label unless this label filter is active.",
+  "@labelScopedSwitchSubtitle": {
+    "description": "Switch subtitle explaining scoped label behavior in the label editor."
+  },
+  "taskDueButtonLabel": "Due (optional)",
+  "@taskDueButtonLabel": {
+    "description": "Input field label for an optional due timestamp in the task editor."
+  },
+  "taskDueClearTooltip": "Clear due timestamp",
+  "@taskDueClearTooltip": {
+    "description": "Tooltip for clearing the due timestamp field."
+  },
+  "pillDuePrefix": "Due: {date}",
+  "@pillDuePrefix": {
+    "description": "Badge text on a task pill showing the due date.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "errorLocalFileCasExhausted": "Local file was modified concurrently and exceeded maximum merge retries.",
+  "@errorLocalFileCasExhausted": {
+    "description": "Error message shown when concurrent local file edits exceed maxCasRetries."
   }
 }

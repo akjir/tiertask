@@ -38,11 +38,15 @@ class TierTaskPill extends ConsumerStatefulWidget {
   /// Creates a [TierTaskPill].
   const TierTaskPill({
     super.key,
+    this.activeFilterLabelId,
     this.animateEntry = false,
     required this.canDowngrade,
     required this.isCompleted,
     required this.task,
   });
+
+  /// Optional active label filter ID used for scoped downgrade behavior.
+  final String? activeFilterLabelId;
 
   /// Whether this pill should play an upgrade entry animation when first mounted.
   final bool animateEntry;
@@ -195,8 +199,10 @@ class _TierTaskIndicators extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final specs = resolveTaskIndicatorSpecs(task, AppLocalizations.of(context));
-    if (specs.isEmpty) {
+    final localizations = AppLocalizations.of(context);
+    final specs = resolveTaskIndicatorSpecs(task, localizations);
+    final dueAt = task.dueAt;
+    if (specs.isEmpty && dueAt == null) {
       return const SizedBox.shrink();
     }
     final color = Theme.of(context).colorScheme.onSurfaceVariant
@@ -204,6 +210,19 @@ class _TierTaskIndicators extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (dueAt != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Text(
+              localizations.pillDuePrefix(TaskItem.formatIsoDate(dueAt)),
+              key: ValueKey('due_task_badge_${task.id}'),
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         for (final spec in specs)
           Padding(
             padding: const EdgeInsets.only(left: 6),
@@ -584,7 +603,10 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
       case _CompleteTaskExit():
         notifier.completeTask(taskId);
       case _DowngradeTaskExit():
-        notifier.downgradeTask(taskId);
+        notifier.downgradeTask(
+          taskId,
+          activeFilterLabelId: widget.activeFilterLabelId,
+        );
         if (mounted) {
           setState(() {
             _exitAction = null;

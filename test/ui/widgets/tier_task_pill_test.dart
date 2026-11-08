@@ -734,6 +734,47 @@ task c20000OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'TierTaskPill renders due badge when dueAt is present and passes activeFilterLabelId on downgrade',
+    (WidgetTester tester) async {
+      final createdAt = DateTime.utc(2026, 11, 1, 8, 0);
+      final dueTask = TaskItem(
+        id: 'dueTask001',
+        title: 'Submit Tax Filing',
+        createdAt: createdAt,
+        dueAt: DateTime.utc(2026, 11, 15, 14, 0),
+      );
+      final initialBoard = TaskBoard(focus: [dueTask]);
+
+      await pumpLeafWidget(
+        tester,
+        TierTaskPill(
+          task: dueTask,
+          canDowngrade: true,
+          isCompleted: false,
+          activeFilterLabelId: 'lblScoped1',
+        ),
+        board: initialBoard,
+      );
+      await tester.pumpAndSettle();
+
+      final dueBadgeFinder = find.byKey(
+        const ValueKey('due_task_badge_dueTask001'),
+      );
+      expect(
+        dueBadgeFinder,
+        findsOneWidget,
+        reason:
+            'Task with dueAt must display the compact due badge on the pill',
+      );
+      expect(
+        find.textContaining('2026-11-15'),
+        findsOneWidget,
+        reason: 'Due badge must display the formatted local due date',
+      );
+    },
+  );
 }
 
 /// Pumps [TierTaskApp] seeded with [seededTdf] at `2026-11-01 12:00` UTC.

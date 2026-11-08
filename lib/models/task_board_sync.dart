@@ -20,6 +20,7 @@ import 'task_board.dart';
 import 'task_board_reconciler.dart';
 import 'task_item.dart';
 import 'tdf_error.dart';
+import 'tdf_location.dart';
 import 'tdf_metadata.dart';
 import 'tdf_payload_comparison.dart';
 import 'tdf_sync_metadata.dart';
@@ -27,7 +28,7 @@ import 'tdf_timezone.dart';
 
 /// Stateless entity-level synchronization, three-way merge, deletion record
 /// reconciliation, and shared queue merge engine for [TaskBoard] documents
-/// per `TDF_SPEC.md` Sections 6.7, 6.8, 6.9.5, and 6.11.2.
+/// per `TDF_SPEC_0.6.0.md` Sections 6.7, 6.8, 6.9.5, and 6.11.2.
 @immutable
 class TaskBoardSync {
   /// Prevents instantiation of this stateless helper class.
@@ -37,13 +38,15 @@ class TaskBoardSync {
   static ({
     Map<String, TdfDeletedTaskRecord> tasks,
     Map<String, TdfDeletedLabelRecord> labels,
+    Map<String, TdfDeletedLocationRecord> locations,
   })
   combineInitialDeletedRecords(
     TdfDeletedBlock primary,
     TdfDeletedBlock secondary,
     TdfDeletedBlock? baseline,
-    Map<String, DateTime> deletedLabelTimestamps,
-  ) {
+    Map<String, DateTime> deletedLabelTimestamps, [
+    Map<String, DateTime> deletedLocationTimestamps = const {},
+  ]) {
     final discardPrimary = primary.generation < secondary.generation;
     final discardSecondary = secondary.generation < primary.generation;
 
@@ -80,7 +83,34 @@ class TaskBoardSync {
         labelRecords[record.labelId] = record;
       }
     }
-    return (tasks: taskRecords, labels: labelRecords);
+
+    final locationRecords = <String, TdfDeletedLocationRecord>{
+      for (final record in primary.locations)
+        if (!_isAckedLocation(record, baseline, discardPrimary))
+          record.locationId: record,
+    };
+    final extraLocations = <TdfDeletedLocationRecord>[
+      for (final record in secondary.locations)
+        if (!_isAckedLocation(record, baseline, discardSecondary)) record,
+      for (final entry in deletedLocationTimestamps.entries)
+        if (isValidLocationId(entry.key))
+          TdfDeletedLocationRecord(
+            locationId: entry.key,
+            deletedAt: TaskItem.normalizeTimestamp(entry.value),
+          ),
+    ];
+    for (final record in extraLocations) {
+      final previous = locationRecords[record.locationId];
+      if (previous == null || record.deletedAt.isAfter(previous.deletedAt)) {
+        locationRecords[record.locationId] = record;
+      }
+    }
+
+    return (
+      tasks: taskRecords,
+      labels: labelRecords,
+      locations: locationRecords,
+    );
   }
 
   /// Prunes expired deletion records (> `2,592,000` seconds) and increments `generation` once when records are retired per Section 6.8.3.
@@ -90,8 +120,9 @@ class TaskBoardSync {
     Map<String, TdfDeletedLabelRecord> deletedLabels,
     bool retiredByUndelete,
     bool pruneExpired,
-    DateTime now,
-  ) {
+    DateTime now, [
+    Map<String, TdfDeletedLocationRecord> deletedLocations = const {},
+  ]) {
     final activeTasks = <TdfDeletedTaskRecord>[
       for (final record in deletedTasks.values)
         if (!_isDeletedRecordExpired(record.deletedAt, now, pruneExpired))
@@ -102,7 +133,12 @@ class TaskBoardSync {
         if (!_isDeletedRecordExpired(record.deletedAt, now, pruneExpired))
           record,
     ];
-    if (activeTasks.length + activeLabels.length >
+    final activeLocations = <TdfDeletedLocationRecord>[
+      for (final record in deletedLocations.values)
+        if (!_isDeletedRecordExpired(record.deletedAt, now, pruneExpired))
+          record,
+    ];
+    if (activeTasks.length + activeLabels.length + activeLocations.length >
         TdfDeletedBlock.maxDeletedRecords) {
       _throwTdf(
         TdfErrorKind.limitExceeded,
@@ -112,7 +148,8 @@ class TaskBoardSync {
 
     final anyExpired =
         activeTasks.length != deletedTasks.length ||
-        activeLabels.length != deletedLabels.length;
+        activeLabels.length != deletedLabels.length ||
+        activeLocations.length != deletedLocations.length;
     var nextGeneration = baseGeneration;
     if (anyExpired || retiredByUndelete) {
       if (baseGeneration >= TdfDeletedBlock.maxGeneration) {
@@ -127,21 +164,25 @@ class TaskBoardSync {
       generation: nextGeneration,
       tasks: activeTasks,
       labels: activeLabels,
+      locations: activeLocations,
     );
   }
 
-  /// Merges [primary] and [secondary] entity-by-entity (`label`, `task`, `deleted`,
-  /// and `queue` blocks) using [baseline], [acknowledgedGeneration],
-  /// [deletedLabelTimestamps], [taskConflictResolutions], and [labelConflictResolutions],
-  /// and evaluates the 6-tier pipeline at [evaluationTime].
+  /// Merges [primary] and [secondary] entity-by-entity (`location`, `label`, `task`,
+  /// `deleted`, and `queue` blocks) using [baseline], [acknowledgedGeneration],
+  /// [deletedLabelTimestamps], [deletedLocationTimestamps], [taskConflictResolutions],
+  /// [labelConflictResolutions], and [locationConflictResolutions], and evaluates the
+  /// 6-tier pipeline at [evaluationTime].
   static TaskBoard merge({
     required TaskBoard primary,
     required TaskBoard secondary,
     TaskBoard? baseline,
     int? acknowledgedGeneration,
     Map<String, DateTime> deletedLabelTimestamps = const {},
+    Map<String, DateTime> deletedLocationTimestamps = const {},
     Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
     Map<String, TdfDeletionResolution> labelConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> locationConflictResolutions = const {},
     required DateTime evaluationTime,
     DateTime? localEvaluationTime,
     bool pruneExpiredDeleted = true,
@@ -160,58 +201,148 @@ class TaskBoardSync {
       secondary.deletedBlock,
       baseline?.deletedBlock,
       deletedLabelTimestamps,
+      deletedLocationTimestamps,
+    );
+    final newlyRefLocations =
+        TaskBoardReconciler.computeNewlyReferencedLocationIds(
+          boards,
+          initialDeleted.tasks,
+          initialDeleted.labels,
+        );
+    final locationOutcome = TaskBoardReconciler.reconcileLocations(
+      boards,
+      initialDeleted.locations,
+      locationConflictResolutions,
+      options,
+      newlyReferencedLocationIds: newlyRefLocations,
+    );
+    final validLocationIds = <String>{
+      for (final loc in locationOutcome.liveLocations) loc.id,
+    };
+    final tombstonedLocationIds = <String>{
+      ...locationOutcome.deletedLocationsById.keys,
+      if (baseline != null)
+        for (final loc in baseline.locations)
+          if (!validLocationIds.contains(loc.id)) loc.id,
+    };
+
+    final newlyRefLabels = TaskBoardReconciler.computeNewlyReferencedLabelIds(
+      boards,
+      initialDeleted.tasks,
     );
     final labelOutcome = TaskBoardReconciler.reconcileLabels(
       boards,
       initialDeleted.labels,
       labelConflictResolutions,
       options,
+      tombstonedLocationIds: tombstonedLocationIds,
+      newlyReferencedLabelIds: newlyRefLabels,
     );
+    final validLabelIds = <String>{
+      for (final label in labelOutcome.liveLabels) label.id,
+    };
+    final previewLabelsById = _previewPostCascadeLabels(
+      labelOutcome.liveLabels,
+      tombstonedLocationIds,
+    );
+
     final taskOutcome = TaskBoardReconciler.reconcileTasks(
       boards,
       initialDeleted.tasks,
       taskConflictResolutions,
       options,
+      tombstonedLocationIds: tombstonedLocationIds,
+      validLabelIds: validLabelIds,
+      postCascadeLabelsById: previewLabelsById,
     );
-    TaskBoardReconciler.checkSyncOutcomes(labelOutcome, taskOutcome);
+    TaskBoardReconciler.checkSyncOutcomes(
+      labelOutcome,
+      taskOutcome,
+      locationOutcome,
+    );
 
-    final validLabelIds = <String>{
-      for (final label in labelOutcome.liveLabels) label.id,
+    final labelsAfterStrip =
+        TaskBoardReconciler.stripDeletedLocationsFromLabelsAndValidate(
+          labelOutcome.liveLabels,
+          validLocationIds,
+          locationOutcome.deletedLocationsById,
+          baseline?.locations,
+        );
+    final postCascadeLabelsById = <String, TdfLabel>{
+      for (final label in labelsAfterStrip) label.id: label,
     };
-    final tasksAfterStrip =
+    final knownScopedLabelIds = <String>{
+      for (final label in primary.labels)
+        if (label.isScoped) label.id,
+      for (final label in secondary.labels)
+        if (label.isScoped) label.id,
+      if (baseline != null)
+        for (final label in baseline.labels)
+          if (label.isScoped) label.id,
+    };
+    final evictedFromQueueIds = <String>{};
+    final tasksAfterLabelStrip =
         TaskBoardReconciler.stripDeletedLabelsAndValidateReferences(
           taskOutcome.liveTasks,
           validLabelIds,
           labelOutcome.deletedLabelsById,
           baseline?.labels,
+          knownScopedLabelIds: knownScopedLabelIds,
+          evictedFromQueueOut: evictedFromQueueIds,
         );
-    validateMergedGraphAndBounds(tasksAfterStrip, labelOutcome.liveLabels);
+    final tasksAfterLocStrip =
+        TaskBoardReconciler.stripDeletedLocationsFromTasksAndValidate(
+          tasksAfterLabelStrip,
+          validLocationIds,
+          locationOutcome.deletedLocationsById,
+          baseline?.locations,
+          postCascadeLabelsById,
+        );
 
     final finalizedDeleted = finalizeDeletedBlock(
       leftGen >= rightGen ? leftGen : rightGen,
       taskOutcome.deletedTasksById,
       labelOutcome.deletedLabelsById,
-      labelOutcome.retiredByUndelete || taskOutcome.retiredByUndelete,
+      locationOutcome.retiredByUndelete ||
+          labelOutcome.retiredByUndelete ||
+          taskOutcome.retiredByUndelete,
       pruneExpiredDeleted,
       now,
+      locationOutcome.deletedLocationsById,
     );
-    final undeletedTaskIds = <String>{
-      for (final entry in taskConflictResolutions.entries)
-        if (entry.value == TdfDeletionResolution.undelete) entry.key,
-    };
+    final tasksAfterExpiredCleanup = _stripExpiredTaskDependencies(
+      tasksAfterLocStrip,
+      taskOutcome.deletedTasksById,
+      finalizedDeleted,
+      now,
+    );
+    validateMergedGraphAndBounds(
+      tasksAfterExpiredCleanup,
+      labelsAfterStrip,
+      locationOutcome.liveLocations,
+    );
+
+    final undeletedQueuedTaskIds = _resolveUndeletedQueuedTaskIds(
+      primary,
+      secondary,
+      taskConflictResolutions,
+      evictedFromQueueIds,
+    );
     final mergedQueue = mergeQueueBlocks(
       primary,
       secondary,
       baseline?.queueBlock,
-      undeletedTaskIds,
-      tasksAfterStrip,
+      undeletedQueuedTaskIds,
+      tasksAfterExpiredCleanup,
+      evictedFromQueueIds: evictedFromQueueIds,
     );
 
     final mergedBoard = TaskBoard.evaluate(
-      tasks: tasksAfterStrip,
+      tasks: tasksAfterExpiredCleanup,
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
-      labels: labelOutcome.liveLabels,
+      labels: labelsAfterStrip,
+      locations: locationOutcome.liveLocations,
       deletedBlock: finalizedDeleted,
       queueBlock: mergedQueue,
       pruneExpiredCompleted: true,
@@ -225,6 +356,7 @@ class TaskBoardSync {
         'secondary_tasks': secondary.allTasks.length,
         'merged_tasks': mergedBoard.allTasks.length,
         'merged_labels': mergedBoard.labels.length,
+        'merged_locations': mergedBoard.locations.length,
         'generation': mergedBoard.deletedBlock.generation,
       },
     );
@@ -237,13 +369,17 @@ class TaskBoardSync {
     TaskBoard secondary,
     TdfQueueBlock? baselineQueue,
     Set<String> undeletedTaskIds,
-    List<TaskItem> mergedTasks,
-  ) {
+    List<TaskItem> mergedTasks, {
+    Set<String> evictedFromQueueIds = const <String>{},
+  }) {
     final primaryQueue = primary.queueBlock;
     final secondaryQueue = secondary.queueBlock;
     final openById = <String, TaskItem>{
       for (final task in mergedTasks)
-        if (!task.isCompleted && task.completedAt == null) task.id: task,
+        if (!task.isCompleted &&
+            task.completedAt == null &&
+            !evictedFromQueueIds.contains(task.id))
+          task.id: task,
     };
 
     final primaryWins =
@@ -348,20 +484,28 @@ class TaskBoardSync {
     return TdfQueueBlock(modifiedAt: nextModified, taskIds: reconciledIds);
   }
 
-  /// Recovers ambiguous local entities identified by [recoverTaskIds] and [recoverLabelIds]
-  /// from [localBoard] into [sharedBoard] as new entities with freshly generated 10-character
-  /// Base62 IDs, rewriting `labels` and `blocked` references among recovered entities per
-  /// `TDF_SPEC.md` Section 6.8.4.
+  /// Recovers ambiguous local entities identified by [recoverTaskIds], [recoverLabelIds],
+  /// and [recoverLocationIds] from [localBoard] into [sharedBoard] as new entities with
+  /// freshly generated 10-character Base62 IDs, rewriting `labels`, `blocked`, and
+  /// `condition location` references among recovered entities per `TDF_SPEC_0.6.0.md` Section 6.8.4.
   static TaskBoard recoverAmbiguousEntities({
     required TaskBoard localBoard,
     required TaskBoard sharedBoard,
     TaskBoard? baseline,
     Iterable<String> recoverTaskIds = const <String>[],
     Iterable<String> recoverLabelIds = const <String>[],
+    Iterable<String> recoverLocationIds = const <String>[],
     required DateTime evaluationTime,
     DateTime? localEvaluationTime,
   }) {
     final now = TaskItem.normalizeTimestamp(evaluationTime);
+    final usedLocationIds = <String>{
+      for (final loc in localBoard.locations) loc.id,
+      for (final loc in sharedBoard.locations) loc.id,
+      for (final record in localBoard.deletedBlock.locations) record.locationId,
+      for (final record in sharedBoard.deletedBlock.locations)
+        record.locationId,
+    };
     final usedLabelIds = <String>{
       for (final label in localBoard.labels) label.id,
       for (final label in sharedBoard.labels) label.id,
@@ -375,6 +519,15 @@ class TaskBoardSync {
       for (final record in sharedBoard.deletedBlock.tasks) record.taskId,
     };
 
+    final locationIdMap = <String, String>{};
+    for (final oldLocId in <String>{...recoverLocationIds}) {
+      final newId = generateLocationId(
+        timestamp: now,
+        existingIds: usedLocationIds,
+      );
+      usedLocationIds.add(newId);
+      locationIdMap[oldLocId] = newId;
+    }
     final labelIdMap = <String, String>{};
     for (final oldLabelId in <String>{...recoverLabelIds}) {
       final newId = generateLabelId(timestamp: now, existingIds: usedLabelIds);
@@ -388,6 +541,9 @@ class TaskBoardSync {
       taskIdMap[oldTaskId] = newId;
     }
 
+    final sharedLocationIds = <String>{
+      for (final loc in sharedBoard.locations) loc.id,
+    };
     final sharedLabelIds = <String>{
       for (final label in sharedBoard.labels) label.id,
     };
@@ -395,23 +551,37 @@ class TaskBoardSync {
       for (final task in sharedBoard.allTasks) task.id,
     };
 
-    final adjustedLabels = <TdfLabel>[
-      for (final label in localBoard.labels)
-        if (labelIdMap[label.id] case final newId?)
-          label.copyWith(
+    final adjustedLocations = <TdfLocation>[
+      for (final loc in localBoard.locations)
+        if (locationIdMap[loc.id] case final newId?)
+          loc.copyWith(
             id: newId,
             modifiedAt: TaskItem.nextModifiedTimestamp(
               now,
-              label.effectiveModifiedAt,
+              loc.effectiveModifiedAt,
             ),
           )
+        else if (sharedLocationIds.contains(loc.id))
+          loc,
+    ];
+    final adjustedLabels = <TdfLabel>[
+      for (final label in localBoard.labels)
+        if (labelIdMap[label.id] case final newId?)
+          _rewriteRecoveredLabel(label, newId, locationIdMap, now)
         else if (sharedLabelIds.contains(label.id))
           label,
     ];
     final adjustedTasks = <TaskItem>[
       for (final task in localBoard.allTasks)
         if (taskIdMap[task.id] case final newId?)
-          _rewriteRecoveredTask(task, newId, labelIdMap, taskIdMap, now)
+          _rewriteRecoveredTask(
+            task,
+            newId,
+            labelIdMap,
+            taskIdMap,
+            locationIdMap,
+            now,
+          )
         else if (sharedTaskIds.contains(task.id))
           task,
     ];
@@ -426,6 +596,7 @@ class TaskBoardSync {
     final preparedLocal = TaskBoard.evaluate(
       tasks: adjustedTasks,
       labels: adjustedLabels,
+      locations: adjustedLocations,
       deletedBlock: localBoard.deletedBlock.copyWith(
         generation: sharedBoard.deletedBlock.generation,
       ),
@@ -445,7 +616,7 @@ class TaskBoardSync {
 
   /// Evaluates the 6-tier pipeline on [board] at [evaluationTime] while preserving
   /// each entity's existing `modifiedAt` state (including omitted `modified` directives)
-  /// per `TDF_SPEC.md` Section 6.7.1 and 6.7.4.
+  /// per `TDF_SPEC_0.6.0.md` Section 6.7.1 and 6.7.4.
   static TaskBoard stampAndNormalize(
     TaskBoard board, {
     required DateTime evaluationTime,
@@ -455,6 +626,7 @@ class TaskBoardSync {
     evaluationTime: TaskItem.normalizeTimestamp(evaluationTime),
     localEvaluationTime: localEvaluationTime,
     labels: board.labels,
+    locations: board.locations,
     deletedBlock: board.deletedBlock,
     queueBlock: board.queueBlock,
     pruneExpiredCompleted: true,
@@ -463,9 +635,11 @@ class TaskBoardSync {
   /// Validates the combined dependency graph for cycles and checks Section 7 resource bounds.
   static void validateMergedGraphAndBounds(
     List<TaskItem> tasks,
-    List<TdfLabel> labels,
-  ) {
-    if (tasks.length + labels.length + 2 > maxTdfBlocksPerDoc) {
+    List<TdfLabel> labels, [
+    List<TdfLocation> locations = const <TdfLocation>[],
+  ]) {
+    if (tasks.length + labels.length + locations.length + 2 >
+        maxTdfBlocksPerDoc) {
       _throwTdf(
         TdfErrorKind.limitExceeded,
         'Merged document exceeds MAX_BLOCKS_PER_DOC (4096).',
@@ -510,6 +684,20 @@ class TaskBoardSync {
   }
 
   /// Returns whether [record] was already acknowledged in [baseline] when [discard] is true.
+  static bool _isAckedLocation(
+    TdfDeletedLocationRecord record,
+    TdfDeletedBlock? baseline,
+    bool discard,
+  ) {
+    final baselineAt = baseline
+        ?.findLocationRecord(record.locationId)
+        ?.deletedAt;
+    return discard &&
+        baselineAt != null &&
+        !record.deletedAt.isAfter(baselineAt);
+  }
+
+  /// Returns whether [record] was already acknowledged in [baseline] when [discard] is true.
   static bool _isAckedTask(
     TdfDeletedTaskRecord record,
     TdfDeletedBlock? baseline,
@@ -530,12 +718,86 @@ class TaskBoardSync {
       prune &&
       now.difference(deletedAt).inSeconds > TaskBoard.completedRetentionSeconds;
 
-  /// Rewrites a recovered [task] with [newId] and remapped `labelIds` and `dependencies` per Section 6.8.4.
+  /// Builds a non-throwing preview of post-cascade [labels] with [tombstonedLocationIds] removed.
+  static Map<String, TdfLabel> _previewPostCascadeLabels(
+    List<TdfLabel> labels,
+    Set<String> tombstonedLocationIds,
+  ) {
+    return <String, TdfLabel>{
+      for (final label in labels)
+        label.id: tombstonedLocationIds.isEmpty
+            ? label
+            : label.copyWith(
+                conditions: _stripLocationsFromConditionsPreview(
+                  label.conditions,
+                  tombstonedLocationIds,
+                ),
+              ),
+    };
+  }
+
+  /// Resolves the set of undeleted task IDs that were present in the surviving live side's `queue` block per Section 6.8.2.
+  static Set<String> _resolveUndeletedQueuedTaskIds(
+    TaskBoard primary,
+    TaskBoard secondary,
+    Map<String, TdfDeletionResolution> taskConflictResolutions,
+    Set<String> evictedFromQueueIds,
+  ) {
+    final primaryQueued = primary.queueBlock.taskIds.toSet();
+    final secondaryQueued = secondary.queueBlock.taskIds.toSet();
+    final result = <String>{};
+    for (final entry in taskConflictResolutions.entries) {
+      if (entry.value != TdfDeletionResolution.undelete) continue;
+      final id = entry.key;
+      if (evictedFromQueueIds.contains(id)) continue;
+      final inSurvivingQueue = primary.findTask(id) != null
+          ? primaryQueued.contains(id)
+          : secondaryQueued.contains(id);
+      if (inSurvivingQueue) {
+        result.add(id);
+      }
+    }
+    return result;
+  }
+
+  /// Rewrites `LocationTaskCondition.locationIds` in [conditions] using [locationIdMap].
+  static List<TaskCondition> _rewriteConditionLocations(
+    List<TaskCondition> conditions,
+    Map<String, String> locationIdMap,
+  ) {
+    if (conditions.isEmpty || locationIdMap.isEmpty) {
+      return conditions;
+    }
+    return <TaskCondition>[
+      for (final rule in conditions)
+        if (rule is LocationTaskCondition && rule.locationIds.isNotEmpty)
+          LocationTaskCondition.fromIds(<String>[
+            for (final locId in rule.locationIds) locationIdMap[locId] ?? locId,
+          ])
+        else
+          rule,
+    ];
+  }
+
+  /// Rewrites a recovered [label] with [newId] and remapped `condition location` references per Section 6.8.4.
+  static TdfLabel _rewriteRecoveredLabel(
+    TdfLabel label,
+    String newId,
+    Map<String, String> locationIdMap,
+    DateTime now,
+  ) => label.copyWith(
+    id: newId,
+    modifiedAt: TaskItem.nextModifiedTimestamp(now, label.effectiveModifiedAt),
+    conditions: _rewriteConditionLocations(label.conditions, locationIdMap),
+  );
+
+  /// Rewrites a recovered [task] with [newId] and remapped `labelIds`, `dependencies`, and `condition location` references per Section 6.8.4.
   static TaskItem _rewriteRecoveredTask(
     TaskItem task,
     String newId,
     Map<String, String> labelIdMap,
     Map<String, String> taskIdMap,
+    Map<String, String> locationIdMap,
     DateTime now,
   ) => task.copyWith(
     id: newId,
@@ -543,6 +805,7 @@ class TaskBoardSync {
     labelIds: <String>[
       for (final labelId in task.labelIds) labelIdMap[labelId] ?? labelId,
     ],
+    conditions: _rewriteConditionLocations(task.conditions, locationIdMap),
     dependencies: <TdfTaskDependency>[
       for (final dependency in task.dependencies)
         TdfTaskDependency(
@@ -551,6 +814,77 @@ class TaskBoardSync {
         ),
     ],
   );
+
+  /// Strips `blocked` references targeting task deletion records that expired during [afterPrune] per Section 6.8.3.
+  static List<TaskItem> _stripExpiredTaskDependencies(
+    List<TaskItem> tasks,
+    Map<String, TdfDeletedTaskRecord> beforePrune,
+    TdfDeletedBlock afterPrune,
+    DateTime now,
+  ) {
+    if (afterPrune.tasks.length == beforePrune.length) {
+      return tasks;
+    }
+    final retainedDeletedTaskIds = <String>{
+      for (final record in afterPrune.tasks) record.taskId,
+    };
+    final expiredTaskIds = <String>{
+      for (final id in beforePrune.keys)
+        if (!retainedDeletedTaskIds.contains(id)) id,
+    };
+    if (expiredTaskIds.isEmpty) {
+      return tasks;
+    }
+    return <TaskItem>[
+      for (final task in tasks)
+        _stripExpiredDepsFromSingleTask(task, expiredTaskIds, now),
+    ];
+  }
+
+  /// Strips [expiredTaskIds] from a single [task]'s `dependencies` and advances `modifiedAt` if changed.
+  static TaskItem _stripExpiredDepsFromSingleTask(
+    TaskItem task,
+    Set<String> expiredTaskIds,
+    DateTime now,
+  ) {
+    if (task.dependencies.isEmpty) {
+      return task;
+    }
+    final retained = <TdfTaskDependency>[
+      for (final dep in task.dependencies)
+        if (!expiredTaskIds.contains(dep.taskId)) dep,
+    ];
+    if (retained.length == task.dependencies.length) {
+      return task;
+    }
+    return task.copyWith(
+      dependencies: retained,
+      blockedByTaskIds: <String>[for (final dep in retained) dep.taskId],
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+    );
+  }
+
+  /// Removes [tombstonedLocationIds] from [conditions] for the pre-merge label location preview.
+  static List<TaskCondition> _stripLocationsFromConditionsPreview(
+    List<TaskCondition> conditions,
+    Set<String> tombstonedLocationIds,
+  ) {
+    final result = <TaskCondition>[];
+    for (final rule in conditions) {
+      if (rule is LocationTaskCondition && rule.locationIds.isNotEmpty) {
+        final retained = <String>[
+          for (final id in rule.locationIds)
+            if (!tombstonedLocationIds.contains(id)) id,
+        ];
+        if (retained.isNotEmpty) {
+          result.add(LocationTaskCondition(locationIds: retained));
+        }
+      } else {
+        result.add(rule);
+      }
+    }
+    return result;
+  }
 
   /// Throws a [TdfException] at line 1 with [kind] and [message].
   static Never _throwTdf(TdfErrorKind kind, String message) =>

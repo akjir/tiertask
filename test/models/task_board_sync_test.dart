@@ -21,6 +21,7 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_sync.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/workspace_sync_state.dart';
@@ -221,18 +222,28 @@ void main() {
     test('produces identical merge results for equivalent quoting, escaping, decimal GPS strings, and inline vs block condition syntax, and rejects merged dependency cycles', () {
       const parser = TdfService();
       const docA = '''
-tdf 0.5.0
+tdf 0.6.0
+location loc001OkD2 {
+    name 'Munich HQ'
+    coordinates 048.13715400 -000.000
+    radius 0250.00
+}
 label 000001OkD2 {
     name 'Work & Ops'
-    condition location 048.13715400 -000.000 0250.00
+    condition location loc001OkD2
 }
 ''';
       const docB = '''
-tdf 0.5.0
+tdf 0.6.0
+location loc001OkD2 {
+    name "Munich HQ"
+    coordinates 48.137154 0
+    radius 250
+}
 label 000001OkD2 {
     name "Work & Ops"
     condition {
-        location 48.137154 0 250
+        location loc001OkD2
     }
 }
 ''';
@@ -240,6 +251,12 @@ label 000001OkD2 {
       final boardB = parser.parse(docB, evaluationTime: t(100));
 
       final merged = syncBoards(boardA, boardB, boardA);
+      expect(
+        merged.locations.single.modifiedAt,
+        isNull,
+        reason:
+            'Equivalent decoded location payloads must not advance revision',
+      );
       expect(
         merged.labels.single.modifiedAt,
         isNull,
@@ -517,6 +534,171 @@ label 000001OkD2 {
       expect(createdRecord!.deletedAt, equals(t(25)));
       expect(createdRecord.completionsCheckpoint, equals(2));
     });
+
+    test('handles location three-way merge, location DeletionConflict, Delete and Undelete resolutions, Someday Undelete queue preservation, and ambiguous location recovery with condition reference rewriting', () {
+      const locId = 'locHomOkD2';
+      const baseLoc = TdfLocation(
+        id: locId,
+        name: 'Home',
+        rawLatitudeText: '48.100000',
+        rawLongitudeText: '11.500000',
+        latitude: 48.1,
+        longitude: 11.5,
+        source: 'Old Addr',
+        rawRadiusText: '100',
+        radius: 100.0,
+      );
+      final baseWithLoc = TaskBoard.evaluate(
+        tasks: [makeTask(taskId, 'Someday Task', 10)],
+        locations: [baseLoc.copyWith(modifiedAt: t(10))],
+        evaluationTime: t(10),
+      );
+      final localEditedLoc = TaskBoard.evaluate(
+        tasks: [makeTask(taskId, 'Someday Task Edited', 15)],
+        locations: [
+          baseLoc.copyWith(
+            latitudeText: '48.200000',
+            longitudeText: '11.600000',
+            latitude: 48.2,
+            longitude: 11.6,
+            source: 'New Addr',
+            modifiedAt: t(15),
+          ),
+        ],
+        evaluationTime: t(15),
+      );
+      final remoteDeletedBoth = TaskBoard.evaluate(
+        tasks: const [],
+        locations: const [],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: [
+            TdfDeletedTaskRecord(
+              taskId: taskId,
+              deletedAt: t(20),
+              completionsCheckpoint: 0,
+            ),
+          ],
+          locations: [
+            TdfDeletedLocationRecord(locationId: locId, deletedAt: t(20)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+
+      expect(
+        () => TaskBoardSync.merge(
+          primary: localEditedLoc,
+          secondary: remoteDeletedBoth,
+          baseline: baseWithLoc,
+          evaluationTime: t(30),
+        ),
+        throwsA(
+          isA<TdfSyncOutcomeException>()
+              .having(
+                (error) => error.kind,
+                'kind',
+                TdfSyncOutcomeKind.deletionConflict,
+              )
+              .having(
+                (error) => error.conflictedTaskIds,
+                'conflictedTaskIds',
+                contains(taskId),
+              )
+              .having(
+                (error) => error.conflictedLocationIds,
+                'conflictedLocationIds',
+                contains(locId),
+              ),
+        ),
+      );
+
+      final undeleted = TaskBoardSync.merge(
+        primary: localEditedLoc,
+        secondary: remoteDeletedBoth,
+        baseline: baseWithLoc,
+        taskConflictResolutions: const {taskId: TdfDeletionResolution.undelete},
+        locationConflictResolutions: const {
+          locId: TdfDeletionResolution.undelete,
+        },
+        evaluationTime: t(30),
+      );
+      expect(undeleted.findLocation(locId)?.source, equals('New Addr'));
+      expect(undeleted.deletedBlock.findLocationRecord(locId), isNull);
+      expect(
+        undeleted.queueBlock.taskIds,
+        isEmpty,
+        reason: 'Undeleted task that was in Someday on surviving side must stay out of queue',
+      );
+      expect(undeleted.someday.map((item) => item.id), equals([taskId]));
+
+      final ambLocBoard = TaskBoard.evaluate(
+        tasks: [
+          makeTask(taskId, 'Loc Task', 12).copyWith(
+            conditions: const [
+              LocationTaskCondition(locationIds: [locId]),
+            ],
+          ),
+        ],
+        labels: const [
+          TdfLabel(
+            id: labelId,
+            name: 'Loc Label',
+            conditions: [
+              LocationTaskCondition(locationIds: [locId]),
+            ],
+          ),
+        ],
+        locations: [baseLoc.copyWith(modifiedAt: t(12))],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: t(20),
+      );
+      final advancedShared = TaskBoard.evaluate(
+        tasks: const [],
+        deletedBlock: TdfDeletedBlock(generation: 2),
+        evaluationTime: t(20),
+      );
+
+      expect(
+        () => TaskBoardSync.merge(
+          primary: ambLocBoard,
+          secondary: advancedShared,
+          acknowledgedGeneration: 1,
+          evaluationTime: t(25),
+        ),
+        throwsA(
+          isA<TdfSyncOutcomeException>()
+              .having(
+                (error) => error.kind,
+                'kind',
+                TdfSyncOutcomeKind.recoveryRequired,
+              )
+              .having(
+                (error) => error.ambiguousLocationIds,
+                'ambiguousLocationIds',
+                contains(locId),
+              ),
+        ),
+      );
+
+      final recovered = TaskBoardSync.recoverAmbiguousEntities(
+        localBoard: ambLocBoard,
+        sharedBoard: advancedShared,
+        recoverTaskIds: const [taskId],
+        recoverLabelIds: const [labelId],
+        recoverLocationIds: const [locId],
+        evaluationTime: t(30),
+      );
+      expect(recovered.locations.length, equals(1));
+      final newLocId = recovered.locations.single.id;
+      expect(newLocId, isNot(equals(locId)));
+      final recLabelCond =
+          recovered.labels.single.conditions.single as LocationTaskCondition;
+      expect(recLabelCond.locationIds, equals([newLocId]));
+      final recTaskCond =
+          recovered.allTasks.single.conditions.single as LocationTaskCondition;
+      expect(recTaskCond.locationIds, equals([newLocId]));
+    });
   });
 
   group('TDF 0.5.1 Section 6.11.2 Shared Queue Sync', () {
@@ -586,23 +768,40 @@ label 000001OkD2 {
   });
 
   group('WorkspaceSyncState Binary Codec & Persistence', () {
-    test('round-trips WorkspaceSyncState binary encoding including acknowledged generations and persists per-workspace sync state', () async {
+    test('round-trips WorkspaceSyncState TTS v3 binary encoding including deletedLocationTimestamps and localSourceDigest and decodes TTS v2 payloads', () async {
       final state = WorkspaceSyncState(
-        lastSyncedLocalTdf: 'tdf 0.5.0\n\ntask 000001OkD2 {\n    name "Local"\n    created 2026-11-01 08:00\n}\n',
-        lastSyncedRemoteTdf: 'tdf 0.5.0\n\ntask 000001OkD2 {\n    name "Remote"\n    created 2026-11-01 08:00\n}\n',
+        lastSyncedLocalTdf: 'tdf 0.6.0\n\ntask 000001OkD2 {\n    name "Local"\n    created 2026-11-01 08:00\n}\n',
+        lastSyncedRemoteTdf: 'tdf 0.6.0\n\ntask 000001OkD2 {\n    name "Remote"\n    created 2026-11-01 08:00\n}\n',
         deletedLabelTimestamps: <String, DateTime>{
           'work00OkD2': DateTime.utc(2026, 11, 2, 10, 15, 30),
           'home00OkD2': DateTime.utc(2026, 11, 2, 11, 0, 0),
         },
+        deletedLocationTimestamps: <String, DateTime>{
+          'loc001OkD2': DateTime.utc(2026, 11, 2, 12, 30, 45),
+        },
         acknowledgedLocalGeneration: 4,
         acknowledgedRemoteGeneration: 7,
+        localSourceDigest:
+            'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
       );
 
-      final decoded = WorkspaceSyncState.fromBytes(state.toBytes());
+      final encodedBytes = state.toBytes();
+      expect(encodedBytes[3], equals(3), reason: 'Must encode TTS v3 header');
+      final decoded = WorkspaceSyncState.fromBytes(encodedBytes);
       expect(decoded, equals(state));
       expect(decoded.hashCode, equals(state.hashCode));
       expect(decoded.acknowledgedLocalGeneration, equals(4));
       expect(decoded.acknowledgedRemoteGeneration, equals(7));
+      expect(
+        decoded.deletedLocationTimestamps['loc001OkD2'],
+        equals(DateTime.utc(2026, 11, 2, 12, 30, 45)),
+      );
+      expect(
+        decoded.localSourceDigest,
+        equals(
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        ),
+      );
       expect(
         WorkspaceSyncState.fromBytes(Uint8List(0)),
         equals(WorkspaceSyncState.empty),

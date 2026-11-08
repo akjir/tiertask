@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -22,10 +24,13 @@ import '../models/task_board.dart';
 import '../models/task_board_sync.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
+import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
 import '../models/workspace_sync_state.dart';
+import '../repositories/local_file_repository.dart';
 import '../services/app_logger.dart';
+import '../services/tdf_id_migration.dart';
 import '../services/tdf_importer.dart';
 import 'config_providers.dart';
 import 'workspace_providers.dart';
@@ -110,6 +115,9 @@ class TaskSyncPipeline {
   /// Prevents instantiation of this stateless helper class.
   const TaskSyncPipeline._();
 
+  /// Maximum number of compare-and-swap (CAS) merge retries before aborting local publication (`3`).
+  static const int maxCasRetries = 3;
+
   /// Flushes [board] to the local `.tdf` file of [workspace] before unloading when local persistence is enabled.
   static Future<void> flushOutgoingLocalBoard(
     Ref ref,
@@ -119,9 +127,39 @@ class TaskSyncPipeline {
     final config = workspace.config;
     if (!config.storageMode.usesLocal || !config.isLocalConfigured) return;
     try {
-      await ref
-          .read(localFileRepositoryProvider)
-          .saveTdf(_serializeTdf(ref, board));
+      final (utcNow, localNow) = resolveTimestamps(ref, null);
+      final settingsRepo = ref.read(settingsRepositoryProvider);
+      final syncState = await settingsRepo.loadWorkspaceSyncState(workspace.id);
+      final baseline = _tryParseBaseline(
+        ref,
+        syncState.lastSyncedLocalTdf,
+        utcNow,
+        localNow,
+      );
+      final published = await _publishLocalWithCasLoop(
+        ref,
+        config,
+        initialDigest: syncState.localSourceDigest,
+        initialBaseline: baseline,
+        candidateBoard: board,
+        deletedLabels: syncState.deletedLabelTimestamps,
+        deletedLocations: syncState.deletedLocationTimestamps,
+        taskConflictResolutions: const <String, TdfDeletionResolution>{},
+        labelConflictResolutions: const <String, TdfDeletionResolution>{},
+        locationConflictResolutions: const <String, TdfDeletionResolution>{},
+        requireTargets: true,
+        skipWriteIfUnchanged: false,
+        utcNow: utcNow,
+        localNow: localNow,
+      );
+      await settingsRepo.saveWorkspaceSyncState(
+        workspace.id,
+        syncState.copyWith(
+          lastSyncedLocalTdf: published.serialized,
+          acknowledgedLocalGeneration: published.board.deletedBlock.generation,
+          localSourceDigest: published.digest,
+        ),
+      );
     } on Object catch (error) {
       AppLogger.warn(
         LogTag.sync,
@@ -130,8 +168,8 @@ class TaskSyncPipeline {
     }
   }
 
-  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.0`) or `0.5.1` [rawTdf]
-  /// document into `tdf 0.5.1`, invalidates any earlier synchronization baseline per
+  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.1`) or `0.6.0` [rawTdf]
+  /// document into `tdf 0.6.0`, invalidates any earlier synchronization baseline per
   /// `TDF_SPEC.md` Section 10.1, and persists the migrated document to active storage.
   static Future<TdfImportResult> importLegacyTdf(
     Ref ref,
@@ -156,8 +194,10 @@ class TaskSyncPipeline {
     );
     final workspace = await ref.read(activeWorkspaceProvider.future);
     final content = importResult.migratedTdfContent;
+    String? localDigest;
     if (config.storageMode.usesLocal && config.isLocalConfigured) {
       await ref.read(localFileRepositoryProvider).saveTdf(content);
+      localDigest = TdfIdMigration.sha256Hex(utf8.encode(content));
     }
     if (config.storageMode.usesWebDav && config.isWebDavConfigured) {
       await ref.read(webDavRepositoryProvider).saveTdf(content);
@@ -172,6 +212,7 @@ class TaskSyncPipeline {
             lastSyncedRemoteTdf: content,
             acknowledgedLocalGeneration: generation,
             acknowledgedRemoteGeneration: generation,
+            localSourceDigest: localDigest,
           ),
         );
     AppLogger.info(
@@ -202,6 +243,27 @@ class TaskSyncPipeline {
     );
   }
 
+  /// Immediately persists a location deletion timestamp to [WorkspaceSyncState] so offline restarts preserve it.
+  static Future<void> persistPendingLocationDeletion(
+    Ref ref,
+    String locationId,
+    DateTime deletedAt,
+  ) async {
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final settingsRepository = ref.read(settingsRepositoryProvider);
+    final current = await settingsRepository.loadWorkspaceSyncState(
+      workspace.id,
+    );
+    final updated = <String, DateTime>{
+      ...current.deletedLocationTimestamps,
+      locationId: deletedAt,
+    };
+    await settingsRepository.saveWorkspaceSyncState(
+      workspace.id,
+      current.copyWith(deletedLocationTimestamps: updated),
+    );
+  }
+
   /// Resets the local file synchronization baseline while preserving the remote WebDAV baseline for [workspaceId].
   static Future<void> resetLocalSyncBaseline(
     Ref ref,
@@ -218,6 +280,7 @@ class TaskSyncPipeline {
         lastSyncedRemoteTdf: current.lastSyncedRemoteTdf,
         acknowledgedLocalGeneration: 0,
         acknowledgedRemoteGeneration: current.acknowledgedRemoteGeneration,
+        localSourceDigest: null,
       ),
     );
   }
@@ -237,6 +300,10 @@ class TaskSyncPipeline {
     Ref ref,
     WebDavConfig config, {
     required Map<String, DateTime> pendingDeletedLabelTimestamps,
+    Map<String, DateTime>? pendingDeletedLocationTimestamps,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> labelConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> locationConflictResolutions = const {},
     TaskBoard? candidateBoard,
     bool isInitialLoad = false,
     bool requireTargets = false,
@@ -248,6 +315,10 @@ class TaskSyncPipeline {
         ref,
         config,
         pendingDeletedLabelTimestamps: pendingDeletedLabelTimestamps,
+        pendingDeletedLocationTimestamps: pendingDeletedLocationTimestamps,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
         candidateBoard: candidateBoard,
         isInitialLoad: isInitialLoad,
         requireTargets: requireTargets,
@@ -275,6 +346,10 @@ class TaskSyncPipeline {
     Ref ref,
     WebDavConfig config, {
     required Map<String, DateTime> pendingDeletedLabelTimestamps,
+    Map<String, DateTime>? pendingDeletedLocationTimestamps,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> labelConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> locationConflictResolutions = const {},
     TaskBoard? candidateBoard,
     bool isInitialLoad = false,
     bool requireTargets = false,
@@ -300,6 +375,10 @@ class TaskSyncPipeline {
       ...syncState.deletedLabelTimestamps,
       ...pendingDeletedLabelTimestamps,
     };
+    final deletedLocations = <String, DateTime>{
+      ...syncState.deletedLocationTimestamps,
+      ...?pendingDeletedLocationTimestamps,
+    };
 
     var hasWorking = candidateBoard != null && !isInitialLoad;
     var working = candidateBoard ?? TaskBoard.empty();
@@ -317,6 +396,10 @@ class TaskSyncPipeline {
         requireTargets: requireTargets,
         syncState: syncState,
         deletedLabels: deletedLabels,
+        deletedLocations: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
         utcNow: utcNow,
         localNow: localNow,
         onLocalStageMerged: onLocalStageMerged,
@@ -329,6 +412,7 @@ class TaskSyncPipeline {
           'workspace': workspace.id,
           'tasks': working.allTasks.length,
           'labels': working.labels.length,
+          'locations': working.locations.length,
         },
       );
     }
@@ -344,6 +428,10 @@ class TaskSyncPipeline {
         requireTargets: requireTargets,
         syncState: syncState,
         deletedLabels: deletedLabels,
+        deletedLocations: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
         utcNow: utcNow,
         localNow: localNow,
       );
@@ -355,6 +443,7 @@ class TaskSyncPipeline {
           'workspace': workspace.id,
           'tasks': working.allTasks.length,
           'labels': working.labels.length,
+          'locations': working.locations.length,
         },
       );
     }
@@ -368,8 +457,10 @@ class TaskSyncPipeline {
     }
 
     pendingDeletedLabelTimestamps.clear();
+    pendingDeletedLocationTimestamps?.clear();
     syncState = syncState.copyWith(
       deletedLabelTimestamps: const <String, DateTime>{},
+      deletedLocationTimestamps: const <String, DateTime>{},
     );
     await settingsRepository.saveWorkspaceSyncState(workspace.id, syncState);
     AppLogger.event(
@@ -380,6 +471,7 @@ class TaskSyncPipeline {
         'workspace': workspace.id,
         'tasks': working.allTasks.length,
         'labels': working.labels.length,
+        'locations': working.locations.length,
       },
     );
     return working;
@@ -404,23 +496,52 @@ class TaskSyncPipeline {
     }
   }
 
-  /// Writes the converged [serializedFinal] document back to local storage after the remote WebDAV stage.
-  static Future<WorkspaceSyncState> _convergeLocalAfterRemoteStage(
-    Ref ref, {
+  /// Writes the converged [candidateBoard] back to local storage after the remote WebDAV stage using the CAS-merge loop.
+  static Future<(TaskBoard, WorkspaceSyncState)> _convergeLocalAfterRemoteStage(
+    Ref ref,
+    WebDavConfig config, {
     required WorkspaceSyncState syncState,
+    required TaskBoard candidateBoard,
     required String serializedFinal,
     required String trimmedFinal,
-    required int generation,
+    required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
     required bool requireTargets,
+    required DateTime utcNow,
+    required DateTime localNow,
   }) async {
     final trimmedLastLocal = (syncState.lastSyncedLocalTdf ?? '').trim();
-    if (requireTargets || trimmedLastLocal != trimmedFinal) {
-      await ref.read(localFileRepositoryProvider).saveTdf(serializedFinal);
-    }
-    return syncState.copyWith(
-      lastSyncedLocalTdf: serializedFinal,
-      acknowledgedLocalGeneration: generation,
+    final baseline = _tryParseBaseline(
+      ref,
+      syncState.lastSyncedLocalTdf,
+      utcNow,
+      localNow,
     );
+    final published = await _publishLocalWithCasLoop(
+      ref,
+      config,
+      initialDigest: syncState.localSourceDigest,
+      initialBaseline: baseline,
+      candidateBoard: candidateBoard,
+      deletedLabels: deletedLabels,
+      deletedLocations: deletedLocations,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      requireTargets: requireTargets,
+      skipWriteIfUnchanged: !requireTargets && trimmedLastLocal == trimmedFinal,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
+    final updatedSyncState = syncState.copyWith(
+      lastSyncedLocalTdf: published.serialized,
+      acknowledgedLocalGeneration: published.board.deletedBlock.generation,
+      localSourceDigest: published.digest,
+    );
+    return (published.board, updatedSyncState);
   }
 
   /// Builds and logs a localized [UnsupportedTdfVersionException] for [localError] and/or [remoteError].
@@ -518,6 +639,132 @@ class TaskSyncPipeline {
       .read(tdfServiceProvider)
       .parse(rawTdf, evaluationTime: utcNow, localEvaluationTime: localNow);
 
+  /// Executes the guarded local publication compare-and-swap (CAS) merge loop (`TDF_SPEC_0.6.0.md` Section 6.8.4).
+  static Future<({TaskBoard board, String serialized, String? digest})>
+  _publishLocalWithCasLoop(
+    Ref ref,
+    WebDavConfig config, {
+    required String? initialDigest,
+    required TaskBoard? initialBaseline,
+    required TaskBoard candidateBoard,
+    required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
+    required bool requireTargets,
+    required bool skipWriteIfUnchanged,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    final localRepo = ref.read(localFileRepositoryProvider);
+    var loopDigest = initialDigest;
+    var loopB = initialBaseline;
+    var loopL = candidateBoard;
+    for (var attempt = 0; attempt <= maxCasRetries; attempt++) {
+      final disk = await localRepo.readTdfWithDigest();
+      if (disk.digest == loopDigest) {
+        final serialized = _serializeTdf(ref, loopL);
+        if (attempt > 0 || !skipWriteIfUnchanged) {
+          await localRepo.saveTdf(serialized);
+          final savedDigest = TdfIdMigration.sha256Hex(utf8.encode(serialized));
+          return (board: loopL, serialized: serialized, digest: savedDigest);
+        }
+        return (board: loopL, serialized: serialized, digest: loopDigest);
+      }
+      if (attempt >= maxCasRetries) {
+        throw const LocalFileException(
+          'Local file was modified concurrently and exceeded maximum CAS merge retries (3).',
+        );
+      }
+      (loopB, loopL, loopDigest) = await _retryCasMergeStep(
+        ref,
+        config,
+        disk: disk,
+        loopB: loopB,
+        loopL: loopL,
+        deletedLabels: deletedLabels,
+        deletedLocations: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
+        requireTargets: requireTargets,
+        utcNow: utcNow,
+        localNow: localNow,
+      );
+    }
+    throw const LocalFileException(
+      'Local file was modified concurrently and exceeded maximum CAS merge retries (3).',
+    );
+  }
+
+  /// Resolves a single CAS mismatch iteration against the freshly read [disk] snapshot.
+  static Future<(TaskBoard?, TaskBoard, String?)> _retryCasMergeStep(
+    Ref ref,
+    WebDavConfig config, {
+    required ({String content, String? digest, bool exists}) disk,
+    required TaskBoard? loopB,
+    required TaskBoard loopL,
+    required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
+    required bool requireTargets,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    if (!disk.exists || disk.content.trim().isEmpty) {
+      final mergedEmpty = TaskBoardSync.merge(
+        primary: loopL,
+        secondary: TaskBoard.empty(),
+        baseline: null,
+        acknowledgedGeneration: null,
+        requireAcknowledgedGeneration: true,
+        deletedLabelTimestamps: deletedLabels,
+        deletedLocationTimestamps: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
+        evaluationTime: utcNow,
+        localEvaluationTime: localNow,
+      );
+      final normalized = TaskBoardSync.stampAndNormalize(
+        mergedEmpty,
+        evaluationTime: utcNow,
+        localEvaluationTime: localNow,
+      );
+      return (null, normalized, disk.digest);
+    }
+    final diskBoard = await _parseLocalOrThrow(
+      ref,
+      config,
+      disk.content,
+      requireTargets,
+      utcNow,
+      localNow,
+    );
+    final merged = TaskBoardSync.merge(
+      primary: loopL,
+      secondary: diskBoard,
+      baseline: loopB,
+      acknowledgedGeneration: loopB?.deletedBlock.generation,
+      deletedLabelTimestamps: deletedLabels,
+      deletedLocationTimestamps: deletedLocations,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    final normalized = TaskBoardSync.stampAndNormalize(
+      merged,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    return (diskBoard, normalized, disk.digest);
+  }
+
   /// Serializes [board] into canonical `.tdf` text.
   static String _serializeTdf(Ref ref, TaskBoard board) =>
       ref.read(tdfServiceProvider).serialize(board);
@@ -533,16 +780,24 @@ class TaskSyncPipeline {
     required bool requireTargets,
     required WorkspaceSyncState syncState,
     required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
     required DateTime utcNow,
     required DateTime localNow,
     required void Function(TaskBoard mergedBoard)? onLocalStageMerged,
   }) async {
-    final rawLocal = await ref.read(localFileRepositoryProvider).loadTdf();
+    final initialRead = await ref
+        .read(localFileRepositoryProvider)
+        .readTdfWithDigest();
+    final rawLocal = initialRead.content;
     final trimmedLocal = rawLocal.trim();
     var nextWorking = working;
     var nextHasWorking = hasWorking;
+    TaskBoard? localBoard;
     if (trimmedLocal.isNotEmpty) {
-      final localBoard = await _parseLocalOrThrow(
+      localBoard = await _parseLocalOrThrow(
         ref,
         config,
         rawLocal,
@@ -564,6 +819,10 @@ class TaskSyncPipeline {
             ? syncState.acknowledgedLocalGeneration
             : null,
         deletedLabelTimestamps: deletedLabels,
+        deletedLocationTimestamps: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
       );
@@ -577,17 +836,33 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
     );
-    final serializedLocal = _serializeTdf(ref, nextWorking);
-    final trimmedSerializedLocal = serializedLocal.trim();
-    if (requireTargets ||
-        hasCandidate ||
-        trimmedLocal != trimmedSerializedLocal) {
-      await ref.read(localFileRepositoryProvider).saveTdf(serializedLocal);
-    }
+    final trimmedSerializedLocal = _serializeTdf(ref, nextWorking).trim();
+    final published = await _publishLocalWithCasLoop(
+      ref,
+      config,
+      initialDigest: initialRead.digest,
+      initialBaseline: localBoard,
+      candidateBoard: nextWorking,
+      deletedLabels: deletedLabels,
+      deletedLocations: deletedLocations,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      requireTargets: requireTargets,
+      skipWriteIfUnchanged:
+          !requireTargets &&
+          !hasCandidate &&
+          trimmedLocal == trimmedSerializedLocal,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
+    nextWorking = published.board;
     final nextSyncState = syncState.copyWith(
-      lastSyncedLocalTdf: serializedLocal,
+      lastSyncedLocalTdf: published.serialized,
       deletedLabelTimestamps: deletedLabels,
+      deletedLocationTimestamps: deletedLocations,
       acknowledgedLocalGeneration: nextWorking.deletedBlock.generation,
+      localSourceDigest: published.digest,
     );
     await ref
         .read(settingsRepositoryProvider)
@@ -610,6 +885,10 @@ class TaskSyncPipeline {
     required bool requireTargets,
     required WorkspaceSyncState syncState,
     required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
     required DateTime utcNow,
     required DateTime localNow,
   }) async {
@@ -639,6 +918,10 @@ class TaskSyncPipeline {
             ? syncState.acknowledgedRemoteGeneration
             : null,
         deletedLabelTimestamps: deletedLabels,
+        deletedLocationTimestamps: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
       );
@@ -666,13 +949,21 @@ class TaskSyncPipeline {
     );
     if (config.storageMode.usesLocal &&
         (requireTargets || config.isLocalConfigured)) {
-      nextSyncState = await _convergeLocalAfterRemoteStage(
+      (nextWorking, nextSyncState) = await _convergeLocalAfterRemoteStage(
         ref,
+        config,
         syncState: nextSyncState,
+        candidateBoard: nextWorking,
         serializedFinal: serializedFinal,
         trimmedFinal: trimmedFinal,
-        generation: nextWorking.deletedBlock.generation,
+        deletedLabels: deletedLabels,
+        deletedLocations: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
         requireTargets: requireTargets,
+        utcNow: utcNow,
+        localNow: localNow,
       );
     }
     return (nextWorking, nextHasWorking, nextSyncState);

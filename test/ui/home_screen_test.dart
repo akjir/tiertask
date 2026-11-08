@@ -506,7 +506,7 @@ void main() {
         filePath: 'tasks.tdf',
       );
       final remoteStore = <String, String>{
-        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.6.0\n',
+        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.7.0\n',
       };
 
       await tester.pumpWidget(
@@ -534,7 +534,7 @@ void main() {
       expect(remoteFetchCount, equals(1));
       expect(
         find.text(
-          'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.6.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+          'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.7.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
         ),
         findsOneWidget,
       );

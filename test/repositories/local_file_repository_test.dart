@@ -348,12 +348,12 @@ void main() {
       final backup002File = File('${tempDirectory.path}/wipe_test.tdf.bak.002');
 
       await repository.wipeTdf(createBackup: true);
-      expect(await mainFile.readAsString(), equals('tdf 0.5.1\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.6.0\n'));
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content 1', flush: true);
       await repository.wipeTdf(createBackup: false);
-      expect(await mainFile.readAsString(), equals('tdf 0.5.1\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.6.0\n'));
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content A', flush: true);
@@ -767,6 +767,72 @@ void main() {
             contains('Permission denied'),
           ),
         ),
+      );
+    });
+
+    test('readTdfWithDigest computes SHA-256 hex digest and saveTdf uses atomic dot-prefixed .tmp.<32hex> replacement without .tdf.lock files', () async {
+      final repository = LocalFileRepository(
+        config: const WebDavConfig(
+          localFilePath: 'atomic_tasks.tdf',
+          storageMode: StorageMode.local,
+        ),
+        baseDirectoryPath: sourceDirectory.path,
+      );
+
+      final missingRead = await repository.readTdfWithDigest();
+      expect(missingRead.exists, isFalse);
+      expect(missingRead.content, isEmpty);
+      expect(missingRead.digest, isNull);
+
+      final targetPath = repository.resolveFilePath();
+      File(targetPath).writeAsStringSync('', flush: true);
+      final emptyRead = await repository.readTdfWithDigest();
+      expect(emptyRead.exists, isTrue);
+      expect(emptyRead.content, isEmpty);
+      expect(
+        emptyRead.digest,
+        equals(
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        ),
+      );
+
+      const sampleContent = 'tdf 0.6.0\n';
+      await repository.saveTdf(sampleContent);
+      final populatedRead = await repository.readTdfWithDigest();
+      expect(populatedRead.exists, isTrue);
+      expect(populatedRead.content, equals(sampleContent));
+      expect(populatedRead.digest, isNotNull);
+      expect(populatedRead.digest?.length, equals(64));
+
+      final entries = sourceDirectory
+          .listSync(followLinks: false)
+          .map((entity) => entity.path.split(Platform.pathSeparator).last)
+          .toList();
+      expect(entries, equals(<String>['atomic_tasks.tdf']));
+      expect(
+        entries.where(
+          (name) => name.contains('.tmp.') || name.endsWith('.lock'),
+        ),
+        isEmpty,
+        reason:
+            'Must leave zero .tmp.<hex> or .tdf.lock files after atomic save',
+      );
+
+      File(targetPath).deleteSync();
+      Directory(targetPath).createSync();
+      await expectLater(
+        () => repository.saveTdf(sampleContent),
+        throwsA(isA<LocalFileException>()),
+      );
+      final remainingTempFiles = sourceDirectory
+          .listSync(followLinks: false)
+          .map((entity) => entity.path.split(Platform.pathSeparator).last)
+          .where((name) => name.contains('.tmp.'))
+          .toList();
+      expect(
+        remainingTempFiles,
+        isEmpty,
+        reason: 'Failed atomic save must unlink its temporary file before rethrowing',
       );
     });
   });

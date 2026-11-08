@@ -113,14 +113,24 @@ void main() {
         reason: 'Drawer must display the German Labels section header',
       );
       expect(
-        find.text('Bearbeiten'),
+        find.text('Orte'),
         findsOneWidget,
-        reason: 'Drawer must display the German Edit labels action',
+        reason: 'Drawer must display the German Locations section header',
+      );
+      expect(
+        find.text('Bearbeiten'),
+        findsNWidgets(2),
+        reason: 'Drawer must display the German Edit actions for Labels and Locations',
       );
       expect(
         find.text('Neues Label erstellen'),
         findsOneWidget,
         reason: 'Drawer must display the German Create new label action',
+      );
+      expect(
+        find.text('Neuen Ort erstellen'),
+        findsOneWidget,
+        reason: 'Drawer must display the German Create new location action',
       );
       expect(
         find.text('Einstellungen'),

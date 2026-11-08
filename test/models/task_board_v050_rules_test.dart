@@ -227,6 +227,8 @@ void main() {
         completions: 7,
         isPriority: true,
         isSuspendedForever: true,
+        dueAt: DateTime.utc(2026, 11, 10, 12, 0),
+        origin: const TaskOrigin(namespace: 'github', externalKey: 'issue-99'),
         repeatRule: const TaskRepeatRule(
           count: 2,
           unit: RepeatUnit.days,
@@ -264,6 +266,17 @@ void main() {
       expect(somedayTask.completedAt, isNull);
       expect(somedayTask.isSuspendedForever, isFalse);
       expect(somedayTask.suspendedAt, isNull);
+      expect(
+        somedayTask.dueAt,
+        isNull,
+        reason: 'Section 6.5: Restoring a task from Completed must clear due',
+      );
+      expect(
+        somedayTask.origin,
+        equals(const TaskOrigin(namespace: 'github', externalKey: 'issue-99')),
+        reason:
+            'Section 6.5: Restoring a task from Completed must preserve origin',
+      );
       expect(somedayTask.isPriority, isFalse);
       expect(
         somedayTask.completions,
@@ -549,6 +562,59 @@ void main() {
         cleanedBoard.deletedBlock.generation,
         equals(1),
         reason: 'Section 6.8.3: Removing multiple expired records in one cleanup increments generation once and preserves nonzero generation when empty',
+      );
+
+      final boardWithExpiredTaskPrereq = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'liveDepTask',
+            title: 'Live Task Depending on Expired Tombstone and Forward Ref',
+            createdAt: fixedNow,
+            modifiedAt: fixedNow,
+            dependencies: const <TdfTaskDependency>[
+              TdfTaskDependency(taskId: 'oldDelTask', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'fwdRefTask', requiredCompletion: 1),
+            ],
+          ),
+        ],
+        evaluationTime: after30DaysAll,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: fixedNow,
+          taskIds: const <String>['liveDepTask'],
+        ),
+        deletedBlock: TdfDeletedBlock(
+          generation: 2,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(
+              taskId: 'oldDelTask',
+              deletedAt: fixedNow,
+              completionsCheckpoint: 1,
+            ),
+          ],
+          locations: <TdfDeletedLocationRecord>[
+            TdfDeletedLocationRecord(
+              locationId: 'oldDelLoc1',
+              deletedAt: fixedNow,
+            ),
+          ],
+        ),
+      );
+      final afterPrereqHygiene = boardWithExpiredTaskPrereq
+          .cleanupExpiredDeletions(currentDate: after30DaysAll);
+      expect(afterPrereqHygiene.deletedBlock.tasks, isEmpty);
+      expect(afterPrereqHygiene.deletedBlock.locations, isEmpty);
+      expect(afterPrereqHygiene.deletedBlock.generation, equals(3));
+      expect(
+        afterPrereqHygiene.findTask('liveDepTask')!.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'fwdRefTask', requiredCompletion: 1),
+        ]),
+        reason: 'Section 6.8.3: Expiring a task tombstone after 30 days must strip blocked references to that expired ID while preserving forward references',
+      );
+      expect(
+        afterPrereqHygiene.findTask('liveDepTask')!.modifiedAt,
+        equals(after30DaysAll),
+        reason: 'Section 6.8.3: Stripping an expired prerequisite reference must advance task.modified',
       );
     });
   });

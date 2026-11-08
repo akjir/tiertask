@@ -20,16 +20,26 @@ import 'task_board_evaluator.dart';
 import 'task_board_queue_mutator.dart';
 import 'task_item.dart';
 import 'task_tier.dart';
+import 'tdf_error.dart';
+import 'tdf_location.dart';
 import 'tdf_metadata.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
 
-/// Label lookup and duplicate validation helpers on [NormalizedTierSlices].
+/// Label and location lookup and duplicate validation helpers on [NormalizedTierSlices].
 extension TaskBoardMutationSlicesX on NormalizedTierSlices {
   /// Finds the [TdfLabel] with [labelId], or `null` if not found.
   TdfLabel? findLabel(String labelId) {
     for (final label in labels) {
       if (label.id == labelId) return label;
+    }
+    return null;
+  }
+
+  /// Finds the [TdfLocation] with [locationId], or `null` if not found.
+  TdfLocation? findLocation(String locationId) {
+    for (final location in locations) {
+      if (location.id == locationId) return location;
     }
     return null;
   }
@@ -71,6 +81,7 @@ class TaskBoardMutator {
     String? color,
     String? id,
     String? note,
+    bool isScoped = false,
     DateTime? currentDate,
     DateTime? modifiedAt,
     List<TaskCondition> conditions = const [],
@@ -89,6 +100,7 @@ class TaskBoardMutator {
     final newLabel = TdfLabel(
       id: labelId,
       name: trimmed,
+      isScoped: isScoped,
       color: TdfColor.normalizeHex(color),
       note: _trimOrNull(note),
       modifiedAt: stamp,
@@ -97,6 +109,58 @@ class TaskBoardMutator {
     return board
         .copyWithSlices(labels: [...board.labels, newLabel])
         .logDomainMutation('addLabel id=$labelId name="$trimmed"');
+  }
+
+  /// Adds a new TDF `location` block to [board] with a unique identifier per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.1.
+  static NormalizedTierSlices addLocation(
+    NormalizedTierSlices board,
+    String name, {
+    required double latitude,
+    required double longitude,
+    required double radius,
+    String? id,
+    String? note,
+    String? source,
+    DateTime? currentDate,
+    DateTime? modifiedAt,
+  }) {
+    final trimmedName = name.trim();
+    if (trimmedName.isEmpty ||
+        !latitude.isFinite ||
+        latitude < -90.0 ||
+        latitude > 90.0 ||
+        !longitude.isFinite ||
+        longitude < -180.0 ||
+        longitude > 180.0 ||
+        !radius.isFinite ||
+        radius <= 0.0 ||
+        radius > maxTdfLocationRadius ||
+        board.locations.length >= maxTdfLocations) {
+      return board;
+    }
+    final rawTime = modifiedAt ?? currentDate;
+    final stamp = rawTime != null ? TaskItem.normalizeTimestamp(rawTime) : null;
+    final used = _collectAllUsedEntityIds(board);
+    final locationId =
+        _trimOrNull(id) ??
+        generateLocationId(timestamp: stamp, existingIds: used);
+    if (board.findLocation(locationId) != null ||
+        board.deletedBlock.findLocationRecord(locationId) != null) {
+      return board;
+    }
+    final newLocation = TdfLocation(
+      id: locationId,
+      name: trimmedName,
+      latitude: latitude,
+      longitude: longitude,
+      radius: radius,
+      note: _trimOrNull(note),
+      source: _trimOrNull(source),
+      modifiedAt: stamp,
+    );
+    return board
+        .copyWithSlices(locations: [...board.locations, newLocation])
+        .logDomainMutation('addLocation id=$locationId');
   }
 
   /// Validates [title], allocates a task ID when [id] is `null`, and runs [mutate].
@@ -159,7 +223,7 @@ class TaskBoardMutator {
     ).logDomainMutation('completeTask$suffix id=$taskId');
   }
 
-  /// Deletes the label with [labelId] from [board], removes its reference from all tasks, and records the deletion.
+  /// Deletes the label with [labelId] from [board], removes its reference from all tasks (applying `scoped` global-view flood protection per Section 6.8.1), and records the deletion.
   static NormalizedTierSlices deleteLabel(
     NormalizedTierSlices board,
     String labelId, [
@@ -173,23 +237,113 @@ class TaskBoardMutator {
       prior.effectiveModifiedAt,
     );
     final record = TdfDeletedLabelRecord(labelId: labelId, deletedAt: stamp);
-    return _mapBoardTasks(
+    final labelMap = <String, TdfLabel>{
+      for (final label in board.labels) label.id: label,
+    };
+    final evictedQueueIds = <String>{};
+    final updatedTasks = <TaskItem>[];
+    for (final task in board.allTasks) {
+      if (!task.labelIds.contains(labelId)) {
+        updatedTasks.add(task);
+        continue;
+      }
+      final wasRestricted = TaskBoardEvaluator.isRestrictedFromGlobalView(
+        task,
+        labelMap,
+      );
+      final remainingLabels = task.labelIds
+          .where((id) => id != labelId)
+          .toList();
+      final lostAllScopedLabels = wasRestricted && remainingLabels.isEmpty;
+      if (lostAllScopedLabels && board.queueBlock.taskIds.contains(task.id)) {
+        evictedQueueIds.add(task.id);
+      }
+      updatedTasks.add(
+        task.copyWith(
+          labelIds: remainingLabels,
+          isPriority: lostAllScopedLabels ? false : task.isPriority,
+          modifiedAt: TaskItem.nextModifiedTimestamp(
+            now,
+            task.effectiveModifiedAt,
+          ),
+        ),
+      );
+    }
+    var nextQueueBlock = board.queueBlock;
+    for (final evictedId in evictedQueueIds) {
+      nextQueueBlock = TaskBoardQueueMutator.removeTaskFromQueue(
+        nextQueueBlock,
+        evictedId,
+        now,
+      );
+    }
+    return TaskBoardEvaluator.reevaluateBoard(
       board,
-      (task) => !task.labelIds.contains(labelId)
-          ? task
-          : task.copyWith(
-              labelIds: task.labelIds.where((id) => id != labelId).toList(),
-              modifiedAt: TaskItem.nextModifiedTimestamp(
-                now,
-                task.effectiveModifiedAt,
-              ),
-            ),
+      tasks: updatedTasks,
       labels: board.labels.where((item) => item.id != labelId).toList(),
       deletedBlock: TaskBoardEvaluator.recordLabelDeletion(
         board.deletedBlock,
         record,
       ),
+      queueBlock: nextQueueBlock,
+      now: now,
+      pruneExpiredCompleted: false,
     ).logDomainMutation('deleteLabel id=$labelId');
+  }
+
+  /// Deletes the location with [locationId] from [board] in strict `label`-before-`task` order (applying `condition location any` inheritance-trap protection per Section 6.8.1) and records the deletion.
+  static NormalizedTierSlices deleteLocation(
+    NormalizedTierSlices board,
+    String locationId, {
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) {
+    final prior = board.findLocation(locationId);
+    if (prior == null) return board;
+    final now = _resolveNow(currentDate);
+    final stamp = TaskItem.nextModifiedTimestamp(
+      now,
+      prior.effectiveModifiedAt,
+    );
+    final record = TdfDeletedLocationRecord(
+      locationId: locationId,
+      deletedAt: stamp,
+    );
+    final updatedLabels = <TdfLabel>[
+      for (final label in board.labels)
+        _cascadeLocationDeletionOnLabel(label, locationId, now),
+    ];
+    final postCascadeLabelsWithLocation = <String>{
+      for (final label in updatedLabels)
+        if (_hasLocationConditionRule(label.conditions)) label.id,
+    };
+    final updatedTasks = <TaskItem>[
+      for (final task in board.allTasks)
+        _cascadeLocationDeletionOnTask(
+          task,
+          locationId,
+          postCascadeLabelsWithLocation,
+          now,
+        ),
+    ];
+    final remainingLocations = board.locations
+        .where((item) => item.id != locationId)
+        .toList();
+    return TaskBoardEvaluator.reevaluateBoard(
+      board,
+      tasks: updatedTasks,
+      labels: updatedLabels,
+      locations: remainingLocations,
+      deletedBlock: TaskBoardEvaluator.recordLocationDeletion(
+        board.deletedBlock,
+        record,
+      ),
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      pruneExpiredCompleted: false,
+    ).logDomainMutation('deleteLocation id=$locationId');
   }
 
   /// Deletes the task with [taskId] from [board], removes its `queue` entry, and records the deletion in `deletedBlock`.
@@ -276,6 +430,7 @@ class TaskBoardMutator {
     NormalizedTierSlices board,
     String labelId, {
     String? name,
+    bool? isScoped,
     String? color,
     bool clearColor = false,
     String? note,
@@ -301,6 +456,7 @@ class TaskBoardMutator {
     );
     final updatedLabel = prior.copyWith(
       name: trimmedName,
+      isScoped: isScoped,
       color: normalizedColor,
       clearColor: clearColor || (color != null && normalizedColor == null),
       note: cleanNote,
@@ -322,6 +478,70 @@ class TaskBoardMutator {
     ).logDomainMutation(logMessage);
   }
 
+  /// Updates an existing location with [locationId] on [board] per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.6.
+  static NormalizedTierSlices updateLocation(
+    NormalizedTierSlices board,
+    String locationId, {
+    String? name,
+    double? latitude,
+    double? longitude,
+    double? radius,
+    String? note,
+    bool clearNote = false,
+    String? source,
+    bool clearSource = false,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) {
+    final prior = board.findLocation(locationId);
+    if (prior == null) return board;
+    final trimmedName = (name ?? prior.name).trim();
+    final nextLatitude = latitude ?? prior.latitude;
+    final nextLongitude = longitude ?? prior.longitude;
+    final nextRadius = radius ?? prior.radius;
+    if (trimmedName.isEmpty ||
+        !nextLatitude.isFinite ||
+        nextLatitude < -90.0 ||
+        nextLatitude > 90.0 ||
+        !nextLongitude.isFinite ||
+        nextLongitude < -180.0 ||
+        nextLongitude > 180.0 ||
+        !nextRadius.isFinite ||
+        nextRadius <= 0.0 ||
+        nextRadius > maxTdfLocationRadius) {
+      return board;
+    }
+    final now = _resolveNow(currentDate);
+    final cleanNote = _trimOrNull(note);
+    final cleanSource = _trimOrNull(source);
+    final stamp = TaskItem.nextModifiedTimestamp(
+      now,
+      prior.effectiveModifiedAt,
+    );
+    final updatedLocation = prior.copyWith(
+      name: trimmedName,
+      latitude: nextLatitude,
+      longitude: nextLongitude,
+      radius: nextRadius,
+      note: cleanNote,
+      clearNote: clearNote || (note != null && cleanNote == null),
+      source: cleanSource,
+      clearSource: clearSource || (source != null && cleanSource == null),
+      modifiedAt: stamp,
+    );
+    return TaskBoardEvaluator.reevaluateBoard(
+      board,
+      locations: [
+        for (final item in board.locations)
+          item.id == locationId ? updatedLocation : item,
+      ],
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ).logDomainMutation('updateLocation id=$locationId');
+  }
+
   /// Updates an existing task (or creates a new task when [isNewTask] is `true`) with [taskId] on [board].
   static NormalizedTierSlices updateTask(
     NormalizedTierSlices board,
@@ -336,10 +556,14 @@ class TaskBoardMutator {
     DateTime? suspendedAt,
     bool? isSuspendedForever,
     bool clearSuspendedAt = false,
+    DateTime? dueAt,
+    bool clearDueAt = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
     List<TdfTaskDependency>? dependencies,
+    TaskOrigin? origin,
+    bool clearOrigin = false,
     List<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
@@ -406,6 +630,10 @@ class TaskBoardMutator {
       dependencies,
       prior,
     );
+    final nextDueAt = (clearDueAt || (isRestoring && dueAt == null))
+        ? null
+        : (dueAt ?? prior?.dueAt);
+    final nextOrigin = clearOrigin ? null : (origin ?? prior?.origin);
     final baseTask = TaskItem(
       id: taskId,
       title: trimmed,
@@ -418,11 +646,13 @@ class TaskBoardMutator {
       modifiedAt: stamp,
       suspendedAt: nextSuspended,
       isSuspendedForever: isForever,
+      dueAt: nextDueAt,
       repeatRule: repeat,
       dependencies: isRestoring
           ? TaskBoardQueueMutator.rearmDependencies(board, armed)
           : armed,
       labelIds: labelIds ?? prior?.labelIds ?? const [],
+      origin: nextOrigin,
       links: links != null ? _cleanLinks(links) : (prior?.links ?? const []),
       conditions: _sanitizeTaskRules(conditions, prior?.conditions ?? const []),
       subtasksAutoFinish: autoFinish,
@@ -503,6 +733,70 @@ class TaskBoardMutator {
     return List<TdfTaskDependency>.unmodifiable(items);
   }
 
+  /// Removes [deletedLocationId] from [label]'s location conditions and advances `label.modified` if changed per Section 6.8.1.
+  static TdfLabel _cascadeLocationDeletionOnLabel(
+    TdfLabel label,
+    String deletedLocationId,
+    DateTime now,
+  ) {
+    if (!_referencesLocationId(label.conditions, deletedLocationId)) {
+      return label;
+    }
+    final nextConditions = <TaskCondition>[];
+    for (final rule in label.conditions) {
+      if (rule is! LocationTaskCondition) {
+        nextConditions.add(rule);
+        continue;
+      }
+      final remainingIds = rule.locationIds
+          .where((id) => id != deletedLocationId)
+          .toList();
+      if (remainingIds.isNotEmpty) {
+        nextConditions.add(LocationTaskCondition.fromIds(remainingIds));
+      }
+    }
+    return label.copyWith(
+      conditions: nextConditions,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        now,
+        label.effectiveModifiedAt,
+      ),
+    );
+  }
+
+  /// Removes [deletedLocationId] from [task]'s location conditions, inserting `location any` when an assigned label in [postCascadeLabelsWithLocation] still defines a location rule per Section 6.8.1.
+  static TaskItem _cascadeLocationDeletionOnTask(
+    TaskItem task,
+    String deletedLocationId,
+    Set<String> postCascadeLabelsWithLocation,
+    DateTime now,
+  ) {
+    if (!_referencesLocationId(task.conditions, deletedLocationId)) {
+      return task;
+    }
+    final nextConditions = <TaskCondition>[];
+    for (final rule in task.conditions) {
+      if (rule is! LocationTaskCondition) {
+        nextConditions.add(rule);
+        continue;
+      }
+      final remainingIds = rule.locationIds
+          .where((id) => id != deletedLocationId)
+          .toList();
+      if (remainingIds.isNotEmpty) {
+        nextConditions.add(LocationTaskCondition.fromIds(remainingIds));
+      } else if (task.labelIds.any(postCascadeLabelsWithLocation.contains)) {
+        nextConditions.add(
+          const GroupResetTaskCondition(targetGroup: ConditionGroup.location),
+        );
+      }
+    }
+    return task.copyWith(
+      conditions: nextConditions,
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+    );
+  }
+
   /// Trims, validates, and caps [links] at [TaskLink.maxLinksPerTask] while preserving order.
   static List<TaskLink> _cleanLinks(List<TaskLink> links) {
     final cleaned = <TaskLink>[];
@@ -521,33 +815,68 @@ class TaskBoardMutator {
         SubtaskItem(title: step.title.trim(), isCompleted: step.isCompleted),
   ];
 
-  /// Collects all task IDs, label IDs, and retained deletion record IDs on [board] (`TDF_SPEC.md` Section 2.9).
+  /// Coalesces [LocationTaskCondition] rules into a single canonical rule when referencing `<location-id>` tokens.
+  static List<LocationTaskCondition> _coalesceLocationConditions(
+    Iterable<LocationTaskCondition> rules,
+  ) {
+    final ids = <String>[];
+    final legacyRules = <LocationTaskCondition>[];
+    for (final rule in rules) {
+      if (rule.locationIds.isNotEmpty) {
+        ids.addAll(rule.locationIds);
+      } else {
+        legacyRules.add(rule);
+      }
+    }
+    if (ids.isEmpty) return legacyRules;
+    return <LocationTaskCondition>[LocationTaskCondition.fromIds(ids)];
+  }
+
+  /// Collects all task IDs, label IDs, location IDs, and retained deletion record IDs on [board] (`TDF_SPEC_0.6.0.md` Section 2.9).
   static Set<String> _collectAllUsedEntityIds(NormalizedTierSlices board) =>
       <String>{
         for (final task in board.allTasks) task.id,
         for (final task in board.allTasks) ...task.blockedByTaskIds,
         for (final task in board.allTasks) ...task.labelIds,
         for (final label in board.labels) label.id,
+        for (final location in board.locations) location.id,
         for (final record in board.deletedBlock.tasks) record.taskId,
         for (final record in board.deletedBlock.labels) record.labelId,
+        for (final record in board.deletedBlock.locations) record.locationId,
       };
 
   /// Filters and orders task condition rules of type [T] for [group], or returns a single [GroupResetTaskCondition] when reset.
   static Iterable<TaskCondition> _groupRules<T extends TaskCondition>(
     List<TaskCondition> rules,
     ConditionGroup group,
-  ) =>
-      rules.any(
-        (rule) => rule is GroupResetTaskCondition && rule.targetGroup == group,
-      )
-      ? <TaskCondition>[GroupResetTaskCondition(targetGroup: group)]
-      : rules.whereType<T>();
+  ) {
+    if (rules.any(
+      (rule) => rule is GroupResetTaskCondition && rule.targetGroup == group,
+    )) {
+      return <TaskCondition>[GroupResetTaskCondition(targetGroup: group)];
+    }
+    if (group == ConditionGroup.location) {
+      return _coalesceLocationConditions(
+        rules.whereType<LocationTaskCondition>(),
+      );
+    }
+    return rules.whereType<T>();
+  }
 
-  /// Applies [transform] to every task across all six slices of [board].
+  /// Returns whether [conditions] contains a non-empty [LocationTaskCondition].
+  static bool _hasLocationConditionRule(List<TaskCondition> conditions) =>
+      conditions.any(
+        (rule) =>
+            rule is LocationTaskCondition &&
+            (rule.locationIds.isNotEmpty || rule.radiusMeters > 0),
+      );
+
+  /// Applies [transform] to every task across all slices of [board].
   static NormalizedTierSlices _mapBoardTasks(
     NormalizedTierSlices board,
     TaskItem Function(TaskItem task) transform, {
     List<TdfLabel>? labels,
+    List<TdfLocation>? locations,
     TdfDeletedBlock? deletedBlock,
   }) => TaskBoardEvaluator.normalizeTierSlices(
     focus: board.focus.map(transform).toList(),
@@ -556,12 +885,23 @@ class TaskBoardMutator {
     blocked: board.blocked.map(transform).toList(),
     someday: board.someday.map(transform).toList(),
     completed: board.completed.map(transform).toList(),
+    scopedHidden: board.scopedHidden.map(transform).toList(),
     labels: labels ?? board.labels,
+    locations: locations ?? board.locations,
     deletedBlock: deletedBlock ?? board.deletedBlock,
     explicitQueueBlock: board.queueBlock,
   );
 
-  /// Reschedules a completed recurring [task] on [board] for its next cycle per `TDF_SPEC.md` Sections 6.4, 6.9.3, and 6.10.3.
+  /// Returns whether any [LocationTaskCondition] in [conditions] references [locationId].
+  static bool _referencesLocationId(
+    List<TaskCondition> conditions,
+    String locationId,
+  ) => conditions.any(
+    (rule) =>
+        rule is LocationTaskCondition && rule.locationIds.contains(locationId),
+  );
+
+  /// Reschedules a completed recurring [task] on [board] for its next cycle per `TDF_SPEC_0.6.0.md` Sections 6.4, 6.9.3, and 6.10.3.
   static TaskItem? _reschedule(
     NormalizedTierSlices board,
     TaskItem task,
@@ -573,6 +913,43 @@ class TaskBoardMutator {
     if (repeatRule == null) return null;
     if (task.completions >= TdfTaskDependency.maxCompletions) {
       throw const FormatException('LimitExceeded');
+    }
+    final nextModified =
+        preserveModifiedAt ??
+        TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt);
+    final rearmedDependencies = TaskBoardQueueMutator.rearmDependencies(
+      board,
+      task.dependencies,
+    );
+    final resetSubtasks = TaskBoardQueueMutator.setAllSubtasksCompleted(
+      task.subtasks,
+      false,
+    );
+    if (task.dueAt case final currentDueUtc?) {
+      final scheduleNext = repeatRule.nextScheduleAnchoredOccurrence(
+        completedAtUtc: now,
+        oldDueUtc: currentDueUtc,
+        oldSuspendedUtc: task.isSuspendedForever ? null : task.suspendedAt,
+        isSuspendedForever: task.isSuspendedForever,
+        timeZone: zone,
+      );
+      AppLogger.info(
+        LogTag.domain,
+        'Rescheduled recurring task id=${task.id} repeat -> nextDueUtc=${scheduleNext.newDueUtc.toIso8601String()}',
+      );
+      return task.copyWith(
+        isCompleted: false,
+        clearCompletedAt: true,
+        completions: task.completions + 1,
+        isPriority: true,
+        suspendedAt: scheduleNext.newSuspendedUtc,
+        isSuspendedForever: false,
+        dueAt: scheduleNext.newDueUtc,
+        repeatRule: repeatRule,
+        dependencies: rearmedDependencies,
+        subtasks: resetSubtasks,
+        modifiedAt: nextModified,
+      );
     }
     final nextDue = repeatRule.nextDueUtc(completedAtUtc: now, timeZone: zone);
     AppLogger.info(
@@ -587,17 +964,9 @@ class TaskBoardMutator {
       suspendedAt: nextDue,
       isSuspendedForever: false,
       repeatRule: repeatRule,
-      dependencies: TaskBoardQueueMutator.rearmDependencies(
-        board,
-        task.dependencies,
-      ),
-      subtasks: TaskBoardQueueMutator.setAllSubtasksCompleted(
-        task.subtasks,
-        false,
-      ),
-      modifiedAt:
-          preserveModifiedAt ??
-          TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+      dependencies: rearmedDependencies,
+      subtasks: resetSubtasks,
+      modifiedAt: nextModified,
     );
   }
 
@@ -605,14 +974,16 @@ class TaskBoardMutator {
   static DateTime _resolveNow(DateTime? currentDate) =>
       TaskItem.normalizeTimestamp(currentDate ?? DateTime.now().toUtc());
 
-  /// Orders [rules] for a `label` block by group (`day`, `time`, `location`) while stripping task-only resets.
+  /// Orders [rules] for a `label` block by group (`day`, `time`, `location`) while stripping task-only resets and coalescing location rules.
   static List<TaskCondition>? _sanitizeLabelRules(List<TaskCondition>? rules) =>
       rules == null
       ? null
       : List<TaskCondition>.unmodifiable([
           ...rules.whereType<DayTaskCondition>(),
           ...rules.whereType<TimeWindowTaskCondition>(),
-          ...rules.whereType<LocationTaskCondition>(),
+          ..._coalesceLocationConditions(
+            rules.whereType<LocationTaskCondition>(),
+          ),
         ]);
 
   /// Orders [rules] for a `task` block by group (`day`, `time`, `location`) while enforcing `TDF_SPEC.md` Section 4.3 reset rules.

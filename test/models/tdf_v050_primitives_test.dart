@@ -13,6 +13,9 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
@@ -420,6 +423,97 @@ void main() {
         ),
       );
       expect(maxTdfBlocksPerDoc, equals(4096));
+    });
+  });
+
+  group('TDF 0.6.0 Timezone Conversion & Mode 2 Schedule-Anchored Recurrence Vectors', () {
+    test('passes all conversion and recurrenceDueAndSuspendedVectors in spec/conformance/v0.6.0/timezone/vectors.json', () {
+      final rawJson = File('spec/conformance/v0.6.0/timezone/vectors.json')
+          .readAsStringSync();
+      final decoded = jsonDecode(rawJson) as Map<String, Object?>;
+      final conversionVectors = decoded['conversionVectors'] as List<Object?>;
+      for (final entry in conversionVectors) {
+        final vector = entry as Map<String, Object?>;
+        final localInput = vector['localInput'] as String;
+        final expectedUtc = vector['expectedUtc'] as String;
+        final parsedLocal = TaskItem.tryParseTdfTimestampInput(localInput)!;
+        final resolvedUtc = TdfTimeZoneContext.europeBerlin.resolveLocalToUtc(
+          parsedLocal.year,
+          parsedLocal.month,
+          parsedLocal.day,
+          parsedLocal.hour,
+          parsedLocal.minute,
+          parsedLocal.second,
+        );
+        expect(
+          TaskItem.formatTdfTimestampWithSeconds(resolvedUtc),
+          equals(expectedUtc),
+          reason: 'Conversion vector $localInput (${vector["note"]})',
+        );
+      }
+
+      final recurrenceVectors =
+          decoded['recurrenceDueAndSuspendedVectors'] as List<Object?>;
+      for (final entry in recurrenceVectors) {
+        final vector = entry as Map<String, Object?>;
+        final id = vector['id'] as String;
+        final completionUtc = TaskItem.tryParseTdfTimestampInput(
+          vector['completionInstantUtc'] as String,
+        )!;
+        final prevDueLocal = TaskItem.tryParseTdfTimestampInput(
+          vector['previousDueLocal'] as String,
+        )!;
+        final prevDueUtc = TdfTimeZoneContext.europeBerlin.resolveLocalToUtc(
+          prevDueLocal.year,
+          prevDueLocal.month,
+          prevDueLocal.day,
+          prevDueLocal.hour,
+          prevDueLocal.minute,
+          prevDueLocal.second,
+        );
+        final rawPrevSuspLocal = vector['previousSuspendedLocal'] as String?;
+        final DateTime? prevSuspUtc;
+        if (rawPrevSuspLocal != null) {
+          final parsedSuspLocal = TaskItem.tryParseTdfTimestampInput(
+            rawPrevSuspLocal,
+          )!;
+          prevSuspUtc = TdfTimeZoneContext.europeBerlin.resolveLocalToUtc(
+            parsedSuspLocal.year,
+            parsedSuspLocal.month,
+            parsedSuspLocal.day,
+            parsedSuspLocal.hour,
+            parsedSuspLocal.minute,
+            parsedSuspLocal.second,
+          );
+        } else {
+          prevSuspUtc = null;
+        }
+
+        const rule = TaskRepeatRule(count: 1, unit: RepeatUnit.months);
+        final nextOccurrence = rule.nextScheduleAnchoredOccurrence(
+          completedAtUtc: completionUtc,
+          oldDueUtc: prevDueUtc,
+          oldSuspendedUtc: prevSuspUtc,
+          timeZone: TdfTimeZoneContext.europeBerlin,
+        );
+        expect(
+          nextOccurrence.stepsK,
+          equals(vector['advancementStepsK'] as int),
+          reason: 'Vector $id must advance by expected k steps',
+        );
+        expect(
+          TaskItem.formatTdfTimestampWithSeconds(nextOccurrence.newDueUtc),
+          equals(vector['expectedNewDueUtc'] as String),
+          reason: 'Vector $id expectedNewDueUtc',
+        );
+        expect(
+          TaskItem.formatTdfTimestampWithSeconds(
+            nextOccurrence.newSuspendedUtc,
+          ),
+          equals(vector['expectedNewSuspendedUtc'] as String),
+          reason: 'Vector $id expectedNewSuspendedUtc',
+        );
+      }
     });
   });
 }

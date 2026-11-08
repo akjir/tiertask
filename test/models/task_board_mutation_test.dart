@@ -18,7 +18,9 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -207,6 +209,15 @@ void main() {
       expect(LocationTaskCondition.tryParse('95.0', '11.0328', '150'), isNull);
 
       var board = TaskBoard(
+        locations: const [
+          TdfLocation(
+            id: 'erfurtOkD2',
+            name: 'Erfurt',
+            latitude: 50.9787,
+            longitude: 11.0328,
+            radius: 200.0,
+          ),
+        ],
         labels: [
           TdfLabel(
             id: 'officeOkD2',
@@ -263,11 +274,7 @@ void main() {
             startToken: '08:00',
             endToken: '18:00',
           ),
-          const LocationTaskCondition(
-            latitude: 50.9787,
-            longitude: 11.0328,
-            radiusMeters: 200.0,
-          ),
+          const LocationTaskCondition(locationIds: ['erfurtOkD2']),
         ],
         labelIds: const ['officeOkD2'],
         currentDate: fixedDate,
@@ -585,6 +592,177 @@ label officeOkD2 {
       expect(
         board.findTask(taskId)!.links.length,
         equals(TaskLink.maxLinksPerTask),
+      );
+    });
+
+    test('manages TDF 0.6.0 dueAt, origin, scoped labels with queue flood-protection on deletion, and locations with label-before-task deletion cascade and location any inheritance-trap protection', () {
+      var board = TaskBoard.empty();
+      board = board.addLocation(
+        'Office',
+        id: 'locOffOkD2',
+        latitude: 50.9787,
+        longitude: 11.0328,
+        radius: 150,
+        note: 'Main office',
+        source: 'manual',
+        currentDate: fixedDate,
+      );
+      board = board.addLocation(
+        'Office',
+        id: 'locAnnex01',
+        latitude: 50.9800,
+        longitude: 11.0350,
+        radius: 100,
+        currentDate: fixedDate,
+      );
+      expect(
+        board.locations.length,
+        equals(2),
+        reason: 'Section 4.3: Duplicate location names must be permitted',
+      );
+
+      final updateLocTime = fixedDate.add(const Duration(minutes: 5));
+      board = board.updateLocation(
+        'locOffOkD2',
+        name: 'HQ Office',
+        latitude: 50.9790,
+        longitude: 11.0330,
+        radius: 200,
+        note: 'Updated note',
+        source: 'gps',
+        currentDate: updateLocTime,
+      );
+      expect(board.findLocation('locOffOkD2')?.name, equals('HQ Office'));
+      expect(
+        board.findLocation('locOffOkD2')?.modifiedAt,
+        equals(updateLocTime),
+      );
+
+      board = board.addLabel(
+        'Scoped Sprint',
+        id: 'lblScoped1',
+        isScoped: true,
+        currentDate: fixedDate,
+      );
+      board = board.addLabel(
+        'Work',
+        id: 'lblWork001',
+        conditions: [
+          LocationTaskCondition.fromIds(const ['locOffOkD2']),
+        ],
+        currentDate: fixedDate,
+      );
+
+      final dueDate = DateTime.utc(2026, 11, 15, 17, 0);
+      const origin = TaskOrigin(namespace: 'caldav', externalKey: 'uid-12345');
+      board = board.addTask(
+        'Scoped Priority Task',
+        id: 'tScpPri001',
+        targetTier: TaskTier.focus,
+        isPriority: true,
+        suspendedAt: DateTime.utc(2026, 11, 10, 9, 0),
+        dueAt: dueDate,
+        origin: origin,
+        labelIds: const ['lblScoped1'],
+        currentDate: fixedDate,
+      );
+      expect(board.findTask('tScpPri001')?.dueAt, equals(dueDate));
+      expect(board.findTask('tScpPri001')?.origin, equals(origin));
+      expect(board.queueTaskIds, contains('tScpPri001'));
+
+      board = board.addTask(
+        'Someday Task With Due',
+        id: 'tSomDue001',
+        targetTier: TaskTier.someday,
+        currentDate: fixedDate,
+      );
+      final dueUpdateTime = fixedDate.add(const Duration(minutes: 10));
+      board = board.updateTask(
+        'tSomDue001',
+        dueAt: dueDate,
+        origin: origin,
+        currentDate: dueUpdateTime,
+      );
+      expect(
+        board.queueTaskIds,
+        isNot(contains('tSomDue001')),
+        reason: 'Section 6.6: Setting due or origin on Someday task must not add it to queue',
+      );
+      expect(board.findTask('tSomDue001')?.dueAt, equals(dueDate));
+      expect(board.findTask('tSomDue001')?.origin, equals(origin));
+
+      board = board.updateTask(
+        'tSomDue001',
+        clearDueAt: true,
+        clearOrigin: true,
+        currentDate: dueUpdateTime.add(const Duration(minutes: 1)),
+      );
+      expect(board.findTask('tSomDue001')?.dueAt, isNull);
+      expect(board.findTask('tSomDue001')?.origin, isNull);
+
+      final deleteScopedTime = fixedDate.add(const Duration(minutes: 20));
+      board = board.deleteLabel('lblScoped1', currentDate: deleteScopedTime);
+      final afterScopedDelete = board.findTask('tScpPri001')!;
+      expect(afterScopedDelete.labelIds, isEmpty);
+      expect(
+        afterScopedDelete.isPriority,
+        isFalse,
+        reason: 'Section 6.8.1: Deleting the last scoped label on a global-view-restricted task must strip priority',
+      );
+      expect(
+        afterScopedDelete.suspendedAt,
+        equals(DateTime.utc(2026, 11, 10, 9, 0)),
+        reason: 'Section 6.8.1: Deleting the last scoped label must preserve suspended',
+      );
+      expect(
+        board.queueTaskIds,
+        isNot(contains('tScpPri001')),
+        reason: 'Section 6.8.1: Deleting the last scoped label must remove the task from queue to prevent global-view flooding',
+      );
+
+      board = board.addTask(
+        'Task Overriding Work Location to Annex',
+        id: 'tOvrAnnex1',
+        labelIds: const ['lblWork001'],
+        conditions: [
+          LocationTaskCondition.fromIds(const ['locAnnex01']),
+        ],
+        currentDate: fixedDate,
+      );
+
+      final deleteAnnexTime = fixedDate.add(const Duration(minutes: 30));
+      board = board.deleteLocation('locAnnex01', currentDate: deleteAnnexTime);
+      expect(
+        board.deletedBlock.findLocationRecord('locAnnex01'),
+        equals(
+          TdfDeletedLocationRecord(
+            locationId: 'locAnnex01',
+            deletedAt: deleteAnnexTime,
+          ),
+        ),
+      );
+      expect(
+        board.findTask('tOvrAnnex1')!.conditions,
+        equals(const [
+          GroupResetTaskCondition(targetGroup: ConditionGroup.location),
+        ]),
+        reason: 'Section 6.8.1: Deleting a task location override when an assigned label still has a live location rule must replace the emptied task rule with condition location any',
+      );
+
+      board = board.updateTask(
+        'tOvrAnnex1',
+        conditions: [
+          LocationTaskCondition.fromIds(const ['locOffOkD2']),
+        ],
+        currentDate: deleteAnnexTime.add(const Duration(minutes: 1)),
+      );
+      final deleteOfficeTime = deleteAnnexTime.add(const Duration(minutes: 5));
+      board = board.deleteLocation('locOffOkD2', currentDate: deleteOfficeTime);
+      expect(board.findLabel('lblWork001')!.conditions, isEmpty);
+      expect(
+        board.findTask('tOvrAnnex1')!.conditions,
+        isEmpty,
+        reason: 'Section 6.8.1: Because label-before-task order removes locOffOkD2 from lblWork001 first, tOvrAnnex1 has no assigned label with a remaining location rule so its emptied location rule is removed completely',
       );
     });
   });

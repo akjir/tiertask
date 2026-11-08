@@ -94,7 +94,7 @@ void main() {
       expect(await tasksFile.exists(), isTrue);
       expect(
         await tasksFile.readAsString(),
-        contains('name "Private Steuererklärung"'),
+        contains('"Private Steuererklärung"'),
       );
 
       final arbeitWorkspace = await container
@@ -136,7 +136,7 @@ void main() {
       expect(await arbeitFile.exists(), isTrue);
       expect(
         await arbeitFile.readAsString(),
-        contains('name "Sprint Planning vorbereiten"'),
+        contains('"Sprint Planning vorbereiten"'),
       );
       expect(
         await tasksFile.readAsString(),
@@ -264,10 +264,7 @@ void main() {
       );
       final projektBFile = File('${tempDir.path}/projekt_b.tdf');
       expect(await projektBFile.exists(), isTrue);
-      expect(
-        await projektBFile.readAsString(),
-        contains('name "Projekt B Task"'),
-      );
+      expect(await projektBFile.readAsString(), contains('"Projekt B Task"'));
 
       final restoredTasksBoard = await container.read(
         taskNotifierProvider.future,

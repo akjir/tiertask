@@ -46,6 +46,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<void>? _inFlightSync;
   final Map<String, DateTime> _pendingDeletedLabelTimestamps =
       <String, DateTime>{};
+  final Map<String, DateTime> _pendingDeletedLocationTimestamps =
+      <String, DateTime>{};
 
   /// Returns the current [TaskBoard] snapshot or an empty board if not yet loaded.
   TaskBoard get _currentBoard => state.asData?.value ?? TaskBoard.empty();
@@ -56,6 +58,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         .read(workspaceUnloadCoordinatorProvider)
         .register(prepareForWorkspaceUnload);
     _pendingDeletedLabelTimestamps.clear();
+    _pendingDeletedLocationTimestamps.clear();
     state = const AsyncLoading();
     final config = await ref.watch(webDavConfigProvider.future);
     if (!config.hasActiveStorage) {
@@ -70,6 +73,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String? color,
     String? id,
     String? note,
+    bool isScoped = false,
+    List<TaskCondition> conditions = const [],
     DateTime? currentDate,
   }) async {
     final (utcNow, _) = _resolveTimestamps(currentDate);
@@ -77,6 +82,34 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _currentBoard.addLabel(
         name,
         color: color,
+        id: id,
+        note: note,
+        isScoped: isScoped,
+        conditions: conditions,
+        currentDate: utcNow,
+      ),
+    );
+  }
+
+  /// Adds a new TDF `location` block with [name], [latitude], [longitude], and [radiusMeters] and persists to storage.
+  Future<void> addLocation(
+    String name, {
+    required double latitude,
+    required double longitude,
+    required double radiusMeters,
+    String source = 'manual',
+    String? id,
+    String? note,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, _) = _resolveTimestamps(currentDate);
+    await _commitMutation(
+      _currentBoard.addLocation(
+        name,
+        latitude: latitude,
+        longitude: longitude,
+        radius: radiusMeters,
+        source: source,
         id: id,
         note: note,
         currentDate: utcNow,
@@ -94,6 +127,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool subtasksAutoFinish = false,
     List<SubtaskItem> subtasks = const [],
     List<String> labelIds = const [],
+    DateTime? dueAt,
+    TaskOrigin? origin,
     DateTime? suspendedAt,
     bool isSuspendedForever = false,
     TaskRepeatRule? repeatRule,
@@ -114,6 +149,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         subtasksAutoFinish: subtasksAutoFinish,
         subtasks: subtasks,
         labelIds: labelIds,
+        dueAt: dueAt,
+        origin: origin,
         suspendedAt: suspendedAt,
         isSuspendedForever: isSuspendedForever,
         repeatRule: repeatRule,
@@ -182,6 +219,32 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     );
   }
 
+  /// Deletes the location with [locationId], strips its reference from all tasks and labels, and persists to storage.
+  Future<void> deleteLocation(
+    String locationId, {
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final existingLocation = _currentBoard.findLocation(locationId);
+    final deleteTimestamp = TaskItem.nextModifiedTimestamp(
+      utcNow,
+      existingLocation?.effectiveModifiedAt ?? TdfLabel.defaultModifiedAt,
+    );
+    _pendingDeletedLocationTimestamps[locationId] = deleteTimestamp;
+    await TaskSyncPipeline.persistPendingLocationDeletion(
+      ref,
+      locationId,
+      deleteTimestamp,
+    );
+    await _commitMutation(
+      _currentBoard.deleteLocation(
+        locationId,
+        currentDate: utcNow,
+        localEvaluationTime: localNow,
+      ),
+    );
+  }
+
   /// Deletes the task with [taskId], removes its `queue` entry, and persists to storage.
   Future<void> deleteTask(String taskId, {DateTime? currentDate}) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
@@ -195,11 +258,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Downgrades an active task per `TDF_SPEC.md` Section 6.3 and persists to storage.
-  Future<void> downgradeTask(String taskId, {DateTime? currentDate}) async {
+  Future<void> downgradeTask(
+    String taskId, {
+    String? activeFilterLabelId,
+    DateTime? currentDate,
+  }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     await _commitMutation(
       _currentBoard.downgradeTask(
         taskId,
+        activeLabelId: activeFilterLabelId,
         currentDate: utcNow,
         localEvaluationTime: localNow,
       ),
@@ -250,7 +318,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final currentBoard = state.asData?.value;
     if (currentWorkspace != null &&
         currentBoard != null &&
-        (currentBoard.allTasks.isNotEmpty || currentBoard.labels.isNotEmpty)) {
+        (currentBoard.allTasks.isNotEmpty ||
+            currentBoard.labels.isNotEmpty ||
+            currentBoard.locations.isNotEmpty)) {
       await TaskSyncPipeline.flushOutgoingLocalBoard(
         ref,
         currentWorkspace,
@@ -345,6 +415,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
     final workspace = await ref.read(activeWorkspaceProvider.future);
     _pendingDeletedLabelTimestamps.clear();
+    _pendingDeletedLocationTimestamps.clear();
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
     final updatedConfig = await ref.read(webDavConfigProvider.future);
@@ -426,6 +497,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool clearColor = false,
     String? note,
     bool clearNote = false,
+    bool? isScoped,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) async {
@@ -438,7 +510,39 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         clearColor: clearColor,
         note: note,
         clearNote: clearNote,
+        isScoped: isScoped,
         conditions: conditions,
+        currentDate: utcNow,
+        localEvaluationTime: localNow,
+      ),
+    );
+  }
+
+  /// Updates an existing location with [locationId] and persists the updated board to storage.
+  Future<void> updateLocation(
+    String locationId, {
+    String? name,
+    double? latitude,
+    double? longitude,
+    double? radiusMeters,
+    String? source,
+    bool clearSource = false,
+    String? note,
+    bool clearNote = false,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    await _commitMutation(
+      _currentBoard.updateLocation(
+        locationId,
+        name: name,
+        latitude: latitude,
+        longitude: longitude,
+        radius: radiusMeters,
+        source: source,
+        clearSource: clearSource,
+        note: note,
+        clearNote: clearNote,
         currentDate: utcNow,
         localEvaluationTime: localNow,
       ),
@@ -455,6 +559,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool? subtasksAutoFinish,
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
+    DateTime? dueAt,
+    bool clearDueAt = false,
+    TaskOrigin? origin,
+    bool clearOrigin = false,
     DateTime? suspendedAt,
     bool? isSuspendedForever,
     bool clearSuspendedAt = false,
@@ -477,6 +585,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         subtasksAutoFinish: subtasksAutoFinish,
         subtasks: subtasks,
         labelIds: labelIds,
+        dueAt: dueAt,
+        clearDueAt: clearDueAt,
+        origin: origin,
+        clearOrigin: clearOrigin,
         suspendedAt: suspendedAt,
         isSuspendedForever: isSuspendedForever,
         clearSuspendedAt: clearSuspendedAt,
@@ -565,6 +677,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         ref,
         config,
         pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
+        pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
         candidateBoard: board,
         onLocalStageMerged: (mergedBoard) {
           localStageSucceeded = true;
@@ -599,6 +712,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       await wipeTarget();
       final workspace = await ref.read(activeWorkspaceProvider.future);
       _pendingDeletedLabelTimestamps.clear();
+      _pendingDeletedLocationTimestamps.clear();
       await ref
           .read(settingsRepositoryProvider)
           .saveWorkspaceSyncState(workspace.id, WorkspaceSyncState.empty);
@@ -631,6 +745,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     ref,
     config,
     pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
+    pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
     candidateBoard: candidateBoard,
     isInitialLoad: isInitialLoad,
     requireTargets: requireTargets,

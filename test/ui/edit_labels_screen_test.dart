@@ -31,14 +31,20 @@ void main() {
     'Side panel removes tier items, displays Google Keep style Labels with Edit at top, task counts, label filtering, and Create new label opening EditLabelsScreen',
     (WidgetTester tester) async {
       const labelsTdf = '''
-tdf 0.5.0
+tdf 0.6.0
 
 queue {
-  modified 2026-11-01 08:30:00
+  modified 2026-11-01 08:30
   task 000001OkD2
   task 000002OkD2
 }
 
+location locCampOk2 {
+  name "Campground"
+  coordinates 50.9787 11.0328
+  radius 250
+  source "gps"
+}
 label home00OkD2 {
   name "Home"
   color "#00E5FF"
@@ -50,13 +56,11 @@ label busin0OkD2 {
 task 000001OkD2 {
   name "Prepare quarterly report"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   labels busin0OkD2 home00OkD2
 }
 task 000002OkD2 {
   name "Water garden plants"
   created 2026-11-01 08:30
-  queued 2026-11-01 08:30
   labels home00OkD2
 }
 ''';
@@ -153,7 +157,10 @@ task 000002OkD2 {
         findsOneWidget,
         reason: 'Side panel must display the Edit button at the top of Labels',
       );
-      expect(find.text('Edit'), findsOneWidget);
+      expect(
+        find.descendant(of: editButtonFinder, matching: find.text('Edit')),
+        findsOneWidget,
+      );
 
       final homeTileFinder = find.byKey(
         const ValueKey('drawer_label_tile_home00OkD2'),
@@ -504,25 +511,18 @@ task 000002OkD2 {
       );
       await tester.pump();
 
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('task_editor_location_lat_input')),
+      final scopedSwitchFinder = find.byKey(
+        const ValueKey('label_editor_scoped_switch'),
       );
-      await tester.enterText(
-        find.byKey(const ValueKey('task_editor_location_lat_input')),
-        '50.9787',
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('task_editor_location_lon_input')),
-        '11.0328',
-      );
-      await tester.enterText(
-        find.byKey(const ValueKey('task_editor_location_radius_input')),
-        '250',
-      );
+      await tester.ensureVisible(scopedSwitchFinder);
+      await tester.tap(scopedSwitchFinder);
       await tester.pump();
-      await tester.tap(
-        find.byKey(const ValueKey('task_editor_add_location_condition_button')),
+
+      final locChipFinder = find.byKey(
+        const ValueKey('task_editor_condition_location_locCampOk2'),
       );
+      await tester.ensureVisible(locChipFinder);
+      await tester.tap(locChipFinder);
       await tester.pump();
 
       await tester.ensureVisible(saveButtonFinder);
@@ -554,6 +554,7 @@ task 000002OkD2 {
       expect(updatedCamping.name, equals('Outdoor Camping'));
       expect(updatedCamping.note, equals('Weekend gear & tents'));
       expect(updatedCamping.color, equals('#4CAF50'));
+      expect(updatedCamping.isScoped, isTrue);
       expect(updatedCamping.conditions.length, equals(3));
 
       await tester.tap(

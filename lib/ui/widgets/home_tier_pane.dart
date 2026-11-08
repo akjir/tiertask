@@ -30,7 +30,11 @@ class AllTasksSearchView extends StatelessWidget {
     super.key,
     required this.board,
     required this.searchQuery,
+    this.activeFilterLabelId,
   });
+
+  /// Active label filter ID when a label filter is selected.
+  final String? activeFilterLabelId;
 
   /// Current task board snapshot (already evaluated for the active label
   /// context if one is selected).
@@ -62,7 +66,11 @@ class AllTasksSearchView extends StatelessWidget {
           );
         }
         final entry = entries[index - 1];
-        return _TierTaskListTile(task: entry.task, tier: entry.tier);
+        return _TierTaskListTile(
+          task: entry.task,
+          tier: entry.tier,
+          activeFilterLabelId: activeFilterLabelId,
+        );
       },
     );
   }
@@ -156,7 +164,15 @@ class LandingSectionLabel extends StatelessWidget {
 /// minimalist task pills.
 class TierScrollView extends StatefulWidget {
   /// Creates a [TierScrollView].
-  const TierScrollView({super.key, required this.board, required this.tier});
+  const TierScrollView({
+    super.key,
+    required this.board,
+    required this.tier,
+    this.activeFilterLabelId,
+  });
+
+  /// Active label filter ID when a label filter is selected.
+  final String? activeFilterLabelId;
 
   /// Current task board snapshot.
   final TaskBoard board;
@@ -246,6 +262,7 @@ class _TierScrollViewState extends State<TierScrollView> {
           animateEntry: _enteringTaskIds.contains(task.id),
           task: task,
           tier: tier,
+          activeFilterLabelId: widget.activeFilterLabelId,
         );
       },
     );
@@ -264,9 +281,11 @@ class _TierTaskListTile extends StatelessWidget {
   const _TierTaskListTile({
     required this.task,
     required this.tier,
+    this.activeFilterLabelId,
     this.animateEntry = false,
   });
 
+  final String? activeFilterLabelId;
   final bool animateEntry;
   final TaskItem task;
   final TaskTier tier;
@@ -282,6 +301,7 @@ class _TierTaskListTile extends StatelessWidget {
           tier == TaskTier.ready ||
           tier == TaskTier.planned,
       isCompleted: tier == TaskTier.completed,
+      activeFilterLabelId: activeFilterLabelId,
     );
   }
 }

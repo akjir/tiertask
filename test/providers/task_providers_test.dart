@@ -19,6 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
@@ -56,7 +57,7 @@ class _ControllableLocalRepository extends LocalFileRepository {
     if (shouldFailSave()) {
       throw const LocalFileException('Simulated wipe failure');
     }
-    setStore('tdf 0.5.1\n');
+    setStore('tdf 0.6.0\n');
   }
 }
 
@@ -108,7 +109,7 @@ class _ControllableWebDavRepository extends WebDavRepository {
         }
       }
     }
-    remoteFiles[path] = 'tdf 0.5.1\n';
+    remoteFiles[path] = 'tdf 0.6.0\n';
   }
 }
 
@@ -430,13 +431,13 @@ void main() {
 
       await notifier.wipeRemoteFile(webdavConfig, createBackup: true);
       expect(remoteFiles['$remotePath.bak'], contains('Task before wipe'));
-      expect(remoteFiles[remotePath], equals('tdf 0.5.1\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.6.0\n'));
 
       await notifier.wipeLocalFile(webdavConfig, createBackup: true);
       final localWipeFile = File('${tempDir.path}/local_wipe.tdf');
       final localWipeBak = File('${tempDir.path}/local_wipe.tdf.bak');
       expect(await localWipeBak.exists(), isTrue);
-      expect(await localWipeFile.readAsString(), equals('tdf 0.5.1\n'));
+      expect(await localWipeFile.readAsString(), equals('tdf 0.6.0\n'));
       expect(container.read(taskNotifierProvider).value?.allTasks, isEmpty);
 
       await expectLater(
@@ -447,6 +448,122 @@ void main() {
         reason: 'Unconfigured WebDAV must throw WebDavException on testConnectionAndSync',
       );
       failRemote = false;
+    });
+
+    test('executes TDF 0.6.0 location CRUD, scoped labels, due/origin task fields, and scoped downgrade mutations', () async {
+      var storedTdf = '';
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        language: AppLanguage.english,
+      );
+      final settingsRepo = InMemorySettingsRepository(config);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _ControllableLocalRepository(
+              config: config,
+              getStore: () => storedTdf,
+              setStore: (value) => storedTdf = value,
+              shouldFailSave: () => false,
+            ),
+          ),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      await notifier.addLocation(
+        'Office HQ',
+        latitude: 52.520008,
+        longitude: 13.404954,
+        radiusMeters: 150,
+        source: 'gps',
+        note: 'Main office',
+      );
+      var board = container.read(taskNotifierProvider).requireValue;
+      expect(board.locations.length, equals(1));
+      final locationId = board.locations.single.id;
+      expect(board.locations.single.name, equals('Office HQ'));
+      expect(board.locations.single.source, equals('gps'));
+
+      await notifier.updateLocation(
+        locationId,
+        name: 'Berlin Office',
+        latitude: 52.5201,
+        longitude: 13.4050,
+        radiusMeters: 250,
+        source: 'manual',
+        note: 'Updated office',
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(board.locations.single.name, equals('Berlin Office'));
+      expect(board.locations.single.radius, equals(250));
+      expect(board.locations.single.source, equals('manual'));
+
+      await notifier.addLabel(
+        'Work Scoped',
+        color: '#2196F3',
+        isScoped: true,
+        conditions: [
+          LocationTaskCondition(locationIds: [locationId]),
+        ],
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      final labelId = board.labels.single.id;
+      expect(board.labels.single.isScoped, isTrue);
+
+      await notifier.updateLabel(
+        labelId,
+        name: 'Work Scoped Updated',
+        color: '#4CAF50',
+        isScoped: false,
+        conditions: [
+          LocationTaskCondition(locationIds: [locationId]),
+        ],
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(board.labels.single.isScoped, isFalse);
+
+      final dueAt = DateTime.utc(2026, 11, 5, 14, 0);
+      const taskOrigin = TaskOrigin(namespace: 'jira', externalKey: 'OPS-42');
+      await notifier.addTask(
+        'Prepare Quarterly Report',
+        labelIds: [labelId],
+        dueAt: dueAt,
+        origin: taskOrigin,
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      final task = board.allTasks.single;
+      expect(task.dueAt, equals(dueAt));
+      expect(task.origin, equals(taskOrigin));
+
+      await notifier.updateTask(
+        task.id,
+        title: 'Prepare Annual Report',
+        isPriority: false,
+        dueAt: DateTime.utc(2026, 11, 6),
+        origin: task.origin,
+        labelIds: [labelId],
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(board.findTask(task.id)?.dueAt, equals(DateTime.utc(2026, 11, 6)));
+      expect(board.findTask(task.id)?.origin, equals(taskOrigin));
+
+      await notifier.deleteLocation(locationId);
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(board.locations, isEmpty);
+      expect(
+        board.deletedBlock.locations.any(
+          (record) => record.locationId == locationId,
+        ),
+        isTrue,
+        reason: 'Deleting a location must record its tombstone in deletedBlock.locations',
+      );
     });
   });
 }

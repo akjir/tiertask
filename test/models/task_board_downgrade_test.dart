@@ -16,6 +16,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -406,6 +408,117 @@ void main() {
         afterSomedayNoop,
         equals(afterPlannedDowngrade),
         reason: 'Downgrading a Someday task must be a no-op per Section 6.3',
+      );
+    });
+
+    test('executes TDF 0.6.0 Section 6.3 active-filter-relative Focus-to-Ready downgrade anchor E_ctx for |E_ctx| = 0, 1 <= |E_ctx| < 7, and |E_ctx| >= 7', () {
+      const lblWork = TdfLabel(id: 'lblWork001', name: 'Work');
+      const lblHome = TdfLabel(id: 'lblHome001', name: 'Home');
+      const lblScoped = TdfLabel(
+        id: 'lblScoped1',
+        name: 'Scoped',
+        isScoped: true,
+      );
+
+      final tasks = <TaskItem>[
+        TaskItem(
+          id: 'w10000OkD2',
+          title: 'Work 1 (Downgrade Me)',
+          isPriority: true,
+          labelIds: const ['lblWork001'],
+          createdAt: fixedDate,
+        ),
+        TaskItem(
+          id: 'w20000OkD2',
+          title: 'Work 2',
+          labelIds: const ['lblWork001'],
+          createdAt: fixedDate,
+        ),
+        TaskItem(
+          id: 'w30000OkD2',
+          title: 'Work 3',
+          labelIds: const ['lblWork001'],
+          createdAt: fixedDate,
+        ),
+        TaskItem(
+          id: 'h10000OkD2',
+          title: 'Home 1',
+          labelIds: const ['lblHome001'],
+          createdAt: fixedDate,
+        ),
+        TaskItem(
+          id: 's10000OkD2',
+          title: 'Scoped Tail Task',
+          labelIds: const ['lblScoped1'],
+          createdAt: fixedDate,
+        ),
+      ];
+
+      final board = TaskBoard.evaluate(
+        tasks: tasks,
+        labels: const [lblWork, lblHome, lblScoped],
+        evaluationTime: fixedDate,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: fixedDate,
+          taskIds: tasks.map((task) => task.id).toList(),
+        ),
+      );
+
+      final downgradedWorkFiltered = board.downgradeTask(
+        'w10000OkD2',
+        activeLabelId: 'lblWork001',
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(
+        downgradedWorkFiltered.queueTaskIds,
+        equals([
+          'w20000OkD2',
+          'w30000OkD2',
+          'w10000OkD2',
+          'h10000OkD2',
+          's10000OkD2',
+        ]),
+        reason: 'Section 6.3: When 1 <= |E_ctx| < 7 in activeLabelId=lblWork001, w1 must move immediately after E_ctx.last (w3), ahead of unrelated h1 and s1',
+      );
+      expect(
+        downgradedWorkFiltered.findTask('w10000OkD2')?.isPriority,
+        isFalse,
+      );
+
+      final downgradedGlobal = board.downgradeTask(
+        'w10000OkD2',
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(
+        downgradedGlobal.queueTaskIds,
+        equals([
+          'w20000OkD2',
+          'w30000OkD2',
+          'h10000OkD2',
+          'w10000OkD2',
+          's10000OkD2',
+        ]),
+        reason: 'Section 6.3: In global view, scoped-only s1 is excluded from E_ctx, so w1 moves immediately after E_ctx.last (h1), ahead of s1',
+      );
+
+      final singleTaskBoard = TaskBoard.evaluate(
+        tasks: [
+          TaskItem(id: 'solo00OkD2', title: 'Solo Task', createdAt: fixedDate),
+        ],
+        evaluationTime: fixedDate,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: fixedDate,
+          taskIds: const ['solo00OkD2'],
+        ),
+      );
+      final afterSoloDowngrade = singleTaskBoard.downgradeTask(
+        'solo00OkD2',
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(
+        afterSoloDowngrade.queueModifiedAt,
+        equals(fixedDate),
+        reason: 'Section 6.3: When |E_ctx| = 0 and priority is false, downgrade is a strict no-op',
       );
     });
   });

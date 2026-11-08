@@ -30,6 +30,7 @@ import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
 import '../services/app_logger.dart';
 import 'edit_labels_screen.dart';
+import 'edit_locations_screen.dart';
 import 'settings_screen.dart';
 import 'widgets/home_drawer.dart';
 import 'widgets/home_tier_pane.dart';
@@ -196,6 +197,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         board: state.board,
         onManageWorkspaces: () => showWorkspaceDialog(context),
         onOpenEditLabels: _openEditLabels,
+        onOpenEditLocations: _openEditLocations,
         onOpenSettings: _openSettings,
         onSelectLabel: _selectLabel,
         onSyncRemote: () =>
@@ -266,6 +268,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => EditLabelsScreen(autofocusCreate: autofocusCreate),
+      ),
+    );
+  }
+
+  /// Pushes [EditLocationsScreen] onto the navigation stack.
+  void _openEditLocations(bool autofocusCreate) {
+    AppLogger.info(LogTag.ui, 'Opened EditLocationsScreen');
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EditLocationsScreen(autofocusCreate: autofocusCreate),
       ),
     );
   }
@@ -378,6 +390,7 @@ class _LandingContentSwitcher extends ConsumerWidget {
           return AllTasksSearchView(
             board: effectiveBoard,
             searchQuery: searchQuery,
+            activeFilterLabelId: activeLabel?.id,
           );
         }
         return PageView.builder(
@@ -387,6 +400,7 @@ class _LandingContentSwitcher extends ConsumerWidget {
           itemBuilder: (context, index) => TierScrollView(
             board: effectiveBoard,
             tier: TaskTier.values[index],
+            activeFilterLabelId: activeLabel?.id,
           ),
         );
       },

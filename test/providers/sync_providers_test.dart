@@ -212,7 +212,7 @@ void main() {
     );
     expect(mergedBoard.findLabel('work00OkD2')?.name, equals('Enterprise'));
     expect(localTdf, equals(remoteTdf));
-    expect(localTdf, contains('tdf 0.5.1'));
+    expect(localTdf, contains('tdf 0.6.0'));
   });
 
   test('Offline WebDAV save failure preserves local file sync and merges per-entity when connection returns', () async {
@@ -244,7 +244,7 @@ void main() {
         .deleteLabel('ops000OkD2');
 
     expect(container1.read(syncStateProvider).errorMessage, isNotNull);
-    expect(localTdf, contains('finished 2026-11-01 09:00'));
+    expect(localTdf, contains('finished    2026-11-01 09:00'));
 
     remoteTdf = 'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n  task 000002OkD2\n}\n\nlabel ops000OkD2 {\n  name "Ops"\n  modified 2026-11-01 08:00:00\n}\n\ntask 000001OkD2 {\n  name "Task One"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n  queued 2026-11-01 08:00:00\n}\n\ntask 000002OkD2 {\n  name "Task Two Updated On Remote"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 09:30:00\n  queued 2026-11-01 08:00:00\n}\n';
 
@@ -331,14 +331,14 @@ void main() {
 
     expect(localSaveCount, greaterThanOrEqualTo(1));
     expect(remoteSaveCount, greaterThanOrEqualTo(1));
-    expect(localTdf, startsWith('tdf 0.5.1\n'));
+    expect(localTdf, startsWith('tdf 0.6.0\n'));
     expect(remoteTdf, equals(localTdf));
   });
 
   test('Unsupported TDF version on remote, local, or both stops retrying, never overwrites unreadable files, and surfaces localized update recommendations', () async {
     const service = TdfService();
     expect(
-      () => service.parse('tdf 0.6.0\n'),
+      () => service.parse('tdf 0.7.0\n'),
       throwsA(
         isA<TdfException>()
             .having(
@@ -346,15 +346,15 @@ void main() {
               'kind',
               equals(TdfErrorKind.unsupportedVersion),
             )
-            .having((error) => error.sourceVersion, 'sourceVersion', '0.6.0')
-            .having((error) => error.targetVersion, 'targetVersion', '0.5.1'),
+            .having((error) => error.sourceVersion, 'sourceVersion', '0.7.0')
+            .having((error) => error.targetVersion, 'targetVersion', '0.6.0'),
       ),
     );
 
     final currentTime = DateTime.utc(2026, 11, 1, 12);
     var remoteFetchCount = 0;
     var remoteSaveCount = 0;
-    var remoteTdf = 'tdf 0.6.0\n';
+    var remoteTdf = 'tdf 0.7.0\n';
     const webDavDeConfig = WebDavConfig(
       storageMode: StorageMode.webdav,
       language: AppLanguage.german,
@@ -394,7 +394,7 @@ void main() {
     expect(
       caughtRemoteError.toString(),
       equals(
-        'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.6.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+        'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.7.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
       ),
     );
 
@@ -412,9 +412,9 @@ void main() {
       config: bothEnConfig,
       settingsRepository: InMemorySettingsRepository(bothEnConfig),
       clock: () => currentTime,
-      getLocal: () => 'tdf 0.6.0\n',
+      getLocal: () => 'tdf 0.7.0\n',
       setLocal: (_) => localFailSaveCount++,
-      getRemote: () => 'tdf 0.5.1\n',
+      getRemote: () => 'tdf 0.6.0\n',
       setRemote: (_) {},
       isOnline: () => true,
     );
@@ -430,7 +430,7 @@ void main() {
     expect(
       caughtLocalError.toString(),
       equals(
-        'The local file uses unsupported file version 0.6.0. Please update TierTask to a newer version.',
+        'The local file uses unsupported file version 0.7.0. Please update TierTask to a newer version.',
       ),
     );
 
@@ -448,11 +448,11 @@ void main() {
       config: bothDeConfig,
       settingsRepository: InMemorySettingsRepository(bothDeConfig),
       clock: () => currentTime,
-      getLocal: () => 'tdf 0.6.0\n',
+      getLocal: () => 'tdf 0.7.0\n',
       setLocal: (_) {},
       getRemote: () {
         bothFailRemoteFetchCount++;
-        return 'tdf 0.7.0\n';
+        return 'tdf 0.8.0\n';
       },
       setRemote: (_) {},
       isOnline: () => true,
@@ -469,7 +469,7 @@ void main() {
     expect(
       caughtBothFailError.toString(),
       equals(
-        'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion 0.6.0 / 0.7.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+        'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion 0.7.0 / 0.8.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
       ),
     );
   });
@@ -640,6 +640,62 @@ void main() {
       localTdf,
       contains('created 2026-11-01 08:00'),
       reason: 'Persisted migrated TDF must contain the UTC-converted timestamp',
+    );
+  });
+
+  test('Universal 3-retry CAS-merge loop resolves concurrent local file edits before save and aborts after maxCasRetries', () async {
+    expect(TaskSyncPipeline.maxCasRetries, equals(3));
+    var currentTime = DateTime.utc(2026, 11, 1, 10);
+    var localTdf =
+        'tdf 0.6.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n}\n\ntask 000001OkD2 {\n  name "Base Task"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n}\n';
+    var readCallCount = 0;
+    var injectConcurrentEditsRemaining = 2;
+    const localOnlyConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      localFilePath: 'tasks.tdf',
+    );
+    final settingsRepository = InMemorySettingsRepository(localOnlyConfig);
+
+    final container = createSyncContainer(
+      config: localOnlyConfig,
+      settingsRepository: settingsRepository,
+      clock: () => currentTime,
+      getLocal: () {
+        readCallCount++;
+        if (readCallCount > 1 && injectConcurrentEditsRemaining > 0) {
+          final taskIndex = 3 - injectConcurrentEditsRemaining;
+          injectConcurrentEditsRemaining--;
+          localTdf =
+              '$localTdf\ntask 00000${taskIndex + 1}OkD2 {\n  name "Concurrent Task $taskIndex"\n  created 2026-11-01 09:0$taskIndex:00\n  modified 2026-11-01 09:0$taskIndex:00\n}\n';
+        }
+        return localTdf;
+      },
+      setLocal: (value) => localTdf = value,
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(container.dispose);
+
+    final initialBoard = await container.read(taskNotifierProvider.future);
+    expect(
+      initialBoard.allTasks.map((task) => task.title),
+      containsAll(<String>[
+        'Base Task',
+        'Concurrent Task 1',
+        'Concurrent Task 2',
+      ]),
+    );
+
+    injectConcurrentEditsRemaining = 4;
+    currentTime = DateTime.utc(2026, 11, 1, 11);
+    await container
+        .read(taskNotifierProvider.notifier)
+        .addTask('Contended Task', targetTier: TaskTier.someday);
+    expect(
+      container.read(syncStateProvider).errorMessage,
+      isNotNull,
+      reason: 'Exceeding 3 CAS retries must surface a LocalFileException error in syncStateProvider',
     );
   });
 }

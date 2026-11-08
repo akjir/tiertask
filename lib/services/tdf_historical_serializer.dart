@@ -15,6 +15,7 @@
 
 import 'package:flutter/foundation.dart';
 
+import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_metadata.dart';
@@ -99,6 +100,52 @@ class TdfHistoricalSerializer {
       _writeTask050(buffer, entry.task, entry.queuedAt);
     }
     return buffer.toString();
+  }
+
+  /// Serializes an intermediate `0.5.1` [board] in canonical `0.5.1` order (`spec/TDF_SPEC_0.6.0.md` Section 10.6).
+  static String serializeDocument051(TaskBoard board) {
+    final buffer = StringBuffer('tdf 0.5.1\n\n');
+    if (!board.deletedBlock.isDefaultEmpty) {
+      buffer.write(
+        'deleted {\n    generation ${board.deletedBlock.generation}\n',
+      );
+      final sortedTasks = List<TdfDeletedTaskRecord>.from(
+        board.deletedBlock.tasks,
+      )..sort((a, b) => a.taskId.compareTo(b.taskId));
+      for (final record in sortedTasks) {
+        final ts = TaskItem.formatTdfTimestampWithSeconds(record.deletedAt);
+        if (record.completionsCheckpoint > 0) {
+          buffer.write(
+            '    task ${record.taskId} $ts ${record.completionsCheckpoint}\n',
+          );
+        } else {
+          buffer.write('    task ${record.taskId} $ts\n');
+        }
+      }
+      final sortedLabels = List<TdfDeletedLabelRecord>.from(
+        board.deletedBlock.labels,
+      )..sort((a, b) => a.labelId.compareTo(b.labelId));
+      for (final record in sortedLabels) {
+        final ts = TaskItem.formatTdfTimestampWithSeconds(record.deletedAt);
+        buffer.write('    label ${record.labelId} $ts\n');
+      }
+      buffer.write('}\n\n');
+    }
+    if (!board.queueBlock.isDefaultEmpty) {
+      _writeQueue050(buffer, board.queueBlock);
+    }
+    final sortedLabels = List<TdfLabel>.from(board.labels)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    for (final label in sortedLabels) {
+      _writeLabel051(buffer, label);
+    }
+    final sortedTasks = List<TaskItem>.from(board.allTasks)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    for (final task in sortedTasks) {
+      _writeTask051(buffer, task);
+    }
+    final output = buffer.toString();
+    return output == 'tdf 0.5.1\n\n' ? 'tdf 0.5.1\n' : output;
   }
 
   /// Serializes an intermediate `0.3.0` or `0.4.0` document in declaration order.
@@ -442,6 +489,99 @@ class TdfHistoricalSerializer {
     }
     _writeHistoricalLinks(buffer, task.links);
     _writeHistoricalConditions(buffer, task.conditions);
+    _writeHistoricalSubtasks(buffer, task.subtasks, task.subtasksAutoFinish);
+    buffer.write('}\n\n');
+  }
+
+  /// Writes `0.5.1` conditions to [buffer], restoring colon-delimited inline location tuples to space-separated tokens.
+  static void _writeConditions051(
+    StringBuffer buffer,
+    List<TaskCondition> conditions,
+  ) {
+    if (conditions.isEmpty) {
+      return;
+    }
+    String formatRule(TaskCondition rule) {
+      if (rule case final LocationTaskCondition loc) {
+        return 'location ${[for (final id in loc.locationIds) id.replaceAll(":", " ")].join(" ")}';
+      }
+      return rule.toTdfDirectiveArgs();
+    }
+
+    if (conditions.length == 1) {
+      buffer.write('    condition ${formatRule(conditions.single)}\n');
+      return;
+    }
+    buffer.write('    condition {\n');
+    for (final rule in conditions) {
+      buffer.write('        ${formatRule(rule)}\n');
+    }
+    buffer.write('    }\n');
+  }
+
+  /// Writes a single `0.5.1` `label` block into [buffer].
+  static void _writeLabel051(StringBuffer buffer, TdfLabel label) {
+    buffer.write('label ${label.id} {\n');
+    buffer.write('    name ${_escapeQuoted(label.name)}\n');
+    if (label.color case final color?) {
+      buffer.write('    color ${_escapeQuoted(color)}\n');
+    }
+    if (label.note case final note?) {
+      buffer.write('    note ${_escapeQuoted(note)}\n');
+    }
+    if (label.modifiedAt case final modifiedAt?) {
+      buffer.write('    modified ${TaskItem.formatTdfTimestamp(modifiedAt)}\n');
+    }
+    _writeConditions051(buffer, label.conditions);
+    buffer.write('}\n\n');
+  }
+
+  /// Writes a single `0.5.1` `task` block into [buffer].
+  static void _writeTask051(StringBuffer buffer, TaskItem task) {
+    buffer.write('task ${task.id}');
+    if (task.isPriority) {
+      buffer.write(' priority');
+    }
+    buffer.write(' {\n');
+    buffer.write('    name ${_escapeQuoted(task.title)}\n');
+    if (task.note case final note?) {
+      buffer.write('    note ${_escapeQuoted(note)}\n');
+    }
+    buffer.write(
+      '    created ${TaskItem.formatTdfTimestamp(task.createdAt)}\n',
+    );
+    if (task.completedAt case final completedAt?) {
+      buffer.write(
+        '    finished ${TaskItem.formatTdfTimestamp(completedAt)}\n',
+      );
+    }
+    if (task.modifiedAt case final modifiedAt?) {
+      buffer.write('    modified ${TaskItem.formatTdfTimestamp(modifiedAt)}\n');
+    }
+    if (task.completions > 0) {
+      buffer.write('    completions ${task.completions}\n');
+    }
+    if (task.repeatRule case final repeatRule?) {
+      buffer.write('    repeat ${repeatRule.toTdfDirectiveArgs()}\n');
+    }
+    if (task.labelIds.isNotEmpty) {
+      buffer.write('    labels ${task.labelIds.join(" ")}\n');
+    }
+    if (task.dependencies.isNotEmpty) {
+      final dependencies = TdfTaskDependency.normalizeList(task.dependencies);
+      buffer.write(
+        '    blocked ${dependencies.map((dependency) => dependency.formatCanonical()).join(" ")}\n',
+      );
+    }
+    if (task.isSuspendedForever) {
+      buffer.write('    suspended forever\n');
+    } else if (task.suspendedAt case final suspendedAt?) {
+      buffer.write(
+        '    suspended ${TaskItem.formatTdfTimestampWithSeconds(suspendedAt)}\n',
+      );
+    }
+    _writeHistoricalLinks(buffer, task.links);
+    _writeConditions051(buffer, task.conditions);
     _writeHistoricalSubtasks(buffer, task.subtasks, task.subtasksAutoFinish);
     buffer.write('}\n\n');
   }

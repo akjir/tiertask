@@ -116,14 +116,14 @@ task home priority {
       );
       expect(
         result.executedSteps,
-        equals(['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1']),
-        reason: 'Chained 0.2.0 import must execute every intermediate version step through 0.5.1',
+        equals(['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1', '0.6.0']),
+        reason: 'Chained 0.2.0 import must execute every intermediate version step through 0.6.0',
       );
-      expect(result.migratedTdfContent, startsWith('tdf 0.5.1\n'));
+      expect(result.migratedTdfContent, startsWith('tdf 0.6.0\n'));
       expect(
         result.migratedTdfContent.contains('    queued '),
         isFalse,
-        reason: 'Final 0.5.1 output must strip all queued directives',
+        reason: 'Final 0.6.0 output must strip all queued directives',
       );
       final migratedTask = result.board.findTask('OaPtpMHEy3')!;
       expect(
@@ -304,7 +304,7 @@ task 8jKaCdOkD2 {
       );
     });
 
-    test('executes adjacent 0.5.0 -> 0.5.1 migration per Section 10.6 and verifies pinned schemaRef050', () {
+    test('executes adjacent 0.5.0 -> 0.5.1 -> 0.6.0 migration per Sections 10.6 and 10.7 and verifies pinned schemaRef050 and schemaRef051', () {
       expect(TdfImporter.schemaRef050.version, equals('0.5.0'));
       expect(
         TdfImporter.schemaRef050.commit,
@@ -314,7 +314,16 @@ task 8jKaCdOkD2 {
         TdfImporter.schemaRef050.blob,
         equals('8b492e7dfedea819ddeb9a2f0663d28fa8b08dfc'),
       );
-      expect(TdfImporter.historicalSchemaReferences.length, equals(4));
+      expect(TdfImporter.schemaRef051.version, equals('0.5.1'));
+      expect(
+        TdfImporter.schemaRef051.commit,
+        equals('8580e166417811432b11303f8c26d544c9819284'),
+      );
+      expect(
+        TdfImporter.schemaRef051.blob,
+        equals('f0059d292dc2b82124e8228718ca0b08d6c2c886'),
+      );
+      expect(TdfImporter.historicalSchemaReferences.length, equals(5));
 
       const doc050 = '''
 tdf 0.5.0

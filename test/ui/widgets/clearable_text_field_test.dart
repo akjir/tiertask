@@ -316,9 +316,6 @@ task 000001OkD2 {
         ValueKey('task_editor_blocked_search_input'),
         ValueKey('task_editor_time_start_input'),
         ValueKey('task_editor_time_end_input'),
-        ValueKey('task_editor_location_lat_input'),
-        ValueKey('task_editor_location_lon_input'),
-        ValueKey('task_editor_location_radius_input'),
       ]) {
         final fieldFinder = find.byKey(fieldKey);
         await tester.ensureVisible(fieldFinder);

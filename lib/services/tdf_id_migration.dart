@@ -105,6 +105,16 @@ abstract final class TdfIdMigration {
     0xc67178f2,
   ];
 
+  /// Assigns a unique 10-character Base62 ID for a legacy inline location [canonicalTuple] (`<lat>:<lon>:<radius>`), updating [usedIds].
+  static String assignLocationId({
+    required String canonicalTuple,
+    required Set<String> usedIds,
+  }) => _assignUniqueId(
+    namespace: 'location',
+    sourceId: canonicalTuple,
+    usedIds: usedIds,
+  );
+
   /// Builds a collision-free [TdfIdMigrationMap] for all non-canonical label and task IDs
   /// in a legacy document per `TDF_SPEC.md` Section 10.4.2.
   ///
@@ -165,6 +175,19 @@ abstract final class TdfIdMigration {
       digits[i] = _base62Alphabet.codeUnitAt(remainder);
     }
     return String.fromCharCodes(digits);
+  }
+
+  /// Computes the 64-character lowercase hexadecimal SHA-256 digest of [inputBytes] (`spec/TDF_SPEC_0.6.0.md` Section 6.7.2).
+  static String sha256Hex(List<int> inputBytes) {
+    const hexDigits = '0123456789abcdef';
+    final digest = _sha256Bytes(inputBytes);
+    final buffer = StringBuffer();
+    for (final byte in digest) {
+      buffer
+        ..write(hexDigits[(byte >> 4) & 0x0F])
+        ..write(hexDigits[byte & 0x0F]);
+    }
+    return buffer.toString();
   }
 
   /// Selects the first unused candidate ID across counters `0..255` and adds it to [usedIds].

@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import 'tdf_metadata.dart';
@@ -136,6 +138,10 @@ class TaskLink {
         return false;
       }
     }
+    final scheme = rawUri.substring(0, colonIndex).toLowerCase();
+    if (scheme == 'javascript' || scheme == 'vbscript' || scheme == 'data') {
+      return false;
+    }
     return true;
   }
 
@@ -181,6 +187,41 @@ class TaskLink {
 
   @override
   String toString() => 'link "$title" "$uri"';
+}
+
+/// Immutable representation of a TDF `origin "<namespace>" "<external-key>"` correlation key on a [TaskItem].
+@immutable
+class TaskOrigin {
+  /// Creates a [TaskOrigin] with [namespace] and [externalKey].
+  const TaskOrigin({required this.namespace, required this.externalKey});
+
+  /// External correlation identifier within [namespace] (`1..500` single-line Unicode scalar values).
+  final String externalKey;
+
+  /// Correlation namespace (`1..500` single-line Unicode scalar values).
+  final String namespace;
+
+  /// Returns a copy of this origin with updated fields.
+  TaskOrigin copyWith({String? namespace, String? externalKey}) {
+    return TaskOrigin(
+      namespace: namespace ?? this.namespace,
+      externalKey: externalKey ?? this.externalKey,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskOrigin &&
+        other.namespace == namespace &&
+        other.externalKey == externalKey;
+  }
+
+  @override
+  int get hashCode => Object.hash(namespace, externalKey);
+
+  @override
+  String toString() => 'origin "$namespace" "<redacted>"';
 }
 
 /// Immutable representation of a TDF `repeat <count> <days|weeks|months> [<repeat-time>]` rule.
@@ -303,6 +344,155 @@ class TaskRepeatRule {
     };
   }
 
+  /// Computes the next schedule-anchored occurrence (`newDueUtc`, `newSuspendedUtc`, `stepsK`)
+  /// when completing a recurring task that has a `due` deadline per `spec/TDF_SPEC_0.6.0.md` Section 6.10.3 Mode 2.
+  ({DateTime newDueUtc, DateTime newSuspendedUtc, int stepsK})
+  nextScheduleAnchoredOccurrence({
+    required DateTime completedAtUtc,
+    required DateTime oldDueUtc,
+    DateTime? oldSuspendedUtc,
+    bool isSuspendedForever = false,
+    required TdfTimeZoneContext timeZone,
+  }) {
+    final normalizedCompletionUtc = TaskItem.normalizeTimestamp(completedAtUtc);
+    final normalizedOldDue = TaskItem.normalizeTimestamp(oldDueUtc);
+    final oldDueLocal = timeZone.toLocalWallClock(normalizedOldDue);
+
+    var stepsK = 1;
+    late DateTime targetDueLocal;
+    late DateTime newDueUtc;
+    while (true) {
+      targetDueLocal = _advanceLocalDate(
+        oldDueLocal,
+        stepsK,
+        oldDueLocal.hour,
+        oldDueLocal.minute,
+        oldDueLocal.second,
+      );
+      if (!TdfCalendar.isWithinTimestampBounds(targetDueLocal)) {
+        throw const FormatException('InvalidTimestamp');
+      }
+      newDueUtc = timeZone.resolveLocalToUtc(
+        targetDueLocal.year,
+        targetDueLocal.month,
+        targetDueLocal.day,
+        targetDueLocal.hour,
+        targetDueLocal.minute,
+        targetDueLocal.second,
+      );
+      if (!TdfCalendar.isWithinTimestampBounds(newDueUtc)) {
+        throw const FormatException('InvalidTimestamp');
+      }
+      if (newDueUtc.isAfter(normalizedCompletionUtc)) {
+        break;
+      }
+      stepsK++;
+    }
+
+    final normalizedOldSuspended = oldSuspendedUtc == null
+        ? null
+        : TaskItem.normalizeTimestamp(oldSuspendedUtc);
+    final hasLeadWindow =
+        normalizedOldSuspended != null &&
+        !isSuspendedForever &&
+        normalizedOldSuspended != TaskItem.defaultSuspendedAt &&
+        normalizedOldSuspended.isBefore(normalizedOldDue);
+
+    if (!hasLeadWindow) {
+      final candidateSuspended = timeZone.resolveLocalToUtc(
+        targetDueLocal.year,
+        targetDueLocal.month,
+        targetDueLocal.day,
+        clock.hour,
+        clock.minute,
+        clock.second,
+      );
+      if (!TdfCalendar.isWithinTimestampBounds(candidateSuspended)) {
+        throw const FormatException('InvalidTimestamp');
+      }
+      final clampedSuspended = candidateSuspended.isBefore(newDueUtc)
+          ? candidateSuspended
+          : newDueUtc;
+      return (
+        newDueUtc: newDueUtc,
+        newSuspendedUtc: clampedSuspended,
+        stepsK: stepsK,
+      );
+    }
+
+    final oldSuspLocal = timeZone.toLocalWallClock(normalizedOldSuspended);
+    final rawTargetSuspLocal = _advanceLocalDate(
+      oldSuspLocal,
+      stepsK,
+      oldSuspLocal.hour,
+      oldSuspLocal.minute,
+      oldSuspLocal.second,
+    );
+    var targetSuspDay = rawTargetSuspLocal.day;
+    if (unit == RepeatUnit.months &&
+        oldSuspLocal.year == oldDueLocal.year &&
+        oldSuspLocal.month == oldDueLocal.month &&
+        oldSuspLocal.day < oldDueLocal.day) {
+      final dEnd = TdfCalendar.daysInMonth(
+        targetDueLocal.year,
+        targetDueLocal.month,
+      );
+      if (rawTargetSuspLocal.day == dEnd && targetDueLocal.day == dEnd) {
+        targetSuspDay = math.max(
+          1,
+          dEnd - (oldDueLocal.day - oldSuspLocal.day),
+        );
+      }
+    }
+
+    final sameLocalDate =
+        rawTargetSuspLocal.year == targetDueLocal.year &&
+        rawTargetSuspLocal.month == targetDueLocal.month &&
+        targetSuspDay == targetDueLocal.day;
+    final repeatClockSeconds =
+        clock.hour * 3600 + clock.minute * 60 + clock.second;
+    final dueClockSeconds =
+        oldDueLocal.hour * 3600 + oldDueLocal.minute * 60 + oldDueLocal.second;
+    final useRepeatClock =
+        !clock.isMidnight &&
+        !(sameLocalDate && repeatClockSeconds >= dueClockSeconds);
+    final chosenHour = useRepeatClock ? clock.hour : oldSuspLocal.hour;
+    final chosenMinute = useRepeatClock ? clock.minute : oldSuspLocal.minute;
+    final chosenSecond = useRepeatClock ? clock.second : oldSuspLocal.second;
+
+    var candidateSuspended = timeZone.resolveLocalToUtc(
+      rawTargetSuspLocal.year,
+      rawTargetSuspLocal.month,
+      targetSuspDay,
+      chosenHour,
+      chosenMinute,
+      chosenSecond,
+    );
+    if (sameLocalDate &&
+        useRepeatClock &&
+        !candidateSuspended.isBefore(newDueUtc)) {
+      candidateSuspended = timeZone.resolveLocalToUtc(
+        rawTargetSuspLocal.year,
+        rawTargetSuspLocal.month,
+        targetSuspDay,
+        oldSuspLocal.hour,
+        oldSuspLocal.minute,
+        oldSuspLocal.second,
+      );
+    }
+    if (!TdfCalendar.isWithinTimestampBounds(candidateSuspended)) {
+      throw const FormatException('InvalidTimestamp');
+    }
+    final clampedSuspended = candidateSuspended.isBefore(newDueUtc)
+        ? candidateSuspended
+        : newDueUtc;
+    return (
+      newDueUtc: newDueUtc,
+      newSuspendedUtc: clampedSuspended,
+      stepsK: stepsK,
+    );
+  }
+
   /// Formats this rule as canonical TDF directive arguments (`<count> <unit> [<repeat-time>]`).
   String toTdfDirectiveArgs() {
     final clockText = clock.formatCanonical();
@@ -310,6 +500,39 @@ class TaskRepeatRule {
       return '$count ${unit.tdfToken}';
     }
     return '$count ${unit.tdfToken} $clockText';
+  }
+
+  /// Advances [baseDate] by `stepsK * count` units while preserving the given local wall-clock time.
+  DateTime _advanceLocalDate(
+    DateTime baseDate,
+    int stepsK,
+    int hour,
+    int minute,
+    int second,
+  ) {
+    return switch (unit) {
+      RepeatUnit.days => _addDays(
+        baseDate,
+        count * stepsK,
+        hour,
+        minute,
+        second,
+      ),
+      RepeatUnit.weeks => _addDays(
+        baseDate,
+        count * 7 * stepsK,
+        hour,
+        minute,
+        second,
+      ),
+      RepeatUnit.months => _addMonths(
+        baseDate,
+        count * stepsK,
+        hour,
+        minute,
+        second,
+      ),
+    };
   }
 
   /// Adds [daysToAdd] calendar days to [baseDate] with the given time-of-day components.
@@ -396,6 +619,8 @@ class TaskItem {
     this.modifiedAt,
     this.suspendedAt,
     this.isSuspendedForever = false,
+    this.dueAt,
+    this.origin,
     this.repeatRule,
     List<String> labelIds = const [],
     List<String>? blockedByTaskIds,
@@ -446,6 +671,9 @@ class TaskItem {
   /// Prerequisite task dependencies with required completion counts (`blocked <task-id>[:<n>]`).
   final List<TdfTaskDependency> dependencies;
 
+  /// Optional target deadline in UTC (`due` directive).
+  final DateTime? dueAt;
+
   /// Unique TDF task entity identifier (`<id>`).
   final String id;
 
@@ -469,6 +697,9 @@ class TaskItem {
 
   /// Optional extended description (`note` directive).
   final String? note;
+
+  /// Optional passive machine correlation key (`origin` directive).
+  final TaskOrigin? origin;
 
   /// Optional recurrence rule (`repeat` directive).
   final TaskRepeatRule? repeatRule;
@@ -502,6 +733,8 @@ class TaskItem {
     DateTime? modifiedAt,
     DateTime? suspendedAt,
     bool? isSuspendedForever,
+    DateTime? dueAt,
+    TaskOrigin? origin,
     TaskRepeatRule? repeatRule,
     List<String>? labelIds,
     List<String>? blockedByTaskIds,
@@ -514,6 +747,8 @@ class TaskItem {
     bool clearCompletedAt = false,
     bool clearModifiedAt = false,
     bool clearSuspendedAt = false,
+    bool clearDueAt = false,
+    bool clearOrigin = false,
     bool clearRepeatRule = false,
   }) {
     final resolvedDependencies = _resolveCopyWithDependencies(
@@ -539,6 +774,8 @@ class TaskItem {
           ? (isSuspendedForever ?? false)
           : (isSuspendedForever ??
                 (suspendedAt != null ? false : this.isSuspendedForever)),
+      dueAt: clearDueAt ? null : (dueAt ?? this.dueAt),
+      origin: clearOrigin ? null : (origin ?? this.origin),
       repeatRule: clearRepeatRule ? null : (repeatRule ?? this.repeatRule),
       labelIds: labelIds ?? this.labelIds,
       blockedByTaskIds: resolvedBlockedIds,
@@ -618,6 +855,7 @@ class TaskItem {
   TaskItem toActive({
     bool? isPriority,
     bool clearBlocking = false,
+    bool clearDueAt = false,
     DateTime? modifiedAt,
   }) {
     return copyWith(
@@ -625,6 +863,7 @@ class TaskItem {
       clearCompletedAt: true,
       isPriority: isPriority,
       clearSuspendedAt: clearBlocking,
+      clearDueAt: clearDueAt,
       blockedByTaskIds: clearBlocking ? const [] : null,
       dependencies: clearBlocking ? const [] : null,
       modifiedAt: modifiedAt,
@@ -834,6 +1073,8 @@ class TaskItem {
         other.modifiedAt == modifiedAt &&
         other.suspendedAt == suspendedAt &&
         other.isSuspendedForever == isSuspendedForever &&
+        other.dueAt == dueAt &&
+        other.origin == origin &&
         other.repeatRule == repeatRule &&
         other.subtasksAutoFinish == subtasksAutoFinish &&
         listEquals(other.labelIds, labelIds) &&
@@ -845,7 +1086,7 @@ class TaskItem {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll(<Object?>[
     id,
     title,
     note,
@@ -857,6 +1098,8 @@ class TaskItem {
     modifiedAt,
     suspendedAt,
     isSuspendedForever,
+    dueAt,
+    origin,
     repeatRule,
     subtasksAutoFinish,
     Object.hashAll(labelIds),
@@ -865,7 +1108,7 @@ class TaskItem {
     Object.hashAll(links),
     Object.hashAll(conditions),
     Object.hashAll(subtasks),
-  );
+  ]);
 
   @override
   String toString() => 'task $id "$title"';

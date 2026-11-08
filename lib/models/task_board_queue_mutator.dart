@@ -30,7 +30,7 @@ extension TaskBoardQueueSlicesX on NormalizedTierSlices {
         return found;
       }
     }
-    return null;
+    return _findInList(scopedHidden, taskId);
   }
 
   /// Finds which [TaskTier] currently contains [taskId], or `null` if not found.
@@ -141,24 +141,46 @@ class TaskBoardQueueMutator {
     return target.completions + 1;
   }
 
-  /// Downgrades a task on [board] in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
+  /// Downgrades a task on [board] in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC_0.6.0.md` Section 6.3.
   static NormalizedTierSlices downgradeTask(
     NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
   }) {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
     );
-    final sourceTier = board.findTierOfTask(taskId);
     final task = board.findTask(taskId);
-    if (sourceTier == null || task == null) return board;
+    if (task == null) return board;
+    final hasActiveContext = activeLabelId != null && activeLabelId.isNotEmpty;
+    final contextBoard = hasActiveContext
+        ? TaskBoardEvaluator.evaluate(
+            tasks: board.allTasks,
+            evaluationTime: now,
+            localEvaluationTime: localEvaluationTime,
+            timeZone: timeZone,
+            labels: board.labels,
+            locations: board.locations,
+            deletedBlock: board.deletedBlock,
+            queueBlock: board.queueBlock,
+            activeLabelId: activeLabelId,
+            currentLatitude: currentLatitude,
+            currentLongitude: currentLongitude,
+            pruneExpiredCompleted: false,
+          )
+        : board;
+    final sourceTier = contextBoard.findTierOfTask(taskId);
+    if (sourceTier == null) return board;
 
     if (sourceTier == TaskTier.focus) {
       return _downgradeFromFocus(
         board,
+        contextBoard,
         task,
         now,
         localEvaluationTime: localEvaluationTime,
@@ -334,6 +356,7 @@ class TaskBoardQueueMutator {
       clearCompletedAt: true,
       clearSuspendedAt: true,
       isSuspendedForever: false,
+      clearDueAt: true,
       isPriority: targetTier == TaskTier.focus,
       dependencies: rearmDependencies(board, existing.dependencies),
       subtasks: setAllSubtasksCompleted(existing.subtasks, false),
@@ -441,29 +464,40 @@ class TaskBoardQueueMutator {
     return appendTaskToQueue(baseQueue, updatedTask.id, now);
   }
 
-  /// Downgrades [task] on [board] from Tier 1 (`Focus`) to Tier 2 (`Ready`) per `TDF_SPEC.md` Section 6.3.
+  /// Downgrades [task] on [board] from Tier 1 (`Focus`) to Tier 2 (`Ready`) using the active-filter-relative anchor $E_{\text{ctx}}$ in [contextBoard] per `TDF_SPEC_0.6.0.md` Section 6.3.
   static NormalizedTierSlices _downgradeFromFocus(
     NormalizedTierSlices board,
+    NormalizedTierSlices contextBoard,
     TaskItem task,
     DateTime now, {
     required DateTime? localEvaluationTime,
     required TdfTimeZoneContext? timeZone,
   }) {
-    final totalEligibleCount =
-        board.focus.length + board.ready.length + board.planned.length;
-    if (totalEligibleCount <
-        TaskBoardEvaluator.focusSoftLimit + TaskBoardEvaluator.readySoftLimit) {
-      return _downgradeToQueueTail(
-        board,
-        task,
-        now,
-        localEvaluationTime: localEvaluationTime,
-        timeZone: timeZone,
-      );
+    final eligibleWithoutTask = <TaskItem>[
+      for (final candidate in <TaskItem>[
+        ...contextBoard.focus,
+        ...contextBoard.ready,
+        ...contextBoard.planned,
+      ])
+        if (candidate.id != task.id) candidate,
+    ];
+    const readyEndAfterExcludingTarget =
+        TaskBoardEvaluator.focusSoftLimit +
+        TaskBoardEvaluator.readySoftLimit -
+        1;
+    final TaskItem? anchorTask;
+    final bool alignedPriority;
+    if (eligibleWithoutTask.isEmpty) {
+      anchorTask = null;
+      alignedPriority = false;
+    } else if (eligibleWithoutTask.length < readyEndAfterExcludingTarget) {
+      anchorTask = eligibleWithoutTask.last;
+      alignedPriority = false;
+    } else {
+      anchorTask = eligibleWithoutTask[readyEndAfterExcludingTarget - 1];
+      alignedPriority = anchorTask.isPriority;
     }
 
-    final slot8Anchor = board.ready[TaskBoardEvaluator.readySoftLimit - 1];
-    final alignedPriority = slot8Anchor.isPriority;
     final priorityChanged = task.isPriority != alignedPriority;
     final updatedTask = priorityChanged
         ? task.copyWith(
@@ -475,13 +509,19 @@ class TaskBoardQueueMutator {
           )
         : task;
 
-    final nextQueueIds = <String>[];
-    for (final id in board.queueBlock.taskIds) {
-      if (id == task.id) continue;
-      nextQueueIds.add(id);
-      if (id == slot8Anchor.id) nextQueueIds.add(task.id);
+    final List<String> nextQueueIds;
+    if (anchorTask == null) {
+      nextQueueIds = board.queueBlock.taskIds;
+    } else {
+      final reordered = <String>[];
+      for (final id in board.queueBlock.taskIds) {
+        if (id == task.id) continue;
+        reordered.add(id);
+        if (id == anchorTask.id) reordered.add(task.id);
+      }
+      if (!reordered.contains(task.id)) reordered.add(task.id);
+      nextQueueIds = reordered;
     }
-    if (!nextQueueIds.contains(task.id)) nextQueueIds.add(task.id);
 
     final queueChanged = !listEquals(nextQueueIds, board.queueBlock.taskIds);
     if (!priorityChanged && !queueChanged) return board;

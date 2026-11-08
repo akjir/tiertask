@@ -40,33 +40,34 @@ class TdfImportResult {
     required this.board,
   }) : executedSteps = List<String>.unmodifiable(executedSteps);
 
-  /// Evaluated target `0.5.1` [TaskBoard].
+  /// Evaluated target `0.6.0` [TaskBoard].
   final TaskBoard board;
 
-  /// Ordered sequence of schema versions traversed during import (for example `['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1']`).
+  /// Ordered sequence of schema versions traversed during import (for example `['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1', '0.6.0']`).
   final List<String> executedSteps;
 
-  /// Canonical `tdf 0.5.1` document string produced by the migration chain.
+  /// Canonical `tdf 0.6.0` document string produced by the migration chain.
   final String migratedTdfContent;
 
-  /// Declared version of the input document (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, or `0.5.1`).
+  /// Declared version of the input document (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.5.1`, or `0.6.0`).
   final String sourceVersion;
 }
 
-/// Stateless service implementing the explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`
-/// version import and adjacent migration chain defined in `TDF_SPEC.md` Section 10.
+/// Stateless service implementing the explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`
+/// version import and adjacent migration chain defined in `spec/TDF_SPEC_0.6.0.md` Section 10.
 @immutable
 class TdfImporter {
   /// Prevents instantiation of this stateless service.
   const TdfImporter._();
 
-  /// Ordered list of all pinned historical TDF schema snapshot references (`0.2.0` through `0.5.0`).
+  /// Ordered list of all pinned historical TDF schema snapshot references (`0.2.0` through `0.5.1`).
   static const List<({String version, String commit, String blob})>
   historicalSchemaReferences = <({String version, String commit, String blob})>[
     schemaRef020,
     schemaRef030,
     schemaRef040,
     schemaRef050,
+    schemaRef051,
   ];
 
   /// Historical schema snapshot reference for `0.2.0` (`TDF_SPEC.md` Section 10.1.1).
@@ -97,7 +98,14 @@ class TdfImporter {
     blob: '8b492e7dfedea819ddeb9a2f0663d28fa8b08dfc',
   );
 
-  /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`).
+  /// Historical schema snapshot reference for `0.5.1` (`spec/TDF_SPEC_0.6.0.md` Section 10.1.1).
+  static const ({String version, String commit, String blob}) schemaRef051 = (
+    version: '0.5.1',
+    commit: '8580e166417811432b11303f8c26d544c9819284',
+    blob: 'f0059d292dc2b82124e8228718ca0b08d6c2c886',
+  );
+
+  /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`).
   static TdfImportResult importDocument(
     String sourceContent, {
     TdfTimeZoneContext? sourceTimeZone,
@@ -129,6 +137,10 @@ class TdfImporter {
       currentDoc = migrate050To051(currentDoc);
       executedSteps.add('0.5.1');
     }
+    if (executedSteps.last == '0.5.1') {
+      currentDoc = migrate051To060(currentDoc);
+      executedSteps.add('0.6.0');
+    }
 
     final board = TdfBlockParser.parseDocument(
       currentDoc,
@@ -143,7 +155,7 @@ class TdfImporter {
     final canonicalDoc = TdfSerializer.serialize(board);
     AppLogger.info(
       LogTag.tdf,
-      'TdfImporter.importDocument steps=${executedSteps.join("->")} tasks=${board.allTasks.length} labels=${board.labels.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+      'TdfImporter.importDocument steps=${executedSteps.join("->")} tasks=${board.allTasks.length} labels=${board.labels.length} locations=${board.locations.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
     );
     return TdfImportResult(
       sourceVersion: sourceVersion,
@@ -287,11 +299,15 @@ class TdfImporter {
       tasks: tasks050,
       queueBlock: queueBlock,
     );
-    TdfBlockParser.parseDocument(serialized050, pruneExpiredCompleted: false);
+    TdfBlockParser.parseDocument(
+      serialized050,
+      pruneExpiredCompleted: false,
+      convertLegacyLocationsTo060: false,
+    );
     return serialized050;
   }
 
-  /// Executes the adjacent `0.5.0 -> 0.5.1` file conversion defined in `TDF_SPEC.md` Section 10.6.
+  /// Executes the adjacent `0.5.0 -> 0.5.1` file conversion defined in `spec/TDF_SPEC_0.6.0.md` Section 10.6.
   static String migrate050To051(String source050) {
     final version = _detectDeclaredVersion(source050);
     if (version != '0.5.0') {
@@ -308,9 +324,14 @@ class TdfImporter {
       final board = TdfBlockParser.parseDocument(
         source050,
         pruneExpiredCompleted: false,
+        convertLegacyLocationsTo060: false,
       );
-      final serialized051 = TdfSerializer.serialize(board);
-      TdfBlockParser.parseDocument(serialized051, pruneExpiredCompleted: false);
+      final serialized051 = TdfHistoricalSerializer.serializeDocument051(board);
+      TdfBlockParser.parseDocument(
+        serialized051,
+        pruneExpiredCompleted: false,
+        convertLegacyLocationsTo060: false,
+      );
       return serialized051;
     } on TdfException catch (error) {
       throw TdfException(
@@ -318,6 +339,39 @@ class TdfImporter {
         line: error.line,
         sourceVersion: '0.5.0',
         targetVersion: '0.5.1',
+        message: error.message,
+      );
+    }
+  }
+
+  /// Executes the adjacent `0.5.1 -> 0.6.0` file conversion defined in `spec/TDF_SPEC_0.6.0.md` Section 10.7.
+  static String migrate051To060(String source051) {
+    final version = _detectDeclaredVersion(source051);
+    if (version != '0.5.1') {
+      throw TdfException(
+        kind: TdfErrorKind.unsupportedVersion,
+        line: 1,
+        sourceVersion: '0.5.1',
+        targetVersion: '0.6.0',
+        message:
+            'Expected source version "0.5.1" for 0.5.1 -> 0.6.0 migration, found "$version".',
+      );
+    }
+    try {
+      final board = TdfBlockParser.parseDocument(
+        source051,
+        pruneExpiredCompleted: false,
+        convertLegacyLocationsTo060: true,
+      );
+      final serialized060 = TdfSerializer.serialize(board);
+      TdfBlockParser.parseDocument(serialized060, pruneExpiredCompleted: false);
+      return serialized060;
+    } on TdfException catch (error) {
+      throw TdfException(
+        kind: error.kind,
+        line: error.line,
+        sourceVersion: '0.5.1',
+        targetVersion: '0.6.0',
         message: error.message,
       );
     }
@@ -528,7 +582,8 @@ class TdfImporter {
         version != '0.3.0' &&
         version != '0.4.0' &&
         version != '0.5.0' &&
-        version != '0.5.1') {
+        version != '0.5.1' &&
+        version != '0.6.0') {
       throw TdfException(
         kind: TdfErrorKind.unsupportedVersion,
         line: firstStatement.line,

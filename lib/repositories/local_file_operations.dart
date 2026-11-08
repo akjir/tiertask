@@ -15,6 +15,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -32,7 +33,9 @@ class LocalFileOperations<E extends Exception> {
   /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
   static const int maxBackupSuffix = 999;
 
+  static const String _hexDigits = '0123456789abcdef';
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
+  static final math.Random _secureRandom = math.Random.secure();
   static final RegExp _windowsDrivePattern = RegExp(r'^[a-zA-Z]:[\\/]');
 
   /// Factory function that constructs a typed domain exception with an optional cause.
@@ -489,6 +492,49 @@ class LocalFileOperations<E extends Exception> {
     }
   }
 
+  /// Atomically writes [bytes] to [filePath] via a dot-prefixed `.tmp.<32hex>` temporary file in the same directory.
+  void writeTdfAtomicallySync(
+    String filePath,
+    List<int> bytes,
+    AppLocalizations messages,
+  ) {
+    final targetType = FileSystemEntity.typeSync(filePath, followLinks: false);
+    if (targetType == FileSystemEntityType.directory) {
+      throw createException(messages.errorMoveSourceIsDirectory(filePath));
+    }
+    if (targetType == FileSystemEntityType.link) {
+      throw createException(messages.errorMoveSourceIsSymlink(filePath));
+    }
+    final targetFile = File(filePath);
+    targetFile.parent.createSync(recursive: true);
+    final fileName = extractFileNameFromPath(filePath);
+    final tempPath = _joinDirectoryAndChild(
+      targetFile.parent.path,
+      '.$fileName.tmp.${_generateTempHexSuffix()}',
+    );
+    if (FileSystemEntity.typeSync(tempPath, followLinks: false) !=
+        FileSystemEntityType.notFound) {
+      throw createException(
+        messages.errorSaveLocalFileFailed('Temporary file collision'),
+      );
+    }
+    final tempFile = File(tempPath);
+    try {
+      tempFile.writeAsBytesSync(bytes, flush: true);
+      tempFile.renameSync(filePath);
+    } on Object {
+      if (FileSystemEntity.typeSync(tempPath, followLinks: false) ==
+          FileSystemEntityType.file) {
+        try {
+          tempFile.deleteSync();
+        } on FileSystemException {
+          // Preserve original write or rename error as primary cause.
+        }
+      }
+      rethrow;
+    }
+  }
+
   /// Copies [sourcePath] to [targetPath] and deletes [sourcePath] when moving across mount points (`EXDEV`).
   void _copyAndDeleteCrossDevice(
     String sourcePath,
@@ -537,6 +583,15 @@ class LocalFileOperations<E extends Exception> {
       case FileSystemEntityType.unixDomainSock:
         throw createException(messages.errorMoveTargetFileExists(path));
     }
+  }
+
+  /// Generates a 128-bit (`32` lowercase hex characters) CSPRNG suffix for atomic temporary files.
+  String _generateTempHexSuffix() {
+    final buffer = StringBuffer();
+    for (var i = 0; i < 32; i++) {
+      buffer.write(_hexDigits[_secureRandom.nextInt(16)]);
+    }
+    return buffer.toString();
   }
 
   /// Checks whether [value] contains ASCII control characters or null bytes.

@@ -22,6 +22,7 @@ import 'package:flutter/services.dart';
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
+import '../services/tdf_id_migration.dart';
 import '../services/tdf_service.dart';
 import 'local_file_operations.dart';
 
@@ -446,6 +447,21 @@ class LocalFileRepository {
   static String readLogFileSync(String path, {required int maxBytes}) =>
       _operations.readLogFileSync(path, maxBytes: maxBytes);
 
+  /// Reads the local `.tdf` file and returns its decoded content, SHA-256 hex digest, and existence flag.
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    final content = await loadTdf();
+    if (content.isNotEmpty) {
+      final digest = TdfIdMigration.sha256Hex(utf8.encode(content));
+      return (content: content, digest: digest, exists: true);
+    }
+    if (fileExists()) {
+      final digest = TdfIdMigration.sha256Hex(const <int>[]);
+      return (content: '', digest: digest, exists: true);
+    }
+    return (content: '', digest: null, exists: false);
+  }
+
   /// Renames the local `.tdf` file to [newFileName] inside its current directory and returns the new resolved path.
   Future<String> renameTdf(String newFileName) async {
     final renamed = _operations.renameTdf(
@@ -533,9 +549,7 @@ class LocalFileRepository {
       return;
     }
     try {
-      final file = File(filePath);
-      file.parent.createSync(recursive: true);
-      file.writeAsBytesSync(bytes, flush: true);
+      _operations.writeTdfAtomicallySync(filePath, bytes, messages);
       AppLogger.event(
         LogLevel.info,
         LogTag.storage,
@@ -659,8 +673,11 @@ class LocalFileRepository {
           fields: <String, Object?>{'path': backupPath},
         );
       }
-      file.parent.createSync(recursive: true);
-      file.writeAsBytesSync(utf8.encode(emptyContent), flush: true);
+      _operations.writeTdfAtomicallySync(
+        filePath,
+        utf8.encode(emptyContent),
+        messages,
+      );
       AppLogger.event(
         LogLevel.info,
         LogTag.storage,

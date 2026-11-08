@@ -1088,4 +1088,86 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get tooltipTaskEditorAutoFinish =>
       'Automatically completes the entire task as soon as all subtasks are checked off.';
+
+  @override
+  String get drawerLocations => 'Locations';
+
+  @override
+  String get createNewLocation => 'Create new location';
+
+  @override
+  String get editLocationsTitle => 'Edit locations';
+
+  @override
+  String get editLocationTitle => 'Edit Location';
+
+  @override
+  String get emptyLocationsHint => 'No locations created yet.';
+
+  @override
+  String get tooltipDeleteLocation => 'Delete location';
+
+  @override
+  String get tooltipEditLocation => 'Edit location';
+
+  @override
+  String get locationDetailsSectionTitle => 'Location Details';
+
+  @override
+  String get locationNameLabel => 'Location Name';
+
+  @override
+  String get locationCoordinatesSectionTitle => 'Coordinates & Radius';
+
+  @override
+  String get locationLatitudeLabel => 'Latitude (-90 to 90)';
+
+  @override
+  String get locationLongitudeLabel => 'Longitude (-180 to 180)';
+
+  @override
+  String get locationRadiusLabel => 'Radius (m/km)';
+
+  @override
+  String get locationUseCurrentGpsButton => 'Use Current GPS Position';
+
+  @override
+  String get locationNameErrorEmpty => 'Please enter a location name.';
+
+  @override
+  String get locationSourceErrorEmpty =>
+      'Please enter a valid source or leave it empty.';
+
+  @override
+  String get locationCoordinatesErrorInvalid =>
+      'Enter valid latitude (-90..90) and longitude (-180..180).';
+
+  @override
+  String get locationRadiusErrorInvalid =>
+      'Enter a valid radius between 0.01m and 100km.';
+
+  @override
+  String get labelScopedSectionTitle => 'Board Scope';
+
+  @override
+  String get labelScopedSwitchTitle => 'Scoped Label';
+
+  @override
+  String get labelScopedSwitchSubtitle =>
+      'Hide tasks with this label unless this label filter is active.';
+
+  @override
+  String get taskDueButtonLabel => 'Due (optional)';
+
+  @override
+  String get taskDueClearTooltip => 'Clear due timestamp';
+
+  @override
+  String pillDuePrefix(String date) {
+    return 'Due: $date';
+  }
+
+  @override
+  String get errorLocalFileCasExhausted =>
+      'Local file was modified concurrently and exceeded maximum merge retries.';
 }

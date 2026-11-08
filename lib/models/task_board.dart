@@ -20,6 +20,7 @@ import 'task_board_mutator.dart';
 import 'task_board_queue_mutator.dart';
 import 'task_item.dart';
 import 'task_tier.dart';
+import 'tdf_location.dart';
 import 'tdf_metadata.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
@@ -35,7 +36,9 @@ class TaskBoard {
     List<TaskItem> blocked = const [],
     List<TaskItem> someday = const [],
     List<TaskItem> completed = const [],
+    List<TaskItem> scopedHidden = const [],
     List<TdfLabel> labels = const [],
+    List<TdfLocation> locations = const [],
     TdfDeletedBlock? deletedBlock,
     TdfQueueBlock? queueBlock,
   }) : this._normalized(
@@ -46,7 +49,9 @@ class TaskBoard {
            blocked: blocked,
            someday: someday,
            completed: completed,
+           scopedHidden: scopedHidden,
            labels: labels,
+           locations: locations,
            deletedBlock: deletedBlock ?? TdfDeletedBlock.empty,
            explicitQueueBlock: queueBlock,
          ),
@@ -60,22 +65,31 @@ class TaskBoard {
       blocked = List<TaskItem>.unmodifiable(slices.blocked),
       someday = List<TaskItem>.unmodifiable(slices.someday),
       completed = List<TaskItem>.unmodifiable(slices.completed),
+      _scopedHidden = List<TaskItem>.unmodifiable(slices.scopedHidden),
       labels = List<TdfLabel>.unmodifiable(slices.labels),
+      locations = List<TdfLocation>.unmodifiable(slices.locations),
       deletedBlock = slices.deletedBlock,
       queueBlock = slices.queueBlock,
       openTaskCountsByLabel = Map.unmodifiable(slices.openTaskCountsByLabel),
-      sortedLabels = TaskBoardEvaluator.sortLabelsAlphabetically(slices.labels);
+      openTaskCountsByLocation = Map.unmodifiable(
+        slices.openTaskCountsByLocation,
+      ),
+      sortedLabels = TaskBoardEvaluator.sortLabelsAlphabetically(slices.labels),
+      sortedLocations = TaskBoardEvaluator.sortLocationsAlphabetically(
+        slices.locations,
+      );
 
   /// Creates an empty [TaskBoard] across all 6 tiers.
   factory TaskBoard.empty() => TaskBoard();
 
-  /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC.md` Section 5.
+  /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC_0.6.0.md` Section 5.
   factory TaskBoard.evaluate({
     required Iterable<TaskItem> tasks,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
     List<TdfLabel> labels = const [],
+    List<TdfLocation> locations = const [],
     TdfDeletedBlock? deletedBlock,
     TdfQueueBlock? queueBlock,
     String? activeLabelId,
@@ -89,6 +103,7 @@ class TaskBoard {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       labels: labels,
+      locations: locations,
       deletedBlock: deletedBlock,
       queueBlock: queueBlock,
       activeLabelId: activeLabelId,
@@ -102,7 +117,7 @@ class TaskBoard {
   static const int completedRetentionDays =
       TaskBoardEvaluator.completedRetentionDays;
 
-  /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC.md` Section 6.8.
+  /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC_0.6.0.md` Section 6.8.
   static const int completedRetentionSeconds =
       TaskBoardEvaluator.completedRetentionSeconds;
 
@@ -118,7 +133,7 @@ class TaskBoard {
   /// Tier 6 (`Completed`) task items.
   final List<TaskItem> completed;
 
-  /// Root `deleted` block storing deletion history generation and active task/label deletion records.
+  /// Root `deleted` block storing deletion history generation and active task/label/location deletion records.
   final TdfDeletedBlock deletedBlock;
 
   /// Tier 1 (`Focus`) task items.
@@ -127,8 +142,14 @@ class TaskBoard {
   /// Defined TDF `label` blocks in declaration order.
   final List<TdfLabel> labels;
 
+  /// Defined TDF `location` blocks in declaration order.
+  final List<TdfLocation> locations;
+
   /// Precomputed map of open (non-completed) task counts across tiers `1` to `5` keyed by label ID.
   final Map<String, int> openTaskCountsByLabel;
+
+  /// Precomputed map of open (non-completed) task counts referencing each location ID (directly or inherited per Section 4.4.3).
+  final Map<String, int> openTaskCountsByLocation;
 
   /// Tier 3 (`Planned`) task items.
   final List<TaskItem> planned;
@@ -145,7 +166,12 @@ class TaskBoard {
   /// Defined TDF `label` blocks sorted alphabetically by display name.
   final List<TdfLabel> sortedLabels;
 
-  /// Returns all tasks across all 6 tiers in canonical document order.
+  /// Defined TDF `location` blocks sorted alphabetically by display name.
+  final List<TdfLocation> sortedLocations;
+
+  final List<TaskItem> _scopedHidden;
+
+  /// Returns all tasks across all 6 tiers (plus any global-view-restricted `scoped` tasks) in canonical document order.
   List<TaskItem> get allTasks => _slices.allTasks;
 
   /// UTC timestamp of the last shared queue order modification (`queue.modified`).
@@ -162,9 +188,12 @@ class TaskBoard {
     blocked: blocked,
     someday: someday,
     completed: completed,
+    scopedHidden: _scopedHidden,
     labels: labels,
+    locations: locations,
     deletedBlock: deletedBlock,
     openTaskCountsByLabel: openTaskCountsByLabel,
+    openTaskCountsByLocation: openTaskCountsByLocation,
     queueBlock: queueBlock,
   );
 
@@ -174,6 +203,7 @@ class TaskBoard {
     String? color,
     String? id,
     String? note,
+    bool isScoped = false,
     DateTime? currentDate,
     DateTime? modifiedAt,
     List<TaskCondition> conditions = const [],
@@ -184,13 +214,40 @@ class TaskBoard {
       color: color,
       id: id,
       note: note,
+      isScoped: isScoped,
       currentDate: currentDate,
       modifiedAt: modifiedAt,
       conditions: conditions,
     ),
   );
 
-  /// Adds a new task per `TDF_SPEC.md` Section 6.1, prunes expired completed tasks, and evaluates tiers.
+  /// Adds a new TDF `location` block with a unique identifier per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.1.
+  TaskBoard addLocation(
+    String name, {
+    required double latitude,
+    required double longitude,
+    required double radius,
+    String? id,
+    String? note,
+    String? source,
+    DateTime? currentDate,
+    DateTime? modifiedAt,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.addLocation(
+      slices,
+      name,
+      latitude: latitude,
+      longitude: longitude,
+      radius: radius,
+      id: id,
+      note: note,
+      source: source,
+      currentDate: currentDate,
+      modifiedAt: modifiedAt,
+    ),
+  );
+
+  /// Adds a new task per `TDF_SPEC_0.6.0.md` Section 6.1, prunes expired completed tasks, and evaluates tiers.
   TaskBoard addTask(
     String title, {
     TaskTier targetTier = TaskTier.planned,
@@ -206,9 +263,11 @@ class TaskBoard {
     List<String> labelIds = const [],
     DateTime? suspendedAt,
     bool? isSuspendedForever,
+    DateTime? dueAt,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
     List<TdfTaskDependency>? dependencies,
+    TaskOrigin? origin,
     List<TaskLink> links = const [],
     List<TaskCondition> conditions = const [],
   }) => _mutate(
@@ -229,9 +288,11 @@ class TaskBoard {
         labelIds: labelIds,
         suspendedAt: suspendedAt,
         isSuspendedForever: isSuspendedForever,
+        dueAt: dueAt,
         repeatRule: repeatRule,
         blockedByTaskIds: blockedByTaskIds,
         dependencies: dependencies,
+        origin: origin,
         links: links,
         conditions: conditions,
         currentDate: now,
@@ -310,7 +371,9 @@ class TaskBoard {
     List<TaskItem>? blocked,
     List<TaskItem>? someday,
     List<TaskItem>? completed,
+    List<TaskItem>? scopedHidden,
     List<TdfLabel>? labels,
+    List<TdfLocation>? locations,
     TdfDeletedBlock? deletedBlock,
     TdfQueueBlock? queueBlock,
   }) {
@@ -329,7 +392,9 @@ class TaskBoard {
       blocked: nextBlocked,
       someday: someday ?? this.someday,
       completed: completed ?? this.completed,
+      scopedHidden: scopedHidden ?? _scopedHidden,
       labels: labels ?? this.labels,
+      locations: locations ?? this.locations,
       deletedBlock: deletedBlock ?? this.deletedBlock,
       queueBlock:
           queueBlock ??
@@ -349,6 +414,22 @@ class TaskBoard {
     (slices) => TaskBoardMutator.deleteLabel(slices, labelId, currentDate),
   );
 
+  /// Deletes the location with [locationId], cascades its removal across labels and tasks per Section 6.8.1, and records the deletion in [deletedBlock].
+  TaskBoard deleteLocation(
+    String locationId, {
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.deleteLocation(
+      slices,
+      locationId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
+  );
+
   /// Deletes the task with [taskId], removes its `queue` entry, and records the deletion in [deletedBlock].
   TaskBoard deleteTask(
     String taskId, {
@@ -365,12 +446,15 @@ class TaskBoard {
     ),
   );
 
-  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
+  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC_0.6.0.md` Section 6.3.
   TaskBoard downgradeTask(
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
   }) => _mutate(
     (slices) => TaskBoardQueueMutator.downgradeTask(
       slices,
@@ -378,6 +462,9 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
     ),
   );
 
@@ -396,6 +483,7 @@ class TaskBoard {
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
         labels: labels,
+        locations: locations,
         deletedBlock: deletedBlock,
         queueBlock: queueBlock,
         activeLabelId: activeLabelId,
@@ -407,6 +495,10 @@ class TaskBoard {
 
   /// Finds the [TdfLabel] with [labelId], or `null` if not found.
   TdfLabel? findLabel(String labelId) => _slices.findLabel(labelId);
+
+  /// Finds the [TdfLocation] with [locationId], or `null` if not found.
+  TdfLocation? findLocation(String locationId) =>
+      _slices.findLocation(locationId);
 
   /// Finds the [TaskItem] with [taskId], or `null` if not found.
   TaskItem? findTask(String taskId) => _slices.findTask(taskId);
@@ -428,7 +520,7 @@ class TaskBoard {
     return this;
   }
 
-  /// Moves [taskId] within [queueBlock] before [beforeTaskId], after [afterTaskId], or to the end per `TDF_SPEC.md` Section 6.11.1.
+  /// Moves [taskId] within [queueBlock] before [beforeTaskId], after [afterTaskId], or to the end per `TDF_SPEC_0.6.0.md` Section 6.11.1.
   TaskBoard moveTaskInQueue(
     String taskId, {
     String? beforeTaskId,
@@ -451,6 +543,10 @@ class TaskBoard {
   /// Returns the precomputed count of open (non-completed) tasks across tiers `1` to `5` referencing [labelId].
   int openTaskCountForLabel(String labelId) =>
       openTaskCountsByLabel[labelId] ?? 0;
+
+  /// Returns the precomputed count of open (non-completed) tasks referencing [locationId] (directly or inherited under Section 4.4.3).
+  int openTaskCountForLocation(String locationId) =>
+      openTaskCountsByLocation[locationId] ?? 0;
 
   /// Prunes tasks in Tier 6 (`Completed`) older than 30 days (`2,592,000` seconds UTC) per `TDF_SPEC.md` Sections 5.2 and 6.8.1.
   TaskBoard pruneCompletedTasks({DateTime? currentDate}) => _mutate(
@@ -521,6 +617,7 @@ class TaskBoard {
   TaskBoard updateLabel(
     String labelId, {
     String? name,
+    bool? isScoped,
     String? color,
     bool clearColor = false,
     String? note,
@@ -534,11 +631,44 @@ class TaskBoard {
       slices,
       labelId,
       name: name,
+      isScoped: isScoped,
       color: color,
       clearColor: clearColor,
       note: note,
       clearNote: clearNote,
       conditions: conditions,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+    ),
+  );
+
+  /// Updates an existing location with [locationId] per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.6.
+  TaskBoard updateLocation(
+    String locationId, {
+    String? name,
+    double? latitude,
+    double? longitude,
+    double? radius,
+    String? note,
+    bool clearNote = false,
+    String? source,
+    bool clearSource = false,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.updateLocation(
+      slices,
+      locationId,
+      name: name,
+      latitude: latitude,
+      longitude: longitude,
+      radius: radius,
+      note: note,
+      clearNote: clearNote,
+      source: source,
+      clearSource: clearSource,
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
@@ -558,10 +688,14 @@ class TaskBoard {
     DateTime? suspendedAt,
     bool? isSuspendedForever,
     bool clearSuspendedAt = false,
+    DateTime? dueAt,
+    bool clearDueAt = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
     List<TdfTaskDependency>? dependencies,
+    TaskOrigin? origin,
+    bool clearOrigin = false,
     List<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
@@ -581,10 +715,14 @@ class TaskBoard {
       suspendedAt: suspendedAt,
       isSuspendedForever: isSuspendedForever,
       clearSuspendedAt: clearSuspendedAt,
+      dueAt: dueAt,
+      clearDueAt: clearDueAt,
       repeatRule: repeatRule,
       clearRepeatRule: clearRepeatRule,
       blockedByTaskIds: blockedByTaskIds,
       dependencies: dependencies,
+      origin: origin,
+      clearOrigin: clearOrigin,
       links: links,
       conditions: conditions,
       currentDate: currentDate,

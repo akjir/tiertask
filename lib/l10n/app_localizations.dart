@@ -2017,6 +2017,156 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Automatically completes the entire task as soon as all subtasks are checked off.'**
   String get tooltipTaskEditorAutoFinish;
+
+  /// Section title for locations in the navigation drawer.
+  ///
+  /// In en, this message translates to:
+  /// **'Locations'**
+  String get drawerLocations;
+
+  /// Action label and input hint for creating a new location.
+  ///
+  /// In en, this message translates to:
+  /// **'Create new location'**
+  String get createNewLocation;
+
+  /// Screen title for the location management screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit locations'**
+  String get editLocationsTitle;
+
+  /// Header title when editing a location in the location editor screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit Location'**
+  String get editLocationTitle;
+
+  /// Empty-state hint shown when no locations exist.
+  ///
+  /// In en, this message translates to:
+  /// **'No locations created yet.'**
+  String get emptyLocationsHint;
+
+  /// Tooltip for the button that deletes a location.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete location'**
+  String get tooltipDeleteLocation;
+
+  /// Tooltip for the edit button on a location row.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit location'**
+  String get tooltipEditLocation;
+
+  /// Section card title for location name, source, and note in the location editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Location Details'**
+  String get locationDetailsSectionTitle;
+
+  /// Input label for the location name field in the location editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Location Name'**
+  String get locationNameLabel;
+
+  /// Section card title for GPS coordinates and radius in the location editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Coordinates & Radius'**
+  String get locationCoordinatesSectionTitle;
+
+  /// Input label for latitude in the location editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Latitude (-90 to 90)'**
+  String get locationLatitudeLabel;
+
+  /// Input label for longitude in the location editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Longitude (-180 to 180)'**
+  String get locationLongitudeLabel;
+
+  /// Input label for radius in the location editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Radius (m/km)'**
+  String get locationRadiusLabel;
+
+  /// Button label to populate location coordinates from the current foreground GPS fix.
+  ///
+  /// In en, this message translates to:
+  /// **'Use Current GPS Position'**
+  String get locationUseCurrentGpsButton;
+
+  /// Validation error shown when the location name is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a location name.'**
+  String get locationNameErrorEmpty;
+
+  /// Validation error shown when the location source is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Please enter a valid source or leave it empty.'**
+  String get locationSourceErrorEmpty;
+
+  /// Validation error shown when location latitude or longitude is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter valid latitude (-90..90) and longitude (-180..180).'**
+  String get locationCoordinatesErrorInvalid;
+
+  /// Validation error shown when location radius is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid radius between 0.01m and 100km.'**
+  String get locationRadiusErrorInvalid;
+
+  /// Section card title for the scoped label switch in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Board Scope'**
+  String get labelScopedSectionTitle;
+
+  /// Switch title for marking a label as scoped in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Scoped Label'**
+  String get labelScopedSwitchTitle;
+
+  /// Switch subtitle explaining scoped label behavior in the label editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide tasks with this label unless this label filter is active.'**
+  String get labelScopedSwitchSubtitle;
+
+  /// Input field label for an optional due timestamp in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Due (optional)'**
+  String get taskDueButtonLabel;
+
+  /// Tooltip for clearing the due timestamp field.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear due timestamp'**
+  String get taskDueClearTooltip;
+
+  /// Badge text on a task pill showing the due date.
+  ///
+  /// In en, this message translates to:
+  /// **'Due: {date}'**
+  String pillDuePrefix(String date);
+
+  /// Error message shown when concurrent local file edits exceed maxCasRetries.
+  ///
+  /// In en, this message translates to:
+  /// **'Local file was modified concurrently and exceeded maximum merge retries.'**
+  String get errorLocalFileCasExhausted;
 }
 
 class _AppLocalizationsDelegate

@@ -140,6 +140,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
   late final TextEditingController _colorController;
   String? _colorErrorMessage;
   late final ConditionEditorController _conditionController;
+  late bool _isScoped;
   late final TextEditingController _nameController;
   String? _nameErrorMessage;
   late final TextEditingController _noteController;
@@ -151,6 +152,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     _nameController = TextEditingController(text: label.name);
     _noteController = TextEditingController(text: label.note ?? '');
     _colorController = TextEditingController(text: label.color ?? '');
+    _isScoped = label.isScoped;
     _conditionController = ConditionEditorController(
       initialConditions: label.conditions,
       allowResets: false,
@@ -204,6 +206,8 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
 
   /// Builds the Settings-style card column inside [EditLabelScreen].
   Widget _buildFormColumn(AppLocalizations localizations) {
+    final board =
+        ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -224,8 +228,18 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
           onSelectPreset: _selectPresetColor,
         ),
         const SizedBox(height: 10),
+        _LabelScopedCard(
+          isScoped: _isScoped,
+          onChanged: (value) {
+            setState(() {
+              _isScoped = value;
+            });
+          },
+        ),
+        const SizedBox(height: 10),
         TaskEditorConditionsSection(
           controller: _conditionController,
+          availableLocations: board.sortedLocations,
           descriptionOverride: localizations.labelConditionsSectionDescription,
         ),
       ],
@@ -305,6 +319,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
           clearColor: rawColor.isEmpty,
           note: trimmedNote.isEmpty ? null : trimmedNote,
           clearNote: trimmedNote.isEmpty,
+          isScoped: _isScoped,
           conditions: _conditionController.buildConditions(),
         );
     if (!mounted) {
@@ -536,6 +551,36 @@ class _EmptyLabelsView extends StatelessWidget {
           message,
           style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 15),
         ),
+      ),
+    );
+  }
+}
+
+/// Card inside [EditLabelScreen] for toggling the TDF 0.6.0 `scoped` modifier on a label.
+class _LabelScopedCard extends StatelessWidget {
+  /// Creates a [_LabelScopedCard].
+  const _LabelScopedCard({required this.isScoped, required this.onChanged});
+
+  /// Whether the `scoped` modifier is enabled on the label.
+  final bool isScoped;
+
+  /// Callback invoked when the switch is toggled.
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return TaskEditorSectionCard(
+      cardKey: const ValueKey('label_editor_scoped_card'),
+      icon: Icons.filter_center_focus_rounded,
+      title: localizations.labelScopedSectionTitle,
+      child: SwitchListTile(
+        key: const ValueKey('label_editor_scoped_switch'),
+        contentPadding: EdgeInsets.zero,
+        title: Text(localizations.labelScopedSwitchTitle),
+        subtitle: Text(localizations.labelScopedSwitchSubtitle),
+        value: isScoped,
+        onChanged: onChanged,
       ),
     );
   }

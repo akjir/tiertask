@@ -32,16 +32,6 @@ class ConditionEditorController extends ChangeNotifier {
   /// Whether task-only reset directives (`any`, `day any`, `time any`, `location any`) are permitted.
   final bool allowResets;
 
-  /// Controller for GPS latitude input.
-  final TextEditingController locationLatController = TextEditingController();
-
-  /// Controller for GPS longitude input.
-  final TextEditingController locationLonController = TextEditingController();
-
-  /// Controller for GPS radius input.
-  final TextEditingController locationRadiusController =
-      TextEditingController();
-
   /// Controller for the end of a time window condition.
   final TextEditingController timeEndController = TextEditingController();
 
@@ -52,8 +42,7 @@ class ConditionEditorController extends ChangeNotifier {
   bool _conditionDayAny = false;
   bool _conditionLocationAny = false;
   bool _conditionTimeAny = false;
-  String? _locationErrorMessage;
-  final List<LocationTaskCondition> _locationRules = <LocationTaskCondition>[];
+  final Set<String> _selectedLocationIds = <String>{};
   final Set<int> _selectedWeekdays = <int>{};
   String? _timeErrorMessage;
   final List<TimeWindowTaskCondition> _timeRules = <TimeWindowTaskCondition>[];
@@ -70,12 +59,9 @@ class ConditionEditorController extends ChangeNotifier {
   /// Whether `condition time any` is active.
   bool get conditionTimeAny => _conditionTimeAny;
 
-  /// Validation error message for GPS location input, or `null` when valid.
-  String? get locationErrorMessage => _locationErrorMessage;
-
-  /// Configured GPS location conditions.
-  List<LocationTaskCondition> get locationRules =>
-      List<LocationTaskCondition>.unmodifiable(_locationRules);
+  /// Selected `location` block IDs for `condition location`.
+  Set<String> get selectedLocationIds =>
+      Set<String>.unmodifiable(_selectedLocationIds);
 
   /// Selected ISO weekdays (`1` = Monday .. `7` = Sunday).
   Set<int> get selectedWeekdays => Set<int>.unmodifiable(_selectedWeekdays);
@@ -91,34 +77,7 @@ class ConditionEditorController extends ChangeNotifier {
   void dispose() {
     timeStartController.dispose();
     timeEndController.dispose();
-    locationLatController.dispose();
-    locationLonController.dispose();
-    locationRadiusController.dispose();
     super.dispose();
-  }
-
-  /// Validates and appends a GPS location condition from the location input controllers.
-  void addLocationCondition(AppLocalizations localizations) {
-    final parsed = LocationTaskCondition.tryParse(
-      locationLatController.text,
-      locationLonController.text,
-      locationRadiusController.text,
-    );
-    if (parsed == null) {
-      _locationErrorMessage = localizations.conditionLocationErrorInvalid;
-      notifyListeners();
-      return;
-    }
-    _conditionAny = false;
-    _conditionLocationAny = false;
-    if (!_locationRules.contains(parsed)) {
-      _locationRules.add(parsed);
-    }
-    locationLatController.clear();
-    locationLonController.clear();
-    locationRadiusController.clear();
-    _locationErrorMessage = null;
-    notifyListeners();
   }
 
   /// Validates and appends a time window condition from the time input controllers.
@@ -159,8 +118,8 @@ class ConditionEditorController extends ChangeNotifier {
         ..._timeRules,
       if (allowResets && _conditionLocationAny)
         const GroupResetTaskCondition(targetGroup: ConditionGroup.location)
-      else
-        ..._locationRules,
+      else if (_selectedLocationIds.isNotEmpty)
+        LocationTaskCondition(locationIds: _selectedLocationIds.toList()),
     ];
   }
 
@@ -182,12 +141,6 @@ class ConditionEditorController extends ChangeNotifier {
     );
   }
 
-  /// Removes the GPS location condition at [index].
-  void removeLocationCondition(int index) {
-    _locationRules.removeAt(index);
-    notifyListeners();
-  }
-
   /// Removes the time window condition at [index].
   void removeTimeCondition(int index) {
     _timeRules.removeAt(index);
@@ -206,7 +159,7 @@ class ConditionEditorController extends ChangeNotifier {
       _conditionLocationAny = false;
       _selectedWeekdays.clear();
       _timeRules.clear();
-      _locationRules.clear();
+      _selectedLocationIds.clear();
     }
     notifyListeners();
   }
@@ -224,6 +177,16 @@ class ConditionEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Toggles [locationId] in the `condition location` set.
+  void toggleLocation(String locationId) {
+    _conditionAny = false;
+    _conditionLocationAny = false;
+    if (!_selectedLocationIds.remove(locationId)) {
+      _selectedLocationIds.add(locationId);
+    }
+    notifyListeners();
+  }
+
   /// Toggles the `condition location any` group reset flag.
   void toggleLocationAny() {
     if (!allowResets) {
@@ -232,7 +195,7 @@ class ConditionEditorController extends ChangeNotifier {
     _conditionLocationAny = !_conditionLocationAny;
     if (_conditionLocationAny) {
       _conditionAny = false;
-      _locationRules.clear();
+      _selectedLocationIds.clear();
     }
     notifyListeners();
   }
@@ -307,8 +270,8 @@ class ConditionEditorController extends ChangeNotifier {
           _selectedWeekdays.addAll(weekdays);
         case TimeWindowTaskCondition():
           _timeRules.add(condition);
-        case LocationTaskCondition():
-          _locationRules.add(condition);
+        case LocationTaskCondition(:final locationIds):
+          _selectedLocationIds.addAll(locationIds);
       }
     }
   }

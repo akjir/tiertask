@@ -323,14 +323,14 @@ void main() {
       await repository.saveWorkspaceSyncState('tasks', v2State);
       expect(await repository.loadWorkspaceSyncState('tasks'), equals(v2State));
 
-      // Simulate legacy TTS\x01 payload (without the trailing 16-byte generations).
-      final v2Bytes = v2State.toBytes();
+      // Simulate legacy TTS\x01 payload (without the trailing 16-byte generations and 3-byte v3 suffix).
+      final v3Bytes = v2State.toBytes();
       final v1Bytes = Uint8List.fromList(<int>[
         0x54,
         0x54,
         0x53,
         0x01,
-        ...v2Bytes.sublist(4, v2Bytes.length - 16),
+        ...v3Bytes.sublist(4, v3Bytes.length - 19),
       ]);
       await fakeStorage.write(
         key: 't2_sync_v1_legacy',
