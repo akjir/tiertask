@@ -1,7 +1,7 @@
 ---
 id: TEP-001
 title: Agent-Optimized Codebase Architecture, Acyclic Import DAG, and Sub-5s TDD Harness
-status: review # concept | planned | in-progress | review | completed | rejected
+status: completed # concept | planned | in-progress | review | completed | rejected
 type: architecture # feature | enhancement | refactor | architecture | spec
 created: 2026-11-07
 updated: 2026-11-08
@@ -400,11 +400,13 @@ Add `pumpLeafWidget` and `FakeTaskNotifier` to `test/ui/test_helpers.dart` (`<= 
 - [x] Update `AGENTS.md`, `ARCHITECTURE.md` (via `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and table updates), and `.agents/skills/` (`tiertask-dev-workflow`, `red-team-audit`, `update-documentation`) per **`update-documentation`**.
 - [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and confirm 0 warnings, 0 circular imports, all `.dart` files $\le 900$ lines, and `< 5s` single-file `verify --fast` execution.
 - [x] Set `status: review` in `tep-001-agent-optimized-architecture.md`, update `.agents/proposals/BOARD.md`, and request user approval.
+- [x] After user approval, set `status: completed`, update `.agents/proposals/BOARD.md`, and finalize delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-07:** Executed 5 parallel subagent investigations covering (1) LLM context engineering and Dart modularity best practices, (2) core domain/parser/sync subsystem decomposition, (3) import graph SCC cycle resolution and provider/UI decomposition, (4) test suite decoupling and sub-5s `verify --fast` architecture, and (5) `AGENTS.md`, `ARCHITECTURE.md`, and `tiertask_dev.py` governance upgrades. Refined `TEP-001` (`status: planned`) to avoid micro-file fragmentation (`71` hand-written `lib/` files and `41` `test/` suites instead of `83 + 68`), keep a single unified `AppLogger` API (`AppLogSink`) at DAG rank 0 without `DomainLogger`, and forbid `export` shims.
 * **2026-11-07:** Completed Wave 1 (`lib/models/tdf_error.dart`, `AppLogSink` in `lib/services/app_logger.dart`, `QuickAddMode` in `lib/models/task_tier.dart`, `task_board*.dart` 4-way split, `task_board_sync*.dart` + `workspace_sync_state.dart` 3-way split, `tdf_service*.dart` 5-way split, `tdf_importer*.dart` 3-way split), Wave 2 (`local_file_repository.dart` + `local_file_operations.dart`, `lib/providers/` 5-way split, `test/repositories/` 6-suite isolation with `HttpOverrides.global = null`, `test/providers/` 4-suite creation), and Wave 3 (`settings_screen.dart` 4-way split, `home_screen.dart` 4-way split, `task_editor_*.dart` 5-way split, `workspace_dialog.dart` + `workspace_row_card.dart`, `tier_task_pill.dart` + `tier_task_subtasks_section.dart`). Committed Waves 1–3 as `d804e0a`.
 * **2026-11-08:** Completed Wave 4: added `FakeTaskNotifier` and `pumpLeafWidget` to `test/ui/test_helpers.dart` (`179L`), split `home_screen_test.dart` + `home_drawer_test.dart` and `tier_task_pill_test.dart` + `tier_task_subtasks_test.dart` so all 41 `*_test.dart` suites are $\le 650$ lines, eliminated all remaining intra-subsystem import cycles (`task_board_evaluator < task_board_queue_mutator < task_board_mutator < task_board` and `local_file_operations < local_file_repository`) so pure Tarjan SCC reports `0` cycles across all 71 hand-written `lib/` files without any whitelist, upgraded `.agents/scripts/tiertask_dev.py`, `AGENTS.md`, `ARCHITECTURE.md`, and `.agents/skills/`, and verified `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`+171: All tests passed!`).
+* **2026-11-08:** Approved by the user; set `status: completed` and moved `TEP-001` to `Completed Proposals` in `.agents/proposals/BOARD.md`.
 
 ### 3.3 Delivered Artifacts
 * **Production Codebase (`lib/` — 71 hand-written `.dart` files + 3 generated `app_localizations*.dart` files):**
