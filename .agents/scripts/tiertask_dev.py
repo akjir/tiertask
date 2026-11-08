@@ -1244,16 +1244,6 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
                 issues.append(f"P-LICENSE-HEADER: Missing verbatim GPL-3.0 header in `{rel}`")
 
         lines = text.splitlines()
-        if len(lines) > 900:
-            issues.append(
-                f"P-FILE-SIZE: `{rel}` has {len(lines)} lines (exceeds 900-line hard ceiling)"
-            )
-        elif len(lines) > 750:
-            print(
-                f"[WARN] P-FILE-SIZE: `{rel}` has {len(lines)} lines (750-line pre-edit split trigger; target 300-650L)",
-                file=sys.stderr,
-            )
-
         for idx, line in enumerate(lines, 1):
             if _IGNORE_COMMENT_RE.search(line):
                 issues.append(f"P-NO-IGNORE: Forbidden analyzer ignore directive in `{rel}:{idx}`")

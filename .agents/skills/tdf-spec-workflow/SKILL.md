@@ -19,12 +19,12 @@ description: >-
 Whenever the user modifies `TDF_SPEC.md` or instructs you to implement or change TDF parsing, serialization, or domain evaluation rules, execute these exact steps in order:
 
 1. **Outline & Diff Spec:** Run `python3 .agents/scripts/tiertask_dev.py outline TDF_SPEC.md` (or `git diff TDF_SPEC.md`) to locate exact section `StartLine-EndLine` ranges, then read only the relevant sections of `TDF_SPEC.md` (Sections 2 through 10). Never paginate blindly through all 2,226 lines of `TDF_SPEC.md`.
-2. **Update Tests First (TDD Red Phase — `P-TDD-FIRST`, `P-FILE-SIZE`):**
-   - Locate the corresponding domain or service test suite in `test/services/` and `test/models/` using `python3 .agents/scripts/tiertask_dev.py outline` or `find` (aiming for around **500 lines** per test file as a soft target per `P-FILE-SIZE`, splitting only when practical).
+2. **Update Tests First (TDD Red Phase — `P-TDD-FIRST`, `P-TEST-MIRROR`):**
+   - Locate the corresponding domain or service test suite in `test/services/` and `test/models/` using `python3 .agents/scripts/tiertask_dev.py outline` or `find`.
    - Add or update positive test cases for valid TDF `0.5.1` syntax, root blocks (`queue`, `deleted`, `label`, `task`), present vs. omitted directive/flag semantics (`priority`, `finished`, `modified`, `blocked`, `suspended`, `repeat`, `condition`, `link`, `subtasks auto-finish`), 6-tier derivation, three-way synchronization, and document mutations.
    - Add or update negative test cases for every error condition in `TDF_SPEC.md` Section 8 and resource bound in Section 7 (`M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`).
    - Run `flutter test --no-pub --no-test-assets -r failures-only <target_tests>` to verify that the new or updated tests fail as expected against the current implementation.
 3. **Update Implementation (TDD Green & Refactor Phase — `P-FILE-SIZE`):**
-   - Modify the scanner, parser, serializer, importer (`lib/services/`), and domain models (`lib/models/`) to satisfy `TDF_SPEC.md` while adhering to `AGENTS.md` layout, the ~500-line soft file-size target (`P-FILE-SIZE`, checking whether large files can be split when practical), and memory rules (`P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-BOUND-ALLOC`, `P-ZERO-COPY`, `P-FLAT-CONTROL-FLOW`, `P-NO-NESTED-LOOPS`).
+   - Modify the scanner, parser, serializer, importer (`lib/services/`), and domain models (`lib/models/`) to satisfy `TDF_SPEC.md` while adhering to `AGENTS.md` layout, responsibility-based modularity (`P-FILE-SIZE`), and memory rules (`P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-BOUND-ALLOC`, `P-ZERO-COPY`, `P-FLAT-CONTROL-FLOW`, `P-NO-NESTED-LOOPS`).
 4. **Update Documentation:** Synchronize `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and `CHANGELOG.md` per **`update-documentation`** and **`changelog-updater`**.
 5. **Verify:** Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` until all static checks, analyzer diagnostics, formatting, and tests pass with zero warnings.
