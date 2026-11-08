@@ -1945,6 +1945,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Diagnostic log synced to WebDAV.'**
   String get logSyncedSnackBar;
+
+  /// Confirm button label in the custom color wheel dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose custom color'**
+  String get tooltipPickCustomColor;
+
+  /// Confirm button label in the custom color wheel dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose Custom Color'**
+  String get labelColorPickerDialogTitle;
+
+  /// Confirm button label in the custom color wheel dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Brightness'**
+  String get labelColorBrightnessLabel;
+
+  /// Confirm button label in the custom color wheel dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Select'**
+  String get actionSelectColor;
 }
 
 class _AppLocalizationsDelegate

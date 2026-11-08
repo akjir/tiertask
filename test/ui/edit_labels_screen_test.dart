@@ -432,6 +432,52 @@ task 000002OkD2 {
         reason: 'Invalid hex color must show validation error',
       );
 
+      final colorWheelButtonFinder = find.byKey(
+        const ValueKey('label_editor_color_wheel_button'),
+      );
+      expect(
+        colorWheelButtonFinder,
+        findsOneWidget,
+        reason:
+            'Color wheel button must be rendered next to the label color input',
+      );
+      expect(
+        tester.getRect(colorWheelButtonFinder).left >=
+            tester.getRect(colorInputFinder).right,
+        isTrue,
+        reason: 'Color wheel button must be positioned directly to the right of the color input field',
+      );
+
+      await tester.tap(colorWheelButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('label_color_picker_dialog')),
+        findsOneWidget,
+        reason: 'Tapping color wheel button must open LabelColorPickerDialog',
+      );
+      final wheelFinder = find.byKey(
+        const ValueKey('label_color_picker_wheel'),
+      );
+      final wheelRect = tester.getRect(wheelFinder);
+      await tester.tapAt(Offset(wheelRect.left + 12, wheelRect.center.dy));
+      await tester.pump();
+      final pickedCustomHex = tester
+          .widget<Text>(
+            find.byKey(const ValueKey('label_color_picker_hex_text')),
+          )
+          .data!;
+      await tester.tap(
+        find.byKey(const ValueKey('label_color_picker_confirm_button')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<TextField>(colorInputFinder).controller?.text,
+        equals(pickedCustomHex),
+        reason: 'Confirming custom color wheel dialog must populate the label color input field',
+      );
+
       await tester.tap(
         find.byKey(const ValueKey('label_editor_color_preset_#4CAF50')),
       );

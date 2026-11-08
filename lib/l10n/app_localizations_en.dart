@@ -1044,4 +1044,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get logSyncedSnackBar => 'Diagnostic log synced to WebDAV.';
+
+  @override
+  String get tooltipPickCustomColor => 'Choose custom color';
+
+  @override
+  String get labelColorPickerDialogTitle => 'Choose Custom Color';
+
+  @override
+  String get labelColorBrightnessLabel => 'Brightness';
+
+  @override
+  String get actionSelectColor => 'Select';
 }

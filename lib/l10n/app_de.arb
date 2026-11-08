@@ -307,5 +307,9 @@
   "logMetadataStats": "Einträge: {entries} | Warnungen: {warnings} | Fehler: {errors}",
   "logFilterAllTags": "Alle",
   "tooltipSyncLogWebDav": "Protokoll mit WebDAV synchronisieren",
-  "logSyncedSnackBar": "Diagnoseprotokoll mit WebDAV synchronisiert."
+  "logSyncedSnackBar": "Diagnoseprotokoll mit WebDAV synchronisiert.",
+  "tooltipPickCustomColor": "Individuelle Farbe wählen",
+  "labelColorPickerDialogTitle": "Individuelle Farbe wählen",
+  "labelColorBrightnessLabel": "Helligkeit",
+  "actionSelectColor": "Auswählen"
 }

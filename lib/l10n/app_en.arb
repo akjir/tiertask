@@ -1428,5 +1428,21 @@
   "logSyncedSnackBar": "Diagnostic log synced to WebDAV.",
   "@logSyncedSnackBar": {
     "description": "Localized string for logSyncedSnackBar"
+  },
+  "tooltipPickCustomColor": "Choose custom color",
+  "@tooltipPickCustomColor": {
+    "description": "Confirm button label in the custom color wheel dialog."
+  },
+  "labelColorPickerDialogTitle": "Choose Custom Color",
+  "@labelColorPickerDialogTitle": {
+    "description": "Confirm button label in the custom color wheel dialog."
+  },
+  "labelColorBrightnessLabel": "Brightness",
+  "@labelColorBrightnessLabel": {
+    "description": "Confirm button label in the custom color wheel dialog."
+  },
+  "actionSelectColor": "Select",
+  "@actionSelectColor": {
+    "description": "Confirm button label in the custom color wheel dialog."
   }
 }

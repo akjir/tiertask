@@ -23,6 +23,7 @@ import '../providers/task_providers.dart';
 import '../services/app_logger.dart';
 import 'widgets/clearable_text_field.dart';
 import 'widgets/condition_editor_controller.dart';
+import 'widgets/label_color_picker_dialog.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_sections.dart';
 
@@ -219,6 +220,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
         LabelEditorColorCard(
           colorController: _colorController,
           errorMessage: _colorErrorMessage,
+          onPickCustomColor: _pickCustomColor,
           onSelectPreset: _selectPresetColor,
         ),
         const SizedBox(height: 10),
@@ -244,6 +246,21 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     }
     setState(() {
       _nameErrorMessage = null;
+    });
+  }
+
+  /// Opens [LabelColorPickerDialog] and populates [_colorController] with the selected `#RRGGBB` color.
+  Future<void> _pickCustomColor() async {
+    final selectedHex = await showLabelColorPickerDialog(
+      context,
+      initialHex: _colorController.text,
+    );
+    if (!mounted || selectedHex == null) {
+      return;
+    }
+    setState(() {
+      _colorController.text = selectedHex;
+      _colorErrorMessage = null;
     });
   }
 

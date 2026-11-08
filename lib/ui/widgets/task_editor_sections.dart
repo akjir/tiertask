@@ -20,13 +20,14 @@ import '../../models/tdf_metadata.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 
-/// Card inside `EditLabelScreen` for editing a label's optional `#RRGGBB` color via hex text input or preset swatches.
+/// Card inside `EditLabelScreen` for editing a label's optional `#RRGGBB` color via hex text input, custom color wheel dialog, or preset swatches.
 class LabelEditorColorCard extends StatelessWidget {
   /// Creates a [LabelEditorColorCard].
   const LabelEditorColorCard({
     super.key,
     required this.colorController,
     required this.errorMessage,
+    required this.onPickCustomColor,
     required this.onSelectPreset,
   });
 
@@ -47,6 +48,9 @@ class LabelEditorColorCard extends StatelessWidget {
 
   /// Optional validation error message for the color input field.
   final String? errorMessage;
+
+  /// Callback invoked when the custom color wheel button is tapped.
+  final VoidCallback onPickCustomColor;
 
   /// Callback invoked when a preset color chip is tapped.
   final ValueChanged<String> onSelectPreset;
@@ -69,24 +73,11 @@ class LabelEditorColorCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ClearableTextField(
-            fieldKey: const ValueKey('label_editor_color_input'),
-            controller: colorController,
-            cursorColor: appTheme.primaryAccent,
-            clearIconColor: appTheme.mutedTextColor,
-            style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
-            decoration: _buildTaskEditorInputDecoration(
-              appTheme: appTheme,
-              focusedColor: appTheme.primaryAccent,
-              labelText: localizations.labelColorSectionTitle,
-              hintText: localizations.labelColorHint,
-              errorText: errorMessage,
-              prefixIcon: Icon(
-                Icons.circle_rounded,
-                size: 16,
-                color: previewColor,
-              ),
-            ),
+          _LabelColorInputRow(
+            colorController: colorController,
+            errorMessage: errorMessage,
+            previewColor: previewColor,
+            onPickCustomColor: onPickCustomColor,
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -497,6 +488,73 @@ class TaskEditorTitleField extends StatelessWidget {
         labelText: titleLabel ?? localizations.taskNameLabel,
         errorText: errorMessage,
       ),
+    );
+  }
+}
+
+/// Row combining the `#RRGGBB` hexadecimal text field and the custom color wheel trigger button inside [LabelEditorColorCard].
+class _LabelColorInputRow extends StatelessWidget {
+  /// Creates a [_LabelColorInputRow].
+  const _LabelColorInputRow({
+    required this.colorController,
+    required this.errorMessage,
+    required this.onPickCustomColor,
+    required this.previewColor,
+  });
+
+  /// Controller for the `#RRGGBB` hexadecimal color input field.
+  final TextEditingController colorController;
+
+  /// Optional validation error message for the color input field.
+  final String? errorMessage;
+
+  /// Callback invoked when the custom color wheel button is tapped.
+  final VoidCallback onPickCustomColor;
+
+  /// Resolved preview color for the leading dot and color wheel icon.
+  final Color previewColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: ClearableTextField(
+            fieldKey: const ValueKey('label_editor_color_input'),
+            controller: colorController,
+            cursorColor: appTheme.primaryAccent,
+            clearIconColor: appTheme.mutedTextColor,
+            style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
+            decoration: _buildTaskEditorInputDecoration(
+              appTheme: appTheme,
+              focusedColor: appTheme.primaryAccent,
+              labelText: localizations.labelColorSectionTitle,
+              hintText: localizations.labelColorHint,
+              errorText: errorMessage,
+              prefixIcon: Icon(
+                Icons.circle_rounded,
+                size: 16,
+                color: previewColor,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton.filledTonal(
+          key: const ValueKey('label_editor_color_wheel_button'),
+          style: IconButton.styleFrom(
+            backgroundColor: appTheme.secondaryContainerColor,
+            foregroundColor: appTheme.onSecondaryContainerColor,
+          ),
+          tooltip: localizations.tooltipPickCustomColor,
+          onPressed: onPickCustomColor,
+          icon: Icon(Icons.color_lens_rounded, color: previewColor),
+        ),
+      ],
     );
   }
 }

@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Dated per-workspace diagnostic log files (`tiertask_<YYYY-MM-DD>_<platform>_<workspaceId>.log`) with `@meta` session headers, 7-day / 5-file local retention pruning, and debounced WebDAV log synchronization.
 - Metadata summary card, minimum severity and subsystem tag filters, and manual WebDAV log upload button in the in-app Diagnostic Log viewer.
 - Added colored label indicator blocks with hover tooltips along the bottom edge of task cards.
+- Added a custom color wheel picker dialog next to the color field in the label editor.
 
 ### Changed
 

@@ -1063,4 +1063,16 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get logSyncedSnackBar =>
       'Diagnoseprotokoll mit WebDAV synchronisiert.';
+
+  @override
+  String get tooltipPickCustomColor => 'Individuelle Farbe wählen';
+
+  @override
+  String get labelColorPickerDialogTitle => 'Individuelle Farbe wählen';
+
+  @override
+  String get labelColorBrightnessLabel => 'Helligkeit';
+
+  @override
+  String get actionSelectColor => 'Auswählen';
 }

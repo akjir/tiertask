@@ -103,6 +103,7 @@ tiertask/
 │           ├── home_drawer.dart
 │           ├── home_tier_pane.dart
 │           ├── home_top_bar.dart
+│           ├── label_color_picker_dialog.dart
 │           ├── local_tdf_file_dialogs.dart
 │           ├── location_status_dialog.dart
 │           ├── log_viewer_dialog.dart
@@ -163,6 +164,7 @@ tiertask/
         └── widgets/
             ├── app_logo_test.dart
             ├── clearable_text_field_test.dart
+            ├── label_color_picker_dialog_test.dart
             ├── quick_add_bar_test.dart
             ├── task_editor_conditions_test.dart
             ├── tier_page_indicator_test.dart
@@ -259,7 +261,7 @@ tiertask/
 | :--- | :--- |
 | `lib/main.dart` | Application entry point initializing `LocalFileLogSink`, global crash hooks (`FlutterError.onError` and `PlatformDispatcher.instance.onError`), and `AppLifecycleListener`, and mounting `TierTaskApp` inside `ProviderScope` with Material 3 themes and `AppLocalizations` delegates. |
 | `lib/ui/app_theme.dart` | Unified Material 3 theme definition (`AppTheme`, `AppThemeSet`, `appThemeProvider`) implementing `ThemeExtension<AppTheme>` and `toThemeData()` for the `Slate` and `Navy` light and dark palettes. |
-| `lib/ui/edit_labels_screen.dart` | Dedicated label overview screen (`EditLabelsScreen`) and label editor panel (`EditLabelScreen`, `openEditLabelScreen`) for creating, editing, and deleting `TdfLabel` definitions with color presets, notes, and inherited conditions. |
+| `lib/ui/edit_labels_screen.dart` | Dedicated label overview screen (`EditLabelsScreen`) and label editor panel (`EditLabelScreen`, `openEditLabelScreen`) for creating, editing, and deleting `TdfLabel` definitions with custom color wheel selection, color presets, notes, and inherited conditions. |
 | `lib/ui/edit_task_screen.dart` | Full-screen task creation and editor panel (`EditTaskScreen`, `openEditTaskScreen`) coordinating Material 3 section cards for editing task details, scheduling, recurrence, labels, subtasks, links, dependencies, and activation conditions. |
 | `lib/ui/home_screen.dart` | Primary landing screen (`HomeScreen`) coordinating the top bar (`HomeTopBar`), 6 horizontal `PageView` tier panes (`HomeTierPane`) and all-tasks search view (`HomeAllTasksSearchList`), bottom `TierPageIndicator`, floating WebDAV sync and `QuickAddBar` triggers, and navigation drawer (`HomeDrawer`). |
 | `lib/ui/settings_screen.dart` | Configuration screen (`SettingsScreen`) coordinating display, time zone, location, and diagnostics preference cards (`SettingsPreferenceCards`), local `.tdf` storage controls (`SettingsLocalStorageSection`), WebDAV endpoint controls (`SettingsWebDavStorageSection`), and fixed bottom `Save` and `Sync` actions. |
@@ -269,6 +271,7 @@ tiertask/
 | `lib/ui/widgets/home_drawer.dart` | Navigation drawer (`HomeDrawer`) and raw `.tdf` preview dialog (`showRawTdfPreviewDialog`) displaying the `AppLogo` header, `DrawerWorkspaceCard`, alphabetical label filters with open task count badges, sync/settings actions, and SemVer build footer. |
 | `lib/ui/widgets/home_tier_pane.dart` | Virtualized single-tier task list (`HomeTierPane`) and all-tasks search result list (`HomeAllTasksSearchList`) rendering `TierTaskPill` items with tier-grouped headers and empty-state hints. |
 | `lib/ui/widgets/home_top_bar.dart` | Top navigation bar (`HomeTopBar`) rendering the drawer menu button, animated active label title, expandable inline task search field, and `TopBarLocationButton`. |
+| `lib/ui/widgets/label_color_picker_dialog.dart` | Material 3 custom color picker dialog (`LabelColorPickerDialog`, `showLabelColorPickerDialog`) rendering an interactive HSV hue-saturation color wheel, brightness slider, and live `#RRGGBB` preview for labels. |
 | `lib/ui/widgets/local_tdf_file_dialogs.dart` | Material 3 dialogs (`SelectLocalTdfDialog`, `RenameLocalTdfDialog`, `showSelectLocalTdfDialog`, `showRenameLocalTdfDialog`) for selecting or renaming local `.tdf` files with single-segment filename validation. |
 | `lib/ui/widgets/location_status_dialog.dart` | Top-bar location status button (`TopBarLocationButton`) and popup dialog (`LocationStatusDialog`, `showLocationStatusDialog`) displaying foreground location status, place name, WGS-84 coordinates, source, and manual refresh trigger. |
 | `lib/ui/widgets/log_viewer_dialog.dart` | Material 3 diagnostic log viewer (`LogViewerDialog`, `LogViewerScreen`, `showLogViewerDialog`) displaying session `@meta` statistics, minimum `LogLevel` and `LogTag` filters, severity-highlighted monospace entries, and `Sync Log Now`, `Copy All`, `Scroll to Bottom`, and `Clear Log` actions. |
