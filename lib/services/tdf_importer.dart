@@ -101,8 +101,8 @@ class TdfImporter {
   /// Historical schema snapshot reference for `0.5.1` (`spec/TDF_SPEC_0.6.0.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef051 = (
     version: '0.5.1',
-    commit: '8580e166417811432b11303f8c26d544c9819284',
-    blob: 'f0059d292dc2b82124e8228718ca0b08d6c2c886',
+    commit: 'f22a3d4b1b15e9d8f5dcbba86da4f7dbd6135b11',
+    blob: '1504ddff1ad9bd40930e4f90de8302336524f4dc',
   );
 
   /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`).

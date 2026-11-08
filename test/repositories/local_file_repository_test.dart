@@ -803,6 +803,14 @@ void main() {
       expect(populatedRead.content, equals(sampleContent));
       expect(populatedRead.digest, isNotNull);
       expect(populatedRead.digest?.length, equals(64));
+      if (Platform.isLinux) {
+        final mode = File(targetPath).statSync().mode & 0x1FF;
+        expect(
+          mode,
+          equals(0x180),
+          reason: 'Atomic temp-file swap on Linux must set owner-only 0600 permissions',
+        );
+      }
 
       final entries = sourceDirectory
           .listSync(followLinks: false)

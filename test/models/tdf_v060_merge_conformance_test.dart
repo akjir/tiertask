@@ -570,7 +570,173 @@ void main() {
         expect(mergedTask.isPriority, isFalse);
         expect(mergedTask.labelIds, isEmpty);
         expect(mergedTask.suspendedAt, equals(suspendedTime));
+        expect(
+          mergedTask.modifiedAt,
+          equals(DateTime.utc(2026, 11, 1, 10, 0, 0)),
+        );
         expect(merged.queueBlock.taskIds, isNot(contains(taskId)));
+      }
+
+      // Concurrent scheduling on L vs. scoped label deletion on R:
+      final unscheduledTask = TaskItem(
+        id: taskId,
+        title: 'Scoped Task',
+        createdAt: DateTime.utc(2026, 11, 1, 8, 0, 0),
+        modifiedAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+        isPriority: false,
+        labelIds: const [scopedLabelId],
+      );
+      final baseUnscheduled = TaskBoard.evaluate(
+        tasks: [unscheduledTask],
+        labels: const [scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+          taskIds: const [],
+        ),
+        evaluationTime: evalTime,
+      );
+      final leftScheduled = TaskBoard.evaluate(
+        tasks: [
+          unscheduledTask.copyWith(
+            isPriority: true,
+            modifiedAt: DateTime.utc(2026, 11, 1, 10, 5, 0),
+          ),
+        ],
+        labels: const [scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 10, 5, 0),
+          taskIds: [taskId],
+        ),
+        evaluationTime: evalTime,
+      );
+      final rightDeletedScoped = TaskBoard.evaluate(
+        tasks: [
+          unscheduledTask.copyWith(
+            isPriority: false,
+            labelIds: const [],
+            modifiedAt: DateTime.utc(2026, 11, 1, 10, 0, 0),
+          ),
+        ],
+        labels: const [],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          labels: [
+            TdfDeletedLabelRecord(
+              labelId: scopedLabelId,
+              deletedAt: DateTime.utc(2026, 11, 1, 10, 0, 0),
+            ),
+          ],
+        ),
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 10, 0, 0),
+          taskIds: const [],
+        ),
+        evaluationTime: evalTime,
+      );
+      for (final (direction, first, second) in [
+        ('forward', leftScheduled, rightDeletedScoped),
+        ('reverse', rightDeletedScoped, leftScheduled),
+      ]) {
+        final merged = TaskBoardSync.merge(
+          primary: first,
+          secondary: second,
+          baseline: baseUnscheduled,
+          evaluationTime: evalTime,
+        );
+        final mergedTask = merged.findTask(taskId)!;
+        expect(
+          mergedTask.labelIds,
+          isEmpty,
+          reason: 'Deleted scoped label must remain stripped ($direction)',
+        );
+        expect(
+          mergedTask.isPriority,
+          isFalse,
+          reason:
+              'Losing last scoped label must strip concurrent priority ($direction)',
+        );
+        expect(
+          merged.queueBlock.taskIds,
+          isNot(contains(taskId)),
+          reason:
+              'Losing last scoped label must evict task from queue ($direction)',
+        );
+      }
+
+      // Concurrent unrelated queue edit on L vs. scoped label deletion on R:
+      const otherTaskId = '7pQr9mOkD2';
+      final otherTask = TaskItem(
+        id: otherTaskId,
+        title: 'Global Task',
+        createdAt: DateTime.utc(2026, 11, 1, 8, 5, 0),
+        modifiedAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+      );
+      final baseWithQueue = TaskBoard.evaluate(
+        tasks: [task, otherTask],
+        labels: const [scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+          taskIds: [taskId],
+        ),
+        evaluationTime: evalTime,
+      );
+      final leftNewerQueue = TaskBoard.evaluate(
+        tasks: [task, otherTask],
+        labels: const [scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 10, 5, 0),
+          taskIds: [taskId, otherTaskId],
+        ),
+        evaluationTime: evalTime,
+      );
+      final rightDeletedScopedWithOther = TaskBoard.evaluate(
+        tasks: [
+          task.copyWith(
+            isPriority: false,
+            labelIds: const [],
+            modifiedAt: DateTime.utc(2026, 11, 1, 10, 0, 0),
+          ),
+          otherTask,
+        ],
+        labels: const [],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          labels: [
+            TdfDeletedLabelRecord(
+              labelId: scopedLabelId,
+              deletedAt: DateTime.utc(2026, 11, 1, 10, 0, 0),
+            ),
+          ],
+        ),
+        queueBlock: TdfQueueBlock(
+          modifiedAt: DateTime.utc(2026, 11, 1, 10, 0, 0),
+          taskIds: const [otherTaskId],
+        ),
+        evaluationTime: evalTime,
+      );
+      for (final (direction, first, second) in [
+        ('forward', leftNewerQueue, rightDeletedScopedWithOther),
+        ('reverse', rightDeletedScopedWithOther, leftNewerQueue),
+      ]) {
+        final merged = TaskBoardSync.merge(
+          primary: first,
+          secondary: second,
+          baseline: baseWithQueue,
+          evaluationTime: evalTime,
+        );
+        final mergedTask = merged.findTask(taskId)!;
+        expect(
+          mergedTask.isPriority,
+          isFalse,
+          reason:
+              'Priority must remain false after scoped label deletion ($direction)',
+        );
+        expect(
+          merged.queueBlock.taskIds,
+          equals(const [otherTaskId]),
+          reason:
+              'Scoped task losing last label must be evicted even when L.queue is newer ($direction)',
+        );
       }
     });
 

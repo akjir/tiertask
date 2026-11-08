@@ -232,24 +232,12 @@ class TdfTaskDirectiveFields {
 
 /// Semantic directive and value parser for TDF 0.6.0 (`spec/TDF_SPEC_0.6.0.md` Sections 2.8, 4, 7, and 8).
 abstract final class TdfDirectiveParser {
-  /// Pattern for a valid `#RRGGBB` hex color string.
-  static final RegExp _colorPattern = RegExp(r'^#[0-9a-fA-F]{6}$');
-
-  /// Pattern for a finite ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`).
-  static final RegExp _decimalNumberPattern = RegExp(r'^-?[0-9]+(\.[0-9]+)?$');
-
-  /// Pattern for a canonical 10-character Base62 entity identifier (`[0-9A-Za-z]{10}`).
-  static final RegExp _entityIdPattern = RegExp(r'^[0-9A-Za-z]{10}$');
-
   /// Forbidden executable or inline-payload URI schemes (`spec/TDF_SPEC_0.6.0.md` Section 2.8).
   static const List<String> _forbiddenUriSchemes = <String>[
     'javascript:',
     'vbscript:',
     'data:',
   ];
-
-  /// Pattern for a valid RFC 3986 URI scheme prefix (`[a-zA-Z][a-zA-Z0-9+.-]*:`).
-  static final RegExp _uriSchemePattern = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*:');
 
   /// Appends a condition rule to [fields] on a `label` block, enforcing `MAX_CONDITION_RULES_PER_ENTITY` and `MAX_LOCATION_REFS_PER_ENTITY`.
   static void addConditionToLabel(
@@ -869,8 +857,7 @@ abstract final class TdfDirectiveParser {
   }
 
   /// Checks whether [id] is a canonical 10-character Base62 entity identifier (`[0-9A-Za-z]{10}`).
-  static bool isValidEntityId(String id) =>
-      id.length == tdfEntityIdLength && _entityIdPattern.hasMatch(id);
+  static bool isValidEntityId(String id) => _isValidBase62EntityId(id);
 
   /// Parses a `step <done> "<text>"` directive inside a `subtasks` block.
   static SubtaskItem parseStepDirective(List<TdfScannedToken> args, int line) {
@@ -1231,6 +1218,108 @@ abstract final class TdfDirectiveParser {
     (rule) => rule is GroupResetTaskCondition && rule.targetGroup == group,
   );
 
+  /// Checks whether [value] contains at least one character other than ASCII whitespace (`0x20`, `\t`, `\n`, `\r`).
+  static bool _hasNonAsciiWhitespaceContent(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit != 0x20 && unit != 0x09 && unit != 0x0A && unit != 0x0D) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Checks whether all characters in [source] within `[start, end)` are ASCII decimal digits (`[0-9]`).
+  static bool _hasOnlyAsciiDigits(String source, int start, int end) {
+    for (var i = start; i < end; i++) {
+      if (!_isAsciiDigit(source.codeUnitAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Checks whether [uri] begins with a valid RFC 3986 URI scheme prefix (`[a-zA-Z][a-zA-Z0-9+.-]*:`).
+  static bool _hasValidUriSchemePrefix(String uri) {
+    final colonIndex = uri.indexOf(':');
+    if (colonIndex <= 0 || !_isAsciiAlpha(uri.codeUnitAt(0))) {
+      return false;
+    }
+    for (var i = 1; i < colonIndex; i++) {
+      if (!_isUriSchemeChar(uri.codeUnitAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Checks whether [unit] is an ASCII letter (`[A-Za-z]`).
+  static bool _isAsciiAlpha(int unit) =>
+      (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A);
+
+  /// Checks whether [unit] is an ASCII decimal digit (`[0-9]`).
+  static bool _isAsciiDigit(int unit) => unit >= 0x30 && unit <= 0x39;
+
+  /// Checks whether [unit] is a valid RFC 3986 URI scheme continuation character (`[a-zA-Z0-9+.-]`).
+  static bool _isUriSchemeChar(int unit) =>
+      _isAsciiAlpha(unit) ||
+      _isAsciiDigit(unit) ||
+      unit == 0x2B ||
+      unit == 0x2D ||
+      unit == 0x2E;
+
+  /// Checks whether [id] is a canonical 10-character Base62 entity identifier (`[0-9A-Za-z]{10}`).
+  static bool _isValidBase62EntityId(String id) {
+    if (id.length != tdfEntityIdLength) {
+      return false;
+    }
+    for (var i = 0; i < tdfEntityIdLength; i++) {
+      final unit = id.codeUnitAt(i);
+      if (!_isAsciiAlpha(unit) && !_isAsciiDigit(unit)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Checks whether [raw] matches a finite ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`).
+  static bool _isValidDecimalNumber(String raw) {
+    if (raw.isEmpty) {
+      return false;
+    }
+    final start = raw.codeUnitAt(0) == 0x2D ? 1 : 0;
+    if (start >= raw.length) {
+      return false;
+    }
+    final dotIndex = raw.indexOf('.', start);
+    if (dotIndex == -1) {
+      return _hasOnlyAsciiDigits(raw, start, raw.length);
+    }
+    if (dotIndex == start || dotIndex == raw.length - 1) {
+      return false;
+    }
+    return _hasOnlyAsciiDigits(raw, start, dotIndex) &&
+        _hasOnlyAsciiDigits(raw, dotIndex + 1, raw.length);
+  }
+
+  /// Checks whether [value] is a valid `#RRGGBB` hex color string (`^#[0-9a-fA-F]{6}$`).
+  static bool _isValidHexColor(String value) {
+    if (value.length != 7 || value.codeUnitAt(0) != 0x23) {
+      return false;
+    }
+    for (var i = 1; i < 7; i++) {
+      final unit = value.codeUnitAt(i);
+      final isHex =
+          _isAsciiDigit(unit) ||
+          (unit >= 0x41 && unit <= 0x46) ||
+          (unit >= 0x61 && unit <= 0x66);
+      if (!isHex) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Normalizes a validated ASCII decimal string (`-?[0-9]+(\.[0-9]+)?`) per Section 6.7.3 (`-0.0` -> `0`, strip redundant leading/trailing zeros).
   static String _normalizeValidatedDecimalString(String raw) {
     var isNegative = false;
@@ -1326,7 +1415,7 @@ abstract final class TdfDirectiveParser {
       );
     }
     final value = args[0].value;
-    if (!_colorPattern.hasMatch(value)) {
+    if (!_isValidHexColor(value)) {
       fail(
         TdfErrorKind.invalidColor,
         line,
@@ -1510,7 +1599,7 @@ abstract final class TdfDirectiveParser {
         'Number token exceeds maximum length of $maxTdfNumberLength characters.',
       );
     }
-    if (!_decimalNumberPattern.hasMatch(raw)) {
+    if (!_isValidDecimalNumber(raw)) {
       fail(TdfErrorKind.invalidNumber, line, 'Invalid decimal number "$raw".');
     }
     final rawDouble = double.tryParse(raw);
@@ -1772,7 +1861,7 @@ abstract final class TdfDirectiveParser {
         'Number token exceeds maximum length of $maxTdfNumberLength characters.',
       );
     }
-    if (!_decimalNumberPattern.hasMatch(raw)) {
+    if (!_isValidDecimalNumber(raw)) {
       fail(TdfErrorKind.invalidNumber, line, 'Invalid decimal number "$raw".');
     }
     final normalizedText = _normalizeValidatedDecimalString(raw);
@@ -1835,6 +1924,14 @@ abstract final class TdfDirectiveParser {
         'Link <uri> cannot be empty or ASCII whitespace only.',
       );
     }
+    final scalarCount = TdfCalendar.countUnicodeScalars(uri);
+    if (scalarCount == null || scalarCount > TaskLink.maxUriLength) {
+      fail(
+        TdfErrorKind.limitExceeded,
+        line,
+        'Link <uri> exceeds maximum of ${TaskLink.maxUriLength} Unicode scalar values.',
+      );
+    }
     for (var i = 0; i < uri.length; i++) {
       final unit = uri.codeUnitAt(i);
       if (unit < 0x20 || unit == 0x7F) {
@@ -1845,15 +1942,7 @@ abstract final class TdfDirectiveParser {
         );
       }
     }
-    final scalarCount = TdfCalendar.countUnicodeScalars(uri);
-    if (scalarCount == null || scalarCount > TaskLink.maxUriLength) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Link <uri> exceeds maximum of ${TaskLink.maxUriLength} Unicode scalar values.',
-      );
-    }
-    if (!_uriSchemePattern.hasMatch(uri)) {
+    if (!_hasValidUriSchemePrefix(uri)) {
       fail(
         TdfErrorKind.invalidUri,
         line,
@@ -2031,16 +2120,5 @@ abstract final class TdfDirectiveParser {
       );
     }
     return value;
-  }
-
-  /// Checks whether [value] contains at least one character other than ASCII whitespace (`0x20`, `\t`, `\n`, `\r`).
-  static bool _hasNonAsciiWhitespaceContent(String value) {
-    for (var i = 0; i < value.length; i++) {
-      final unit = value.codeUnitAt(i);
-      if (unit != 0x20 && unit != 0x09 && unit != 0x0A && unit != 0x0D) {
-        return true;
-      }
-    }
-    return false;
   }
 }

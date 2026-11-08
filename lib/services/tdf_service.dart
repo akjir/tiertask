@@ -101,7 +101,7 @@ class TdfService {
   static const String supportedVersion = TdfBlockParser.supportedVersion;
 
   /// Explicitly imports and migrates [sourceContent] (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, or `0.5.1`)
-  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1`) into a [TaskBoard].
+  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`) into a [TaskBoard].
   TaskBoard importDocument(
     String sourceContent, {
     TdfTimeZoneContext? sourceTimeZone,
@@ -122,7 +122,7 @@ class TdfService {
     currentLongitude: currentLongitude,
   );
 
-  /// Scans and parses a `tdf 0.5.1` (or legacy `tdf 0.5.0`) [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
+  /// Scans and parses a `tdf 0.6.0` (or legacy `tdf 0.5.0` / `tdf 0.5.1`) [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
@@ -173,7 +173,7 @@ class TdfService {
     }
   }
 
-  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.5.1` document string
+  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.6.0` document string
   /// and validates canonical output against Section 7.1 bounds.
   String serialize(TaskBoard board) => _serializeInternal(board);
 
@@ -228,7 +228,7 @@ class TdfService {
     }
   }
 
-  /// Delegates single-pass TDF 0.5.1 (and legacy 0.5.0) scanning and parsing to [TdfBlockParser.parseDocument].
+  /// Delegates single-pass TDF 0.6.0 (and legacy 0.5.0 / 0.5.1) scanning and parsing to [TdfBlockParser.parseDocument].
   TaskBoard _parseInternal(
     String tdfContent, {
     DateTime? evaluationTime,
@@ -251,7 +251,7 @@ class TdfService {
     );
   }
 
-  /// Delegates canonical TDF 0.5.1 serialization and bounds validation to [TdfSerializer.serialize].
+  /// Delegates canonical TDF 0.6.0 serialization and bounds validation to [TdfSerializer.serialize].
   String _serializeInternal(TaskBoard board) {
     final stopwatch = Stopwatch()..start();
     final output = TdfSerializer.serialize(board);

@@ -520,18 +520,24 @@ class LocalFileOperations<E extends Exception> {
     }
     final tempFile = File(tempPath);
     try {
-      tempFile.writeAsBytesSync(bytes, flush: true);
+      _writeAndFlushTempFileSync(tempFile, bytes, messages);
       tempFile.renameSync(filePath);
     } on Object {
-      if (FileSystemEntity.typeSync(tempPath, followLinks: false) ==
-          FileSystemEntityType.file) {
-        try {
-          tempFile.deleteSync();
-        } on FileSystemException {
-          // Preserve original write or rename error as primary cause.
-        }
-      }
+      _cleanupTempFileSync(tempFile);
       rethrow;
+    }
+  }
+
+  /// Deletes [tempFile] if it exists as a regular file after a failed atomic write or rename.
+  void _cleanupTempFileSync(File tempFile) {
+    if (FileSystemEntity.typeSync(tempFile.path, followLinks: false) !=
+        FileSystemEntityType.file) {
+      return;
+    }
+    try {
+      tempFile.deleteSync();
+    } on FileSystemException {
+      // Preserve original write or rename error as primary cause.
     }
   }
 
@@ -779,5 +785,27 @@ class LocalFileOperations<E extends Exception> {
       workspaceId: workspaceId,
     );
     return sample.substring(19);
+  }
+
+  /// Opens [tempFile] with `FileMode.writeOnly`, applies owner-only `0600` permissions on Linux, writes [bytes], and flushes (`fsync`).
+  void _writeAndFlushTempFileSync(
+    File tempFile,
+    List<int> bytes,
+    AppLocalizations messages,
+  ) {
+    final handle = tempFile.openSync(mode: FileMode.writeOnly);
+    try {
+      if (Platform.isLinux &&
+          Process.runSync('chmod', <String>['0600', tempFile.path]).exitCode !=
+              0) {
+        throw createException(
+          messages.errorSaveLocalFileFailed('Failed to set 0600 permissions'),
+        );
+      }
+      handle.writeFromSync(bytes);
+      handle.flushSync();
+    } finally {
+      handle.closeSync();
+    }
   }
 }

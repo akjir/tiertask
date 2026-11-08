@@ -699,6 +699,214 @@ label 000001OkD2 {
           recovered.allTasks.single.conditions.single as LocationTaskCondition;
       expect(recTaskCond.locationIds, equals([newLocId]));
     });
+
+    test('recoverAmbiguousEntities rewrites references on shared surviving local labels and tasks and validateMergedGraphAndBounds enforces Section 6.7.7 resource bounds', () {
+      const locAmb = 'LocAmbOkD2';
+      const labelAmb = 'LblAmbOkD2';
+      const taskAmb = 'TskAmbOkD2';
+      const labelShared = 'LblShrOkD2';
+      const taskShared = 'TskShrOkD2';
+
+      final sharedLabelOnRemote = TdfLabel(
+        id: labelShared,
+        name: 'Shared Label',
+        modifiedAt: t(10),
+      );
+      final sharedTaskOnRemote = makeTask(taskShared, 'Shared Task', 10);
+      final sharedBoard = TaskBoard.evaluate(
+        tasks: [sharedTaskOnRemote],
+        labels: [sharedLabelOnRemote],
+        deletedBlock: TdfDeletedBlock(generation: 2),
+        evaluationTime: t(20),
+      );
+
+      final localBoard = TaskBoard.evaluate(
+        tasks: [
+          makeTask(taskAmb, 'Ambiguous Task', 12),
+          sharedTaskOnRemote.copyWith(
+            labelIds: const [labelAmb],
+            dependencies: const [
+              TdfTaskDependency(taskId: taskAmb, requiredCompletion: 2),
+            ],
+            conditions: const [
+              LocationTaskCondition(locationIds: [locAmb]),
+            ],
+            modifiedAt: t(15),
+          ),
+        ],
+        labels: [
+          TdfLabel(id: labelAmb, name: 'Ambiguous Label', modifiedAt: t(12)),
+          sharedLabelOnRemote.copyWith(
+            conditions: const [
+              LocationTaskCondition(locationIds: [locAmb]),
+            ],
+            modifiedAt: t(15),
+          ),
+        ],
+        locations: [
+          TdfLocation(
+            id: locAmb,
+            name: 'Ambiguous Location',
+            latitude: 48.1,
+            longitude: 11.5,
+            radius: 150,
+            modifiedAt: t(12),
+          ),
+        ],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: t(20),
+      );
+
+      final recoveredBoard = TaskBoardSync.recoverAmbiguousEntities(
+        localBoard: localBoard,
+        sharedBoard: sharedBoard,
+        recoverTaskIds: const [taskAmb],
+        recoverLabelIds: const [labelAmb],
+        recoverLocationIds: const [locAmb],
+        evaluationTime: t(30),
+      );
+
+      final newLocId = recoveredBoard.locations.single.id;
+      final newLabelId = recoveredBoard.labels
+          .firstWhere((label) => label.id != labelShared)
+          .id;
+      final newTaskId = recoveredBoard.allTasks
+          .firstWhere((task) => task.id != taskShared)
+          .id;
+
+      final mergedSharedLabel = recoveredBoard.findLabel(labelShared)!;
+      final sharedLabelLocCond =
+          mergedSharedLabel.conditions.single as LocationTaskCondition;
+      expect(
+        sharedLabelLocCond.locationIds,
+        equals([newLocId]),
+        reason: 'Shared surviving label referencing recovered location must be rewritten',
+      );
+      expect(mergedSharedLabel.modifiedAt, equals(t(30)));
+
+      final mergedSharedTask = recoveredBoard.findTask(taskShared)!;
+      expect(
+        mergedSharedTask.labelIds,
+        equals([newLabelId]),
+        reason: 'Shared surviving task referencing recovered label must be rewritten',
+      );
+      expect(
+        mergedSharedTask.dependencies,
+        equals([TdfTaskDependency(taskId: newTaskId, requiredCompletion: 2)]),
+        reason: 'Shared surviving task referencing recovered prerequisite must be rewritten',
+      );
+      final sharedTaskLocCond =
+          mergedSharedTask.conditions.single as LocationTaskCondition;
+      expect(
+        sharedTaskLocCond.locationIds,
+        equals([newLocId]),
+        reason: 'Shared surviving task referencing recovered location must be rewritten',
+      );
+      expect(mergedSharedTask.modifiedAt, equals(t(30)));
+
+      // Section 6.7.7 post-merge resource bounds in validateMergedGraphAndBounds:
+      final tooManyLocations = <TdfLocation>[
+        for (var i = 0; i <= maxTdfLocations; i++)
+          TdfLocation(
+            id: 'Loc${i.toString().padLeft(7, '0')}',
+            name: 'Loc $i',
+            latitude: 48.0,
+            longitude: 11.0,
+            radius: 100.0,
+          ),
+      ];
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds(
+          const [],
+          const [],
+          tooManyLocations,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Exceeding maxTdfLocations (200) must throw limitExceeded',
+      );
+
+      final tooManyLabelIds = <String>[
+        for (var i = 0; i <= maxTdfArgsPerStmt; i++)
+          'Lbl${i.toString().padLeft(7, '0')}',
+      ];
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds([
+          makeTask('TskLblLim1', 'Task').copyWith(labelIds: tooManyLabelIds),
+        ], const []),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Task with > 64 labelIds must throw limitExceeded',
+      );
+
+      final tooManyDependencies = <TdfTaskDependency>[
+        for (var i = 0; i <= maxTdfArgsPerStmt; i++)
+          TdfTaskDependency(taskId: 'Dep${i.toString().padLeft(7, '0')}'),
+      ];
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds([
+          makeTask(
+            'TskDepLim1',
+            'Task',
+          ).copyWith(dependencies: tooManyDependencies),
+        ], const []),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Task with > 64 dependencies must throw limitExceeded',
+      );
+
+      final tooManyLocRefs = <String>[
+        for (var i = 0; i <= maxTdfLocationRefsPerEntity; i++)
+          'Loc${i.toString().padLeft(7, '0')}',
+      ];
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds([
+          makeTask('TskLocLim1', 'Task').copyWith(
+            conditions: [LocationTaskCondition(locationIds: tooManyLocRefs)],
+          ),
+        ], const []),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Task with > 63 location refs must throw limitExceeded',
+      );
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds(const [], [
+          TdfLabel(
+            id: 'LblLocLim1',
+            name: 'Label',
+            conditions: [LocationTaskCondition(locationIds: tooManyLocRefs)],
+          ),
+        ]),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Label with > 63 location refs must throw limitExceeded',
+      );
+    });
   });
 
   group('TDF 0.5.1 Section 6.11.2 Shared Queue Sync', () {

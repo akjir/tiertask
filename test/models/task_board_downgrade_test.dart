@@ -16,6 +16,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/services/tdf_service.dart';
@@ -519,6 +520,56 @@ void main() {
         afterSoloDowngrade.queueModifiedAt,
         equals(fixedDate),
         reason: 'Section 6.3: When |E_ctx| = 0 and priority is false, downgrade is a strict no-op',
+      );
+    });
+
+    test('evaluates GPS location conditions in downgradeTask when activeLabelId is null and coordinates are provided', () {
+      const locOffice = TdfLocation(
+        id: 'locOffOkD2',
+        name: 'Office',
+        latitude: 52.5200,
+        longitude: 13.4050,
+        radius: 100.0,
+      );
+      final tasks = <TaskItem>[
+        TaskItem(
+          id: 'f10000OkD2',
+          title: 'Focus 1',
+          isPriority: true,
+          createdAt: fixedDate,
+        ),
+        TaskItem(id: 'f20000OkD2', title: 'Focus 2', createdAt: fixedDate),
+        TaskItem(
+          id: 'locTskOkD2',
+          title: 'Office Task (Location Restricted)',
+          conditions: const [
+            LocationTaskCondition(locationIds: ['locOffOkD2']),
+          ],
+          createdAt: fixedDate,
+        ),
+      ];
+      final board = TaskBoard.evaluate(
+        tasks: tasks,
+        locations: const [locOffice],
+        evaluationTime: fixedDate,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: fixedDate,
+          taskIds: tasks.map((task) => task.id).toList(),
+        ),
+      );
+
+      // At coordinates far from Office (48.1351, 11.5820), locTskOkD2 is Blocked,
+      // so E_ctx for f10000OkD2 contains only [f20000OkD2].
+      final downgradedAwayFromOffice = board.downgradeTask(
+        'f10000OkD2',
+        currentLatitude: 48.1351,
+        currentLongitude: 11.5820,
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(
+        downgradedAwayFromOffice.queueTaskIds,
+        equals(['f20000OkD2', 'f10000OkD2', 'locTskOkD2']),
+        reason: 'When locTskOkD2 is blocked by GPS coordinates, E_ctx.last is f20000OkD2, so f10000OkD2 moves immediately after f20000OkD2 ahead of locTskOkD2',
       );
     });
   });

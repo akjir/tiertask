@@ -32,6 +32,7 @@ import '../repositories/webdav_repository.dart';
 import '../services/app_logger.dart';
 import '../services/tdf_importer.dart';
 import 'config_providers.dart';
+import 'location_providers.dart';
 import 'sync_providers.dart';
 import 'workspace_providers.dart';
 
@@ -264,18 +265,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? currentDate,
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final locationFix = ref.read(locationStateProvider).fix;
     await _commitMutation(
       _currentBoard.downgradeTask(
         taskId,
         activeLabelId: activeFilterLabelId,
+        currentLatitude: locationFix?.latitude,
+        currentLongitude: locationFix?.longitude,
         currentDate: utcNow,
         localEvaluationTime: localNow,
       ),
     );
   }
 
-  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.0`) or `0.5.1` [rawTdf]
-  /// document into `tdf 0.5.1`, invalidates any earlier synchronization baseline per
+  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.1`) or `0.6.0` [rawTdf]
+  /// document into `tdf 0.6.0`, invalidates any earlier synchronization baseline per
   /// `TDF_SPEC.md` Section 10.1, and persists the migrated document to active storage.
   Future<TdfImportResult> importLegacyTdf(
     String rawTdf, {

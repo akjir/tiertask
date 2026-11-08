@@ -157,7 +157,9 @@ class TaskBoardQueueMutator {
     );
     final task = board.findTask(taskId);
     if (task == null) return board;
-    final hasActiveContext = activeLabelId != null && activeLabelId.isNotEmpty;
+    final hasActiveContext =
+        (activeLabelId != null && activeLabelId.isNotEmpty) ||
+        (currentLatitude != null && currentLongitude != null);
     final contextBoard = hasActiveContext
         ? TaskBoardEvaluator.evaluate(
             tasks: board.allTasks,

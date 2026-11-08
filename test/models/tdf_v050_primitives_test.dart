@@ -101,6 +101,42 @@ void main() {
         reason: 'Unpaired low surrogate must be rejected',
       );
     });
+
+    test('validates TaskLink.isValidUri using Unicode scalar value count rather than UTF-16 code units', () {
+      const prefix = 'https://example.com/';
+      final valid2048Scalars = '$prefix${'\u{1F600}' * (2048 - prefix.length)}';
+      expect(
+        valid2048Scalars.length,
+        greaterThan(TaskLink.maxUriLength),
+        reason: 'Astral plane URI exceeds 2048 UTF-16 code units',
+      );
+      expect(
+        TdfCalendar.countUnicodeScalars(valid2048Scalars),
+        equals(TaskLink.maxUriLength),
+      );
+      expect(
+        TaskLink.isValidUri(valid2048Scalars),
+        isTrue,
+        reason: 'URI with exactly 2048 Unicode scalar values must be valid',
+      );
+
+      final invalid2049Scalars = '$valid2048Scalars\u{1F600}';
+      expect(
+        TaskLink.isValidUri(invalid2049Scalars),
+        isFalse,
+        reason: 'URI with 2049 Unicode scalar values must be rejected',
+      );
+      expect(
+        TaskLink.isValidUri('   '),
+        isFalse,
+        reason: 'ASCII space-only URI must be rejected',
+      );
+      expect(
+        TaskLink.isValidUri('\t'),
+        isFalse,
+        reason: 'ASCII tab-only URI must be rejected',
+      );
+    });
   });
 
   group('TDF 0.5.0 TdfRepeatClock and Europe/Berlin Section 6.10.4 Vectors', () {

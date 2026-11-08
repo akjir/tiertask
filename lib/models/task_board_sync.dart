@@ -241,6 +241,12 @@ class TaskBoardSync {
     final validLabelIds = <String>{
       for (final label in labelOutcome.liveLabels) label.id,
     };
+    final tombstonedLabelIds = <String>{
+      ...labelOutcome.deletedLabelsById.keys,
+      if (baseline != null)
+        for (final label in baseline.labels)
+          if (!validLabelIds.contains(label.id)) label.id,
+    };
     final previewLabelsById = _previewPostCascadeLabels(
       labelOutcome.liveLabels,
       tombstonedLocationIds,
@@ -252,6 +258,7 @@ class TaskBoardSync {
       taskConflictResolutions,
       options,
       tombstonedLocationIds: tombstonedLocationIds,
+      tombstonedLabelIds: tombstonedLabelIds,
       validLabelIds: validLabelIds,
       postCascadeLabelsById: previewLabelsById,
     );
@@ -289,6 +296,7 @@ class TaskBoardSync {
           baseline?.labels,
           knownScopedLabelIds: knownScopedLabelIds,
           evictedFromQueueOut: evictedFromQueueIds,
+          boards: boards,
         );
     final tasksAfterLocStrip =
         TaskBoardReconciler.stripDeletedLocationsFromTasksAndValidate(
@@ -569,7 +577,7 @@ class TaskBoardSync {
         if (labelIdMap[label.id] case final newId?)
           _rewriteRecoveredLabel(label, newId, locationIdMap, now)
         else if (sharedLabelIds.contains(label.id))
-          label,
+          _rewriteRecoveredLabel(label, label.id, locationIdMap, now),
     ];
     final adjustedTasks = <TaskItem>[
       for (final task in localBoard.allTasks)
@@ -583,7 +591,14 @@ class TaskBoardSync {
             now,
           )
         else if (sharedTaskIds.contains(task.id))
-          task,
+          _rewriteRecoveredTask(
+            task,
+            task.id,
+            labelIdMap,
+            taskIdMap,
+            locationIdMap,
+            now,
+          ),
     ];
     final adjustedQueueIds = <String>[
       for (final id in localBoard.queueBlock.taskIds)
@@ -638,12 +653,29 @@ class TaskBoardSync {
     List<TdfLabel> labels, [
     List<TdfLocation> locations = const <TdfLocation>[],
   ]) {
+    if (locations.length > maxTdfLocations) {
+      _throwTdf(
+        TdfErrorKind.limitExceeded,
+        'Merged document exceeds MAX_LOCATIONS (200).',
+      );
+    }
     if (tasks.length + labels.length + locations.length + 2 >
         maxTdfBlocksPerDoc) {
       _throwTdf(
         TdfErrorKind.limitExceeded,
         'Merged document exceeds MAX_BLOCKS_PER_DOC (4096).',
       );
+    }
+    for (final label in labels) {
+      if (_countLocationRefs(label.conditions) > maxTdfLocationRefsPerEntity) {
+        _throwTdf(
+          TdfErrorKind.limitExceeded,
+          'Merged label "${label.id}" exceeds MAX_LOCATION_REFS_PER_ENTITY (63).',
+        );
+      }
+    }
+    for (final task in tasks) {
+      _validateTaskBounds(task);
     }
     final taskMap = <String, TaskItem>{for (final task in tasks) task.id: task};
     if (_hasDependencyCycle(taskMap)) {
@@ -658,6 +690,34 @@ class TaskBoardSync {
   static int _compareConcurrentQueuedTasks(TaskItem left, TaskItem right) {
     final createdCmp = left.createdAt.compareTo(right.createdAt);
     return createdCmp != 0 ? createdCmp : left.id.compareTo(right.id);
+  }
+
+  /// Returns whether any `LocationTaskCondition` in [conditions] references a key in [locationIdMap].
+  static bool _conditionsReferenceAny(
+    List<TaskCondition> conditions,
+    Map<String, String> locationIdMap,
+  ) {
+    if (conditions.isEmpty || locationIdMap.isEmpty) {
+      return false;
+    }
+    for (final rule in conditions) {
+      if (rule is LocationTaskCondition &&
+          rule.locationIds.any(locationIdMap.containsKey)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Counts total `<location-id>` references across all `LocationTaskCondition` rules in [conditions].
+  static int _countLocationRefs(List<TaskCondition> conditions) {
+    var count = 0;
+    for (final rule in conditions) {
+      if (rule is LocationTaskCondition) {
+        count += rule.locationIds.length;
+      }
+    }
+    return count;
   }
 
   /// Checks whether [taskMap] contains any directed dependency cycle.
@@ -779,19 +839,34 @@ class TaskBoardSync {
     ];
   }
 
-  /// Rewrites a recovered [label] with [newId] and remapped `condition location` references per Section 6.8.4.
+  /// Rewrites a recovered or surviving [label] with [newId] and remapped `condition location` references per Section 6.8.4.
   static TdfLabel _rewriteRecoveredLabel(
     TdfLabel label,
     String newId,
     Map<String, String> locationIdMap,
     DateTime now,
-  ) => label.copyWith(
-    id: newId,
-    modifiedAt: TaskItem.nextModifiedTimestamp(now, label.effectiveModifiedAt),
-    conditions: _rewriteConditionLocations(label.conditions, locationIdMap),
-  );
+  ) {
+    final idChanged = newId != label.id;
+    final condChanged = _conditionsReferenceAny(
+      label.conditions,
+      locationIdMap,
+    );
+    if (!idChanged && !condChanged) {
+      return label;
+    }
+    return label.copyWith(
+      id: newId,
+      modifiedAt: TaskItem.nextModifiedTimestamp(
+        now,
+        label.effectiveModifiedAt,
+      ),
+      conditions: condChanged
+          ? _rewriteConditionLocations(label.conditions, locationIdMap)
+          : label.conditions,
+    );
+  }
 
-  /// Rewrites a recovered [task] with [newId] and remapped `labelIds`, `dependencies`, and `condition location` references per Section 6.8.4.
+  /// Rewrites a recovered or surviving [task] with [newId] and remapped `labelIds`, `dependencies`, and `condition location` references per Section 6.8.4.
   static TaskItem _rewriteRecoveredTask(
     TaskItem task,
     String newId,
@@ -799,21 +874,36 @@ class TaskBoardSync {
     Map<String, String> taskIdMap,
     Map<String, String> locationIdMap,
     DateTime now,
-  ) => task.copyWith(
-    id: newId,
-    modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
-    labelIds: <String>[
-      for (final labelId in task.labelIds) labelIdMap[labelId] ?? labelId,
-    ],
-    conditions: _rewriteConditionLocations(task.conditions, locationIdMap),
-    dependencies: <TdfTaskDependency>[
+  ) {
+    final idChanged = newId != task.id;
+    final labelsChanged = task.labelIds.any(labelIdMap.containsKey);
+    final depsChanged = task.dependencies.any(
+      (dep) => taskIdMap.containsKey(dep.taskId),
+    );
+    final condChanged = _conditionsReferenceAny(task.conditions, locationIdMap);
+    if (!idChanged && !labelsChanged && !depsChanged && !condChanged) {
+      return task;
+    }
+    final mappedDeps = <TdfTaskDependency>[
       for (final dependency in task.dependencies)
         TdfTaskDependency(
           taskId: taskIdMap[dependency.taskId] ?? dependency.taskId,
           requiredCompletion: dependency.requiredCompletion,
         ),
-    ],
-  );
+    ];
+    return task.copyWith(
+      id: newId,
+      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+      labelIds: <String>[
+        for (final labelId in task.labelIds) labelIdMap[labelId] ?? labelId,
+      ],
+      conditions: condChanged
+          ? _rewriteConditionLocations(task.conditions, locationIdMap)
+          : task.conditions,
+      dependencies: mappedDeps,
+      blockedByTaskIds: <String>[for (final dep in mappedDeps) dep.taskId],
+    );
+  }
 
   /// Strips `blocked` references targeting task deletion records that expired during [afterPrune] per Section 6.8.3.
   static List<TaskItem> _stripExpiredTaskDependencies(
@@ -889,6 +979,28 @@ class TaskBoardSync {
   /// Throws a [TdfException] at line 1 with [kind] and [message].
   static Never _throwTdf(TdfErrorKind kind, String message) =>
       throw TdfException(kind: kind, line: 1, message: message);
+
+  /// Validates Section 7 directive argument and location reference bounds on [task].
+  static void _validateTaskBounds(TaskItem task) {
+    if (task.labelIds.length > maxTdfArgsPerStmt) {
+      _throwTdf(
+        TdfErrorKind.limitExceeded,
+        'Merged task "${task.id}" exceeds MAX_ARGS_PER_STMT (64) on labels.',
+      );
+    }
+    if (task.dependencies.length > maxTdfArgsPerStmt) {
+      _throwTdf(
+        TdfErrorKind.limitExceeded,
+        'Merged task "${task.id}" exceeds MAX_ARGS_PER_STMT (64) on blocked.',
+      );
+    }
+    if (_countLocationRefs(task.conditions) > maxTdfLocationRefsPerEntity) {
+      _throwTdf(
+        TdfErrorKind.limitExceeded,
+        'Merged task "${task.id}" exceeds MAX_LOCATION_REFS_PER_ENTITY (63).',
+      );
+    }
+  }
 
   /// Recursive DFS helper for cycle detection (`0` = unvisited, `1` = visiting, `2` = visited).
   static bool _visitCycleDfs(

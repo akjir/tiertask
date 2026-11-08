@@ -72,11 +72,98 @@ void main() {
         );
 
         if (id == '01_complete_v060') {
-          expect(board.deletedBlock.locations.length, equals(1));
+          final deletedJson = normalizedJson['deleted'] as Map<String, Object?>;
+          expect(
+            board.deletedBlock.generation,
+            equals(deletedJson['generation']),
+          );
+          final deletedTasksJson = deletedJson['tasks'] as List<Object?>;
+          expect(
+            board.deletedBlock.tasks.length,
+            equals(deletedTasksJson.length),
+          );
+          final deletedTaskJson =
+              deletedTasksJson.single as Map<String, Object?>;
+          expect(
+            board.deletedBlock.tasks.single.taskId,
+            equals(deletedTaskJson['id']),
+          );
+          expect(
+            board.deletedBlock.tasks.single.deletedAt,
+            equals(DateTime.parse(deletedTaskJson['deletedAt'] as String)),
+          );
+          expect(
+            board.deletedBlock.tasks.single.completionsCheckpoint,
+            equals(deletedTaskJson['completionsCheckpoint']),
+          );
+
+          final deletedLabelsJson = deletedJson['labels'] as List<Object?>;
+          expect(
+            board.deletedBlock.labels.length,
+            equals(deletedLabelsJson.length),
+          );
+          final deletedLabelJson =
+              deletedLabelsJson.single as Map<String, Object?>;
+          expect(
+            board.deletedBlock.labels.single.labelId,
+            equals(deletedLabelJson['id']),
+          );
+          expect(
+            board.deletedBlock.labels.single.deletedAt,
+            equals(DateTime.parse(deletedLabelJson['deletedAt'] as String)),
+          );
+
+          final deletedLocationsJson =
+              deletedJson['locations'] as List<Object?>;
+          expect(
+            board.deletedBlock.locations.length,
+            equals(deletedLocationsJson.length),
+          );
+          final deletedLocationJson =
+              deletedLocationsJson.single as Map<String, Object?>;
           expect(
             board.deletedBlock.locations.single.locationId,
-            equals('8tYp4M0eF3'),
+            equals(deletedLocationJson['id']),
           );
+          expect(
+            board.deletedBlock.locations.single.deletedAt,
+            equals(DateTime.parse(deletedLocationJson['deletedAt'] as String)),
+          );
+
+          final queueJson = normalizedJson['queue'] as Map<String, Object?>;
+          expect(
+            board.queueBlock.modifiedAt,
+            equals(DateTime.parse(queueJson['modified'] as String)),
+          );
+          expect(board.queueBlock.taskIds, equals(queueJson['taskIds']));
+
+          final labelsJson = normalizedJson['labels'] as List<Object?>;
+          expect(board.labels.length, equals(labelsJson.length));
+          final homeLabel = board.findLabel('4x9p2mOkD2')!;
+          expect(homeLabel.isScoped, isFalse);
+          expect(homeLabel.name, equals('Home & Garden'));
+          expect(homeLabel.color, isNull);
+          expect(homeLabel.note, isNull);
+          expect(homeLabel.modifiedAt, equals(DateTime.utc(2026, 11, 1, 8, 0)));
+          expect(
+            homeLabel.conditions
+                .whereType<LocationTaskCondition>()
+                .single
+                .locationIds,
+            equals(['7pQr9mOkD2']),
+          );
+
+          final itLabel = board.findLabel('9kLm2P0aBc')!;
+          expect(itLabel.isScoped, isTrue);
+          expect(itLabel.name, equals('IT & Servers'));
+          expect(itLabel.color, equals('#2196F3'));
+          expect(itLabel.note, isNull);
+          expect(itLabel.modifiedAt, equals(DateTime.utc(2026, 11, 1, 8, 0)));
+          expect(
+            itLabel.conditions.whereType<DayTaskCondition>().single.dayTokens,
+            equals(['mon', 'tue', 'wed', 'thu', 'fri']),
+          );
+
           expect(
             board.locations.map((loc) => loc.id),
             equals(['7pQr9mOkD2', '5473OnNDhL']),
@@ -86,6 +173,49 @@ void main() {
           expect(warehouse.longitudeText, equals('13.405'));
           expect(warehouse.radiusText, equals('75.5'));
           expect(warehouse.effectiveModifiedAt, equals(DateTime.utc(1970)));
+
+          final orderTask = board.findTask('3nQp7ROkB8')!;
+          expect(orderTask.isPriority, isFalse);
+          expect(
+            orderTask.title,
+            equals('Order replacement lawnmower blades online'),
+          );
+          expect(orderTask.note, isNull);
+          expect(orderTask.createdAt, equals(DateTime.utc(2026, 11, 1, 18, 0)));
+          expect(orderTask.completedAt, isNull);
+          expect(
+            orderTask.modifiedAt,
+            equals(DateTime.utc(2026, 11, 1, 18, 0)),
+          );
+          expect(orderTask.completions, equals(0));
+          expect(orderTask.repeatRule, isNull);
+          expect(orderTask.labelIds, equals(['4x9p2mOkD2']));
+          expect(orderTask.dependencies, isEmpty);
+          expect(orderTask.suspendedAt, isNull);
+          expect(orderTask.dueAt, equals(DateTime.utc(2026, 11, 3, 17, 0)));
+          expect(
+            orderTask.origin,
+            equals(
+              const TaskOrigin(
+                namespace: 'https://jira.example.com',
+                externalKey: 'HOME-42',
+              ),
+            ),
+          );
+          expect(
+            orderTask.links,
+            equals(const [
+              TaskLink(
+                title: 'Portal Login',
+                uri: 'https://example.com/portal#login',
+              ),
+            ]),
+          );
+          expect(
+            orderTask.conditions,
+            equals(const [GlobalResetTaskCondition()]),
+          );
+          expect(orderTask.subtasks, isEmpty);
 
           final mowTask = board.findTask('8jKaCdOkD2')!;
           expect(mowTask.dueAt, equals(DateTime.utc(2026, 11, 7, 16, 0)));
@@ -98,6 +228,8 @@ void main() {
               ),
             ),
           );
+          expect(mowTask.subtasksAutoFinish, isTrue);
+          expect(mowTask.subtasks.length, equals(2));
           final locCond = mowTask.conditions
               .whereType<LocationTaskCondition>()
               .single;
@@ -107,6 +239,21 @@ void main() {
             reason: 'Coalesced location IDs must preserve first-seen declaration order',
           );
         } else if (id == '02_scoped_labels_and_shared_origin') {
+          expect(
+            board.labels.map((label) => label.id).toSet(),
+            equals({'4x9p2mOkD2', '9kLm2P0aBc'}),
+          );
+          expect(board.findLabel('4x9p2mOkD2')!.isScoped, isFalse);
+          expect(board.findLabel('9kLm2P0aBc')!.isScoped, isTrue);
+          expect(board.locations, isEmpty);
+          expect(
+            board.allTasks.map((task) => task.id).toSet(),
+            equals({'2bDf6HOkA4', '5vWx9ZOk91'}),
+          );
+          expect(
+            board.findTask('2bDf6HOkA4')!.origin,
+            equals(board.findTask('5vWx9ZOk91')!.origin),
+          );
           final evalMap =
               normalizedJson['globalViewEvaluation'] as Map<String, Object?>;
           final labelsById = {
@@ -257,19 +404,31 @@ void main() {
         } else {
           final expectedError = testCase['expectedError'] as String;
           final expectedLine = testCase['expectedLine'] as int;
+          final expectedMatcher = isA<TdfException>()
+              .having(
+                (error) => _specErrorName(error.kind),
+                'kind',
+                expectedError,
+              )
+              .having((error) => error.line, 'line', expectedLine);
           expect(
             () => tdfService.parse(inputTdf, evaluationTime: fixedDate),
-            throwsA(
-              isA<TdfException>()
-                  .having(
-                    (error) => _specErrorName(error.kind),
-                    'kind',
-                    expectedError,
-                  )
-                  .having((error) => error.line, 'line', expectedLine),
-            ),
+            throwsA(expectedMatcher),
             reason:
-                'Invalid migration fixture $id must fail with $expectedError at line $expectedLine',
+                'Invalid migration fixture $id must fail with $expectedError at line $expectedLine on parse',
+          );
+          expect(
+            () =>
+                TdfImporter.importDocument(inputTdf, evaluationTime: fixedDate),
+            throwsA(expectedMatcher),
+            reason:
+                'Invalid migration fixture $id must fail with $expectedError at line $expectedLine on importDocument',
+          );
+          expect(
+            () => TdfImporter.migrate051To060(inputTdf),
+            throwsA(expectedMatcher),
+            reason:
+                'Invalid migration fixture $id must fail with $expectedError at line $expectedLine on migrate051To060',
           );
         }
       }

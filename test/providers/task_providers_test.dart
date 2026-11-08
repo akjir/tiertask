@@ -17,11 +17,13 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -563,6 +565,52 @@ void main() {
         ),
         isTrue,
         reason: 'Deleting a location must record its tombstone in deletedBlock.locations',
+      );
+
+      // Verify downgradeTask forwards current GPS fix from locationStateProvider:
+      await notifier.addLocation(
+        'Munich Office',
+        latitude: 48.1351,
+        longitude: 11.5820,
+        radiusMeters: 100,
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      final munichId = board.locations.single.id;
+      await notifier.addTask(
+        'Focus Top',
+        targetTier: TaskTier.focus,
+        isPriority: true,
+      );
+      await notifier.addTask(
+        'Munich Only Task',
+        targetTier: TaskTier.planned,
+        conditions: [
+          LocationTaskCondition(locationIds: [munichId]),
+        ],
+      );
+      board = container.read(taskNotifierProvider).requireValue;
+      final focusTopId = board.allTasks
+          .firstWhere((item) => item.title == 'Focus Top')
+          .id;
+      final munichTaskId = board.allTasks
+          .firstWhere((item) => item.title == 'Munich Only Task')
+          .id;
+      await notifier.moveTaskInQueue(focusTopId, beforeTaskId: task.id);
+      await notifier.moveTaskInQueue(munichTaskId, afterTaskId: task.id);
+
+      // With active GPS fix in Berlin (far from Munich), munichTaskId is excluded from E_ctx:
+      container
+          .read(locationStateProvider.notifier)
+          .state = LocationState.found(
+        fix: const LocationFix(latitude: 52.5200, longitude: 13.4050),
+        updatedAt: fixedDate,
+      );
+      await notifier.downgradeTask(focusTopId, currentDate: fixedDate);
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(
+        board.queueTaskIds,
+        equals([task.id, focusTopId, munichTaskId]),
+        reason: 'TaskNotifier.downgradeTask must pass currentFix coordinates so GPS-blocked tasks are excluded from E_ctx',
       );
     });
   });

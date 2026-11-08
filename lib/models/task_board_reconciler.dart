@@ -295,6 +295,7 @@ class TaskBoardReconciler {
     Map<String, TdfDeletionResolution> resolutions,
     (int?, bool, DateTime) options, {
     Set<String> tombstonedLocationIds = const <String>{},
+    Set<String> tombstonedLabelIds = const <String>{},
     Set<String>? validLabelIds,
     Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
   }) {
@@ -320,6 +321,7 @@ class TaskBoardReconciler {
         context,
         accumulator,
         tombstonedLocationIds: tombstonedLocationIds,
+        tombstonedLabelIds: tombstonedLabelIds,
         validLabelIds: validLabelIds,
         postCascadeLabelsById: postCascadeLabelsById,
       )) {
@@ -345,6 +347,7 @@ class TaskBoardReconciler {
     List<TdfLabel>? baselineLabels, {
     Set<String> knownScopedLabelIds = const <String>{},
     Set<String>? evictedFromQueueOut,
+    (TaskBoard, TaskBoard, TaskBoard?)? boards,
   }) {
     final baseIds = <String>{
       if (baselineLabels != null)
@@ -356,6 +359,18 @@ class TaskBoardReconciler {
         for (final label in baselineLabels)
           if (label.isScoped) label.id,
     };
+    final primaryMap = boards != null
+        ? _indexById(boards.$1.allTasks, (task) => task.id)
+        : const <String, TaskItem>{};
+    final secondaryMap = boards != null
+        ? _indexById(boards.$2.allTasks, (task) => task.id)
+        : const <String, TaskItem>{};
+    final baselineMap = boards?.$3 != null
+        ? _indexById(
+            boards?.$3?.allTasks ?? const <TaskItem>[],
+            (task) => task.id,
+          )
+        : const <String, TaskItem>{};
     return <TaskItem>[
       for (final task in tasks)
         _stripDeletedLabelsFromSingleTask(
@@ -365,6 +380,11 @@ class TaskBoardReconciler {
           baseIds,
           scopedIds,
           evictedFromQueueOut,
+          sourceVariants: (
+            primaryMap[task.id],
+            secondaryMap[task.id],
+            baselineMap[task.id],
+          ),
         ),
     ];
   }
@@ -499,6 +519,95 @@ class TaskBoardReconciler {
     return ids;
   }
 
+  /// Filters [locationIds] against [validLocationIds], [deletedLocationsById], and [baselineLocationSet].
+  static ({List<String> retainedIds, bool strippedAny, DateTime? latestAt})
+  _filterLocationIdsForEntity({
+    required String entityKind,
+    required String entityId,
+    required List<String> locationIds,
+    required Set<String> validLocationIds,
+    required Map<String, TdfDeletedLocationRecord> deletedLocationsById,
+    required Set<String> baselineLocationSet,
+  }) {
+    final retained = <String>[];
+    var stripped = false;
+    DateTime? latestAt;
+
+    for (final locId in locationIds) {
+      if (validLocationIds.contains(locId)) {
+        retained.add(locId);
+        continue;
+      }
+      final deletedRecord = deletedLocationsById[locId];
+      if (deletedRecord != null || baselineLocationSet.contains(locId)) {
+        stripped = true;
+        latestAt = _maxNullableDate(latestAt, deletedRecord?.deletedAt);
+        continue;
+      }
+      throw TdfException(
+        kind: TdfErrorKind.unknownLocationReference,
+        line: 1,
+        message:
+            'Merged $entityKind "$entityId" references undeclared location "$locId".',
+      );
+    }
+    return (retainedIds: retained, strippedAny: stripped, latestAt: latestAt);
+  }
+
+  /// Computes the post-cascade [TaskItem] and its deterministic Section 6.7.6 revision after stripping deleted labels.
+  static TaskItem _finalizePostLabelCascadeTask(
+    TaskItem task, {
+    required List<String> retained,
+    required bool nextPriority,
+    required DateTime? latestLabelDeletion,
+    required (TaskItem?, TaskItem?, TaskItem?) sourceVariants,
+  }) {
+    final candidate = task.copyWith(
+      labelIds: retained,
+      isPriority: nextPriority,
+    );
+    final (primaryTask, secondaryTask, baselineTask) = sourceVariants;
+    if (primaryTask != null && secondaryTask != null) {
+      var greatest =
+          TdfPayloadComparison.compareTaskVersions(
+                primaryTask,
+                secondaryTask,
+              ) >=
+              0
+          ? primaryTask
+          : secondaryTask;
+      if (baselineTask != null &&
+          TdfPayloadComparison.compareTaskVersions(baselineTask, greatest) >
+              0) {
+        greatest = baselineTask;
+      }
+      final deletionNotNewer =
+          latestLabelDeletion == null ||
+          !latestLabelDeletion.isAfter(greatest.effectiveModifiedAt);
+      if (deletionNotNewer &&
+          greatest.completions == candidate.completions &&
+          TdfPayloadComparison.compareTaskPayloads(greatest, candidate) == 0) {
+        return greatest;
+      }
+      var maxObserved = _laterDate(
+        primaryTask.effectiveModifiedAt,
+        secondaryTask.effectiveModifiedAt,
+      );
+      maxObserved = _laterDate(maxObserved, baselineTask?.effectiveModifiedAt);
+      maxObserved = _laterDate(maxObserved, latestLabelDeletion);
+      return candidate.copyWith(
+        modifiedAt: maxObserved.add(const Duration(seconds: 1)),
+      );
+    }
+    final baseModified = _laterDate(
+      task.effectiveModifiedAt,
+      latestLabelDeletion,
+    );
+    return candidate.copyWith(
+      modifiedAt: baseModified.add(const Duration(seconds: 1)),
+    );
+  }
+
   /// Returns whether any label in [labelIds] has a post-cascade `LocationTaskCondition` in [postCascadeLabelsById].
   static bool _hasLiveLabelLocationRule(
     List<String> labelIds,
@@ -541,10 +650,21 @@ class TaskBoardReconciler {
       task.effectiveModifiedAt == baseTask.effectiveModifiedAt &&
       TdfPayloadComparison.compareTaskPayloads(task, baseTask) == 0;
 
+  /// Returns the later of [left] and optional [right].
+  static DateTime _laterDate(DateTime left, DateTime? right) =>
+      (right != null && right.isAfter(left)) ? right : left;
+
   /// Returns the maximum of three integers.
   static int _max3Int(int a, int b, int c) {
     final ab = a >= b ? a : b;
     return ab >= c ? ab : c;
+  }
+
+  /// Returns the later of two nullable [DateTime] values.
+  static DateTime? _maxNullableDate(DateTime? left, DateTime? right) {
+    if (left == null) return right;
+    if (right == null) return left;
+    return right.isAfter(left) ? right : left;
   }
 
   /// Computes generation advancement and ambiguity flags for one-sided entities absent from baseline.
@@ -725,6 +845,7 @@ class TaskBoardReconciler {
     _ReconcileContext context,
     _TaskAccumulator accumulator, {
     required Set<String> tombstonedLocationIds,
+    required Set<String> tombstonedLabelIds,
     required Set<String>? validLabelIds,
     required Map<String, TdfLabel> postCascadeLabelsById,
   }) {
@@ -735,6 +856,7 @@ class TaskBoardReconciler {
         incoming: secondaryTask,
         baseline: baselineTask,
         tombstonedLocationIds: tombstonedLocationIds,
+        tombstonedLabelIds: tombstonedLabelIds,
         validLabelIds: validLabelIds,
         postCascadeLabelsById: postCascadeLabelsById,
       );
@@ -922,8 +1044,9 @@ class TaskBoardReconciler {
     Map<String, TdfDeletedLabelRecord> deletedLabelsById,
     Set<String> baselineLabelSet,
     Set<String> scopedLabelSet,
-    Set<String>? evictedFromQueueOut,
-  ) {
+    Set<String>? evictedFromQueueOut, {
+    (TaskItem?, TaskItem?, TaskItem?) sourceVariants = (null, null, null),
+  }) {
     if (task.labelIds.isEmpty) return task;
     final retained = <String>[];
     DateTime? latestLabelDeletion;
@@ -961,15 +1084,12 @@ class TaskBoardReconciler {
     if (lostLastScopedLabel && evictedFromQueueOut != null) {
       evictedFromQueueOut.add(task.id);
     }
-    var baseModified = task.effectiveModifiedAt;
-    if (latestLabelDeletion != null &&
-        latestLabelDeletion.isAfter(baseModified)) {
-      baseModified = latestLabelDeletion;
-    }
-    return task.copyWith(
-      labelIds: retained,
-      isPriority: lostLastScopedLabel ? false : task.isPriority,
-      modifiedAt: baseModified.add(const Duration(seconds: 1)),
+    return _finalizePostLabelCascadeTask(
+      task,
+      retained: retained,
+      nextPriority: lostLastScopedLabel ? false : task.isPriority,
+      latestLabelDeletion: latestLabelDeletion,
+      sourceVariants: sourceVariants,
     );
   }
 
@@ -1073,48 +1193,6 @@ class TaskBoardReconciler {
       conditions: updatedConditions,
       modifiedAt: baseModified.add(const Duration(seconds: 1)),
     );
-  }
-
-  /// Filters [locationIds] against [validLocationIds], [deletedLocationsById], and [baselineLocationSet].
-  static ({List<String> retainedIds, bool strippedAny, DateTime? latestAt})
-  _filterLocationIdsForEntity({
-    required String entityKind,
-    required String entityId,
-    required List<String> locationIds,
-    required Set<String> validLocationIds,
-    required Map<String, TdfDeletedLocationRecord> deletedLocationsById,
-    required Set<String> baselineLocationSet,
-  }) {
-    final retained = <String>[];
-    var stripped = false;
-    DateTime? latestAt;
-
-    for (final locId in locationIds) {
-      if (validLocationIds.contains(locId)) {
-        retained.add(locId);
-        continue;
-      }
-      final deletedRecord = deletedLocationsById[locId];
-      if (deletedRecord != null || baselineLocationSet.contains(locId)) {
-        stripped = true;
-        latestAt = _maxNullableDate(latestAt, deletedRecord?.deletedAt);
-        continue;
-      }
-      throw TdfException(
-        kind: TdfErrorKind.unknownLocationReference,
-        line: 1,
-        message:
-            'Merged $entityKind "$entityId" references undeclared location "$locId".',
-      );
-    }
-    return (retainedIds: retained, strippedAny: stripped, latestAt: latestAt);
-  }
-
-  /// Returns the later of two nullable [DateTime] values.
-  static DateTime? _maxNullableDate(DateTime? left, DateTime? right) {
-    if (left == null) return right;
-    if (right == null) return left;
-    return right.isAfter(left) ? right : left;
   }
 }
 

@@ -549,5 +549,31 @@ task link01OkD2 {
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
       expect(reparsed.findTask('link01OkD2')!.links, equals(task.links));
     });
+
+    test('enforces Section 2.8 <uri> error precedence: LimitExceeded before InvalidUri when > 2048 scalars and containing a control character', () {
+      final overLimitWithControl = 'https://example.com/\t${'a' * 2048}';
+      final doc =
+          '''
+tdf 0.6.0
+
+task link02OkD2 {
+    name    "Precedence test"
+    created 2026-11-01 08:00
+    link    "Doc" "$overLimitWithControl"
+}
+''';
+
+      expect(
+        () => tdfService.parse(doc, evaluationTime: fixedDate),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Section 2.8 requires EmptyText -> LimitExceeded (> 2048 scalars) -> InvalidUri (control char / scheme)',
+      );
+    });
   });
 }

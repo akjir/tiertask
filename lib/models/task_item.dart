@@ -110,7 +110,11 @@ class TaskLink {
   /// Validates that [rawUri] is non-empty, within [maxUriLength], free of ASCII control characters,
   /// and begins with a valid URI scheme matching `[a-zA-Z][a-zA-Z0-9+.-]*:`.
   static bool isValidUri(String rawUri) {
-    if (rawUri.isEmpty || rawUri.length > maxUriLength) {
+    if (rawUri.isEmpty) {
+      return false;
+    }
+    final scalarCount = TdfCalendar.countUnicodeScalars(rawUri);
+    if (scalarCount == null || scalarCount > maxUriLength) {
       return false;
     }
     var colonIndex = -1;

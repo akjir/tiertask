@@ -404,6 +404,7 @@ class TdfPayloadComparison {
     required TaskItem incoming,
     required TaskItem? baseline,
     Set<String> tombstonedLocationIds = const <String>{},
+    Set<String> tombstonedLabelIds = const <String>{},
     Set<String>? validLabelIds,
     Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
   }) {
@@ -411,7 +412,11 @@ class TdfPayloadComparison {
     final winner = localWins ? local : incoming;
     final loser = localWins ? incoming : local;
     if (baseline == null) {
-      return winner;
+      return _preserveTombstonedLabelsWithoutBaseline(
+        winner,
+        loser,
+        tombstonedLabelIds,
+      );
     }
     final mergedName = _mergeScalar(
       local: local.title,
@@ -431,6 +436,7 @@ class TdfPayloadComparison {
       local: local.labelIds,
       incoming: incoming.labelIds,
       baseline: baseline.labelIds,
+      tombstonedLabelIds: tombstonedLabelIds,
     );
     final hasLiveLabelLocationRule = _hasLiveLabelLocationRuleForTask(
       mergedLabels,
@@ -1102,11 +1108,12 @@ class TdfPayloadComparison {
     return merged;
   }
 
-  /// Merges label reference sets `(B \ removed) U added` in ascending ASCII order per Section 6.7.5.
+  /// Merges label reference sets `(B \ removed) U added` in ascending ASCII order per Section 6.7.5, excluding [tombstonedLabelIds] from `removed` per Section 6.7.8.
   static List<String> _mergeLabelSets({
     required List<String> local,
     required List<String> incoming,
     required List<String> baseline,
+    Set<String> tombstonedLabelIds = const <String>{},
   }) {
     final bSet = <String>{...baseline};
     final lSet = <String>{...local};
@@ -1114,8 +1121,8 @@ class TdfPayloadComparison {
 
     final added = <String>{...lSet.difference(bSet), ...rSet.difference(bSet)};
     final removed = <String>{
-      ...bSet.difference(lSet),
-      ...bSet.difference(rSet),
+      ...bSet.difference(lSet).difference(tombstonedLabelIds),
+      ...bSet.difference(rSet).difference(tombstonedLabelIds),
     };
     final result = bSet.difference(removed).union(added).toList()..sort();
     return result;
@@ -1283,6 +1290,27 @@ class TdfPayloadComparison {
     }
     final sorted = <String>{...labelIds}.toList()..sort();
     return sorted;
+  }
+
+  /// Preserves any [tombstonedLabelIds] from [loser] on [winner] when merging without a baseline so $L_{\text{before}}(T)$ includes tombstoned labels.
+  static TaskItem _preserveTombstonedLabelsWithoutBaseline(
+    TaskItem winner,
+    TaskItem loser,
+    Set<String> tombstonedLabelIds,
+  ) {
+    if (tombstonedLabelIds.isEmpty || loser.labelIds.isEmpty) {
+      return winner;
+    }
+    final missingTombstoned = <String>[
+      for (final id in loser.labelIds)
+        if (tombstonedLabelIds.contains(id) && !winner.labelIds.contains(id))
+          id,
+    ];
+    if (missingTombstoned.isEmpty) {
+      return winner;
+    }
+    final combined = <String>[...winner.labelIds, ...missingTombstoned]..sort();
+    return winner.copyWith(labelIds: combined);
   }
 
   /// Strips [tombstonedLocationIds] from [model] and converts an emptied task location group into its cascade target state per Section 6.7.5 Point 2.

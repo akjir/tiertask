@@ -317,11 +317,11 @@ task 8jKaCdOkD2 {
       expect(TdfImporter.schemaRef051.version, equals('0.5.1'));
       expect(
         TdfImporter.schemaRef051.commit,
-        equals('8580e166417811432b11303f8c26d544c9819284'),
+        equals('f22a3d4b1b15e9d8f5dcbba86da4f7dbd6135b11'),
       );
       expect(
         TdfImporter.schemaRef051.blob,
-        equals('f0059d292dc2b82124e8228718ca0b08d6c2c886'),
+        equals('1504ddff1ad9bd40930e4f90de8302336524f4dc'),
       );
       expect(TdfImporter.historicalSchemaReferences.length, equals(5));
 
