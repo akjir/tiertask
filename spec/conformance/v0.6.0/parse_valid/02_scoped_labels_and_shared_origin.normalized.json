@@ -1,0 +1,16 @@
+{
+  "version": "0.6.0",
+  "canonicalSourceDigest": "32af7ce0f0cd847fc1676b1723b66e2ca08eb0188e7ff9859cdf490021a82767",
+  "globalViewEvaluation": {
+    "2bDf6HOkA4": {
+      "isRestrictedFromGlobalView": true,
+      "effectiveGlobalLabels": []
+    },
+    "5vWx9ZOk91": {
+      "isRestrictedFromGlobalView": false,
+      "effectiveGlobalLabels": [
+        "4x9p2mOkD2"
+      ]
+    }
+  }
+}

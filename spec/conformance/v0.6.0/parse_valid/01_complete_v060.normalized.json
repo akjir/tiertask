@@ -1,0 +1,225 @@
+{
+  "version": "0.6.0",
+  "canonicalSourceDigest": "9fa6b9c78cb287a78dd67a39b5bdab99f8af01b86ac2a92a9108b0f18ea71eb1",
+  "deleted": {
+    "generation": 4,
+    "tasks": [
+      {
+        "id": "6uCk8N0aB1",
+        "deletedAt": "2026-11-01T12:00:00Z",
+        "completionsCheckpoint": 3
+      }
+    ],
+    "labels": [
+      {
+        "id": "1rQv7S0cD2",
+        "deletedAt": "2026-11-02T09:00:00Z"
+      }
+    ],
+    "locations": [
+      {
+        "id": "8tYp4M0eF3",
+        "deletedAt": "2026-11-02T10:15:00Z"
+      }
+    ]
+  },
+  "queue": {
+    "modified": "2026-11-01T19:30:00Z",
+    "taskIds": [
+      "8jKaCdOkD2",
+      "3nQp7ROkB8"
+    ]
+  },
+  "labels": [
+    {
+      "id": "4x9p2mOkD2",
+      "scoped": false,
+      "name": "Home & Garden",
+      "color": null,
+      "note": null,
+      "modified": "2026-11-01T08:00:00Z",
+      "condition": {
+        "globalAny": false,
+        "dayGroup": {
+          "resetAny": false,
+          "rules": []
+        },
+        "timeGroup": {
+          "resetAny": false,
+          "rules": []
+        },
+        "locationGroup": {
+          "resetAny": false,
+          "locationIds": [
+            "7pQr9mOkD2"
+          ]
+        }
+      }
+    },
+    {
+      "id": "9kLm2P0aBc",
+      "scoped": true,
+      "name": "IT & Servers",
+      "color": "#2196F3",
+      "note": null,
+      "modified": "2026-11-01T08:00:00Z",
+      "condition": {
+        "globalAny": false,
+        "dayGroup": {
+          "resetAny": false,
+          "rules": [
+            [
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri"
+            ]
+          ]
+        },
+        "timeGroup": {
+          "resetAny": false,
+          "rules": []
+        },
+        "locationGroup": {
+          "resetAny": false,
+          "locationIds": []
+        }
+      }
+    }
+  ],
+  "locations": [
+    {
+      "id": "5473OnNDhL",
+      "name": "Warehouse",
+      "note": null,
+      "source": null,
+      "coordinates": {
+        "latitude": "0",
+        "longitude": "13.405"
+      },
+      "radius": "75.5",
+      "modified": "1970-01-01T00:00:00Z"
+    },
+    {
+      "id": "7pQr9mOkD2",
+      "name": "Home",
+      "note": "Main residence driveway and garden",
+      "source": "Erfurt, Germany",
+      "coordinates": {
+        "latitude": "50.9787",
+        "longitude": "11.0328"
+      },
+      "radius": "150",
+      "modified": "2026-11-01T08:00:00Z"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "3nQp7ROkB8",
+      "priority": false,
+      "name": "Order replacement lawnmower blades online",
+      "note": null,
+      "created": "2026-11-01T18:00:00Z",
+      "finished": null,
+      "modified": "2026-11-01T18:00:00Z",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": [],
+      "suspended": null,
+      "due": "2026-11-03T17:00:00Z",
+      "origin": {
+        "namespace": "https://jira.example.com",
+        "externalKey": "HOME-42"
+      },
+      "links": [
+        {
+          "title": "Portal Login",
+          "uri": "https://example.com/portal#login"
+        }
+      ],
+      "condition": {
+        "globalAny": true,
+        "dayGroup": {
+          "resetAny": false,
+          "rules": []
+        },
+        "timeGroup": {
+          "resetAny": false,
+          "rules": []
+        },
+        "locationGroup": {
+          "resetAny": false,
+          "locationIds": []
+        }
+      },
+      "subtasks": null
+    },
+    {
+      "id": "8jKaCdOkD2",
+      "priority": true,
+      "name": "Mow the lawn",
+      "note": "Check fuel level before starting",
+      "created": "2026-11-01T19:30:00Z",
+      "finished": null,
+      "modified": "2026-11-01T19:30:00Z",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": [
+        {
+          "targetId": "3nQp7ROkB8",
+          "requiredCompletions": 1
+        }
+      ],
+      "suspended": "2026-11-04T23:00:00Z",
+      "due": "2026-11-07T16:00:00Z",
+      "origin": {
+        "namespace": "https://jira.example.com",
+        "externalKey": "HOME-99"
+      },
+      "links": [],
+      "condition": {
+        "globalAny": false,
+        "dayGroup": {
+          "resetAny": false,
+          "rules": []
+        },
+        "timeGroup": {
+          "resetAny": false,
+          "rules": [
+            {
+              "start": "09:00",
+              "end": "18:00"
+            }
+          ]
+        },
+        "locationGroup": {
+          "resetAny": false,
+          "locationIds": [
+            "7pQr9mOkD2",
+            "5473OnNDhL"
+          ]
+        }
+      },
+      "subtasks": {
+        "autoFinish": true,
+        "steps": [
+          {
+            "done": false,
+            "text": "Get lawnmower from the shed"
+          },
+          {
+            "done": true,
+            "text": "Empty grass catcher bag"
+          }
+        ]
+      }
+    }
+  ]
+}

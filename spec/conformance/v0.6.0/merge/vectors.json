@@ -1,0 +1,420 @@
+{
+  "version": "0.6.0",
+  "invariant": "merge(B, L, R) == merge(B, R, L) for all vectors",
+  "vectors": [
+    {
+      "id": "merge_01_atomic_origin_pair",
+      "section": "6.7.5",
+      "description": "Origin (namespace, externalKey) merges as a single atomic pair so namespace and externalKey from different sides never mix.",
+      "baseline": {
+        "id": "3nQp7ROkB8",
+        "modified": "2026-11-01T10:00:00Z",
+        "origin": {
+          "namespace": "https://jira.example.com",
+          "externalKey": "HOME-1"
+        }
+      },
+      "left": {
+        "id": "3nQp7ROkB8",
+        "modified": "2026-11-01T10:05:00Z",
+        "origin": {
+          "namespace": "https://github.com/org/repo",
+          "externalKey": "issue:99"
+        }
+      },
+      "right": {
+        "id": "3nQp7ROkB8",
+        "modified": "2026-11-01T10:02:00Z",
+        "origin": {
+          "namespace": "https://jira.example.com",
+          "externalKey": "HOME-2"
+        }
+      },
+      "expected": {
+        "id": "3nQp7ROkB8",
+        "winner": "left",
+        "modified": "2026-11-01T10:05:00Z",
+        "origin": {
+          "namespace": "https://github.com/org/repo",
+          "externalKey": "issue:99"
+        }
+      }
+    },
+    {
+      "id": "merge_02_same_occurrence_unbundling",
+      "section": "6.7.5",
+      "description": "When B.completions == L.completions == R.completions and finished is omitted in all three, priority, suspended, due, repeat, blocked, and subtasks unbundle and merge independently.",
+      "baseline": {
+        "id": "8jKaCdOkD2",
+        "modified": "2026-11-01T10:00:00Z",
+        "completions": 2,
+        "finished": null,
+        "priority": false,
+        "suspended": null,
+        "due": "2026-11-05T18:00:00Z",
+        "repeat": {
+          "count": 1,
+          "unit": "weeks",
+          "at": null
+        },
+        "blocked": {
+          "3nQp7ROkB8": 1
+        },
+        "subtasks": {
+          "autoFinish": true,
+          "steps": [
+            {
+              "done": false,
+              "text": "Step A"
+            },
+            {
+              "done": false,
+              "text": "Step B"
+            }
+          ]
+        }
+      },
+      "left": {
+        "id": "8jKaCdOkD2",
+        "modified": "2026-11-01T10:05:00Z",
+        "completions": 2,
+        "finished": null,
+        "priority": true,
+        "suspended": null,
+        "due": "2026-11-06T18:00:00Z",
+        "repeat": {
+          "count": 1,
+          "unit": "weeks",
+          "at": null
+        },
+        "blocked": {
+          "3nQp7ROkB8": 1,
+          "5vWx9ZOk91": 2
+        },
+        "subtasks": {
+          "autoFinish": true,
+          "steps": [
+            {
+              "done": true,
+              "text": "Step A"
+            },
+            {
+              "done": false,
+              "text": "Step B"
+            }
+          ]
+        }
+      },
+      "right": {
+        "id": "8jKaCdOkD2",
+        "modified": "2026-11-01T10:08:00Z",
+        "completions": 2,
+        "finished": null,
+        "priority": false,
+        "suspended": "2026-11-04T08:00:00Z",
+        "due": "2026-11-05T18:00:00Z",
+        "repeat": {
+          "count": 1,
+          "unit": "weeks",
+          "at": null
+        },
+        "blocked": {
+          "3nQp7ROkB8": 1
+        },
+        "subtasks": {
+          "autoFinish": true,
+          "steps": [
+            {
+              "done": false,
+              "text": "Step A"
+            },
+            {
+              "done": true,
+              "text": "Step B"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "id": "8jKaCdOkD2",
+        "modified": "2026-11-01T10:08:01Z",
+        "completions": 2,
+        "finished": null,
+        "priority": true,
+        "suspended": "2026-11-04T08:00:00Z",
+        "due": "2026-11-06T18:00:00Z",
+        "repeat": {
+          "count": 1,
+          "unit": "weeks",
+          "at": null
+        },
+        "blocked": {
+          "3nQp7ROkB8": 1,
+          "5vWx9ZOk91": 2
+        },
+        "subtasks": {
+          "autoFinish": true,
+          "steps": [
+            {
+              "done": true,
+              "text": "Step A"
+            },
+            {
+              "done": true,
+              "text": "Step B"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "merge_03_coupled_location_coordinates_and_source",
+      "section": "6.7.5",
+      "description": "Location (coordinates, source) merges as a coupled unit so a coordinate update on L does not retain a stale geocoding source from B or R, while an independent radius edit on R is preserved.",
+      "baseline": {
+        "id": "7pQr9mOkD2",
+        "modified": "2026-11-01T08:00:00Z",
+        "name": "Office",
+        "source": "Erfurt, Germany",
+        "coordinates": {
+          "latitude": "50.9787",
+          "longitude": "11.0328"
+        },
+        "radius": "150"
+      },
+      "left": {
+        "id": "7pQr9mOkD2",
+        "modified": "2026-11-01T08:10:00Z",
+        "name": "Office",
+        "source": null,
+        "coordinates": {
+          "latitude": "52.52",
+          "longitude": "13.405"
+        },
+        "radius": "150"
+      },
+      "right": {
+        "id": "7pQr9mOkD2",
+        "modified": "2026-11-01T08:12:00Z",
+        "name": "Office",
+        "source": "Erfurt, Germany",
+        "coordinates": {
+          "latitude": "50.9787",
+          "longitude": "11.0328"
+        },
+        "radius": "250"
+      },
+      "expected": {
+        "id": "7pQr9mOkD2",
+        "modified": "2026-11-01T08:12:01Z",
+        "name": "Office",
+        "source": null,
+        "coordinates": {
+          "latitude": "52.52",
+          "longitude": "13.405"
+        },
+        "radius": "250"
+      }
+    },
+    {
+      "id": "merge_04_location_deletion_cascade_inheritance_trap",
+      "section": "6.7.8",
+      "description": "Deleting a task's override location on L while its assigned label still has a live location rule inserts 'condition location any' on the task; when the label's only location is also deleted, the task omits condition.",
+      "caseA_label_retains_location": {
+        "deletedLocations": [
+          "LocOverride"
+        ],
+        "postCascadeLabel": {
+          "id": "4x9p2mOkD2",
+          "condition": {
+            "locationIds": [
+              "LocLabelHome"
+            ]
+          }
+        },
+        "taskBeforeCascade": {
+          "id": "8jKaCdOkD2",
+          "labels": [
+            "4x9p2mOkD2"
+          ],
+          "condition": {
+            "locationIds": [
+              "LocOverride"
+            ]
+          }
+        },
+        "expectedTaskCondition": "condition location any"
+      },
+      "caseB_label_also_loses_only_location": {
+        "deletedLocations": [
+          "LocShared"
+        ],
+        "postCascadeLabel": {
+          "id": "4x9p2mOkD2",
+          "condition": null
+        },
+        "taskBeforeCascade": {
+          "id": "8jKaCdOkD2",
+          "labels": [
+            "4x9p2mOkD2"
+          ],
+          "condition": {
+            "locationIds": [
+              "LocShared"
+            ]
+          }
+        },
+        "expectedTaskCondition": null
+      },
+      "caseC_three_way_explicit_rule_removal_wins_over_cascade": {
+        "deletedLocations": [
+          "LocOverride"
+        ],
+        "postCascadeLabel": {
+          "id": "4x9p2mOkD2",
+          "condition": {
+            "locationIds": [
+              "LocLabelHome"
+            ]
+          }
+        },
+        "baselineTaskCondition": {
+          "locationIds": [
+            "LocOverride"
+          ]
+        },
+        "leftTaskCondition": null,
+        "rightTaskCondition": "condition location any",
+        "expectedTaskCondition": null
+      }
+    },
+    {
+      "id": "merge_05_scoped_label_deletion_queue_eviction",
+      "section": "6.7.8",
+      "description": "When a task restricted from global view (assigned only to scoped labels) loses its last label due to label deletion, its deleted label and priority flag are stripped, suspended is preserved, and its ID is evicted from queue to Someday.",
+      "deletedLabels": [
+        {
+          "id": "9kLm2P0aBc",
+          "scoped": true
+        }
+      ],
+      "taskBeforeCascade": {
+        "id": "2bDf6HOkA4",
+        "priority": true,
+        "labels": [
+          "9kLm2P0aBc"
+        ],
+        "suspended": "2026-11-10T08:00:00Z",
+        "inQueue": true
+      },
+      "expectedTaskAfterCascade": {
+        "id": "2bDf6HOkA4",
+        "priority": false,
+        "labels": [],
+        "suspended": "2026-11-10T08:00:00Z",
+        "inQueue": false,
+        "derivedTier": "Blocked (until 2026-11-10T08:00:00Z, then Someday)"
+      }
+    },
+    {
+      "id": "merge_06_thirty_day_task_tombstone_expiry_blocked_cleanup",
+      "section": "6.8.3",
+      "description": "Retiring a task deletion record older than 2,592,000 seconds (30 days) removes blocked references to that expiring task ID from live dependent tasks regardless of completion checkpoint, while keeping 30-day-exact records and missing forward references.",
+      "now": "2026-12-02T12:00:01Z",
+      "deletedBeforeCleanup": {
+        "generation": 4,
+        "tasks": [
+          {
+            "id": "6uCk8N0aB1",
+            "deletedAt": "2026-11-02T12:00:00Z",
+            "completionsCheckpoint": 0
+          },
+          {
+            "id": "9aBc2D0eF4",
+            "deletedAt": "2026-11-02T12:00:01Z",
+            "completionsCheckpoint": 2
+          }
+        ]
+      },
+      "dependentTaskBeforeCleanup": {
+        "id": "8jKaCdOkD2",
+        "modified": "2026-11-05T10:00:00Z",
+        "blocked": [
+          {
+            "targetId": "6uCk8N0aB1",
+            "requiredCompletions": 1
+          },
+          {
+            "targetId": "9aBc2D0eF4",
+            "requiredCompletions": 3
+          },
+          {
+            "targetId": "ForwardRef1",
+            "requiredCompletions": 1
+          }
+        ]
+      },
+      "expectedAfterCleanup": {
+        "deleted": {
+          "generation": 5,
+          "tasks": [
+            {
+              "id": "9aBc2D0eF4",
+              "deletedAt": "2026-11-02T12:00:01Z",
+              "completionsCheckpoint": 2
+            }
+          ]
+        },
+        "dependentTask": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-12-02T12:00:01Z",
+          "blocked": [
+            {
+              "targetId": "9aBc2D0eF4",
+              "requiredCompletions": 3
+            },
+            {
+              "targetId": "ForwardRef1",
+              "requiredCompletions": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "merge_07_deletion_conflict_on_newly_introduced_references",
+      "section": "6.8.2",
+      "description": "Introducing a label in A_X(T) or a location in A_loc_X(E) on an existing or newly created entity while the opposing side deletes that label or location triggers DeletionConflict even when the label or location's own payload was unchanged.",
+      "cases": [
+        {
+          "name": "Newly added label reference on existing task vs concurrent label deletion",
+          "baselineTaskLabels": [],
+          "leftTaskLabels": [
+            "4x9p2mOkD2"
+          ],
+          "rightDeletedLabels": [
+            "4x9p2mOkD2"
+          ],
+          "expectedOutcome": "DeletionConflict",
+          "conflictLabelIds": [
+            "4x9p2mOkD2"
+          ]
+        },
+        {
+          "name": "Newly created task referencing location vs concurrent location deletion",
+          "baselineTaskPresent": false,
+          "leftNewTaskLocationRefs": [
+            "7pQr9mOkD2"
+          ],
+          "rightDeletedLocations": [
+            "7pQr9mOkD2"
+          ],
+          "expectedOutcome": "DeletionConflict",
+          "conflictLocationIds": [
+            "7pQr9mOkD2"
+          ]
+        }
+      ]
+    }
+  ]
+}

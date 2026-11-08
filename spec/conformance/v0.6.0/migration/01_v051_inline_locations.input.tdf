@@ -1,0 +1,29 @@
+tdf 0.5.1
+
+label 4x9p2mOkD2 {
+    name     "Home & Garden"
+    modified 2026-11-01 08:00:00
+    condition {
+        day      sat sun
+        location 50.978700 11.032800 150.00
+    }
+}
+
+task 8jKaCdOkD2 {
+    name     "Inspect locations"
+    created  2026-11-01 19:30:00
+    modified 2026-11-01 19:30:00
+    labels   4x9p2mOkD2
+    condition {
+        location 48.1371544 11.5761245 75.500
+        location 50.9787 11.0328 150
+    }
+}
+
+task 3nQp7ROkB8 {
+    name      "Remote task"
+    created   2026-11-01 18:00:00
+    modified  2026-11-01 18:00:00
+    labels    4x9p2mOkD2
+    condition location any
+}

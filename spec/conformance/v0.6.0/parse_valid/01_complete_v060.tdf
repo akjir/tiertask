@@ -1,0 +1,75 @@
+# Non-canonical ordering and formatting input for TDF 0.6.0
+tdf 0.6.0
+
+task 8jKaCdOkD2 priority {
+    modified  2026-11-01 19:30
+    created   2026-11-01 19:30
+    name      "Mow the lawn"
+    note      "Check fuel level before starting"
+    due       2026-11-07 16:00:00
+    suspended 2026-11-04 23:00:00
+    origin    "https://jira.example.com" "HOME-99"
+    blocked   3nQp7ROkB8:1
+    labels    4x9p2mOkD2
+    condition {
+        location 7pQr9mOkD2
+        time 09:00 18:00
+        location 5473OnNDhL 7pQr9mOkD2
+    }
+    subtasks auto-finish {
+        step false "Get lawnmower from the shed"
+        step true  "Empty grass catcher bag"
+    }
+}
+
+location 7pQr9mOkD2 {
+    radius      150.00
+    coordinates 50.978700 11.032800
+    modified    2026-11-01 08:00
+    source      "Erfurt, Germany"
+    note        "Main residence driveway and garden"
+    name        "Home"
+}
+
+location 5473OnNDhL {
+    name        "Warehouse"
+    coordinates -0.000000 13.405000
+    radius      75.50
+}
+
+label 9kLm2P0aBc scoped {
+    modified 2026-11-01 08:00
+    color    "#2196F3"
+    name     "IT & Servers"
+    condition day mon tue wed thu fri
+}
+
+label 4x9p2mOkD2 {
+    name     "Home & Garden"
+    modified 2026-11-01 08:00
+    condition location 7pQr9mOkD2
+}
+
+task 3nQp7ROkB8 {
+    name      "Order replacement lawnmower blades online"
+    created   2026-11-01 18:00
+    modified  2026-11-01 18:00
+    labels    4x9p2mOkD2
+    due       2026-11-03 17:00
+    origin    "https://jira.example.com" "HOME-42"
+    link      "Portal Login" "https://example.com/portal#login"
+    condition any
+}
+
+queue {
+    modified 2026-11-01 19:30:00
+    task 8jKaCdOkD2
+    task 3nQp7ROkB8
+}
+
+deleted {
+    location 8tYp4M0eF3 2026-11-02 10:15:00
+    label 1rQv7S0cD2 2026-11-02 09:00:00
+    task 6uCk8N0aB1 2026-11-01 12:00:00 3
+    generation 4
+}

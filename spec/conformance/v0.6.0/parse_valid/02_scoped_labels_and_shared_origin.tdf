@@ -1,0 +1,25 @@
+tdf 0.6.0
+
+label 9kLm2P0aBc scoped {
+    name "Private Project"
+    condition day sat
+}
+
+label 4x9p2mOkD2 {
+    name "General"
+    condition day mon tue wed thu fri
+}
+
+task 2bDf6HOkA4 {
+    name    "Scoped-only task hidden from global view"
+    created 2026-11-01 12:00:00
+    labels  9kLm2P0aBc
+    origin  "https://github.com/org/repo" "issue:101"
+}
+
+task 5vWx9ZOk91 {
+    name    "Mixed scoped and non-scoped task sharing identical origin"
+    created 2026-11-01 12:05:00
+    labels  4x9p2mOkD2 9kLm2P0aBc
+    origin  "https://github.com/org/repo" "issue:101"
+}

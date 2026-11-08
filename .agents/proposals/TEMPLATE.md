@@ -15,7 +15,7 @@ updated: YYYY-MM-DD
 Write a one-paragraph factual summary of the proposal and its objective.
 
 ### 1.2 Motivation
-Explain the problem and why the current implementation or `TDF_SPEC.md` definition is insufficient.
+Explain the problem and why the current implementation or `spec/TDF_SPEC_0.6.0.md` definition is insufficient.
 
 ### 1.3 Goals & Non-Goals
 * **Goals:** List specific, measurable outcomes.
@@ -33,7 +33,7 @@ List alternative solutions and explain why they were rejected.
 List modified files across `lib/l10n/`, `lib/models/`, `lib/services/`, `lib/repositories/`, `lib/providers/`, `lib/ui/`, and `test/` and their interactions.
 
 ### 2.2 TDF Schema, Localization & State Changes
-Specify changes to `TDF_SPEC.md` (lexical grammar, directives, dynamic 6-tier derivation, state mutations, three-way sync, resource bounds, or version migration), domain models, binary persistence (`TTW\x01`, `TTS\x01`), or ARB localization keys (`lib/l10n/app_en.arb`, `lib/l10n/app_de.arb`).
+Specify changes to `spec/TDF_SPEC_0.6.0.md` (lexical grammar, directives, dynamic 6-tier derivation, state mutations, three-way sync, resource bounds, or version migration), domain models, binary persistence (`TTW\x01`, `TTS\x01`), or ARB localization keys (`lib/l10n/app_en.arb`, `lib/l10n/app_de.arb`).
 
 ### 2.3 Implementation Details
 Specify class and method signatures, unidirectional data flow (`P-UDF-ARCHITECTURE`), repository I/O isolation (`P-IO-ISOLATION`), single-pass $O(N)$ scanning/serialization (`P-ZERO-COPY`, `P-NO-QUADRATIC`), explicit `max*` resource bounds (`P-BOUND-ALLOC`), and `AppLogger` diagnostic instrumentation (`AGENTS.md` Section 6).
@@ -45,7 +45,7 @@ Define Red-Green-Refactor TDD test cases in `test/models/`, `test/services/`, `t
 
 ### 3.1 Task Breakdown
 - [ ] Run `flutter analyze --fatal-infos --fatal-warnings` and `flutter test` to confirm a clean baseline.
-- [ ] Update `TDF_SPEC.md` if `.tdf` format, evaluation, or mutation rules change (per **`tdf-spec-workflow`**).
+- [ ] Update `spec/TDF_SPEC_0.6.0.md` if `.tdf` format, evaluation, or mutation rules change (per **`tdf-spec-workflow`**).
 - [ ] Write failing unit and widget tests first in `test/` (TDD Red Phase — `P-TDD-FIRST`).
 - [ ] Implement production changes in `lib/` (and run `flutter gen-l10n` if ARB files changed) with `AppLogger` instrumentation (TDD Green & Refactor Phase).
 - [ ] Update Parts 1 and 2 if the implementation changes the design.

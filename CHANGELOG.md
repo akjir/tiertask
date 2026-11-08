@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added colored label indicator blocks with hover tooltips along the bottom edge of task cards.
 - Added a custom color wheel picker dialog next to the color field in the label editor.
 - Added hover tooltips to the `Priority`, `Someday`, `Suspended`, `Repeat`, `Auto-finish`, `Any day`, `Any time`, and `Any location` chips in the task editor explaining their behavior.
+- Defined the normative TierTask Data Format (`TDF`) `0.6.0` specification in `TDF_SPEC.md` and added the machine-readable conformance fixture suite in `spec/conformance/v0.6.0/` (`TEP-003`).
 
 ### Changed
 

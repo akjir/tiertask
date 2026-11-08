@@ -1,0 +1,143 @@
+{
+  "version": "0.6.0",
+  "cases": [
+    {
+      "file": "01_origin_duplicate.tdf",
+      "expectedError": "DuplicateDirective",
+      "expectedLine": 6,
+      "description": "Duplicate origin directive inside a single task block."
+    },
+    {
+      "file": "02_origin_empty_namespace.tdf",
+      "expectedError": "EmptyText",
+      "expectedLine": 5,
+      "description": "Empty namespace string in origin directive."
+    },
+    {
+      "file": "03_origin_whitespace_external_key.tdf",
+      "expectedError": "EmptyText",
+      "expectedLine": 5,
+      "description": "Whitespace-only external-key string in origin directive."
+    },
+    {
+      "file": "04_origin_unquoted_arg.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "Unquoted bare-word argument in origin directive."
+    },
+    {
+      "file": "05_origin_one_arg.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "Fewer than 2 arguments in origin directive."
+    },
+    {
+      "file": "06_origin_three_args.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "More than 2 arguments in origin directive."
+    },
+    {
+      "file": "07_origin_escaped_newline.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "Decoded newline escape sequence inside single-line origin text."
+    },
+    {
+      "file": "08_origin_invalid_escape.tdf",
+      "expectedError": "InvalidEscapeSequence",
+      "expectedLine": 5,
+      "description": "Unknown escape sequence \\x inside double-quoted origin argument."
+    },
+    {
+      "file": "09_origin_block_brace.tdf",
+      "expectedError": "UnknownBlockType",
+      "expectedLine": 5,
+      "description": "Opening brace after scalar origin directive."
+    },
+    {
+      "file": "10_unknown_location_reference.tdf",
+      "expectedError": "UnknownLocationReference",
+      "expectedLine": 5,
+      "description": "Condition location rule referencing an undeclared location-id."
+    },
+    {
+      "file": "11_deleted_location_reference.tdf",
+      "expectedError": "UnknownLocationReference",
+      "expectedLine": 9,
+      "description": "Condition location rule referencing a tombstoned location-id."
+    },
+    {
+      "file": "12_link_javascript_uri.tdf",
+      "expectedError": "InvalidUri",
+      "expectedLine": 5,
+      "description": "Forbidden executable javascript: URI scheme in link directive."
+    },
+    {
+      "file": "13_link_vbscript_uri.tdf",
+      "expectedError": "InvalidUri",
+      "expectedLine": 5,
+      "description": "Forbidden executable vbscript: URI scheme in link directive."
+    },
+    {
+      "file": "14_link_data_uri.tdf",
+      "expectedError": "InvalidUri",
+      "expectedLine": 5,
+      "description": "Forbidden inline-payload data: URI scheme in link directive."
+    },
+    {
+      "file": "15_location_missing_coordinates.tdf",
+      "expectedError": "MissingRequiredDirective",
+      "expectedLine": 2,
+      "description": "Location block missing required coordinates directive."
+    },
+    {
+      "file": "16_location_missing_radius.tdf",
+      "expectedError": "MissingRequiredDirective",
+      "expectedLine": 2,
+      "description": "Location block missing required radius directive."
+    },
+    {
+      "file": "17_location_coordinates_7_decimals.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 4,
+      "description": "Native 0.6.0 location coordinates exceeding 6 fractional digits."
+    },
+    {
+      "file": "18_location_radius_3_decimals.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 5,
+      "description": "Native 0.6.0 location radius exceeding 2 fractional digits."
+    },
+    {
+      "file": "19_location_radius_zero.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 5,
+      "description": "Location radius equal to zero (must be > 0)."
+    },
+    {
+      "file": "20_location_scientific_notation.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 5,
+      "description": "Scientific notation 1e2 in location radius."
+    },
+    {
+      "file": "21_location_nan.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 4,
+      "description": "Non-finite NaN token in location coordinates."
+    },
+    {
+      "file": "22_deleted_location_with_checkpoint.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 4,
+      "description": "Forbidden completion checkpoint argument on a location deletion record."
+    },
+    {
+      "file": "23_label_quoted_scoped_header.tdf",
+      "expectedError": "InvalidBlockHeader",
+      "expectedLine": 2,
+      "description": "Quoted 'scoped' header token on a label block."
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+tdf 0.6.0
+
+label 4x9p2mOkD2 {
+    name     "Home & Garden"
+    modified 2026-11-01 08:00
+    condition {
+        day      sat sun
+        location 5473OnNDhL
+    }
+}
+
+location 5473OnNDhL {
+    name        "Location (50.9787, 11.0328, 150m)"
+    coordinates 50.9787 11.0328
+    radius      150
+}
+
+location AU9Mg5SPW1 {
+    name        "Location (48.137154, 11.576125, 75.5m)"
+    coordinates 48.137154 11.576125
+    radius      75.5
+}
+
+task 3nQp7ROkB8 {
+    name      "Remote task"
+    created   2026-11-01 18:00
+    modified  2026-11-01 18:00
+    labels    4x9p2mOkD2
+    condition location any
+}
+
+task 8jKaCdOkD2 {
+    name      "Inspect locations"
+    created   2026-11-01 19:30
+    modified  2026-11-01 19:30
+    labels    4x9p2mOkD2
+    condition location AU9Mg5SPW1 5473OnNDhL
+}

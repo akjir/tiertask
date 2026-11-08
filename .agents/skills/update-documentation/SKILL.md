@@ -1,14 +1,14 @@
 ---
 name: update-documentation
 description: >-
-  Maintain and update README.md, ARCHITECTURE.md, AGENTS.md, and TDF_SPEC.md for TierTask. Activate whenever editing documentation or when supported platforms, task tier rules, TDF (.tdf) file schemas, local file or WebDAV synchronization, architecture layers, or system requirements change.
+  Maintain and update README.md, ARCHITECTURE.md, AGENTS.md, and spec/TDF_SPEC_0.6.0.md for TierTask. Activate whenever editing documentation or when supported platforms, task tier rules, TDF (.tdf) file schemas, local file or WebDAV synchronization, architecture layers, or system requirements change.
 ---
 
 # Updating Documentation
 
 ## 1. Strict Separation of Concerns (Single Source of Truth)
 * **`README.md` (Project Entry Point):** Keep under 130 lines. Do NOT copy detailed Dart class/method inventories, file paths (`lib/...`), widget test keys, full TDF grammar/error tables, or internal test matrices into `README.md`. Update `README.md` ONLY when top-level features, supported platforms (`Linux`, `Android`, `Windows`), tier definitions, `.tdf` format overview, system requirements, installation/build steps, or repository document links change.
-* **`TDF_SPEC.md` (Format Specification):** Single Source of Truth for the TierTask Data Format (`TDF`) lexical rules, root-block grammar (`queue`, `deleted`, `label`, `task`), parser resource bounds, dynamic 6-tier derivation pipeline, and state mutation/synchronization semantics used in `*.tdf`. Never add project-specific implementation paths or rule IDs into `TDF_SPEC.md` (see **`tdf-spec-workflow`**).
+* **`spec/TDF_SPEC_0.6.0.md` (Format Specification):** Single Source of Truth for the TierTask Data Format (`TDF`) lexical rules, root-block grammar (`queue`, `deleted`, `location`, `label`, `task`), parser resource bounds, dynamic 6-tier derivation pipeline, and state mutation/synchronization semantics used in `*.tdf`. Never add project-specific implementation paths or rule IDs into `spec/TDF_SPEC_0.6.0.md` (see **`tdf-spec-workflow`**).
 * **`ARCHITECTURE.md` (Architecture & File Structure):** Single Source of Truth for the architectural layers (`Localization`, `Models`, `Services`, `Repositories`, `Providers`, `UI`), acyclic layer DAG (`P-ACYCLIC-DAG`), directory tree, per-file class responsibilities, and local file / WebDAV execution and synchronization flow.
 * **`AGENTS.md` (AI Engineering & TDD Rules):** Single Source of Truth for TDD workflow (`P-TDD-FIRST`), language rules (`P-LANG-RULES`), deterministic `.dart` file layout, responsibility-based modularity (`P-FILE-SIZE`: split by domain/widget responsibility rather than line count, forbidding `part`/`part of` and `export` shims), class cohesion (`P-CLASS-COHESION`), acyclic import DAG (`P-ACYCLIC-DAG`: `0` circular import SCCs, `app_logger < models < l10n < services < repositories < providers < ui < main`), static analysis rules, diagnostic logging policy, test mirroring (`P-TEST-MIRROR`: `test/<layer>/`, `pumpLeafWidget`, `HttpOverrides.global = null`), parallel subagent isolation (`P-SUBAGENT-ISOLATION`: disjoint file Write Sets), and mandatory `M-*` test categories.
 
@@ -19,15 +19,15 @@ Omit a Table of Contents. Maintain this exact section order:
 3. **`## Requirements`:** 2-column table (`Component | Requirement`).
 4. **`## Installation & Build`:** Copy-paste ready `git clone`, `flutter pub get`, `flutter gen-l10n`, debug `flutter run`, and obfuscated `flutter build <target> --release --obfuscate --split-debug-info=build/symbols` commands (`linux`, `apk`, `windows`) separated into short descriptive blocks.
 5. **`## Quick Start`:** Self-contained numbered steps for configuring display language/theme, configuring `Local` / `WebDAV` / `Both` storage (`tasks.tdf`), creating tasks with `Priority`, `Someday`, or `Labels`, and synchronizing the board.
-6. **`## Tier System & Documentation`:** Summary table of the 6 tiers (`Tier | English (en) | German (de) | Soft Limit | Derivation Rule`), canonical `tasks.tdf` example (`tdf 0.5.1`), and a bullet list of links to `[TDF_SPEC.md](TDF_SPEC.md)`, `[ARCHITECTURE.md](ARCHITECTURE.md)`, `[AGENTS.md](AGENTS.md)`, and `[CHANGELOG.md](CHANGELOG.md)`.
+6. **`## Tier System & Documentation`:** Summary table of the 6 tiers (`Tier | English (en) | German (de) | Soft Limit | Derivation Rule`), canonical `tasks.tdf` example (`tdf 0.5.1`), and a bullet list of links to `[spec/TDF_SPEC_0.6.0.md](spec/TDF_SPEC_0.6.0.md)`, `[ARCHITECTURE.md](ARCHITECTURE.md)`, `[AGENTS.md](AGENTS.md)`, and `[CHANGELOG.md](CHANGELOG.md)`.
 7. **`## Development`:** Self-contained `flutter gen-l10n`, `dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, and `flutter test` commands.
 8. **`## Disclaimer & License`:** 2-sentence warranty disclaimer and GPL-3.0 link to `[LICENSE](LICENSE)`.
 
 ## 3. `ARCHITECTURE.md` Structure & Automation (`tiertask_dev.py arch`)
 Maintain this exact section order and use `python3 .agents/scripts/tiertask_dev.py arch --sync-tree [--set <rel_path> "<description>"] --audit` to keep the directory tree and tables synchronized:
-1. **`# TierTask Architecture and File Structure`** + update callout referencing `AGENTS.md` and `TDF_SPEC.md`.
+1. **`# TierTask Architecture and File Structure`** + update callout referencing `AGENTS.md` and `spec/TDF_SPEC_0.6.0.md`.
 2. **`## Architectural Layers`:** Table of layers (`Localization`, `Models`, `Services`, `Repositories`, `Providers`, `UI`) with paths and responsibilities, plus `P-UDF-ARCHITECTURE` / `P-ACYCLIC-DAG` / `P-IO-ISOLATION` note.
-3. **`## Directory Layout`:** ASCII tree of the repository structure (`android/`, `assets/`, `linux/`, `windows/`, `lib/`, `test/`), auto-synced via `tiertask_dev.py arch --sync-tree`.
+3. **`## Directory Layout`:** ASCII tree of the repository structure (`android/`, `assets/`, `linux/`, `spec/`, `windows/`, `lib/`, `test/`), auto-synced via `tiertask_dev.py arch --sync-tree`.
 4. **Layer Sections (`## Root Files`, `## Localization`, `## Domain Models`, `## Services`, `## Repositories`, `## State Providers`, `## User Interface`):** 2-column tables (`File | Function`) where each row is a concise 1-sentence summary (`<= 65` words) listing only public classes/functions and core responsibilities. Never list private `_Widget` names, icon identifiers, or widget test keys in `ARCHITECTURE.md`.
 5. **`## Execution & Synchronization Flow`:** Numbered end-to-end flow from app startup, active workspace loading, and locale/theme resolution to two-stage three-way `.tdf` synchronization (`In-Memory <-> Local File <-> WebDAV`), single-pass $O(N)$ `tdf 0.5.1` parsing/serialization, dynamic 6-tier evaluation, 30-day completed task and tombstone pruning, and opt-in diagnostic logging.
 

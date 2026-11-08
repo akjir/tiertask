@@ -486,7 +486,11 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
 
     results: list[str] = []
 
-    md_targets = [root / "TDF_SPEC.md", root / "ARCHITECTURE.md"]
+    md_targets: list[Path] = []
+    spec_dir = root / "spec"
+    if spec_dir.exists():
+        md_targets.extend(sorted(spec_dir.glob("TDF_SPEC*.md")))
+    md_targets.extend([root / "TDF_SPEC.md", root / "ARCHITECTURE.md"])
     for md in md_targets:
         if not md.exists():
             continue
@@ -916,6 +920,23 @@ def _render_dir_tree(base: Path, prefix: str = "") -> list[str]:
     return lines
 
 
+def _render_spec_tree(base: Path, prefix: str = "") -> list[str]:
+    """Renders top-level specification files and collapsed subdirectories in spec/."""
+    entries = sorted(
+        [p for p in base.iterdir() if not p.name.startswith(".")],
+        key=lambda p: (p.is_dir(), p.name),
+    )
+    lines: list[str] = []
+    for idx, entry in enumerate(entries):
+        is_last = idx == len(entries) - 1
+        connector = "└── " if is_last else "├── "
+        if entry.is_dir():
+            lines.append(f"{prefix}{connector}{entry.name}/")
+        else:
+            lines.append(f"{prefix}{connector}{entry.name}")
+    return lines
+
+
 def generate_architecture_tree(root: Path) -> str:
     """Generates the canonical ASCII directory layout block for ARCHITECTURE.md."""
     root_files = [
@@ -930,14 +951,19 @@ def generate_architecture_tree(root: Path) -> str:
         "pubspec.yaml",
     ]
     existing_root_files = [f for f in root_files if (root / f).exists()]
-    collapsed_dirs = [d for d in ("android", "assets", "linux", "windows") if (root / d).exists()]
+    collapsed_dirs = [d for d in ("android", "assets", "linux", "spec", "windows") if (root / d).exists()]
     expanded_dirs = [d for d in ("lib", "test") if (root / d).exists()]
 
     items: list[tuple[str, str]] = []
     for f in existing_root_files:
         items.append(("file", f))
     for d in collapsed_dirs:
-        items.append(("collapsed_dir" if d != "assets" else "expanded_dir", d))
+        if d == "assets":
+            items.append(("expanded_dir", d))
+        elif d == "spec":
+            items.append(("spec_dir", d))
+        else:
+            items.append(("collapsed_dir", d))
     for d in expanded_dirs:
         items.append(("expanded_dir", d))
 
@@ -950,6 +976,9 @@ def generate_architecture_tree(root: Path) -> str:
             tree_lines.append(f"{connector}{name}")
         elif kind == "collapsed_dir":
             tree_lines.append(f"{connector}{name}/")
+        elif kind == "spec_dir":
+            tree_lines.append(f"{connector}{name}/")
+            tree_lines.extend(_render_spec_tree(root / name, child_prefix))
         else:
             tree_lines.append(f"{connector}{name}/")
             tree_lines.extend(_render_dir_tree(root / name, child_prefix))
@@ -974,7 +1003,7 @@ def sync_architecture_tree(root: Path) -> bool:
 
 def _layer_section_for_path(rel_path: str) -> str:
     """Maps a repository-relative path to its section heading in ARCHITECTURE.md."""
-    if "/" not in rel_path:
+    if "/" not in rel_path or rel_path.startswith("spec/"):
         return "## Root Files"
     if rel_path.startswith("lib/l10n/"):
         return "## Localization"
@@ -1091,6 +1120,9 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
         p = root / name
         if p.exists():
             md_files.append(p)
+    spec_dir = root / "spec"
+    if spec_dir.exists():
+        md_files.extend(sorted(spec_dir.rglob("*.md")))
     agents_dir = root / ".agents"
     if agents_dir.exists():
         md_files.extend(sorted(agents_dir.rglob("*.md")))
@@ -1098,7 +1130,8 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
     for p in md_files:
         rel = p.relative_to(root).as_posix()
         raw = p.read_bytes()
-        if rel != "TDF_SPEC.md" and b"\r\n" in raw:
+        is_tdf_spec = rel == "TDF_SPEC.md" or (rel.startswith("spec/TDF_SPEC") and rel.endswith(".md"))
+        if not is_tdf_spec and b"\r\n" in raw:
             if fix:
                 raw = raw.replace(b"\r\n", b"\n")
                 p.write_bytes(raw)

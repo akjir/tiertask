@@ -1,0 +1,64 @@
+{
+  "version": "0.6.0",
+  "idDerivationAlgorithm": "TDF-ID-MIGRATION-1 (Section 10.4.2 & Section 10.7)",
+  "normativeLocationIdVectors": [
+    {
+      "namespace": "location",
+      "sourceId": "50.9787:11.0328:150",
+      "counter": 0,
+      "candidate": "5473OnNDhL",
+      "synthesizedName": "Location (50.9787, 11.0328, 150m)"
+    },
+    {
+      "namespace": "location",
+      "sourceId": "50.9787:11.0328:150",
+      "counter": 1,
+      "candidate": "5qLZ0E0s4Y",
+      "synthesizedName": "Location (50.9787, 11.0328, 150m)"
+    },
+    {
+      "namespace": "location",
+      "sourceId": "52.52:13.405:250",
+      "counter": 0,
+      "candidate": "9HSso0GjnR",
+      "synthesizedName": "Location (52.52, 13.405, 250m)"
+    },
+    {
+      "namespace": "location",
+      "sourceId": "48.137154:11.576125:75.5",
+      "counter": 0,
+      "candidate": "AU9Mg5SPW1",
+      "synthesizedName": "Location (48.137154, 11.576125, 75.5m)"
+    }
+  ],
+  "cases": [
+    {
+      "id": "01_v051_inline_locations",
+      "sourceVersion": "0.5.1",
+      "targetVersion": "0.6.0",
+      "inputFile": "01_v051_inline_locations.input.tdf",
+      "expectedFile": "01_v051_inline_locations.expected.tdf",
+      "valid": true,
+      "description": "Extracts inline 0.5.1 location rules with half-away-from-zero 6/2-decimal rounding, deduplicates across labels and tasks, derives deterministic TDF-ID-MIGRATION-1 location IDs, and coalesces per-entity location rules in first-seen declaration order."
+    },
+    {
+      "id": "02_v051_rounded_zero_radius_invalid",
+      "sourceVersion": "0.5.1",
+      "targetVersion": "0.6.0",
+      "inputFile": "02_v051_rounded_zero_radius_invalid.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 6,
+      "valid": false,
+      "description": "Rejects a 0.5.1 inline location rule whose radius (0.004) rounds to 0 under 2-decimal half-away-from-zero rounding."
+    },
+    {
+      "id": "03_v050_chained_to_v060",
+      "sourceVersion": "0.5.0",
+      "targetVersion": "0.6.0",
+      "inputFile": "03_v050_chained_to_v060.input.tdf",
+      "expectedFile": "03_v050_chained_to_v060.expected.tdf",
+      "valid": true,
+      "description": "Chained load-time conversion 0.5.0 -> 0.5.1 -> 0.6.0 preserving fallback modified = max(created, queued, finished), stripping queued, and extracting inline location rules."
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "version": "0.6.0",
+  "timeZone": "Europe/Berlin",
+  "conversionVectors": [
+    {
+      "operation": "local_to_utc",
+      "localInput": "2026-01-15 00:00:00",
+      "expectedUtc": "2026-01-14 23:00:00",
+      "note": "Winter time (CET, UTC+1)"
+    },
+    {
+      "operation": "local_to_utc",
+      "localInput": "2026-07-15 00:00:00",
+      "expectedUtc": "2026-07-14 22:00:00",
+      "note": "Summer time (CEST, UTC+2)"
+    },
+    {
+      "operation": "local_to_utc",
+      "localInput": "2026-03-29 02:30:00",
+      "expectedUtc": "2026-03-29 01:30:00",
+      "note": "Spring-forward gap applies pre-gap CET offset (UTC+1 -> 01:30:00 UTC = 03:30:00 CEST after the gap)"
+    },
+    {
+      "operation": "local_to_utc",
+      "localInput": "2026-10-25 02:30:00",
+      "expectedUtc": "2026-10-25 00:30:00",
+      "note": "Fall-back fold selects first (earlier, CEST UTC+2) occurrence"
+    }
+  ],
+  "recurrenceDueAndSuspendedVectors": [
+    {
+      "id": "tz_rec_01_october_dst_lead_window",
+      "section": "6.10.3",
+      "description": "Monthly recurring task with due and suspended completed late across the October CEST -> CET transition advances both by k = 1 month in local calendar time, preserving 18:00 and 08:00 local clocks.",
+      "repeat": "repeat 1 months",
+      "completionInstantUtc": "2026-10-17 10:00:00",
+      "previousDueLocal": "2026-10-15 18:00:00",
+      "previousDueUtc": "2026-10-15 16:00:00",
+      "previousSuspendedLocal": "2026-10-10 08:00:00",
+      "previousSuspendedUtc": "2026-10-10 06:00:00",
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-11-15 18:00:00",
+      "expectedNewDueUtc": "2026-11-15 17:00:00",
+      "expectedNewSuspendedLocal": "2026-11-10 08:00:00",
+      "expectedNewSuspendedUtc": "2026-11-10 07:00:00"
+    },
+    {
+      "id": "tz_rec_02_month_end_clamping_jan29_jan31",
+      "section": "6.10.3",
+      "description": "Monthly recurring task with due on Jan 31 (D_d = 31) and suspended on Jan 29 (D_s = 29, 2-day lead window) clamps newDue to Feb 28 (D_end = 28) and adjusts newSuspended day to max(1, 28 - (31 - 29)) = 26 (Feb 26).",
+      "repeat": "repeat 1 months",
+      "completionInstantUtc": "2026-01-31 12:00:00",
+      "previousDueLocal": "2026-01-31 18:00:00",
+      "previousSuspendedLocal": "2026-01-29 08:00:00",
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-02-28 18:00:00",
+      "expectedNewDueUtc": "2026-02-28 17:00:00",
+      "expectedNewSuspendedLocal": "2026-02-26 08:00:00",
+      "expectedNewSuspendedUtc": "2026-02-26 07:00:00"
+    },
+    {
+      "id": "tz_rec_03_month_end_clamping_jan28_jan31",
+      "section": "6.10.3",
+      "description": "Monthly recurring task with due on Jan 31 (D_d = 31) and suspended on Jan 28 (D_s = 28, 3-day lead window) clamps newDue to Feb 28 (D_end = 28) and adjusts newSuspended day to max(1, 28 - (31 - 28)) = 25 (Feb 25).",
+      "repeat": "repeat 1 months",
+      "completionInstantUtc": "2026-01-31 12:00:00",
+      "previousDueLocal": "2026-01-31 18:00:00",
+      "previousSuspendedLocal": "2026-01-28 08:00:00",
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-02-28 18:00:00",
+      "expectedNewDueUtc": "2026-02-28 17:00:00",
+      "expectedNewSuspendedLocal": "2026-02-25 08:00:00",
+      "expectedNewSuspendedUtc": "2026-02-25 07:00:00"
+    },
+    {
+      "id": "tz_rec_04_due_present_suspended_omitted",
+      "section": "6.10.3",
+      "description": "Monthly recurring task with due on Nov 15 18:00 local and omitted suspended completed early on Nov 12 advances newDue to Dec 15 18:00 local and sets newSuspended to Dec 15 00:00:00 local.",
+      "repeat": "repeat 1 months",
+      "completionInstantUtc": "2026-11-12 10:00:00",
+      "previousDueLocal": "2026-11-15 18:00:00",
+      "previousSuspendedLocal": null,
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-12-15 18:00:00",
+      "expectedNewDueUtc": "2026-12-15 17:00:00",
+      "expectedNewSuspendedLocal": "2026-12-15 00:00:00",
+      "expectedNewSuspendedUtc": "2026-12-14 23:00:00"
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Disclaimer:** `TierTask` is strictly a private, personal project developed for individual use. It is provided without any warranty, official support, or maintenance guarantees.
 
-`TierTask` is a Flutter task manager for Linux, Android, and Windows that dynamically derives six priority and status tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single local or WebDAV-synchronized `.tdf` file (`tasks.tdf`) in the block-based TierTask Data Format ([`TDF_SPEC.md`](TDF_SPEC.md)).
+`TierTask` is a Flutter task manager for Linux, Android, and Windows that dynamically derives six priority and status tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single local or WebDAV-synchronized `.tdf` file (`tasks.tdf`) in the block-based TierTask Data Format ([`spec/TDF_SPEC_0.6.0.md`](spec/TDF_SPEC_0.6.0.md)).
 
 ## Overview
 
@@ -106,7 +106,7 @@ task 3nR8vWOkD8 {
 ```
 
 For complete documentation, refer to the dedicated specifications in this repository:
-- **[TDF_SPEC.md](TDF_SPEC.md):** Normative lexical grammar, root-block schema, 6-tier evaluation pipeline, and synchronization rules for `.tdf` files.
+- **[spec/TDF_SPEC_0.6.0.md](spec/TDF_SPEC_0.6.0.md):** Normative lexical grammar, root-block schema, 6-tier evaluation pipeline, and synchronization rules for `.tdf` files.
 - **[ARCHITECTURE.md](ARCHITECTURE.md):** Architectural layers, directory structure, file inventory, and synchronization flow.
 - **[AGENTS.md](AGENTS.md):** Engineering rules, TDD workflow (`P-TDD-FIRST`), deterministic `.dart` file layout, and test requirements.
 - **[CHANGELOG.md](CHANGELOG.md):** Version history and user-facing release notes.

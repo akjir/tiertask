@@ -1,0 +1,83 @@
+{
+  "version": "0.6.0",
+  "cases": [
+    {
+      "file": "01_name_500_supplementary_scalars_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Task name with exactly 500 supplementary Unicode scalar values (U+10400, 1000 UTF-16 code units) is valid."
+    },
+    {
+      "file": "02_name_501_supplementary_scalars_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Task name with 501 supplementary Unicode scalar values (U+10400) exceeds MAX_TEXT_LENGTH = 500."
+    },
+    {
+      "file": "03_name_250_decomposed_combining_pairs_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Task name with 250 decomposed U+0065 U+0301 pairs (500 scalar values) is valid."
+    },
+    {
+      "file": "04_origin_500_scalars_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Task origin with 500 scalar values in namespace and 500 scalar values in external-key is valid."
+    },
+    {
+      "file": "05_origin_501_scalars_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Task origin with 501 scalar values in external-key exceeds MAX_TEXT_LENGTH = 500."
+    },
+    {
+      "file": "06_locations_200_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Document with exactly MAX_LOCATIONS = 200 root location blocks is valid."
+    },
+    {
+      "file": "07_locations_201_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Document with 201 root location blocks exceeds MAX_LOCATIONS = 200."
+    },
+    {
+      "file": "08_location_radius_100000_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Location radius at exact MAX_LOCATION_RADIUS = 100000 (100 km) is valid."
+    },
+    {
+      "file": "09_location_radius_100000_01_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Location radius 100000.01 exceeds MAX_LOCATION_RADIUS = 100000."
+    },
+    {
+      "file": "10_number_24_chars_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Number token with exactly MAX_NUMBER_LENGTH = 24 ASCII characters is valid."
+    },
+    {
+      "file": "11_number_25_chars_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Number token with 25 ASCII characters exceeds MAX_NUMBER_LENGTH = 24."
+    },
+    {
+      "file": "12_location_refs_63_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Entity referencing exactly MAX_LOCATION_REFS_PER_ENTITY = 63 location IDs across condition rules (counted before deduplication) is valid."
+    },
+    {
+      "file": "13_location_refs_64_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Entity referencing 64 location IDs across condition rules (counted before deduplication) exceeds MAX_LOCATION_REFS_PER_ENTITY = 63."
+    }
+  ]
+}

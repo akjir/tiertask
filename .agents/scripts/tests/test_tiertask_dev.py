@@ -59,6 +59,7 @@ class TestTierTaskDev(unittest.TestCase):
         (root / "lib" / "ui").mkdir(parents=True)
         (root / "test" / "models").mkdir(parents=True)
         (root / "test" / "ui").mkdir(parents=True)
+        (root / "spec").mkdir(parents=True)
         (root / ".agents" / "skills").mkdir(parents=True)
         (root / ".dart_tool").mkdir(parents=True)
 
@@ -68,7 +69,7 @@ class TestTierTaskDev(unittest.TestCase):
         (root / "README.md").write_text("# TierTask\n\n## Overview\n\nSummary text.\n", encoding="utf-8")
         (root / "AGENTS.md").write_text("# TierTask AI Agent Rules\n\n## 1. Core Principles\n", encoding="utf-8")
         (root / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n", encoding="utf-8")
-        (root / "TDF_SPEC.md").write_text(
+        (root / "spec" / "TDF_SPEC_0.6.0.md").write_text(
             "# TierTask Data Format\n\n## 1. Introduction\nText.\n\n### 1.1 Scope\nMore text.\n",
             encoding="utf-8",
         )
@@ -193,7 +194,7 @@ tiertask/
         (root / "ARCHITECTURE.md").write_text(arch_md, encoding="utf-8")
 
     def test_outline_markdown_and_dart_signatures(self) -> None:
-        md_out = tiertask_dev.outline_file(self.root, self.root / "TDF_SPEC.md")
+        md_out = tiertask_dev.outline_file(self.root, self.root / "spec" / "TDF_SPEC_0.6.0.md")
         self.assertIn("1-7: # TierTask Data Format", md_out)
         self.assertIn("3-7: ## 1. Introduction", md_out)
         self.assertIn("6-7: ### 1.1 Scope", md_out)
@@ -215,7 +216,7 @@ tiertask/
         self.assertTrue(any("lib/l10n/app_en.arb" in m for m in arb_matches))
 
         spec_matches = tiertask_dev.find_in_repo(self.root, "Scope")
-        self.assertTrue(any("TDF_SPEC.md" in m for m in spec_matches))
+        self.assertTrue(any("spec/TDF_SPEC_0.6.0.md" in m for m in spec_matches))
 
     def test_deps_computes_transitive_reverse_dependencies(self) -> None:
         info = tiertask_dev.compute_dependencies(self.root, "lib/models/sample_model.dart")

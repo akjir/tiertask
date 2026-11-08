@@ -1,0 +1,1001 @@
+tdf 0.6.0
+location LocId00001 {
+    name "Loc 1"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00002 {
+    name "Loc 2"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00003 {
+    name "Loc 3"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00004 {
+    name "Loc 4"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00005 {
+    name "Loc 5"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00006 {
+    name "Loc 6"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00007 {
+    name "Loc 7"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00008 {
+    name "Loc 8"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00009 {
+    name "Loc 9"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00010 {
+    name "Loc 10"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00011 {
+    name "Loc 11"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00012 {
+    name "Loc 12"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00013 {
+    name "Loc 13"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00014 {
+    name "Loc 14"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00015 {
+    name "Loc 15"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00016 {
+    name "Loc 16"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00017 {
+    name "Loc 17"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00018 {
+    name "Loc 18"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00019 {
+    name "Loc 19"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00020 {
+    name "Loc 20"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00021 {
+    name "Loc 21"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00022 {
+    name "Loc 22"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00023 {
+    name "Loc 23"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00024 {
+    name "Loc 24"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00025 {
+    name "Loc 25"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00026 {
+    name "Loc 26"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00027 {
+    name "Loc 27"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00028 {
+    name "Loc 28"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00029 {
+    name "Loc 29"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00030 {
+    name "Loc 30"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00031 {
+    name "Loc 31"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00032 {
+    name "Loc 32"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00033 {
+    name "Loc 33"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00034 {
+    name "Loc 34"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00035 {
+    name "Loc 35"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00036 {
+    name "Loc 36"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00037 {
+    name "Loc 37"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00038 {
+    name "Loc 38"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00039 {
+    name "Loc 39"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00040 {
+    name "Loc 40"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00041 {
+    name "Loc 41"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00042 {
+    name "Loc 42"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00043 {
+    name "Loc 43"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00044 {
+    name "Loc 44"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00045 {
+    name "Loc 45"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00046 {
+    name "Loc 46"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00047 {
+    name "Loc 47"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00048 {
+    name "Loc 48"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00049 {
+    name "Loc 49"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00050 {
+    name "Loc 50"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00051 {
+    name "Loc 51"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00052 {
+    name "Loc 52"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00053 {
+    name "Loc 53"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00054 {
+    name "Loc 54"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00055 {
+    name "Loc 55"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00056 {
+    name "Loc 56"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00057 {
+    name "Loc 57"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00058 {
+    name "Loc 58"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00059 {
+    name "Loc 59"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00060 {
+    name "Loc 60"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00061 {
+    name "Loc 61"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00062 {
+    name "Loc 62"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00063 {
+    name "Loc 63"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00064 {
+    name "Loc 64"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00065 {
+    name "Loc 65"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00066 {
+    name "Loc 66"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00067 {
+    name "Loc 67"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00068 {
+    name "Loc 68"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00069 {
+    name "Loc 69"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00070 {
+    name "Loc 70"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00071 {
+    name "Loc 71"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00072 {
+    name "Loc 72"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00073 {
+    name "Loc 73"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00074 {
+    name "Loc 74"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00075 {
+    name "Loc 75"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00076 {
+    name "Loc 76"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00077 {
+    name "Loc 77"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00078 {
+    name "Loc 78"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00079 {
+    name "Loc 79"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00080 {
+    name "Loc 80"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00081 {
+    name "Loc 81"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00082 {
+    name "Loc 82"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00083 {
+    name "Loc 83"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00084 {
+    name "Loc 84"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00085 {
+    name "Loc 85"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00086 {
+    name "Loc 86"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00087 {
+    name "Loc 87"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00088 {
+    name "Loc 88"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00089 {
+    name "Loc 89"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00090 {
+    name "Loc 90"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00091 {
+    name "Loc 91"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00092 {
+    name "Loc 92"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00093 {
+    name "Loc 93"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00094 {
+    name "Loc 94"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00095 {
+    name "Loc 95"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00096 {
+    name "Loc 96"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00097 {
+    name "Loc 97"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00098 {
+    name "Loc 98"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00099 {
+    name "Loc 99"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00100 {
+    name "Loc 100"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00101 {
+    name "Loc 101"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00102 {
+    name "Loc 102"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00103 {
+    name "Loc 103"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00104 {
+    name "Loc 104"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00105 {
+    name "Loc 105"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00106 {
+    name "Loc 106"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00107 {
+    name "Loc 107"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00108 {
+    name "Loc 108"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00109 {
+    name "Loc 109"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00110 {
+    name "Loc 110"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00111 {
+    name "Loc 111"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00112 {
+    name "Loc 112"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00113 {
+    name "Loc 113"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00114 {
+    name "Loc 114"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00115 {
+    name "Loc 115"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00116 {
+    name "Loc 116"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00117 {
+    name "Loc 117"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00118 {
+    name "Loc 118"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00119 {
+    name "Loc 119"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00120 {
+    name "Loc 120"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00121 {
+    name "Loc 121"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00122 {
+    name "Loc 122"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00123 {
+    name "Loc 123"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00124 {
+    name "Loc 124"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00125 {
+    name "Loc 125"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00126 {
+    name "Loc 126"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00127 {
+    name "Loc 127"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00128 {
+    name "Loc 128"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00129 {
+    name "Loc 129"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00130 {
+    name "Loc 130"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00131 {
+    name "Loc 131"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00132 {
+    name "Loc 132"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00133 {
+    name "Loc 133"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00134 {
+    name "Loc 134"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00135 {
+    name "Loc 135"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00136 {
+    name "Loc 136"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00137 {
+    name "Loc 137"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00138 {
+    name "Loc 138"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00139 {
+    name "Loc 139"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00140 {
+    name "Loc 140"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00141 {
+    name "Loc 141"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00142 {
+    name "Loc 142"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00143 {
+    name "Loc 143"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00144 {
+    name "Loc 144"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00145 {
+    name "Loc 145"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00146 {
+    name "Loc 146"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00147 {
+    name "Loc 147"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00148 {
+    name "Loc 148"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00149 {
+    name "Loc 149"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00150 {
+    name "Loc 150"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00151 {
+    name "Loc 151"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00152 {
+    name "Loc 152"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00153 {
+    name "Loc 153"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00154 {
+    name "Loc 154"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00155 {
+    name "Loc 155"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00156 {
+    name "Loc 156"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00157 {
+    name "Loc 157"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00158 {
+    name "Loc 158"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00159 {
+    name "Loc 159"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00160 {
+    name "Loc 160"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00161 {
+    name "Loc 161"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00162 {
+    name "Loc 162"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00163 {
+    name "Loc 163"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00164 {
+    name "Loc 164"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00165 {
+    name "Loc 165"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00166 {
+    name "Loc 166"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00167 {
+    name "Loc 167"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00168 {
+    name "Loc 168"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00169 {
+    name "Loc 169"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00170 {
+    name "Loc 170"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00171 {
+    name "Loc 171"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00172 {
+    name "Loc 172"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00173 {
+    name "Loc 173"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00174 {
+    name "Loc 174"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00175 {
+    name "Loc 175"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00176 {
+    name "Loc 176"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00177 {
+    name "Loc 177"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00178 {
+    name "Loc 178"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00179 {
+    name "Loc 179"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00180 {
+    name "Loc 180"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00181 {
+    name "Loc 181"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00182 {
+    name "Loc 182"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00183 {
+    name "Loc 183"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00184 {
+    name "Loc 184"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00185 {
+    name "Loc 185"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00186 {
+    name "Loc 186"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00187 {
+    name "Loc 187"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00188 {
+    name "Loc 188"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00189 {
+    name "Loc 189"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00190 {
+    name "Loc 190"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00191 {
+    name "Loc 191"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00192 {
+    name "Loc 192"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00193 {
+    name "Loc 193"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00194 {
+    name "Loc 194"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00195 {
+    name "Loc 195"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00196 {
+    name "Loc 196"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00197 {
+    name "Loc 197"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00198 {
+    name "Loc 198"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00199 {
+    name "Loc 199"
+    coordinates 50.0 11.0
+    radius 100
+}
+location LocId00200 {
+    name "Loc 200"
+    coordinates 50.0 11.0
+    radius 100
+}

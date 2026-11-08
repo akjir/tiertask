@@ -1,0 +1,19 @@
+{
+  "version": "0.6.0",
+  "cases": [
+    {
+      "id": "01_complete_v060",
+      "inputFile": "01_complete_v060.tdf",
+      "canonicalFile": "01_complete_v060.canonical.tdf",
+      "normalizedFile": "01_complete_v060.normalized.json",
+      "description": "Complete TDF 0.6.0 document exercising root block sorting, location decimal normalization, coalesced location condition rules, scoped labels, due, and origin."
+    },
+    {
+      "id": "02_scoped_labels_and_shared_origin",
+      "inputFile": "02_scoped_labels_and_shared_origin.tdf",
+      "canonicalFile": "02_scoped_labels_and_shared_origin.canonical.tdf",
+      "normalizedFile": "02_scoped_labels_and_shared_origin.normalized.json",
+      "description": "Scoped label global-view exclusion (L_global(T)) and multiple tasks sharing an identical origin correlation pair."
+    }
+  ]
+}

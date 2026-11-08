@@ -1,0 +1,13 @@
+tdf 0.5.0
+
+queue {
+    modified 2026-11-01 19:30:00
+    task 8jKaCdOkD2
+}
+
+task 8jKaCdOkD2 {
+    name      "Chained 0.5.0 to 0.6.0 task"
+    created   2026-11-01 18:00:00
+    queued    2026-11-01 19:30:00
+    condition location 52.520000 13.405000 250
+}

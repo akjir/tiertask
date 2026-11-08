@@ -1,0 +1,7 @@
+tdf 0.5.1
+
+task 8jKaCdOkD2 {
+    name      "Sub-centimeter radius rounds to 0"
+    created   2026-11-01 19:30:00
+    condition location 50.9787 11.0328 0.004
+}
