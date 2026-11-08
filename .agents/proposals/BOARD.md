@@ -12,7 +12,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
 | TEP-004 | TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation | feature | review | [`tep-004-tdf-0-6-0-implementation.md`](tep-004-tdf-0-6-0-implementation.md) |
-| TEP-005 | Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation | feature | planned | [`tep-005-location-source-resolution.md`](tep-005-location-source-resolution.md) |
+| TEP-005 | Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation | feature | review | [`tep-005-location-source-resolution.md`](tep-005-location-source-resolution.md) |
 
 ### Completed Proposals
 

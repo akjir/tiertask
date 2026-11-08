@@ -536,8 +536,9 @@ task tskRegOkD2 {
       final scopedIcon = tester.widget<Icon>(scopedIndicatorFinder);
       expect(
         scopedIcon.icon,
-        equals(Icons.filter_center_focus_rounded),
-        reason: 'Scoped label indicator must use the scoped focus icon',
+        equals(Icons.visibility_off_outlined),
+        reason:
+            'Scoped label indicator must use the visibility_off_outlined icon',
       );
       expect(
         scopedIcon.size,

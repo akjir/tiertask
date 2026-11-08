@@ -304,7 +304,7 @@ class _DrawerLabelTrailing extends StatelessWidget {
         Tooltip(
           message: AppLocalizations.of(context).labelScopedSwitchTitle,
           child: Icon(
-            Icons.filter_center_focus_rounded,
+            Icons.visibility_off_outlined,
             key: ValueKey('drawer_label_scoped_indicator_${label.id}'),
             size: 16,
             color: color,

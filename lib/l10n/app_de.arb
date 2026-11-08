@@ -344,5 +344,15 @@
   "taskDueButtonLabel": "Fällig am (optional)",
   "taskDueClearTooltip": "Fälligkeit löschen",
   "pillDuePrefix": "Fällig: {date}",
-  "errorLocalFileCasExhausted": "Die lokale Datei wurde gleichzeitig geändert und hat die maximale Anzahl an Merge-Versuchen überschritten."
+  "errorLocalFileCasExhausted": "Die lokale Datei wurde gleichzeitig geändert und hat die maximale Anzahl an Merge-Versuchen überschritten.",
+  "locationSourceTypeLabel": "Quellentyp",
+  "locationSourceTypeGps": "GPS-Koordinaten",
+  "locationSourceTypeAddress": "Adresse",
+  "locationSourceTypePlusCode": "Google Plus Code",
+  "locationSourceAddressHint": "Straße, PLZ, Ort",
+  "locationSourcePlusCodeHint": "z. B. 9F2PXXH7+F4 oder XXH7+F4 Erfurt",
+  "locationResolveButton": "Auflösen",
+  "locationSelectCandidateTitle": "Ort auswählen",
+  "locationResolveErrorNotFound": "Adresse oder Plus Code konnte nicht aufgelöst werden.",
+  "locationResolveErrorInvalidPlusCode": "Gültigen Plus Code eingeben (z. B. 9F2PXXH7+F4 oder XXH7+F4 Erfurt)."
 }

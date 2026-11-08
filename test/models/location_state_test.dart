@@ -61,6 +61,11 @@ void main() {
       );
 
       expect(
+        erfurtFix.isWithinDisplacementThreshold(erfurtFix, 0.0),
+        isTrue,
+        reason: 'Identical coordinates must be within 0.0m threshold boundary',
+      );
+      expect(
         erfurtFix.isWithinDisplacementThreshold(nearbyFix, 100.0),
         isTrue,
         reason: 'Points ~36m apart must be within 100m threshold',
@@ -73,7 +78,13 @@ void main() {
       expect(
         erfurtFix.isWithinDisplacementThreshold(placeOnlyFix, 100.0),
         isFalse,
-        reason: 'Comparison with missing coordinates must return false',
+        reason: 'Comparison with missing target coordinates must return false',
+      );
+      expect(
+        placeOnlyFix.isWithinDisplacementThreshold(erfurtFix, 100.0),
+        isFalse,
+        reason:
+            'Comparison with missing receiver coordinates must return false',
       );
 
       final updatedFix = erfurtFix.copyWith(placeName: 'Erfurt, Germany');
@@ -94,7 +105,11 @@ void main() {
       );
       for (final source in LocationSource.values) {
         final withSource = erfurtFix.copyWith(source: source);
-        expect(withSource.source, equals(source));
+        expect(
+          withSource.source,
+          equals(source),
+          reason: 'copyWith must update source to ${source.name}',
+        );
       }
       expect(
         erfurtFix,
@@ -189,6 +204,14 @@ void main() {
         ),
         isTrue,
         reason: 'Found state at exact 5m 00s cooldown boundary must refresh',
+      );
+      expect(
+        foundState.shouldRefreshOnResume(
+          baseTime.add(const Duration(minutes: 5, seconds: 1)),
+          minInterval,
+        ),
+        isTrue,
+        reason: 'Found state at 5m 01s (> 5m cooldown) must refresh',
       );
 
       final copied = foundState.copyWith(status: LocationStatus.searching);
@@ -288,6 +311,67 @@ void main() {
         decodedDefault.config.locationEnabled,
         isFalse,
         reason: 'Default binary record must decode locationEnabled: false',
+      );
+    });
+  });
+
+  group('LocationSourceType & GeocodingCandidate Domain Models', () {
+    test('defines exhaustive LocationSourceType values and formats GeocodingCandidate coordinates to at most 6 decimal places', () {
+      expect(
+        LocationSourceType.values,
+        equals(const <LocationSourceType>[
+          LocationSourceType.gps,
+          LocationSourceType.address,
+          LocationSourceType.plusCode,
+        ]),
+        reason: 'LocationSourceType must define gps, address, and plusCode',
+      );
+
+      const candidate1 = GeocodingCandidate(
+        displayName: 'Willy-Brandt-Platz 1, 99084 Erfurt, Germany',
+        latitude: 50.97256789,
+        longitude: 11.03781234,
+      );
+      const candidate1Duplicate = GeocodingCandidate(
+        displayName: 'Willy-Brandt-Platz 1, 99084 Erfurt, Germany',
+        latitude: 50.97256789,
+        longitude: 11.03781234,
+      );
+      const candidate2 = GeocodingCandidate(
+        displayName: 'Alexanderplatz, 10178 Berlin, Germany',
+        latitude: 52.52,
+        longitude: 13.405,
+      );
+
+      expect(
+        candidate1.formattedCoordinates,
+        equals('50.972568, 11.037812'),
+        reason: 'formattedCoordinates must round to at most 6 decimal places matching TdfLocation.formatRoundedDouble',
+      );
+      expect(
+        candidate2.formattedCoordinates,
+        equals('52.52, 13.405'),
+        reason: 'formattedCoordinates must strip trailing zeros after rounding to 6 decimals',
+      );
+      expect(
+        candidate1,
+        equals(candidate1Duplicate),
+        reason: 'Identical GeocodingCandidate instances must be equal',
+      );
+      expect(
+        candidate1.hashCode,
+        equals(candidate1Duplicate.hashCode),
+        reason: 'Identical GeocodingCandidate instances must share hashCode',
+      );
+      expect(
+        candidate1,
+        isNot(equals(candidate2)),
+        reason: 'Distinct GeocodingCandidate instances must not be equal',
+      );
+      expect(
+        candidate1.toString(),
+        contains('Willy-Brandt-Platz 1'),
+        reason: 'GeocodingCandidate.toString must include displayName',
       );
     });
   });

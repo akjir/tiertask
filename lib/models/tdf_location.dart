@@ -302,19 +302,17 @@ class TdfLocation {
 String generateLocationId({
   DateTime? timestamp,
   Set<String> existingIds = const <String>{},
+  math.Random? random,
 }) {
   final resolvedTime = timestamp ?? DateTime.now().toUtc();
   final utcSeconds = resolvedTime.toUtc().millisecondsSinceEpoch ~/ 1000;
   final normalizedTime =
       ((utcSeconds % _timeModulo) + _timeModulo) % _timeModulo;
   final timePart = _encodeBase62Fixed(normalizedTime, 4);
-  final random = math.Random.secure();
+  final resolvedRandom = random ?? math.Random.secure();
   while (true) {
-    final units = List<int>.filled(6, 0x30);
-    for (var i = 0; i < 6; i++) {
-      units[i] = _base62Alphabet.codeUnitAt(random.nextInt(62));
-    }
-    final candidate = '${String.fromCharCodes(units)}$timePart';
+    final randomPart = _randomBase62Segment(resolvedRandom);
+    final candidate = '$randomPart$timePart';
     if (!existingIds.contains(candidate)) {
       return candidate;
     }
@@ -347,6 +345,15 @@ String _encodeBase62Fixed(int value, int width) {
     final digit = remaining % 62;
     units[i] = _base62Alphabet.codeUnitAt(digit);
     remaining ~/= 62;
+  }
+  return String.fromCharCodes(units);
+}
+
+/// Generates a 6-character random Base62 string segment using [random].
+String _randomBase62Segment(math.Random random) {
+  final units = List<int>.filled(6, 0x30);
+  for (var i = 0; i < 6; i++) {
+    units[i] = _base62Alphabet.codeUnitAt(random.nextInt(62));
   }
   return String.fromCharCodes(units);
 }

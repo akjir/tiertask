@@ -20,7 +20,9 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../models/location_state.dart';
+import '../models/tdf_error.dart';
 import '../services/app_logger.dart';
+import '../services/plus_code_service.dart';
 
 /// In-memory [LocationRepository] implementation for deterministic unit and widget tests.
 class FakeLocationRepository implements LocationRepository {
@@ -36,11 +38,27 @@ class FakeLocationRepository implements LocationRepository {
   /// Value of `forceRefresh` passed to the most recent [determineLocation] call.
   bool lastForceRefresh = false;
 
+  /// Query string passed to the most recent [searchLocations] call.
+  String? lastSearchQuery;
+
+  /// Total number of [searchLocations] invocations.
+  int searchCallCount = 0;
+
+  /// Configured [GeocodingCandidate] list returned by [searchLocations].
+  List<GeocodingCandidate> searchResults = const <GeocodingCandidate>[];
+
   @override
   Future<LocationFix?> determineLocation({bool forceRefresh = false}) async {
     callCount++;
     lastForceRefresh = forceRefresh;
     return currentFix;
+  }
+
+  @override
+  Future<List<GeocodingCandidate>> searchLocations(String query) async {
+    searchCallCount++;
+    lastSearchQuery = query;
+    return searchResults;
   }
 }
 
@@ -48,6 +66,9 @@ class FakeLocationRepository implements LocationRepository {
 abstract interface class LocationRepository {
   /// Resolves the current [LocationFix], or returns `null` when unavailable.
   Future<LocationFix?> determineLocation({bool forceRefresh = false});
+
+  /// Searches forward-geocoding candidates matching [query] (at most 5 results).
+  Future<List<GeocodingCandidate>> searchLocations(String query);
 }
 
 /// Platform-backed [LocationRepository] combining the native OS location channel with bounded geocoding and GeoIP fallback.
@@ -61,7 +82,9 @@ class PlatformLocationRepository implements LocationRepository {
     Uri? fallbackGeoIpUri,
     Uri? geoIpUri,
     this.maxResponseBytes = defaultMaxResponseBytes,
+    this.minSearchInterval = defaultMinSearchInterval,
     Uri Function(double latitude, double longitude)? reverseGeocodeUriBuilder,
+    Uri Function(String query)? searchGeocodeUriBuilder,
     Uri? wifiGeolocateUri,
   }) : _channel = channel ?? locationChannel,
        _clientFactory = clientFactory ?? HttpClient.new,
@@ -70,6 +93,8 @@ class PlatformLocationRepository implements LocationRepository {
        _geoIpUri = geoIpUri ?? defaultGeoIpUri,
        _reverseGeocodeUriBuilder =
            reverseGeocodeUriBuilder ?? _defaultReverseGeocodeUri,
+       _searchGeocodeUriBuilder =
+           searchGeocodeUriBuilder ?? _defaultSearchGeocodeUri,
        _wifiGeolocateUri = wifiGeolocateUri ?? defaultWifiGeolocateUri;
 
   /// Default timeout for HTTP reverse-geocoding and GeoIP requests.
@@ -88,6 +113,9 @@ class PlatformLocationRepository implements LocationRepository {
   /// Default maximum allowed HTTP response body size in bytes (64 KiB).
   static const int defaultMaxResponseBytes = 65536;
 
+  /// Default minimum interval between outbound Nominatim search requests (1 req/s).
+  static const Duration defaultMinSearchInterval = Duration(seconds: 1);
+
   /// Default HTTPS Wi-Fi BSSID positioning endpoint (MLS / Ichnaea v1 protocol).
   static final Uri defaultWifiGeolocateUri = Uri.parse(
     'https://api.beacondb.net/v1/geolocate',
@@ -100,6 +128,15 @@ class PlatformLocationRepository implements LocationRepository {
   static const MethodChannel locationChannel = MethodChannel(
     'de.akjir.tiertask/location',
   );
+
+  /// Maximum number of forward-geocoding candidates returned by [searchLocations].
+  static const int maxGeocodingCandidates = 5;
+
+  /// Maximum allowed character length for a forward-geocoding search query.
+  static const int maxSearchQueryLength = 500;
+
+  /// Maximum number of Wi-Fi access points included in a positioning lookup.
+  static const int maxWifiAccessPoints = 20;
 
   /// Maximum horizontal accuracy radius in meters accepted for a Wi-Fi BSSID fix.
   static const double maxWifiPositioningAccuracyMeters = 2000.0;
@@ -119,6 +156,9 @@ class PlatformLocationRepository implements LocationRepository {
   /// Maximum allowed HTTP response size in bytes.
   final int maxResponseBytes;
 
+  /// Minimum interval enforced between consecutive [searchLocations] HTTP calls.
+  final Duration minSearchInterval;
+
   DateTime? _cachedGeoIpAt;
   LocationFix? _cachedGeoIpFix;
   final MethodChannel _channel;
@@ -127,8 +167,11 @@ class PlatformLocationRepository implements LocationRepository {
   final Uri _fallbackGeoIpUri;
   final Uri _geoIpUri;
   LocationFix? _lastGeocodedFix;
+  DateTime? _lastSearchAt;
   final Uri Function(double latitude, double longitude)
   _reverseGeocodeUriBuilder;
+  final Uri Function(String query) _searchGeocodeUriBuilder;
+  bool _searchInFlight = false;
   final Uri _wifiGeolocateUri;
 
   @override
@@ -177,6 +220,41 @@ class PlatformLocationRepository implements LocationRepository {
     return geoIpFix;
   }
 
+  @override
+  Future<List<GeocodingCandidate>> searchLocations(String query) async {
+    if (query.length > maxSearchQueryLength || _searchInFlight) {
+      return const <GeocodingCandidate>[];
+    }
+    final normalizedQuery = PlusCodeService.normalizeSingleLineText(
+      query,
+      maxScalarValues: maxSearchQueryLength,
+    );
+    if (normalizedQuery.isEmpty) {
+      return const <GeocodingCandidate>[];
+    }
+    _searchInFlight = true;
+    try {
+      await _waitForSearchRateLimit();
+      _lastSearchAt = _clock();
+      final stopwatch = Stopwatch()..start();
+      final uri = _searchGeocodeUriBuilder(normalizedQuery);
+      final jsonList = await _fetchJsonList(uri);
+      final candidates = _parseSearchCandidates(jsonList);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'location.search',
+        fields: <String, Object?>{
+          'results': candidates.length,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return candidates;
+    } finally {
+      _searchInFlight = false;
+    }
+  }
+
   /// Builds the default OpenStreetMap Nominatim reverse-geocoding URI for [latitude] and [longitude].
   static Uri _defaultReverseGeocodeUri(double latitude, double longitude) {
     return Uri.https(
@@ -189,6 +267,16 @@ class PlatformLocationRepository implements LocationRepository {
         'zoom': '10',
       },
     );
+  }
+
+  /// Builds the default OpenStreetMap Nominatim forward-geocoding search URI for [query].
+  static Uri _defaultSearchGeocodeUri(String query) {
+    return Uri.https('nominatim.openstreetmap.org', '/search', <String, String>{
+      'format': 'jsonv2',
+      'addressdetails': '1',
+      'limit': '$maxGeocodingCandidates',
+      'q': query,
+    });
   }
 
   /// Extracts a [LocationFix] from the native channel map when status is `'found'` and coordinates are valid.
@@ -221,25 +309,18 @@ class PlatformLocationRepository implements LocationRepository {
     }
     final sanitized = <Map<String, Object?>>[];
     for (final item in rawList) {
-      if (sanitized.length >= 20) {
+      if (sanitized.length >= maxWifiAccessPoints) {
         break;
       }
-      if (item is Map<Object?, Object?>) {
-        final mac = item['macAddress'];
-        if (mac is String && mac.trim().isNotEmpty) {
-          final entry = <String, Object?>{'macAddress': mac.trim()};
-          if (item['signalStrength'] case final num strength) {
-            entry['signalStrength'] = strength.toInt();
-          }
-          sanitized.add(entry);
-        }
+      if (_sanitizeWifiAccessPointEntry(item) case final entry?) {
+        sanitized.add(entry);
       }
     }
     return sanitized;
   }
 
-  /// Performs a bounded HTTP GET to [uri] and decodes a JSON object map, or returns `null` on error.
-  Future<Map<String, Object?>?> _fetchJsonMap(Uri uri) async {
+  /// Performs a bounded HTTP GET to [uri] and returns the decoded JSON value, or `null` on error.
+  Future<Object?> _fetchDecodedJson(Uri uri) async {
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       return null;
     }
@@ -257,16 +338,31 @@ class PlatformLocationRepository implements LocationRepository {
       if (body == null) {
         return null;
       }
-      final Object? decoded = jsonDecode(body);
-      if (decoded is Map<String, Object?>) {
-        return decoded;
-      }
-      return null;
+      return jsonDecode(body);
     } on Object {
+      AppLogger.warn(LogTag.storage, 'HTTP GET JSON fetch failed');
       return null;
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// Performs a bounded HTTP GET to [uri] and decodes a JSON array list, or returns `null` on error.
+  Future<List<Object?>?> _fetchJsonList(Uri uri) async {
+    final decoded = await _fetchDecodedJson(uri);
+    if (decoded is List<Object?>) {
+      return decoded;
+    }
+    return null;
+  }
+
+  /// Performs a bounded HTTP GET to [uri] and decodes a JSON object map, or returns `null` on error.
+  Future<Map<String, Object?>?> _fetchJsonMap(Uri uri) async {
+    final decoded = await _fetchDecodedJson(uri);
+    if (decoded is Map<String, Object?>) {
+      return decoded;
+    }
+    return null;
   }
 
   /// Returns the first non-empty trimmed string value among [keys] in [map].
@@ -388,6 +484,59 @@ class PlatformLocationRepository implements LocationRepository {
       'name',
       'display_name',
     ]);
+  }
+
+  /// Parses a single Nominatim search JSON object into a [GeocodingCandidate], or returns `null` when invalid.
+  static GeocodingCandidate? _parseSearchCandidateEntry(Object? rawItem) {
+    if (rawItem is! Map<Object?, Object?>) {
+      return null;
+    }
+    final latitude = _parseCoordinate(
+      rawItem['lat'] ?? rawItem['latitude'],
+      maxMagnitude: 90.0,
+    );
+    final longitude = _parseCoordinate(
+      rawItem['lon'] ?? rawItem['longitude'],
+      maxMagnitude: 180.0,
+    );
+    if (latitude == null || longitude == null) {
+      return null;
+    }
+    final rawName = rawItem['display_name'] ?? rawItem['name'];
+    if (rawName is! String) {
+      return null;
+    }
+    final displayName = PlusCodeService.normalizeSingleLineText(
+      rawName,
+      maxScalarValues: maxTdfTextLength,
+    );
+    if (displayName.isEmpty) {
+      return null;
+    }
+    return GeocodingCandidate(
+      displayName: displayName,
+      latitude: latitude,
+      longitude: longitude,
+    );
+  }
+
+  /// Extracts up to [maxGeocodingCandidates] sanitized [GeocodingCandidate] items from [jsonList].
+  static List<GeocodingCandidate> _parseSearchCandidates(
+    List<Object?>? jsonList,
+  ) {
+    if (jsonList == null || jsonList.isEmpty) {
+      return const <GeocodingCandidate>[];
+    }
+    final candidates = <GeocodingCandidate>[];
+    for (final rawItem in jsonList) {
+      if (candidates.length >= maxGeocodingCandidates) {
+        break;
+      }
+      if (_parseSearchCandidateEntry(rawItem) case final candidate?) {
+        candidates.add(candidate);
+      }
+    }
+    return List<GeocodingCandidate>.unmodifiable(candidates);
   }
 
   /// Extracts a [LocationFix] from an MLS / BeaconDB `/v1/geolocate` JSON payload.
@@ -578,5 +727,34 @@ class PlatformLocationRepository implements LocationRepository {
       'wifiAccessPoints': accessPoints,
     });
     return _parseWifiGeolocateFix(responseMap);
+  }
+
+  /// Sanitizes a single raw Wi-Fi access point [item] into a map with `macAddress` and optional integer `signalStrength`, or returns `null` when invalid.
+  static Map<String, Object?>? _sanitizeWifiAccessPointEntry(Object? item) {
+    if (item is! Map<Object?, Object?>) {
+      return null;
+    }
+    final mac = item['macAddress'];
+    if (mac is! String || mac.trim().isEmpty) {
+      return null;
+    }
+    final entry = <String, Object?>{'macAddress': mac.trim()};
+    if (item['signalStrength'] case final num strength) {
+      entry['signalStrength'] = strength.toInt();
+    }
+    return entry;
+  }
+
+  /// Waits for any remaining [minSearchInterval] cooldown since [_lastSearchAt].
+  Future<void> _waitForSearchRateLimit() async {
+    if (minSearchInterval <= Duration.zero) {
+      return;
+    }
+    if (_lastSearchAt case final lastAt?) {
+      final elapsed = _clock().difference(lastAt);
+      if (elapsed < minSearchInterval) {
+        await Future<void>.delayed(minSearchInterval - elapsed);
+      }
+    }
   }
 }

@@ -1170,4 +1170,36 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get errorLocalFileCasExhausted =>
       'Local file was modified concurrently and exceeded maximum merge retries.';
+
+  @override
+  String get locationSourceTypeLabel => 'Source Type';
+
+  @override
+  String get locationSourceTypeGps => 'GPS Coordinates';
+
+  @override
+  String get locationSourceTypeAddress => 'Address';
+
+  @override
+  String get locationSourceTypePlusCode => 'Google Plus Code';
+
+  @override
+  String get locationSourceAddressHint => 'Street, postal code, city';
+
+  @override
+  String get locationSourcePlusCodeHint => 'e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt';
+
+  @override
+  String get locationResolveButton => 'Resolve';
+
+  @override
+  String get locationSelectCandidateTitle => 'Select Location';
+
+  @override
+  String get locationResolveErrorNotFound =>
+      'Could not resolve address or Plus Code.';
+
+  @override
+  String get locationResolveErrorInvalidPlusCode =>
+      'Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).';
 }

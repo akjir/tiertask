@@ -1581,5 +1581,45 @@
   "errorLocalFileCasExhausted": "Local file was modified concurrently and exceeded maximum merge retries.",
   "@errorLocalFileCasExhausted": {
     "description": "Error message shown when concurrent local file edits exceed maxCasRetries."
+  },
+  "locationSourceTypeLabel": "Source Type",
+  "@locationSourceTypeLabel": {
+    "description": "Label for the location source type dropdown."
+  },
+  "locationSourceTypeGps": "GPS Coordinates",
+  "@locationSourceTypeGps": {
+    "description": "Dropdown option for manual or hardware GPS coordinate input."
+  },
+  "locationSourceTypeAddress": "Address",
+  "@locationSourceTypeAddress": {
+    "description": "Dropdown option for street address forward geocoding."
+  },
+  "locationSourceTypePlusCode": "Google Plus Code",
+  "@locationSourceTypePlusCode": {
+    "description": "Dropdown option for Open Location Code (Google Plus Code) resolution."
+  },
+  "locationSourceAddressHint": "Street, postal code, city",
+  "@locationSourceAddressHint": {
+    "description": "Hint text for the location source input when Address is selected."
+  },
+  "locationSourcePlusCodeHint": "e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt",
+  "@locationSourcePlusCodeHint": {
+    "description": "Hint text for the location source input when Google Plus Code is selected."
+  },
+  "locationResolveButton": "Resolve",
+  "@locationResolveButton": {
+    "description": "Button label to resolve an entered address or Plus Code into coordinates."
+  },
+  "locationSelectCandidateTitle": "Select Location",
+  "@locationSelectCandidateTitle": {
+    "description": "Title of the candidate selection dialog when forward geocoding returns multiple matches."
+  },
+  "locationResolveErrorNotFound": "Could not resolve address or Plus Code.",
+  "@locationResolveErrorNotFound": {
+    "description": "Validation error when address or Plus Code locality lookup returns no matches."
+  },
+  "locationResolveErrorInvalidPlusCode": "Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).",
+  "@locationResolveErrorInvalidPlusCode": {
+    "description": "Validation error when the entered Plus Code syntax is invalid."
   }
 }

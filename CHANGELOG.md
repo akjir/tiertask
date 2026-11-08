@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Defined the normative TierTask Data Format (`TDF`) `0.6.0` specification in `spec/TDF_SPEC_0.6.0.md` and added the machine-readable conformance fixture suite in `spec/conformance/v0.6.0/` (`TEP-003`).
 - Implemented the TierTask Data Format (`TDF`) `0.6.0` runtime, reusable locations management in the navigation drawer, `scoped` label queue partitioning, informational `due` dates on tasks, and `0.5.1 -> 0.6.0` document migration (`TEP-004`).
 - Added a scoped indicator icon next to the task count for scoped labels in the navigation drawer.
+- Added selectable location source resolution (`GPS Coordinates`, `Address`, and `Google Plus Code`) with offline Plus Code decoding and multi-match address selection in the location editor (`TEP-005`).
 
 ### Changed
 

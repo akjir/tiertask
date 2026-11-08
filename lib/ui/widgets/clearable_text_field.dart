@@ -31,8 +31,8 @@ class ClearableTextField extends StatefulWidget {
     this.clearTooltip,
     this.cursorColor,
     this.decoration = const InputDecoration(),
+    this.enabled = true,
     this.fieldKey,
-    this.focusNode,
     this.keyboardType,
     this.maxLines = 1,
     this.minLines,
@@ -40,6 +40,7 @@ class ClearableTextField extends StatefulWidget {
     this.onChanged,
     this.onCleared,
     this.onSubmitted,
+    this.readOnly = false,
     this.showClearWhenUnfocused = false,
     this.style,
     this.textInputAction,
@@ -74,11 +75,11 @@ class ClearableTextField extends StatefulWidget {
   /// Base [InputDecoration] for the text field.
   final InputDecoration decoration;
 
+  /// Whether the text field is interactive.
+  final bool enabled;
+
   /// Optional key forwarded directly to the inner [TextField] or [TextFormField].
   final Key? fieldKey;
-
-  /// Optional external [FocusNode] for managing focus.
-  final FocusNode? focusNode;
 
   /// Optional keyboard input type.
   final TextInputType? keyboardType;
@@ -101,6 +102,9 @@ class ClearableTextField extends StatefulWidget {
   /// Optional callback invoked when the user submits the field from the keyboard.
   final ValueChanged<String>? onSubmitted;
 
+  /// Whether the text field is read-only.
+  final bool readOnly;
+
   /// Whether to keep the clear button visible when unfocused if [controller] contains text.
   final bool showClearWhenUnfocused;
 
@@ -120,6 +124,49 @@ class ClearableTextField extends StatefulWidget {
   State<ClearableTextField> createState() => _ClearableTextFieldState();
 }
 
+/// Form-integrated input view rendered when [ClearableTextField] acts as a [TextFormField].
+class _ClearableFormField extends StatelessWidget {
+  /// Creates a [_ClearableFormField].
+  const _ClearableFormField({
+    required this.config,
+    required this.decoration,
+    required this.focusNode,
+  });
+
+  /// Parent [ClearableTextField] configuration.
+  final ClearableTextField config;
+
+  /// Effective [InputDecoration] including the optional clear button.
+  final InputDecoration decoration;
+
+  /// Focus node attached to the input field.
+  final FocusNode focusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      key: config.fieldKey,
+      controller: config.controller,
+      focusNode: focusNode,
+      enabled: config.enabled,
+      readOnly: config.readOnly,
+      autofocus: config.autofocus,
+      obscureText: config.obscureText,
+      autocorrect: config.autocorrect,
+      keyboardType: config.keyboardType,
+      textInputAction: config.textInputAction,
+      style: config.style,
+      cursorColor: config.cursorColor,
+      minLines: config.minLines,
+      maxLines: config.maxLines,
+      decoration: decoration,
+      onChanged: config.onChanged,
+      onFieldSubmitted: config.onSubmitted,
+      validator: config.validator,
+    );
+  }
+}
+
 /// Trailing suffix widget combining the clear button with an optional custom [trailingIcon].
 class _ClearableSuffixIcon extends StatelessWidget {
   /// Creates a [_ClearableSuffixIcon].
@@ -128,7 +175,6 @@ class _ClearableSuffixIcon extends StatelessWidget {
     required this.iconColor,
     required this.iconSize,
     required this.onClear,
-    required this.showClearButton,
     required this.tooltip,
     required this.trailingIcon,
   });
@@ -144,9 +190,6 @@ class _ClearableSuffixIcon extends StatelessWidget {
 
   /// Callback invoked when the clear button is pressed.
   final VoidCallback onClear;
-
-  /// Whether the clear button is currently visible.
-  final bool showClearButton;
 
   /// Localized tooltip for the clear button.
   final String tooltip;
@@ -170,53 +213,46 @@ class _ClearableSuffixIcon extends StatelessWidget {
     }
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: [if (showClearButton) clearButton, customTrailing],
+      children: [clearButton, customTrailing],
     );
   }
 }
 
 /// State for [ClearableTextField].
 class _ClearableTextFieldState extends State<ClearableTextField> {
-  FocusNode? _internalFocusNode;
-
-  /// Active [FocusNode] supplied by [widget.focusNode] or owned internally.
-  FocusNode get _effectiveFocusNode =>
-      widget.focusNode ?? (_internalFocusNode ??= FocusNode());
+  final FocusNode _focusNode = FocusNode();
+  bool _isClearButtonVisible = false;
 
   /// Whether the clear button should be rendered in the suffix slot.
   bool get _shouldShowClearButton =>
-      _effectiveFocusNode.hasFocus ||
-      (widget.showClearWhenUnfocused && widget.controller.text.isNotEmpty);
+      widget.enabled &&
+      !widget.readOnly &&
+      (_focusNode.hasFocus ||
+          (widget.showClearWhenUnfocused && widget.controller.text.isNotEmpty));
 
   @override
   void initState() {
     super.initState();
-    _effectiveFocusNode.addListener(_handleStateChange);
+    _isClearButtonVisible = _shouldShowClearButton;
+    _focusNode.addListener(_handleStateChange);
     widget.controller.addListener(_handleStateChange);
   }
 
   @override
   void didUpdateWidget(covariant ClearableTextField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.focusNode != widget.focusNode) {
-      (oldWidget.focusNode ?? _internalFocusNode)?.removeListener(
-        _handleStateChange,
-      );
-      _effectiveFocusNode.addListener(_handleStateChange);
-    }
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_handleStateChange);
       widget.controller.addListener(_handleStateChange);
     }
+    _isClearButtonVisible = _shouldShowClearButton;
   }
 
   @override
   void dispose() {
-    (widget.focusNode ?? _internalFocusNode)?.removeListener(
-      _handleStateChange,
-    );
+    _focusNode.removeListener(_handleStateChange);
     widget.controller.removeListener(_handleStateChange);
-    _internalFocusNode?.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -224,29 +260,18 @@ class _ClearableTextFieldState extends State<ClearableTextField> {
   Widget build(BuildContext context) {
     final decoration = _buildEffectiveDecoration(context);
     if (widget.useFormField || widget.validator != null) {
-      return TextFormField(
-        key: widget.fieldKey,
-        controller: widget.controller,
-        focusNode: _effectiveFocusNode,
-        autofocus: widget.autofocus,
-        obscureText: widget.obscureText,
-        autocorrect: widget.autocorrect,
-        keyboardType: widget.keyboardType,
-        textInputAction: widget.textInputAction,
-        style: widget.style,
-        cursorColor: widget.cursorColor,
-        minLines: widget.minLines,
-        maxLines: widget.maxLines,
+      return _ClearableFormField(
+        config: widget,
         decoration: decoration,
-        onChanged: widget.onChanged,
-        onFieldSubmitted: widget.onSubmitted,
-        validator: widget.validator,
+        focusNode: _focusNode,
       );
     }
     return TextField(
       key: widget.fieldKey,
       controller: widget.controller,
-      focusNode: _effectiveFocusNode,
+      focusNode: _focusNode,
+      enabled: widget.enabled,
+      readOnly: widget.readOnly,
       autofocus: widget.autofocus,
       obscureText: widget.obscureText,
       autocorrect: widget.autocorrect,
@@ -262,11 +287,9 @@ class _ClearableTextFieldState extends State<ClearableTextField> {
     );
   }
 
-  /// Merges the clear button into [widget.decoration] when [_shouldShowClearButton] is true.
+  /// Merges the clear button into [widget.decoration] when [_isClearButtonVisible] is true.
   InputDecoration _buildEffectiveDecoration(BuildContext context) {
-    final showClear = _shouldShowClearButton;
-    final existingSuffix = widget.decoration.suffixIcon;
-    if (!showClear) {
+    if (!_isClearButtonVisible) {
       return widget.decoration;
     }
     final localizations = AppLocalizations.of(context);
@@ -276,9 +299,8 @@ class _ClearableTextFieldState extends State<ClearableTextField> {
         clearButtonKey: widget.clearButtonKey,
         iconColor: widget.clearIconColor ?? colorScheme.onSurfaceVariant,
         iconSize: widget.clearIconSize,
-        showClearButton: showClear,
         tooltip: widget.clearTooltip ?? localizations.tooltipClearInput,
-        trailingIcon: existingSuffix,
+        trailingIcon: widget.decoration.suffixIcon,
         onClear: _clearText,
       ),
     );
@@ -289,13 +311,19 @@ class _ClearableTextFieldState extends State<ClearableTextField> {
     widget.controller.clear();
     widget.onChanged?.call('');
     widget.onCleared?.call();
-    _effectiveFocusNode.requestFocus();
+    _focusNode.requestFocus();
   }
 
-  /// Rebuilds when focus or controller text changes.
+  /// Rebuilds only when clear-button visibility transitions.
   void _handleStateChange() {
-    if (mounted) {
-      setState(() {});
+    if (!mounted) {
+      return;
+    }
+    final nextVisible = _shouldShowClearButton;
+    if (nextVisible != _isClearButtonVisible) {
+      setState(() {
+        _isClearButtonVisible = nextVisible;
+      });
     }
   }
 }

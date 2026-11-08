@@ -2167,6 +2167,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Local file was modified concurrently and exceeded maximum merge retries.'**
   String get errorLocalFileCasExhausted;
+
+  /// Label for the location source type dropdown.
+  ///
+  /// In en, this message translates to:
+  /// **'Source Type'**
+  String get locationSourceTypeLabel;
+
+  /// Dropdown option for manual or hardware GPS coordinate input.
+  ///
+  /// In en, this message translates to:
+  /// **'GPS Coordinates'**
+  String get locationSourceTypeGps;
+
+  /// Dropdown option for street address forward geocoding.
+  ///
+  /// In en, this message translates to:
+  /// **'Address'**
+  String get locationSourceTypeAddress;
+
+  /// Dropdown option for Open Location Code (Google Plus Code) resolution.
+  ///
+  /// In en, this message translates to:
+  /// **'Google Plus Code'**
+  String get locationSourceTypePlusCode;
+
+  /// Hint text for the location source input when Address is selected.
+  ///
+  /// In en, this message translates to:
+  /// **'Street, postal code, city'**
+  String get locationSourceAddressHint;
+
+  /// Hint text for the location source input when Google Plus Code is selected.
+  ///
+  /// In en, this message translates to:
+  /// **'e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt'**
+  String get locationSourcePlusCodeHint;
+
+  /// Button label to resolve an entered address or Plus Code into coordinates.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolve'**
+  String get locationResolveButton;
+
+  /// Title of the candidate selection dialog when forward geocoding returns multiple matches.
+  ///
+  /// In en, this message translates to:
+  /// **'Select Location'**
+  String get locationSelectCandidateTitle;
+
+  /// Validation error when address or Plus Code locality lookup returns no matches.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not resolve address or Plus Code.'**
+  String get locationResolveErrorNotFound;
+
+  /// Validation error when the entered Plus Code syntax is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).'**
+  String get locationResolveErrorInvalidPlusCode;
 }
 
 class _AppLocalizationsDelegate

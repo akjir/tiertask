@@ -15,7 +15,48 @@
 
 import 'package:flutter/foundation.dart';
 
+import 'tdf_location.dart';
 import 'tdf_metadata.dart';
+
+/// Immutable forward-geocoding match returned by a location search query.
+@immutable
+class GeocodingCandidate {
+  /// Creates a [GeocodingCandidate] with a single-line [displayName] and WGS-84 coordinates.
+  const GeocodingCandidate({
+    required this.displayName,
+    required this.latitude,
+    required this.longitude,
+  });
+
+  /// Single-line human-readable display name or formatted street address.
+  final String displayName;
+
+  /// WGS-84 latitude in decimal degrees (`[-90.0, 90.0]`).
+  final double latitude;
+
+  /// WGS-84 longitude in decimal degrees (`[-180.0, 180.0]`).
+  final double longitude;
+
+  /// Formats [latitude] and [longitude] rounded to at most 6 decimal places.
+  String get formattedCoordinates =>
+      '${TdfLocation.formatRoundedDouble(latitude, 6)}, ${TdfLocation.formatRoundedDouble(longitude, 6)}';
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is GeocodingCandidate &&
+        other.displayName == displayName &&
+        other.latitude == latitude &&
+        other.longitude == longitude;
+  }
+
+  @override
+  int get hashCode => Object.hash(displayName, latitude, longitude);
+
+  @override
+  String toString() =>
+      'GeocodingCandidate(displayName: $displayName, coordinates: $formattedCoordinates)';
+}
 
 /// Immutable representation of a resolved geographical location fix.
 @immutable
@@ -42,12 +83,13 @@ class LocationFix {
 
   /// Formats [latitude] and [longitude] to 5 decimal places, or returns `null` when missing.
   String? get formattedCoordinates {
-    final lat = latitude;
-    final lon = longitude;
-    if (lat == null || lon == null) {
-      return null;
+    if ((latitude, longitude) case (
+      final currentLatitude?,
+      final currentLongitude?,
+    )) {
+      return '${currentLatitude.toStringAsFixed(5)}, ${currentLongitude.toStringAsFixed(5)}';
     }
-    return '${lat.toStringAsFixed(5)}, ${lon.toStringAsFixed(5)}';
+    return null;
   }
 
   /// Whether both [latitude] and [longitude] are present.
@@ -73,20 +115,21 @@ class LocationFix {
     LocationFix other,
     double thresholdMeters,
   ) {
-    final lat1 = latitude;
-    final lon1 = longitude;
-    final lat2 = other.latitude;
-    final lon2 = other.longitude;
-    if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) {
-      return false;
+    if ((latitude, longitude, other.latitude, other.longitude) case (
+      final startLatitude?,
+      final startLongitude?,
+      final endLatitude?,
+      final endLongitude?,
+    )) {
+      final distance = LocationTaskCondition.haversineDistanceMeters(
+        startLatitude,
+        startLongitude,
+        endLatitude,
+        endLongitude,
+      );
+      return distance <= thresholdMeters;
     }
-    final distance = LocationTaskCondition.haversineDistanceMeters(
-      lat1,
-      lon1,
-      lat2,
-      lon2,
-    );
-    return distance <= thresholdMeters;
+    return false;
   }
 
   @override
@@ -117,6 +160,18 @@ enum LocationSource {
 
   /// IP-based GeoIP lookup over the internet.
   internet,
+}
+
+/// Selectable coordinate resolution mode in the location editor.
+enum LocationSourceType {
+  /// Manual WGS-84 coordinate entry or hardware GPS lookup.
+  gps,
+
+  /// Street address or place name resolved via forward geocoding.
+  address,
+
+  /// Open Location Code (Google Plus Code) resolved offline or with a locality query.
+  plusCode,
 }
 
 /// Immutable state snapshot of the foreground location determination service.
@@ -172,10 +227,11 @@ class LocationState {
     return switch (status) {
       LocationStatus.disabled => false,
       LocationStatus.searching => false,
+      LocationStatus.found => switch (updatedAt) {
+        final lastUpdatedAt? => now.difference(lastUpdatedAt) >= minInterval,
+        null => true,
+      },
       LocationStatus.unavailable => true,
-      LocationStatus.found =>
-        updatedAt == null ||
-            now.difference(updatedAt ?? now).compareTo(minInterval) >= 0,
     };
   }
 

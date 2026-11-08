@@ -137,6 +137,255 @@ void main() {
   );
 
   testWidgets(
+    'ClearableTextField scopes rebuilds to clear-button visibility transitions, swaps controllers in didUpdateWidget, enforces visibility guards, and supports TextField and TextFormField modes',
+    (WidgetTester tester) async {
+      final firstController = TextEditingController();
+      final secondController = TextEditingController();
+      addTearDown(firstController.dispose);
+      addTearDown(secondController.dispose);
+
+      var suffixBuildCount = 0;
+      var activeController = firstController;
+      var isEnabled = true;
+      var isReadOnly = false;
+      var showClearWhenUnfocused = false;
+      var useFormField = false;
+      FormFieldValidator<String>? validator;
+      final formKey = GlobalKey<FormState>();
+
+      late StateSetter updateHost;
+
+      await pumpLeafWidget(
+        tester,
+        StatefulBuilder(
+          builder: (context, setHostState) {
+            updateHost = setHostState;
+            return Form(
+              key: formKey,
+              child: ClearableTextField(
+                fieldKey: const ValueKey('scoped_field'),
+                clearButtonKey: const ValueKey('scoped_clear_button'),
+                controller: activeController,
+                enabled: isEnabled,
+                readOnly: isReadOnly,
+                showClearWhenUnfocused: showClearWhenUnfocused,
+                useFormField: useFormField,
+                validator: validator,
+                decoration: InputDecoration(
+                  labelText: 'Scoped',
+                  suffixIcon: Builder(
+                    builder: (context) {
+                      suffixBuildCount++;
+                      return const Icon(
+                        Icons.info_outline,
+                        key: ValueKey('scoped_suffix_icon'),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      );
+
+      final fieldFinder = find.byKey(const ValueKey('scoped_field'));
+      final clearButtonFinder = find.byKey(
+        const ValueKey('scoped_clear_button'),
+      );
+
+      expect(
+        find.byType(TextFormField),
+        findsNothing,
+        reason: 'Default mode must render a plain TextField',
+      );
+      expect(
+        find.byType(TextField),
+        findsOneWidget,
+        reason: 'Default mode must mount a TextField widget',
+      );
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'Clear button must be hidden initially when unfocused',
+      );
+      expect(
+        suffixBuildCount,
+        equals(1),
+        reason: 'Custom suffixIcon Builder must build once on initial mount',
+      );
+
+      await tester.tap(fieldFinder);
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsOneWidget,
+        reason: 'Focusing the field must transition clear button to visible',
+      );
+      expect(
+        suffixBuildCount,
+        equals(2),
+        reason: 'Custom suffixIcon Builder must rebuild when clear-button visibility transitions',
+      );
+
+      final clearButtonBeforeTyping = tester.widget<IconButton>(
+        clearButtonFinder,
+      );
+
+      await tester.enterText(fieldFinder, 'a');
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'ab');
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'abc');
+      await tester.pump();
+
+      expect(
+        suffixBuildCount,
+        equals(2),
+        reason: 'Typing characters while focused must not rebuild custom suffixIcon when clear-button visibility is unchanged',
+      );
+      expect(
+        tester.widget<IconButton>(clearButtonFinder),
+        same(clearButtonBeforeTyping),
+        reason: 'Typing characters while focused must not trigger redundant ClearableTextField setState rebuilds when clear-button visibility is unchanged',
+      );
+
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'Unfocusing with showClearWhenUnfocused false must hide the clear button',
+      );
+      expect(
+        suffixBuildCount,
+        equals(3),
+        reason: 'Hiding the clear button must transition suffix slot back to the bare suffixIcon',
+      );
+
+      firstController.clear();
+      updateHost(() {
+        showClearWhenUnfocused = true;
+      });
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'showClearWhenUnfocused must not show clear button when unfocused text is empty',
+      );
+
+      firstController.text = 'a';
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsOneWidget,
+        reason: 'showClearWhenUnfocused must show clear button when unfocused text becomes non-empty',
+      );
+      final unfocusedClearButton = tester.widget<IconButton>(clearButtonFinder);
+
+      firstController.text = 'ab';
+      await tester.pump();
+      firstController.text = 'abc';
+      await tester.pump();
+
+      expect(
+        tester.widget<IconButton>(clearButtonFinder),
+        same(unfocusedClearButton),
+        reason: 'Subsequent non-empty edits while unfocused must not rebuild ClearableTextField when visibility stays true',
+      );
+
+      updateHost(() {
+        isReadOnly = true;
+      });
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'readOnly true must hide the clear button',
+      );
+
+      updateHost(() {
+        isReadOnly = false;
+        isEnabled = false;
+      });
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'enabled false must hide the clear button',
+      );
+
+      updateHost(() {
+        isEnabled = true;
+        activeController = secondController;
+      });
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'Swapping to an empty second controller while unfocused must hide the clear button',
+      );
+
+      firstController.text = 'mutated old controller';
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsNothing,
+        reason: 'Old controller listener must be detached in didUpdateWidget so mutations do not affect visibility',
+      );
+
+      secondController.text = 'new controller text';
+      await tester.pump();
+
+      expect(
+        clearButtonFinder,
+        findsOneWidget,
+        reason: 'New controller listener must be attached in didUpdateWidget so non-empty text shows the clear button',
+      );
+
+      updateHost(() {
+        useFormField = true;
+      });
+      await tester.pump();
+
+      expect(
+        find.byType(TextFormField),
+        findsOneWidget,
+        reason: 'useFormField true must render a TextFormField',
+      );
+
+      updateHost(() {
+        useFormField = false;
+        validator = (value) =>
+            (value == null || value.isEmpty) ? 'Required' : null;
+      });
+      await tester.pump();
+
+      expect(
+        find.byType(TextFormField),
+        findsOneWidget,
+        reason: 'Non-null validator must render a TextFormField',
+      );
+
+      secondController.clear();
+      await tester.pump();
+      expect(
+        formKey.currentState?.validate(),
+        isFalse,
+        reason: 'TextFormField mode must wire the validator into the enclosing Form',
+      );
+    },
+  );
+
+  testWidgets(
     'SettingsScreen text fields display right-side clear button when focused and clear text on click',
     (WidgetTester tester) async {
       const config = WebDavConfig(

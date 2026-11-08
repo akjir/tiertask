@@ -1189,4 +1189,37 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get errorLocalFileCasExhausted =>
       'Die lokale Datei wurde gleichzeitig geändert und hat die maximale Anzahl an Merge-Versuchen überschritten.';
+
+  @override
+  String get locationSourceTypeLabel => 'Quellentyp';
+
+  @override
+  String get locationSourceTypeGps => 'GPS-Koordinaten';
+
+  @override
+  String get locationSourceTypeAddress => 'Adresse';
+
+  @override
+  String get locationSourceTypePlusCode => 'Google Plus Code';
+
+  @override
+  String get locationSourceAddressHint => 'Straße, PLZ, Ort';
+
+  @override
+  String get locationSourcePlusCodeHint =>
+      'z. B. 9F2PXXH7+F4 oder XXH7+F4 Erfurt';
+
+  @override
+  String get locationResolveButton => 'Auflösen';
+
+  @override
+  String get locationSelectCandidateTitle => 'Ort auswählen';
+
+  @override
+  String get locationResolveErrorNotFound =>
+      'Adresse oder Plus Code konnte nicht aufgelöst werden.';
+
+  @override
+  String get locationResolveErrorInvalidPlusCode =>
+      'Gültigen Plus Code eingeben (z. B. 9F2PXXH7+F4 oder XXH7+F4 Erfurt).';
 }

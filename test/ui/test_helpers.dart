@@ -20,9 +20,11 @@ import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
+import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/ui/app_theme.dart';
@@ -161,6 +163,7 @@ Future<ProviderContainer> pumpLeafWidget(
   ThemeMode themeMode = ThemeMode.light,
   DateTime Function()? clock,
   bool wrapInScaffold = true,
+  LocationRepository? locationRepository,
 }) async {
   final effectiveThemeSet =
       themeSet ?? AppThemeSet.forPalette(config.themePalette);
@@ -180,6 +183,8 @@ Future<ProviderContainer> pumpLeafWidget(
         clock ?? () => DateTime.utc(2026, 11, 1, 12, 0),
       ),
       taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+      if (locationRepository != null)
+        locationRepositoryProvider.overrideWithValue(locationRepository),
     ],
   );
   addTearDown(container.dispose);

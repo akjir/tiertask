@@ -1,10 +1,10 @@
 ---
 id: TEP-005
 title: Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation
-status: planned
+status: review
 type: feature
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # TEP-005: Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation
@@ -238,18 +238,19 @@ No grammar or semantic changes to `spec/TDF_SPEC_0.6.0.md` are required. `spec/T
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
-- [ ] Add English and German localization keys to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` via `tiertask_dev.py l10n --set`.
-- [ ] Write failing unit tests in `test/models/location_state_test.dart`, `test/services/plus_code_service_test.dart`, and `test/repositories/location_repository_test.dart`, and failing widget tests in `test/ui/edit_locations_screen_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
-- [ ] Implement `LocationSourceType` and `GeocodingCandidate` in `lib/models/location_state.dart`, `PlusCodeService` in `lib/services/plus_code_service.dart`, `searchLocations` in `lib/repositories/location_repository.dart`, `enabled`/`readOnly` support in `lib/ui/widgets/clearable_text_field.dart`, and the source resolution workflow in `lib/ui/edit_locations_screen.dart` (TDD Green & Refactor Phase).
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree --set lib/services/plus_code_service.dart "Stateless Open Location Code (Google Plus Code) parser, decoder, encoder, and nearest-locality recovery service."` and synchronize `ARCHITECTURE.md` and `README.md` per **`update-documentation`**.
-- [ ] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
-- [ ] Set `status: review` in `tep-005-location-source-resolution.md` and `BOARD.md` and request user approval.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
+- [x] Add English and German localization keys to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` via `tiertask_dev.py l10n --set`.
+- [x] Write failing unit tests in `test/models/location_state_test.dart`, `test/services/plus_code_service_test.dart`, and `test/repositories/location_repository_test.dart`, and failing widget tests in `test/ui/edit_locations_screen_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
+- [x] Implement `LocationSourceType` and `GeocodingCandidate` in `lib/models/location_state.dart`, `PlusCodeService` in `lib/services/plus_code_service.dart`, `searchLocations` in `lib/repositories/location_repository.dart`, `enabled`/`readOnly` support in `lib/ui/widgets/clearable_text_field.dart`, and the source resolution workflow in `lib/ui/edit_locations_screen.dart` (TDD Green & Refactor Phase).
+- [x] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree --set lib/services/plus_code_service.dart "Stateless Open Location Code (Google Plus Code) parser, decoder, encoder, and nearest-locality recovery service."` and synchronize `ARCHITECTURE.md` and `README.md` per **`update-documentation`**.
+- [x] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
+- [x] Set `status: review` in `tep-005-location-source-resolution.md` and `BOARD.md` and request user approval.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-08:** Created `TEP-005` in `planned` status following internet research on What3words API restrictions, OpenStreetMap Nominatim forward geocoding, and offline Open Location Code decoding.
 * **2026-11-08:** Updated `TEP-005` with 6 technical refinements: optional `localitySuffix` preservation on `FullPlusCodeInput`, single-line `<text>` normalization and 500-rune truncation for `GeocodingCandidate.displayName`, 6-decimal `GeocodingCandidate.formattedCoordinates` alignment, anchor-derived `_isSourceResolved` tracking, `_resolveGeneration` async cancellation and in-flight control locking, and Nominatim rate-limit guard plus short Plus Code source string preservation.
+* **2026-11-09:** Implemented `TEP-005` via Red-Green-Refactor TDD across `lib/models/location_state.dart`, `lib/services/plus_code_service.dart`, `lib/repositories/location_repository.dart`, `lib/ui/widgets/clearable_text_field.dart`, `lib/ui/edit_locations_screen.dart`, and `lib/l10n/app_*.arb`.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*

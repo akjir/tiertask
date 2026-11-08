@@ -17,12 +17,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/edit_labels_screen.dart';
+import 'package:tiertask/ui/widgets/task_editor_sections.dart';
 
 import 'test_helpers.dart';
 
@@ -515,6 +518,14 @@ task 000002OkD2 {
         const ValueKey('label_editor_scoped_switch'),
       );
       await tester.ensureVisible(scopedSwitchFinder);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('label_editor_scoped_card')),
+          matching: find.byIcon(Icons.visibility_off_outlined),
+        ),
+        findsOneWidget,
+        reason: 'Scoped label card in EditLabelScreen must use the visibility_off_outlined icon',
+      );
       await tester.tap(scopedSwitchFinder);
       await tester.pump();
 
@@ -580,6 +591,245 @@ task 000002OkD2 {
         find.byKey(const ValueKey('edit_labels_screen')),
         findsOneWidget,
         reason: 'Clicking Create new label in the drawer must also open EditLabelsScreen',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditLabelsScreen renders empty view, clears input, guards whitespace submit, and creates label on keyboard submit',
+    (WidgetTester tester) async {
+      final container = await pumpLeafWidget(
+        tester,
+        const EditLabelsScreen(),
+        board: TaskBoard.empty(),
+      );
+
+      final emptyTextFinder = find.descendant(
+        of: find.byType(Center),
+        matching: find.byType(Text),
+      );
+      expect(
+        emptyTextFinder,
+        findsOneWidget,
+        reason: 'Empty labels board must render the empty labels hint',
+      );
+      expect(
+        tester.widget<Text>(emptyTextFinder).data,
+        contains('label'),
+        reason: 'Empty labels hint must describe the absence of labels',
+      );
+
+      final clearButtonFinder = find.byKey(
+        const ValueKey('create_label_clear_button'),
+      );
+      final submitButtonFinder = find.byKey(
+        const ValueKey('create_label_submit_button'),
+      );
+      final inputFinder = find.byKey(const ValueKey('create_label_input'));
+
+      expect(
+        tester.widget<IconButton>(clearButtonFinder).onPressed,
+        isNull,
+        reason: 'Clear button must be disabled when create input is empty',
+      );
+      expect(
+        tester.widget<IconButton>(submitButtonFinder).onPressed,
+        isNull,
+        reason: 'Submit button must be disabled when create input is empty',
+      );
+
+      await tester.enterText(inputFinder, '   ');
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(taskNotifierProvider).requireValue.labels,
+        isEmpty,
+        reason: 'Submitting whitespace-only input must not create a label',
+      );
+
+      await tester.enterText(inputFinder, 'DraftLabel');
+      await tester.pump();
+      expect(
+        tester.widget<IconButton>(clearButtonFinder).onPressed,
+        isNotNull,
+        reason:
+            'Clear button must be enabled when non-whitespace text is entered',
+      );
+
+      await tester.tap(clearButtonFinder);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(inputFinder).controller?.text,
+        isEmpty,
+        reason: 'Tapping clear button must clear the create label input field',
+      );
+      expect(
+        container.read(taskNotifierProvider).requireValue.labels,
+        isEmpty,
+        reason: 'Clearing the input must not create a label',
+      );
+
+      await tester.enterText(inputFinder, 'KeyboardLabel');
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .labels
+            .map((label) => label.name),
+        equals(['KeyboardLabel']),
+        reason: 'Submitting via keyboard action must create the new label',
+      );
+      expect(
+        tester.widget<TextField>(inputFinder).controller?.text,
+        isEmpty,
+        reason:
+            'Creating a label via keyboard submit must clear the input field',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditLabelScreen deselects active preset color, clears existing color and note on save, and handles dialog and screen cancel',
+    (WidgetTester tester) async {
+      const initialLabel = TdfLabel(
+        id: 'home00OkD2',
+        name: 'Home',
+        color: '#4CAF50',
+        note: 'Initial note',
+      );
+      final container = await pumpLeafWidget(
+        tester,
+        const EditLabelScreen(label: initialLabel),
+        board: TaskBoard.empty().copyWith(labels: const [initialLabel]),
+      );
+
+      expect(
+        find.ancestor(
+          of: find.byType(LabelEditorColorCard),
+          matching: find.byType(ValueListenableBuilder<TextEditingValue>),
+        ),
+        findsOneWidget,
+        reason: 'LabelEditorColorCard must be scoped inside a ValueListenableBuilder on the color controller',
+      );
+
+      final colorInputFinder = find.byKey(
+        const ValueKey('label_editor_color_input'),
+      );
+      final noteInputFinder = find.byKey(
+        const ValueKey('task_editor_note_input'),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('label_editor_color_wheel_button')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('label_color_picker_dialog')),
+        findsOneWidget,
+        reason: 'Tapping color wheel button must open LabelColorPickerDialog',
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const ValueKey('label_color_picker_dialog')),
+          matching: find.text('Cancel'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('label_color_picker_dialog')),
+        findsNothing,
+        reason: 'Cancelling LabelColorPickerDialog must close the dialog',
+      );
+      expect(
+        tester.widget<TextField>(colorInputFinder).controller?.text,
+        equals('#4CAF50'),
+        reason:
+            'Cancelling LabelColorPickerDialog must preserve the current color',
+      );
+
+      final greenPresetFinder = find.byKey(
+        const ValueKey('label_editor_color_preset_#4CAF50'),
+      );
+      await tester.tap(greenPresetFinder);
+      await tester.pump();
+      expect(
+        tester.widget<TextField>(colorInputFinder).controller?.text,
+        isEmpty,
+        reason:
+            'Tapping an already-active preset color swatch must deselect it',
+      );
+
+      await tester.enterText(noteInputFinder, '   ');
+      await tester.pump();
+
+      final saveButtonFinder = find.byKey(
+        const ValueKey('task_editor_save_button'),
+      );
+      await tester.ensureVisible(saveButtonFinder);
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      final clearedLabel = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findLabel('home00OkD2')!;
+      expect(
+        clearedLabel.color,
+        isNull,
+        reason:
+            'Saving with an empty color field must clear the existing color',
+      );
+      expect(
+        clearedLabel.note,
+        isNull,
+        reason: 'Saving with a whitespace-only note field must clear the existing note',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditLabelScreen cancel button closes editor without persisting changes',
+    (WidgetTester tester) async {
+      const initialLabel = TdfLabel(
+        id: 'home00OkD2',
+        name: 'Home',
+        color: '#4CAF50',
+      );
+      final container = await pumpLeafWidget(
+        tester,
+        const EditLabelScreen(label: initialLabel),
+        board: TaskBoard.empty().copyWith(labels: const [initialLabel]),
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Unsaved Home',
+      );
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('task_editor_cancel_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('edit_label_screen')),
+        findsNothing,
+        reason: 'Tapping cancel button must pop EditLabelScreen',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findLabel('home00OkD2')
+            ?.name,
+        equals('Home'),
+        reason: 'Cancelling EditLabelScreen must not persist unsaved changes',
       );
     },
   );

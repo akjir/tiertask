@@ -18,6 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
+import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
 import '../providers/task_providers.dart';
 import '../services/app_logger.dart';
@@ -49,6 +50,33 @@ class EditLabelsScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<EditLabelsScreen> createState() => _EditLabelsScreenState();
+}
+
+/// Leading clear/add icon button inside [_CreateLabelRow].
+class _CreateLabelClearButton extends StatelessWidget {
+  /// Creates a [_CreateLabelClearButton].
+  const _CreateLabelClearButton({required this.hasText, required this.onClear});
+
+  /// Whether the input field currently contains non-whitespace text.
+  final bool hasText;
+
+  /// Callback invoked when the clear button is pressed.
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    return IconButton(
+      key: const ValueKey('create_label_clear_button'),
+      tooltip: hasText ? localizations.actionCancel : localizations.actionAdd,
+      icon: Icon(
+        hasText ? Icons.close_rounded : Icons.add_rounded,
+        color: colorScheme.onSurfaceVariant,
+      ),
+      onPressed: hasText ? onClear : null,
+    );
+  }
 }
 
 /// Top row inside [EditLabelsScreen] for creating a new label.
@@ -85,37 +113,14 @@ class _CreateLabelRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         children: [
-          IconButton(
-            key: const ValueKey('create_label_clear_button'),
-            tooltip: hasText
-                ? localizations.actionCancel
-                : localizations.actionAdd,
-            icon: Icon(
-              hasText ? Icons.close_rounded : Icons.add_rounded,
-              color: colorScheme.onSurfaceVariant,
-            ),
-            onPressed: hasText ? onClear : null,
-          ),
+          _CreateLabelClearButton(hasText: hasText, onClear: onClear),
           const SizedBox(width: 8),
           Expanded(
-            child: ClearableTextField(
-              fieldKey: const ValueKey('create_label_input'),
-              controller: controller,
+            child: _CreateLabelTextField(
               autofocus: autofocus,
-              cursorColor: colorScheme.primary,
-              style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
-              textInputAction: TextInputAction.done,
-              onCleared: onClear,
-              onSubmitted: (_) => onSubmit(),
-              decoration: InputDecoration(
-                filled: false,
-                hintText: localizations.createNewLabel,
-                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                isDense: true,
-              ),
+              controller: controller,
+              onClear: onClear,
+              onSubmit: onSubmit,
             ),
           ),
           IconButton(
@@ -129,6 +134,141 @@ class _CreateLabelRow extends StatelessWidget {
             ),
             onPressed: hasText ? onSubmit : null,
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Text field inside [_CreateLabelRow] for entering a new label name.
+class _CreateLabelTextField extends StatelessWidget {
+  /// Creates a [_CreateLabelTextField].
+  const _CreateLabelTextField({
+    required this.autofocus,
+    required this.controller,
+    required this.onClear,
+    required this.onSubmit,
+  });
+
+  /// Whether the text field requests focus automatically.
+  final bool autofocus;
+
+  /// Controller for the new label name input.
+  final TextEditingController controller;
+
+  /// Callback invoked when the input is cleared.
+  final VoidCallback onClear;
+
+  /// Callback invoked when the new label is submitted.
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    return ClearableTextField(
+      fieldKey: const ValueKey('create_label_input'),
+      controller: controller,
+      autofocus: autofocus,
+      cursorColor: colorScheme.primary,
+      style: TextStyle(color: colorScheme.onSurface, fontSize: 16),
+      textInputAction: TextInputAction.done,
+      onCleared: onClear,
+      onSubmitted: (_) => onSubmit(),
+      decoration: InputDecoration(
+        filled: false,
+        hintText: localizations.createNewLabel,
+        hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        isDense: true,
+      ),
+    );
+  }
+}
+
+/// Scrollable card column inside [EditLabelScreen].
+class _EditLabelForm extends StatelessWidget {
+  /// Creates an [_EditLabelForm].
+  const _EditLabelForm({
+    required this.colorController,
+    required this.colorErrorMessage,
+    required this.conditionController,
+    required this.isScoped,
+    required this.nameController,
+    required this.nameErrorMessage,
+    required this.noteController,
+    required this.onPickCustomColor,
+    required this.onScopedChanged,
+    required this.onSelectPresetColor,
+    required this.onSubmit,
+  });
+
+  /// Controller for the hex color input.
+  final TextEditingController colorController;
+
+  /// Validation error message for the color input, if any.
+  final String? colorErrorMessage;
+
+  /// Controller for the label conditions editor.
+  final ConditionEditorController conditionController;
+
+  /// Whether the `scoped` modifier is enabled on the label.
+  final bool isScoped;
+
+  /// Controller for the label name input.
+  final TextEditingController nameController;
+
+  /// Validation error message for the label name input, if any.
+  final String? nameErrorMessage;
+
+  /// Controller for the label note input.
+  final TextEditingController noteController;
+
+  /// Callback invoked to open the custom color wheel dialog.
+  final VoidCallback onPickCustomColor;
+
+  /// Callback invoked when the `scoped` switch changes.
+  final ValueChanged<bool> onScopedChanged;
+
+  /// Callback invoked when a preset color swatch is selected.
+  final ValueChanged<String> onSelectPresetColor;
+
+  /// Callback invoked when the form is submitted.
+  final VoidCallback onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TaskEditorDetailsCard(
+            sectionTitle: localizations.labelDetailsSectionTitle,
+            titleLabel: localizations.labelNameLabel,
+            titleController: nameController,
+            noteController: noteController,
+            errorMessage: nameErrorMessage,
+            onSubmit: onSubmit,
+          ),
+          const SizedBox(height: 10),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: colorController,
+            builder: (context, _, _) => LabelEditorColorCard(
+              colorController: colorController,
+              errorMessage: colorErrorMessage,
+              onPickCustomColor: onPickCustomColor,
+              onSelectPreset: onSelectPresetColor,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _LabelScopedCard(isScoped: isScoped, onChanged: onScopedChanged),
+          const SizedBox(height: 10),
+          _LabelConditionsSection(controller: conditionController),
         ],
       ),
     );
@@ -176,7 +316,6 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final localizations = AppLocalizations.of(context);
-
     return Scaffold(
       key: const ValueKey('edit_label_screen'),
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -186,9 +325,18 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: _buildFormColumn(localizations),
+              child: _EditLabelForm(
+                colorController: _colorController,
+                colorErrorMessage: _colorErrorMessage,
+                conditionController: _conditionController,
+                isScoped: _isScoped,
+                nameController: _nameController,
+                nameErrorMessage: _nameErrorMessage,
+                noteController: _noteController,
+                onPickCustomColor: _pickCustomColor,
+                onScopedChanged: _handleScopedChanged,
+                onSelectPresetColor: _selectPresetColor,
+                onSubmit: _submit,
               ),
             ),
             Padding(
@@ -204,50 +352,11 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     );
   }
 
-  /// Builds the Settings-style card column inside [EditLabelScreen].
-  Widget _buildFormColumn(AppLocalizations localizations) {
-    final board =
-        ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TaskEditorDetailsCard(
-          sectionTitle: localizations.labelDetailsSectionTitle,
-          titleLabel: localizations.labelNameLabel,
-          titleController: _nameController,
-          noteController: _noteController,
-          errorMessage: _nameErrorMessage,
-          onSubmit: _submit,
-        ),
-        const SizedBox(height: 10),
-        LabelEditorColorCard(
-          colorController: _colorController,
-          errorMessage: _colorErrorMessage,
-          onPickCustomColor: _pickCustomColor,
-          onSelectPreset: _selectPresetColor,
-        ),
-        const SizedBox(height: 10),
-        _LabelScopedCard(
-          isScoped: _isScoped,
-          onChanged: (value) {
-            setState(() {
-              _isScoped = value;
-            });
-          },
-        ),
-        const SizedBox(height: 10),
-        TaskEditorConditionsSection(
-          controller: _conditionController,
-          availableLocations: board.sortedLocations,
-          descriptionOverride: localizations.labelConditionsSectionDescription,
-        ),
-      ],
-    );
-  }
-
-  /// Rebuilds preview state and clears any color validation error when [_colorController] changes.
+  /// Clears any color validation error when [_colorController] changes.
   void _handleColorChanged() {
+    if (_colorErrorMessage == null) {
+      return;
+    }
     setState(() {
       _colorErrorMessage = null;
     });
@@ -260,6 +369,13 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     }
     setState(() {
       _nameErrorMessage = null;
+    });
+  }
+
+  /// Updates the `scoped` modifier state when toggled.
+  void _handleScopedChanged(bool value) {
+    setState(() {
+      _isScoped = value;
     });
   }
 
@@ -347,9 +463,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
 /// State for [EditLabelsScreen].
 class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
   final TextEditingController _createController = TextEditingController();
-
-  /// Whether the create-label input field currently contains non-whitespace text.
-  bool get _hasCreateText => _createController.text.trim().isNotEmpty;
+  bool _hasCreateText = false;
 
   @override
   void initState() {
@@ -370,7 +484,6 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
     final board =
         ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
-    final sortedLabels = board.sortedLabels;
 
     return Scaffold(
       key: const ValueKey('edit_labels_screen'),
@@ -391,23 +504,11 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
             ),
             Divider(height: 1, color: theme.scaffoldBackgroundColor),
             Expanded(
-              child: sortedLabels.isEmpty
-                  ? _EmptyLabelsView(message: localizations.emptyLabelsHint)
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      itemCount: sortedLabels.length,
-                      itemBuilder: (context, index) {
-                        final label = sortedLabels[index];
-                        return _EditableLabelRow(
-                          key: ValueKey('edit_label_row_${label.id}'),
-                          label: label,
-                          openTaskCount: board.openTaskCountForLabel(label.id),
-                          onDelete: () => _deleteLabel(label.id),
-                          onEdit: () =>
-                              openEditLabelScreen(context, label: label),
-                        );
-                      },
-                    ),
+              child: _LabelsListSection(
+                board: board,
+                onDeleteLabel: _deleteLabel,
+                sortedLabels: board.sortedLabels,
+              ),
             ),
           ],
         ),
@@ -425,9 +526,15 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
     await ref.read(taskNotifierProvider.notifier).deleteLabel(labelId);
   }
 
-  /// Rebuilds when the create-label text changes.
+  /// Rebuilds when the non-whitespace state of [_createController] changes.
   void _handleCreateInputChanged() {
-    setState(() {});
+    final hasText = _createController.text.trim().isNotEmpty;
+    if (hasText == _hasCreateText) {
+      return;
+    }
+    setState(() {
+      _hasCreateText = hasText;
+    });
   }
 
   /// Creates a new label from [_createController] and clears the input field.
@@ -466,70 +573,80 @@ class _EditableLabelRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final iconColor = _resolveLabelColor(
-      label.color,
-      colorScheme.onSurfaceVariant,
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Material(
-        color: theme.cardColor,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Row(
-            children: [
-              IconButton(
-                key: ValueKey('delete_label_button_${label.id}'),
-                tooltip: localizations.tooltipDeleteLabel,
-                icon: Icon(
-                  Icons.delete_outline_rounded,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                onPressed: onDelete,
-              ),
-              Icon(Icons.label_outline_rounded, color: iconColor, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  label.name,
-                  style: TextStyle(
-                    color: colorScheme.onSurface,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Badge.count(
-                key: ValueKey('edit_label_badge_${label.id}'),
-                count: openTaskCount,
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                key: ValueKey('edit_label_button_${label.id}'),
-                tooltip: localizations.tooltipEditLabel,
-                icon: Icon(
-                  Icons.edit_outlined,
-                  color: colorScheme.onSurfaceVariant,
-                ),
-                onPressed: onEdit,
-              ),
-            ],
+    final colorScheme = Theme.of(context).colorScheme;
+    final variantColor = colorScheme.onSurfaceVariant;
+    final iconColor = _resolveLabelColor(label.color, variantColor);
+    return _LabelRowCard(
+      child: Row(
+        children: [
+          IconButton(
+            key: ValueKey('delete_label_button_${label.id}'),
+            tooltip: AppLocalizations.of(context).tooltipDeleteLabel,
+            icon: Icon(Icons.delete_outline_rounded, color: variantColor),
+            onPressed: onDelete,
           ),
-        ),
+          Icon(Icons.label_outline_rounded, color: iconColor, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              label.name,
+              style: TextStyle(
+                color: colorScheme.onSurface,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          _EditableLabelTrailing(
+            labelId: label.id,
+            onEdit: onEdit,
+            openTaskCount: openTaskCount,
+          ),
+        ],
       ),
     );
   }
+}
 
-  /// Resolves the optional `#RRGGBB` color of [rawHex] or falls back to [fallback].
-  static Color _resolveLabelColor(String? rawHex, Color fallback) {
-    final parsed = TdfColor.tryParseArgb(rawHex);
-    return parsed != null ? Color(parsed) : fallback;
+/// Trailing open-task count badge and edit button inside [_EditableLabelRow].
+class _EditableLabelTrailing extends StatelessWidget {
+  /// Creates an [_EditableLabelTrailing].
+  const _EditableLabelTrailing({
+    required this.labelId,
+    required this.onEdit,
+    required this.openTaskCount,
+  });
+
+  /// Identifier of the label for widget keys.
+  final String labelId;
+
+  /// Callback invoked when the edit icon button is tapped.
+  final VoidCallback onEdit;
+
+  /// Number of open tasks referencing the label.
+  final int openTaskCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Badge.count(
+          key: ValueKey('edit_label_badge_$labelId'),
+          count: openTaskCount,
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          key: ValueKey('edit_label_button_$labelId'),
+          tooltip: localizations.tooltipEditLabel,
+          icon: Icon(Icons.edit_outlined, color: colorScheme.onSurfaceVariant),
+          onPressed: onEdit,
+        ),
+      ],
+    );
   }
 }
 
@@ -556,6 +673,56 @@ class _EmptyLabelsView extends StatelessWidget {
   }
 }
 
+/// Conditions editor section inside [EditLabelScreen] scoped to board locations.
+class _LabelConditionsSection extends ConsumerWidget {
+  /// Creates a [_LabelConditionsSection].
+  const _LabelConditionsSection({required this.controller});
+
+  /// Controller managing label activation conditions.
+  final ConditionEditorController controller;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final availableLocations = ref.watch(
+      taskNotifierProvider.select(
+        (asyncBoard) =>
+            asyncBoard.asData?.value.sortedLocations ?? const <TdfLocation>[],
+      ),
+    );
+    return TaskEditorConditionsSection(
+      controller: controller,
+      availableLocations: availableLocations,
+      descriptionOverride: localizations.labelConditionsSectionDescription,
+    );
+  }
+}
+
+/// Rounded card container for an [_EditableLabelRow].
+class _LabelRowCard extends StatelessWidget {
+  /// Creates a [_LabelRowCard].
+  const _LabelRowCard({required this.child});
+
+  /// Row content displayed inside the card.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Material(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 /// Card inside [EditLabelScreen] for toggling the TDF 0.6.0 `scoped` modifier on a label.
 class _LabelScopedCard extends StatelessWidget {
   /// Creates a [_LabelScopedCard].
@@ -572,7 +739,7 @@ class _LabelScopedCard extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     return TaskEditorSectionCard(
       cardKey: const ValueKey('label_editor_scoped_card'),
-      icon: Icons.filter_center_focus_rounded,
+      icon: Icons.visibility_off_outlined,
       title: localizations.labelScopedSectionTitle,
       child: SwitchListTile(
         key: const ValueKey('label_editor_scoped_switch'),
@@ -586,6 +753,47 @@ class _LabelScopedCard extends StatelessWidget {
   }
 }
 
+/// Body list inside [EditLabelsScreen] rendering either [_EmptyLabelsView] or the alphabetical label rows.
+class _LabelsListSection extends StatelessWidget {
+  /// Creates a [_LabelsListSection].
+  const _LabelsListSection({
+    required this.board,
+    required this.onDeleteLabel,
+    required this.sortedLabels,
+  });
+
+  /// Active task board used to compute open task counts per label.
+  final TaskBoard board;
+
+  /// Callback invoked when a label row's delete button is pressed.
+  final ValueChanged<String> onDeleteLabel;
+
+  /// Alphabetically sorted labels to display.
+  final List<TdfLabel> sortedLabels;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    if (sortedLabels.isEmpty) {
+      return _EmptyLabelsView(message: localizations.emptyLabelsHint);
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemCount: sortedLabels.length,
+      itemBuilder: (context, index) {
+        final label = sortedLabels[index];
+        return _EditableLabelRow(
+          key: ValueKey('edit_label_row_${label.id}'),
+          label: label,
+          openTaskCount: board.openTaskCountForLabel(label.id),
+          onDelete: () => onDeleteLabel(label.id),
+          onEdit: () => openEditLabelScreen(context, label: label),
+        );
+      },
+    );
+  }
+}
+
 /// Pushes [EditLabelScreen] onto the navigation stack to edit [label].
 Future<void> openEditLabelScreen(
   BuildContext context, {
@@ -595,4 +803,10 @@ Future<void> openEditLabelScreen(
   return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(builder: (_) => EditLabelScreen(label: label)),
   );
+}
+
+/// Resolves the optional `#RRGGBB` color of [rawHex] or falls back to [fallback].
+Color _resolveLabelColor(String? rawHex, Color fallback) {
+  final parsed = TdfColor.tryParseArgb(rawHex);
+  return parsed != null ? Color(parsed) : fallback;
 }

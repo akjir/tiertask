@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
@@ -39,9 +41,47 @@ void main() {
 
   group('TdfLocation Entity, Base62 IDs, Decimal Validation & Rounding', () {
     test('generates and validates 10-character Base62 location IDs', () {
-      final id = generateLocationId(timestamp: DateTime.utc(2026, 11, 1, 8, 0));
-      expect(id.length, equals(10));
-      expect(isValidLocationId(id), isTrue);
+      final timestamp = DateTime.utc(2026, 11, 1, 8, 0);
+      final firstId = generateLocationId(
+        timestamp: timestamp,
+        random: math.Random(42),
+      );
+      expect(firstId.length, equals(10));
+      expect(isValidLocationId(firstId), isTrue);
+      expect(
+        firstId.substring(6),
+        equals('NQTw'),
+        reason:
+            'Timestamp suffix must encode UTC seconds modulo 62^4 in Base62',
+      );
+
+      final epochId = generateLocationId(
+        timestamp: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        random: math.Random(42),
+      );
+      expect(
+        epochId.substring(6),
+        equals('0000'),
+        reason: 'Epoch zero must produce left-padded 0000 suffix',
+      );
+
+      final nonCollidingId = generateLocationId(
+        timestamp: timestamp,
+        existingIds: <String>{firstId},
+        random: math.Random(42),
+      );
+      expect(isValidLocationId(nonCollidingId), isTrue);
+      expect(
+        nonCollidingId,
+        isNot(equals(firstId)),
+        reason: 'generateLocationId must retry when candidate collides with existingIds',
+      );
+      expect(
+        nonCollidingId.substring(6),
+        equals('NQTw'),
+        reason: 'Retried location ID must preserve the 4-character timestamp suffix',
+      );
+
       expect(isValidLocationId('7pQr9mOkD2'), isTrue);
       expect(isValidLocationId('short'), isFalse);
       expect(isValidLocationId('7pQr9mOkD!'), isFalse);

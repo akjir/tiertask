@@ -30,9 +30,8 @@ import 'package:tiertask/repositories/settings_repository.dart';
 import 'test_helpers.dart';
 
 /// Controllable [LocationRepository] allowing tests to hold a lookup in the `searching` state.
-class _CompleterLocationRepository implements LocationRepository {
+class _CompleterLocationRepository extends FakeLocationRepository {
   Completer<LocationFix?> completer = Completer<LocationFix?>();
-  int callCount = 0;
 
   @override
   Future<LocationFix?> determineLocation({bool forceRefresh = false}) {
