@@ -3,25 +3,27 @@ name: changelog-updater
 description: Updates and maintains CHANGELOG.md adhering to Keep a Changelog under [Unreleased].
 ---
 # Changelog Updater
-**Goal:** Maintain `CHANGELOG.md` per Keep a Changelog 1.1.0 & SemVer 2.0.0.
+**Goal:** Maintain `CHANGELOG.md` per Keep a Changelog 1.1.0 & SemVer 2.0.0 with concise, strictly end-user-relevant entries.
 
 ## USE WHEN
-- Implementing, changing, or removing user-facing features or options (supported platforms, dynamic 6-tier derivation, soft WIP limits, 30-day retention pruning, `.tdf` blocks and directives, recurrence, activation conditions, workspaces, local `.tdf` persistence, WebDAV synchronization, UI screens/interactions, settings, diagnostic logging).
-- Fixing user-facing bugs.
+- Adding, changing, or removing features, settings, or file format capabilities that directly affect end-user behavior.
+- Fixing bugs or improving performance in ways observable by the user.
 
 ## RULES
-- **Section:** ONLY under `## [Unreleased]`. Never commit or leave an empty `[Unreleased]` section.
-- **Allowed Categories:** `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`. Only include non-empty categories, separated by a blank line after each heading.
-- **Scope (User-Facing ONLY):**
-  - **INCLUDE:** Visible UI features, task management rules (tiers, soft limits, retention pruning, downgrade/complete/restore actions, recurring tasks, activation conditions, links, notes, subtasks), `.tdf` format capabilities and version migrations, workspace management, local `.tdf` file and WebDAV synchronization behavior, settings, and user-facing bugfixes.
-  - **BANNED:** Internal refactors, internal codecs/helpers without standalone user impact (`Base64Service`, binary storage encoding), test additions or modifications (`M-*` rules), internal build/analyzer configurations (`analysis_options.yaml`), internal agent directives/skills, toolchain adjustments without user impact, and **internal source file paths (`lib/...`), Dart class/method inventories (`TaskBoard.completeTask`, `_LandingDrawer`), or widget test keys (`drawer_label_tile_<id>`)** (class and file inventories belong exclusively in `ARCHITECTURE.md`).
-- **Entry Format (`P-LANG-RULES`):**
-  - 1-line concise user-facing bullet (typically 15–35 words; never multi-clause file or class inventories).
-  - Action verb matching the category (e.g., `Added ...`, `Changed ...`, `Deprecated ...`, `Removed ...`, `Fixed ...`).
-  - Strict factual English (ASD-STE100 80%), zero emojis, no Markdown horizontal rules (`---`). Reference issue/PR if applicable (`(#123)`).
-  - Consolidate or update existing `## [Unreleased]` entries when an unreleased feature is modified, renamed, or superseded before release so `## [Unreleased]` never contains contradictory intermediate steps.
+- **Section:** Place new entries ONLY under `## [Unreleased]`. If `## [Unreleased]` does not exist (for example, right after a release), insert `## [Unreleased]` directly above the latest `## [X.Y.Z] - YYYY-MM-DD` section. Never commit or leave an empty `## [Unreleased]` section.
+- **Allowed Categories:** `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`. Include only non-empty categories, separated by a blank line after each heading.
+- **Scope (End-User Behavior ONLY):**
+  - **INCLUDE:** New user-facing features, observable behavior changes, workflow or UI improvements, `.tdf` format capabilities, synchronization changes, and user-facing bug or performance fixes.
+  - **BANNED (Internal Changes):** Internal formatting, code restructuring, modularization, refactoring, architecture adjustments, build/analyzer configuration, agent skills/rules, or test changes (`M-*` rules) that do not alter observable program behavior.
+  - **BANNED (Code-Specific Details):** Source file paths (`lib/...`), class, method, function, or widget identifiers (`TaskBoard`, `PageView`, `TierPageIndicator`), internal state/storage representations (`Base64Service`, binary encodings, `step true`), algorithm complexity notation (`O(N)`), and widget keys.
+- **Outcome-Focused & Concise Wording (`P-LANG-RULES`):**
+  - Describe the effect for the user, never the code mechanism. Write `Reduced startup time when loading large task boards.` instead of `Added XAdapterSubscriber function to accelerate execution time.`.
+  - Keep every bullet brief (1 concise sentence, typically 8–20 words).
+  - Start with an action verb matching the category (`Added ...`, `Changed ...`, `Deprecated ...`, `Removed ...`, `Fixed ...`, `Reduced ...`).
+  - Use factual English (ASD-STE100 80%) with zero emojis and no Markdown horizontal rules (`---`).
+  - Consolidate or update existing `## [Unreleased]` bullets when an unreleased change is modified or superseded before release.
 
 ## WORKFLOW
-1. Verify user-facing impact. Skip if internal, refactor, or test-only.
-2. Locate `## [Unreleased]` in `CHANGELOG.md` (create `CHANGELOG.md` with standard header if missing).
-3. Add or update the entry under the matching category (`### Added`, `### Changed`, `### Fixed`, `### Removed`, etc.). Create the category header if missing.
+1. Verify observable end-user impact. Skip immediately if the change is internal, structural, or test-only.
+2. Locate or create `## [Unreleased]` at the top of `CHANGELOG.md`.
+3. Add or update a concise, code-free entry under the matching category (`### Added`, `### Changed`, `### Fixed`, `### Removed`, etc.).
