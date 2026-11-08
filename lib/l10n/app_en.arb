@@ -1316,5 +1316,117 @@
         "type": "String"
       }
     }
+  },
+  "logLevelLabel": "Minimum Log Level",
+  "@logLevelLabel": {
+    "description": "Localized string for logLevelLabel"
+  },
+  "logLevelDebug": "Debug",
+  "@logLevelDebug": {
+    "description": "Localized string for logLevelDebug"
+  },
+  "logLevelInfo": "Info",
+  "@logLevelInfo": {
+    "description": "Localized string for logLevelInfo"
+  },
+  "logLevelWarn": "Warning",
+  "@logLevelWarn": {
+    "description": "Localized string for logLevelWarn"
+  },
+  "logLevelError": "Error",
+  "@logLevelError": {
+    "description": "Localized string for logLevelError"
+  },
+  "logStorageLabel": "Log Storage",
+  "@logStorageLabel": {
+    "description": "Localized string for logStorageLabel"
+  },
+  "logStorageLocal": "Local",
+  "@logStorageLocal": {
+    "description": "Localized string for logStorageLocal"
+  },
+  "logStorageWebDav": "WebDAV",
+  "@logStorageWebDav": {
+    "description": "Localized string for logStorageWebDav"
+  },
+  "logStorageBoth": "Both",
+  "@logStorageBoth": {
+    "description": "Localized string for logStorageBoth"
+  },
+  "logMetadataSectionTitle": "Session Metadata",
+  "@logMetadataSectionTitle": {
+    "description": "Localized string for logMetadataSectionTitle"
+  },
+  "logMetadataFile": "File: {fileName}",
+  "@logMetadataFile": {
+    "description": "Localized string for logMetadataFile",
+    "placeholders": {
+      "fileName": {
+        "type": "String"
+      }
+    }
+  },
+  "logMetadataVersion": "Version: {version}",
+  "@logMetadataVersion": {
+    "description": "Localized string for logMetadataVersion",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "logMetadataPlatform": "Platform: {platform}",
+  "@logMetadataPlatform": {
+    "description": "Localized string for logMetadataPlatform",
+    "placeholders": {
+      "platform": {
+        "type": "String"
+      }
+    }
+  },
+  "logMetadataWorkspace": "Workspace: {workspace}",
+  "@logMetadataWorkspace": {
+    "description": "Localized string for logMetadataWorkspace",
+    "placeholders": {
+      "workspace": {
+        "type": "String"
+      }
+    }
+  },
+  "logMetadataTimeZone": "Time Zone: {timeZone}",
+  "@logMetadataTimeZone": {
+    "description": "Localized string for logMetadataTimeZone",
+    "placeholders": {
+      "timeZone": {
+        "type": "String"
+      }
+    }
+  },
+  "logMetadataStats": "Entries: {entries} | Warnings: {warnings} | Errors: {errors}",
+  "@logMetadataStats": {
+    "description": "Localized string for logMetadataStats",
+    "placeholders": {
+      "entries": {
+        "type": "String"
+      },
+      "warnings": {
+        "type": "String"
+      },
+      "errors": {
+        "type": "String"
+      }
+    }
+  },
+  "logFilterAllTags": "All",
+  "@logFilterAllTags": {
+    "description": "Localized string for logFilterAllTags"
+  },
+  "tooltipSyncLogWebDav": "Sync log to WebDAV",
+  "@tooltipSyncLogWebDav": {
+    "description": "Localized string for tooltipSyncLogWebDav"
+  },
+  "logSyncedSnackBar": "Diagnostic log synced to WebDAV.",
+  "@logSyncedSnackBar": {
+    "description": "Localized string for logSyncedSnackBar"
   }
 }

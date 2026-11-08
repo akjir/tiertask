@@ -49,7 +49,7 @@ class WebDavRepository {
     this.timeout = const Duration(seconds: 15),
   }) : _clientFactory = clientFactory ?? HttpClient.new {
     if (config.password.isNotEmpty) {
-      AppLogger.registerSecret(config.password);
+      AppLogger.setSecretToRedact(config.password);
     }
   }
 
@@ -77,6 +77,50 @@ class WebDavRepository {
     return lookupAppLocalizations(locale);
   }
 
+  /// Deletes the remote diagnostic log file [logFileName] via HTTP DELETE, ignoring `404`.
+  Future<void> deleteLog(String logFileName) async {
+    final localizations = _localizations;
+    final uri = _requireLogUri(logFileName, localizations);
+    final stopwatch = Stopwatch()..start();
+    final client = _clientFactory();
+    client.connectionTimeout = timeout;
+
+    try {
+      final request = await client.deleteUrl(uri).timeout(timeout);
+      request.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
+      final response = await request.close().timeout(timeout);
+      await response.drain<void>().timeout(timeout);
+      final status = response.statusCode;
+      if ((status >= 200 && status < 300) || status == HttpStatus.notFound) {
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          'webdav.log_delete',
+          fields: <String, Object?>{
+            'uri': uri.toString(),
+            'status': status,
+            'elapsed_ms': stopwatch.elapsedMilliseconds,
+          },
+        );
+        return;
+      }
+      throw WebDavException(
+        localizations.errorSaveMarkdownFailed,
+        statusCode: status,
+      );
+    } on Object catch (error) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'webdav.log_delete',
+        fields: <String, Object?>{'uri': uri.toString()},
+        error: error,
+      );
+    } finally {
+      client.close(force: false);
+    }
+  }
+
   /// Fetches the remote TDF file (`tiertask.tdf`) via HTTP GET.
   ///
   /// Returns an empty string when the remote file does not exist (`HTTP 404`)
@@ -86,6 +130,23 @@ class WebDavRepository {
     final uri = _requireUri(localizations);
     final result = await _getFromUri(uri, localizations);
     return result.content;
+  }
+
+  /// Uploads the diagnostic log snapshot for [logFileName] to WebDAV via HTTP PUT.
+  ///
+  /// Does not append post-snapshot log entries on HTTP `2xx` success so that
+  /// debounced log uploads do not re-dirty [AppLogger.revision].
+  Future<void> saveLog(String logFileName, [String? logContent]) async {
+    final localizations = _localizations;
+    final uri = _requireLogUri(logFileName, localizations);
+    final snapshot = logContent ?? '${AppLogger.fullLogText}\n';
+    await _putToUri(
+      uri,
+      snapshot,
+      localizations,
+      eventName: 'webdav.log_put',
+      logOnSuccess: false,
+    );
   }
 
   /// Overwrites the remote TDF file on the WebDAV server via HTTP PUT.
@@ -106,16 +167,20 @@ class WebDavRepository {
       if (current.exists) {
         final backupUri = await _resolveNextRemoteBackupUri(uri, localizations);
         await _putToUri(backupUri, current.content, localizations);
-        AppLogger.info(
+        AppLogger.event(
+          LogLevel.info,
           LogTag.storage,
-          'WebDavRepository.wipeTdf created remote backup $backupUri',
+          'webdav.wipe',
+          fields: <String, Object?>{'backup_uri': backupUri.toString()},
         );
       }
     }
     await _putToUri(uri, emptyContent, localizations);
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.storage,
-      'WebDavRepository.wipeTdf reset remote file $uri backup=$createBackup',
+      'webdav.wipe',
+      fields: <String, Object?>{'uri': uri.toString(), 'backup': createBackup},
     );
   }
 
@@ -141,16 +206,29 @@ class WebDavRepository {
           .timeout(timeout);
 
       if (status >= 200 && status < 300) {
-        AppLogger.info(
+        AppLogger.event(
+          LogLevel.info,
           LogTag.storage,
-          'WebDavRepository.fetchTdf GET $uri status=$status bytes=${body.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+          'webdav.get',
+          fields: <String, Object?>{
+            'uri': uri.toString(),
+            'status': status,
+            'bytes': body.length,
+            'elapsed_ms': stopwatch.elapsedMilliseconds,
+          },
         );
         return (exists: true, content: body);
       }
       if (status == HttpStatus.notFound) {
-        AppLogger.info(
+        AppLogger.event(
+          LogLevel.info,
           LogTag.storage,
-          'WebDavRepository.fetchTdf GET $uri status=404 (not found) elapsed=${stopwatch.elapsedMilliseconds}ms',
+          'webdav.get',
+          fields: <String, Object?>{
+            'uri': uri.toString(),
+            'status': 404,
+            'elapsed_ms': stopwatch.elapsedMilliseconds,
+          },
         );
         return (exists: false, content: '');
       }
@@ -165,35 +243,56 @@ class WebDavRepository {
         statusCode: status,
       );
     } on WebDavException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.fetchTdf GET $uri failed: $error',
+        'webdav.get',
+        fields: <String, Object?>{
+          'uri': uri.toString(),
+          'status': error.statusCode,
+        },
+        error: error,
       );
       rethrow;
     } on SocketException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.fetchTdf GET $uri socket error: ${error.message}',
+        'webdav.get',
+        fields: <String, Object?>{'uri': uri.toString(), 'reason': 'socket'},
+        error: error.message,
       );
       throw WebDavException(
         localizations.errorNetworkUnreachable(error.message),
       );
     } on TimeoutException {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.fetchTdf GET $uri timed out after ${timeout.inMilliseconds}ms',
+        'webdav.get',
+        fields: <String, Object?>{
+          'uri': uri.toString(),
+          'reason': 'timeout',
+          'timeout_ms': timeout.inMilliseconds,
+        },
       );
       throw WebDavException(localizations.errorTimeoutLoad);
     } on HandshakeException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.fetchTdf GET $uri TLS error: ${error.message}',
+        'webdav.get',
+        fields: <String, Object?>{'uri': uri.toString(), 'reason': 'tls'},
+        error: error.message,
       );
       throw WebDavException(localizations.errorTlsLoad(error.message));
     } on Object catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.fetchTdf GET $uri unexpected error: $error',
+        'webdav.get',
+        fields: <String, Object?>{'uri': uri.toString()},
+        error: error,
       );
       throw WebDavException(
         localizations.errorUnexpectedLoad(error.toString()),
@@ -203,12 +302,14 @@ class WebDavRepository {
     }
   }
 
-  /// Executes an HTTP PUT sending [tdfContent] to [uri].
+  /// Executes an HTTP PUT sending [payload] to [uri].
   Future<void> _putToUri(
     Uri uri,
-    String tdfContent,
-    AppLocalizations localizations,
-  ) async {
+    String payload,
+    AppLocalizations localizations, {
+    String eventName = 'webdav.put',
+    bool logOnSuccess = true,
+  }) async {
     final stopwatch = Stopwatch()..start();
     final client = _clientFactory();
     client.connectionTimeout = timeout;
@@ -221,7 +322,7 @@ class WebDavRepository {
         'text/plain; charset=utf-8',
       );
 
-      final bytes = utf8.encode(tdfContent);
+      final bytes = utf8.encode(payload);
       request.contentLength = bytes.length;
       request.add(bytes);
 
@@ -230,10 +331,19 @@ class WebDavRepository {
 
       final status = response.statusCode;
       if (status >= 200 && status < 300) {
-        AppLogger.info(
-          LogTag.storage,
-          'WebDavRepository.saveTdf PUT $uri status=$status bytes=${bytes.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
-        );
+        if (logOnSuccess) {
+          AppLogger.event(
+            LogLevel.info,
+            LogTag.storage,
+            eventName,
+            fields: <String, Object?>{
+              'uri': uri.toString(),
+              'status': status,
+              'bytes': bytes.length,
+              'elapsed_ms': stopwatch.elapsedMilliseconds,
+            },
+          );
+        }
         return;
       }
       if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
@@ -247,39 +357,72 @@ class WebDavRepository {
         statusCode: status,
       );
     } on WebDavException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.saveTdf PUT $uri failed: $error',
+        eventName,
+        fields: <String, Object?>{
+          'uri': uri.toString(),
+          'status': error.statusCode,
+        },
+        error: error,
       );
       rethrow;
     } on SocketException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.saveTdf PUT $uri socket error: ${error.message}',
+        eventName,
+        fields: <String, Object?>{'uri': uri.toString(), 'reason': 'socket'},
+        error: error.message,
       );
       throw WebDavException(localizations.errorNetworkSave(error.message));
     } on TimeoutException {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.saveTdf PUT $uri timed out after ${timeout.inMilliseconds}ms',
+        eventName,
+        fields: <String, Object?>{
+          'uri': uri.toString(),
+          'reason': 'timeout',
+          'timeout_ms': timeout.inMilliseconds,
+        },
       );
       throw WebDavException(localizations.errorTimeoutSave);
     } on HandshakeException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.saveTdf PUT $uri TLS error: ${error.message}',
+        eventName,
+        fields: <String, Object?>{'uri': uri.toString(), 'reason': 'tls'},
+        error: error.message,
       );
       throw WebDavException(localizations.errorTlsSave(error.message));
     } on Object catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.storage,
-        'WebDavRepository.saveTdf PUT $uri unexpected error: $error',
+        eventName,
+        fields: <String, Object?>{'uri': uri.toString()},
+        error: error,
       );
       throw WebDavException(
         localizations.errorUnexpectedSave(error.toString()),
       );
     } finally {
       client.close(force: false);
+    }
+  }
+
+  /// Validates and returns the resolved WebDAV log [Uri] for [logFileName].
+  Uri _requireLogUri(String logFileName, AppLocalizations localizations) {
+    if (!config.isWebDavConfigured) {
+      throw WebDavException(localizations.errorWebDavNotConfigured);
+    }
+    try {
+      return config.resolveLogEndpointUri(logFileName);
+    } on FormatException {
+      throw WebDavException(localizations.errorInvalidServerUrl);
     }
   }
 

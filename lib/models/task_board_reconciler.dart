@@ -15,6 +15,7 @@
 
 import 'package:flutter/foundation.dart';
 
+import '../services/app_logger.dart';
 import 'task_board.dart';
 import 'task_item.dart';
 import 'tdf_error.dart';
@@ -63,6 +64,16 @@ class TaskBoardReconciler {
     TaskReconciliationOutcome tasks,
   ) {
     if (tasks.conflictedIds.isNotEmpty || labels.conflictedIds.isNotEmpty) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.sync,
+        'sync.conflict',
+        fields: <String, Object?>{
+          'kind': 'deletion_conflict',
+          'tasks': tasks.conflictedIds.length,
+          'labels': labels.conflictedIds.length,
+        },
+      );
       throw TdfSyncOutcomeException(
         kind: TdfSyncOutcomeKind.deletionConflict,
         conflictedTaskIds: List<String>.unmodifiable(tasks.conflictedIds),
@@ -71,6 +82,16 @@ class TaskBoardReconciler {
       );
     }
     if (tasks.ambiguousIds.isNotEmpty || labels.ambiguousIds.isNotEmpty) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.sync,
+        'sync.conflict',
+        fields: <String, Object?>{
+          'kind': 'recovery_required',
+          'tasks': tasks.ambiguousIds.length,
+          'labels': labels.ambiguousIds.length,
+        },
+      );
       throw TdfSyncOutcomeException(
         kind: TdfSyncOutcomeKind.recoveryRequired,
         ambiguousTaskIds: List<String>.unmodifiable(tasks.ambiguousIds),
@@ -285,13 +306,26 @@ class TaskBoardReconciler {
   ) {
     final (primaryLabel, secondaryLabel, baselineLabel) = entities;
     if (primaryLabel != null && secondaryLabel != null) {
-      accumulator.live.add(
-        TdfPayloadComparison.mergeLabelWithBaseline(
-          local: primaryLabel,
-          incoming: secondaryLabel,
-          baseline: baselineLabel,
-        ),
+      final mergedLabel = TdfPayloadComparison.mergeLabelWithBaseline(
+        local: primaryLabel,
+        incoming: secondaryLabel,
+        baseline: baselineLabel,
       );
+      final winner = identical(mergedLabel, primaryLabel)
+          ? 'primary'
+          : (identical(mergedLabel, secondaryLabel) ? 'secondary' : 'merged');
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.sync,
+        'sync.reconcile.label',
+        fields: <String, Object?>{
+          'id': id,
+          'winner': winner,
+          'primary_rev': primaryLabel.effectiveModifiedAt.toIso8601String(),
+          'secondary_rev': secondaryLabel.effectiveModifiedAt.toIso8601String(),
+        },
+      );
+      accumulator.live.add(mergedLabel);
       return false;
     }
 
@@ -340,13 +374,26 @@ class TaskBoardReconciler {
   ) {
     final (primaryTask, secondaryTask, baselineTask) = entities;
     if (primaryTask != null && secondaryTask != null) {
-      accumulator.live.add(
-        TdfPayloadComparison.mergeTaskWithBaseline(
-          local: primaryTask,
-          incoming: secondaryTask,
-          baseline: baselineTask,
-        ),
+      final mergedTask = TdfPayloadComparison.mergeTaskWithBaseline(
+        local: primaryTask,
+        incoming: secondaryTask,
+        baseline: baselineTask,
       );
+      final winner = identical(mergedTask, primaryTask)
+          ? 'primary'
+          : (identical(mergedTask, secondaryTask) ? 'secondary' : 'merged');
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.sync,
+        'sync.reconcile.task',
+        fields: <String, Object?>{
+          'id': id,
+          'winner': winner,
+          'primary_rev': primaryTask.effectiveModifiedAt.toIso8601String(),
+          'secondary_rev': secondaryTask.effectiveModifiedAt.toIso8601String(),
+        },
+      );
+      accumulator.live.add(mergedTask);
       return false;
     }
 

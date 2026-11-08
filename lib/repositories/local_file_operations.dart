@@ -42,11 +42,14 @@ class LocalFileOperations<E extends Exception> {
   String combineDirectoryAndFileName(String directoryPath, String fileName) =>
       _joinDirectoryAndChild(directoryPath, extractFileNameFromPath(fileName));
 
-  /// Resolves the default filesystem path for `tiertask.log` inside [baseDirectoryPath] or the user data directory.
-  String defaultLogFilePath({String? baseDirectoryPath}) {
+  /// Resolves the default filesystem path for [fileName] (or `tiertask.log`) inside [baseDirectoryPath] or the user data directory.
+  String defaultLogFilePath({String? baseDirectoryPath, String? fileName}) {
     final trimmed = baseDirectoryPath?.trim() ?? '';
     final base = trimmed.isNotEmpty ? trimmed : resolveDefaultDirectoryPath();
-    return _joinDirectoryAndChild(base, AppLogger.defaultLogFileName);
+    final targetName = (fileName != null && fileName.trim().isNotEmpty)
+        ? extractFileNameFromPath(fileName.trim())
+        : AppLogger.defaultLogFileName;
+    return _joinDirectoryAndChild(base, targetName);
   }
 
   /// Synchronously deletes the diagnostic log file at [path] if it is a regular file.
@@ -58,6 +61,35 @@ class LocalFileOperations<E extends Exception> {
       }
     } on FileSystemException {
       // Ignore deletion failures on missing or locked diagnostic files.
+    }
+  }
+
+  /// Deletes all dated and legacy diagnostic log files for [workspaceId] in [directoryPath].
+  int deleteWorkspaceLogFilesSync({
+    required String directoryPath,
+    required String platform,
+    required String workspaceId,
+  }) {
+    final cleanDir = directoryPath.trim();
+    if (cleanDir.isEmpty) return 0;
+    try {
+      final dir = Directory(cleanDir);
+      if (!dir.existsSync()) return 0;
+      final suffix = _workspaceLogSuffix(platform, workspaceId);
+      var deleted = 0;
+      for (final entity in dir.listSync(followLinks: false)) {
+        if (entity is! File) continue;
+        final name = extractFileNameFromPath(entity.path);
+        final isLegacy = name == AppLogger.defaultLogFileName;
+        final isWorkspaceLog = _tryParseWorkspaceLogDate(name, suffix) != null;
+        if (isLegacy || isWorkspaceLog) {
+          deleteLogFileSync(entity.path);
+          deleted++;
+        }
+      }
+      return deleted;
+    } on FileSystemException {
+      return 0;
     }
   }
 
@@ -87,7 +119,12 @@ class LocalFileOperations<E extends Exception> {
     }
     try {
       File(path).deleteSync();
-      AppLogger.info(LogTag.storage, 'deleteTdf deleted $path');
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'local.wipe',
+        fields: <String, Object?>{'path': path, 'deleted': true},
+      );
     } on FileSystemException catch (error) {
       throw mapMoveFileSystemException(error, path, messages);
     }
@@ -216,7 +253,61 @@ class LocalFileOperations<E extends Exception> {
       case FileSystemEntityType.unixDomainSock:
         throw createException(messages.errorMovePermissionDenied(fromPath));
     }
-    AppLogger.info(LogTag.storage, 'moveTdfFile $fromPath -> $toPath');
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.storage,
+      'local.move',
+      fields: <String, Object?>{'from': fromPath, 'to': toPath},
+    );
+  }
+
+  /// Prunes expired (`> maxRetainedDays`) and excess (`> maxRetainedFiles`) log files for [workspaceId].
+  int pruneExpiredLogFilesSync({
+    required String directoryPath,
+    required String platform,
+    required String workspaceId,
+    required DateTime utcNow,
+    int maxRetainedDays = AppLogger.maxRetainedLogDays,
+    int maxRetainedFiles = AppLogger.maxRetainedLogFiles,
+  }) {
+    final cleanDir = directoryPath.trim();
+    if (cleanDir.isEmpty) return 0;
+    try {
+      final dir = Directory(cleanDir);
+      if (!dir.existsSync()) return 0;
+      final suffix = _workspaceLogSuffix(platform, workspaceId);
+      final todayUtc = DateTime.utc(utcNow.year, utcNow.month, utcNow.day);
+      final retainedCandidates = <(DateTime, String)>[];
+      var pruned = 0;
+
+      for (final entity in dir.listSync(followLinks: false)) {
+        if (entity is! File) continue;
+        final name = extractFileNameFromPath(entity.path);
+        if (name == AppLogger.defaultLogFileName) {
+          deleteLogFileSync(entity.path);
+          pruned++;
+          continue;
+        }
+        final logDate = _tryParseWorkspaceLogDate(name, suffix);
+        if (logDate == null) continue;
+        if (todayUtc.difference(logDate).inDays > maxRetainedDays) {
+          deleteLogFileSync(entity.path);
+          pruned++;
+        } else {
+          retainedCandidates.add((logDate, entity.path));
+        }
+      }
+
+      retainedCandidates.sort((a, b) => a.$1.compareTo(b.$1));
+      final overflowCount = retainedCandidates.length - maxRetainedFiles;
+      for (var i = 0; i < overflowCount; i++) {
+        deleteLogFileSync(retainedCandidates[i].$2);
+        pruned++;
+      }
+      return pruned;
+    } on FileSystemException {
+      return 0;
+    }
   }
 
   /// Synchronously reads up to [maxBytes] from the diagnostic log file at [path].
@@ -532,6 +623,32 @@ class LocalFileOperations<E extends Exception> {
     }
   }
 
+  /// Parses the UTC date from [fileName] if it matches `tiertask_<YYYY-MM-DD>[suffix]`.
+  DateTime? _tryParseWorkspaceLogDate(String fileName, String suffix) {
+    if (!fileName.startsWith('tiertask_') ||
+        !fileName.endsWith(suffix) ||
+        fileName.length != 19 + suffix.length) {
+      return null;
+    }
+    final datePart = fileName.substring(9, 19);
+    if (datePart.codeUnitAt(4) != 0x2D || datePart.codeUnitAt(7) != 0x2D) {
+      return null;
+    }
+    final year = int.tryParse(datePart.substring(0, 4));
+    final month = int.tryParse(datePart.substring(5, 7));
+    final day = int.tryParse(datePart.substring(8, 10));
+    if (year == null ||
+        month == null ||
+        day == null ||
+        month < 1 ||
+        month > 12 ||
+        day < 1 ||
+        day > 31) {
+      return null;
+    }
+    return DateTime.utc(year, month, day);
+  }
+
   /// Validates [rawPath] against traversal, UNC prefixes, drive-relative colons, and control characters and returns normalized path segments.
   List<String> _validateAndSplitSegments(
     String rawPath,
@@ -597,5 +714,15 @@ class LocalFileOperations<E extends Exception> {
     } on FileSystemException catch (error) {
       throw mapMoveFileSystemException(error, path, messages);
     }
+  }
+
+  /// Derives the canonical `_<platform>_<workspaceId>.log` suffix via [AppLogger.formatLogFileName].
+  String _workspaceLogSuffix(String platform, String workspaceId) {
+    final sample = AppLogger.formatLogFileName(
+      utcNow: DateTime.utc(2000),
+      platform: platform,
+      workspaceId: workspaceId,
+    );
+    return sample.substring(19);
   }
 }

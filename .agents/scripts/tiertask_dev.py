@@ -1445,6 +1445,96 @@ def run_verify(
     return 0
 
 
+_LOG_LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARN": 2, "ERROR": 3, "CRASH": 4}
+_LOG_LINE_RE = re.compile(
+    r"^(\S+)\s+\[(DEBUG|INFO\s?|WARN\s?|ERROR|CRASH)\]\s+\[([A-Z]+)\s*\]\s+(.*)$"
+)
+
+
+def _discover_latest_log_file(root: Path) -> Path | None:
+    """Finds the most recently modified TierTask diagnostic log file."""
+    candidates: list[Path] = []
+    home = Path.home()
+    search_dirs = [
+        root,
+        home / ".local" / "share" / "tiertask",
+        home / ".config" / "tiertask",
+    ]
+    for directory in search_dirs:
+        if not directory.exists():
+            continue
+        candidates.extend(directory.glob("tiertask_*.log"))
+        legacy = directory / "tiertask.log"
+        if legacy.exists():
+            candidates.append(legacy)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
+def inspect_log_file(
+    log_path: Path,
+    min_level: str | None = None,
+    tag_filter: str | None = None,
+    event_filter: str | None = None,
+    summary_only: bool = False,
+) -> int:
+    """Parses, filters, and summarizes a TierTask diagnostic log file."""
+    if not log_path.exists():
+        print(f"Log file not found: {log_path}", file=sys.stderr)
+        return 1
+    lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    min_rank = _LOG_LEVEL_ORDER.get((min_level or "DEBUG").upper(), 0)
+    norm_tag = tag_filter.upper() if tag_filter else None
+    meta_lines: list[str] = []
+    level_counts = {k: 0 for k in _LOG_LEVEL_ORDER}
+    tag_counts: dict[str, int] = {}
+    matched_lines: list[str] = []
+
+    for line in lines:
+        if line.startswith("===") or line.startswith("@meta "):
+            meta_lines.append(line)
+            if not norm_tag and not event_filter and min_rank == 0:
+                matched_lines.append(line)
+            continue
+        match = _LOG_LINE_RE.match(line)
+        if not match:
+            if not norm_tag and not event_filter:
+                matched_lines.append(line)
+            continue
+        raw_level = match.group(2).strip()
+        raw_tag = match.group(3).strip()
+        payload = match.group(4)
+        level_counts[raw_level] = level_counts.get(raw_level, 0) + 1
+        tag_counts[raw_tag] = tag_counts.get(raw_tag, 0) + 1
+        if _LOG_LEVEL_ORDER.get(raw_level, 0) < min_rank:
+            continue
+        if norm_tag and raw_tag != norm_tag:
+            continue
+        if event_filter and event_filter not in payload:
+            continue
+        matched_lines.append(line)
+
+    if summary_only:
+        print(f"Log file: {log_path}")
+        for m in meta_lines:
+            print(f"  {m}")
+        print(
+            "Level counts: "
+            + ", ".join(f"{k}={v}" for k, v in level_counts.items())
+        )
+        print(
+            "Tag counts: "
+            + (", ".join(f"{k}={v}" for k, v in sorted(tag_counts.items())) or "none")
+        )
+        print(f"Matched lines: {len(matched_lines)}")
+        return 0
+
+    for line in matched_lines:
+        print(line)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="TierTask developer and agent automation CLI.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1501,6 +1591,17 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="Optional explicit files to check/test (defaults to git status changes).",
     )
+
+    p_log = sub.add_parser("log", help="Inspect, filter, and summarize TierTask diagnostic log files.")
+    p_log.add_argument("path", nargs="?", help="Optional path to a .log file (defaults to latest local log).")
+    p_log.add_argument("--level", choices=list(_LOG_LEVEL_ORDER), help="Minimum log severity level.")
+    p_log.add_argument(
+        "--tag",
+        choices=["LIFECYCLE", "TDF", "DOMAIN", "SYNC", "STORAGE", "UI"],
+        help="Subsystem tag filter.",
+    )
+    p_log.add_argument("--event", help="Event name or payload substring filter.")
+    p_log.add_argument("--summary", action="store_true", help="Print session metadata and level/tag summary counts.")
 
     return parser
 
@@ -1583,6 +1684,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "verify":
         mode = "full" if args.full else "fast"
         return run_verify(root, mode=mode, fix=args.fix, force=args.force, targets=args.targets)
+
+    if args.command == "log":
+        target_log = Path(args.path).resolve() if args.path else _discover_latest_log_file(root)
+        if target_log is None:
+            print("No diagnostic log file found.", file=sys.stderr)
+            return 1
+        return inspect_log_file(
+            target_log,
+            min_level=args.level,
+            tag_filter=args.tag,
+            event_filter=args.event,
+            summary_only=args.summary,
+        )
 
     return 0
 

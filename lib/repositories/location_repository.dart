@@ -20,6 +20,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 
 import '../models/location_state.dart';
+import '../services/app_logger.dart';
 
 /// In-memory [LocationRepository] implementation for deterministic unit and widget tests.
 class FakeLocationRepository implements LocationRepository {
@@ -132,14 +133,48 @@ class PlatformLocationRepository implements LocationRepository {
 
   @override
   Future<LocationFix?> determineLocation({bool forceRefresh = false}) async {
+    final stopwatch = Stopwatch()..start();
     final nativeMap = await _invokeNativeChannel();
     if (_extractNativeFix(nativeMap) case final nativeFix?) {
-      return _resolvePlaceNameForNativeFix(nativeFix);
+      final resolved = await _resolvePlaceNameForNativeFix(nativeFix);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'location.lookup',
+        fields: <String, Object?>{
+          'source': 'channel',
+          'has_coords': resolved.hasCoordinates,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return resolved;
     }
     if (await _resolveWifiAccessPointsFix(nativeMap) case final wifiFix?) {
-      return _resolvePlaceNameForNativeFix(wifiFix);
+      final resolved = await _resolvePlaceNameForNativeFix(wifiFix);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'location.lookup',
+        fields: <String, Object?>{
+          'source': 'wifi_mls',
+          'has_coords': resolved.hasCoordinates,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return resolved;
     }
-    return _resolveGeoIpFallback(forceRefresh: forceRefresh);
+    final geoIpFix = await _resolveGeoIpFallback(forceRefresh: forceRefresh);
+    AppLogger.event(
+      geoIpFix != null ? LogLevel.info : LogLevel.warn,
+      LogTag.storage,
+      'location.lookup',
+      fields: <String, Object?>{
+        'source': 'geoip',
+        'has_coords': geoIpFix?.hasCoordinates ?? false,
+        'elapsed_ms': stopwatch.elapsedMilliseconds,
+      },
+    );
+    return geoIpFix;
   }
 
   /// Builds the default OpenStreetMap Nominatim reverse-geocoding URI for [latitude] and [longitude].
@@ -449,6 +484,7 @@ class PlatformLocationRepository implements LocationRepository {
         }
       }
     }
+    final stopwatch = Stopwatch()..start();
     final jsonMap = await _fetchJsonMap(_geoIpUri);
     var resolved = _parseGeoIpFix(jsonMap);
     if (resolved == null && _fallbackGeoIpUri != _geoIpUri) {
@@ -459,6 +495,15 @@ class PlatformLocationRepository implements LocationRepository {
       _cachedGeoIpFix = resolved;
       _cachedGeoIpAt = now;
     }
+    AppLogger.event(
+      resolved != null ? LogLevel.info : LogLevel.warn,
+      LogTag.storage,
+      'location.geoip',
+      fields: <String, Object?>{
+        'has_coords': resolved?.hasCoordinates ?? false,
+        'elapsed_ms': stopwatch.elapsedMilliseconds,
+      },
+    );
     return resolved;
   }
 
@@ -488,9 +533,19 @@ class PlatformLocationRepository implements LocationRepository {
       final latitude?,
       final longitude?,
     )) {
+      final stopwatch = Stopwatch()..start();
       final uri = _reverseGeocodeUriBuilder(latitude, longitude);
       final jsonMap = await _fetchJsonMap(uri);
       final placeName = _parseReverseGeocodePlaceName(jsonMap);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'location.geocode',
+        fields: <String, Object?>{
+          'results': placeName != null ? 1 : 0,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
       if (placeName != null) {
         final enriched = LocationFix(
           latitude: latitude,

@@ -17,6 +17,8 @@ import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 
+import '../services/app_logger.dart';
+
 /// Supported display language modes in TierTask.
 enum AppLanguage {
   /// Follows the operating system language (`de` -> German, otherwise English default).
@@ -183,6 +185,8 @@ class WebDavConfig {
     this.timeZoneMode = AppTimeZoneMode.automatic,
     int manualTimeZoneOffsetMinutes = 0,
     this.diagnosticsEnabled = false,
+    this.logLevel = LogLevel.info,
+    this.logStorageMode = StorageMode.local,
   }) : storageMode =
            storageMode ??
            (serverUrl != '' && username != '' && password != ''
@@ -283,8 +287,14 @@ class WebDavConfig {
   /// Manually configured UTC offset in minutes (`-720..840`) when [timeZoneMode] is [AppTimeZoneMode.manual].
   final int manualTimeZoneOffsetMinutes;
 
-  /// Whether opt-in diagnostic logging (`tiertask.log`) is enabled.
+  /// Whether opt-in diagnostic logging (`tiertask_<date>_<platform>_<workspace>.log`) is enabled.
   final bool diagnosticsEnabled;
+
+  /// Minimum severity threshold for recorded diagnostic log entries.
+  final LogLevel logLevel;
+
+  /// Persistence target for diagnostic logs (`local`, `webdav`, or `both`).
+  final StorageMode logStorageMode;
 
   /// Whether opt-in diagnostic logging is enabled (alias for [diagnosticsEnabled]).
   bool get enableLogging => diagnosticsEnabled;
@@ -332,6 +342,8 @@ class WebDavConfig {
     AppTimeZoneMode? timeZoneMode,
     int? manualTimeZoneOffsetMinutes,
     bool? diagnosticsEnabled,
+    LogLevel? logLevel,
+    StorageMode? logStorageMode,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -348,6 +360,8 @@ class WebDavConfig {
       manualTimeZoneOffsetMinutes:
           manualTimeZoneOffsetMinutes ?? this.manualTimeZoneOffsetMinutes,
       diagnosticsEnabled: diagnosticsEnabled ?? this.diagnosticsEnabled,
+      logLevel: logLevel ?? this.logLevel,
+      logStorageMode: logStorageMode ?? this.logStorageMode,
     );
   }
 
@@ -446,6 +460,27 @@ class WebDavConfig {
     return Uri.tryParse(fullUrl);
   }
 
+  /// Resolves the sibling WebDAV endpoint [Uri] for [logFileName] next to the `.tdf` file.
+  Uri resolveLogEndpointUri(String logFileName) {
+    final trimmed = logFileName.trim();
+    if (!_isValidLogFileName(trimmed)) {
+      throw FormatException('Invalid diagnostic log file name: "$logFileName"');
+    }
+    final endpointUri = resolveEndpointUri();
+    if (endpointUri == null || endpointUri.pathSegments.isEmpty) {
+      throw const FormatException(
+        'Cannot resolve WebDAV log endpoint URI from unconfigured server URL.',
+      );
+    }
+    final parentSegments = endpointUri.pathSegments.sublist(
+      0,
+      endpointUri.pathSegments.length - 1,
+    );
+    return endpointUri.replace(
+      pathSegments: <String>[...parentSegments, trimmed],
+    );
+  }
+
   /// Converts [instant] into a wall-clock [DateTime] (encoded with `isUtc: true` components
   /// for deterministic field access) according to [timeZoneMode] and [manualTimeZoneOffsetMinutes].
   DateTime toLocalWallClock(DateTime instant) {
@@ -472,6 +507,20 @@ class WebDavConfig {
     );
   }
 
+  /// Returns `true` when [name] is a safe `.log` basename without path traversal.
+  static bool _isValidLogFileName(String name) {
+    if (name.length < 5 || !name.endsWith('.log') || name.contains('..')) {
+      return false;
+    }
+    for (var i = 0; i < name.length; i++) {
+      final code = name.codeUnitAt(i);
+      if (code <= 0x20 || code >= 0x7F || code == 0x2F || code == 0x5C) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -488,7 +537,9 @@ class WebDavConfig {
         other.locationEnabled == locationEnabled &&
         other.timeZoneMode == timeZoneMode &&
         other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes &&
-        other.diagnosticsEnabled == diagnosticsEnabled;
+        other.diagnosticsEnabled == diagnosticsEnabled &&
+        other.logLevel == logLevel &&
+        other.logStorageMode == logStorageMode;
   }
 
   @override
@@ -506,5 +557,7 @@ class WebDavConfig {
     timeZoneMode,
     manualTimeZoneOffsetMinutes,
     diagnosticsEnabled,
+    logLevel,
+    logStorageMode,
   );
 }

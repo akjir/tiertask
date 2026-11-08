@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -43,7 +44,7 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
   void initState() {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
-      onStateChange: AppLogger.handleAppLifecycleState,
+      onStateChange: _handleLifecycleStateChange,
       onExitRequested: () async {
         AppLogger.handleAppLifecycleState(AppLifecycleState.detached);
         return AppExitResponse.exit;
@@ -76,6 +77,24 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
       darkTheme: appThemeSet.dark.toThemeData(),
       home: const HomeScreen(),
     );
+  }
+
+  /// Attempts a best-effort WebDAV log upload when backgrounding the application.
+  Future<void> _flushRemoteLogQuietly() async {
+    try {
+      await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
+    } on Object {
+      // Ignore background flush errors during lifecycle transitions.
+    }
+  }
+
+  /// Records lifecycle state transitions and flushes WebDAV logs on backgrounding.
+  void _handleLifecycleStateChange(AppLifecycleState state) {
+    AppLogger.handleAppLifecycleState(state);
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      unawaited(_flushRemoteLogQuietly());
+    }
   }
 
   /// Maps [AppThemeMode] to Flutter's [ThemeMode].

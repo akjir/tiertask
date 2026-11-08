@@ -66,10 +66,16 @@ extension TaskBoardSlicesX on NormalizedTierSlices {
 
   /// Logs [action] with the resulting 6-tier task distribution under [LogTag.domain] and returns `this`.
   NormalizedTierSlices logDomainMutation(String action) {
-    AppLogger.info(
-      LogTag.domain,
-      '$action | tiers: Focus=${focus.length}, Ready=${ready.length}, Planned=${planned.length}, Blocked=${blocked.length}, Someday=${someday.length}, Completed=${completed.length}',
+    final normalized = TaskBoardEvaluator.formatDomainMutationMessage(
+      action,
+      focus: focus.length,
+      ready: ready.length,
+      planned: planned.length,
+      blocked: blocked.length,
+      someday: someday.length,
+      completed: completed.length,
     );
+    AppLogger.info(LogTag.domain, normalized);
     return this;
   }
 }
@@ -135,9 +141,15 @@ class TaskBoardEvaluator {
       tasks: retainedTasks,
       labels: retainedLabels,
     );
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.domain,
-      'cleanupExpiredDeletions removed=$removedCount generation=${nextDeletedBlock.generation}',
+      'eval.prune',
+      fields: <String, Object?>{
+        'kind': 'deletions',
+        'removed': removedCount,
+        'generation': nextDeletedBlock.generation,
+      },
     );
     return board.copyWithSlices(deletedBlock: nextDeletedBlock);
   }
@@ -223,7 +235,7 @@ class TaskBoardEvaluator {
     );
     const readyEnd = focusSoftLimit + readySoftLimit;
 
-    return normalizeTierSlices(
+    final normalized = normalizeTierSlices(
       focus: orderedEligible.take(focusSoftLimit).toList(),
       ready: orderedEligible.skip(focusSoftLimit).take(readySoftLimit).toList(),
       planned: orderedEligible.skip(readyEnd).toList(),
@@ -234,6 +246,45 @@ class TaskBoardEvaluator {
       deletedBlock: resolvedDeletedBlock,
       explicitQueueBlock: resolvedQueueBlock,
     );
+    if (AppLogger.shouldLog(LogLevel.debug)) {
+      _logDebugEvaluation(
+        normalized,
+        nowUtc: now,
+        taskMap: taskMap,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      );
+    }
+    return normalized;
+  }
+
+  /// Formats a raw domain [action] into a canonical `<event> | <key=value ...>` message.
+  static String formatDomainMutationMessage(
+    String action, {
+    required int focus,
+    required int ready,
+    required int planned,
+    required int blocked,
+    required int someday,
+    required int completed,
+  }) {
+    final trimmed = action.trim();
+    final spaceIndex = trimmed.indexOf(' ');
+    final rawVerb = spaceIndex >= 0
+        ? trimmed.substring(0, spaceIndex)
+        : trimmed;
+    final details = spaceIndex >= 0
+        ? trimmed.substring(spaceIndex + 1).trim()
+        : '';
+    final eventName = _mapDomainVerb(rawVerb);
+    final tiersSuffix =
+        'focus=$focus ready=$ready planned=$planned '
+        'blocked=$blocked someday=$someday completed=$completed';
+    if (details.isEmpty) {
+      return '$eventName | $tiersSuffix';
+    }
+    return '$eventName | $details $tiersSuffix';
   }
 
   /// Returns whether [targetTaskId] is reachable from [startTaskId] via `blockedByTaskIds` edges in [taskMap].
@@ -344,9 +395,14 @@ class TaskBoardEvaluator {
       }
     }
     if (prunedRecords.isEmpty) return board;
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.domain,
-      'pruneCompletedTasks pruned=${prunedRecords.length} expired tasks (>30 days)',
+      'eval.prune',
+      fields: <String, Object?>{
+        'kind': 'completed',
+        'pruned': prunedRecords.length,
+      },
     );
     final nextDeleted = prunedRecords.fold(
       board.deletedBlock,
@@ -600,6 +656,113 @@ class TaskBoardEvaluator {
   static bool _isWithinRetention(TaskItem task, DateTime nowUtc) {
     final completedDate = task.completedAt;
     return completedDate == null || !_isTimestampExpired(completedDate, nowUtc);
+  }
+
+  /// Emits deduplicated `DEBUG` evaluation summary and blocked-task trace entries.
+  static void _logDebugEvaluation(
+    NormalizedTierSlices slices, {
+    required DateTime nowUtc,
+    required Map<String, TaskItem> taskMap,
+    required String? activeLabelId,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) {
+    final blockedIds = slices.blocked.map((task) => task.id).join(',');
+    final signature =
+        '${activeLabelId ?? 'all'}|${slices.focus.length}|'
+        '${slices.ready.length}|${slices.planned.length}|'
+        '${slices.blocked.length}|${slices.someday.length}|'
+        '${slices.completed.length}|$blockedIds';
+    if (!AppLogger.deduplicateEvalSummary(signature)) {
+      return;
+    }
+    for (final task in slices.blocked) {
+      _logSingleBlockedTask(
+        task,
+        nowUtc: nowUtc,
+        taskMap: taskMap,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      );
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.domain,
+      'eval.summary',
+      fields: <String, Object?>{
+        'label': activeLabelId ?? 'all',
+        'focus': slices.focus.length,
+        'ready': slices.ready.length,
+        'planned': slices.planned.length,
+        'blocked': slices.blocked.length,
+        'someday': slices.someday.length,
+        'completed': slices.completed.length,
+      },
+    );
+  }
+
+  /// Logs the anonymized blocking reason for a single [task] at `DEBUG` level.
+  static void _logSingleBlockedTask(
+    TaskItem task, {
+    required DateTime nowUtc,
+    required Map<String, TaskItem> taskMap,
+    required double? currentLatitude,
+    required double? currentLongitude,
+  }) {
+    final hasDeferral = _hasActiveDeferral(task, nowUtc);
+    final depsOk = areDependenciesSatisfied(task, taskMap);
+    final reason = hasDeferral
+        ? 'deferral'
+        : (!depsOk ? 'dependency' : 'condition');
+    int? distanceMeters;
+    int? radiusMeters;
+    if (reason == 'condition' &&
+        currentLatitude != null &&
+        currentLongitude != null) {
+      for (final rule in task.conditions) {
+        if (rule is LocationTaskCondition) {
+          distanceMeters = LocationTaskCondition.haversineDistanceMeters(
+            currentLatitude,
+            currentLongitude,
+            rule.latitude,
+            rule.longitude,
+          ).round();
+          radiusMeters = rule.radiusMeters.round();
+          break;
+        }
+      }
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.domain,
+      'eval.blocked',
+      fields: <String, Object?>{
+        'id': task.id,
+        'reason': reason,
+        'distance_m': distanceMeters,
+        'radius_m': radiusMeters,
+      },
+    );
+  }
+
+  /// Maps a legacy domain mutation verb to its canonical `<domain>.<verb>` event name.
+  static String _mapDomainVerb(String rawVerb) {
+    if (rawVerb.startsWith('completeTask')) return 'task.complete';
+    return switch (rawVerb) {
+      'addTask' => 'task.add',
+      'updateTask' => 'task.update',
+      'restoreTask' => 'task.restore',
+      'deleteTask' => 'task.delete',
+      'downgradeTask' => 'task.downgrade',
+      'scheduleTask' => 'task.schedule',
+      'blockTask' => 'task.block',
+      'moveTaskInQueue' => 'task.move_queue',
+      'toggleSubtask' => 'task.toggle_subtask',
+      'addLabel' => 'label.add',
+      'updateLabel' => 'label.update',
+      'deleteLabel' => 'label.delete',
+      _ => rawVerb,
+    };
   }
 
   /// Normalizes open tasks in [slice] so `isCompleted` and `completedAt` are cleared.

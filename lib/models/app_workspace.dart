@@ -18,6 +18,7 @@ import 'dart:typed_data' show BytesBuilder;
 
 import 'package:flutter/foundation.dart';
 
+import '../services/app_logger.dart';
 import 'webdav_config.dart';
 
 /// Immutable representation of the single active workspace loaded in memory.
@@ -226,11 +227,13 @@ class AppWorkspace {
     AppWorkspace workspace,
   ) {
     final config = workspace.config;
+    final remoteLogFlag = config.logStorageMode == StorageMode.local ? 0 : 1;
     builder.addByte(
       (config.storageMode.id & 0x03) |
           ((config.language.id & 0x03) << 2) |
           ((config.themeMode.id & 0x03) << 4) |
-          ((config.themePalette.id & 0x01) << 6),
+          ((config.themePalette.id & 0x01) << 6) |
+          (remoteLogFlag << 7),
     );
     for (final rawField in <String>[
       workspace.id.trim(),
@@ -251,13 +254,16 @@ class AppWorkspace {
         ..addByte(encoded.length & 0xFF)
         ..add(encoded);
     }
+    final offsetField = _encodeOffsetAndLogStorage(
+      config.manualTimeZoneOffsetMinutes,
+      config.logStorageMode,
+    );
     final tzWord =
         ((config.timeZoneMode.id & 0x01) << 15) |
         ((config.locationEnabled ? 1 : 0) << 14) |
         ((config.diagnosticsEnabled ? 1 : 0) << 13) |
-        ((config.manualTimeZoneOffsetMinutes -
-                WebDavConfig.minUtcOffsetMinutes) &
-            0x07FF);
+        ((_encodeLogLevelBits(config.logLevel) & 0x03) << 11) |
+        (offsetField & 0x07FF);
     builder
       ..addByte((tzWord >> 8) & 0xFF)
       ..addByte(tzWord & 0xFF);
@@ -278,6 +284,37 @@ class AppWorkspace {
     return rawSlug.endsWith('_')
         ? rawSlug.substring(0, rawSlug.length - 1)
         : rawSlug;
+  }
+
+  /// Decodes the 2-bit `tzWord` bits `11..12` into a [LogLevel] (`0 -> info` default).
+  static LogLevel _decodeLogLevelBits(int bits) {
+    return switch (bits & 0x03) {
+      1 => LogLevel.debug,
+      2 => LogLevel.warn,
+      3 => LogLevel.error,
+      _ => LogLevel.info,
+    };
+  }
+
+  /// Decodes `(manualTimeZoneOffsetMinutes, logStorageMode)` from [flags] bit 7 and [tzWord].
+  static (int, StorageMode) _decodeOffsetAndLogStorage(int flags, int tzWord) {
+    final rawOffsetField = tzWord & 0x07FF;
+    final hasRemoteLogBit = ((flags >> 7) & 0x01) == 1;
+    if (!hasRemoteLogBit) {
+      return (
+        rawOffsetField + WebDavConfig.minUtcOffsetMinutes,
+        StorageMode.local,
+      );
+    }
+    if (rawOffsetField <= 1560) {
+      return (
+        rawOffsetField + WebDavConfig.minUtcOffsetMinutes,
+        StorageMode.webdav,
+      );
+    }
+    final decodedOffset =
+        ((rawOffsetField - 1561) * 5) + WebDavConfig.minUtcOffsetMinutes;
+    return (decodedOffset, StorageMode.both);
   }
 
   /// Decodes and validates a single [AppWorkspace] record from [source] at [offset].
@@ -303,6 +340,10 @@ class AppWorkspace {
     final tzWord = (source[cursor] << 8) | source[cursor + 1];
     cursor += 2;
 
+    final (manualOffsetMinutes, logStorageMode) = _decodeOffsetAndLogStorage(
+      flags,
+      tzWord,
+    );
     final filePath = fields[5].trim();
     final localPath = fields[6].trim();
     final workspace = AppWorkspace(
@@ -320,9 +361,10 @@ class AppWorkspace {
         themePalette: AppThemePalette.fromId((flags >> 6) & 0x01),
         locationEnabled: ((tzWord >> 14) & 0x01) == 1,
         timeZoneMode: AppTimeZoneMode.fromId((tzWord >> 15) & 0x01),
-        manualTimeZoneOffsetMinutes:
-            (tzWord & 0x07FF) + WebDavConfig.minUtcOffsetMinutes,
+        manualTimeZoneOffsetMinutes: manualOffsetMinutes,
         diagnosticsEnabled: ((tzWord >> 13) & 0x01) == 1,
+        logLevel: _decodeLogLevelBits((tzWord >> 11) & 0x03),
+        logStorageMode: logStorageMode,
       ),
     );
     if (workspace.id.isEmpty ||
@@ -337,6 +379,29 @@ class AppWorkspace {
       _throwCorrupt(error.message);
     }
     return (workspace, cursor);
+  }
+
+  /// Encodes [level] into 2 bits (`0 -> info` default) for `tzWord` bits `11..12`.
+  static int _encodeLogLevelBits(LogLevel level) {
+    return switch (level) {
+      LogLevel.debug => 1,
+      LogLevel.info => 0,
+      LogLevel.warn => 2,
+      LogLevel.error || LogLevel.crash => 3,
+    };
+  }
+
+  /// Encodes [offsetMinutes] and [logStorageMode] into the 11-bit `tzWord` offset field.
+  static int _encodeOffsetAndLogStorage(
+    int offsetMinutes,
+    StorageMode logStorageMode,
+  ) {
+    final shifted = offsetMinutes - WebDavConfig.minUtcOffsetMinutes;
+    final clamped = shifted < 0 ? 0 : (shifted > 1560 ? 1560 : shifted);
+    if (logStorageMode == StorageMode.both) {
+      return 1561 + (clamped ~/ 5);
+    }
+    return clamped;
   }
 
   /// Returns `true` when [value] contains C0/C1 control characters, line separators, or BiDi overrides.

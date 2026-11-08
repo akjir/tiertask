@@ -17,14 +17,20 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/webdav_config.dart';
+import '../../services/app_logger.dart';
+import 'log_viewer_dialog.dart';
 
-/// Card for enabling or disabling the opt-in diagnostic log (`tiertask.log`).
+/// Card for configuring opt-in diagnostic logging, minimum log level, and log storage mode.
 class DiagnosticsSelectionCard extends StatelessWidget {
   /// Creates a [DiagnosticsSelectionCard].
   const DiagnosticsSelectionCard({
     super.key,
     required this.diagnosticsEnabled,
+    required this.selectedLogLevel,
+    required this.selectedLogStorageMode,
     required this.onDiagnosticsEnabledChanged,
+    required this.onLogLevelChanged,
+    required this.onLogStorageModeChanged,
   });
 
   /// Whether opt-in diagnostic logging is currently enabled.
@@ -33,6 +39,18 @@ class DiagnosticsSelectionCard extends StatelessWidget {
   /// Callback invoked when the user toggles the diagnostic logging switch.
   final ValueChanged<bool> onDiagnosticsEnabledChanged;
 
+  /// Callback invoked when the user selects a new minimum [LogLevel].
+  final ValueChanged<LogLevel> onLogLevelChanged;
+
+  /// Callback invoked when the user selects a new log [StorageMode].
+  final ValueChanged<StorageMode> onLogStorageModeChanged;
+
+  /// Currently selected minimum [LogLevel].
+  final LogLevel selectedLogLevel;
+
+  /// Currently selected log [StorageMode].
+  final StorageMode selectedLogStorageMode;
+
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
@@ -40,13 +58,24 @@ class DiagnosticsSelectionCard extends StatelessWidget {
       icon: Icons.bug_report_outlined,
       title: localizations.diagnosticsSectionTitle,
       description: localizations.diagnosticsSectionDescription,
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Switch(
-          key: const ValueKey('settings_diagnostics_switch'),
-          value: diagnosticsEnabled,
-          onChanged: onDiagnosticsEnabledChanged,
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Switch(
+            key: const ValueKey('settings_diagnostics_switch'),
+            value: diagnosticsEnabled,
+            onChanged: onDiagnosticsEnabledChanged,
+          ),
+          if (diagnosticsEnabled) ...[
+            const SizedBox(height: 8),
+            _DiagnosticsDetailsPanel(
+              selectedLogLevel: selectedLogLevel,
+              selectedLogStorageMode: selectedLogStorageMode,
+              onLogLevelChanged: onLogLevelChanged,
+              onLogStorageModeChanged: onLogStorageModeChanged,
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -189,8 +218,14 @@ class SettingsPreferenceCards extends StatelessWidget {
         ),
         DiagnosticsSelectionCard(
           diagnosticsEnabled: config.diagnosticsEnabled,
+          selectedLogLevel: config.logLevel,
+          selectedLogStorageMode: config.logStorageMode,
           onDiagnosticsEnabledChanged: (value) =>
               onPreferenceChanged(config.copyWith(diagnosticsEnabled: value)),
+          onLogLevelChanged: (value) =>
+              onPreferenceChanged(config.copyWith(logLevel: value)),
+          onLogStorageModeChanged: (value) =>
+              onPreferenceChanged(config.copyWith(logStorageMode: value)),
         ),
         StorageModeSelectionCard(
           selectedStorageMode: config.storageMode,
@@ -473,6 +508,143 @@ class TimeZoneSelectionCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+/// Expanded controls for log level, log storage mode, and opening [LogViewerDialog].
+class _DiagnosticsDetailsPanel extends StatelessWidget {
+  const _DiagnosticsDetailsPanel({
+    required this.selectedLogLevel,
+    required this.selectedLogStorageMode,
+    required this.onLogLevelChanged,
+    required this.onLogStorageModeChanged,
+  });
+
+  final ValueChanged<LogLevel> onLogLevelChanged;
+  final ValueChanged<StorageMode> onLogStorageModeChanged;
+  final LogLevel selectedLogLevel;
+  final StorageMode selectedLogStorageMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final labelStyle = Theme.of(context).textTheme.labelLarge;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 8,
+      children: [
+        Text(localizations.logLevelLabel, style: labelStyle),
+        _LogLevelSelector(
+          selectedLogLevel: selectedLogLevel,
+          onLogLevelChanged: onLogLevelChanged,
+        ),
+        Text(localizations.logStorageLabel, style: labelStyle),
+        _LogStorageModeSelector(
+          selectedLogStorageMode: selectedLogStorageMode,
+          onLogStorageModeChanged: onLogStorageModeChanged,
+        ),
+        const _DiagnosticsLogFileRow(),
+      ],
+    );
+  }
+}
+
+/// Displays the resolved log filename and a button to open [LogViewerDialog].
+class _DiagnosticsLogFileRow extends StatelessWidget {
+  const _DiagnosticsLogFileRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Wrap(
+      alignment: WrapAlignment.spaceBetween,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        Text(localizations.logMetadataFile(AppLogger.activeLogFileName)),
+        OutlinedButton.icon(
+          key: const ValueKey('settings_open_log_viewer_button'),
+          onPressed: () => showLogViewerDialog(context),
+          icon: const Icon(Icons.article_outlined, size: 18),
+          label: Text(localizations.diagnosticLogTitle),
+        ),
+      ],
+    );
+  }
+}
+
+/// Segmented selector for minimum [LogLevel].
+class _LogLevelSelector extends StatelessWidget {
+  const _LogLevelSelector({
+    required this.selectedLogLevel,
+    required this.onLogLevelChanged,
+  });
+
+  final ValueChanged<LogLevel> onLogLevelChanged;
+  final LogLevel selectedLogLevel;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return _PreferenceSegmentedButton<LogLevel>(
+      buttonKey: const ValueKey('settings_log_level_segmented'),
+      selectedValue: selectedLogLevel,
+      onChanged: onLogLevelChanged,
+      segments: [
+        ButtonSegment<LogLevel>(
+          value: LogLevel.debug,
+          label: Text(localizations.logLevelDebug),
+        ),
+        ButtonSegment<LogLevel>(
+          value: LogLevel.info,
+          label: Text(localizations.logLevelInfo),
+        ),
+        ButtonSegment<LogLevel>(
+          value: LogLevel.warn,
+          label: Text(localizations.logLevelWarn),
+        ),
+        ButtonSegment<LogLevel>(
+          value: LogLevel.error,
+          label: Text(localizations.logLevelError),
+        ),
+      ],
+    );
+  }
+}
+
+/// Segmented selector for diagnostic log [StorageMode].
+class _LogStorageModeSelector extends StatelessWidget {
+  const _LogStorageModeSelector({
+    required this.selectedLogStorageMode,
+    required this.onLogStorageModeChanged,
+  });
+
+  final ValueChanged<StorageMode> onLogStorageModeChanged;
+  final StorageMode selectedLogStorageMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return _PreferenceSegmentedButton<StorageMode>(
+      buttonKey: const ValueKey('settings_log_storage_segmented'),
+      selectedValue: selectedLogStorageMode,
+      onChanged: onLogStorageModeChanged,
+      segments: [
+        ButtonSegment<StorageMode>(
+          value: StorageMode.local,
+          label: Text(localizations.logStorageLocal),
+        ),
+        ButtonSegment<StorageMode>(
+          value: StorageMode.webdav,
+          label: Text(localizations.logStorageWebDav),
+        ),
+        ButtonSegment<StorageMode>(
+          value: StorageMode.both,
+          label: Text(localizations.logStorageBoth),
+        ),
+      ],
     );
   }
 }

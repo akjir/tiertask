@@ -12,6 +12,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
 | TEP-001 | Agent-Optimized Codebase Architecture, Acyclic Import DAG, and Sub-5s TDD Harness | architecture | review | [`tep-001-agent-optimized-architecture.md`](tep-001-agent-optimized-architecture.md) |
+| TEP-002 | Structured Diagnostic Logging, Configurable Log Levels, and Local/WebDAV Log Persistence | feature | review | [`tep-002-structured-logging-and-persistence.md`](tep-002-structured-logging-and-persistence.md) |
 
 ### Completed Proposals
 

@@ -16,6 +16,7 @@
 import 'package:flutter/services.dart';
 
 import '../models/task_item.dart';
+import '../services/app_logger.dart';
 
 /// In-memory [LinkLauncherRepository] implementation for deterministic unit and widget tests.
 class FakeLinkLauncherRepository implements LinkLauncherRepository {
@@ -78,7 +79,17 @@ class PlatformLinkLauncherRepository implements LinkLauncherRepository {
   @override
   Future<void> openLink(String uri) async {
     final trimmed = uri.trim();
+    final colonIndex = trimmed.indexOf(':');
+    final scheme = colonIndex > 0
+        ? trimmed.substring(0, colonIndex).toLowerCase()
+        : 'unknown';
     if (!TaskLink.isValidUri(trimmed)) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'link.open',
+        fields: <String, Object?>{'scheme': scheme, 'reason': 'invalid_uri'},
+      );
       throw const LinkLaunchException('Invalid link URI.');
     }
     try {
@@ -87,14 +98,39 @@ class PlatformLinkLauncherRepository implements LinkLauncherRepository {
         <String, String>{'uri': trimmed},
       );
       if (launched != true) {
+        AppLogger.event(
+          LogLevel.error,
+          LogTag.storage,
+          'link.open',
+          fields: <String, Object?>{'scheme': scheme, 'launched': false},
+        );
         throw const LinkLaunchException('Could not open link URI.');
       }
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'link.open',
+        fields: <String, Object?>{'scheme': scheme, 'launched': true},
+      );
     } on PlatformException catch (error) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'link.open',
+        fields: <String, Object?>{'scheme': scheme},
+        error: error.code,
+      );
       throw LinkLaunchException(
         error.message ?? 'Could not open link URI.',
         cause: error,
       );
     } on MissingPluginException catch (error) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'link.open',
+        fields: <String, Object?>{'scheme': scheme, 'reason': 'missing_plugin'},
+      );
       throw LinkLaunchException('Could not open link URI.', cause: error);
     }
   }

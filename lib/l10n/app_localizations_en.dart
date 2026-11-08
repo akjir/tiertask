@@ -975,4 +975,73 @@ class AppLocalizationsEn extends AppLocalizations {
   String errorUnsupportedTdfVersionBoth(String version) {
     return 'The local and remote files use unsupported file version $version. Please update TierTask to a newer version.';
   }
+
+  @override
+  String get logLevelLabel => 'Minimum Log Level';
+
+  @override
+  String get logLevelDebug => 'Debug';
+
+  @override
+  String get logLevelInfo => 'Info';
+
+  @override
+  String get logLevelWarn => 'Warning';
+
+  @override
+  String get logLevelError => 'Error';
+
+  @override
+  String get logStorageLabel => 'Log Storage';
+
+  @override
+  String get logStorageLocal => 'Local';
+
+  @override
+  String get logStorageWebDav => 'WebDAV';
+
+  @override
+  String get logStorageBoth => 'Both';
+
+  @override
+  String get logMetadataSectionTitle => 'Session Metadata';
+
+  @override
+  String logMetadataFile(String fileName) {
+    return 'File: $fileName';
+  }
+
+  @override
+  String logMetadataVersion(String version) {
+    return 'Version: $version';
+  }
+
+  @override
+  String logMetadataPlatform(String platform) {
+    return 'Platform: $platform';
+  }
+
+  @override
+  String logMetadataWorkspace(String workspace) {
+    return 'Workspace: $workspace';
+  }
+
+  @override
+  String logMetadataTimeZone(String timeZone) {
+    return 'Time Zone: $timeZone';
+  }
+
+  @override
+  String logMetadataStats(String entries, String warnings, String errors) {
+    return 'Entries: $entries | Warnings: $warnings | Errors: $errors';
+  }
+
+  @override
+  String get logFilterAllTags => 'All';
+
+  @override
+  String get tooltipSyncLogWebDav => 'Sync log to WebDAV';
+
+  @override
+  String get logSyncedSnackBar => 'Diagnostic log synced to WebDAV.';
 }

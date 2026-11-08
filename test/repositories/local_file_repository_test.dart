@@ -441,6 +441,92 @@ void main() {
 
       sink.deleteLogFileSync(defaultPath);
       expect(File(defaultPath).existsSync(), isFalse);
+
+      final nowUtc = DateTime.utc(2026, 11, 10, 12);
+      final resolvedDatedPath = LocalFileRepository.resolveLogFilePath(
+        baseDirectoryPath: tempDirectory.path,
+        utcNow: nowUtc,
+        platform: 'linux',
+        workspaceId: 'work',
+      );
+      expect(
+        resolvedDatedPath,
+        equals(
+          '${tempDirectory.path}${Platform.pathSeparator}'
+          'tiertask_2026-11-10_linux_work.log',
+        ),
+      );
+
+      final legacyLog = File(
+        '${tempDirectory.path}${Platform.pathSeparator}tiertask.log',
+      )..writeAsStringSync('legacy', flush: true);
+      final expiredLog = File(
+        '${tempDirectory.path}${Platform.pathSeparator}'
+        'tiertask_2026-11-01_linux_work.log',
+      )..writeAsStringSync('expired (>7d)', flush: true);
+      final otherWorkspaceLog = File(
+        '${tempDirectory.path}${Platform.pathSeparator}'
+        'tiertask_2026-11-01_linux_other.log',
+      )..writeAsStringSync('other workspace', flush: true);
+
+      final recentDates = <String>[
+        '2026-11-04',
+        '2026-11-05',
+        '2026-11-06',
+        '2026-11-07',
+        '2026-11-08',
+        '2026-11-09',
+        '2026-11-10',
+      ];
+      for (final dateStr in recentDates) {
+        File(
+          '${tempDirectory.path}${Platform.pathSeparator}'
+          'tiertask_${dateStr}_linux_work.log',
+        ).writeAsStringSync('recent $dateStr', flush: true);
+      }
+
+      final prunedCount = sink.pruneExpiredLogFilesSync(
+        directoryPath: tempDirectory.path,
+        platform: 'linux',
+        workspaceId: 'work',
+        utcNow: nowUtc,
+        maxRetainedDays: 7,
+        maxRetainedFiles: 5,
+      );
+      expect(
+        prunedCount,
+        equals(4),
+        reason: 'Legacy tiertask.log, 1 expired file (2026-11-01), and 2 overflow files (2026-11-04, 2026-11-05) must be pruned',
+      );
+      expect(legacyLog.existsSync(), isFalse);
+      expect(expiredLog.existsSync(), isFalse);
+      expect(
+        File(
+          '${tempDirectory.path}${Platform.pathSeparator}'
+          'tiertask_2026-11-05_linux_work.log',
+        ).existsSync(),
+        isFalse,
+      );
+      expect(
+        File(
+          '${tempDirectory.path}${Platform.pathSeparator}'
+          'tiertask_2026-11-06_linux_work.log',
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        otherWorkspaceLog.existsSync(),
+        isTrue,
+        reason: 'Logs from other workspaces must not be pruned',
+      );
+
+      final deletedCount = sink.deleteWorkspaceLogFilesSync(
+        directoryPath: tempDirectory.path,
+        platform: 'linux',
+        workspaceId: 'work',
+      );
+      expect(deletedCount, equals(5));
+      expect(otherWorkspaceLog.existsSync(), isTrue);
     });
   });
 

@@ -1831,6 +1831,120 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'The local and remote files use unsupported file version {version}. Please update TierTask to a newer version.'**
   String errorUnsupportedTdfVersionBoth(String version);
+
+  /// Localized string for logLevelLabel
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum Log Level'**
+  String get logLevelLabel;
+
+  /// Localized string for logLevelDebug
+  ///
+  /// In en, this message translates to:
+  /// **'Debug'**
+  String get logLevelDebug;
+
+  /// Localized string for logLevelInfo
+  ///
+  /// In en, this message translates to:
+  /// **'Info'**
+  String get logLevelInfo;
+
+  /// Localized string for logLevelWarn
+  ///
+  /// In en, this message translates to:
+  /// **'Warning'**
+  String get logLevelWarn;
+
+  /// Localized string for logLevelError
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get logLevelError;
+
+  /// Localized string for logStorageLabel
+  ///
+  /// In en, this message translates to:
+  /// **'Log Storage'**
+  String get logStorageLabel;
+
+  /// Localized string for logStorageLocal
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get logStorageLocal;
+
+  /// Localized string for logStorageWebDav
+  ///
+  /// In en, this message translates to:
+  /// **'WebDAV'**
+  String get logStorageWebDav;
+
+  /// Localized string for logStorageBoth
+  ///
+  /// In en, this message translates to:
+  /// **'Both'**
+  String get logStorageBoth;
+
+  /// Localized string for logMetadataSectionTitle
+  ///
+  /// In en, this message translates to:
+  /// **'Session Metadata'**
+  String get logMetadataSectionTitle;
+
+  /// Localized string for logMetadataFile
+  ///
+  /// In en, this message translates to:
+  /// **'File: {fileName}'**
+  String logMetadataFile(String fileName);
+
+  /// Localized string for logMetadataVersion
+  ///
+  /// In en, this message translates to:
+  /// **'Version: {version}'**
+  String logMetadataVersion(String version);
+
+  /// Localized string for logMetadataPlatform
+  ///
+  /// In en, this message translates to:
+  /// **'Platform: {platform}'**
+  String logMetadataPlatform(String platform);
+
+  /// Localized string for logMetadataWorkspace
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace: {workspace}'**
+  String logMetadataWorkspace(String workspace);
+
+  /// Localized string for logMetadataTimeZone
+  ///
+  /// In en, this message translates to:
+  /// **'Time Zone: {timeZone}'**
+  String logMetadataTimeZone(String timeZone);
+
+  /// Localized string for logMetadataStats
+  ///
+  /// In en, this message translates to:
+  /// **'Entries: {entries} | Warnings: {warnings} | Errors: {errors}'**
+  String logMetadataStats(String entries, String warnings, String errors);
+
+  /// Localized string for logFilterAllTags
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get logFilterAllTags;
+
+  /// Localized string for tooltipSyncLogWebDav
+  ///
+  /// In en, this message translates to:
+  /// **'Sync log to WebDAV'**
+  String get tooltipSyncLogWebDav;
+
+  /// Localized string for logSyncedSnackBar
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostic log synced to WebDAV.'**
+  String get logSyncedSnackBar;
 }
 
 class _AppLocalizationsDelegate

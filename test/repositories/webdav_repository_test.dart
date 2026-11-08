@@ -80,6 +80,13 @@ void main() {
           }
           request.response.statusCode = forcedPutStatus;
           await request.response.close();
+        } else if (request.method == 'DELETE') {
+          if (remoteFiles.remove(path) != null) {
+            request.response.statusCode = HttpStatus.noContent;
+          } else {
+            request.response.statusCode = HttpStatus.notFound;
+          }
+          await request.response.close();
         } else {
           request.response.statusCode = HttpStatus.methodNotAllowed;
           await request.response.close();
@@ -347,13 +354,14 @@ void main() {
       final fullLog = AppLogger.fullLogText;
       expect(
         fullLog,
-        contains('[INFO] [STORAGE] WebDavRepository.saveTdf PUT'),
-        reason: 'WebDavRepository.saveTdf must emit [STORAGE] log entry',
+        contains('[INFO ] [STORAGE  ] webdav.put |'),
+        reason: 'WebDavRepository.saveTdf must emit [STORAGE] webdav.put entry',
       );
       expect(
         fullLog,
-        contains('[INFO] [STORAGE] WebDavRepository.fetchTdf GET'),
-        reason: 'WebDavRepository.fetchTdf must emit [STORAGE] log entry',
+        contains('[INFO ] [STORAGE  ] webdav.get |'),
+        reason:
+            'WebDavRepository.fetchTdf must emit [STORAGE] webdav.get entry',
       );
       expect(
         fullLog,
@@ -364,6 +372,44 @@ void main() {
         fullLog,
         isNot(contains('c3RlZmFuOnNlY3JldA==')),
         reason: 'Base64 Basic Auth token must be redacted in AppLogger',
+      );
+
+      final linesBeforeSaveLog = AppLogger.lines.length;
+      const logFileName = 'tiertask_2026-11-03_linux_tasks.log';
+      await repository.saveLog(logFileName);
+      expect(
+        remoteFiles['/remote.php/dav/files/stefan/$logFileName'],
+        isNotEmpty,
+        reason: 'saveLog must upload diagnostic log to sibling WebDAV path',
+      );
+      expect(
+        AppLogger.lines.length,
+        equals(linesBeforeSaveLog),
+        reason: 'Successful saveLog must not append post-snapshot log entries that re-dirty the log',
+      );
+
+      forcedPutStatus = HttpStatus.internalServerError;
+      await expectLater(
+        () => repository.saveLog(logFileName),
+        throwsA(isA<WebDavException>()),
+      );
+      expect(
+        AppLogger.fullLogText,
+        contains('[ERROR] [STORAGE  ] webdav.log_put |'),
+        reason: 'Failed saveLog must record webdav.log_put error after request',
+      );
+
+      await repository.deleteLog(logFileName);
+      expect(
+        remoteFiles.containsKey('/remote.php/dav/files/stefan/$logFileName'),
+        isFalse,
+        reason: 'deleteLog must remove remote log file via HTTP DELETE',
+      );
+      await repository.deleteLog(logFileName);
+      expect(
+        AppLogger.fullLogText,
+        contains('[INFO ] [STORAGE  ] webdav.log_delete |'),
+        reason: 'deleteLog must record webdav.log_delete entry',
       );
     });
   });

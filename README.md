@@ -14,7 +14,7 @@
 - **Context-Aware Conditions & Recurrence:** Evaluates completion-count dependencies, `suspended`, and `day`, `time`, and foreground GPS `location` conditions with label inheritance, and reschedules completed `repeat` tasks into `Focus` via `Blocked`.
 - **Two-Stage Three-Way Synchronization:** Reconciles in-memory state, local `.tdf` files, and WebDAV servers using 10-character Base62 entity identifiers, monotonic UTC `modified` timestamps, and `deleted.generation` counters across `Local`, `WebDAV`, and `Both` storage modes.
 - **Multi-Workspace & Encrypted Settings:** Isolates independent `.tdf` task boards and storage settings into switchable workspaces persisted via `flutter_secure_storage`.
-- **Opt-In Diagnostic Logging:** Records sanitized runtime events and crash stack traces into a 5,000-line rolling `tiertask.log` ring buffer with an in-app log viewer when enabled.
+- **Opt-In Diagnostic Logging:** Records privacy-sanitized structured runtime events (`<UTC-ISO> [<LEVEL>] [<TAG>] <event> | <key=value ...>`), `@meta` session headers, and crash stack traces at configurable log levels (`Debug`, `Info`, `Warning`, `Error`) into a 5,000-line (`2 MiB`) rolling dated log file (`tiertask_<YYYY-MM-DD>_<platform>_<workspaceId>.log`) stored locally (`Local`), on WebDAV (`WebDAV`), or both (`Both`), with an in-app filterable log viewer.
 
 ## Requirements
 

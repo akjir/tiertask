@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 
 Uint8List _buildRawRecord({
   int flags = 0,
@@ -185,6 +186,101 @@ void main() {
         equals(updated.summary.hashCode),
         reason: 'WorkspaceSummary hashCode must be deterministic',
       );
+    });
+
+    test('preserves logLevel and logStorageMode across all 37 UTC offsets without changing 51-byte default record size', () {
+      const defaultWorkspace = AppWorkspace.defaultWorkspace;
+      expect(
+        defaultWorkspace.toBytes().length,
+        equals(51),
+        reason: 'Default workspace binary encoding must remain 51 bytes',
+      );
+
+      for (final level in LogLevel.configurableLevels) {
+        for (final logMode in StorageMode.values) {
+          for (final offset in WebDavConfig.supportedUtcOffsetMinutes) {
+            final workspace = defaultWorkspace.copyWith(
+              config: WebDavConfig(
+                timeZoneMode: AppTimeZoneMode.manual,
+                manualTimeZoneOffsetMinutes: offset,
+                diagnosticsEnabled: true,
+                logLevel: level,
+                logStorageMode: logMode,
+              ),
+            );
+            final bytes = workspace.toBytes();
+            expect(
+              bytes.length,
+              equals(51),
+              reason:
+                  'Record size must remain 51 bytes for level=${level.label}, '
+                  'logMode=${logMode.name}, offset=$offset',
+            );
+            final decoded = AppWorkspace.fromBytes(bytes);
+            expect(
+              decoded.config.logLevel,
+              equals(level),
+              reason: 'Decoded logLevel must match ${level.label}',
+            );
+            expect(
+              decoded.config.logStorageMode,
+              equals(logMode),
+              reason: 'Decoded logStorageMode must match ${logMode.name}',
+            );
+            expect(
+              decoded.config.manualTimeZoneOffsetMinutes,
+              equals(offset),
+              reason: 'Decoded manualTimeZoneOffsetMinutes must match $offset',
+            );
+          }
+        }
+      }
+    });
+
+    test('resolveLogEndpointUri resolves sibling WebDAV log URLs and rejects traversal or non-.log filenames', () {
+      const nextcloudConfig = WebDavConfig(
+        serverUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tiertask/tasks.tdf',
+      );
+      expect(
+        nextcloudConfig
+            .resolveLogEndpointUri('tiertask_2026-11-03_linux_tasks.log')
+            .toString(),
+        equals(
+          'https://cloud.example.com/remote.php/dav/files/alice/'
+          'tiertask/tiertask_2026-11-03_linux_tasks.log',
+        ),
+      );
+
+      const directUrlConfig = WebDavConfig(
+        serverUrl: 'https://dav.example.com/sync/work.tdf',
+        username: 'alice',
+        password: 'secret',
+      );
+      expect(
+        directUrlConfig
+            .resolveLogEndpointUri('tiertask_2026-11-03_linux_work.log')
+            .toString(),
+        equals(
+          'https://dav.example.com/sync/tiertask_2026-11-03_linux_work.log',
+        ),
+      );
+
+      for (final invalidLogName in <String>[
+        '',
+        '../escape.log',
+        'nested/file.log',
+        r'nested\file.log',
+        'not_a_log.tdf',
+      ]) {
+        expect(
+          () => nextcloudConfig.resolveLogEndpointUri(invalidLogName),
+          throwsA(isA<FormatException>()),
+          reason: 'Invalid log filename "$invalidLogName" must be rejected',
+        );
+      }
     });
   });
 

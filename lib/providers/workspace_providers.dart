@@ -82,6 +82,16 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
       _replaceLoadedWorkspace(created);
     }
     ref.read(_workspaceListRevisionProvider.notifier).bump();
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.lifecycle,
+      'workspace.create',
+      fields: <String, Object?>{
+        'id': created.id,
+        'name': created.name,
+        'activated': activate,
+      },
+    );
     return created;
   }
 
@@ -99,6 +109,15 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
       _replaceLoadedWorkspace(activeAfterDelete);
     }
     ref.read(_workspaceListRevisionProvider.notifier).bump();
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.lifecycle,
+      'workspace.delete',
+      fields: <String, Object?>{
+        'deleted_id': workspaceId.trim(),
+        'active_id': activeAfterDelete.id,
+      },
+    );
     return activeAfterDelete;
   }
 
@@ -113,6 +132,12 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
       state = AsyncData(renamed);
     }
     ref.read(_workspaceListRevisionProvider.notifier).bump();
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.lifecycle,
+      'workspace.rename',
+      fields: <String, Object?>{'id': renamed.id, 'name': renamed.name},
+    );
     return renamed;
   }
 
@@ -127,9 +152,15 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
     final nextWorkspace = await repository.activateWorkspace(workspaceId);
     _replaceLoadedWorkspace(nextWorkspace);
     ref.read(_workspaceListRevisionProvider.notifier).bump();
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.lifecycle,
-      'Switched active workspace to id=${nextWorkspace.id} name="${nextWorkspace.name}"',
+      'workspace.switch',
+      fields: <String, Object?>{
+        'from': current?.id ?? 'none',
+        'to': nextWorkspace.id,
+        'name': nextWorkspace.name,
+      },
     );
     return nextWorkspace;
   }

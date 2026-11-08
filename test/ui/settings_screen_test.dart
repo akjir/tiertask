@@ -465,10 +465,27 @@ task 000004OkD2 {
       );
       await _tapVisible(tester, switchFinder);
 
+      final expectedFileName = AppLogger.formatLogFileName(
+        utcNow: DateTime.utc(2026, 11, 3, 22, 5, 14, 128),
+        platform: Platform.operatingSystem,
+        workspaceId: 'tasks',
+      );
       final logFile = File(
-        '${tempDir.path}${Platform.pathSeparator}tiertask.log',
+        '${tempDir.path}${Platform.pathSeparator}$expectedFileName',
       );
       expect(logFile.existsSync(), isTrue);
+      expect(
+        find.byKey(const ValueKey('settings_log_level_segmented')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('settings_log_storage_segmented')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('settings_open_log_viewer_button')),
+        findsOneWidget,
+      );
 
       AppLogger.warn(LogTag.sync, 'Simulated warning entry');
       AppLogger.error(LogTag.storage, 'Simulated error entry');
@@ -491,6 +508,18 @@ task 000004OkD2 {
       await tester.pumpAndSettle();
 
       expect(find.text('Diagnostic Log'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('log_viewer_metadata_card')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('log_viewer_level_dropdown')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('log_viewer_tag_dropdown')),
+        findsOneWidget,
+      );
       expect(find.textContaining('Simulated warning entry'), findsOneWidget);
       expect(find.textContaining('Simulated error entry'), findsOneWidget);
       expect(find.textContaining('Simulated crash entry'), findsOneWidget);

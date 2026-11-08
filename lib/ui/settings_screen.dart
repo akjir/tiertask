@@ -426,6 +426,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _handlePreferenceChanged(WebDavConfig updatedConfig) async {
     final diagnosticsChanged =
         updatedConfig.diagnosticsEnabled != _preferences.diagnosticsEnabled;
+    final logLevelChanged = updatedConfig.logLevel != _preferences.logLevel;
+    final logStorageChanged =
+        updatedConfig.logStorageMode != _preferences.logStorageMode;
     setState(() {
       _preferences = updatedConfig;
       _clearStatusBanner();
@@ -433,6 +436,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final notifier = ref.read(webDavConfigProvider.notifier);
     if (diagnosticsChanged) {
       await notifier.updateDiagnosticsEnabled(updatedConfig.diagnosticsEnabled);
+    } else if (logLevelChanged) {
+      await notifier.updateLogLevel(updatedConfig.logLevel);
+    } else if (logStorageChanged) {
+      await notifier.updateLogStorageMode(updatedConfig.logStorageMode);
     } else {
       await notifier.updateConfig(updatedConfig);
     }

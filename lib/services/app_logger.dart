@@ -13,456 +13,1132 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:collection';
+
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
-
-/// Synchronous log file persistence contract injected from the repository layer.
-abstract interface class AppLogSink {
-  /// Computes the canonical log file path for [baseDirectoryPath].
-  String defaultLogFilePath({String? baseDirectoryPath});
-
-  /// Synchronously deletes the log file at [path] if it exists.
-  void deleteLogFileSync(String path);
-
-  /// Synchronously reads up to the trailing [maxBytes] of [path].
-  String readLogFileSync(String path, {required int maxBytes});
-
-  /// Synchronously writes or appends [content] to [path].
-  void writeLogFileSync(String path, String content, {required bool append});
-}
+import 'package:flutter/widgets.dart' show AppLifecycleState;
 
 /// Severity levels for structured diagnostic log entries.
 enum LogLevel {
-  /// Verbose diagnostic trace for internal state transitions.
-  debug(label: 'DEBUG'),
+  /// Fine-grained diagnostic traces for development and deep troubleshooting.
+  debug(0, 'DEBUG', 'DEBUG'),
 
-  /// Normal operational milestone.
-  info(label: 'INFO'),
+  /// Normal operational milestones across lifecycle, TDF, domain, and sync.
+  info(1, 'INFO', 'INFO '),
 
-  /// Recoverable anomaly or fallback condition.
-  warn(label: 'WARN'),
+  /// Recoverable anomalies, fallbacks, or validation warnings.
+  warn(2, 'WARN', 'WARN '),
 
-  /// Handled operational failure or exception.
-  error(label: 'ERROR'),
+  /// Operational failures, I/O errors, or rejected mutations.
+  error(3, 'ERROR', 'ERROR'),
 
-  /// Unhandled framework or isolate exception recorded before termination.
-  crash(label: 'CRASH');
+  /// Unhandled framework or isolate exceptions captured before termination.
+  crash(4, 'CRASH', 'CRASH');
 
-  /// Creates a [LogLevel] with its uppercase bracket [label].
-  const LogLevel({required this.label});
+  /// Creates a [LogLevel] with its numeric [id], [label], and 5-char [paddedLabel].
+  const LogLevel(this.id, this.label, this.paddedLabel);
 
-  /// Canonical uppercase identifier rendered in `<timestamp> [<LEVEL>] [<TAG>]`.
+  /// User-configurable minimum log thresholds in ascending severity order.
+  static const List<LogLevel> configurableLevels = <LogLevel>[
+    LogLevel.debug,
+    LogLevel.info,
+    LogLevel.warn,
+    LogLevel.error,
+  ];
+
+  /// Numeric identifier used for compact configuration serialization.
+  final int id;
+
+  /// Canonical uppercase text token written to metadata and CLI filters.
   final String label;
+
+  /// Fixed 5-character right-padded label written inside `[<LEVEL>]` brackets.
+  final String paddedLabel;
+
+  /// Resolves a configurable [LogLevel] from its persisted numeric [id].
+  static LogLevel fromId(int id) {
+    return switch (id) {
+      0 => LogLevel.debug,
+      1 => LogLevel.info,
+      2 => LogLevel.warn,
+      3 => LogLevel.error,
+      _ => LogLevel.info,
+    };
+  }
+
+  /// Parses a case-insensitive [LogLevel] token or returns `null` when unknown.
+  static LogLevel? tryParse(String raw) {
+    final normalized = raw.trim().toUpperCase();
+    return switch (normalized) {
+      'DEBUG' => LogLevel.debug,
+      'INFO' => LogLevel.info,
+      'WARN' || 'WARNING' => LogLevel.warn,
+      'ERROR' => LogLevel.error,
+      'CRASH' => LogLevel.crash,
+      _ => null,
+    };
+  }
 }
 
 /// Architectural subsystem tags for structured diagnostic log entries.
 enum LogTag {
-  /// Application startup, platform metadata, lifecycle transitions, and crash recovery.
-  lifecycle(label: 'LIFECYCLE'),
+  /// App startup, lifecycle state transitions, and global error boundaries.
+  lifecycle('LIFECYCLE', 'LIFECYCLE'),
 
-  /// TDF lexical scanning, structural parsing, and canonical serialization.
-  tdf(label: 'TDF'),
+  /// TDF lexical scanning, parsing, serialization, and format migrations.
+  tdf('TDF', 'TDF      '),
 
-  /// TaskBoard mutations, recurring task rescheduling, 30-day pruning, and 6-tier derivation.
-  domain(label: 'DOMAIN'),
+  /// Pure `TaskBoard` evaluations, task/label mutations, and queue changes.
+  domain('DOMAIN', 'DOMAIN   '),
 
-  /// Two-stage synchronization pipeline and per-entity LWW merge decisions.
-  sync(label: 'SYNC'),
+  /// Local/WebDAV synchronization pipeline stages and LWW board merges.
+  sync('SYNC', 'SYNC     '),
 
-  /// Local `.tdf` filesystem I/O and WebDAV HTTP requests and responses.
-  storage(label: 'STORAGE'),
+  /// Local file I/O, WebDAV HTTP requests, and settings persistence.
+  storage('STORAGE', 'STORAGE  '),
 
-  /// User interface navigation, dialog launches, and manual sync or migration triggers.
-  ui(label: 'UI');
+  /// User-initiated screen/dialog navigation and diagnostic actions.
+  ui('UI', 'UI       ');
 
-  /// Creates a [LogTag] with its uppercase bracket [label].
-  const LogTag({required this.label});
+  /// Creates a [LogTag] with its canonical [label] and 9-char [paddedLabel].
+  const LogTag(this.label, this.paddedLabel);
 
-  /// Canonical uppercase subsystem identifier rendered in `<timestamp> [<LEVEL>] [<TAG>]`.
+  /// Canonical uppercase subsystem token.
   final String label;
+
+  /// Fixed 9-character right-padded label written inside `[<TAG>]` brackets.
+  final String paddedLabel;
+
+  /// Parses a case-insensitive [LogTag] token or returns `null` when unknown.
+  static LogTag? tryParse(String raw) {
+    final normalized = raw.trim().toUpperCase();
+    return switch (normalized) {
+      'LIFECYCLE' => LogTag.lifecycle,
+      'TDF' => LogTag.tdf,
+      'DOMAIN' => LogTag.domain,
+      'SYNC' => LogTag.sync,
+      'STORAGE' => LogTag.storage,
+      'UI' => LogTag.ui,
+      _ => null,
+    };
+  }
 }
 
-/// Opt-in, zero-dependency diagnostic logger with synchronous crash preservation,
-/// credential redaction, and rolling ring-buffer size protection.
-class AppLogger {
-  /// Prevents instantiation of this static diagnostic logger class.
+/// Immutable session and environment metadata written to the diagnostic log header.
+@immutable
+class LogMetadata {
+  /// Creates a [LogMetadata] snapshot for the `@meta` header block.
+  const LogMetadata({
+    this.appVersion = 'unknown',
+    this.platform = 'unknown',
+    this.osVersion = 'unknown',
+    this.locale = 'en',
+    this.timeZone = 'system',
+    this.workspaceId = 'default',
+    this.workspaceName = 'Default',
+    this.storageMode = 'local',
+    this.logStorageMode = 'local',
+  });
+
+  /// Default metadata placeholder before provider initialization completes.
+  static const LogMetadata empty = LogMetadata();
+
+  /// Semantic application version and build identifier.
+  final String appVersion;
+
+  /// Active locale code (`en`, `de`).
+  final String locale;
+
+  /// Configured diagnostic log persistence target (`local`, `webdav`, `both`).
+  final String logStorageMode;
+
+  /// Operating system version description.
+  final String osVersion;
+
+  /// Target platform identifier (`linux`, `android`, `windows`).
+  final String platform;
+
+  /// Configured TDF task board storage mode (`local`, `webdav`, `both`).
+  final String storageMode;
+
+  /// Active time zone mode and UTC offset summary.
+  final String timeZone;
+
+  /// Stable identifier of the active workspace.
+  final String workspaceId;
+
+  /// Display name of the active workspace.
+  final String workspaceName;
+
+  /// Returns a copy of this metadata with the specified fields replaced.
+  LogMetadata copyWith({
+    String? appVersion,
+    String? platform,
+    String? osVersion,
+    String? locale,
+    String? timeZone,
+    String? workspaceId,
+    String? workspaceName,
+    String? storageMode,
+    String? logStorageMode,
+  }) {
+    return LogMetadata(
+      appVersion: appVersion ?? this.appVersion,
+      platform: platform ?? this.platform,
+      osVersion: osVersion ?? this.osVersion,
+      locale: locale ?? this.locale,
+      timeZone: timeZone ?? this.timeZone,
+      workspaceId: workspaceId ?? this.workspaceId,
+      workspaceName: workspaceName ?? this.workspaceName,
+      storageMode: storageMode ?? this.storageMode,
+      logStorageMode: logStorageMode ?? this.logStorageMode,
+    );
+  }
+
+  /// Formats the 5-line `@meta` header block placed at the top of a log file.
+  List<String> toHeaderLines({
+    required LogLevel minimumLevel,
+    required DateTime sessionStartUtc,
+  }) {
+    final startIso = AppLogger.formatIsoUtcTimestamp(sessionStartUtc);
+    final safeVersion = AppLogger.formatFieldValue(appVersion);
+    final safePlatform = AppLogger.formatFieldValue(platform);
+    final safeOs = AppLogger.formatFieldValue(osVersion, alwaysQuote: true);
+    final safeLocale = AppLogger.formatFieldValue(locale);
+    final safeTz = AppLogger.formatFieldValue(timeZone, alwaysQuote: true);
+    final safeWsId = AppLogger.formatFieldValue(workspaceId);
+    final safeWsName = AppLogger.formatFieldValue(
+      workspaceName,
+      alwaysQuote: true,
+    );
+    final safeStorage = AppLogger.formatFieldValue(storageMode);
+    final safeLogStorage = AppLogger.formatFieldValue(logStorageMode);
+    return <String>[
+      AppLogger.headerStartBanner,
+      '@meta format=1 app_version=$safeVersion platform=$safePlatform os=$safeOs',
+      '@meta locale=$safeLocale timezone=$safeTz session_start=$startIso',
+      '@meta workspace_id=$safeWsId workspace_name=$safeWsName '
+          'storage_mode=$safeStorage log_storage=$safeLogStorage '
+          'min_level=${minimumLevel.label}',
+      AppLogger.headerEndBanner,
+    ];
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is LogMetadata &&
+        other.appVersion == appVersion &&
+        other.platform == platform &&
+        other.osVersion == osVersion &&
+        other.locale == locale &&
+        other.timeZone == timeZone &&
+        other.workspaceId == workspaceId &&
+        other.workspaceName == workspaceName &&
+        other.storageMode == storageMode &&
+        other.logStorageMode == logStorageMode;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    appVersion,
+    platform,
+    osVersion,
+    locale,
+    timeZone,
+    workspaceId,
+    workspaceName,
+    storageMode,
+    logStorageMode,
+  );
+
+  @override
+  String toString() =>
+      'LogMetadata(version: $appVersion, platform: $platform, '
+      'workspace: $workspaceId, logStorage: $logStorageMode)';
+}
+
+/// Abstract synchronous file persistence sink for [AppLogger].
+///
+/// Implemented in `lib/repositories/local_file_repository.dart` so that
+/// `lib/services/app_logger.dart` remains pure and free of `dart:io` imports
+/// (`P-IO-ISOLATION`, `P-ACYCLIC-DAG`).
+abstract interface class AppLogSink {
+  /// Creates a const [AppLogSink].
+  const AppLogSink();
+
+  /// Resolves the default diagnostic log file path inside [baseDirectoryPath].
+  String defaultLogFilePath({String? baseDirectoryPath, String? fileName});
+
+  /// Deletes the diagnostic log file at [path] if it exists.
+  void deleteLogFileSync(String path);
+
+  /// Deletes all dated and legacy log files for [workspaceId] in [directoryPath].
+  int deleteWorkspaceLogFilesSync({
+    required String directoryPath,
+    required String platform,
+    required String workspaceId,
+  });
+
+  /// Prunes expired (`> maxRetainedDays`) and excess (`> maxRetainedFiles`) log files.
+  int pruneExpiredLogFilesSync({
+    required String directoryPath,
+    required String platform,
+    required String workspaceId,
+    required DateTime utcNow,
+    int maxRetainedDays = AppLogger.maxRetainedLogDays,
+    int maxRetainedFiles = AppLogger.maxRetainedLogFiles,
+  });
+
+  /// Reads up to the trailing [maxBytes] of the log file at [path], or returns `''`.
+  String readLogFileSync(String path, {required int maxBytes});
+
+  /// Writes or appends [content] synchronously to the log file at [path].
+  void writeLogFileSync(String path, String content, {required bool append});
+}
+
+/// Opt-in structured diagnostic logger with credential sanitization and crash recovery.
+///
+/// When [isEnabled] is `false` (the default), all logging methods return
+/// immediately without formatting strings, allocating memory, or touching disk.
+final class AppLogger {
   const AppLogger._();
 
-  /// Default file name for the persistent diagnostic log.
+  /// Default legacy filename for the persistent diagnostic log.
   static const String defaultLogFileName = 'tiertask.log';
 
-  /// Default maximum number of lines retained in memory and on disk before rolling 20% pruning.
+  /// Default maximum number of lines retained in memory and on disk.
   static const int defaultMaxLines = 5000;
 
-  /// Maximum allowed diagnostic log file size in bytes (`2 MiB`).
+  /// Closing delimiter line of the `@meta` diagnostic header block.
+  static const String headerEndBanner = '===============================';
+
+  /// Opening delimiter line of the `@meta` diagnostic header block.
+  static const String headerStartBanner = '=== TIERTASK DIAGNOSTIC LOG ===';
+
+  /// Maximum byte size (2 MiB) allowed for the persistent diagnostic log file.
   static const int maxFileBytes = 2097152;
 
-  /// Injectable UTC clock used to format deterministic log entry timestamps.
-  static DateTime Function() clock = () => DateTime.now().toUtc();
+  /// Maximum age in days for retained local workspace log files.
+  static const int maxRetainedLogDays = 7;
+
+  /// Maximum number of dated local log files retained per workspace.
+  static const int maxRetainedLogFiles = 5;
+
+  /// Trailing debounce duration before uploading updated logs to WebDAV.
+  static const Duration webDavFlushDebounce = Duration(seconds: 5);
 
   static final RegExp _authHeaderPattern = RegExp(
-    r'(Authorization\s*:\s*(?:Basic|Bearer)\s+)\S+',
+    r'(authorization\s*[:=]\s*(?:basic|bearer)\s+)[^\s,;"]+',
     caseSensitive: false,
   );
-  static final RegExp _basicBearerTokenPattern = RegExp(
-    r'\b((?:Basic|Bearer)\s+)[A-Za-z0-9+/=._\-]{4,}',
+  static String _baseDirectoryPath = '';
+  static final RegExp _basicTokenPattern = RegExp(
+    r'\b(basic\s+)[A-Za-z0-9+/=._~-]{6,}',
     caseSensitive: false,
   );
-  static final ValueNotifier<int> _changeNotifier = ValueNotifier<int>(0);
-  static final RegExp _controlCharPattern = RegExp(
-    r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]',
-  );
-  static bool _crashedInSession = false;
+  static DateTime Function() _clock = DateTime.now;
+  static bool _crashedInCurrentSession = false;
   static bool _enabled = false;
-  static int _estimatedBytes = 0;
   static final RegExp _keyValueSecretPattern = RegExp(
-    r'\b((?:password|appPassword|secret|token)\s*[=:]\s*)(?:"[^"]*"|\x27[^\x27]*\x27|\S+)',
+    r'((?:password|passwd|secret|token|credentials?)\s*[:=]\s*)[^\s,&;"]+',
     caseSensitive: false,
   );
+  static String _lastEvalSummarySignature = '';
   static final List<String> _lines = <String>[];
-  static String? _logFilePath;
+  static String _logFilePath = '';
   static int _maxLines = defaultMaxLines;
-  static final Set<String> _registeredSecrets = <String>{};
+  static LogMetadata _metadata = LogMetadata.empty;
+  static LogLevel _minimumLevel = LogLevel.info;
+  static bool _persistToDisk = true;
+  static final ValueNotifier<int> _revision = ValueNotifier<int>(0);
+  static String? _secretToRedact;
+  static DateTime _sessionStartUtc = DateTime.fromMillisecondsSinceEpoch(
+    0,
+    isUtc: true,
+  );
   static AppLogSink? _sink;
   static final RegExp _urlUserInfoPattern = RegExp(
     r'(https?://[^/\s:@]+:)([^@\s/]+)(@)',
     caseSensitive: false,
   );
 
-  /// Listenable revision counter that increments whenever the log buffer changes.
-  static ValueListenable<int> get changeListenable => _changeNotifier;
+  /// Active dated log filename for the current workspace and UTC date.
+  static String get activeLogFileName {
+    if (_logFilePath.isNotEmpty) {
+      final slashIndex = _logFilePath.lastIndexOf('/');
+      final backslashIndex = _logFilePath.lastIndexOf(r'\');
+      final splitIndex = slashIndex > backslashIndex
+          ? slashIndex
+          : backslashIndex;
+      if (splitIndex >= 0 && splitIndex + 1 < _logFilePath.length) {
+        return _logFilePath.substring(splitIndex + 1);
+      }
+      return _logFilePath;
+    }
+    return formatLogFileName(
+      utcNow: _clock().toUtc(),
+      platform: _metadata.platform,
+      workspaceId: _metadata.workspaceId,
+    );
+  }
 
-  /// Full newline-joined diagnostic log text currently held in memory.
+  /// Concatenated multi-line diagnostic log text for clipboard export or WebDAV upload.
   static String get fullLogText => _lines.join('\n');
 
-  /// Whether an unhandled crash was recorded during the active session.
-  static bool get hasCrashedInSession => _crashedInSession;
+  /// Whether an unhandled crash was recorded during the current process session.
+  static bool get hasCrashedInSession => _crashedInCurrentSession;
 
-  /// Whether opt-in diagnostic logging is currently active.
+  /// Whether diagnostic logging is currently enabled by the user.
   static bool get isEnabled => _enabled;
 
-  /// Unmodifiable snapshot of all formatted log lines currently in the buffer.
-  static List<String> get lines => List<String>.unmodifiable(_lines);
+  /// Unmodifiable snapshot of all currently buffered diagnostic log lines.
+  static List<String> get lines => UnmodifiableListView<String>(_lines);
 
-  /// Resolved filesystem path for `tiertask.log`, or `null` before initialization.
-  static String? get logFilePath => _logFilePath;
+  /// Active file system path used for `tiertask_<date>_<platform>_<workspace>.log`.
+  static String get logFilePath => _logFilePath;
 
-  /// Manually clears the in-memory log buffer and truncates `tiertask.log` to 0 bytes.
+  /// Current session and workspace metadata written to the `@meta` header block.
+  static LogMetadata get metadata => _metadata;
+
+  /// Active minimum severity threshold for non-crash log entries.
+  static LogLevel get minimumLevel => _minimumLevel;
+
+  /// Notifier incremented whenever buffered log lines are added, pruned, or cleared.
+  static ValueListenable<int> get revision => _revision;
+
+  /// Overrides the clock function used for log entry timestamps and dated filenames.
+  static set clock(DateTime Function() value) {
+    _clock = value;
+  }
+
+  /// Clears all in-memory log lines and truncates or removes local workspace logs.
   static void clear() {
     _lines.clear();
-    _estimatedBytes = 0;
-    _crashedInSession = false;
-    if (_enabled) {
-      if (_logFilePath case final path?) {
-        _sink?.writeLogFileSync(path, '', append: false);
+    _crashedInCurrentSession = false;
+    _lastEvalSummarySignature = '';
+    final sink = _sink;
+    if (_enabled && sink != null) {
+      if (_baseDirectoryPath.isNotEmpty) {
+        sink.deleteWorkspaceLogFilesSync(
+          directoryPath: _baseDirectoryPath,
+          platform: _metadata.platform,
+          workspaceId: _metadata.workspaceId,
+        );
+      }
+      if (_persistToDisk && _logFilePath.isNotEmpty) {
+        sink.writeLogFileSync(_logFilePath, '', append: false);
       }
     }
-    _notifyChange();
+    _revision.value++;
   }
 
-  /// Synchronously flushes an unhandled [error] and [stackTrace] with level `[CRASH]`
-  /// and locks the session against clean-exit truncation.
+  /// Records an unhandled framework or isolate crash and flushes it synchronously.
   static void crash(Object error, StackTrace stackTrace) {
-    if (!_enabled) {
-      return;
-    }
-    _crashedInSession = true;
-    final timestamp = formatUtcTimestamp(clock());
-    final sanitizedError = _collapseNewlines(sanitize(error.toString()));
-    final entries = <String>[
-      '$timestamp [CRASH] [LIFECYCLE] Unhandled exception: $sanitizedError',
+    if (!_enabled) return;
+    _crashedInCurrentSession = true;
+    final timestamp = formatIsoUtcTimestamp(_clock().toUtc());
+    final sanitizedError = formatFieldValue(
+      sanitize(error.toString()),
+      alwaysQuote: true,
+    );
+    final sanitizedTrace = sanitize(stackTrace.toString()).trimRight();
+    final batch = <String>[
+      '$timestamp [${LogLevel.crash.paddedLabel}] '
+          '[${LogTag.lifecycle.paddedLabel}] '
+          'crash.unhandled | error=$sanitizedError',
     ];
-    final stackLines = sanitize(stackTrace.toString()).split('\n');
-    for (final rawFrame in stackLines) {
-      final cleanFrame = rawFrame.replaceAll('\r', '').trimRight();
-      if (cleanFrame.isNotEmpty) {
-        entries.add('$timestamp [CRASH] [LIFECYCLE]   $cleanFrame');
+    if (sanitizedTrace.isNotEmpty) {
+      var frameIndex = 0;
+      for (final rawLine in sanitizedTrace.split('\n')) {
+        final trimmed = rawLine.trimRight();
+        if (trimmed.isNotEmpty) {
+          final quotedFrame = formatFieldValue(trimmed, alwaysQuote: true);
+          batch.add(
+            '$timestamp [${LogLevel.crash.paddedLabel}] '
+            '[${LogTag.lifecycle.paddedLabel}] '
+            'crash.stack | frame=$frameIndex line=$quotedFrame',
+          );
+          frameIndex++;
+        }
       }
     }
-    _appendEntries(entries);
+    _appendLines(batch, forceFullWrite: true);
   }
 
-  /// Records a [LogLevel.debug] entry under [tag] when diagnostic logging is enabled.
-  static void debug(LogTag tag, String message) =>
-      log(LogLevel.debug, tag, message);
-
-  /// Records a [LogLevel.error] entry under [tag] when diagnostic logging is enabled.
-  static void error(LogTag tag, String message) =>
-      log(LogLevel.error, tag, message);
-
-  /// Formats [timestamp] in UTC as `YYYY-MM-DD HH:MM:SS.mmm`.
-  static String formatUtcTimestamp(DateTime timestamp) {
-    final utc = timestamp.toUtc();
-    final year = utc.year.toString().padLeft(4, '0');
-    final month = utc.month.toString().padLeft(2, '0');
-    final day = utc.day.toString().padLeft(2, '0');
-    final hour = utc.hour.toString().padLeft(2, '0');
-    final minute = utc.minute.toString().padLeft(2, '0');
-    final second = utc.second.toString().padLeft(2, '0');
-    final millisecond = utc.millisecond.toString().padLeft(3, '0');
-    return '$year-$month-$day $hour:$minute:$second.$millisecond';
+  /// Logs a `DEBUG` message under [tag] when [shouldLog] permits `LogLevel.debug`.
+  static void debug(LogTag tag, String message) {
+    _log(LogLevel.debug, tag, message);
   }
 
-  /// Handles [AppLifecycleState] transitions, preserving the log across sleep/backgrounding
-  /// and truncating `tiertask.log` on clean `detached` exit when no crash occurred.
-  static void handleAppLifecycleState(AppLifecycleState state) {
-    if (!_enabled) {
-      return;
+  /// Deduplicated `DEBUG` logger for `eval.summary` to avoid flooding on UI rebuilds.
+  static bool deduplicateEvalSummary(String signature) {
+    if (_lastEvalSummarySignature == signature) {
+      return false;
     }
+    _lastEvalSummarySignature = signature;
+    return true;
+  }
+
+  /// Logs an `ERROR` message and optional [error] / [stackTrace] under [tag].
+  static void error(
+    LogTag tag,
+    String message, [
+    Object? error,
+    StackTrace? stackTrace,
+  ]) {
+    if (!shouldLog(LogLevel.error)) return;
+    final buffer = StringBuffer(message);
+    if (error != null) {
+      buffer
+        ..write(' | error=')
+        ..write(formatFieldValue(error.toString(), alwaysQuote: true));
+    }
+    if (stackTrace != null) {
+      final firstFrame = _firstStackFrame(stackTrace);
+      if (firstFrame.isNotEmpty) {
+        buffer
+          ..write(' trace=')
+          ..write(formatFieldValue(firstFrame, alwaysQuote: true));
+      }
+    }
+    _log(LogLevel.error, tag, buffer.toString());
+  }
+
+  /// Logs a structured `<event> | <key=value ...>` entry at [level] and [tag].
+  static void event(
+    LogLevel level,
+    LogTag tag,
+    String event, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    if (!shouldLog(level)) return;
+    final buffer = StringBuffer(event)..write(' |');
+    for (final entry in fields.entries) {
+      final val = entry.value;
+      if (val != null) {
+        buffer
+          ..write(' ')
+          ..write(entry.key)
+          ..write('=')
+          ..write(formatFieldValue(val));
+      }
+    }
+    if (error != null) {
+      buffer
+        ..write(' error=')
+        ..write(formatFieldValue(error.toString(), alwaysQuote: true));
+    }
+    if (stackTrace != null) {
+      final firstFrame = _firstStackFrame(stackTrace);
+      if (firstFrame.isNotEmpty) {
+        buffer
+          ..write(' trace=')
+          ..write(formatFieldValue(firstFrame, alwaysQuote: true));
+      }
+    }
+    _log(level, tag, buffer.toString());
+  }
+
+  /// Formats a structured field [value] with secret sanitization and quoting.
+  static String formatFieldValue(Object? value, {bool alwaysQuote = false}) {
+    if (value == null) return '""';
+    if (value is bool || value is num) return value.toString();
+    final sanitized = _collapseControlChars(sanitize(value.toString()));
+    if (!alwaysQuote && sanitized.isNotEmpty && !_needsQuotes(sanitized)) {
+      return sanitized;
+    }
+    final escaped = sanitized.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+    return '"$escaped"';
+  }
+
+  /// Formats [timestamp] as canonical UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SS.mmmZ`).
+  static String formatIsoUtcTimestamp(DateTime timestamp) {
+    final utc = timestamp.toUtc();
+    final y = utc.year.toString().padLeft(4, '0');
+    final m = utc.month.toString().padLeft(2, '0');
+    final d = utc.day.toString().padLeft(2, '0');
+    final h = utc.hour.toString().padLeft(2, '0');
+    final min = utc.minute.toString().padLeft(2, '0');
+    final s = utc.second.toString().padLeft(2, '0');
+    final ms = utc.millisecond.toString().padLeft(3, '0');
+    return '$y-$m-${d}T$h:$min:$s.${ms}Z';
+  }
+
+  /// Builds the canonical dated log filename `tiertask_<YYYY-MM-DD>_<platform>_<workspaceId>.log`.
+  static String formatLogFileName({
+    required DateTime utcNow,
+    required String platform,
+    required String workspaceId,
+  }) {
+    final utc = utcNow.toUtc();
+    final y = utc.year.toString().padLeft(4, '0');
+    final m = utc.month.toString().padLeft(2, '0');
+    final d = utc.day.toString().padLeft(2, '0');
+    final safePlatform = _sanitizeSlugToken(platform, fallback: 'unknown');
+    final safeWorkspace = _sanitizeSlugToken(workspaceId, fallback: 'default');
+    return 'tiertask_$y-$m-${d}_${safePlatform}_$safeWorkspace.log';
+  }
+
+  /// Handles Flutter [AppLifecycleState] transitions while preserving session logs.
+  static void handleAppLifecycleState(AppLifecycleState state) {
+    if (!_enabled) return;
     switch (state) {
       case AppLifecycleState.resumed:
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
-        info(LogTag.lifecycle, 'AppLifecycleState changed to ${state.name}');
+        event(
+          LogLevel.info,
+          LogTag.lifecycle,
+          'lifecycle.state',
+          fields: <String, Object?>{'state': state.name},
+        );
       case AppLifecycleState.detached:
-        _handleDetachedExit();
+        event(
+          LogLevel.info,
+          LogTag.lifecycle,
+          'session.exit',
+          fields: <String, Object?>{
+            'state': 'detached',
+            'crashed': _crashedInCurrentSession,
+          },
+        );
+        _writeFullFile();
     }
   }
 
-  /// Records a [LogLevel.info] entry under [tag] when diagnostic logging is enabled.
-  static void info(LogTag tag, String message) =>
-      log(LogLevel.info, tag, message);
-
-  /// Formats, sanitizes, and synchronously appends a structured log entry when enabled.
-  static void log(LogLevel level, LogTag tag, String message) {
-    if (!_enabled) {
-      return;
-    }
-    final timestamp = formatUtcTimestamp(clock());
-    final cleanMessage = _collapseNewlines(sanitize(message));
-    final entry = '$timestamp [${level.label}] [${tag.label}] $cleanMessage';
-    _appendEntries(<String>[entry]);
+  /// Logs an `INFO` message under [tag] when [shouldLog] permits `LogLevel.info`.
+  static void info(LogTag tag, String message) {
+    _log(LogLevel.info, tag, message);
   }
 
-  /// Registers a sensitive credential string so any occurrence in log messages is replaced with `[REDACTED]`.
-  static void registerSecret(String secret) {
-    final trimmed = secret.trim();
-    if (trimmed.isNotEmpty) {
-      _registeredSecrets.add(trimmed);
+  /// Returns `true` when [line] satisfies the viewer [minimumLevel] and optional [tag] filter.
+  static bool matchesFilter(
+    String line, {
+    required LogLevel minimumLevel,
+    LogTag? tag,
+  }) {
+    if (line.startsWith('===') || line.startsWith('@meta ')) {
+      return tag == null && minimumLevel == LogLevel.debug;
     }
-  }
-
-  /// Resets all static logger state and restores the UTC clock for isolated testing.
-  static void resetForTesting({DateTime Function()? clock, AppLogSink? sink}) {
-    _enabled = false;
-    _crashedInSession = false;
-    _lines.clear();
-    _estimatedBytes = 0;
-    _logFilePath = null;
-    _maxLines = defaultMaxLines;
-    _registeredSecrets.clear();
-    _sink = sink;
-    AppLogger.clock = clock ?? (() => DateTime.now().toUtc());
-    _notifyChange();
-  }
-
-  /// Redacts credentials, `Authorization` headers, URL userinfo, and control characters from [input].
-  static String sanitize(String input) {
-    if (input.isEmpty) {
-      return input;
+    final parsedLevel = _extractLineLevel(line);
+    if (parsedLevel != null &&
+        parsedLevel != LogLevel.crash &&
+        parsedLevel.index < minimumLevel.index) {
+      return false;
     }
-    var result = input;
-    for (final secret in _registeredSecrets) {
-      if (secret.isNotEmpty && result.contains(secret)) {
-        result = result.replaceAll(secret, '[REDACTED]');
+    if (tag != null) {
+      final parsedTag = _extractLineTag(line);
+      if (parsedTag != tag) {
+        return false;
       }
     }
-    result = result.replaceAllMapped(
+    return true;
+  }
+
+  /// Resets all static logger state for isolated unit and widget tests.
+  @visibleForTesting
+  static void resetForTesting({DateTime Function()? clock, AppLogSink? sink}) {
+    _enabled = false;
+    _crashedInCurrentSession = false;
+    _lastEvalSummarySignature = '';
+    _lines.clear();
+    _logFilePath = '';
+    _baseDirectoryPath = '';
+    _secretToRedact = null;
+    _minimumLevel = LogLevel.info;
+    _metadata = LogMetadata.empty;
+    _persistToDisk = true;
+    _maxLines = defaultMaxLines;
+    _clock = clock ?? DateTime.now;
+    _sink = sink;
+    _revision.value = 0;
+  }
+
+  /// Redacts passwords, Bearer/Basic tokens, and embedded URL userinfo from [input].
+  static String sanitize(String input) {
+    if (input.isEmpty) return input;
+    var sanitized = input;
+    final secret = _secretToRedact;
+    if (secret != null && secret.isNotEmpty) {
+      sanitized = sanitized.replaceAll(secret, '[REDACTED]');
+    }
+    sanitized = sanitized.replaceAllMapped(
       _authHeaderPattern,
       (match) => '${match.group(1)}[REDACTED]',
     );
-    result = result.replaceAllMapped(
-      _basicBearerTokenPattern,
+    sanitized = sanitized.replaceAllMapped(
+      _basicTokenPattern,
       (match) => '${match.group(1)}[REDACTED]',
     );
-    result = result.replaceAllMapped(
+    sanitized = sanitized.replaceAllMapped(
       _urlUserInfoPattern,
       (match) => '${match.group(1)}[REDACTED]${match.group(3)}',
     );
-    result = result.replaceAllMapped(
+    sanitized = sanitized.replaceAllMapped(
       _keyValueSecretPattern,
       (match) => '${match.group(1)}[REDACTED]',
     );
-    return result.replaceAll(_controlCharPattern, '');
+    return sanitized;
   }
 
-  /// Enables or disables diagnostic logging, performing startup crash recovery on enable
-  /// or immediate buffer and file deletion on disable.
+  /// Enables or disables diagnostic logging and synchronizes on-disk log state.
   static void setEnabled(
     bool enabled, {
     AppLogSink? sink,
     String? logFilePath,
+    String? baseDirectoryPath,
     String? secretToRedact,
-    int? maxLines,
+    LogLevel? minimumLevel,
+    LogMetadata? metadata,
+    bool? persistToDisk,
+    int maxLines = defaultMaxLines,
   }) {
     if (sink != null) {
       _sink = sink;
     }
     if (secretToRedact != null) {
-      registerSecret(secretToRedact);
+      _secretToRedact = secretToRedact.isEmpty ? null : secretToRedact;
     }
-    if (maxLines != null && maxLines > 0) {
-      _maxLines = maxLines;
+    if (minimumLevel != null) {
+      _minimumLevel = minimumLevel;
     }
-    final resolvedPath = _resolveTargetFilePath(logFilePath);
+    if (metadata != null) {
+      _metadata = metadata;
+    }
+    if (persistToDisk != null) {
+      _persistToDisk = persistToDisk;
+    }
+    if (baseDirectoryPath != null) {
+      _baseDirectoryPath = baseDirectoryPath;
+    }
+    _maxLines = maxLines > 10 ? maxLines : 10;
+
+    final resolvedPath = _resolvePath(logFilePath);
     if (!enabled) {
-      _enabled = false;
-      _crashedInSession = false;
-      _lines.clear();
-      _estimatedBytes = 0;
-      _logFilePath = resolvedPath;
-      _sink?.deleteLogFileSync(resolvedPath);
-      _notifyChange();
+      _disableAndDeleteLogs(resolvedPath);
       return;
     }
-    if (_enabled && _logFilePath == resolvedPath) {
-      return;
+
+    final wasEnabled = _enabled;
+    final pathChanged = resolvedPath.isNotEmpty && resolvedPath != _logFilePath;
+    _logFilePath = resolvedPath;
+    if (_baseDirectoryPath.isEmpty && _logFilePath.isNotEmpty) {
+      _baseDirectoryPath = _extractParentDirectory(_logFilePath);
     }
     _enabled = true;
-    _crashedInSession = false;
-    _logFilePath = resolvedPath;
-    _initializeSessionFile(resolvedPath);
-    _notifyChange();
-  }
 
-  /// Records a [LogLevel.warn] entry under [tag] when diagnostic logging is enabled.
-  static void warn(LogTag tag, String message) =>
-      log(LogLevel.warn, tag, message);
-
-  /// Appends [entries] to memory and disk, enforcing rolling line and byte bounds.
-  static void _appendEntries(List<String> entries) {
-    for (final entry in entries) {
-      _lines.add(entry);
-      _estimatedBytes += entry.length + 1;
-    }
-    final path = _logFilePath;
-    if (_lines.length > _maxLines || _estimatedBytes > maxFileBytes) {
-      _pruneOldestTwentyPercent();
-      if (path != null) {
-        _sink?.writeLogFileSync(path, '${_lines.join('\n')}\n', append: false);
-      }
-    } else if (path != null) {
-      _sink?.writeLogFileSync(path, '${entries.join('\n')}\n', append: true);
-    }
-    _notifyChange();
-  }
-
-  /// Collapses CR and LF line breaks in [value] into single-line `' | '` separators.
-  static String _collapseNewlines(String value) => value
-      .replaceAll('\r\n', ' | ')
-      .replaceAll('\n', ' | ')
-      .replaceAll('\r', ' | ');
-
-  /// Handles `AppLifecycleState.detached` by truncating `tiertask.log` unless a crash occurred.
-  static void _handleDetachedExit() {
-    if (_crashedInSession) {
-      warn(
-        LogTag.lifecycle,
-        'AppLifecycleState.detached after crash; preserving tiertask.log',
-      );
-      return;
-    }
-    _lines.clear();
-    _estimatedBytes = 0;
-    if (_logFilePath case final path?) {
-      _sink?.writeLogFileSync(path, '', append: false);
-    }
-    _notifyChange();
-  }
-
-  /// Inspects `tiertask.log` at [path] on session startup to detect clean exit vs. crash recovery.
-  static void _initializeSessionFile(String path) {
-    final existing = _sink?.readLogFileSync(path, maxBytes: maxFileBytes) ?? '';
-    final timestamp = formatUtcTimestamp(clock());
-    final platform = defaultTargetPlatform.name;
-    if (existing.trim().isEmpty) {
-      _lines.clear();
-      final header = '=== SESSION START $timestamp [$platform] ===';
-      _lines.add(header);
-      _recomputeEstimatedBytes();
-      _sink?.writeLogFileSync(path, '$header\n', append: false);
-      return;
-    }
-
-    _loadExistingLines(existing);
-    final banner =
-        '=== RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE | NEW SESSION START $timestamp [$platform] ===';
-    _lines
-      ..add('')
-      ..add(banner);
-    _recomputeEstimatedBytes();
-    if (_lines.length > _maxLines || _estimatedBytes > maxFileBytes) {
-      _pruneOldestTwentyPercent();
-      _sink?.writeLogFileSync(path, '${_lines.join('\n')}\n', append: false);
+    if (!wasEnabled || pathChanged) {
+      _crashedInCurrentSession = false;
+      _lastEvalSummarySignature = '';
+      _sessionStartUtc = _clock().toUtc();
+      _applyLocalStoragePolicy();
+      _initializeSessionFile();
     } else {
-      _sink?.writeLogFileSync(path, '\n$banner\n', append: true);
+      _refreshHeaderLinesInPlace();
     }
   }
 
-  /// Returns `true` when [line] is a session banner or `[CRASH]` entry that must survive rolling pruning.
-  static bool _isProtectedLine(String line) =>
-      line.startsWith('=== ') || line.contains('[CRASH]');
-
-  /// Populates [_lines] from [rawContent] read from `tiertask.log` on startup.
-  static void _loadExistingLines(String rawContent) {
-    _lines.clear();
-    final normalized = rawContent.replaceAll('\r\n', '\n');
-    final split = normalized.split('\n');
-    final count = (split.isNotEmpty && split.last.isEmpty)
-        ? split.length - 1
-        : split.length;
-    for (var i = 0; i < count; i++) {
-      _lines.add(split[i]);
+  /// Updates the active minimum severity [level] and refreshes the `@meta` header.
+  static void setMinimumLevel(LogLevel level) {
+    if (_minimumLevel == level) return;
+    _minimumLevel = level;
+    if (_enabled) {
+      _refreshHeaderLinesInPlace();
     }
   }
 
-  /// Increments [_changeNotifier] so open log viewer widgets rebuild.
-  static void _notifyChange() {
-    _changeNotifier.value = _changeNotifier.value + 1;
+  /// Updates the dynamic WebDAV password string to redact from all future log lines.
+  static void setSecretToRedact(String? secret) {
+    _secretToRedact = (secret == null || secret.isEmpty) ? null : secret;
   }
 
-  /// Trims the oldest 20% of non-protected log entries while preserving session headers and `[CRASH]` blocks.
-  static void _pruneOldestTwentyPercent() {
-    var regularCount = 0;
-    for (final line in _lines) {
-      if (!_isProtectedLine(line)) {
-        regularCount++;
-      }
+  /// Returns `true` when [ isEnabled ] is `true` and [level] meets [minimumLevel].
+  static bool shouldLog(LogLevel level) {
+    if (!_enabled) return false;
+    if (level == LogLevel.crash) return true;
+    return level.index >= _minimumLevel.index;
+  }
+
+  /// Updates session [metadata], [minimumLevel], and [persistToDisk] state in place.
+  static void updateMetadata(
+    LogMetadata metadata, {
+    LogLevel? minimumLevel,
+    bool? persistToDisk,
+    String? logFilePath,
+    String? baseDirectoryPath,
+  }) {
+    _metadata = metadata;
+    if (minimumLevel != null) {
+      _minimumLevel = minimumLevel;
     }
-    final targetDrop = (regularCount * 0.20).ceil();
-    var remainingToDrop = targetDrop > 0 ? targetDrop : 1;
-    final retained = <String>[];
-    for (final line in _lines) {
-      if (_isProtectedLine(line) || remainingToDrop <= 0) {
-        retained.add(line);
+    final previousPersist = _persistToDisk;
+    if (persistToDisk != null) {
+      _persistToDisk = persistToDisk;
+    }
+    if (baseDirectoryPath != null) {
+      _baseDirectoryPath = baseDirectoryPath;
+    }
+    if (!_enabled) return;
+
+    final nextPath = logFilePath != null
+        ? _resolvePath(logFilePath)
+        : _logFilePath;
+    if (nextPath.isNotEmpty && nextPath != _logFilePath) {
+      _logFilePath = nextPath;
+      _applyLocalStoragePolicy();
+      _initializeSessionFile();
+      return;
+    }
+    if (previousPersist != _persistToDisk) {
+      _applyLocalStoragePolicy();
+    }
+    _refreshHeaderLinesInPlace();
+  }
+
+  /// Logs a `WARN` message under [tag] when [shouldLog] permits `LogLevel.warn`.
+  static void warn(LogTag tag, String message) {
+    _log(LogLevel.warn, tag, message);
+  }
+
+  /// Appends [newLines] to the in-memory ring buffer and writes or rewrites the disk file.
+  static void _appendLines(
+    List<String> newLines, {
+    bool forceFullWrite = false,
+  }) {
+    if (newLines.isEmpty) return;
+    _lines.addAll(newLines);
+    final trimmed = _trimToMaxLinesIfNeeded();
+    final sink = _sink;
+    final path = _logFilePath;
+    if (_persistToDisk && sink != null && path.isNotEmpty) {
+      if (trimmed || forceFullWrite) {
+        _writeFullFile();
       } else {
-        remainingToDrop--;
+        final chunk = '${newLines.join('\n')}\n';
+        sink.writeLogFileSync(path, chunk, append: true);
       }
+    }
+    _revision.value++;
+  }
+
+  /// Applies local retention pruning or local file removal based on [_persistToDisk].
+  static void _applyLocalStoragePolicy() {
+    final sink = _sink;
+    if (sink == null || _baseDirectoryPath.isEmpty) return;
+    if (!_persistToDisk) {
+      sink.deleteWorkspaceLogFilesSync(
+        directoryPath: _baseDirectoryPath,
+        platform: _metadata.platform,
+        workspaceId: _metadata.workspaceId,
+      );
+      if (_logFilePath.isNotEmpty) {
+        sink.deleteLogFileSync(_logFilePath);
+      }
+      return;
+    }
+    final pruned = sink.pruneExpiredLogFilesSync(
+      directoryPath: _baseDirectoryPath,
+      platform: _metadata.platform,
+      workspaceId: _metadata.workspaceId,
+      utcNow: _clock().toUtc(),
+    );
+    if (pruned > 0) {
+      // Recorded after session initialization if needed.
+    }
+  }
+
+  /// Replaces CR, LF, and ASCII control characters with single spaces.
+  static String _collapseControlChars(String input) {
+    final buffer = StringBuffer();
+    for (var i = 0; i < input.length; i++) {
+      final code = input.codeUnitAt(i);
+      if (code < 0x20 || code == 0x7F) {
+        buffer.write(' ');
+      } else {
+        buffer.writeCharCode(code);
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// Disables logging and removes both the active and historical workspace log files.
+  static void _disableAndDeleteLogs(String resolvedPath) {
+    _enabled = false;
+    _crashedInCurrentSession = false;
+    _lastEvalSummarySignature = '';
+    _lines.clear();
+    final sink = _sink;
+    if (sink != null) {
+      if (resolvedPath.isNotEmpty) {
+        sink.deleteLogFileSync(resolvedPath);
+      }
+      if (_baseDirectoryPath.isNotEmpty) {
+        sink.deleteWorkspaceLogFilesSync(
+          directoryPath: _baseDirectoryPath,
+          platform: _metadata.platform,
+          workspaceId: _metadata.workspaceId,
+        );
+      }
+    }
+    _logFilePath = resolvedPath;
+    _revision.value++;
+  }
+
+  /// Extracts the [LogLevel] from a formatted log [line], or returns `null`.
+  static LogLevel? _extractLineLevel(String line) {
+    if (line.length < 32 || line.codeUnitAt(25) != 0x5B) {
+      return null;
+    }
+    final rawLevel = line.substring(26, 31).trimRight();
+    return LogLevel.tryParse(rawLevel);
+  }
+
+  /// Extracts the [LogTag] from a formatted log [line], or returns `null`.
+  static LogTag? _extractLineTag(String line) {
+    if (line.length < 44 || line.codeUnitAt(33) != 0x5B) {
+      return null;
+    }
+    final rawTag = line.substring(34, 43).trimRight();
+    return LogTag.tryParse(rawTag);
+  }
+
+  /// Extracts the parent directory path from [filePath], or returns `''`.
+  static String _extractParentDirectory(String filePath) {
+    final slashIndex = filePath.lastIndexOf('/');
+    final backslashIndex = filePath.lastIndexOf(r'\');
+    final splitIndex = slashIndex > backslashIndex
+        ? slashIndex
+        : backslashIndex;
+    if (splitIndex <= 0) return '';
+    return filePath.substring(0, splitIndex);
+  }
+
+  /// Extracts the first non-empty stack frame from [stackTrace].
+  static String _firstStackFrame(StackTrace stackTrace) {
+    for (final line in stackTrace.toString().split('\n')) {
+      final trimmed = line.trim();
+      if (trimmed.isNotEmpty) return trimmed;
+    }
+    return '';
+  }
+
+  /// Returns `true` if [previousBodyLines] ended without a clean `crashed=false` exit.
+  static bool _hadUncleanPreviousExit(List<String> previousBodyLines) {
+    for (var i = previousBodyLines.length - 1; i >= 0; i--) {
+      final line = previousBodyLines[i].trim();
+      if (line.isNotEmpty) {
+        return !line.contains('session.exit | state=detached crashed=false');
+      }
+    }
+    return false;
+  }
+
+  /// Initializes the session log buffer, preserving prior entries and detecting crashes.
+  static void _initializeSessionFile() {
+    _lines.clear();
+    final sink = _sink;
+    final path = _logFilePath;
+    final nowUtc = _sessionStartUtc;
+    final nowIso = formatIsoUtcTimestamp(nowUtc);
+
+    final headerLines = _metadata.toHeaderLines(
+      minimumLevel: _minimumLevel,
+      sessionStartUtc: nowUtc,
+    );
+    final previousBodyLines = <String>[];
+    if (_persistToDisk && sink != null && path.isNotEmpty) {
+      final existing = sink.readLogFileSync(path, maxBytes: maxFileBytes);
+      if (existing.trim().isNotEmpty) {
+        for (final line in existing.split('\n')) {
+          if (line.isNotEmpty && !_isHeaderLine(line)) {
+            previousBodyLines.add(line);
+          }
+        }
+      }
+    }
+
+    _lines
+      ..addAll(headerLines)
+      ..addAll(previousBodyLines);
+
+    if (_hadUncleanPreviousExit(previousBodyLines)) {
+      _lines
+        ..add(
+          '=== RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE | '
+          'NEW SESSION START $nowIso ===',
+        )
+        ..add(
+          '$nowIso [${LogLevel.warn.paddedLabel}] '
+          '[${LogTag.lifecycle.paddedLabel}] '
+          'session.recover | reason=unclean_exit_or_crash',
+        );
+    }
+
+    _lines.add(
+      '$nowIso [${LogLevel.info.paddedLabel}] '
+      '[${LogTag.lifecycle.paddedLabel}] '
+      'session.start | '
+      'version=${formatFieldValue(_metadata.appVersion)} '
+      'platform=${formatFieldValue(_metadata.platform)} '
+      'workspace=${formatFieldValue(_metadata.workspaceId)} '
+      'level=${_minimumLevel.label} '
+      'storage=${formatFieldValue(_metadata.logStorageMode)}',
+    );
+    _trimToMaxLinesIfNeeded();
+    _writeFullFile();
+    _revision.value++;
+  }
+
+  /// Returns `true` when [line] is part of the 5-line `@meta` header block.
+  static bool _isHeaderLine(String line) {
+    return line == headerStartBanner ||
+        line == headerEndBanner ||
+        line.startsWith('@meta ');
+  }
+
+  /// Returns `true` when [line] must be preserved across 20% rolling line pruning.
+  static bool _isProtectedLine(String line) {
+    return _isHeaderLine(line) ||
+        line.contains('[CRASH]') ||
+        line.contains('RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE');
+  }
+
+  /// Formats and records a single log line when [shouldLog] permits [level].
+  static void _log(LogLevel level, LogTag tag, String message) {
+    if (!shouldLog(level)) return;
+    final timestamp = formatIsoUtcTimestamp(_clock().toUtc());
+    final sanitizedMessage = _collapseControlChars(sanitize(message));
+    final formatted =
+        '$timestamp [${level.paddedLabel}] [${tag.paddedLabel}] '
+        '$sanitizedMessage';
+    _appendLines(<String>[formatted]);
+  }
+
+  /// Returns `true` when [value] contains spaces, quotes, or `=` requiring quotes.
+  static bool _needsQuotes(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit <= 0x20 || unit == 0x22 || unit == 0x3D || unit == 0x7C) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Replaces the 5-line `@meta` header at the top of [_lines] and rewrites the file.
+  static void _refreshHeaderLinesInPlace() {
+    if (_lines.isEmpty) return;
+    final updatedHeader = _metadata.toHeaderLines(
+      minimumLevel: _minimumLevel,
+      sessionStartUtc: _sessionStartUtc,
+    );
+    var bodyStartIndex = 0;
+    while (bodyStartIndex < _lines.length &&
+        _isHeaderLine(_lines[bodyStartIndex])) {
+      bodyStartIndex++;
+    }
+    final body = _lines.sublist(bodyStartIndex);
+    _lines
+      ..clear()
+      ..addAll(updatedHeader)
+      ..addAll(body);
+    _writeFullFile();
+    _revision.value++;
+  }
+
+  /// Resolves the target log file path from [explicitPath] or the configured sink.
+  static String _resolvePath(String? explicitPath) {
+    if (explicitPath != null && explicitPath.isNotEmpty) {
+      return explicitPath;
+    }
+    if (_logFilePath.isNotEmpty) {
+      return _logFilePath;
+    }
+    final sink = _sink;
+    if (sink == null) {
+      return '';
+    }
+    final fileName = formatLogFileName(
+      utcNow: _clock().toUtc(),
+      platform: _metadata.platform,
+      workspaceId: _metadata.workspaceId,
+    );
+    return sink.defaultLogFilePath(
+      baseDirectoryPath: _baseDirectoryPath.isEmpty ? null : _baseDirectoryPath,
+      fileName: fileName,
+    );
+  }
+
+  /// Sanitizes a platform or workspace identifier into a safe filename slug token.
+  static String _sanitizeSlugToken(String raw, {required String fallback}) {
+    final lower = raw.trim().toLowerCase();
+    if (lower.isEmpty) return fallback;
+    final buffer = StringBuffer();
+    var lastWasUnderscore = false;
+    for (var i = 0; i < lower.length; i++) {
+      final code = lower.codeUnitAt(i);
+      final isAlphaNum =
+          (code >= 0x61 && code <= 0x7A) ||
+          (code >= 0x30 && code <= 0x39) ||
+          code == 0x2D;
+      if (isAlphaNum) {
+        buffer.writeCharCode(code);
+        lastWasUnderscore = false;
+      } else if (!lastWasUnderscore && buffer.isNotEmpty) {
+        buffer.write('_');
+        lastWasUnderscore = true;
+      }
+    }
+    var result = buffer.toString();
+    while (result.endsWith('_')) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result.isEmpty ? fallback : result;
+  }
+
+  /// Trims the oldest 20% of non-protected entries when [_lines] exceeds [_maxLines].
+  static bool _trimToMaxLinesIfNeeded() {
+    if (_lines.length <= _maxLines) {
+      return false;
+    }
+    final overflow = _lines.length - _maxLines;
+    final twentyPercent = (_maxLines * 0.2).ceil();
+    final targetDrop = overflow + (twentyPercent > 1 ? twentyPercent : 1);
+
+    final retained = <String>[];
+    var dropped = 0;
+    for (var i = 0; i < _lines.length; i++) {
+      final line = _lines[i];
+      if (dropped < targetDrop && !_isProtectedLine(line)) {
+        dropped++;
+      } else {
+        retained.add(line);
+      }
+    }
+    if (retained.length > _maxLines) {
+      final start = retained.length - _maxLines;
+      final tail = retained.sublist(start);
+      retained
+        ..clear()
+        ..addAll(tail);
     }
     _lines
       ..clear()
       ..addAll(retained);
-    _recomputeEstimatedBytes();
+    return true;
   }
 
-  /// Recomputes [_estimatedBytes] from the current [_lines] buffer.
-  static void _recomputeEstimatedBytes() {
-    var total = 0;
-    for (final line in _lines) {
-      total += line.length + 1;
-    }
-    _estimatedBytes = total;
-  }
-
-  /// Resolves the target filesystem path for `tiertask.log`.
-  static String _resolveTargetFilePath(String? explicitPath) {
-    if (explicitPath != null && explicitPath.trim().isNotEmpty) {
-      return explicitPath.trim();
-    }
-    if (_logFilePath case final currentPath? when currentPath.isNotEmpty) {
-      return currentPath;
-    }
-    return _sink?.defaultLogFilePath() ?? defaultLogFileName;
+  /// Overwrites the persistent log file with the current contents of [_lines].
+  static void _writeFullFile() {
+    if (!_persistToDisk) return;
+    final sink = _sink;
+    final path = _logFilePath;
+    if (sink == null || path.isEmpty) return;
+    final payload = _lines.isEmpty ? '' : '${_lines.join('\n')}\n';
+    sink.writeLogFileSync(path, payload, append: false);
   }
 }

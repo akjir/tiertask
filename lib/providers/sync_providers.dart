@@ -258,9 +258,12 @@ class TaskSyncPipeline {
           .setSuccess(ref.read(clockProvider)().toUtc());
       return board;
     } on Object catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.sync,
-        'Sync pipeline failed (mode=${config.storageMode.name}): $error',
+        'sync.error',
+        fields: <String, Object?>{'mode': config.storageMode.name},
+        error: error,
       );
       ref.read(syncStateProvider.notifier).setError(error.toString());
       rethrow;
@@ -279,9 +282,15 @@ class TaskSyncPipeline {
   }) async {
     final (utcNow, localNow) = resolveTimestamps(ref, null);
     final workspace = await ref.read(activeWorkspaceProvider.future);
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.sync,
-      'Starting two-stage sync pipeline workspace=${workspace.id} mode=${config.storageMode.name} initial=$isInitialLoad',
+      'sync.start',
+      fields: <String, Object?>{
+        'workspace': workspace.id,
+        'mode': config.storageMode.name,
+        'initial': isInitialLoad,
+      },
     );
     final settingsRepository = ref.read(settingsRepositoryProvider);
     var syncState = await settingsRepository.loadWorkspaceSyncState(
@@ -312,6 +321,16 @@ class TaskSyncPipeline {
         localNow: localNow,
         onLocalStageMerged: onLocalStageMerged,
       );
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.sync,
+        'sync.stage.local',
+        fields: <String, Object?>{
+          'workspace': workspace.id,
+          'tasks': working.allTasks.length,
+          'labels': working.labels.length,
+        },
+      );
     }
 
     if (config.storageMode.usesWebDav &&
@@ -328,6 +347,16 @@ class TaskSyncPipeline {
         utcNow: utcNow,
         localNow: localNow,
       );
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.sync,
+        'sync.stage.remote',
+        fields: <String, Object?>{
+          'workspace': workspace.id,
+          'tasks': working.allTasks.length,
+          'labels': working.labels.length,
+        },
+      );
     }
 
     if (!hasWorking) {
@@ -343,9 +372,15 @@ class TaskSyncPipeline {
       deletedLabelTimestamps: const <String, DateTime>{},
     );
     await settingsRepository.saveWorkspaceSyncState(workspace.id, syncState);
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.sync,
-      'Completed two-stage sync pipeline workspace=${workspace.id} tasks=${working.allTasks.length} labels=${working.labels.length}',
+      'sync.complete',
+      fields: <String, Object?>{
+        'workspace': workspace.id,
+        'tasks': working.allTasks.length,
+        'labels': working.labels.length,
+      },
     );
     return working;
   }

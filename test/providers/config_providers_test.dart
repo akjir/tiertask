@@ -231,12 +231,36 @@ void main() {
       expect(container.read(diagnosticsEnabledProvider), isTrue);
       expect(AppLogger.isEnabled, isTrue);
       final logFile = File(
-        LocalFileRepository.defaultLogFilePath(baseDirectoryPath: tempDir.path),
+        LocalFileRepository.resolveLogFilePath(
+          baseDirectoryPath: tempDir.path,
+          utcNow: fixedDate.toUtc(),
+          platform: Platform.operatingSystem,
+          workspaceId: 'tasks',
+        ),
       );
       expect(
         await logFile.exists(),
         isTrue,
-        reason: 'Enabling diagnostics must write startup log to tiertask.log',
+        reason: 'Enabling diagnostics must write startup log to dated log file',
+      );
+
+      await notifier.updateLogLevel(LogLevel.debug);
+      expect(
+        container.read(webDavConfigProvider).requireValue.logLevel,
+        equals(LogLevel.debug),
+      );
+      expect(AppLogger.minimumLevel, equals(LogLevel.debug));
+
+      await notifier.updateLogStorageMode(StorageMode.both);
+      expect(
+        container.read(webDavConfigProvider).requireValue.logStorageMode,
+        equals(StorageMode.both),
+      );
+      expect(
+        AppLogger.fullLogText,
+        contains('log_storage=both min_level=DEBUG'),
+        reason:
+            'Updating logStorageMode and logLevel must refresh @meta header',
       );
 
       await notifier.updateDiagnosticsEnabled(false);
@@ -245,7 +269,7 @@ void main() {
       expect(
         await logFile.exists(),
         isFalse,
-        reason: 'Disabling diagnostics must immediately delete tiertask.log',
+        reason: 'Disabling diagnostics must immediately delete dated log file',
       );
     });
   });

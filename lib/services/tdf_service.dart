@@ -129,15 +129,28 @@ class TdfService {
         currentLongitude: currentLongitude,
         pruneExpiredCompleted: pruneExpiredCompleted,
       );
-      AppLogger.info(
+      AppLogger.event(
+        LogLevel.info,
         LogTag.tdf,
-        'TdfService.parse v$supportedVersion tasks=${board.allTasks.length} labels=${board.labels.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+        'tdf.parse',
+        fields: <String, Object?>{
+          'version': supportedVersion,
+          'tasks': board.allTasks.length,
+          'labels': board.labels.length,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
       );
       return board;
     } on TdfException catch (error) {
-      AppLogger.error(
+      AppLogger.event(
+        LogLevel.error,
         LogTag.tdf,
-        'TdfService.parse failed (${error.kind.name} at line ${error.line}): ${error.message}',
+        'tdf.error',
+        fields: <String, Object?>{
+          'kind': error.kind.name,
+          'line': error.line,
+          'message': error.message,
+        },
       );
       rethrow;
     }
@@ -158,17 +171,43 @@ class TdfService {
     double? currentLatitude,
     double? currentLongitude,
   }) {
-    final result = TdfImporter.importDocument(
-      sourceContent,
-      sourceTimeZone: sourceTimeZone,
-      evaluationTime: evaluationTime,
-      localEvaluationTime: localEvaluationTime,
-      evaluationTimeZone: evaluationTimeZone,
-      activeLabelId: activeLabelId,
-      currentLatitude: currentLatitude,
-      currentLongitude: currentLongitude,
-    );
-    return result.board;
+    final stopwatch = Stopwatch()..start();
+    try {
+      final result = TdfImporter.importDocument(
+        sourceContent,
+        sourceTimeZone: sourceTimeZone,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        evaluationTimeZone: evaluationTimeZone,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+      );
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.tdf,
+        'tdf.migrate',
+        fields: <String, Object?>{
+          'target_version': supportedVersion,
+          'tasks': result.board.allTasks.length,
+          'labels': result.board.labels.length,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return result.board;
+    } on TdfException catch (error) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.tdf,
+        'tdf.error',
+        fields: <String, Object?>{
+          'kind': error.kind.name,
+          'line': error.line,
+          'message': error.message,
+        },
+      );
+      rethrow;
+    }
   }
 
   /// Delegates single-pass TDF 0.5.1 (and legacy 0.5.0) scanning and parsing to [TdfBlockParser.parseDocument].
@@ -198,19 +237,17 @@ class TdfService {
   String _serializeInternal(TaskBoard board) {
     final stopwatch = Stopwatch()..start();
     final output = TdfSerializer.serialize(board);
-    if (board.deletedBlock.isDefaultEmpty &&
-        board.queueBlock.isDefaultEmpty &&
-        board.labels.isEmpty &&
-        board.allTasks.isEmpty) {
-      AppLogger.info(
-        LogTag.tdf,
-        'TdfService.serialize v$supportedVersion tasks=0 labels=0 elapsed=${stopwatch.elapsedMilliseconds}ms',
-      );
-      return output;
-    }
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.tdf,
-      'TdfService.serialize v$supportedVersion tasks=${board.allTasks.length} labels=${board.labels.length} bytes=${output.length} elapsed=${stopwatch.elapsedMilliseconds}ms',
+      'tdf.serialize',
+      fields: <String, Object?>{
+        'version': supportedVersion,
+        'tasks': board.allTasks.length,
+        'labels': board.labels.length,
+        'bytes': output.length,
+        'elapsed_ms': stopwatch.elapsedMilliseconds,
+      },
     );
     return output;
   }

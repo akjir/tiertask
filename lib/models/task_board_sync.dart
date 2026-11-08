@@ -216,9 +216,17 @@ class TaskBoardSync {
       queueBlock: mergedQueue,
       pruneExpiredCompleted: true,
     );
-    AppLogger.info(
+    AppLogger.event(
+      LogLevel.info,
       LogTag.sync,
-      'TaskBoardSync.merge completed: primary=(tasks=${primary.allTasks.length}, labels=${primary.labels.length}, gen=$leftGen), secondary=(tasks=${secondary.allTasks.length}, labels=${secondary.labels.length}, gen=$rightGen) -> merged=(tasks=${mergedBoard.allTasks.length}, labels=${mergedBoard.labels.length}, gen=${mergedBoard.deletedBlock.generation})',
+      'sync.merge',
+      fields: <String, Object?>{
+        'primary_tasks': primary.allTasks.length,
+        'secondary_tasks': secondary.allTasks.length,
+        'merged_tasks': mergedBoard.allTasks.length,
+        'merged_labels': mergedBoard.labels.length,
+        'generation': mergedBoard.deletedBlock.generation,
+      },
     );
     return mergedBoard;
   }
@@ -297,6 +305,16 @@ class TaskBoardSync {
       greatestQueue = baselineQueue;
     }
     if (listEquals(greatestQueue.taskIds, reconciledIds)) {
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.sync,
+        'sync.reconcile.queue',
+        fields: <String, Object?>{
+          'winner': primaryWins ? 'primary' : 'secondary',
+          'entries': reconciledIds.length,
+          'additions': concurrentAdditions.length,
+        },
+      );
       return TdfQueueBlock(
         modifiedAt: greatestQueue.modifiedAt,
         taskIds: reconciledIds,
@@ -317,6 +335,16 @@ class TaskBoardSync {
         'Merged queue revision exceeds maximum supported timestamp.',
       );
     }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.sync,
+      'sync.reconcile.queue',
+      fields: <String, Object?>{
+        'winner': primaryWins ? 'primary' : 'secondary',
+        'entries': reconciledIds.length,
+        'additions': concurrentAdditions.length,
+      },
+    );
     return TdfQueueBlock(modifiedAt: nextModified, taskIds: reconciledIds);
   }
 
