@@ -1444,5 +1444,37 @@
   "actionSelectColor": "Select",
   "@actionSelectColor": {
     "description": "Confirm button label in the custom color wheel dialog."
+  },
+  "tooltipConditionDayAny": "Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.",
+  "@tooltipConditionDayAny": {
+    "description": "Tooltip for the Any day condition reset chip in the task editor."
+  },
+  "tooltipConditionTimeAny": "Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.",
+  "@tooltipConditionTimeAny": {
+    "description": "Tooltip for the Any time condition reset chip in the task editor."
+  },
+  "tooltipConditionLocationAny": "Explicitly overrides all location restrictions from assigned labels so this task is active at any location.",
+  "@tooltipConditionLocationAny": {
+    "description": "Tooltip for the Any location condition reset chip in the task editor."
+  },
+  "tooltipTaskEditorPriority": "Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.",
+  "@tooltipTaskEditorPriority": {
+    "description": "Tooltip for the Priority toggle chip in the task editor."
+  },
+  "tooltipTaskEditorSomeday": "Parks this task in the Someday backlog without pulling it into active tiers.",
+  "@tooltipTaskEditorSomeday": {
+    "description": "Tooltip for the Someday toggle chip in the task editor."
+  },
+  "tooltipTaskEditorSuspended": "Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.",
+  "@tooltipTaskEditorSuspended": {
+    "description": "Tooltip for the Suspended toggle chip in the task editor."
+  },
+  "tooltipTaskEditorRepeat": "Automatically reschedules this task after the configured interval upon completion and resets all subtasks.",
+  "@tooltipTaskEditorRepeat": {
+    "description": "Tooltip for the Repeat toggle chip in the task editor."
+  },
+  "tooltipTaskEditorAutoFinish": "Automatically completes the entire task as soon as all subtasks are checked off.",
+  "@tooltipTaskEditorAutoFinish": {
+    "description": "Tooltip for the Auto-finish toggle chip in the subtasks section of the task editor."
   }
 }

@@ -315,6 +315,7 @@ class TaskEditorSubtasksSection extends StatelessWidget {
         chipKey: const ValueKey('task_editor_auto_finish_toggle'),
         icon: Icons.done_all_rounded,
         label: localizations.subtasksAutoFinishLabel,
+        tooltip: localizations.tooltipTaskEditorAutoFinish,
         isSelected: subtasksAutoFinish,
         accentColor: appTheme.tertiaryAccent,
         onTap: onToggleAutoFinish,

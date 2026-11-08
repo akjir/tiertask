@@ -1075,4 +1075,36 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get actionSelectColor => 'Auswählen';
+
+  @override
+  String get tooltipConditionDayAny =>
+      'Überschreibt explizit alle Wochentags-Einschränkungen zugewiesener Labels, sodass diese Aufgabe an jedem Tag aktiv ist.';
+
+  @override
+  String get tooltipConditionTimeAny =>
+      'Überschreibt explizit alle Zeitfenster-Einschränkungen zugewiesener Labels, sodass diese Aufgabe zu jeder Uhrzeit aktiv ist.';
+
+  @override
+  String get tooltipConditionLocationAny =>
+      'Überschreibt explizit alle Standort-Einschränkungen zugewiesener Labels, sodass diese Aufgabe an jedem Standort aktiv ist.';
+
+  @override
+  String get tooltipTaskEditorPriority =>
+      'Markiert diese Aufgabe mit Priorität, sodass sie vor regulären Aufgaben in Fokus oder Bereit gezogen wird.';
+
+  @override
+  String get tooltipTaskEditorSomeday =>
+      'Parkt diese Aufgabe im Irgendwann-Backlog, ohne sie in aktive Stufen zu ziehen.';
+
+  @override
+  String get tooltipTaskEditorSuspended =>
+      'Stellt diese Aufgabe unter Blockiert zurück (optional bis zu einem gewählten Zeitpunkt) und deaktiviert währenddessen die Bedingungsauswertung.';
+
+  @override
+  String get tooltipTaskEditorRepeat =>
+      'Plant diese Aufgabe beim Abschließen automatisch nach dem festgelegten Intervall neu ein und setzt alle Unteraufgaben zurück.';
+
+  @override
+  String get tooltipTaskEditorAutoFinish =>
+      'Schließt die gesamte Aufgabe automatisch ab, sobald alle Unteraufgaben abgehakt sind.';
 }

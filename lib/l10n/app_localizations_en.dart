@@ -1056,4 +1056,36 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get actionSelectColor => 'Select';
+
+  @override
+  String get tooltipConditionDayAny =>
+      'Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.';
+
+  @override
+  String get tooltipConditionTimeAny =>
+      'Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.';
+
+  @override
+  String get tooltipConditionLocationAny =>
+      'Explicitly overrides all location restrictions from assigned labels so this task is active at any location.';
+
+  @override
+  String get tooltipTaskEditorPriority =>
+      'Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.';
+
+  @override
+  String get tooltipTaskEditorSomeday =>
+      'Parks this task in the Someday backlog without pulling it into active tiers.';
+
+  @override
+  String get tooltipTaskEditorSuspended =>
+      'Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.';
+
+  @override
+  String get tooltipTaskEditorRepeat =>
+      'Automatically reschedules this task after the configured interval upon completion and resets all subtasks.';
+
+  @override
+  String get tooltipTaskEditorAutoFinish =>
+      'Automatically completes the entire task as soon as all subtasks are checked off.';
 }

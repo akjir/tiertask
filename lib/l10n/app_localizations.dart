@@ -1969,6 +1969,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Select'**
   String get actionSelectColor;
+
+  /// Tooltip for the Any day condition reset chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.'**
+  String get tooltipConditionDayAny;
+
+  /// Tooltip for the Any time condition reset chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.'**
+  String get tooltipConditionTimeAny;
+
+  /// Tooltip for the Any location condition reset chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Explicitly overrides all location restrictions from assigned labels so this task is active at any location.'**
+  String get tooltipConditionLocationAny;
+
+  /// Tooltip for the Priority toggle chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.'**
+  String get tooltipTaskEditorPriority;
+
+  /// Tooltip for the Someday toggle chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Parks this task in the Someday backlog without pulling it into active tiers.'**
+  String get tooltipTaskEditorSomeday;
+
+  /// Tooltip for the Suspended toggle chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.'**
+  String get tooltipTaskEditorSuspended;
+
+  /// Tooltip for the Repeat toggle chip in the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically reschedules this task after the configured interval upon completion and resets all subtasks.'**
+  String get tooltipTaskEditorRepeat;
+
+  /// Tooltip for the Auto-finish toggle chip in the subtasks section of the task editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically completes the entire task as soon as all subtasks are checked off.'**
+  String get tooltipTaskEditorAutoFinish;
 }
 
 class _AppLocalizationsDelegate

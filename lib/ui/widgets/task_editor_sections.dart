@@ -156,6 +156,7 @@ class TaskEditorChip extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.isEnabled = true,
+    this.tooltip,
   });
 
   /// Highlight color when selected.
@@ -179,6 +180,9 @@ class TaskEditorChip extends StatelessWidget {
   /// Callback invoked when the chip is tapped.
   final VoidCallback onTap;
 
+  /// Optional tooltip displayed on hover or long press.
+  final String? tooltip;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -188,6 +192,7 @@ class TaskEditorChip extends StatelessWidget {
 
     return FilterChip(
       key: chipKey,
+      tooltip: tooltip,
       selected: isSelected,
       showCheckmark: false,
       visualDensity: VisualDensity.compact,

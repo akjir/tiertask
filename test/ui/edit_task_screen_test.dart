@@ -24,6 +24,7 @@ import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/edit_task_screen.dart';
 
 import 'test_helpers.dart';
 
@@ -623,6 +624,111 @@ task 000001OkD2 {
         find.byKey(const ValueKey('editor_open_link_0')),
       );
       expect(find.text('Could not open link.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen provides explanatory hover tooltips on Priority, Someday, Suspended, Repeat, and Auto-finish chips in English and German',
+    (WidgetTester tester) async {
+      await pumpLeafWidget(
+        tester,
+        const EditTaskScreen(),
+        locale: const Locale('en'),
+      );
+
+      final priorityChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_priority_button')),
+      );
+      final somedayChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_someday_button')),
+      );
+      final suspendedChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      final repeatChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_repeat_button')),
+      );
+      final autoFinishChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_auto_finish_toggle')),
+      );
+
+      expect(
+        priorityChip.tooltip,
+        equals(
+          'Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.',
+        ),
+        reason: 'Priority chip must explain priority pull behavior on hover',
+      );
+      expect(
+        somedayChip.tooltip,
+        equals(
+          'Parks this task in the Someday backlog without pulling it into active tiers.',
+        ),
+        reason: 'Someday chip must explain Someday backlog behavior on hover',
+      );
+      expect(
+        suspendedChip.tooltip,
+        equals(
+          'Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.',
+        ),
+        reason: 'Suspended chip must explain deferral behavior on hover',
+      );
+      expect(
+        repeatChip.tooltip,
+        equals(
+          'Automatically reschedules this task after the configured interval upon completion and resets all subtasks.',
+        ),
+        reason: 'Repeat chip must explain recurrence behavior on hover',
+      );
+      expect(
+        autoFinishChip.tooltip,
+        equals(
+          'Automatically completes the entire task as soon as all subtasks are checked off.',
+        ),
+        reason: 'Auto-finish chip must explain automatic completion on hover',
+      );
+
+      await pumpLeafWidget(
+        tester,
+        const EditTaskScreen(),
+        locale: const Locale('de'),
+      );
+
+      expect(
+        find.byTooltip(
+          'Markiert diese Aufgabe mit Priorität, sodass sie vor regulären Aufgaben in Fokus oder Bereit gezogen wird.',
+        ),
+        findsOneWidget,
+        reason: 'Priority chip must provide German tooltip',
+      );
+      expect(
+        find.byTooltip(
+          'Parkt diese Aufgabe im Irgendwann-Backlog, ohne sie in aktive Stufen zu ziehen.',
+        ),
+        findsOneWidget,
+        reason: 'Someday chip must provide German tooltip',
+      );
+      expect(
+        find.byTooltip(
+          'Stellt diese Aufgabe unter Blockiert zurück (optional bis zu einem gewählten Zeitpunkt) und deaktiviert währenddessen die Bedingungsauswertung.',
+        ),
+        findsOneWidget,
+        reason: 'Suspended chip must provide German tooltip',
+      );
+      expect(
+        find.byTooltip(
+          'Plant diese Aufgabe beim Abschließen automatisch nach dem festgelegten Intervall neu ein und setzt alle Unteraufgaben zurück.',
+        ),
+        findsOneWidget,
+        reason: 'Repeat chip must provide German tooltip',
+      );
+      expect(
+        find.byTooltip(
+          'Schließt die gesamte Aufgabe automatisch ab, sobald alle Unteraufgaben abgehakt sind.',
+        ),
+        findsOneWidget,
+        reason: 'Auto-finish chip must provide German tooltip',
+      );
     },
   );
 }

@@ -22,6 +22,8 @@ import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/widgets/condition_editor_controller.dart';
+import 'package:tiertask/ui/widgets/task_editor_conditions_section.dart';
 
 import '../test_helpers.dart';
 
@@ -470,6 +472,85 @@ task 000003OkD2 {
         cycleChip.onSelected,
         isNull,
         reason: 'EditTaskScreen must disable prerequisite suggestions that would create a circular dependency',
+      );
+    },
+  );
+
+  testWidgets(
+    'TaskEditorConditionsSection provides explanatory tooltips on Any day, Any time, and Any location reset chips in English and German',
+    (WidgetTester tester) async {
+      final controller = ConditionEditorController();
+      addTearDown(controller.dispose);
+
+      await pumpLeafWidget(
+        tester,
+        SingleChildScrollView(
+          child: TaskEditorConditionsSection(controller: controller),
+        ),
+        locale: const Locale('en'),
+      );
+
+      final dayAnyChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_condition_day_any_toggle')),
+      );
+      final timeAnyChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_condition_time_any_toggle')),
+      );
+      final locationAnyChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_condition_location_any_toggle')),
+      );
+
+      expect(
+        dayAnyChip.tooltip,
+        equals(
+          'Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.',
+        ),
+        reason:
+            'Any day reset chip must explain weekday label override on hover',
+      );
+      expect(
+        timeAnyChip.tooltip,
+        equals(
+          'Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.',
+        ),
+        reason: 'Any time reset chip must explain time window label override on hover',
+      );
+      expect(
+        locationAnyChip.tooltip,
+        equals(
+          'Explicitly overrides all location restrictions from assigned labels so this task is active at any location.',
+        ),
+        reason: 'Any location reset chip must explain location label override on hover',
+      );
+
+      await pumpLeafWidget(
+        tester,
+        SingleChildScrollView(
+          child: TaskEditorConditionsSection(controller: controller),
+        ),
+        locale: const Locale('de'),
+      );
+
+      expect(
+        find.byTooltip(
+          'Überschreibt explizit alle Wochentags-Einschränkungen zugewiesener Labels, sodass diese Aufgabe an jedem Tag aktiv ist.',
+        ),
+        findsOneWidget,
+        reason: 'Any day reset chip must provide German tooltip',
+      );
+      expect(
+        find.byTooltip(
+          'Überschreibt explizit alle Zeitfenster-Einschränkungen zugewiesener Labels, sodass diese Aufgabe zu jeder Uhrzeit aktiv ist.',
+        ),
+        findsOneWidget,
+        reason: 'Any time reset chip must provide German tooltip',
+      );
+      expect(
+        find.byTooltip(
+          'Überschreibt explizit alle Standort-Einschränkungen zugewiesener Labels, sodass diese Aufgabe an jedem Standort aktiv ist.',
+        ),
+        findsOneWidget,
+        reason: 'Any location reset chip must provide German tooltip',
       );
     },
   );

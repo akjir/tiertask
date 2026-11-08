@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Metadata summary card, minimum severity and subsystem tag filters, and manual WebDAV log upload button in the in-app Diagnostic Log viewer.
 - Added colored label indicator blocks with hover tooltips along the bottom edge of task cards.
 - Added a custom color wheel picker dialog next to the color field in the label editor.
+- Added hover tooltips to the `Priority`, `Someday`, `Suspended`, `Repeat`, `Auto-finish`, `Any day`, `Any time`, and `Any location` chips in the task editor explaining their behavior.
 
 ### Changed
 
