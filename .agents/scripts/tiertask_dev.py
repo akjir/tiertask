@@ -286,6 +286,48 @@ def outline_dart_lib(lines: list[str]) -> list[str]:
     return out
 
 
+_IDENT_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _extract_method_identifier(sig: str) -> str | None:
+    """Extracts the method identifier before the parameter list `(`, handling Dart 3 record return types."""
+    s = sig.strip()
+    if s.startswith("static "):
+        s = s[len("static ") :].strip()
+    angle = 0
+    paren = 0
+    last_ident: str | None = None
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "<":
+            angle += 1
+            i += 1
+        elif ch == ">":
+            angle = max(0, angle - 1)
+            i += 1
+        elif ch == "(":
+            if angle == 0 and paren == 0 and last_ident is not None and last_ident != "Function":
+                return last_ident if "(" not in s[i + 1 :] or s.endswith(")") else last_ident
+            paren += 1
+            i += 1
+        elif ch == ")":
+            paren = max(0, paren - 1)
+            i += 1
+        elif angle == 0 and paren == 0:
+            m = _IDENT_TOKEN_RE.match(s, i)
+            if m:
+                tok = m.group(0)
+                if tok not in ("static", "async", "sync", "covariant", "external", "operator"):
+                    last_ident = tok
+                i = m.end()
+            else:
+                i += 1
+        else:
+            i += 1
+    return None
+
+
 def _outline_class_members(
     lines: list[str],
     body_start: int,
@@ -308,7 +350,8 @@ def _outline_class_members(
             or stripped.startswith("@")
             or stripped.startswith("static const ")
             or stripped.startswith("static final ")
-            or (stripped.startswith("final ") and "(" not in stripped)
+            or stripped.startswith("final ")
+            or stripped.startswith("late ")
         ):
             idx += 1
             continue
@@ -321,16 +364,19 @@ def _outline_class_members(
         )
         is_getter = " get " in stripped
         prefix_before_paren = stripped.split("(", 1)[0] if "(" in stripped else ""
-        has_parens = "(" in stripped and "=" not in prefix_before_paren
+        has_parens = (
+            "(" in stripped
+            and "=" not in prefix_before_paren
+            and "Function(" not in stripped
+        )
 
         if is_ctor or is_getter or has_parens:
             sig, _ = _collect_signature(lines, idx)
             end_idx = _find_matching_brace_line(lines, idx)
             out.append(f"    {idx + 1}-{end_idx + 1}: {sig}")
             if not is_ctor and not is_getter and "(" in sig:
-                before_paren = _TRAILING_GENERIC_RE.sub("", sig.split("(", 1)[0].strip()).strip()
-                tokens = before_paren.split()
-                if tokens and tokens[-1].startswith("_"):
+                mname = _extract_method_identifier(sig)
+                if mname and mname.startswith("_"):
                     priv_count += 1
             idx = max(idx + 1, end_idx + 1)
             continue

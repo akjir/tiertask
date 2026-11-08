@@ -309,11 +309,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
   /// Warning and condition badge accent color.
   final Color warningAccent;
 
-  /// Resolves the active [AppTheme] extension from [context].
-  static AppTheme of(BuildContext context) {
-    return Theme.of(context).extension<AppTheme>() ?? AppTheme.dark;
-  }
-
   @override
   AppTheme copyWith({
     Brightness? brightness,
@@ -495,6 +490,11 @@ class AppTheme extends ThemeExtension<AppTheme> {
       warningAccent:
           Color.lerp(warningAccent, other.warningAccent, t) ?? warningAccent,
     );
+  }
+
+  /// Resolves the active [AppTheme] extension from [context].
+  static AppTheme of(BuildContext context) {
+    return Theme.of(context).extension<AppTheme>() ?? AppTheme.dark;
   }
 
   /// Compiles this [AppTheme] into a complete Material 3 [ThemeData].

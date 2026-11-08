@@ -17,10 +17,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/widgets/tier_task_pill.dart';
 
 import '../test_helpers.dart';
 
@@ -425,6 +429,38 @@ task c20000OkD2 {
         tester.getTopLeft(c2Finder).dy,
         closeTo(c1InitialTop, 0.01),
         reason: 'Remaining completed task must settle into the top slot after restore',
+      );
+    },
+  );
+
+  testWidgets(
+    'TierTaskPill mounted via pumpLeafWidget updates FakeTaskNotifier board in-memory on completion without TDF parsing',
+    (WidgetTester tester) async {
+      final createdAt = DateTime.utc(2026, 11, 1, 8, 0);
+      final task = TaskItem(
+        id: 'leaf01OkD2',
+        title: 'Isolated Leaf Pill Task',
+        createdAt: createdAt,
+      );
+      final initialBoard = TaskBoard(focus: [task]);
+
+      final container = await pumpLeafWidget(
+        tester,
+        TierTaskPill(task: task, canDowngrade: true, isCompleted: false),
+        board: initialBoard,
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Isolated Leaf Pill Task'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_leaf01OkD2')),
+      );
+      await tester.pumpAndSettle();
+
+      final updatedBoard = container.read(taskNotifierProvider).requireValue;
+      expect(
+        updatedBoard.completed.map((item) => item.id),
+        equals(['leaf01OkD2']),
       );
     },
   );

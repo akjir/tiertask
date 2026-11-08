@@ -55,7 +55,7 @@ Empirical analysis of the TierTask repository identified four structural bottlen
   4. No introduction of third-party packages, code-generation frameworks (`build_runner`, `freezed`), Dart `part`/`part of` directives, barrel `export` shims, or artificial 1:1 micro-test files for internal parser AST builders.
 
 ### 1.4 Description
-`TEP-001` preserves TierTask's 6 top-level architectural layers (`lib/l10n/`, `lib/models/`, `lib/services/`, `lib/repositories/`, `lib/providers/`, `lib/ui/`) while decomposing the 12 `1,000+` line monoliths into `55` focused production files connected via explicit relative `import` statements:
+`TEP-001` preserves TierTask's 6 top-level architectural layers (`lib/l10n/`, `lib/models/`, `lib/services/`, `lib/repositories/`, `lib/providers/`, `lib/ui/`) while decomposing the 12 `1,000+` line monoliths into `71` focused production files connected via explicit relative `import` statements:
 
 * **Facade Preservation & Cohesive Subsystem Engines:**
   * Public domain and service entrypoints (`TaskBoard`, `TaskBoardSync`, `TdfService`, `TdfImporter`, `LocalFileRepository`) remain at their canonical file paths and retain their public method signatures.
@@ -85,7 +85,7 @@ Empirical analysis of the TierTask repository identified four structural bottlen
 
 ### 2.1 Architecture & Affected Modules
 
-#### 2.1.1 Target Production Directory Tree (`lib/` — 55 Hand-Written Leaf Files, All $\le 880$ Lines)
+#### 2.1.1 Target Production Directory Tree (`lib/` — 71 Hand-Written Leaf Files, All $\le 881$ Lines)
 ```text
 lib/
 ├── main.dart                                             (107L)
@@ -140,7 +140,7 @@ lib/
 └── ui/
     ├── app_theme.dart                                    (~855L, kept intact; adds AppThemeNotifier)
     ├── edit_labels_screen.dart                           (535L)
-    ├── edit_task_screen.dart                             (868L, kept intact)
+    ├── edit_task_screen.dart                             (711L, _EditTaskFormColumn extracted; helpers moved to scheduling/blocker leaf files)
     ├── home_screen.dart                                  (~540L, split from 1,722L)
     ├── settings_screen.dart                              (~540L, split from 1,904L)
     └── widgets/
@@ -408,12 +408,12 @@ Add `pumpLeafWidget` and `FakeTaskNotifier` to `test/ui/test_helpers.dart` (`<= 
 
 ### 3.3 Delivered Artifacts
 * **Production Codebase (`lib/` — 71 hand-written `.dart` files + 3 generated `app_localizations*.dart` files):**
-  * **Models (`lib/models/` — 17 files):** `app_workspace.dart` (`537L`), `location_state.dart` (`212L`), `task_board.dart` (`612L`), `task_board_evaluator.dart` (`645L`), `task_board_mutator.dart` (`646L`), `task_board_queue_mutator.dart` (`626L`), `task_board_reconciler.dart` (`577L`), `task_board_sync.dart` (`552L`), `task_item.dart` (`872L`), `task_tier.dart` (`65L`), `tdf_error.dart` (`152L`), `tdf_metadata.dart` (`879L`), `tdf_payload_comparison.dart` (`719L`), `tdf_sync_metadata.dart` (`475L`), `tdf_timezone.dart` (`491L`), `webdav_config.dart` (`510L`), `workspace_sync_state.dart` (`288L`).
-  * **Services (`lib/services/` — 11 files):** `app_logger.dart` (`447L`, DAG rank 0), `base64_service.dart` (`331L`), `tdf_directive_parser.dart` (`640L`), `tdf_historical_parser.dart` (`650L`), `tdf_historical_serializer.dart` (`448L`), `tdf_id_migration.dart` (`317L`), `tdf_importer.dart` (`550L`), `tdf_parser.dart` (`640L`), `tdf_scanner.dart` (`496L`), `tdf_serializer.dart` (`327L`), `tdf_service.dart` (`217L`).
+  * **Models (`lib/models/` — 17 files):** `app_workspace.dart` (`537L`), `location_state.dart` (`212L`), `task_board.dart` (`612L`), `task_board_evaluator.dart` (`645L`), `task_board_mutator.dart` (`646L`), `task_board_queue_mutator.dart` (`626L`), `task_board_reconciler.dart` (`578L`), `task_board_sync.dart` (`553L`), `task_item.dart` (`872L`), `task_tier.dart` (`65L`), `tdf_error.dart` (`152L`), `tdf_metadata.dart` (`881L`), `tdf_payload_comparison.dart` (`721L`), `tdf_sync_metadata.dart` (`475L`), `tdf_timezone.dart` (`491L`), `webdav_config.dart` (`510L`), `workspace_sync_state.dart` (`288L`).
+  * **Services (`lib/services/` — 11 files):** `app_logger.dart` (`468L`, DAG rank 0), `base64_service.dart` (`331L`), `tdf_directive_parser.dart` (`640L`), `tdf_historical_parser.dart` (`650L`), `tdf_historical_serializer.dart` (`448L`), `tdf_id_migration.dart` (`317L`), `tdf_importer.dart` (`550L`), `tdf_parser.dart` (`640L`), `tdf_scanner.dart` (`496L`), `tdf_serializer.dart` (`327L`), `tdf_service.dart` (`217L`).
   * **Repositories (`lib/repositories/` — 7 files):** `app_version_repository.dart` (`189L`), `link_launcher_repository.dart` (`101L`), `local_file_operations.dart` (`553L`), `local_file_repository.dart` (`554L`), `location_repository.dart` (`527L`), `settings_repository.dart` (`478L`), `webdav_repository.dart` (`320L`).
-  * **Providers (`lib/providers/` — 5 files):** `config_providers.dart` (`335L`), `location_providers.dart` (`171L`), `sync_providers.dart` (`576L`), `task_providers.dart` (`641L`), `workspace_providers.dart` (`182L`).
-  * **UI & Entrypoint (`lib/ui/`, `lib/main.dart`, `lib/l10n/` — 31 hand-written files):** `main.dart` (`109L`), `tier_localization_extension.dart` (`57L`), `app_theme.dart` (`846L`), `edit_labels_screen.dart` (`535L`), `edit_task_screen.dart` (`872L`), `home_screen.dart` (`577L`), `settings_screen.dart` (`576L`), and 24 modular widget files in `lib/ui/widgets/` (`147–808L`, all split widgets $\le 647L$).
-* **Test Suites (`test/` — 41 `*_test.dart` suites $\le 650L$ + `test/ui/test_helpers.dart` at `179L`):**
+  * **Providers (`lib/providers/` — 5 files):** `config_providers.dart` (`335L`), `location_providers.dart` (`171L`), `sync_providers.dart` (`577L`), `task_providers.dart` (`641L`), `workspace_providers.dart` (`182L`).
+  * **UI & Entrypoint (`lib/ui/`, `lib/main.dart`, `lib/l10n/` — 31 hand-written files):** `main.dart` (`110L`), `tier_localization_extension.dart` (`57L`), `app_theme.dart` (`846L`), `edit_labels_screen.dart` (`535L`), `edit_task_screen.dart` (`711L`), `home_screen.dart` (`577L`), `settings_screen.dart` (`576L`), and 24 modular widget files in `lib/ui/widgets/` (`147–808L`, all split widgets $\le 647L$).
+* **Test Suites (`test/` — 41 `*_test.dart` suites $\le 650L$ + `test/ui/test_helpers.dart` at `198L`):**
   * 9 model suites (`test/models/`), 5 service suites (`test/services/`), 6 repository suites (`test/repositories/`), 4 provider suites (`test/providers/`), and 17 UI/widget suites (`test/ui/` and `test/ui/widgets/`).
 * **Governance & Tooling:**
   * Updated `.agents/scripts/tiertask_dev.py` (`P-FILE-SIZE`, `P-ACYCLIC-DAG` Tarjan SCC + layer rank, `_SUBSYSTEM_TEST_MAP`, multi-query `find`, `outline` class metrics), `AGENTS.md`, `ARCHITECTURE.md`, and `.agents/skills/` (`tiertask-dev-workflow`, `red-team-audit`, `update-documentation`).

@@ -44,7 +44,7 @@ class FakeLocalFileRepository extends LocalFileRepository {
   }
 }
 
-/// In-memory [TaskNotifier] test double that returns [initialBoard] without filesystem or network I/O.
+/// In-memory [TaskNotifier] test double that returns [initialBoard] and commits mutations in-memory without filesystem or network I/O.
 class FakeTaskNotifier extends TaskNotifier {
   /// Creates a [FakeTaskNotifier] seeded with [initialBoard].
   FakeTaskNotifier([TaskBoard? initialBoard])
@@ -54,7 +54,15 @@ class FakeTaskNotifier extends TaskNotifier {
   final TaskBoard initialBoard;
 
   @override
-  Future<TaskBoard> build() async => initialBoard;
+  Future<TaskBoard> build() async {
+    state = AsyncData(initialBoard);
+    return initialBoard;
+  }
+
+  @override
+  Future<void> pushToRemote(TaskBoard board, {TaskBoard? fallbackBoard}) async {
+    state = AsyncData(board);
+  }
 }
 
 /// Fake [WebDavRepository] for deterministic widget tests of connection status banners.
@@ -140,7 +148,7 @@ Future<void> openSettingsFromMenu(WidgetTester tester) async {
 }
 
 /// Mounts [child] inside an isolated in-memory [ProviderScope] and [MaterialApp] without booting `HomeScreen` or `TdfService.parse`.
-Future<void> pumpLeafWidget(
+Future<ProviderContainer> pumpLeafWidget(
   WidgetTester tester,
   Widget child, {
   TaskBoard? board,
@@ -153,18 +161,29 @@ Future<void> pumpLeafWidget(
 }) async {
   final effectiveThemeSet =
       themeSet ?? AppThemeSet.forPalette(config.themePalette);
+  final container = ProviderContainer(
+    overrides: [
+      settingsRepositoryProvider.overrideWithValue(
+        InMemorySettingsRepository(config),
+      ),
+      localFileRepositoryProvider.overrideWith(
+        (ref) =>
+            FakeLocalFileRepository(config: config, initialTdf: 'tdf 0.5.1\n'),
+      ),
+      webDavRepositoryProvider.overrideWith(
+        (ref) => FakeWebDavRepository(config: config, shouldFail: () => false),
+      ),
+      clockProvider.overrideWithValue(
+        clock ?? () => DateTime.utc(2026, 11, 1, 12, 0),
+      ),
+      taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+    ],
+  );
+  addTearDown(container.dispose);
+  await container.read(taskNotifierProvider.future);
   await tester.pumpWidget(
-    ProviderScope(
-      overrides: [
-        settingsRepositoryProvider.overrideWithValue(
-          InMemorySettingsRepository(config),
-        ),
-        clockProvider.overrideWithValue(
-          clock ?? () => DateTime.utc(2026, 11, 1, 12, 0),
-        ),
-        if (board != null)
-          taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: MaterialApp(
         locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -176,4 +195,5 @@ Future<void> pumpLeafWidget(
       ),
     ),
   );
+  return container;
 }

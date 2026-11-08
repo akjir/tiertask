@@ -30,6 +30,7 @@ import 'tdf_timezone.dart';
 /// per `TDF_SPEC.md` Sections 6.7, 6.8, 6.9.5, and 6.11.2.
 @immutable
 class TaskBoardSync {
+  /// Prevents instantiation of this stateless helper class.
   const TaskBoardSync._();
 
   /// Combines active deletion records from [primary] and [secondary], discarding old acknowledged records when one side advanced generation.

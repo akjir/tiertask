@@ -49,12 +49,12 @@ class TdfBlockParser {
     final hasOpen = state.blockStack.isNotEmpty;
     _check(hasOpen, TdfErrorKind.unexpectedClosingBrace, line);
     switch (state.blockStack.removeLast()) {
-      case final TdfTaskBuilder block:
-        state.taskEntries.add(block.build(line));
-      case final TdfLabelBuilder block:
-        state.labels.add(block.build(line));
+      case final TdfConditionBlockBuilder block:
+        _check(block.hasAnyRule, TdfErrorKind.missingRequiredDirective, line);
       case final TdfDeletedBlockBuilder block:
         state.deletedBlock = block.build(line);
+      case final TdfLabelBuilder block:
+        state.labels.add(block.build(line));
       case final TdfQueueBlockBuilder block:
         state.queueBlock = block.build(line);
         state.queueEntries.addAll(block.entries);
@@ -62,12 +62,12 @@ class TdfBlockParser {
       case final TdfSubtasksBuilder block:
         final hasSteps = block.steps.isNotEmpty;
         _check(hasSteps, TdfErrorKind.missingRequiredDirective, line);
-        if (state.blockStack.last case final TdfTaskBuilder parent) {
+        if (state.blockStack.lastOrNull case final TdfTaskBuilder parent) {
           parent.subtasksAutoFinish = block.autoFinish;
           parent.subtasks = block.steps;
         }
-      case final TdfConditionBlockBuilder block:
-        _check(block.hasAnyRule, TdfErrorKind.missingRequiredDirective, line);
+      case final TdfTaskBuilder block:
+        state.taskEntries.add(block.build(line));
     }
   }
 
@@ -126,8 +126,8 @@ class TdfBlockParser {
     if (tokens.isEmpty) {
       return;
     }
-    if (!state.hasSeenFirstStatement &&
-        _processInitialStatement(state, tokens, line)) {
+    if (!state.hasSeenFirstStatement) {
+      _processInitialStatement(state, tokens, line);
       return;
     }
     if (tokens[0].kind == TdfTokenKind.closeBrace) {
@@ -338,23 +338,23 @@ class TdfBlockParser {
     final name = tokens[0].value;
     final args = tokens.sublist(1);
     switch (active) {
-      case final TdfTaskBuilder block:
-        TdfDirectiveParser.applyTaskDirective(block, name, args, line);
-      case final TdfLabelBuilder block:
-        TdfDirectiveParser.applyLabelDirective(block, name, args, line);
+      case final TdfConditionBlockBuilder block:
+        TdfDirectiveParser.applyConditionDirective(block, name, args, line);
       case final TdfDeletedBlockBuilder block:
         TdfDirectiveParser.applyDeletedDirective(block, name, args, line);
+      case final TdfLabelBuilder block:
+        TdfDirectiveParser.applyLabelDirective(block, name, args, line);
       case final TdfQueueBlockBuilder block:
         TdfDirectiveParser.applyQueueDirective(block, name, args, line);
       case final TdfSubtasksBuilder block:
         TdfDirectiveParser.applySubtasks(block.steps, name, args, line);
-      case final TdfConditionBlockBuilder block:
-        TdfDirectiveParser.applyConditionDirective(block, name, args, line);
+      case final TdfTaskBuilder block:
+        TdfDirectiveParser.applyTaskDirective(block, name, args, line);
     }
   }
 
   /// Validates the first non-empty statement (`tdf 0.5.1` or legacy `tdf 0.5.0`) per Section 4.0 and Section 10.6.
-  static bool _processInitialStatement(
+  static void _processInitialStatement(
     TdfParserState state,
     List<TdfScannedToken> tokens,
     int line,
@@ -382,7 +382,7 @@ class TdfBlockParser {
       }
       state.isLegacy050 = tokens[1].value == legacySupportedVersion;
       state.hasSeenFirstStatement = true;
-      return true;
+      return;
     }
     _fail(TdfErrorKind.missingVersionHeader, line);
   }
@@ -405,9 +405,10 @@ class TdfBlockParser {
           isPriority: task.isPriority,
           id: task.id,
         ));
-        final effectiveMod = task.effectiveModifiedAt;
-        if (latestModified == null || effectiveMod.isAfter(latestModified)) {
-          latestModified = effectiveMod;
+        final effectiveModifiedAt = task.effectiveModifiedAt;
+        if (latestModified == null ||
+            effectiveModifiedAt.isAfter(latestModified)) {
+          latestModified = effectiveModifiedAt;
         }
       }
     }
@@ -434,10 +435,8 @@ class TdfBlockParser {
   /// Validates canonical `labels` references across all parsed tasks.
   static void _validateLabelReferences(TdfParserState state) {
     for (final entry in state.taskEntries) {
-      for (final labelId in entry.canonicalLabelIds) {
-        final exists = state.labelIds.contains(labelId);
-        _check(exists, TdfErrorKind.unknownLabelReference, entry.labelsLine);
-      }
+      final allExist = entry.task.labelIds.every(state.labelIds.contains);
+      _check(allExist, TdfErrorKind.unknownLabelReference, entry.labelsLine);
     }
   }
 
@@ -516,10 +515,9 @@ final class TdfLabelBuilder extends TdfBlockBuilder
   );
 }
 
-/// Pairs a built [TaskItem] with source line numbers and label reference lists for post-parse validation.
+/// Pairs a built [TaskItem] with source line numbers for post-parse validation.
 typedef TdfParsedTaskEntry = ({
   TaskItem task,
-  List<String> canonicalLabelIds,
   int headerLine,
   int labelsLine,
   int blockedLine,
@@ -619,7 +617,6 @@ final class TdfTaskBuilder extends TdfBlockBuilder with TdfTaskDirectiveFields {
     );
     return (
       task: task,
-      canonicalLabelIds: canonical,
       headerLine: headerLine,
       labelsLine: labelsLine,
       blockedLine: blockedLine,

@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/services/tdf_parser.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -370,6 +371,96 @@ void main() {
         TdfErrorKind.invalidUri,
         expectedLine: 4,
       );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Empty subtasks"\n  created 2026-11-01\n  subtasks {\n  }\n}',
+        TdfErrorKind.missingRequiredDirective,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Empty condition"\n  created 2026-11-01\n  condition {\n  }\n}',
+        TdfErrorKind.missingRequiredDirective,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Duplicate subtasks"\n  created 2026-11-01\n  subtasks {\n    step false "One"\n  }\n  subtasks {\n    step false "Two"\n  }\n}',
+        TdfErrorKind.duplicateDirective,
+        expectedLine: 7,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T1"\n  created 2026-11-01\n  blocked 000002OkD2\n}\n'
+        'task 000002OkD2 {\n  name "T2"\n  created 2026-11-01\n  blocked 000003OkD2\n}\n'
+        'task 000003OkD2 {\n  name "T3"\n  created 2026-11-01\n  blocked 000001OkD2\n}',
+        TdfErrorKind.circularDependency,
+        expectedLine: 4,
+      );
+    });
+
+    test('enforces structural parser bounds and guards standalone TdfSubtasksBuilder closure', () {
+      final state = TdfParserState();
+      final subtasksBuilder = TdfSubtasksBuilder(true)
+        ..steps.add(const SubtaskItem(title: 'Step 1', isCompleted: false));
+      state.blockStack.add(subtasksBuilder);
+      expect(
+        () => TdfBlockParser.closeCurrentBlock(state, 1),
+        returnsNormally,
+        reason: 'Closing a standalone TdfSubtasksBuilder must not throw StateError on empty blockStack',
+      );
+      expect(state.blockStack, isEmpty);
+
+      final nineConditions = List.filled(
+        9,
+        '  condition {\n    day mon\n  }',
+      ).join('\n');
+      final blocks4100 = List.generate(
+        410,
+        (index) =>
+            'label ${index.toString().padLeft(6, '0')}OkD2 {\n  name "L"\n$nineConditions\n}',
+      ).join('\n');
+      final steps513 = List.filled(513, '    step false "Step"').join('\n');
+      final days65 = List.filled(65, 'mon').join(' ');
+
+      final limitCases = <({String description, String document})>[
+        (
+          description: 'maxFileBytes (1048576)',
+          document: 'tdf 0.5.1\n#${'a' * 1048570}',
+        ),
+        (
+          description: 'maxLineCount (16384)',
+          document: 'tdf 0.5.1\n${'\n' * 16384}',
+        ),
+        (
+          description: 'maxNestingDepth (2)',
+          document: 'tdf 0.5.1\ntask 000001OkD2 {\n  subtasks {\n    condition {\n    }\n  }\n}\n',
+        ),
+        (
+          description: 'maxBlocksPerDoc (4096)',
+          document: 'tdf 0.5.1\n$blocks4100\n',
+        ),
+        (
+          description: 'maxStmtsPerBlock (512)',
+          document:
+              'tdf 0.5.1\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$steps513\n  }\n}\n',
+        ),
+        (
+          description: 'maxArgsPerStmt (64)',
+          document:
+              'tdf 0.5.1\nlabel 000001OkD2 {\n  name "L"\n  condition {\n    day $days65\n  }\n}\n',
+        ),
+      ];
+
+      for (final testCase in limitCases) {
+        expect(
+          () => tdfService.parse(testCase.document, evaluationTime: fixedDate),
+          throwsA(
+            isA<TdfException>().having(
+              (error) => error.kind,
+              'kind',
+              TdfErrorKind.limitExceeded,
+            ),
+          ),
+          reason: 'Exceeding ${testCase.description} must throw limitExceeded',
+        );
+      }
     });
 
     test('enforces Section 7 and Section 7.2 bounds including 512 condition rules across blocks, Unicode scalar text limits, calendar endpoints, and canonical output bounds', () {

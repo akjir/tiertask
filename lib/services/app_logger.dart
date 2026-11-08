@@ -85,6 +85,7 @@ enum LogTag {
 /// Opt-in, zero-dependency diagnostic logger with synchronous crash preservation,
 /// credential redaction, and rolling ring-buffer size protection.
 class AppLogger {
+  /// Prevents instantiation of this static diagnostic logger class.
   const AppLogger._();
 
   /// Default file name for the persistent diagnostic log.

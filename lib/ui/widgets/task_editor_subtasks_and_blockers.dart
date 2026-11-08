@@ -16,7 +16,9 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/task_board.dart';
 import '../../models/task_item.dart';
+import '../../models/task_tier.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -163,6 +165,101 @@ class TaskEditorBlockedBySection extends StatelessWidget {
       for (final candidate in candidateTasks)
         if (selectedBlockedByIds.contains(candidate.id)) candidate,
     ];
+  }
+}
+
+/// Stateless board query and validation helper for the task editor.
+class TaskEditorBoardHelper {
+  /// Prevents instantiation of [TaskEditorBoardHelper].
+  const TaskEditorBoardHelper._();
+
+  /// Collects open tasks on [board] that can be referenced in the prerequisites section.
+  static List<TaskItem> collectCandidateBlockerTasks({
+    required TaskBoard board,
+    required String? currentTaskId,
+    required Set<String> selectedBlockedByIds,
+  }) {
+    return <TaskItem>[
+      for (final task in board.allTasks)
+        if (task.id != currentTaskId &&
+            ((!task.isCompleted && task.completedAt == null) ||
+                selectedBlockedByIds.contains(task.id)))
+          task,
+    ];
+  }
+
+  /// Collects candidate prerequisite task IDs that would create a dependency cycle.
+  static Set<String> collectDisabledBlockerIds({
+    required TaskBoard board,
+    required TaskItem? currentTask,
+    required List<TaskItem> candidates,
+  }) {
+    if (currentTask == null) {
+      return const <String>{};
+    }
+    return <String>{
+      for (final candidate in candidates)
+        if (board.wouldCreateDependencyCycle(currentTask.id, candidate.id))
+          candidate.id,
+    };
+  }
+
+  /// Collects selected prerequisite task IDs in canonical board declaration order.
+  static List<String> collectOrderedBlockedByIds(
+    TaskBoard board,
+    Set<String> selectedBlockedByIds,
+  ) {
+    return <String>[
+      for (final task in board.allTasks)
+        if (selectedBlockedByIds.contains(task.id)) task.id,
+    ];
+  }
+
+  /// Collects selected label IDs in canonical board declaration order.
+  static List<String> collectOrderedLabelIds(
+    TaskBoard board,
+    Set<String> selectedLabelIds,
+  ) {
+    return <String>[
+      for (final label in board.labels)
+        if (selectedLabelIds.contains(label.id)) label.id,
+    ];
+  }
+
+  /// Derives the initial [QuickAddMode] for an existing [task] on [board].
+  static QuickAddMode resolveInitialMode(TaskItem task, TaskBoard board) {
+    if (task.isCompleted || task.completedAt != null) {
+      return QuickAddMode.standard;
+    }
+    if (task.isPriority) {
+      return QuickAddMode.priority;
+    }
+    if (board.someday.any((candidate) => candidate.id == task.id) ||
+        (board.allTasks.any((candidate) => candidate.id == task.id) &&
+            !board.queueTaskIds.contains(task.id))) {
+      return QuickAddMode.someday;
+    }
+    return QuickAddMode.standard;
+  }
+
+  /// Validates the entered task [rawTitle] against empty and duplicate constraints.
+  static String? validateTitle({
+    required TaskBoard board,
+    required String rawTitle,
+    required String? excludingTaskId,
+    required AppLocalizations localizations,
+  }) {
+    final trimmed = rawTitle.trim();
+    if (trimmed.isEmpty) {
+      return localizations.taskNameErrorEmpty;
+    }
+    if (board.hasDuplicateTaskTitle(
+      trimmed,
+      excludingTaskId: excludingTaskId,
+    )) {
+      return localizations.taskNameErrorDuplicate;
+    }
+    return null;
   }
 }
 

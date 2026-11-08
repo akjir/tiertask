@@ -25,29 +25,55 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('LocalFileRepository Path Helpers & Native Picker Channel', () {
-    late Directory tempDir;
+    late Directory tempDirectory;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp('tiertask_dir_helpers_');
+      tempDirectory = await Directory.systemTemp.createTemp(
+        'tiertask_dir_helpers_',
+      );
     });
 
     tearDown(() async {
-      if (await tempDir.exists()) {
-        await tempDir.delete(recursive: true);
+      if (await tempDirectory.exists()) {
+        await tempDirectory.delete(recursive: true);
       }
     });
 
-    test('resolves directory path, extracts file name, and combines directory and file name for relative and absolute paths', () {
-      final relativeRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
-        baseDirectoryPath: tempDir.path,
+    test('resolves directory path, extracts file name, and combines directory and file name for relative, absolute, and root paths', () {
+      const operations = LocalFileOperations<LocalFileException>(
+        LocalFileException.new,
       );
-      expect(relativeRepo.extractFileName(), equals('tasks.tdf'));
-      expect(relativeRepo.resolveDirectoryPath(), equals(tempDir.path));
-      expect(relativeRepo.tryResolveDirectoryPath(), equals(tempDir.path));
+      expect(operations.trimTrailingSeparators('/'), equals('/'));
+      expect(operations.trimTrailingSeparators('///'), equals('/'));
+      expect(operations.trimTrailingSeparators(r'C:\'), equals(r'C:\'));
+      expect(operations.trimTrailingSeparators(r'C:\\\'), equals(r'C:\'));
       expect(
-        relativeRepo.tryResolveFilePath(),
-        equals('${tempDir.path}${Platform.pathSeparator}tasks.tdf'),
+        LocalFileRepository.defaultLogFilePath(baseDirectoryPath: '/'),
+        equals('/tiertask.log'),
+      );
+
+      final rootRepository = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: '/',
+      );
+      expect(rootRepository.resolveFilePath(), equals('/tasks.tdf'));
+
+      final relativeRepository = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: tempDirectory.path,
+      );
+      expect(relativeRepository.extractFileName(), equals('tasks.tdf'));
+      expect(
+        relativeRepository.resolveDirectoryPath(),
+        equals(tempDirectory.path),
+      );
+      expect(
+        relativeRepository.tryResolveDirectoryPath(),
+        equals(tempDirectory.path),
+      );
+      expect(
+        relativeRepository.tryResolveFilePath(),
+        equals('${tempDirectory.path}${Platform.pathSeparator}tasks.tdf'),
       );
       expect(
         LocalFileRepository.extractDirectoryFromPath('tasks.tdf'),
@@ -59,24 +85,28 @@ void main() {
       );
       expect(LocalFileRepository.resolveDefaultDirectoryPath(), isNotEmpty);
 
-      final customSubdir =
-          '${tempDir.path}${Platform.pathSeparator}custom_folder';
+      final customSubdirectory =
+          '${tempDirectory.path}${Platform.pathSeparator}custom_folder';
       final combined = LocalFileRepository.combineDirectoryAndFileName(
-        customSubdir,
+        customSubdirectory,
         'work.tdf',
       );
       expect(
         combined,
-        equals('$customSubdir${Platform.pathSeparator}work.tdf'),
+        equals('$customSubdirectory${Platform.pathSeparator}work.tdf'),
       );
 
-      final absoluteRepo = LocalFileRepository(
+      final absoluteRepository = LocalFileRepository(
         config: WebDavConfig(localFilePath: combined),
-        baseDirectoryPath: '${tempDir.path}${Platform.pathSeparator}ignored',
+        baseDirectoryPath:
+            '${tempDirectory.path}${Platform.pathSeparator}ignored',
       );
-      expect(absoluteRepo.resolveFilePath(), equals(combined));
-      expect(absoluteRepo.resolveDirectoryPath(), equals(customSubdir));
-      expect(absoluteRepo.extractFileName(), equals('work.tdf'));
+      expect(absoluteRepository.resolveFilePath(), equals(combined));
+      expect(
+        absoluteRepository.resolveDirectoryPath(),
+        equals(customSubdirectory),
+      );
+      expect(absoluteRepository.extractFileName(), equals('work.tdf'));
     });
 
     test('pickDirectory and pickTdfFile invoke native directory_picker MethodChannel and handle cancel', () async {
@@ -98,27 +128,27 @@ void main() {
             );
       });
 
-      final repo = LocalFileRepository(
+      final repository = LocalFileRepository(
         config: const WebDavConfig(localFilePath: 'tasks.tdf'),
-        baseDirectoryPath: tempDir.path,
+        baseDirectoryPath: tempDirectory.path,
       );
-      final selectedDir = await repo.pickDirectory(
-        initialDirectory: tempDir.path,
+      final selectedDirectory = await repository.pickDirectory(
+        initialDirectory: tempDirectory.path,
       );
-      expect(selectedDir, equals('/home/stefan/SelectedTasks'));
+      expect(selectedDirectory, equals('/home/stefan/SelectedTasks'));
       expect(recordedCall?.method, equals('pickDirectory'));
 
-      mockResponse = '${tempDir.path}/custom_board';
-      final pickedFile = await repo.pickTdfFile(
-        initialDirectory: tempDir.path,
+      mockResponse = '${tempDirectory.path}/custom_board';
+      final pickedFile = await repository.pickTdfFile(
+        initialDirectory: tempDirectory.path,
         currentFileName: 'tasks.tdf',
       );
-      expect(pickedFile, equals('${tempDir.path}/custom_board.tdf'));
+      expect(pickedFile, equals('${tempDirectory.path}/custom_board.tdf'));
       expect(recordedCall?.method, equals('pickFile'));
 
       mockResponse = null;
-      expect(await repo.pickDirectory(), isNull);
-      expect(await repo.pickTdfFile(), isNull);
+      expect(await repository.pickDirectory(), isNull);
+      expect(await repository.pickTdfFile(), isNull);
     });
 
     test('validates file names and paths, initializes missing .tdf files, and lists sorted .tdf files', () async {
@@ -153,46 +183,55 @@ void main() {
         'sub/tasks.tdf',
         r'sub\tasks.tdf',
         'bad\x00name.tdf',
+        'C:tasks.tdf',
+        'tasks.tdf:\$DATA',
       ]) {
-        expect(LocalFileRepository.isValidSingleFileName(invalid), isFalse);
+        expect(
+          LocalFileRepository.isValidSingleFileName(invalid),
+          isFalse,
+          reason: 'Single file name "$invalid" must be rejected',
+        );
         expect(
           () => LocalFileRepository.validateFileName(invalid),
           throwsA(isA<LocalFileException>()),
+          reason: 'validateFileName("$invalid") must throw LocalFileException',
         );
       }
 
-      final newRepo = LocalFileRepository(
+      final newRepository = LocalFileRepository(
         config: const WebDavConfig(localFilePath: 'newly_created.tdf'),
-        baseDirectoryPath: tempDir.path,
+        baseDirectoryPath: tempDirectory.path,
       );
-      expect(newRepo.fileExists(), isFalse);
-      await newRepo.initializeTdfIfNeeded();
-      expect(newRepo.fileExists(), isTrue);
+      expect(newRepository.fileExists(), isFalse);
+      await newRepository.initializeTdfIfNeeded();
+      expect(newRepository.fileExists(), isTrue);
       final createdPath =
-          '${tempDir.path}${Platform.pathSeparator}newly_created.tdf';
+          '${tempDirectory.path}${Platform.pathSeparator}newly_created.tdf';
       expect(File(createdPath).readAsStringSync(), startsWith('tdf '));
 
-      File('${tempDir.path}${Platform.pathSeparator}alpha.tdf')
+      File('${tempDirectory.path}${Platform.pathSeparator}alpha.tdf')
           .writeAsStringSync('tdf 0.5.1\n', flush: true);
-      File('${tempDir.path}${Platform.pathSeparator}ignore.txt')
+      File('${tempDirectory.path}${Platform.pathSeparator}ignore.txt')
           .writeAsStringSync('not tdf', flush: true);
       expect(
-        newRepo.listTdfFileNamesInDirectory(),
+        newRepository.listTdfFileNamesInDirectory(),
         equals(<String>['alpha.tdf', 'newly_created.tdf']),
       );
     });
   });
 
   group('LocalFileRepository Read, Write, Wipe, Rename, Delete & Bounds', () {
-    late Directory tempDir;
+    late Directory tempDirectory;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp('tiertask_local_test_');
+      tempDirectory = await Directory.systemTemp.createTemp(
+        'tiertask_local_test_',
+      );
     });
 
     tearDown(() async {
-      if (await tempDir.exists()) {
-        await tempDir.delete(recursive: true);
+      if (await tempDirectory.exists()) {
+        await tempDirectory.delete(recursive: true);
       }
     });
 
@@ -202,7 +241,7 @@ void main() {
           localFilePath: 'custom_tasks.tdf',
           storageMode: StorageMode.local,
         ),
-        baseDirectoryPath: tempDir.path,
+        baseDirectoryPath: tempDirectory.path,
         maxFileBytes: 256,
       );
       expect(await repository.loadTdf(), isEmpty);
@@ -219,17 +258,45 @@ void main() {
         'bad\x00file.tdf',
         'bad\nfile.tdf',
         r'..\escape.tdf',
+        r'\tasks.tdf',
+        r'\\server\share\tasks.tdf',
+        'C:tasks.tdf',
+        'tasks.tdf:\$DATA',
       ]) {
-        final invalidRepo = LocalFileRepository(
+        final invalidRepository = LocalFileRepository(
           config: WebDavConfig(localFilePath: invalidPath),
-          baseDirectoryPath: tempDir.path,
+          baseDirectoryPath: tempDirectory.path,
         );
-        expect(invalidRepo.tryResolveFilePath(), isNull);
-        expect(invalidRepo.tryResolveDirectoryPath(), isNull);
+        expect(
+          invalidRepository.tryResolveFilePath(),
+          isNull,
+          reason: 'tryResolveFilePath for "$invalidPath" must return null',
+        );
+        expect(
+          invalidRepository.tryResolveDirectoryPath(),
+          isNull,
+          reason: 'tryResolveDirectoryPath for "$invalidPath" must return null',
+        );
         await expectLater(
-          invalidRepo.loadTdf,
+          invalidRepository.loadTdf,
           throwsA(isA<LocalFileException>()),
           reason: 'Invalid localFilePath "$invalidPath" must be rejected',
+        );
+      }
+
+      for (final invalidBase in <String>[
+        '${tempDirectory.path}/../escape',
+        '../escape',
+        '${tempDirectory.path}/bad\x00dir',
+      ]) {
+        final invalidBaseRepository = LocalFileRepository(
+          config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+          baseDirectoryPath: invalidBase,
+        );
+        expect(
+          invalidBaseRepository.tryResolveFilePath(),
+          isNull,
+          reason: 'Invalid baseDirectoryPath "$invalidBase" must be rejected',
         );
       }
 
@@ -273,64 +340,72 @@ void main() {
           localFilePath: 'wipe_test.tdf',
           storageMode: StorageMode.local,
         ),
-        baseDirectoryPath: tempDir.path,
+        baseDirectoryPath: tempDirectory.path,
       );
-      final mainFile = File('${tempDir.path}/wipe_test.tdf');
-      final bakFile = File('${tempDir.path}/wipe_test.tdf.bak');
-      final bak001File = File('${tempDir.path}/wipe_test.tdf.bak.001');
-      final bak002File = File('${tempDir.path}/wipe_test.tdf.bak.002');
+      final mainFile = File('${tempDirectory.path}/wipe_test.tdf');
+      final backupFile = File('${tempDirectory.path}/wipe_test.tdf.bak');
+      final backup001File = File('${tempDirectory.path}/wipe_test.tdf.bak.001');
+      final backup002File = File('${tempDirectory.path}/wipe_test.tdf.bak.002');
 
       await repository.wipeTdf(createBackup: true);
       expect(await mainFile.readAsString(), equals('tdf 0.5.1\n'));
-      expect(await bakFile.exists(), isFalse);
+      expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content 1', flush: true);
       await repository.wipeTdf(createBackup: false);
       expect(await mainFile.readAsString(), equals('tdf 0.5.1\n'));
-      expect(await bakFile.exists(), isFalse);
+      expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content A', flush: true);
       await repository.wipeTdf(createBackup: true);
-      expect(await bakFile.readAsString(), equals('corrupted tdf content A'));
+      expect(
+        await backupFile.readAsString(),
+        equals('corrupted tdf content A'),
+      );
 
       await mainFile.writeAsString('corrupted tdf content B', flush: true);
       await repository.wipeTdf(createBackup: true);
       expect(
-        await bak001File.readAsString(),
+        await backup001File.readAsString(),
         equals('corrupted tdf content B'),
       );
-      expect(await bakFile.readAsString(), equals('corrupted tdf content A'));
+      expect(
+        await backupFile.readAsString(),
+        equals('corrupted tdf content A'),
+      );
 
       await mainFile.writeAsString('corrupted tdf content C', flush: true);
       await repository.wipeTdf(createBackup: true);
       expect(
-        await bak002File.readAsString(),
+        await backup002File.readAsString(),
         equals('corrupted tdf content C'),
       );
 
       final renamedPath = await repository.renameTdf('renamed_board');
       expect(
         renamedPath,
-        equals('${tempDir.path}${Platform.pathSeparator}renamed_board.tdf'),
+        equals(
+          '${tempDirectory.path}${Platform.pathSeparator}renamed_board.tdf',
+        ),
       );
       expect(await mainFile.exists(), isFalse);
       expect(await File(renamedPath).exists(), isTrue);
 
-      final renamedRepo = LocalFileRepository(
+      final renamedRepository = LocalFileRepository(
         config: WebDavConfig(localFilePath: renamedPath),
       );
-      await renamedRepo.deleteTdf();
+      await renamedRepository.deleteTdf();
       expect(await File(renamedPath).exists(), isFalse);
     });
 
-    test('LocalFileLogSink reads, writes, appends, truncates to maxBytes, and deletes diagnostic log files', () {
+    test('LocalFileLogSink reads, writes, appends, truncates to maxBytes, guards against non-positive maxBytes and symlinks, and deletes diagnostic log files', () {
       const sink = LocalFileLogSink();
       final defaultPath = sink.defaultLogFilePath(
-        baseDirectoryPath: tempDir.path,
+        baseDirectoryPath: tempDirectory.path,
       );
       expect(
         defaultPath,
-        equals('${tempDir.path}${Platform.pathSeparator}tiertask.log'),
+        equals('${tempDirectory.path}${Platform.pathSeparator}tiertask.log'),
       );
       expect(sink.readLogFileSync(defaultPath, maxBytes: 1024), isEmpty);
 
@@ -344,6 +419,25 @@ void main() {
         sink.readLogFileSync(defaultPath, maxBytes: 7),
         equals('Line 2\n'),
       );
+      expect(sink.readLogFileSync(defaultPath, maxBytes: 0), isEmpty);
+      expect(sink.readLogFileSync(defaultPath, maxBytes: -5), isEmpty);
+
+      final targetFile = File(
+        '${tempDirectory.path}${Platform.pathSeparator}protected_target.txt',
+      )..writeAsStringSync('sensitive content', flush: true);
+      final symlinkLogPath =
+          '${tempDirectory.path}${Platform.pathSeparator}symlink.log';
+      Link(symlinkLogPath).createSync(targetFile.path);
+
+      expect(sink.readLogFileSync(symlinkLogPath, maxBytes: 1024), isEmpty);
+      sink.writeLogFileSync(symlinkLogPath, 'injected log', append: false);
+      expect(targetFile.readAsStringSync(), equals('sensitive content'));
+      sink.deleteLogFileSync(symlinkLogPath);
+      expect(
+        FileSystemEntity.typeSync(symlinkLogPath, followLinks: false),
+        equals(FileSystemEntityType.link),
+      );
+      expect(targetFile.existsSync(), isTrue);
 
       sink.deleteLogFileSync(defaultPath);
       expect(File(defaultPath).existsSync(), isFalse);
@@ -351,45 +445,51 @@ void main() {
   });
 
   group('LocalFileRepository Safe Non-Destructive File Move & Error Reasons', () {
-    late Directory sourceDir;
-    late Directory targetDir;
+    late Directory sourceDirectory;
+    late Directory targetDirectory;
 
     setUp(() async {
-      sourceDir = await Directory.systemTemp.createTemp('tiertask_move_src_');
-      targetDir = await Directory.systemTemp.createTemp('tiertask_move_dst_');
+      sourceDirectory = await Directory.systemTemp.createTemp(
+        'tiertask_move_src_',
+      );
+      targetDirectory = await Directory.systemTemp.createTemp(
+        'tiertask_move_dst_',
+      );
     });
 
     tearDown(() async {
-      if (await sourceDir.exists()) {
-        await sourceDir.delete(recursive: true);
+      if (await sourceDirectory.exists()) {
+        await sourceDirectory.delete(recursive: true);
       }
-      if (await targetDir.exists()) {
-        await targetDir.delete(recursive: true);
+      if (await targetDirectory.exists()) {
+        await targetDirectory.delete(recursive: true);
       }
     });
 
     test('moves existing .tdf file across directories and rejects existing target file, directory, symlink, or invalid source', () async {
-      final sourcePath = '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
-      final targetPath = '${targetDir.path}${Platform.pathSeparator}tasks.tdf';
+      final sourcePath =
+          '${sourceDirectory.path}${Platform.pathSeparator}tasks.tdf';
+      final targetPath =
+          '${targetDirectory.path}${Platform.pathSeparator}tasks.tdf';
       const content = 'tdf 0.3.0\ntask t001 {\n    name "Move Me"\n}\n';
       await File(sourcePath).writeAsString(content, flush: true);
 
-      LocalFileRepository englishRepo(String path) => LocalFileRepository(
+      LocalFileRepository englishRepository(String path) => LocalFileRepository(
         config: WebDavConfig(
           localFilePath: path,
           language: AppLanguage.english,
         ),
       );
-      final sourceRepo = englishRepo(sourcePath);
-      final targetRepo = englishRepo(targetPath);
+      final sourceRepository = englishRepository(sourcePath);
+      final targetRepository = englishRepository(targetPath);
 
-      await sourceRepo.moveTdfFile(targetRepo);
+      await sourceRepository.moveTdfFile(targetRepository);
       expect(await File(sourcePath).exists(), isFalse);
       expect(await File(targetPath).readAsString(), equals(content));
 
       await File(sourcePath).writeAsString(content, flush: true);
       await expectLater(
-        () => sourceRepo.moveTdfFile(targetRepo),
+        () => sourceRepository.moveTdfFile(targetRepository),
         throwsA(
           isA<LocalFileException>().having(
             (error) => error.message,
@@ -399,11 +499,13 @@ void main() {
         ),
       );
 
-      final existingDirTarget =
-          '${targetDir.path}${Platform.pathSeparator}existing_dir.tdf';
-      await Directory(existingDirTarget).create();
+      final existingDirectoryTarget =
+          '${targetDirectory.path}${Platform.pathSeparator}existing_dir.tdf';
+      await Directory(existingDirectoryTarget).create();
       await expectLater(
-        () => sourceRepo.moveTdfFile(englishRepo(existingDirTarget)),
+        () => sourceRepository.moveTdfFile(
+          englishRepository(existingDirectoryTarget),
+        ),
         throwsA(
           isA<LocalFileException>().having(
             (error) => error.message,
@@ -416,11 +518,12 @@ void main() {
       );
 
       final symlinkTarget =
-          '${targetDir.path}${Platform.pathSeparator}symlink_tasks.tdf';
-      await Link(symlinkTarget)
-          .create('${targetDir.path}${Platform.pathSeparator}dangling_target');
+          '${targetDirectory.path}${Platform.pathSeparator}symlink_tasks.tdf';
+      await Link(symlinkTarget).create(
+        '${targetDirectory.path}${Platform.pathSeparator}dangling_target',
+      );
       await expectLater(
-        () => sourceRepo.moveTdfFile(englishRepo(symlinkTarget)),
+        () => sourceRepository.moveTdfFile(englishRepository(symlinkTarget)),
         throwsA(
           isA<LocalFileException>().having(
             (error) => error.message,
@@ -431,13 +534,14 @@ void main() {
       );
 
       final symlinkSource =
-          '${sourceDir.path}${Platform.pathSeparator}link_source.tdf';
+          '${sourceDirectory.path}${Platform.pathSeparator}link_source.tdf';
       await Link(symlinkSource).create(sourcePath);
-      final freshTargetRepo = englishRepo(
-        '${targetDir.path}${Platform.pathSeparator}fresh.tdf',
+      final freshTargetRepository = englishRepository(
+        '${targetDirectory.path}${Platform.pathSeparator}fresh.tdf',
       );
       await expectLater(
-        () => englishRepo(symlinkSource).moveTdfFile(freshTargetRepo),
+        () =>
+            englishRepository(symlinkSource).moveTdfFile(freshTargetRepository),
         throwsA(
           isA<LocalFileException>().having(
             (error) => error.message,
@@ -447,10 +551,34 @@ void main() {
         ),
       );
 
-      final missingDirTarget =
-          '${targetDir.path}${Platform.pathSeparator}missing_folder${Platform.pathSeparator}tasks.tdf';
+      if (Platform.isLinux) {
+        final socketSource =
+            '${sourceDirectory.path}${Platform.pathSeparator}sock.tdf';
+        final serverSocket = await ServerSocket.bind(
+          InternetAddress(socketSource, type: InternetAddressType.unix),
+          0,
+        );
+        addTearDown(() async {
+          await serverSocket.close();
+        });
+        await expectLater(
+          () =>
+              englishRepository(socketSource)
+                  .moveTdfFile(freshTargetRepository),
+          throwsA(isA<LocalFileException>()),
+        );
+        await expectLater(
+          englishRepository(socketSource).deleteTdf,
+          throwsA(isA<LocalFileException>()),
+        );
+      }
+
+      final missingDirectoryTarget =
+          '${targetDirectory.path}${Platform.pathSeparator}missing_folder${Platform.pathSeparator}tasks.tdf';
       await expectLater(
-        () => sourceRepo.moveTdfFile(englishRepo(missingDirTarget)),
+        () => sourceRepository.moveTdfFile(
+          englishRepository(missingDirectoryTarget),
+        ),
         throwsA(
           isA<LocalFileException>().having(
             (error) => error.message,
@@ -462,12 +590,12 @@ void main() {
     });
 
     test('maps OS error codes across Linux and Windows and probes target directory writability', () async {
-      final repo = LocalFileRepository(
+      final repository = LocalFileRepository(
         config: const WebDavConfig(
           localFilePath: 'tasks.tdf',
           language: AppLanguage.english,
         ),
-        baseDirectoryPath: sourceDir.path,
+        baseDirectoryPath: sourceDirectory.path,
       );
       expect(
         LocalFileOperations.maxBackupSuffix,
@@ -501,13 +629,13 @@ void main() {
         (206, 'Filename is too long.', 'too long'),
         (999, 'Custom hardware I/O fault', 'Custom hardware I/O fault'),
       ]) {
-        final fsException = FileSystemException(
+        final fileSystemException = FileSystemException(
           'Move failed',
           '/target/tasks.tdf',
           OSError(message, code),
         );
-        final mapped = repo.mapMoveFileSystemException(
-          fsException,
+        final mapped = repository.mapMoveFileSystemException(
+          fileSystemException,
           fallbackPath: '/target/tasks.tdf',
         );
         expect(
@@ -521,31 +649,31 @@ void main() {
       final idResult = await Process.run('id', const <String>['-u']);
       if (idResult.stdout.toString().trim() == '0') return;
 
-      final readOnlyDir =
-          '${targetDir.path}${Platform.pathSeparator}readonly_dir';
-      await Directory(readOnlyDir).create();
-      await Process.run('chmod', <String>['0500', readOnlyDir]);
+      final readOnlyDirectory =
+          '${targetDirectory.path}${Platform.pathSeparator}readonly_dir';
+      await Directory(readOnlyDirectory).create();
+      await Process.run('chmod', <String>['0500', readOnlyDirectory]);
       addTearDown(() async {
-        await Process.run('chmod', <String>['0700', readOnlyDir]);
+        await Process.run('chmod', <String>['0700', readOnlyDirectory]);
       });
 
-      final nonExistentSourceRepo = LocalFileRepository(
+      final nonExistentSourceRepository = LocalFileRepository(
         config: WebDavConfig(
           localFilePath:
-              '${sourceDir.path}${Platform.pathSeparator}not_created_yet.tdf',
+              '${sourceDirectory.path}${Platform.pathSeparator}not_created_yet.tdf',
           language: AppLanguage.english,
         ),
       );
-      final readOnlyTargetRepo = LocalFileRepository(
+      final readOnlyTargetRepository = LocalFileRepository(
         config: WebDavConfig(
           localFilePath:
-              '$readOnlyDir${Platform.pathSeparator}not_created_yet.tdf',
+              '$readOnlyDirectory${Platform.pathSeparator}not_created_yet.tdf',
           language: AppLanguage.english,
         ),
       );
 
       await expectLater(
-        () => nonExistentSourceRepo.moveTdfFile(readOnlyTargetRepo),
+        () => nonExistentSourceRepository.moveTdfFile(readOnlyTargetRepository),
         throwsA(
           isA<LocalFileException>().having(
             (error) => error.message,

@@ -141,6 +141,24 @@ class TaskEditorRepeatField extends StatelessWidget {
     );
   }
 
+  /// Resolves the `repeat` rule when [isRepeating] is enabled, or `null` when disabled or invalid.
+  static TaskRepeatRule? parseRepeatRule({
+    required bool isRepeating,
+    required String rawCount,
+    required RepeatUnit unit,
+  }) {
+    if (!isRepeating) {
+      return null;
+    }
+    final parsedCount = int.tryParse(rawCount.trim());
+    if (parsedCount == null ||
+        parsedCount < 1 ||
+        parsedCount > TaskRepeatRule.maxRepeatCount) {
+      return null;
+    }
+    return TaskRepeatRule(count: parsedCount, unit: unit);
+  }
+
   /// Builds the numeric recurrence interval count text field.
   Widget _buildCountField(AppLocalizations localizations, AppTheme appTheme) {
     final borderRadius = BorderRadius.circular(14);
@@ -374,6 +392,85 @@ class TaskEditorSuspendedField extends StatelessWidget {
     );
   }
 
+  /// Formats an initial `suspended` timestamp for the input field (omitting `defaultSuspendedAt`).
+  static String formatInitialText(DateTime? suspendedAt) {
+    if (suspendedAt == null || suspendedAt == TaskItem.defaultSuspendedAt) {
+      return '';
+    }
+    return TaskItem.formatTdfTimestamp(suspendedAt);
+  }
+
+  /// Resolves the `suspendedAt` timestamp when [isSuspended] is enabled, or `null` when disabled.
+  static DateTime? parseSuspendedTimestamp({
+    required bool isSuspended,
+    required String rawText,
+  }) {
+    if (!isSuspended) {
+      return null;
+    }
+    final trimmed = rawText.trim();
+    if (trimmed.isEmpty) {
+      return TaskItem.defaultSuspendedAt;
+    }
+    return TaskItem.tryParseTdfTimestampInput(trimmed);
+  }
+
+  /// Opens a Material 3 date picker and returns the updated `YYYY-MM-DD` (or `YYYY-MM-DD HH:MM`) text.
+  static Future<String?> pickSuspendedDate({
+    required BuildContext context,
+    required String currentText,
+    required DateTime fallbackDate,
+  }) async {
+    final initialDate = _resolveInitialSuspendedDate(currentText, fallbackDate);
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime.utc(2000),
+      lastDate: DateTime.utc(2100, 12, 31),
+    );
+    if (pickedDate == null) {
+      return null;
+    }
+    final formattedDate = TaskItem.formatIsoDate(pickedDate);
+    final existingTime = _extractTimeSuffix(currentText);
+    return existingTime != null
+        ? '$formattedDate $existingTime'
+        : formattedDate;
+  }
+
+  /// Opens a 24-hour Material 3 time picker and returns the updated `YYYY-MM-DD HH:MM` text.
+  static Future<String?> pickSuspendedTime({
+    required BuildContext context,
+    required String currentText,
+    required DateTime fallbackDate,
+  }) async {
+    final existingTimeSuffix = _extractTimeSuffix(currentText);
+    final initialTime = _extractTimeOfDay(
+      existingTimeSuffix ?? '',
+      const TimeOfDay(hour: 9, minute: 0),
+    );
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      builder: _build24HourTimePicker,
+    );
+    if (pickedTime == null) {
+      return null;
+    }
+    final datePart =
+        _extractDatePart(currentText) ?? TaskItem.formatIsoDate(fallbackDate);
+    final formattedTime = _formatTimeOfDay(pickedTime);
+    return '$datePart $formattedTime';
+  }
+
+  /// Wraps a [showTimePicker] dialog in a 24-hour [MediaQuery] configuration.
+  static Widget _build24HourTimePicker(BuildContext context, Widget? child) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+      child: child ?? const SizedBox.shrink(),
+    );
+  }
+
   /// Builds the [InputDecoration] for the suspended timestamp text field.
   InputDecoration _buildDecoration(
     AppLocalizations localizations,
@@ -438,5 +535,62 @@ class TaskEditorSuspendedField extends StatelessWidget {
         ),
       ],
     );
+  }
+
+  /// Extracts a valid `YYYY-MM-DD` date prefix from [rawInput], or `null` if invalid.
+  static String? _extractDatePart(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.length < 10) {
+      return null;
+    }
+    final candidate = trimmed.substring(0, 10);
+    return TaskItem.tryParseIsoDate(candidate) != null ? candidate : null;
+  }
+
+  /// Parses [rawTime] (`HH:MM`) into a [TimeOfDay], or returns [fallback] if invalid.
+  static TimeOfDay _extractTimeOfDay(String rawTime, TimeOfDay fallback) {
+    final minutes = TaskItem.tryParseTimeMinutes(rawTime.trim());
+    if (minutes == null) {
+      return fallback;
+    }
+    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
+  }
+
+  /// Extracts a valid `HH:MM` suffix from a `YYYY-MM-DD HH:MM` timestamp string, or `null`.
+  static String? _extractTimeSuffix(String rawInput) {
+    final trimmed = rawInput.trim();
+    if (trimmed.length <= 10) {
+      return null;
+    }
+    final remainder = trimmed.substring(10).trim();
+    if (remainder.length >= 5) {
+      final hhMm = remainder.substring(0, 5);
+      if (TaskItem.tryParseTimeMinutes(hhMm) != null) {
+        return hhMm;
+      }
+    }
+    return null;
+  }
+
+  /// Formats [time] as a zero-padded 24-hour `HH:MM` string.
+  static String _formatTimeOfDay(TimeOfDay time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  /// Resolves the initial [DateTime] for the suspended date picker from [rawInput] or [fallback].
+  static DateTime _resolveInitialSuspendedDate(
+    String rawInput,
+    DateTime fallback,
+  ) {
+    final datePart = _extractDatePart(rawInput);
+    if (datePart != null) {
+      final parsed = TaskItem.tryParseIsoDate(datePart);
+      if (parsed != null && parsed.year >= 2000 && parsed.year <= 2100) {
+        return parsed;
+      }
+    }
+    return DateTime.utc(fallback.year, fallback.month, fallback.day);
   }
 }

@@ -27,6 +27,7 @@ import 'tdf_timezone.dart';
 /// per `TDF_SPEC.md` Sections 6.7.3–6.7.6 and 6.11.2.
 @immutable
 class TdfPayloadComparison {
+  /// Prevents instantiation of this stateless helper class.
   const TdfPayloadComparison._();
 
   /// Compares two condition lists normalized into `(globalAny, dayGroup, timeGroup, locationGroup)`.
@@ -656,6 +657,7 @@ class TdfPayloadComparison {
 /// Normalized condition representation `(globalAny, dayGroup, timeGroup, locationGroup)` per Section 6.7.3.
 @immutable
 class _NormalizedConditionModel {
+  /// Creates a [_NormalizedConditionModel].
   const _NormalizedConditionModel({
     required this.globalAny,
     required this.dayResetAny,

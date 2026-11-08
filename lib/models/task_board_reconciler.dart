@@ -54,6 +54,7 @@ class LabelReconciliationOutcome {
 /// Stateless per-entity three-way task and label reconciliation engine for `TaskBoardSync`.
 @immutable
 class TaskBoardReconciler {
+  /// Prevents instantiation of this stateless helper class.
   const TaskBoardReconciler._();
 
   /// Throws a [TdfSyncOutcomeException] when [labels] or [tasks] recorded deletion conflicts or ambiguous recovery items.

@@ -107,6 +107,7 @@ class SyncStateNotifier extends Notifier<SyncState> {
 /// Stateless two-stage local and WebDAV synchronization and migration pipeline.
 @immutable
 class TaskSyncPipeline {
+  /// Prevents instantiation of this stateless helper class.
   const TaskSyncPipeline._();
 
   /// Flushes [board] to the local `.tdf` file of [workspace] before unloading when local persistence is enabled.
@@ -121,8 +122,11 @@ class TaskSyncPipeline {
       await ref
           .read(localFileRepositoryProvider)
           .saveTdf(_serializeTdf(ref, board));
-    } on Object {
-      // Best-effort flush before workspace unload.
+    } on Object catch (error) {
+      AppLogger.warn(
+        LogTag.sync,
+        'Failed to flush outgoing local board for workspace ${workspace.id}: $error',
+      );
     }
   }
 
@@ -136,7 +140,7 @@ class TaskSyncPipeline {
     DateTime? currentDate,
   }) async {
     final (utcNow, localNow) = resolveTimestamps(ref, currentDate);
-    final config = resolveCurrentConfig(ref);
+    final config = readCurrentConfig(ref);
     final resolvedZone =
         sourceTimeZone ??
         TdfTimeZoneContext.fixedOffset(
@@ -170,6 +174,10 @@ class TaskSyncPipeline {
             acknowledgedRemoteGeneration: generation,
           ),
         );
+    AppLogger.info(
+      LogTag.sync,
+      'Imported legacy TDF document (sourceVersion=${importResult.sourceVersion}, migrated=${importResult.executedSteps.length > 1})',
+    );
     return importResult;
   }
 
@@ -180,13 +188,15 @@ class TaskSyncPipeline {
     DateTime deletedAt,
   ) async {
     final workspace = await ref.read(activeWorkspaceProvider.future);
-    final settingsRepo = ref.read(settingsRepositoryProvider);
-    final current = await settingsRepo.loadWorkspaceSyncState(workspace.id);
+    final settingsRepository = ref.read(settingsRepositoryProvider);
+    final current = await settingsRepository.loadWorkspaceSyncState(
+      workspace.id,
+    );
     final updated = <String, DateTime>{
       ...current.deletedLabelTimestamps,
       labelId: deletedAt,
     };
-    await settingsRepo.saveWorkspaceSyncState(
+    await settingsRepository.saveWorkspaceSyncState(
       workspace.id,
       current.copyWith(deletedLabelTimestamps: updated),
     );
@@ -197,9 +207,11 @@ class TaskSyncPipeline {
     Ref ref,
     String workspaceId,
   ) async {
-    final settingsRepo = ref.read(settingsRepositoryProvider);
-    final current = await settingsRepo.loadWorkspaceSyncState(workspaceId);
-    await settingsRepo.saveWorkspaceSyncState(
+    final settingsRepository = ref.read(settingsRepositoryProvider);
+    final current = await settingsRepository.loadWorkspaceSyncState(
+      workspaceId,
+    );
+    await settingsRepository.saveWorkspaceSyncState(
       workspaceId,
       WorkspaceSyncState(
         lastSyncedLocalTdf: null,
@@ -241,9 +253,15 @@ class TaskSyncPipeline {
         requireTargets: requireTargets,
         onLocalStageMerged: onLocalStageMerged,
       );
-      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+      ref
+          .read(syncStateProvider.notifier)
+          .setSuccess(ref.read(clockProvider)().toUtc());
       return board;
     } on Object catch (error) {
+      AppLogger.error(
+        LogTag.sync,
+        'Sync pipeline failed (mode=${config.storageMode.name}): $error',
+      );
       ref.read(syncStateProvider.notifier).setError(error.toString());
       rethrow;
     }
@@ -265,8 +283,10 @@ class TaskSyncPipeline {
       LogTag.sync,
       'Starting two-stage sync pipeline workspace=${workspace.id} mode=${config.storageMode.name} initial=$isInitialLoad',
     );
-    final settingsRepo = ref.read(settingsRepositoryProvider);
-    var syncState = await settingsRepo.loadWorkspaceSyncState(workspace.id);
+    final settingsRepository = ref.read(settingsRepositoryProvider);
+    var syncState = await settingsRepository.loadWorkspaceSyncState(
+      workspace.id,
+    );
     final deletedLabels = <String, DateTime>{
       ...syncState.deletedLabelTimestamps,
       ...pendingDeletedLabelTimestamps,
@@ -278,124 +298,36 @@ class TaskSyncPipeline {
 
     if (config.storageMode.usesLocal &&
         (requireTargets || config.isLocalConfigured)) {
-      final rawLocal = await ref.read(localFileRepositoryProvider).loadTdf();
-      if (rawLocal.trim().isNotEmpty) {
-        final localBoard = await _parseLocalOrThrow(
-          ref,
-          config,
-          rawLocal,
-          requireTargets,
-          utcNow,
-          localNow,
-        );
-        final baseline = _tryParseBaseline(
-          ref,
-          syncState.lastSyncedLocalTdf,
-          utcNow,
-          localNow,
-        );
-        working = TaskBoardSync.merge(
-          primary: hasWorking ? working : localBoard,
-          secondary: localBoard,
-          baseline: baseline ?? (hasWorking ? null : localBoard),
-          acknowledgedGeneration: baseline != null
-              ? syncState.acknowledgedLocalGeneration
-              : null,
-          deletedLabelTimestamps: deletedLabels,
-          evaluationTime: utcNow,
-          localEvaluationTime: localNow,
-        );
-        hasWorking = true;
-      }
-      if (rawLocal.trim().isNotEmpty || hasWorking || requireTargets) {
-        working = TaskBoardSync.stampAndNormalize(
-          working,
-          evaluationTime: utcNow,
-          localEvaluationTime: localNow,
-        );
-        final serializedLocal = _serializeTdf(ref, working);
-        if (requireTargets ||
-            hasCandidate ||
-            rawLocal.trim() != serializedLocal.trim()) {
-          await ref.read(localFileRepositoryProvider).saveTdf(serializedLocal);
-        }
-        syncState = syncState.copyWith(
-          lastSyncedLocalTdf: serializedLocal,
-          deletedLabelTimestamps: deletedLabels,
-          acknowledgedLocalGeneration: working.deletedBlock.generation,
-        );
-        await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
-        if (hasCandidate &&
-            onLocalStageMerged != null &&
-            ref.read(activeWorkspaceProvider).asData?.value.id ==
-                workspace.id) {
-          onLocalStageMerged(working);
-        }
-      }
+      (working, hasWorking, syncState) = await _synchronizeLocalStage(
+        ref,
+        config,
+        workspaceId: workspace.id,
+        working: working,
+        hasWorking: hasWorking,
+        hasCandidate: hasCandidate,
+        requireTargets: requireTargets,
+        syncState: syncState,
+        deletedLabels: deletedLabels,
+        utcNow: utcNow,
+        localNow: localNow,
+        onLocalStageMerged: onLocalStageMerged,
+      );
     }
 
     if (config.storageMode.usesWebDav &&
         (requireTargets || config.isWebDavConfigured)) {
-      final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
-      if (rawRemote.trim().isNotEmpty) {
-        final remoteBoard = _parseRemoteOrThrow(
-          ref,
-          config,
-          rawRemote,
-          utcNow,
-          localNow,
-        );
-        final baseline = _tryParseBaseline(
-          ref,
-          syncState.lastSyncedRemoteTdf,
-          utcNow,
-          localNow,
-        );
-        working = TaskBoardSync.merge(
-          primary: hasWorking ? working : remoteBoard,
-          secondary: remoteBoard,
-          baseline: baseline ?? (hasWorking ? null : remoteBoard),
-          acknowledgedGeneration: baseline != null
-              ? syncState.acknowledgedRemoteGeneration
-              : null,
-          deletedLabelTimestamps: deletedLabels,
-          evaluationTime: utcNow,
-          localEvaluationTime: localNow,
-        );
-        hasWorking = true;
-      }
-      if (rawRemote.trim().isNotEmpty || hasWorking || requireTargets) {
-        working = TaskBoardSync.stampAndNormalize(
-          working,
-          evaluationTime: utcNow,
-          localEvaluationTime: localNow,
-        );
-        final serializedFinal = _serializeTdf(ref, working);
-        if (requireTargets ||
-            hasCandidate ||
-            config.storageMode == StorageMode.both ||
-            rawRemote.trim() != serializedFinal.trim()) {
-          await ref.read(webDavRepositoryProvider).saveTdf(serializedFinal);
-        }
-        syncState = syncState.copyWith(
-          lastSyncedRemoteTdf: serializedFinal,
-          acknowledgedRemoteGeneration: working.deletedBlock.generation,
-        );
-        if (config.storageMode.usesLocal &&
-            (requireTargets || config.isLocalConfigured)) {
-          if (requireTargets ||
-              (syncState.lastSyncedLocalTdf ?? '').trim() !=
-                  serializedFinal.trim()) {
-            await ref
-                .read(localFileRepositoryProvider)
-                .saveTdf(serializedFinal);
-          }
-          syncState = syncState.copyWith(
-            lastSyncedLocalTdf: serializedFinal,
-            acknowledgedLocalGeneration: working.deletedBlock.generation,
-          );
-        }
-      }
+      (working, hasWorking, syncState) = await _synchronizeRemoteStage(
+        ref,
+        config,
+        working: working,
+        hasWorking: hasWorking,
+        hasCandidate: hasCandidate,
+        requireTargets: requireTargets,
+        syncState: syncState,
+        deletedLabels: deletedLabels,
+        utcNow: utcNow,
+        localNow: localNow,
+      );
     }
 
     if (!hasWorking) {
@@ -410,7 +342,7 @@ class TaskSyncPipeline {
     syncState = syncState.copyWith(
       deletedLabelTimestamps: const <String, DateTime>{},
     );
-    await settingsRepo.saveWorkspaceSyncState(workspace.id, syncState);
+    await settingsRepository.saveWorkspaceSyncState(workspace.id, syncState);
     AppLogger.info(
       LogTag.sync,
       'Completed two-stage sync pipeline workspace=${workspace.id} tasks=${working.allTasks.length} labels=${working.labels.length}',
@@ -435,6 +367,25 @@ class TaskSyncPipeline {
     } on Object {
       return null;
     }
+  }
+
+  /// Writes the converged [serializedFinal] document back to local storage after the remote WebDAV stage.
+  static Future<WorkspaceSyncState> _convergeLocalAfterRemoteStage(
+    Ref ref, {
+    required WorkspaceSyncState syncState,
+    required String serializedFinal,
+    required String trimmedFinal,
+    required int generation,
+    required bool requireTargets,
+  }) async {
+    final trimmedLastLocal = (syncState.lastSyncedLocalTdf ?? '').trim();
+    if (requireTargets || trimmedLastLocal != trimmedFinal) {
+      await ref.read(localFileRepositoryProvider).saveTdf(serializedFinal);
+    }
+    return syncState.copyWith(
+      lastSyncedLocalTdf: serializedFinal,
+      acknowledgedLocalGeneration: generation,
+    );
   }
 
   /// Builds and logs a localized [UnsupportedTdfVersionException] for [localError] and/or [remoteError].
@@ -536,6 +487,162 @@ class TaskSyncPipeline {
   static String _serializeTdf(Ref ref, TaskBoard board) =>
       ref.read(tdfServiceProvider).serialize(board);
 
+  /// Executes the first-stage local file merge and write-back for [workspaceId].
+  static Future<(TaskBoard, bool, WorkspaceSyncState)> _synchronizeLocalStage(
+    Ref ref,
+    WebDavConfig config, {
+    required String workspaceId,
+    required TaskBoard working,
+    required bool hasWorking,
+    required bool hasCandidate,
+    required bool requireTargets,
+    required WorkspaceSyncState syncState,
+    required Map<String, DateTime> deletedLabels,
+    required DateTime utcNow,
+    required DateTime localNow,
+    required void Function(TaskBoard mergedBoard)? onLocalStageMerged,
+  }) async {
+    final rawLocal = await ref.read(localFileRepositoryProvider).loadTdf();
+    final trimmedLocal = rawLocal.trim();
+    var nextWorking = working;
+    var nextHasWorking = hasWorking;
+    if (trimmedLocal.isNotEmpty) {
+      final localBoard = await _parseLocalOrThrow(
+        ref,
+        config,
+        rawLocal,
+        requireTargets,
+        utcNow,
+        localNow,
+      );
+      final baseline = _tryParseBaseline(
+        ref,
+        syncState.lastSyncedLocalTdf,
+        utcNow,
+        localNow,
+      );
+      nextWorking = TaskBoardSync.merge(
+        primary: nextHasWorking ? nextWorking : localBoard,
+        secondary: localBoard,
+        baseline: baseline ?? (nextHasWorking ? null : localBoard),
+        acknowledgedGeneration: baseline != null
+            ? syncState.acknowledgedLocalGeneration
+            : null,
+        deletedLabelTimestamps: deletedLabels,
+        evaluationTime: utcNow,
+        localEvaluationTime: localNow,
+      );
+      nextHasWorking = true;
+    }
+    if (trimmedLocal.isEmpty && !nextHasWorking && !requireTargets) {
+      return (nextWorking, nextHasWorking, syncState);
+    }
+    nextWorking = TaskBoardSync.stampAndNormalize(
+      nextWorking,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    final serializedLocal = _serializeTdf(ref, nextWorking);
+    final trimmedSerializedLocal = serializedLocal.trim();
+    if (requireTargets ||
+        hasCandidate ||
+        trimmedLocal != trimmedSerializedLocal) {
+      await ref.read(localFileRepositoryProvider).saveTdf(serializedLocal);
+    }
+    final nextSyncState = syncState.copyWith(
+      lastSyncedLocalTdf: serializedLocal,
+      deletedLabelTimestamps: deletedLabels,
+      acknowledgedLocalGeneration: nextWorking.deletedBlock.generation,
+    );
+    await ref
+        .read(settingsRepositoryProvider)
+        .saveWorkspaceSyncState(workspaceId, nextSyncState);
+    if (hasCandidate &&
+        onLocalStageMerged != null &&
+        ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId) {
+      onLocalStageMerged(nextWorking);
+    }
+    return (nextWorking, nextHasWorking, nextSyncState);
+  }
+
+  /// Executes the second-stage WebDAV remote merge, write-back, and local convergence.
+  static Future<(TaskBoard, bool, WorkspaceSyncState)> _synchronizeRemoteStage(
+    Ref ref,
+    WebDavConfig config, {
+    required TaskBoard working,
+    required bool hasWorking,
+    required bool hasCandidate,
+    required bool requireTargets,
+    required WorkspaceSyncState syncState,
+    required Map<String, DateTime> deletedLabels,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
+    final trimmedRemote = rawRemote.trim();
+    var nextWorking = working;
+    var nextHasWorking = hasWorking;
+    if (trimmedRemote.isNotEmpty) {
+      final remoteBoard = _parseRemoteOrThrow(
+        ref,
+        config,
+        rawRemote,
+        utcNow,
+        localNow,
+      );
+      final baseline = _tryParseBaseline(
+        ref,
+        syncState.lastSyncedRemoteTdf,
+        utcNow,
+        localNow,
+      );
+      nextWorking = TaskBoardSync.merge(
+        primary: nextHasWorking ? nextWorking : remoteBoard,
+        secondary: remoteBoard,
+        baseline: baseline ?? (nextHasWorking ? null : remoteBoard),
+        acknowledgedGeneration: baseline != null
+            ? syncState.acknowledgedRemoteGeneration
+            : null,
+        deletedLabelTimestamps: deletedLabels,
+        evaluationTime: utcNow,
+        localEvaluationTime: localNow,
+      );
+      nextHasWorking = true;
+    }
+    if (trimmedRemote.isEmpty && !nextHasWorking && !requireTargets) {
+      return (nextWorking, nextHasWorking, syncState);
+    }
+    nextWorking = TaskBoardSync.stampAndNormalize(
+      nextWorking,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    final serializedFinal = _serializeTdf(ref, nextWorking);
+    final trimmedFinal = serializedFinal.trim();
+    if (requireTargets ||
+        hasCandidate ||
+        config.storageMode == StorageMode.both ||
+        trimmedRemote != trimmedFinal) {
+      await ref.read(webDavRepositoryProvider).saveTdf(serializedFinal);
+    }
+    var nextSyncState = syncState.copyWith(
+      lastSyncedRemoteTdf: serializedFinal,
+      acknowledgedRemoteGeneration: nextWorking.deletedBlock.generation,
+    );
+    if (config.storageMode.usesLocal &&
+        (requireTargets || config.isLocalConfigured)) {
+      nextSyncState = await _convergeLocalAfterRemoteStage(
+        ref,
+        syncState: nextSyncState,
+        serializedFinal: serializedFinal,
+        trimmedFinal: trimmedFinal,
+        generation: nextWorking.deletedBlock.generation,
+        requireTargets: requireTargets,
+      );
+    }
+    return (nextWorking, nextHasWorking, nextSyncState);
+  }
+
   /// Parses [rawBaselineTdf] into a [TaskBoard], or returns `null` when empty or malformed.
   static TaskBoard? _tryParseBaseline(
     Ref ref,
@@ -546,7 +653,11 @@ class TaskSyncPipeline {
     if (rawBaselineTdf == null || rawBaselineTdf.trim().isEmpty) return null;
     try {
       return _parseTdf(ref, rawBaselineTdf, utcNow, localNow);
-    } on TdfException {
+    } on TdfException catch (error) {
+      AppLogger.warn(
+        LogTag.sync,
+        'Ignoring corrupted local sync baseline (${error.kind.name})',
+      );
       return null;
     }
   }

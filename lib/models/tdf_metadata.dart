@@ -257,6 +257,7 @@ class LocationTaskCondition extends TaskCondition {
        _longitudeText = null,
        _radiusText = null;
 
+  /// Creates a [LocationTaskCondition] preserving canonical raw decimal token texts.
   const LocationTaskCondition._(
     this.latitude,
     this.longitude,
@@ -595,6 +596,7 @@ class TimeWindowTaskCondition extends TaskCondition {
 /// Pure hexadecimal color validation and formatting helper for TDF `label` blocks.
 @immutable
 class TdfColor {
+  /// Prevents instantiation of this stateless helper class.
   const TdfColor._();
 
   /// Formats the lower 24 RGB bits of [argb] as a canonical uppercase `#RRGGBB` string.

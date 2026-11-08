@@ -32,6 +32,7 @@ class LogViewerDialog extends StatefulWidget {
   State<LogViewerDialog> createState() => _LogViewerDialogState();
 }
 
+/// State for [LogViewerDialog] managing horizontal and vertical scroll controllers.
 class _LogViewerDialogState extends State<LogViewerDialog> {
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _verticalController = ScrollController();

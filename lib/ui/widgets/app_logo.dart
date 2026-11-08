@@ -62,17 +62,6 @@ class _AppLogoPainter extends CustomPainter {
     return oldDelegate.appTheme != appTheme;
   }
 
-  /// Paints a single rounded tier bar at [rect] with a horizontal gradient from [start] to [end].
-  void _paintBar(Canvas canvas, Rect rect, Color start, Color end) {
-    final paint = Paint()
-      ..shader = LinearGradient(colors: [start, end]).createShader(rect);
-    final roundedRect = RRect.fromRectAndRadius(
-      rect,
-      const Radius.circular(28),
-    );
-    canvas.drawRRect(roundedRect, paint);
-  }
-
   /// Paints the squircle background and subtle accent inner border.
   void _paintBackground(Canvas canvas) {
     const rect = Rect.fromLTWH(0, 0, _gridSize, _gridSize);
@@ -93,6 +82,17 @@ class _AppLogoPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 6;
     canvas.drawRRect(backgroundRRect.deflate(3), borderPaint);
+  }
+
+  /// Paints a single rounded tier bar at [rect] with a horizontal gradient from [start] to [end].
+  void _paintBar(Canvas canvas, Rect rect, Color start, Color end) {
+    final paint = Paint()
+      ..shader = LinearGradient(colors: [start, end]).createShader(rect);
+    final roundedRect = RRect.fromRectAndRadius(
+      rect,
+      const Radius.circular(28),
+    );
+    canvas.drawRRect(roundedRect, paint);
   }
 
   /// Paints the circular completion badge with a cutout halo and checkmark.

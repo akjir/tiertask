@@ -15,10 +15,12 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/models/workspace_sync_state.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -85,7 +87,7 @@ void main() {
   );
 
   ProviderContainer createSyncContainer({
-    required SettingsRepository settingsRepo,
+    required SettingsRepository settingsRepository,
     required DateTime Function() clock,
     required String Function() getLocal,
     required void Function(String) setLocal,
@@ -96,7 +98,7 @@ void main() {
   }) {
     return ProviderContainer(
       overrides: [
-        settingsRepositoryProvider.overrideWithValue(settingsRepo),
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
         clockProvider.overrideWithValue(clock),
         localFileRepositoryProvider.overrideWith(
           (ref) => _InMemorySyncLocalRepository(
@@ -118,9 +120,11 @@ void main() {
   }
 
   test('SyncStateNotifier tracks syncing, success, error, clearError, and resets when active workspace switches', () async {
-    final settingsRepo = InMemorySettingsRepository();
+    final settingsRepository = InMemorySettingsRepository();
     final container = ProviderContainer(
-      overrides: [settingsRepositoryProvider.overrideWithValue(settingsRepo)],
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
+      ],
     );
     addTearDown(container.dispose);
 
@@ -170,15 +174,15 @@ void main() {
     var localTdf =
         'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n}\n\nlabel work00OkD2 {\n  name "Work"\n  modified 2026-11-01 08:00:00\n}\n\ntask 000001OkD2 {\n  name "Initial Task"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n  queued 2026-11-01 08:00:00\n}\n';
     var remoteTdf = localTdf;
-    final settingsRepo = InMemorySettingsRepository(bothConfig);
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
 
     final container = createSyncContainer(
-      settingsRepo: settingsRepo,
+      settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
-      setLocal: (val) => localTdf = val,
+      setLocal: (value) => localTdf = value,
       getRemote: () => remoteTdf,
-      setRemote: (val) => remoteTdf = val,
+      setRemote: (value) => remoteTdf = value,
       isOnline: () => true,
     );
     addTearDown(container.dispose);
@@ -217,15 +221,15 @@ void main() {
     var localTdf =
         'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n  task 000002OkD2\n}\n\nlabel ops000OkD2 {\n  name "Ops"\n  modified 2026-11-01 08:00:00\n}\n\ntask 000001OkD2 {\n  name "Task One"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n  queued 2026-11-01 08:00:00\n}\n\ntask 000002OkD2 {\n  name "Task Two"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n  queued 2026-11-01 08:00:00\n}\n';
     var remoteTdf = localTdf;
-    final settingsRepo = InMemorySettingsRepository(bothConfig);
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
 
     final container1 = createSyncContainer(
-      settingsRepo: settingsRepo,
+      settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
-      setLocal: (val) => localTdf = val,
+      setLocal: (value) => localTdf = value,
       getRemote: () => remoteTdf,
-      setRemote: (val) => remoteTdf = val,
+      setRemote: (value) => remoteTdf = value,
       isOnline: () => isOnline,
     );
     await container1.read(taskNotifierProvider.future);
@@ -248,12 +252,12 @@ void main() {
     isOnline = true;
     currentTime = DateTime.utc(2026, 11, 1, 10);
     final container2 = createSyncContainer(
-      settingsRepo: settingsRepo,
+      settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
-      setLocal: (val) => localTdf = val,
+      setLocal: (value) => localTdf = value,
       getRemote: () => remoteTdf,
-      setRemote: (val) => remoteTdf = val,
+      setRemote: (value) => remoteTdf = value,
       isOnline: () => isOnline,
     );
     addTearDown(container2.dispose);
@@ -269,7 +273,7 @@ void main() {
     final activeWorkspace = await container2.read(
       activeWorkspaceProvider.future,
     );
-    final syncStateAfter = await settingsRepo.loadWorkspaceSyncState(
+    final syncStateAfter = await settingsRepository.loadWorkspaceSyncState(
       activeWorkspace.id,
     );
     expect(syncStateAfter.deletedLabelTimestamps, isEmpty);
@@ -283,20 +287,20 @@ void main() {
     var remoteTdf = 'tdf 0.5.0\n';
     var localSaveCount = 0;
     var remoteSaveCount = 0;
-    final settingsRepo = InMemorySettingsRepository(bothConfig);
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
 
     final container = createSyncContainer(
-      settingsRepo: settingsRepo,
+      settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
-      setLocal: (val) {
+      setLocal: (value) {
         localSaveCount++;
-        localTdf = val;
+        localTdf = value;
       },
       getRemote: () => remoteTdf,
-      setRemote: (val) {
+      setRemote: (value) {
         remoteSaveCount++;
-        remoteTdf = val;
+        remoteTdf = value;
       },
       isOnline: () => true,
     );
@@ -361,7 +365,7 @@ void main() {
     );
     final webDavContainer = createSyncContainer(
       config: webDavDeConfig,
-      settingsRepo: InMemorySettingsRepository(webDavDeConfig),
+      settingsRepository: InMemorySettingsRepository(webDavDeConfig),
       clock: () => currentTime,
       getLocal: () => '',
       setLocal: (_) {},
@@ -369,9 +373,9 @@ void main() {
         remoteFetchCount++;
         return remoteTdf;
       },
-      setRemote: (val) {
+      setRemote: (value) {
         remoteSaveCount++;
-        remoteTdf = val;
+        remoteTdf = value;
       },
       isOnline: () => true,
     );
@@ -406,7 +410,7 @@ void main() {
     );
     final bothLocalFailContainer = createSyncContainer(
       config: bothEnConfig,
-      settingsRepo: InMemorySettingsRepository(bothEnConfig),
+      settingsRepository: InMemorySettingsRepository(bothEnConfig),
       clock: () => currentTime,
       getLocal: () => 'tdf 0.6.0\n',
       setLocal: (_) => localFailSaveCount++,
@@ -442,7 +446,7 @@ void main() {
     );
     final bothFailContainer = createSyncContainer(
       config: bothDeConfig,
-      settingsRepo: InMemorySettingsRepository(bothDeConfig),
+      settingsRepository: InMemorySettingsRepository(bothDeConfig),
       clock: () => currentTime,
       getLocal: () => 'tdf 0.6.0\n',
       setLocal: (_) {},
@@ -467,6 +471,175 @@ void main() {
       equals(
         'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion 0.6.0 / 0.7.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
       ),
+    );
+  });
+
+  test('TaskSyncPipeline.runSyncWithStatus records exact UTC clockProvider timestamp in syncStateProvider.lastSyncedAt', () async {
+    final fixedClock = DateTime(2026, 11, 1, 14, 30, 15);
+    var localTdf = 'tdf 0.5.1\n';
+    var remoteTdf = 'tdf 0.5.1\n';
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
+
+    final container = createSyncContainer(
+      settingsRepository: settingsRepository,
+      clock: () => fixedClock,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => remoteTdf,
+      setRemote: (value) => remoteTdf = value,
+      isOnline: () => true,
+    );
+    addTearDown(container.dispose);
+
+    await container.read(taskNotifierProvider.future);
+    final syncState = container.read(syncStateProvider);
+    expect(
+      syncState.isSyncing,
+      isFalse,
+      reason: 'Sync should complete and clear isSyncing flag',
+    );
+    expect(
+      syncState.lastSyncedAt,
+      equals(fixedClock.toUtc()),
+      reason: 'lastSyncedAt must match the injected clockProvider UTC timestamp instead of wall-clock DateTime.now()',
+    );
+    expect(
+      syncState.lastSyncedAt?.isUtc,
+      isTrue,
+      reason: 'lastSyncedAt must be normalized to UTC',
+    );
+  });
+
+  test('TaskSyncPipeline.flushOutgoingLocalBoard flushes local board when configured and swallows save exceptions', () async {
+    var savedTdf = '';
+    var shouldThrow = false;
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
+    final container = createSyncContainer(
+      settingsRepository: settingsRepository,
+      clock: () => DateTime.utc(2026, 11, 1, 12),
+      getLocal: () => savedTdf,
+      setLocal: (value) {
+        if (shouldThrow) {
+          throw const LocalFileException('Simulated disk full');
+        }
+        savedTdf = value;
+      },
+      getRemote: () => savedTdf,
+      setRemote: (value) => savedTdf = value,
+      isOnline: () => true,
+    );
+    addTearDown(container.dispose);
+
+    final workspace = await container.read(activeWorkspaceProvider.future);
+    final board = TaskBoard.empty().addTask(
+      'Flush Test Task',
+      currentDate: DateTime.utc(2026, 11, 1, 12),
+    );
+    final flushProvider = FutureProvider.family<void, TaskBoard>(
+      (ref, targetBoard) =>
+          TaskSyncPipeline.flushOutgoingLocalBoard(ref, workspace, targetBoard),
+    );
+
+    await container.read(flushProvider(board).future);
+    expect(
+      savedTdf,
+      contains('Flush Test Task'),
+      reason: 'Normal flush should serialize and save board to local storage',
+    );
+
+    shouldThrow = true;
+    final secondBoard = board.addTask(
+      'Failing Flush Task',
+      currentDate: DateTime.utc(2026, 11, 1, 12, 5),
+    );
+    await expectLater(
+      container.read(flushProvider(secondBoard).future),
+      completes,
+      reason: 'Best-effort flush must swallow repository exceptions',
+    );
+    expect(
+      savedTdf,
+      isNot(contains('Failing Flush Task')),
+      reason: 'Failed save should leave previous local content intact',
+    );
+  });
+
+  test('Corrupted baseline TDF in SettingsRepository recovers via 2-way merge without throwing', () async {
+    final currentTime = DateTime.utc(2026, 11, 1, 12);
+    var localTdf =
+        'tdf 0.5.1\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n}\n\ntask 000001OkD2 {\n  name "Local Surviving Task"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n}\n';
+    var remoteTdf =
+        'tdf 0.5.1\n\nqueue {\n  modified 2026-11-01 09:00:00\n  task 000002OkD2\n}\n\ntask 000002OkD2 {\n  name "Remote Surviving Task"\n  created 2026-11-01 09:00:00\n  modified 2026-11-01 09:00:00\n}\n';
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
+    final activeWorkspace = await settingsRepository.loadActiveWorkspace();
+    await settingsRepository.saveWorkspaceSyncState(
+      activeWorkspace.id,
+      WorkspaceSyncState(
+        lastSyncedLocalTdf: 'corrupted_header_without_version\n{{{',
+        lastSyncedRemoteTdf: 'tdf 0.5.1\ntask broken {\n',
+        acknowledgedLocalGeneration: 3,
+        acknowledgedRemoteGeneration: 3,
+      ),
+    );
+
+    final container = createSyncContainer(
+      settingsRepository: settingsRepository,
+      clock: () => currentTime,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => remoteTdf,
+      setRemote: (value) => remoteTdf = value,
+      isOnline: () => true,
+    );
+    addTearDown(container.dispose);
+
+    final mergedBoard = await container.read(taskNotifierProvider.future);
+    expect(
+      mergedBoard.allTasks.map((task) => task.title),
+      containsAll(<String>['Local Surviving Task', 'Remote Surviving Task']),
+      reason: 'Corrupted local and remote baselines must fall back to 2-way merge and retain tasks from both sides',
+    );
+  });
+
+  test('TaskSyncPipeline.importLegacyTdf applies manual timeZoneMode offset when sourceTimeZone is omitted', () async {
+    final currentTime = DateTime.utc(2026, 11, 1, 12);
+    const manualConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      localFilePath: 'tasks.tdf',
+      timeZoneMode: AppTimeZoneMode.manual,
+      manualTimeZoneOffsetMinutes: 120,
+    );
+    const legacyTdf =
+        'tdf 0.2.0\n\ntask 000001OkD2 {\n  name "Manual Offset Legacy Task"\n  created 2026-11-01 10:00\n  queued 2026-11-01 10:00\n}\n';
+    var localTdf = 'tdf 0.5.1\n';
+    final settingsRepository = InMemorySettingsRepository(manualConfig);
+
+    final container = createSyncContainer(
+      config: manualConfig,
+      settingsRepository: settingsRepository,
+      clock: () => currentTime,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => true,
+    );
+    addTearDown(container.dispose);
+
+    await container.read(taskNotifierProvider.future);
+    final importResult = await container
+        .read(taskNotifierProvider.notifier)
+        .importLegacyTdf(legacyTdf);
+    final importedTask = importResult.board.allTasks.single;
+    expect(
+      importedTask.createdAt,
+      equals(DateTime.utc(2026, 11, 1, 8)),
+      reason: '10:00 local in manual +02:00 offset must convert to 08:00 UTC during 0.2.0 -> 0.5.1 import',
+    );
+    expect(
+      localTdf,
+      contains('created 2026-11-01 08:00'),
+      reason: 'Persisted migrated TDF must contain the UTC-converted timestamp',
     );
   });
 }

@@ -142,6 +142,20 @@ class PlatformLocationRepository implements LocationRepository {
     return _resolveGeoIpFallback(forceRefresh: forceRefresh);
   }
 
+  /// Builds the default OpenStreetMap Nominatim reverse-geocoding URI for [latitude] and [longitude].
+  static Uri _defaultReverseGeocodeUri(double latitude, double longitude) {
+    return Uri.https(
+      'nominatim.openstreetmap.org',
+      '/reverse',
+      <String, String>{
+        'format': 'jsonv2',
+        'lat': latitude.toStringAsFixed(5),
+        'lon': longitude.toStringAsFixed(5),
+        'zoom': '10',
+      },
+    );
+  }
+
   /// Extracts a [LocationFix] from the native channel map when status is `'found'` and coordinates are valid.
   LocationFix? _extractNativeFix(Map<String, Object?>? map) {
     if (map == null || map['status'] != 'found') {
@@ -163,6 +177,30 @@ class PlatformLocationRepository implements LocationRepository {
       placeName: placeName,
       source: source,
     );
+  }
+
+  /// Extracts a sanitized list of Wi-Fi access point maps (`macAddress` and optional `signalStrength`) from [rawList].
+  static List<Map<String, Object?>> _extractWifiAccessPoints(Object? rawList) {
+    if (rawList is! List<Object?>) {
+      return const <Map<String, Object?>>[];
+    }
+    final sanitized = <Map<String, Object?>>[];
+    for (final item in rawList) {
+      if (sanitized.length >= 20) {
+        break;
+      }
+      if (item is Map<Object?, Object?>) {
+        final mac = item['macAddress'];
+        if (mac is String && mac.trim().isNotEmpty) {
+          final entry = <String, Object?>{'macAddress': mac.trim()};
+          if (item['signalStrength'] case final num strength) {
+            entry['signalStrength'] = strength.toInt();
+          }
+          sanitized.add(entry);
+        }
+      }
+    }
+    return sanitized;
   }
 
   /// Performs a bounded HTTP GET to [uri] and decodes a JSON object map, or returns `null` on error.
@@ -196,6 +234,20 @@ class PlatformLocationRepository implements LocationRepository {
     }
   }
 
+  /// Returns the first non-empty trimmed string value among [keys] in [map].
+  static String? _firstNonEmptyString(
+    Map<String, Object?> map,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = map[key];
+      if (value is String && value.trim().isNotEmpty) {
+        return value.trim();
+      }
+    }
+    return null;
+  }
+
   /// Invokes the native platform channel and returns the result map, or `null` if unavailable.
   Future<Map<String, Object?>?> _invokeNativeChannel() async {
     try {
@@ -205,6 +257,130 @@ class PlatformLocationRepository implements LocationRepository {
     } on Object {
       return null;
     }
+  }
+
+  /// Joins [locality] and [country] into a human-readable place label.
+  static String? _joinPlaceParts(String? locality, String? country) {
+    if (locality != null && country != null && locality != country) {
+      return '$locality, $country';
+    }
+    return locality ?? country;
+  }
+
+  /// Parses a finite coordinate from [rawValue] bounded by [maxMagnitude].
+  static double? _parseCoordinate(
+    Object? rawValue, {
+    required double maxMagnitude,
+  }) {
+    final double? numeric = switch (rawValue) {
+      final num number => number.toDouble(),
+      final String text => double.tryParse(text.trim()),
+      _ => null,
+    };
+    if (numeric == null || !numeric.isFinite || numeric.abs() > maxMagnitude) {
+      return null;
+    }
+    return numeric;
+  }
+
+  /// Extracts a [LocationFix] from a GeoIP JSON payload.
+  static LocationFix? _parseGeoIpFix(Map<String, Object?>? jsonMap) {
+    if (jsonMap == null) {
+      return null;
+    }
+    final latitude = _parseCoordinate(
+      jsonMap['latitude'] ?? jsonMap['lat'],
+      maxMagnitude: 90.0,
+    );
+    final longitude = _parseCoordinate(
+      jsonMap['longitude'] ?? jsonMap['lon'],
+      maxMagnitude: 180.0,
+    );
+    final locality = _firstNonEmptyString(jsonMap, const <String>[
+      'city',
+      'region',
+      'region_name',
+    ]);
+    final country = _firstNonEmptyString(jsonMap, const <String>[
+      'country',
+      'country_name',
+    ]);
+    final placeName = _joinPlaceParts(locality, country);
+    if (latitude == null && longitude == null && placeName == null) {
+      return null;
+    }
+    return LocationFix(
+      latitude: latitude,
+      longitude: longitude,
+      placeName: placeName,
+      source: LocationSource.internet,
+    );
+  }
+
+  /// Parses the native platform channel `source` string into a [LocationSource].
+  static LocationSource _parseNativeSource(Object? rawSource) {
+    if (rawSource is String) {
+      return switch (rawSource.trim().toLowerCase()) {
+        'gps' => LocationSource.gps,
+        'internet' => LocationSource.internet,
+        _ => LocationSource.system,
+      };
+    }
+    return LocationSource.system;
+  }
+
+  /// Extracts a concise place name from a Nominatim reverse-geocoding JSON payload.
+  static String? _parseReverseGeocodePlaceName(Map<String, Object?>? jsonMap) {
+    if (jsonMap == null) {
+      return null;
+    }
+    final address = jsonMap['address'];
+    if (address is Map<String, Object?>) {
+      final locality = _firstNonEmptyString(address, const <String>[
+        'city',
+        'town',
+        'village',
+        'municipality',
+        'county',
+        'state',
+      ]);
+      final country = _firstNonEmptyString(address, const <String>['country']);
+      if (_joinPlaceParts(locality, country) case final combined?) {
+        return combined;
+      }
+    }
+    return _firstNonEmptyString(jsonMap, const <String>[
+      'name',
+      'display_name',
+    ]);
+  }
+
+  /// Extracts a [LocationFix] from an MLS / BeaconDB `/v1/geolocate` JSON payload.
+  static LocationFix? _parseWifiGeolocateFix(Map<String, Object?>? jsonMap) {
+    if (jsonMap == null) {
+      return null;
+    }
+    final accuracy = _parseCoordinate(
+      jsonMap['accuracy'],
+      maxMagnitude: 100000.0,
+    );
+    if (accuracy != null && accuracy > maxWifiPositioningAccuracyMeters) {
+      return null;
+    }
+    final location = jsonMap['location'];
+    if (location is! Map<String, Object?>) {
+      return null;
+    }
+    final latitude = _parseCoordinate(location['lat'], maxMagnitude: 90.0);
+    final longitude = _parseCoordinate(location['lng'], maxMagnitude: 180.0);
+    if (latitude == null || longitude == null) {
+      return null;
+    }
+    return LocationFix(
+      latitude: latitude,
+      longitude: longitude,
+      source: LocationSource.system,
+    );
   }
 
   /// Performs a bounded HTTP POST of [payload] to [uri] and decodes a JSON object map, or returns `null` on error.
@@ -347,181 +523,5 @@ class PlatformLocationRepository implements LocationRepository {
       'wifiAccessPoints': accessPoints,
     });
     return _parseWifiGeolocateFix(responseMap);
-  }
-
-  /// Builds the default OpenStreetMap Nominatim reverse-geocoding URI for [latitude] and [longitude].
-  static Uri _defaultReverseGeocodeUri(double latitude, double longitude) {
-    return Uri.https(
-      'nominatim.openstreetmap.org',
-      '/reverse',
-      <String, String>{
-        'format': 'jsonv2',
-        'lat': latitude.toStringAsFixed(5),
-        'lon': longitude.toStringAsFixed(5),
-        'zoom': '10',
-      },
-    );
-  }
-
-  /// Extracts a sanitized list of Wi-Fi access point maps (`macAddress` and optional `signalStrength`) from [rawList].
-  static List<Map<String, Object?>> _extractWifiAccessPoints(Object? rawList) {
-    if (rawList is! List<Object?>) {
-      return const <Map<String, Object?>>[];
-    }
-    final sanitized = <Map<String, Object?>>[];
-    for (final item in rawList) {
-      if (sanitized.length >= 20) {
-        break;
-      }
-      if (item is Map<Object?, Object?>) {
-        final mac = item['macAddress'];
-        if (mac is String && mac.trim().isNotEmpty) {
-          final entry = <String, Object?>{'macAddress': mac.trim()};
-          if (item['signalStrength'] case final num strength) {
-            entry['signalStrength'] = strength.toInt();
-          }
-          sanitized.add(entry);
-        }
-      }
-    }
-    return sanitized;
-  }
-
-  /// Returns the first non-empty trimmed string value among [keys] in [map].
-  static String? _firstNonEmptyString(
-    Map<String, Object?> map,
-    List<String> keys,
-  ) {
-    for (final key in keys) {
-      final value = map[key];
-      if (value is String && value.trim().isNotEmpty) {
-        return value.trim();
-      }
-    }
-    return null;
-  }
-
-  /// Joins [locality] and [country] into a human-readable place label.
-  static String? _joinPlaceParts(String? locality, String? country) {
-    if (locality != null && country != null && locality != country) {
-      return '$locality, $country';
-    }
-    return locality ?? country;
-  }
-
-  /// Parses a finite coordinate from [rawValue] bounded by [maxMagnitude].
-  static double? _parseCoordinate(
-    Object? rawValue, {
-    required double maxMagnitude,
-  }) {
-    final double? numeric = switch (rawValue) {
-      final num number => number.toDouble(),
-      final String text => double.tryParse(text.trim()),
-      _ => null,
-    };
-    if (numeric == null || !numeric.isFinite || numeric.abs() > maxMagnitude) {
-      return null;
-    }
-    return numeric;
-  }
-
-  /// Extracts a [LocationFix] from a GeoIP JSON payload.
-  static LocationFix? _parseGeoIpFix(Map<String, Object?>? jsonMap) {
-    if (jsonMap == null) {
-      return null;
-    }
-    final latitude = _parseCoordinate(
-      jsonMap['latitude'] ?? jsonMap['lat'],
-      maxMagnitude: 90.0,
-    );
-    final longitude = _parseCoordinate(
-      jsonMap['longitude'] ?? jsonMap['lon'],
-      maxMagnitude: 180.0,
-    );
-    final locality = _firstNonEmptyString(jsonMap, const <String>[
-      'city',
-      'region',
-      'region_name',
-    ]);
-    final country = _firstNonEmptyString(jsonMap, const <String>[
-      'country',
-      'country_name',
-    ]);
-    final placeName = _joinPlaceParts(locality, country);
-    if (latitude == null && longitude == null && placeName == null) {
-      return null;
-    }
-    return LocationFix(
-      latitude: latitude,
-      longitude: longitude,
-      placeName: placeName,
-      source: LocationSource.internet,
-    );
-  }
-
-  /// Parses the native platform channel `source` string into a [LocationSource].
-  static LocationSource _parseNativeSource(Object? rawSource) {
-    if (rawSource is String) {
-      return switch (rawSource.trim().toLowerCase()) {
-        'gps' => LocationSource.gps,
-        'internet' => LocationSource.internet,
-        _ => LocationSource.system,
-      };
-    }
-    return LocationSource.system;
-  }
-
-  /// Extracts a concise place name from a Nominatim reverse-geocoding JSON payload.
-  static String? _parseReverseGeocodePlaceName(Map<String, Object?>? jsonMap) {
-    if (jsonMap == null) {
-      return null;
-    }
-    final address = jsonMap['address'];
-    if (address is Map<String, Object?>) {
-      final locality = _firstNonEmptyString(address, const <String>[
-        'city',
-        'town',
-        'village',
-        'municipality',
-        'county',
-        'state',
-      ]);
-      final country = _firstNonEmptyString(address, const <String>['country']);
-      if (_joinPlaceParts(locality, country) case final combined?) {
-        return combined;
-      }
-    }
-    return _firstNonEmptyString(jsonMap, const <String>[
-      'name',
-      'display_name',
-    ]);
-  }
-
-  /// Extracts a [LocationFix] from an MLS / BeaconDB `/v1/geolocate` JSON payload.
-  static LocationFix? _parseWifiGeolocateFix(Map<String, Object?>? jsonMap) {
-    if (jsonMap == null) {
-      return null;
-    }
-    final accuracy = _parseCoordinate(
-      jsonMap['accuracy'],
-      maxMagnitude: 100000.0,
-    );
-    if (accuracy != null && accuracy > maxWifiPositioningAccuracyMeters) {
-      return null;
-    }
-    final location = jsonMap['location'];
-    if (location is! Map<String, Object?>) {
-      return null;
-    }
-    final latitude = _parseCoordinate(location['lat'], maxMagnitude: 90.0);
-    final longitude = _parseCoordinate(location['lng'], maxMagnitude: 180.0);
-    if (latitude == null || longitude == null) {
-      return null;
-    }
-    return LocationFix(
-      latitude: latitude,
-      longitude: longitude,
-      source: LocationSource.system,
-    );
   }
 }

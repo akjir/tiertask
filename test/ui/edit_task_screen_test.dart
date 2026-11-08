@@ -189,7 +189,11 @@ task 000001OkD2 {
         'task_editor_blocked_card',
         'task_editor_conditions_card',
       ]) {
-        expect(find.byKey(ValueKey(cardKey)), findsOneWidget);
+        expect(
+          find.byKey(ValueKey(cardKey)),
+          findsOneWidget,
+          reason: 'Expected editor card $cardKey to be rendered',
+        );
       }
       expect(
         find.descendant(
@@ -550,6 +554,75 @@ task 000001OkD2 {
           ),
         ]),
       );
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen clears invalid suspended errors on input, enforces pending link and max-link bounds, and shows a SnackBar on link launch failure',
+    (WidgetTester tester) async {
+      final fakeLauncher = FakeLinkLauncherRepository(shouldThrow: true);
+      final initialLinks = [
+        for (var i = 0; i < TaskLink.maxLinksPerTask; i++)
+          '  link "Doc $i" "https://example.com/doc-$i"',
+      ].join('\n');
+      await _pumpEditorApp(
+        tester,
+        initialTdf:
+            'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\n\ntask 000001OkD2 {\n  name "Max Links Task"\n  created 2026-11-01 08:00\n  queued 2026-11-01 08:00\n$initialLinks\n}\n',
+        clock: DateTime.utc(2026, 11, 1, 10, 0),
+        linkLauncher: fakeLauncher,
+      );
+
+      await _tapKey(tester, 'edit_task_button_000001OkD2');
+
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      final suspendedInput = find.byKey(
+        const ValueKey('task_editor_suspended_input'),
+      );
+      await tester.enterText(suspendedInput, 'invalid-date');
+      await _tapKey(tester, 'task_editor_save_button');
+      const suspendedError =
+          'Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).';
+      expect(find.text(suspendedError), findsOneWidget);
+
+      await tester.enterText(suspendedInput, '2026-12-01');
+      await tester.pump();
+      expect(find.text(suspendedError), findsNothing);
+
+      final linkTitleFinder = find.byKey(
+        const ValueKey('editor_link_title_input'),
+      );
+      final linkUriFinder = find.byKey(const ValueKey('editor_link_uri_input'));
+      await tester.ensureVisible(linkUriFinder);
+      await tester.enterText(linkTitleFinder, 'Overflow Link');
+      await tester.enterText(linkUriFinder, 'https://example.com/overflow');
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(
+        find.text('Maximum of 20 links per task reached.'),
+        findsOneWidget,
+      );
+
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_remove_link_0')),
+      );
+      await tester.enterText(linkUriFinder, 'invalid-pending-uri');
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(
+        find.text(
+          'Enter both a link title and a valid URI with scheme (e.g. https://...).',
+        ),
+        findsOneWidget,
+      );
+
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_open_link_0')),
+      );
+      expect(find.text('Could not open link.'), findsOneWidget);
     },
   );
 }

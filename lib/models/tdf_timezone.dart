@@ -204,6 +204,7 @@ class TdfRepeatClock {
 /// Time zone transition and local-to-UTC resolution context per `TDF_SPEC.md` Section 6.10.
 @immutable
 class TdfTimeZoneContext {
+  /// Creates a [TdfTimeZoneContext] with [zoneId], [_ruleKind], and [fixedOffsetSeconds].
   const TdfTimeZoneContext._(
     this.zoneId,
     this._ruleKind, [
@@ -223,6 +224,7 @@ class TdfTimeZoneContext {
   const factory TdfTimeZoneContext.missing([String zoneId]) =
       TdfTimeZoneContext._missing;
 
+  /// Creates an unavailable [TdfTimeZoneContext] with [zoneId].
   const TdfTimeZoneContext._missing([this.zoneId = ''])
     : _ruleKind = _TimeZoneRuleKind.unavailable,
       fixedOffsetSeconds = 0;
@@ -405,6 +407,19 @@ class TdfTimeZoneContext {
     return daySeconds < 3 * 3600 ? cestSeconds : cetSeconds;
   }
 
+  /// Resolves the UTC offset in seconds for a UTC [utcInstant] in `Europe/Berlin`.
+  static int _resolveEuropeBerlinUtcOffsetSeconds(DateTime utcInstant) {
+    final year = utcInstant.year;
+    final springSunday = _lastSundayOfMonth(year, 3);
+    final autumnSunday = _lastSundayOfMonth(year, 10);
+    final dstStartUtc = DateTime.utc(year, 3, springSunday, 1, 0, 0);
+    final dstEndUtc = DateTime.utc(year, 10, autumnSunday, 1, 0, 0);
+    if (!utcInstant.isBefore(dstStartUtc) && utcInstant.isBefore(dstEndUtc)) {
+      return 7200;
+    }
+    return 3600;
+  }
+
   /// Resolves the UTC offset in seconds for a local wall-clock date and time.
   int _resolveOffsetSecondsForLocal(
     int year,
@@ -437,19 +452,6 @@ class TdfTimeZoneContext {
       ),
       _TimeZoneRuleKind.unavailable => 0,
     };
-  }
-
-  /// Resolves the UTC offset in seconds for a UTC [utcInstant] in `Europe/Berlin`.
-  static int _resolveEuropeBerlinUtcOffsetSeconds(DateTime utcInstant) {
-    final year = utcInstant.year;
-    final springSunday = _lastSundayOfMonth(year, 3);
-    final autumnSunday = _lastSundayOfMonth(year, 10);
-    final dstStartUtc = DateTime.utc(year, 3, springSunday, 1, 0, 0);
-    final dstEndUtc = DateTime.utc(year, 10, autumnSunday, 1, 0, 0);
-    if (!utcInstant.isBefore(dstStartUtc) && utcInstant.isBefore(dstEndUtc)) {
-      return 7200;
-    }
-    return 3600;
   }
 
   /// Parses an ISO UTC offset string such as `+01:00`, `-05:30`, `UTC+02:00`, or `+00:00` into seconds.

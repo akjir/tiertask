@@ -35,6 +35,7 @@ class TierTaskApp extends ConsumerStatefulWidget {
   ConsumerState<TierTaskApp> createState() => _TierTaskAppState();
 }
 
+/// State for [TierTaskApp] managing application lifecycle log flushing and Material routing.
 class _TierTaskAppState extends ConsumerState<TierTaskApp> {
   AppLifecycleListener? _lifecycleListener;
 

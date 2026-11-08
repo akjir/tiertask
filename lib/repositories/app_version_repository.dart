@@ -28,9 +28,6 @@ abstract interface class AppVersionRepository {
   /// Maximum allowed length for a formatted full version string.
   static const int _maxVersionLength = 64;
 
-  /// Loads the formatted application version string (`v0.1.0+<count>.<hash>[.dev]`).
-  Future<String> loadAppVersion();
-
   /// Formats the full SemVer 2.0.0 application version with Git build metadata (`v<version>+<count>.<hash>[.dev]`).
   static String formatFullVersion({
     String packageVersion = AppVersionRepository.packageVersion,
@@ -60,6 +57,9 @@ abstract interface class AppVersionRepository {
     }
     return true;
   }
+
+  /// Loads the formatted application version string (`v0.1.0+<count>.<hash>[.dev]`).
+  Future<String> loadAppVersion();
 
   /// Returns `true` when [value] is non-empty and consists strictly of ASCII digits (`0-9`).
   static bool _isAsciiDigits(String value) {

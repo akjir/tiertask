@@ -39,32 +39,29 @@ class LocalFileOperations<E extends Exception> {
   final E Function(String message, {Object? cause}) createException;
 
   /// Combines [directoryPath] and [fileName] into a normalized local `.tdf` file path.
-  String combineDirectoryAndFileName(String directoryPath, String fileName) {
-    final cleanDir = trimTrailingSeparators(directoryPath.trim());
-    final cleanName = extractFileNameFromPath(fileName);
-    if (cleanDir.isEmpty) return cleanName;
-    final sep = Platform.pathSeparator;
-    return cleanDir == sep ? '$sep$cleanName' : '$cleanDir$sep$cleanName';
-  }
+  String combineDirectoryAndFileName(String directoryPath, String fileName) =>
+      _joinDirectoryAndChild(directoryPath, extractFileNameFromPath(fileName));
 
   /// Resolves the default filesystem path for `tiertask.log` inside [baseDirectoryPath] or the user data directory.
   String defaultLogFilePath({String? baseDirectoryPath}) {
     final trimmed = baseDirectoryPath?.trim() ?? '';
     final base = trimmed.isNotEmpty ? trimmed : resolveDefaultDirectoryPath();
-    return '${trimTrailingSeparators(base)}${Platform.pathSeparator}${AppLogger.defaultLogFileName}';
+    return _joinDirectoryAndChild(base, AppLogger.defaultLogFileName);
   }
 
-  /// Synchronously deletes the diagnostic log file at [path] if it exists.
+  /// Synchronously deletes the diagnostic log file at [path] if it is a regular file.
   void deleteLogFileSync(String path) {
     try {
-      final file = File(path);
-      if (file.existsSync()) file.deleteSync();
+      if (FileSystemEntity.typeSync(path, followLinks: false) ==
+          FileSystemEntityType.file) {
+        File(path).deleteSync();
+      }
     } on FileSystemException {
       // Ignore deletion failures on missing or locked diagnostic files.
     }
   }
 
-  /// Deletes the local `.tdf` file at [path] if it exists, rejecting directories and symbolic links.
+  /// Deletes the local `.tdf` file at [path] if it exists, rejecting directories, symbolic links, and special files.
   void deleteTdf(
     String path,
     AppLocalizations messages, {
@@ -75,13 +72,18 @@ class LocalFileOperations<E extends Exception> {
       inMemoryStore?.remove(path);
       return;
     }
-    final sourceType = FileSystemEntity.typeSync(path, followLinks: false);
-    if (sourceType == FileSystemEntityType.notFound) return;
-    if (sourceType == FileSystemEntityType.directory) {
-      throw createException(messages.errorMoveSourceIsDirectory(path));
-    }
-    if (sourceType == FileSystemEntityType.link) {
-      throw createException(messages.errorMoveSourceIsSymlink(path));
+    switch (FileSystemEntity.typeSync(path, followLinks: false)) {
+      case FileSystemEntityType.notFound:
+        return;
+      case FileSystemEntityType.directory:
+        throw createException(messages.errorMoveSourceIsDirectory(path));
+      case FileSystemEntityType.link:
+        throw createException(messages.errorMoveSourceIsSymlink(path));
+      case FileSystemEntityType.pipe:
+      case FileSystemEntityType.unixDomainSock:
+        throw createException(messages.errorMovePermissionDenied(path));
+      case FileSystemEntityType.file:
+        break;
     }
     try {
       File(path).deleteSync();
@@ -107,7 +109,7 @@ class LocalFileOperations<E extends Exception> {
     final trimmed = trimTrailingSeparators(rawPath.trim());
     if (trimmed.isEmpty) return '';
     final lastSlash = trimmed.lastIndexOf('/');
-    final lastBackslash = trimmed.lastIndexOf('\\');
+    final lastBackslash = trimmed.lastIndexOf(r'\');
     final splitIndex = lastSlash > lastBackslash ? lastSlash : lastBackslash;
     if (splitIndex < 0) return '';
     if (splitIndex == 0) return '/';
@@ -154,7 +156,8 @@ class LocalFileOperations<E extends Exception> {
         trimmed != '..' &&
         trimmed.toLowerCase() != '.tdf' &&
         !trimmed.contains('/') &&
-        !trimmed.contains('\\') &&
+        !trimmed.contains(r'\') &&
+        !trimmed.contains(':') &&
         !_hasControlCharacters(trimmed);
   }
 
@@ -183,11 +186,11 @@ class LocalFileOperations<E extends Exception> {
     return createException(text, cause: error);
   }
 
-  /// Safely moves the `.tdf` file from [fromPath] to [toPath] inside [targetDirPath] without overwriting existing entities.
+  /// Safely moves the `.tdf` file from [fromPath] to [toPath] inside [targetDirectoryPath] without overwriting existing entities.
   void moveTdfFile(
     String fromPath,
     String toPath,
-    String targetDirPath,
+    String targetDirectoryPath,
     int maxFileBytes,
     AppLocalizations messages, {
     required bool inMemory,
@@ -198,7 +201,7 @@ class LocalFileOperations<E extends Exception> {
       _moveInMemoryEntry(inMemoryStore, fromPath, toPath, messages);
       return;
     }
-    _validateTargetDirectory(targetDirPath, messages);
+    _validateTargetDirectory(targetDirectoryPath, messages);
     _ensureTargetDoesNotExist(toPath, messages);
     switch (FileSystemEntity.typeSync(fromPath, followLinks: false)) {
       case FileSystemEntityType.link:
@@ -206,26 +209,38 @@ class LocalFileOperations<E extends Exception> {
       case FileSystemEntityType.directory:
         throw createException(messages.errorMoveSourceIsDirectory(fromPath));
       case FileSystemEntityType.notFound:
-        _verifyDirectoryWritable(targetDirPath, messages);
+        _verifyDirectoryWritable(targetDirectoryPath, messages);
       case FileSystemEntityType.file:
+        _performFileMove(fromPath, toPath, maxFileBytes, messages);
       case FileSystemEntityType.pipe:
       case FileSystemEntityType.unixDomainSock:
-        _performFileMove(fromPath, toPath, maxFileBytes, messages);
+        throw createException(messages.errorMovePermissionDenied(fromPath));
     }
     AppLogger.info(LogTag.storage, 'moveTdfFile $fromPath -> $toPath');
   }
 
   /// Synchronously reads up to [maxBytes] from the diagnostic log file at [path].
   String readLogFileSync(String path, {required int maxBytes}) {
+    if (maxBytes <= 0) return '';
     try {
-      final file = File(path);
-      if (!file.existsSync()) return '';
-      final bytes = file.readAsBytesSync();
-      if (bytes.isEmpty) return '';
-      final slice = bytes.length > maxBytes
-          ? bytes.sublist(bytes.length - maxBytes)
-          : bytes;
-      return utf8.decode(slice, allowMalformed: true);
+      if (FileSystemEntity.typeSync(path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        return '';
+      }
+      final randomAccessFile = File(path).openSync();
+      try {
+        final length = randomAccessFile.lengthSync();
+        if (length <= 0) return '';
+        if (length > maxBytes) {
+          randomAccessFile.setPositionSync(length - maxBytes);
+        }
+        final bytes = randomAccessFile.readSync(
+          length > maxBytes ? maxBytes : length,
+        );
+        return utf8.decode(bytes, allowMalformed: true);
+      } finally {
+        randomAccessFile.closeSync();
+      }
     } on FileSystemException {
       return '';
     }
@@ -257,34 +272,34 @@ class LocalFileOperations<E extends Exception> {
 
   /// Resolves the platform-appropriate user data directory for relative local file names.
   String resolveDefaultDirectoryPath() {
-    final env = Platform.environment;
-    final sep = Platform.pathSeparator;
+    final environment = Platform.environment;
+    final separator = Platform.pathSeparator;
     final candidates = <String?>[
       if (Platform.isWindows) ...<String?>[
-        env['APPDATA'],
-        env['LOCALAPPDATA'],
-        env['USERPROFILE'],
+        environment['APPDATA'],
+        environment['LOCALAPPDATA'],
+        environment['USERPROFILE'],
       ],
-      env['XDG_DATA_HOME'],
+      environment['XDG_DATA_HOME'],
     ];
     for (final candidate in candidates) {
       final trimmed = candidate?.trim() ?? '';
       if (trimmed.isNotEmpty) {
-        return '${trimTrailingSeparators(trimmed)}${sep}tiertask';
+        return '${trimTrailingSeparators(trimmed)}${separator}tiertask';
       }
     }
-    final home = (env['HOME'] ?? '').trim();
+    final home = (environment['HOME'] ?? '').trim();
     if (home.isNotEmpty) {
-      return '${trimTrailingSeparators(home)}$sep.local${sep}share${sep}tiertask';
+      return '${trimTrailingSeparators(home)}$separator.local${separator}share${separator}tiertask';
     }
     return Directory.systemTemp.path;
   }
 
   /// Resolves the parent directory path of [resolvedFilePath].
   String resolveDirectoryPath(String resolvedFilePath) {
-    final sep = Platform.pathSeparator;
-    final lastIndex = resolvedFilePath.lastIndexOf(sep);
-    if (lastIndex <= 0) return sep;
+    final separator = Platform.pathSeparator;
+    final lastIndex = resolvedFilePath.lastIndexOf(separator);
+    if (lastIndex <= 0) return separator;
     if (lastIndex == 2 && _windowsDrivePattern.hasMatch(resolvedFilePath)) {
       return resolvedFilePath.substring(0, 3);
     }
@@ -301,9 +316,9 @@ class LocalFileOperations<E extends Exception> {
     if (isAbsolutePath(rawPath.trim())) return normalized;
     final trimmedBase = baseDirectoryPath?.trim() ?? '';
     final base = trimmedBase.isNotEmpty
-        ? trimmedBase
+        ? _validateBaseDirectoryPath(trimmedBase, messages)
         : resolveDefaultDirectoryPath();
-    return '${trimTrailingSeparators(base)}${Platform.pathSeparator}$normalized';
+    return _joinDirectoryAndChild(base, normalized);
   }
 
   /// Resolves the first available `<filePath>.bak` or `<filePath>.bak.NNN` backup path on disk.
@@ -323,10 +338,11 @@ class LocalFileOperations<E extends Exception> {
     );
   }
 
-  /// Strips trailing `/` and `\` characters from [path].
+  /// Strips trailing `/` and `\` characters from [path], preserving POSIX and Windows drive roots.
   String trimTrailingSeparators(String path) {
+    final minLength = _windowsDrivePattern.hasMatch(path) ? 3 : 1;
     var end = path.length;
-    while (end > 1 &&
+    while (end > minLength &&
         (path.codeUnitAt(end - 1) == 0x2F ||
             path.codeUnitAt(end - 1) == 0x5C)) {
       end--;
@@ -349,15 +365,15 @@ class LocalFileOperations<E extends Exception> {
   ) {
     final trimmed = rawPath.trim();
     final segments = _validateAndSplitSegments(trimmed, messages);
-    final sep = Platform.pathSeparator;
-    final joined = segments.join(sep);
+    final separator = Platform.pathSeparator;
+    final joined = segments.join(separator);
     if (trimmed.startsWith('/')) return '/$joined';
     if (_windowsDrivePattern.hasMatch(trimmed)) {
-      final remaining = segments.skip(1).join(sep);
+      final remaining = segments.skip(1).join(separator);
       if (remaining.isEmpty) {
         throw createException(messages.errorInvalidLocalFilePath);
       }
-      return '${trimmed.substring(0, 2)}$sep$remaining';
+      return '${trimmed.substring(0, 2)}$separator$remaining';
     }
     return joined;
   }
@@ -365,6 +381,11 @@ class LocalFileOperations<E extends Exception> {
   /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
   void writeLogFileSync(String path, String content, {required bool append}) {
     try {
+      final type = FileSystemEntity.typeSync(path, followLinks: false);
+      if (type != FileSystemEntityType.notFound &&
+          type != FileSystemEntityType.file) {
+        return;
+      }
       final file = File(path);
       file.parent.createSync(recursive: true);
       file.writeAsStringSync(
@@ -442,15 +463,26 @@ class LocalFileOperations<E extends Exception> {
     return code == 18 || code == 17 && Platform.isWindows;
   }
 
+  /// Joins [directoryPath] and [childPath] with a single platform path separator without duplicating root slashes.
+  String _joinDirectoryAndChild(String directoryPath, String childPath) {
+    final cleanDirectory = trimTrailingSeparators(directoryPath.trim());
+    if (cleanDirectory.isEmpty) return childPath;
+    final lastCode = cleanDirectory.codeUnitAt(cleanDirectory.length - 1);
+    if (lastCode == 0x2F || lastCode == 0x5C) {
+      return '$cleanDirectory$childPath';
+    }
+    return '$cleanDirectory${Platform.pathSeparator}$childPath';
+  }
+
   /// Fallback text matcher when `osError.errorCode` is not populated or uses a non-standard code.
   String _mapMoveErrorByText(
     FileSystemException error,
     String path,
     AppLocalizations messages,
   ) {
-    final rawOs = error.osError?.message.trim() ?? '';
-    final details = rawOs.isNotEmpty
-        ? '$rawOs ($path)'
+    final rawOsMessage = error.osError?.message.trim() ?? '';
+    final details = rawOsMessage.isNotEmpty
+        ? '$rawOsMessage ($path)'
         : '${error.message} ($path)';
     final lower = details.toLowerCase();
     if (lower.contains('permission denied') ||
@@ -500,18 +532,24 @@ class LocalFileOperations<E extends Exception> {
     }
   }
 
-  /// Validates [rawPath] against traversal and control characters and returns normalized path segments.
+  /// Validates [rawPath] against traversal, UNC prefixes, drive-relative colons, and control characters and returns normalized path segments.
   List<String> _validateAndSplitSegments(
     String rawPath,
     AppLocalizations messages,
   ) {
-    if (rawPath.isEmpty || _hasControlCharacters(rawPath)) {
+    if (rawPath.isEmpty ||
+        rawPath.startsWith(r'\') ||
+        _hasControlCharacters(rawPath)) {
       throw createException(messages.errorInvalidLocalFilePath);
     }
+    final isWindowsDrive = _windowsDrivePattern.hasMatch(rawPath);
     final segments = <String>[];
     for (final segment in rawPath.split(_pathSeparatorPattern)) {
       if (segment.isEmpty) continue;
-      if (segment == '.' || segment == '..') {
+      final allowDriveColon = isWindowsDrive && segments.isEmpty;
+      if (segment == '.' ||
+          segment == '..' ||
+          (!allowDriveColon && segment.contains(':'))) {
         throw createException(messages.errorInvalidLocalFilePath);
       }
       segments.add(segment);
@@ -520,6 +558,16 @@ class LocalFileOperations<E extends Exception> {
       throw createException(messages.errorInvalidLocalFilePath);
     }
     return segments;
+  }
+
+  /// Validates [rawBase] as a safe base directory path without traversal or control characters.
+  String _validateBaseDirectoryPath(String rawBase, AppLocalizations messages) {
+    final cleanBase = trimTrailingSeparators(rawBase.trim());
+    if (cleanBase == '/') return '/';
+    if (cleanBase.length == 3 && _windowsDrivePattern.hasMatch(cleanBase)) {
+      return '${cleanBase.substring(0, 2)}${Platform.pathSeparator}';
+    }
+    return validateRelativeOrAbsolutePath(cleanBase, messages);
   }
 
   /// Verifies that [path] exists and resolves to a directory rather than a file or broken link.
