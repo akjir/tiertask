@@ -27,6 +27,7 @@ tiertask/
 ├── LICENSE
 ├── README.md
 ├── analysis_options.yaml
+├── install.sh
 ├── l10n.yaml
 ├── pubspec.yaml
 ├── android/
@@ -193,6 +194,7 @@ tiertask/
 | `CHANGELOG.md` | User-facing change history following Keep a Changelog 1.1.0. |
 | `README.md` | Project overview, supported platforms (Linux, Android, Windows), build instructions, and `.tdf` tier reference. |
 | `analysis_options.yaml` | Dart analyzer configuration excluding `build/**`, `android/**`, `linux/**`, `windows/**`, and generated `lib/l10n/app_localizations*.dart` files. |
+| `install.sh` | POSIX user-space Linux build and installation script installing the release bundle, executable symlink, icons, and desktop entry into `$HOME/.local`. |
 | `l10n.yaml` | Flutter `gen-l10n` configuration pointing to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`. |
 | `pubspec.yaml` | Package metadata and dependencies (`flutter`, `flutter_localizations`, `flutter_riverpod`, `flutter_secure_storage`, `intl`). |
 | `spec/TDF_SPEC_0.6.0.md` | Normative specification for the TierTask Data Format (`.tdf`) lexical grammar, blocks, directives, 6-tier derivation pipeline, mutations, and error bounds. |

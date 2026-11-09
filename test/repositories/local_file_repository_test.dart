@@ -410,6 +410,14 @@ void main() {
       expect(sink.readLogFileSync(defaultPath, maxBytes: 1024), isEmpty);
 
       sink.writeLogFileSync(defaultPath, 'Line 1\n', append: false);
+      if (Platform.isLinux) {
+        final mode = FileStat.statSync(defaultPath).mode & 0x1FF;
+        expect(
+          mode,
+          equals(0x180),
+          reason: 'Diagnostic log files on Linux must use 0600 permissions',
+        );
+      }
       sink.writeLogFileSync(defaultPath, 'Line 2\n', append: true);
       expect(
         sink.readLogFileSync(defaultPath, maxBytes: 1024),

@@ -321,6 +321,11 @@ void main() {
         'http://',
         'https://',
         '://missing-host',
+        'ftp://cloud.example.com',
+        'file:///etc/passwd',
+        'https://user:pass@cloud.example.com',
+        'https://cloud.example.com/dav?query=1',
+        'https://cloud.example.com/dav#fragment',
       ]) {
         final invalidConfig = WebDavConfig(
           serverUrl: invalidServerUrl,
@@ -335,12 +340,37 @@ void main() {
         );
       }
 
+      for (final invalidFilePath in <String>[
+        '../tasks.tdf',
+        'sub/../../etc/passwd',
+        './tasks.tdf',
+        r'folder\tasks.tdf',
+        'tasks\x00.tdf',
+      ]) {
+        final invalidPathConfig = WebDavConfig(
+          serverUrl: 'https://cloud.example.com',
+          username: 'stefan',
+          password: secret,
+          filePath: invalidFilePath,
+        );
+        expect(
+          invalidPathConfig.resolveEndpointUri(),
+          isNull,
+          reason: 'Unsafe remote filePath "$invalidFilePath" must resolve null',
+        );
+      }
+
       final activeConfig = WebDavConfig(
         serverUrl: 'http://${server.address.host}:${server.port}',
         username: 'stefan',
         password: secret,
         filePath: 'logged.tdf',
         language: AppLanguage.english,
+      );
+      expect(
+        activeConfig.toString(),
+        isNot(contains(secret)),
+        reason: 'WebDavConfig.toString() must redact password',
       );
       final repository = WebDavRepository(config: activeConfig);
       await repository.saveTdf('tdf 0.5.1\n');
@@ -410,6 +440,24 @@ void main() {
         AppLogger.fullLogText,
         contains('[INFO ] [STORAGE  ] webdav.log_delete |'),
         reason: 'deleteLog must record webdav.log_delete entry',
+      );
+
+      final boundedRepo = WebDavRepository(
+        config: activeConfig,
+        maxFileBytes: 64,
+      );
+      remoteFiles['/remote.php/dav/files/stefan/logged.tdf'] = 'a' * 64;
+      expect(
+        (await boundedRepo.fetchTdf()).length,
+        equals(64),
+        reason: 'Payload at exact maxFileBytes boundary must succeed',
+      );
+      remoteFiles['/remote.php/dav/files/stefan/logged.tdf'] = 'a' * 65;
+      await expectLater(
+        boundedRepo.fetchTdf,
+        throwsA(isA<WebDavException>()),
+        reason:
+            'Payload exceeding maxFileBytes (N+1) must throw WebDavException',
       );
     });
   });

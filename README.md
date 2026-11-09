@@ -44,9 +44,10 @@ flutter run -d linux
 flutter run -d windows
 ```
 
-Build obfuscated release artifacts for supported platforms:
+Build obfuscated release artifacts for supported platforms (or build and install into `$HOME/.local` on Linux via `./install.sh`):
 
 ```bash
+./install.sh
 flutter build linux --release --obfuscate --split-debug-info=build/symbols
 flutter build apk --release --obfuscate --split-debug-info=build/symbols
 flutter build windows --release --obfuscate --split-debug-info=build/symbols

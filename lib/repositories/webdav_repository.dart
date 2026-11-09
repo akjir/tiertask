@@ -46,6 +46,7 @@ class WebDavRepository {
   WebDavRepository({
     required this.config,
     HttpClient Function()? clientFactory,
+    this.maxFileBytes = LocalFileRepository.defaultMaxFileBytes,
     this.timeout = const Duration(seconds: 15),
   }) : _clientFactory = clientFactory ?? HttpClient.new {
     if (config.password.isNotEmpty) {
@@ -55,6 +56,9 @@ class WebDavRepository {
 
   /// Active WebDAV connection and language configuration.
   final WebDavConfig config;
+
+  /// Maximum allowed remote response or payload byte size (1 MiB default).
+  final int maxFileBytes;
 
   /// Timeout applied to connection, request, and response operations.
   final Duration timeout;
@@ -200,10 +204,7 @@ class WebDavRepository {
 
       final response = await request.close().timeout(timeout);
       final status = response.statusCode;
-      final body = await response
-          .transform(utf8.decoder)
-          .join()
-          .timeout(timeout);
+      final body = await _readBoundedUtf8Body(response, localizations);
 
       if (status >= 200 && status < 300) {
         AppLogger.event(
@@ -412,6 +413,24 @@ class WebDavRepository {
     } finally {
       client.close(force: false);
     }
+  }
+
+  /// Reads at most [maxFileBytes] from [response] and decodes it as UTF-8, throwing [WebDavException] if oversized.
+  Future<String> _readBoundedUtf8Body(
+    HttpClientResponse response,
+    AppLocalizations localizations,
+  ) async {
+    if (response.contentLength > maxFileBytes) {
+      throw WebDavException(localizations.errorLocalFileTooLarge);
+    }
+    final bytes = <int>[];
+    await for (final chunk in response.timeout(timeout)) {
+      if (bytes.length + chunk.length > maxFileBytes) {
+        throw WebDavException(localizations.errorLocalFileTooLarge);
+      }
+      bytes.addAll(chunk);
+    }
+    return utf8.decode(bytes);
   }
 
   /// Validates and returns the resolved WebDAV log [Uri] for [logFileName].

@@ -414,11 +414,17 @@ class WebDavConfig {
   /// Resolves the full WebDAV endpoint [Uri] for the target `.tdf` file.
   Uri? resolveEndpointUri() {
     var rawUrl = serverUrl.trim();
-    if (rawUrl.isEmpty) {
+    if (rawUrl.isEmpty || _hasControlCharacters(rawUrl)) {
       return null;
     }
 
-    if (!rawUrl.startsWith('http://') && !rawUrl.startsWith('https://')) {
+    final lowerUrl = rawUrl.toLowerCase();
+    if (lowerUrl.contains('://') &&
+        !lowerUrl.startsWith('http://') &&
+        !lowerUrl.startsWith('https://')) {
+      return null;
+    }
+    if (!lowerUrl.startsWith('http://') && !lowerUrl.startsWith('https://')) {
       rawUrl = 'https://$rawUrl';
     }
 
@@ -427,19 +433,32 @@ class WebDavConfig {
     }
 
     final baseUri = Uri.tryParse(rawUrl);
-    if (baseUri == null || !baseUri.hasScheme || baseUri.host.isEmpty) {
+    if (baseUri == null ||
+        (baseUri.scheme != 'http' && baseUri.scheme != 'https') ||
+        baseUri.host.isEmpty ||
+        baseUri.userInfo.isNotEmpty ||
+        baseUri.hasQuery ||
+        baseUri.hasFragment ||
+        _hasInvalidPathSegments(baseUri.pathSegments)) {
       return null;
     }
 
-    final cleanFile = filePath.trim().isEmpty
+    final trimmedFile = filePath.trim();
+    if (_hasInvalidRemoteFilePath(trimmedFile)) {
+      return null;
+    }
+    final cleanFile = trimmedFile.isEmpty
         ? defaultFileName
-        : filePath.trim().replaceFirst(_leadingSlashesPattern, '');
+        : trimmedFile.replaceFirst(_leadingSlashesPattern, '');
 
     final encodedFileSegments = cleanFile
         .split('/')
         .where((segment) => segment.isNotEmpty)
         .map(Uri.encodeComponent)
         .join('/');
+    if (encodedFileSegments.isEmpty) {
+      return null;
+    }
 
     final String fullUrl;
     if (rawUrl.toLowerCase().endsWith('.tdf')) {
@@ -507,6 +526,38 @@ class WebDavConfig {
     );
   }
 
+  /// Returns `true` when [value] contains ASCII control characters or null bytes.
+  static bool _hasControlCharacters(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final code = value.codeUnitAt(i);
+      if (code < 0x20 || code == 0x7F) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` when [segments] contains `.` or `..` traversal components.
+  static bool _hasInvalidPathSegments(Iterable<String> segments) {
+    for (final segment in segments) {
+      if (segment == '.' || segment == '..') {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` when [rawFilePath] contains backslashes, control characters, or traversal segments.
+  static bool _hasInvalidRemoteFilePath(String rawFilePath) {
+    if (rawFilePath.isEmpty) {
+      return false;
+    }
+    if (rawFilePath.contains(r'\') || _hasControlCharacters(rawFilePath)) {
+      return true;
+    }
+    return _hasInvalidPathSegments(rawFilePath.split('/'));
+  }
+
   /// Returns `true` when [name] is a safe `.log` basename without path traversal.
   static bool _isValidLogFileName(String name) {
     if (name.length < 5 || !name.endsWith('.log') || name.contains('..')) {
@@ -560,4 +611,11 @@ class WebDavConfig {
     logLevel,
     logStorageMode,
   );
+
+  @override
+  String toString() =>
+      'WebDavConfig(serverUrl: $serverUrl, username: $username, '
+      'password: ${password.isEmpty ? "" : "[REDACTED]"}, '
+      'filePath: $filePath, localFilePath: $localFilePath, '
+      'storageMode: ${storageMode.name})';
 }

@@ -971,6 +971,7 @@ def generate_architecture_tree(root: Path) -> str:
         "README.md",
         "TDF_SPEC.md",
         "analysis_options.yaml",
+        "install.sh",
         "l10n.yaml",
         "pubspec.yaml",
     ]

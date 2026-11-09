@@ -487,6 +487,10 @@ class LocalFileOperations<E extends Exception> {
         mode: append ? FileMode.append : FileMode.write,
         flush: true,
       );
+      if (Platform.isLinux &&
+          (type == FileSystemEntityType.notFound || !append)) {
+        Process.runSync('chmod', <String>['0600', path]);
+      }
     } on FileSystemException {
       // Never propagate diagnostic log I/O errors into user workflows.
     }
