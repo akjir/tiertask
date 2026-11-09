@@ -207,7 +207,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ? null
           : _LandingFloatingButtons(onOpenQuickAdd: _openQuickAdd),
       bottomNavigationBar: _isQuickAddOpen
-          ? _QuickAddBottomBar(onClose: _closeQuickAdd)
+          ? _QuickAddBottomBar(
+              initialLabelId: state.activeLabel?.id,
+              onClose: _closeQuickAdd,
+            )
           : null,
       body: _LandingScaffoldBody(
         activeLabel: state.activeLabel,
@@ -532,15 +535,23 @@ class _LandingScaffoldBody extends StatelessWidget {
 /// Bottom bar hosting [QuickAddBar] padded by the keyboard view insets.
 class _QuickAddBottomBar extends StatelessWidget {
   /// Creates a [_QuickAddBottomBar].
-  const _QuickAddBottomBar({required this.onClose});
+  const _QuickAddBottomBar({
+    required this.initialLabelId,
+    required this.onClose,
+  });
 
+  final String? initialLabelId;
   final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: QuickAddBar(onCancel: onClose, onSubmitted: onClose),
+      child: QuickAddBar(
+        initialLabelId: initialLabelId,
+        onCancel: onClose,
+        onSubmitted: onClose,
+      ),
     );
   }
 }

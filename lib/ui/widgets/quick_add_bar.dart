@@ -31,7 +31,15 @@ const String _popupTapRegionGroupId = 'quick_add_popup_region';
 /// Inline bottom task creation bar with title input, Priority, Someday, upward Labels selector, Advanced dialog trigger, and Cancel actions.
 class QuickAddBar extends ConsumerStatefulWidget {
   /// Creates a [QuickAddBar] widget.
-  const QuickAddBar({super.key, this.onCancel, this.onSubmitted});
+  const QuickAddBar({
+    super.key,
+    this.initialLabelId,
+    this.onCancel,
+    this.onSubmitted,
+  });
+
+  /// Optional label ID pre-selected when opening the bar.
+  final String? initialLabelId;
 
   /// Optional callback invoked when the cancel button is pressed.
   final VoidCallback? onCancel;
@@ -327,7 +335,23 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialLabelId case final labelId?) {
+      _selectedLabelIds.add(labelId);
+    }
     _controller.addListener(_handleControllerChanged);
+  }
+
+  @override
+  void didUpdateWidget(QuickAddBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialLabelId != widget.initialLabelId) {
+      if (oldWidget.initialLabelId case final previousLabelId?) {
+        _selectedLabelIds.remove(previousLabelId);
+      }
+      if (widget.initialLabelId case final nextLabelId?) {
+        _selectedLabelIds.add(nextLabelId);
+      }
+    }
   }
 
   @override
@@ -380,13 +404,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
   /// Clears pending state and invokes [QuickAddBar.onCancel].
   void _cancel() {
     _controller.clear();
-    setState(() {
-      if (_labelsPopupController.isShowing) {
-        _labelsPopupController.hide();
-      }
-      _selectedLabelIds.clear();
-      _mode = QuickAddMode.standard;
-    });
+    setState(_resetDraftState);
     widget.onCancel?.call();
   }
 
@@ -418,16 +436,22 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
           return;
         }
         _controller.clear();
-        setState(() {
-          if (_labelsPopupController.isShowing) {
-            _labelsPopupController.hide();
-          }
-          _selectedLabelIds.clear();
-          _mode = QuickAddMode.standard;
-        });
+        setState(_resetDraftState);
         widget.onSubmitted?.call();
       },
     );
+  }
+
+  /// Resets the popup, selected labels, and mode to their initial draft state.
+  void _resetDraftState() {
+    if (_labelsPopupController.isShowing) {
+      _labelsPopupController.hide();
+    }
+    _selectedLabelIds.clear();
+    if (widget.initialLabelId case final labelId?) {
+      _selectedLabelIds.add(labelId);
+    }
+    _mode = QuickAddMode.standard;
   }
 
   /// Submits the entered task title, priority/someday selection, and labels.
@@ -449,13 +473,7 @@ class _QuickAddBarState extends ConsumerState<QuickAddBar> {
     ];
 
     _controller.clear();
-    setState(() {
-      if (_labelsPopupController.isShowing) {
-        _labelsPopupController.hide();
-      }
-      _selectedLabelIds.clear();
-      _mode = QuickAddMode.standard;
-    });
+    setState(_resetDraftState);
 
     await ref
         .read(taskNotifierProvider.notifier)

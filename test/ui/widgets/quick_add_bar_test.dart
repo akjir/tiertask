@@ -503,4 +503,177 @@ label chr000OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'QuickAddBar and EditTaskScreen pre-select the active drawer label when creating a new task',
+    (WidgetTester tester) async {
+      const seededLabelsTdf = '''
+tdf 0.5.0
+
+queue {
+  modified 2026-11-01 00:00:00
+}
+
+label home00OkD2 {
+  name "Home"
+  color "#00E5FF"
+}
+label officeOkD2 {
+  name "Office"
+  color "#FF9100"
+}
+''';
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: const WebDavConfig(language: AppLanguage.english),
+              initialTdf: seededLabelsTdf,
+            ),
+          ),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('drawer_label_tile_officeOkD2')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      final barFinder = find.byKey(const ValueKey('quick_add_bar'));
+      final barTheme = Theme.of(tester.element(barFinder));
+      final labelsButtonFinder = find.byKey(
+        const ValueKey('quick_add_labels_button'),
+      );
+      final labelsIconFinder = find.descendant(
+        of: labelsButtonFinder,
+        matching: find.byType(Icon),
+      );
+
+      expect(
+        tester.widget<Icon>(labelsIconFinder).color,
+        equals(barTheme.colorScheme.primary),
+        reason: 'Labels button must be highlighted immediately when an active label filter is selected',
+      );
+
+      await tester.tap(labelsButtonFinder);
+      await tester.pumpAndSettle();
+
+      final officeOptionFinder = find.byKey(
+        const ValueKey('quick_add_label_officeOkD2'),
+      );
+      final homeOptionFinder = find.byKey(
+        const ValueKey('quick_add_label_home00OkD2'),
+      );
+      expect(
+        find.descendant(
+          of: officeOptionFinder,
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Active label Office must be pre-selected in the upward menu',
+      );
+      expect(
+        find.descendant(
+          of: homeOptionFinder,
+          matching: find.byIcon(Icons.radio_button_unchecked_rounded),
+        ),
+        findsOneWidget,
+        reason: 'Inactive label Home must remain unselected in the upward menu',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('quick_add_advanced_button')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('edit_task_screen')),
+        findsOneWidget,
+        reason: 'Advanced button must open EditTaskScreen',
+      );
+      expect(
+        tester
+            .widget<FilterChip>(
+              find.byKey(const ValueKey('task_editor_label_officeOkD2')),
+            )
+            .selected,
+        isTrue,
+        reason: 'EditTaskScreen must pre-select the active label Office',
+      );
+      expect(
+        tester
+            .widget<FilterChip>(
+              find.byKey(const ValueKey('task_editor_label_home00OkD2')),
+            )
+            .selected,
+        isFalse,
+        reason: 'EditTaskScreen must keep inactive label Home unselected',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('task_editor_cancel_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('quick_add_input')),
+        'Prepare quarterly deck',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('quick_add_submit_button')));
+      await tester.pumpAndSettle();
+
+      final board = container.read(taskNotifierProvider).value!;
+      expect(board.focus.length, equals(1));
+      expect(
+        board.focus.single.labelIds,
+        equals(['officeOkD2']),
+        reason: 'Submitted task must carry the pre-selected active label ID',
+      );
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('drawer_label_tile_home00OkD2')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('quick_add_input')),
+        'Restock pantry',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('quick_add_submit_button')));
+      await tester.pumpAndSettle();
+
+      final updatedBoard = container.read(taskNotifierProvider).value!;
+      final homeTask = updatedBoard.allTasks.firstWhere(
+        (task) => task.title == 'Restock pantry',
+      );
+      expect(
+        homeTask.labelIds,
+        equals(['home00OkD2']),
+        reason: 'Switching the active drawer label while QuickAddBar is open must update the pre-selected label',
+      );
+    },
+  );
 }
