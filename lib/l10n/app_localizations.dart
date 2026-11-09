@@ -2353,6 +2353,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} links'**
   String taskInfoLinksCount(String count);
+
+  /// Dialog title when confirming deletion of a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete Task'**
+  String get deleteTaskDialogTitle;
+
+  /// Confirmation message shown in the dialog before deleting a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete task \"{title}\"? This action cannot be undone.'**
+  String deleteTaskConfirmMessage(String title);
 }
 
 class _AppLocalizationsDelegate

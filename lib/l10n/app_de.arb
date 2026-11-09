@@ -375,5 +375,7 @@
   "taskInfoBlockedByProgress": "{satisfied} von {total} erfüllt",
   "taskInfoRepeatEvery": "Alle {count} {unit}",
   "taskInfoRepeatCompletions": "{count}-mal abgeschlossen",
-  "taskInfoLinksCount": "{count} Links"
+  "taskInfoLinksCount": "{count} Links",
+  "deleteTaskDialogTitle": "Aufgabe löschen",
+  "deleteTaskConfirmMessage": "Aufgabe „{title}“ löschen? Diese Aktion kann nicht rückgängig gemacht werden."
 }

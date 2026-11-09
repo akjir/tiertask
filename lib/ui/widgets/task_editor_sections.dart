@@ -101,17 +101,21 @@ class LabelEditorColorCard extends StatelessWidget {
   }
 }
 
-/// Footer row inside the task editor containing Cancel and Save actions.
+/// Footer row inside the task editor containing Cancel, optional Delete, and Save actions.
 class TaskEditorActionsRow extends StatelessWidget {
   /// Creates a [TaskEditorActionsRow].
   const TaskEditorActionsRow({
     super.key,
     required this.onCancel,
+    this.onDelete,
     required this.onSave,
   });
 
   /// Callback invoked when Cancel is pressed.
   final VoidCallback onCancel;
+
+  /// Optional callback invoked when Delete is pressed.
+  final VoidCallback? onDelete;
 
   /// Callback invoked when Save is pressed.
   final VoidCallback onSave;
@@ -121,12 +125,20 @@ class TaskEditorActionsRow extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     return Row(
       children: [
+        if (onDelete case final deleteCallback?) ...[
+          Expanded(child: _DeleteTaskActionButton(onPressed: deleteCallback)),
+          const SizedBox(width: 12),
+        ],
         Expanded(
           child: OutlinedButton.icon(
             key: const ValueKey('task_editor_cancel_button'),
             onPressed: onCancel,
             icon: const Icon(Icons.close_rounded),
-            label: Text(localizations.actionCancel),
+            label: Text(
+              localizations.actionCancel,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -136,7 +148,11 @@ class TaskEditorActionsRow extends StatelessWidget {
             key: const ValueKey('task_editor_save_button'),
             onPressed: onSave,
             icon: const Icon(Icons.save_outlined),
-            label: Text(localizations.actionSave),
+            label: Text(
+              localizations.actionSave,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ),
       ],
@@ -492,6 +508,35 @@ class TaskEditorTitleField extends StatelessWidget {
         focusedColor: appTheme.primaryAccent,
         labelText: titleLabel ?? localizations.taskNameLabel,
         errorText: errorMessage,
+      ),
+    );
+  }
+}
+
+/// Destructive Delete action button inside [TaskEditorActionsRow].
+class _DeleteTaskActionButton extends StatelessWidget {
+  /// Creates a [_DeleteTaskActionButton].
+  const _DeleteTaskActionButton({required this.onPressed});
+
+  /// Callback invoked when the Delete button is pressed.
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    return OutlinedButton.icon(
+      key: const ValueKey('task_editor_delete_button'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: colorScheme.error,
+        side: BorderSide(color: colorScheme.error),
+      ),
+      onPressed: onPressed,
+      icon: const Icon(Icons.delete_outline_rounded),
+      label: Text(
+        localizations.actionDelete,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }

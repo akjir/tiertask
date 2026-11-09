@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -61,6 +63,96 @@ class EditTaskScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<EditTaskScreen> createState() => _EditTaskScreenState();
+}
+
+/// Confirmation dialog shown before deleting an existing task from [EditTaskScreen].
+class _DeleteTaskConfirmDialog extends StatefulWidget {
+  /// Creates a [_DeleteTaskConfirmDialog].
+  const _DeleteTaskConfirmDialog({required this.taskTitle});
+
+  /// Total delay in seconds (`3` s) before the Delete button unlocks.
+  static const int confirmDelaySeconds = 3;
+
+  /// Countdown tick interval (`1` s).
+  static const Duration tickInterval = Duration(seconds: 1);
+
+  /// Title of the task pending deletion.
+  final String taskTitle;
+
+  @override
+  State<_DeleteTaskConfirmDialog> createState() =>
+      _DeleteTaskConfirmDialogState();
+}
+
+/// State for [_DeleteTaskConfirmDialog] managing the 3-second confirmation countdown.
+class _DeleteTaskConfirmDialogState extends State<_DeleteTaskConfirmDialog> {
+  int _remainingSeconds = _DeleteTaskConfirmDialog.confirmDelaySeconds;
+  Timer? _timer;
+
+  /// Whether the countdown has finished and the Delete button is enabled.
+  bool get _isConfirmEnabled => _remainingSeconds <= 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(
+      _DeleteTaskConfirmDialog.tickInterval,
+      _handleTimerTick,
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+    final deleteLabel = _isConfirmEnabled
+        ? localizations.actionDelete
+        : '${localizations.actionDelete} (${_remainingSeconds}s)';
+    return AlertDialog(
+      key: const ValueKey('delete_task_confirm_dialog'),
+      title: Text(localizations.deleteTaskDialogTitle),
+      content: Text(localizations.deleteTaskConfirmMessage(widget.taskTitle)),
+      actions: [
+        TextButton(
+          key: const ValueKey('delete_task_cancel_button'),
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(localizations.actionCancel),
+        ),
+        FilledButton(
+          key: const ValueKey('delete_task_confirm_button'),
+          style: FilledButton.styleFrom(
+            backgroundColor: colorScheme.error,
+            foregroundColor: colorScheme.onError,
+          ),
+          onPressed: _isConfirmEnabled
+              ? () => Navigator.of(context).pop(true)
+              : null,
+          child: Text(deleteLabel),
+        ),
+      ],
+    );
+  }
+
+  /// Decrements [_remainingSeconds] on each tick and cancels [timer] once unlocked.
+  void _handleTimerTick(Timer timer) {
+    final nextSeconds = _remainingSeconds - 1;
+    if (nextSeconds <= 0) {
+      timer.cancel();
+      if (mounted) {
+        setState(() => _remainingSeconds = 0);
+      }
+      return;
+    }
+    if (mounted) {
+      setState(() => _remainingSeconds = nextSeconds);
+    }
+  }
 }
 
 /// Settings-style scrollable card column inside [EditTaskScreen].
@@ -286,7 +378,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       ),
     );
     final localizations = AppLocalizations.of(context);
-    final title = widget.initialTask != null
+    final isEditing = widget.initialTask != null;
+    final title = isEditing
         ? localizations.editTaskTitle
         : localizations.advancedTaskTitle;
     return Scaffold(
@@ -307,6 +400,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
               child: TaskEditorActionsRow(
                 onCancel: () => Navigator.of(context).pop(),
+                onDelete: isEditing ? _confirmDeleteTask : null,
                 onSave: _submit,
               ),
             ),
@@ -380,6 +474,26 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       ],
       suspendedAt: suspendedAt,
     );
+  }
+
+  /// Prompts for confirmation and deletes [EditTaskScreen.initialTask] when confirmed.
+  Future<void> _confirmDeleteTask() async {
+    final existingTask = widget.initialTask;
+    if (existingTask == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _DeleteTaskConfirmDialog(taskTitle: existingTask.title),
+    );
+    if (!mounted || confirmed != true) return;
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.delete_task.confirmed',
+      fields: <String, Object?>{'id': existingTask.id},
+    );
+    await ref.read(taskNotifierProvider.notifier).deleteTask(existingTask.id);
+    if (!mounted) return;
+    Navigator.of(context).pop();
   }
 
   /// Clears any due timestamp validation error when the user edits the due field.

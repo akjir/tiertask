@@ -791,6 +791,186 @@ task 000001OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'EditTaskScreen shows Delete button only when editing an existing task and requires confirmation before deleting in English and German',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.6.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task 000001OkD2
+  task 000002OkD2
+}
+
+task 000001OkD2 {
+  name "Audit Firewall"
+  created 2026-11-01 08:00
+  modified 2026-11-01 08:00
+}
+task 000002OkD2 {
+  name "Rotate Certificates"
+  created 2026-11-01 08:05
+  modified 2026-11-01 08:05
+}
+''';
+      final fixedNow = DateTime.utc(2026, 11, 1, 12, 0);
+      final container = await _pumpEditorApp(
+        tester,
+        initialTdf: seededTdf,
+        clock: fixedNow,
+      );
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
+
+      expect(
+        find.byKey(const ValueKey('task_editor_delete_button')),
+        findsNothing,
+        reason: 'Delete button must not be shown when creating a new task',
+      );
+      await _tapKey(tester, 'task_editor_cancel_button');
+
+      await _tapKey(tester, 'edit_task_button_000001OkD2');
+
+      final deleteButtonFinder = find.byKey(
+        const ValueKey('task_editor_delete_button'),
+      );
+      expect(
+        deleteButtonFinder,
+        findsOneWidget,
+        reason: 'Delete button must be shown when editing an existing task',
+      );
+
+      await tester.tap(deleteButtonFinder);
+      await tester.pump();
+
+      final dialogFinder = find.byKey(
+        const ValueKey('delete_task_confirm_dialog'),
+      );
+      final confirmButtonFinder = find.byKey(
+        const ValueKey('delete_task_confirm_button'),
+      );
+      expect(
+        dialogFinder,
+        findsOneWidget,
+        reason: 'Tapping Delete must open the confirmation dialog',
+      );
+      expect(find.text('Delete Task'), findsOneWidget);
+      expect(
+        find.text(
+          'Delete task "Audit Firewall"? This action cannot be undone.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.widget<FilledButton>(confirmButtonFinder).onPressed,
+        isNull,
+        reason: 'Confirm button must be disabled initially during 3s countdown',
+      );
+      expect(find.text('Delete (3s)'), findsOneWidget);
+
+      await tester.tap(confirmButtonFinder, warnIfMissed: false);
+      await tester.pump(const Duration(seconds: 2));
+      expect(
+        dialogFinder,
+        findsOneWidget,
+        reason:
+            'Tapping disabled confirm button before 3s must not close dialog',
+      );
+      expect(
+        tester.widget<FilledButton>(confirmButtonFinder).onPressed,
+        isNull,
+        reason: 'Confirm button must remain disabled before 3s have elapsed',
+      );
+      expect(find.text('Delete (1s)'), findsOneWidget);
+
+      await _tapKey(tester, 'delete_task_cancel_button');
+      expect(
+        dialogFinder,
+        findsNothing,
+        reason: 'Cancelling confirmation must close the dialog',
+      );
+      expect(
+        find.byKey(const ValueKey('edit_task_screen')),
+        findsOneWidget,
+        reason: 'Cancelling confirmation must keep EditTaskScreen open',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('000001OkD2'),
+        isNotNull,
+        reason: 'Cancelling confirmation must not delete the task',
+      );
+
+      await tester.tap(deleteButtonFinder);
+      await tester.pump();
+      expect(
+        tester.widget<FilledButton>(confirmButtonFinder).onPressed,
+        isNull,
+        reason: 'Re-opened confirmation dialog must restart the 3s timer',
+      );
+      await tester.pump(const Duration(seconds: 3));
+      expect(
+        tester.widget<FilledButton>(confirmButtonFinder).onPressed,
+        isNotNull,
+        reason: 'Confirm button must become enabled once 3s have elapsed',
+      );
+      expect(find.text('Delete'), findsWidgets);
+      await _tapKey(tester, 'delete_task_confirm_button');
+
+      expect(
+        find.byKey(const ValueKey('edit_task_screen')),
+        findsNothing,
+        reason: 'Confirming deletion must close EditTaskScreen',
+      );
+      final boardAfterFirstDelete = container
+          .read(taskNotifierProvider)
+          .requireValue;
+      expect(
+        boardAfterFirstDelete.findTask('000001OkD2'),
+        isNull,
+        reason: 'Confirmed task must be removed from the board',
+      );
+      expect(
+        boardAfterFirstDelete.deletedBlock.findTaskRecord('000001OkD2'),
+        isNotNull,
+        reason: 'Confirmed task deletion must record a TDF tombstone',
+      );
+
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateLanguage(AppLanguage.german);
+      await tester.pumpAndSettle();
+
+      await _tapKey(tester, 'edit_task_button_000002OkD2');
+      await _tapKey(tester, 'task_editor_delete_button', settle: false);
+
+      expect(find.text('Aufgabe löschen'), findsOneWidget);
+      expect(
+        find.text(
+          'Aufgabe „Rotate Certificates“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Löschen (3s)'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 3));
+      await _tapKey(tester, 'delete_task_confirm_button');
+
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('000002OkD2'),
+        isNull,
+        reason: 'German confirmation must also delete the task',
+      );
+    },
+  );
 }
 
 /// Asserts that the subtask toggle identified by [key] is checked and remains locked when tapped.

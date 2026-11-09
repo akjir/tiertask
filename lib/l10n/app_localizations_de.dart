@@ -1312,4 +1312,12 @@ class AppLocalizationsDe extends AppLocalizations {
   String taskInfoLinksCount(String count) {
     return '$count Links';
   }
+
+  @override
+  String get deleteTaskDialogTitle => 'Aufgabe löschen';
+
+  @override
+  String deleteTaskConfirmMessage(String title) {
+    return 'Aufgabe „$title“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.';
+  }
 }

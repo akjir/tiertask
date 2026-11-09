@@ -1291,4 +1291,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String taskInfoLinksCount(String count) {
     return '$count links';
   }
+
+  @override
+  String get deleteTaskDialogTitle => 'Delete Task';
+
+  @override
+  String deleteTaskConfirmMessage(String title) {
+    return 'Delete task \"$title\"? This action cannot be undone.';
+  }
 }

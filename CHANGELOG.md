@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added a delete button with a 3-second confirmation countdown dialog in the task editor when editing an existing task.
 - Added interactive task status indicator icons for suspension, prerequisite tasks, and activation conditions that open a task information dialog on click or tap.
 - Added a POSIX user-space build and installation script for Linux with desktop launcher integration.
 

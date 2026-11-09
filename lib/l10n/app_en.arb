@@ -1791,5 +1791,18 @@
         "type": "String"
       }
     }
+  },
+  "deleteTaskDialogTitle": "Delete Task",
+  "@deleteTaskDialogTitle": {
+    "description": "Dialog title when confirming deletion of a task."
+  },
+  "deleteTaskConfirmMessage": "Delete task \"{title}\"? This action cannot be undone.",
+  "@deleteTaskConfirmMessage": {
+    "description": "Confirmation message shown in the dialog before deleting a task.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
   }
 }
