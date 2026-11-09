@@ -13,12 +13,16 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/models/workspace_sync_state.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -29,6 +33,36 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/tdf_service.dart';
+
+class _CountingTdfService extends TdfService {
+  const _CountingTdfService(this.onParse);
+
+  final void Function() onParse;
+
+  @override
+  TaskBoard parse(
+    String tdfContent, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    bool pruneExpiredCompleted = false,
+  }) {
+    onParse();
+    return super.parse(
+      tdfContent,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+    );
+  }
+}
 
 class _InMemorySyncLocalRepository extends LocalFileRepository {
   _InMemorySyncLocalRepository({
@@ -697,5 +731,179 @@ void main() {
       isNotNull,
       reason: 'Exceeding 3 CAS retries must surface a LocalFileException error in syncStateProvider',
     );
+  });
+
+  test('WebDAV 304 Not Modified skips remote TDF parsing, 3-way merge, and PUT upload, and 412 Precondition Failed retries via 3-way merge', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    const canonicalInitial =
+        'tdf 0.6.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name     "Initial Task"\n    created  2026-11-01 08:00\n    modified 2026-11-01 08:00\n}\n';
+    var remoteTdf = canonicalInitial;
+    var remoteEtag = '"etag-v1"';
+    var remoteLastModified = 'Mon, 09 Nov 2026 22:00:00 GMT';
+    var get200Count = 0;
+    var get304Count = 0;
+    var putCount = 0;
+    var injectConcurrentRemoteEditOnNextPut = false;
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          get304Count++;
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          request.response.headers.set(
+            HttpHeaders.lastModifiedHeader,
+            remoteLastModified,
+          );
+          await request.response.close();
+          return;
+        }
+        get200Count++;
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.headers.set(
+          HttpHeaders.lastModifiedHeader,
+          remoteLastModified,
+        );
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+
+      if (request.method == 'PUT') {
+        putCount++;
+        final body = await utf8.decoder.bind(request).join();
+        final ifMatch = request.headers.value(HttpHeaders.ifMatchHeader);
+        if (injectConcurrentRemoteEditOnNextPut) {
+          injectConcurrentRemoteEditOnNextPut = false;
+          remoteTdf = 'tdf 0.6.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name     "Initial Task"\n    created  2026-11-01 08:00\n    modified 2026-11-01 08:00\n}\n\ntask 000002OkD2 {\n    name     "Concurrent Server Task"\n    created  2026-11-01 09:30\n    modified 2026-11-01 09:30\n}\n';
+          remoteEtag = '"etag-concurrent"';
+        }
+        if (ifMatch != null && ifMatch != remoteEtag) {
+          request.response.statusCode = HttpStatus.preconditionFailed;
+          await request.response.close();
+          return;
+        }
+        remoteTdf = body;
+        remoteEtag = '"etag-put-$putCount"';
+        remoteLastModified = 'Mon, 09 Nov 2026 22:0$putCount:00 GMT';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.headers.set(
+          HttpHeaders.lastModifiedHeader,
+          remoteLastModified,
+        );
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    var currentTime = DateTime.utc(2026, 11, 1, 9);
+    var parseCount = 0;
+    final webdavOnlyConfig = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settingsRepository = InMemorySettingsRepository(webdavOnlyConfig);
+
+    final container1 = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
+        clockProvider.overrideWithValue(() => currentTime),
+        tdfServiceProvider.overrideWithValue(
+          _CountingTdfService(() => parseCount++),
+        ),
+      ],
+    );
+
+    // 1. Initial load fetches 200 OK, persists ETag + Last-Modified, and skips redundant PUT since remote is already canonical.
+    final initialBoard = await container1.read(taskNotifierProvider.future);
+    expect(initialBoard.allTasks.single.title, equals('Initial Task'));
+    expect(get200Count, equals(1));
+    expect(get304Count, equals(0));
+    expect(
+      putCount,
+      equals(0),
+      reason: 'Unchanged canonical remote TDF must not trigger a redundant PUT',
+    );
+    final activeWorkspace = await container1.read(
+      activeWorkspaceProvider.future,
+    );
+    final savedState = await settingsRepository.loadWorkspaceSyncState(
+      activeWorkspace.id,
+    );
+    expect(savedState.remoteEtag, equals('"etag-v1"'));
+    expect(
+      savedState.remoteLastModified,
+      equals('Mon, 09 Nov 2026 22:00:00 GMT'),
+    );
+
+    // 2. Manual syncFromRemote receives 304 Not Modified and runs 0 TDF parser passes and 0 PUT uploads.
+    parseCount = 0;
+    await container1.read(taskNotifierProvider.notifier).syncFromRemote();
+    expect(get200Count, equals(1));
+    expect(get304Count, equals(1));
+    expect(
+      parseCount,
+      equals(0),
+      reason: '304 Not Modified with existing in-memory board must skip all TDF parser passes',
+    );
+    expect(putCount, equals(0));
+
+    // 3. Simulate app restart (new ProviderContainer seeded from SettingsRepository):
+    //    cold start in StorageMode.webdav receives 304 Not Modified and parses cached TDF only once (skipping baseline parse & merge).
+    container1.dispose();
+    parseCount = 0;
+    final container2 = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
+        clockProvider.overrideWithValue(() => currentTime),
+        tdfServiceProvider.overrideWithValue(
+          _CountingTdfService(() => parseCount++),
+        ),
+      ],
+    );
+    addTearDown(container2.dispose);
+
+    final restartedBoard = await container2.read(taskNotifierProvider.future);
+    expect(restartedBoard.allTasks.single.title, equals('Initial Task'));
+    expect(get200Count, equals(1));
+    expect(get304Count, equals(2));
+    expect(
+      parseCount,
+      equals(1),
+      reason: 'Cold start with 304 Not Modified must parse cached TDF once and skip baseline re-parse',
+    );
+    expect(putCount, equals(0));
+
+    // 4. Local mutation with concurrent remote edit between GET (304) and PUT (412 Precondition Failed)
+    //    retries by fetching the updated remote TDF (200 OK), merging both tasks, and succeeding on retry PUT.
+    injectConcurrentRemoteEditOnNextPut = true;
+    currentTime = DateTime.utc(2026, 11, 1, 10);
+    await container2
+        .read(taskNotifierProvider.notifier)
+        .addTask('Local Mutated Task', targetTier: TaskTier.someday);
+
+    final mergedAfter412 = container2.read(taskNotifierProvider).requireValue;
+    expect(
+      mergedAfter412.allTasks.map((task) => task.title),
+      containsAll(<String>[
+        'Initial Task',
+        'Concurrent Server Task',
+        'Local Mutated Task',
+      ]),
+      reason: '412 Precondition Failed on PUT must re-fetch, 3-way merge, and retry saveTdf',
+    );
+    expect(container2.read(syncStateProvider).errorMessage, isNull);
+    expect(get200Count, equals(2));
+    expect(putCount, equals(2));
   });
 }

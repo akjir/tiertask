@@ -460,5 +460,198 @@ void main() {
             'Payload exceeding maxFileBytes (N+1) must throw WebDavException',
       );
     });
+
+    test('caches ETag and Last-Modified headers, evaluates 304 Not Modified on GET, and sends If-Match on PUT with 412 cache invalidation', () async {
+      final etagServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => etagServer.close(force: true));
+
+      var serverContent = 'tdf 0.6.0\n# v1\n';
+      String? serverEtag = '"etag-v1"';
+      String? serverLastModified = 'Mon, 09 Nov 2026 22:00:00 GMT';
+      String? receivedIfNoneMatch;
+      String? receivedIfModifiedSince;
+      String? receivedIfMatch;
+      var get200Count = 0;
+      var get304Count = 0;
+
+      etagServer.listen((HttpRequest request) async {
+        receivedIfNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        receivedIfModifiedSince = request.headers.value(
+          HttpHeaders.ifModifiedSinceHeader,
+        );
+        receivedIfMatch = request.headers.value(HttpHeaders.ifMatchHeader);
+
+        if (request.method == 'GET') {
+          final etagMatched =
+              serverEtag != null && receivedIfNoneMatch == serverEtag;
+          final lastModMatched =
+              serverEtag == null &&
+              serverLastModified != null &&
+              receivedIfModifiedSince == serverLastModified;
+          if (etagMatched || lastModMatched) {
+            get304Count++;
+            request.response.statusCode = HttpStatus.notModified;
+            if (serverEtag != null) {
+              request.response.headers.set(HttpHeaders.etagHeader, serverEtag!);
+            }
+            if (serverLastModified != null) {
+              request.response.headers.set(
+                HttpHeaders.lastModifiedHeader,
+                serverLastModified!,
+              );
+            }
+            await request.response.close();
+            return;
+          }
+          get200Count++;
+          request.response.statusCode = HttpStatus.ok;
+          if (serverEtag != null) {
+            request.response.headers.set(HttpHeaders.etagHeader, serverEtag!);
+          }
+          if (serverLastModified != null) {
+            request.response.headers.set(
+              HttpHeaders.lastModifiedHeader,
+              serverLastModified!,
+            );
+          }
+          request.response.write(serverContent);
+          await request.response.close();
+          return;
+        }
+
+        if (request.method == 'PUT') {
+          final body = await utf8.decoder.bind(request).join();
+          if (receivedIfMatch != null && receivedIfMatch != serverEtag) {
+            request.response.statusCode = HttpStatus.preconditionFailed;
+            await request.response.close();
+            return;
+          }
+          serverContent = body;
+          if (serverEtag != null && !serverEtag!.startsWith('W/')) {
+            serverEtag = '"etag-v2"';
+            request.response.headers.set(HttpHeaders.etagHeader, serverEtag!);
+          }
+          serverLastModified = 'Mon, 09 Nov 2026 22:05:00 GMT';
+          request.response.headers.set(
+            HttpHeaders.lastModifiedHeader,
+            serverLastModified!,
+          );
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+        }
+      });
+
+      expect(WebDavRepository.isStrongEtag('"etag-v1"'), isTrue);
+      expect(WebDavRepository.isStrongEtag('W/"weak-etag"'), isFalse);
+      expect(WebDavRepository.isStrongEtag('w/"weak-etag"'), isFalse);
+      expect(WebDavRepository.isStrongEtag(''), isFalse);
+      expect(WebDavRepository.isStrongEtag(null), isFalse);
+
+      final config = WebDavConfig(
+        serverUrl: 'http://${etagServer.address.host}:${etagServer.port}',
+        username: 'stefan',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+        language: AppLanguage.english,
+      );
+      final repository = WebDavRepository(config: config);
+
+      // 1. Initial GET returns 200 OK and caches ETag and Last-Modified.
+      final firstBody = await repository.fetchTdf();
+      expect(firstBody, equals('tdf 0.6.0\n# v1\n'));
+      expect(repository.lastFetchWasNotModified, isFalse);
+      expect(repository.cachedEtag, equals('"etag-v1"'));
+      expect(
+        repository.cachedLastModified,
+        equals('Mon, 09 Nov 2026 22:00:00 GMT'),
+      );
+      expect(get200Count, equals(1));
+      expect(get304Count, equals(0));
+
+      // 2. Second GET sends If-None-Match and If-Modified-Since, receives 304 Not Modified, and returns cached content.
+      final secondBody = await repository.fetchTdf();
+      expect(secondBody, equals('tdf 0.6.0\n# v1\n'));
+      expect(repository.lastFetchWasNotModified, isTrue);
+      expect(receivedIfNoneMatch, equals('"etag-v1"'));
+      expect(receivedIfModifiedSince, equals('Mon, 09 Nov 2026 22:00:00 GMT'));
+      expect(get200Count, equals(1));
+      expect(get304Count, equals(1));
+
+      // 3. PUT sends If-Match: "etag-v1" and updates cachedEtag to "etag-v2".
+      await repository.saveTdf('tdf 0.6.0\n# v2\n');
+      expect(receivedIfMatch, equals('"etag-v1"'));
+      expect(repository.cachedEtag, equals('"etag-v2"'));
+      expect(
+        repository.cachedLastModified,
+        equals('Mon, 09 Nov 2026 22:05:00 GMT'),
+      );
+
+      // 4. Subsequent GET uses "etag-v2" from PUT response and receives 304 Not Modified without redownloading.
+      final thirdBody = await repository.fetchTdf();
+      expect(thirdBody, equals('tdf 0.6.0\n# v2\n'));
+      expect(repository.lastFetchWasNotModified, isTrue);
+      expect(receivedIfNoneMatch, equals('"etag-v2"'));
+      expect(get200Count, equals(1));
+      expect(get304Count, equals(2));
+
+      // 5. Simulate concurrent external modification on server ("etag-v3"); PUT with stale "etag-v2" throws 412 and clears cached ETag.
+      serverContent = 'tdf 0.6.0\n# v3-external\n';
+      serverEtag = '"etag-v3"';
+      await expectLater(
+        () => repository.saveTdf('tdf 0.6.0\n# v2-local-conflict\n'),
+        throwsA(
+          isA<WebDavException>().having(
+            (e) => e.statusCode,
+            'statusCode',
+            equals(HttpStatus.preconditionFailed),
+          ),
+        ),
+      );
+      expect(
+        repository.cachedEtag,
+        isNull,
+        reason: 'HTTP 412 must invalidate stale cached ETag',
+      );
+
+      // 6. Next GET after 412 fetches unconditionally (200 OK) and obtains "etag-v3".
+      final fourthBody = await repository.fetchTdf();
+      expect(fourthBody, equals('tdf 0.6.0\n# v3-external\n'));
+      expect(repository.lastFetchWasNotModified, isFalse);
+      expect(repository.cachedEtag, equals('"etag-v3"'));
+      expect(get200Count, equals(2));
+
+      // 7. Weak ETag sends If-None-Match on GET, but omits If-Match on PUT.
+      serverEtag = 'W/"weak-v4"';
+      serverContent = 'tdf 0.6.0\n# v4-weak\n';
+      repository.clearCache();
+      await repository.fetchTdf();
+      expect(repository.cachedEtag, equals('W/"weak-v4"'));
+      await repository.fetchTdf();
+      expect(repository.lastFetchWasNotModified, isTrue);
+      expect(receivedIfNoneMatch, equals('W/"weak-v4"'));
+      await repository.saveTdf('tdf 0.6.0\n# v5\n');
+      expect(
+        receivedIfMatch,
+        isNull,
+        reason: 'Weak ETag must not be sent in If-Match header on PUT',
+      );
+
+      // 8. Server with only Last-Modified (no ETag) evaluates 304 via If-Modified-Since.
+      serverEtag = null;
+      serverLastModified = 'Mon, 09 Nov 2026 22:10:00 GMT';
+      serverContent = 'tdf 0.6.0\n# v6-lastmod-only\n';
+      repository.clearCache();
+      repository.seedCacheIfEmpty(
+        etag: null,
+        lastModified: 'Mon, 09 Nov 2026 22:10:00 GMT',
+        content: 'tdf 0.6.0\n# v6-lastmod-only\n',
+      );
+      final seededBody = await repository.fetchTdf();
+      expect(seededBody, equals('tdf 0.6.0\n# v6-lastmod-only\n'));
+      expect(repository.lastFetchWasNotModified, isTrue);
+      expect(receivedIfModifiedSince, equals('Mon, 09 Nov 2026 22:10:00 GMT'));
+    });
   });
 }

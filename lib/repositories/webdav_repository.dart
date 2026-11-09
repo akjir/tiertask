@@ -35,6 +35,9 @@ class WebDavException implements Exception {
   /// Optional HTTP status code returned by the WebDAV server.
   final int? statusCode;
 
+  /// Whether this exception represents an `HTTP 412 Precondition Failed` response.
+  bool get isPreconditionFailed => statusCode == HttpStatus.preconditionFailed;
+
   @override
   String toString() =>
       statusCode != null ? '$message (HTTP $statusCode)' : message;
@@ -63,7 +66,21 @@ class WebDavRepository {
   /// Timeout applied to connection, request, and response operations.
   final Duration timeout;
 
+  String? _cachedContent;
+  String? _cachedEtag;
+  String? _cachedLastModified;
+  Uri? _cachedUri;
   final HttpClient Function() _clientFactory;
+  bool _lastFetchNotModified = false;
+
+  /// Cached HTTP `ETag` response header from the most recent `.tdf` synchronization.
+  String? get cachedEtag => _cachedEtag;
+
+  /// Cached HTTP `Last-Modified` response header from the most recent `.tdf` synchronization.
+  String? get cachedLastModified => _cachedLastModified;
+
+  /// Whether the most recent [fetchTdf] call received `HTTP 304 Not Modified`.
+  bool get lastFetchWasNotModified => _lastFetchNotModified;
 
   /// Builds the HTTP Basic Authentication header value.
   String get _basicAuthHeader {
@@ -79,6 +96,15 @@ class WebDavRepository {
       PlatformDispatcher.instance.locale,
     );
     return lookupAppLocalizations(locale);
+  }
+
+  /// Clears cached HTTP `ETag`, `Last-Modified`, and `.tdf` content state.
+  void clearCache() {
+    _cachedUri = null;
+    _cachedEtag = null;
+    _cachedLastModified = null;
+    _cachedContent = null;
+    _lastFetchNotModified = false;
   }
 
   /// Deletes the remote diagnostic log file [logFileName] via HTTP DELETE, ignoring `404`.
@@ -127,13 +153,26 @@ class WebDavRepository {
 
   /// Fetches the remote TDF file (`tiertask.tdf`) via HTTP GET.
   ///
+  /// Sends `If-None-Match` and/or `If-Modified-Since` when cached validators and
+  /// content exist for the active URI, returning the cached content on `HTTP 304`.
   /// Returns an empty string when the remote file does not exist (`HTTP 404`)
   /// so a new 6-tier board can be initialized on first save.
   Future<String> fetchTdf() async {
     final localizations = _localizations;
     final uri = _requireUri(localizations);
-    final result = await _getFromUri(uri, localizations);
+    final result = await _getFromUri(
+      uri,
+      localizations,
+      useConditionalCache: true,
+    );
     return result.content;
+  }
+
+  /// Returns `true` when [etag] is a non-empty strong HTTP entity tag (not prefixed with `W/` or `w/`).
+  static bool isStrongEtag(String? etag) {
+    final normalized = _normalizeHeaderValue(etag);
+    if (normalized == null) return false;
+    return !normalized.startsWith('W/') && !normalized.startsWith('w/');
   }
 
   /// Uploads the diagnostic log snapshot for [logFileName] to WebDAV via HTTP PUT.
@@ -157,7 +196,23 @@ class WebDavRepository {
   Future<void> saveTdf(String tdfContent) async {
     final localizations = _localizations;
     final uri = _requireUri(localizations);
-    await _putToUri(uri, tdfContent, localizations);
+    await _putToUri(uri, tdfContent, localizations, useConditionalCache: true);
+  }
+
+  /// Seeds the conditional validator cache for the resolved `.tdf` URI when not already populated.
+  void seedCacheIfEmpty({String? etag, String? lastModified, String? content}) {
+    final uri = config.resolveEndpointUri();
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) return;
+    if (_cachedUri == uri && _cachedContent != null) return;
+    final normalizedContent = content?.trim();
+    if (normalizedContent == null || normalizedContent.isEmpty) return;
+    final normalizedEtag = _normalizeHeaderValue(etag);
+    final normalizedLastModified = _normalizeHeaderValue(lastModified);
+    if (normalizedEtag == null && normalizedLastModified == null) return;
+    _cachedUri = uri;
+    _cachedContent = content;
+    _cachedEtag = normalizedEtag;
+    _cachedLastModified = normalizedLastModified;
   }
 
   /// Empties and re-initializes the remote `.tdf` file on the WebDAV server, optionally creating a `.bak` or `.bak.001`+ backup first if the file exists.
@@ -179,7 +234,13 @@ class WebDavRepository {
         );
       }
     }
-    await _putToUri(uri, emptyContent, localizations);
+    clearCache();
+    await _putToUri(
+      uri,
+      emptyContent,
+      localizations,
+      useConditionalCache: true,
+    );
     AppLogger.event(
       LogLevel.info,
       LogTag.storage,
@@ -188,60 +249,55 @@ class WebDavRepository {
     );
   }
 
+  /// Attaches `If-None-Match` and `If-Modified-Since` headers to [request] when cached `.tdf` content exists for [uri].
+  void _applyConditionalGetHeaders(HttpClientRequest request, Uri uri) {
+    if (_cachedUri != uri) return;
+    final cachedBody = _cachedContent;
+    if (cachedBody == null || cachedBody.isEmpty) return;
+    if (_cachedEtag case final etag?) {
+      request.headers.set(HttpHeaders.ifNoneMatchHeader, etag);
+    }
+    if (_cachedLastModified case final lastModified?) {
+      request.headers.set(HttpHeaders.ifModifiedSinceHeader, lastModified);
+    }
+  }
+
+  /// Attaches `If-Match` to [request] when a strong cached `ETag` exists for [uri].
+  void _applyConditionalPutHeaders(HttpClientRequest request, Uri uri) {
+    if (_cachedUri != uri) return;
+    if (_cachedEtag case final etag? when isStrongEtag(etag)) {
+      request.headers.set(HttpHeaders.ifMatchHeader, etag);
+    }
+  }
+
   /// Executes an HTTP GET against [uri] and returns whether the resource exists along with its decoded body.
   Future<({bool exists, String content})> _getFromUri(
     Uri uri,
-    AppLocalizations localizations,
-  ) async {
+    AppLocalizations localizations, {
+    bool useConditionalCache = false,
+  }) async {
     final stopwatch = Stopwatch()..start();
     final client = _clientFactory();
     client.connectionTimeout = timeout;
+    if (useConditionalCache) {
+      _lastFetchNotModified = false;
+    }
 
     try {
       final request = await client.getUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.authorizationHeader, _basicAuthHeader);
       request.headers.set(HttpHeaders.acceptHeader, 'text/plain, */*');
+      if (useConditionalCache) {
+        _applyConditionalGetHeaders(request, uri);
+      }
 
       final response = await request.close().timeout(timeout);
-      final status = response.statusCode;
-      final body = await _readBoundedUtf8Body(response, localizations);
-
-      if (status >= 200 && status < 300) {
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.storage,
-          'webdav.get',
-          fields: <String, Object?>{
-            'uri': uri.toString(),
-            'status': status,
-            'bytes': body.length,
-            'elapsed_ms': stopwatch.elapsedMilliseconds,
-          },
-        );
-        return (exists: true, content: body);
-      }
-      if (status == HttpStatus.notFound) {
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.storage,
-          'webdav.get',
-          fields: <String, Object?>{
-            'uri': uri.toString(),
-            'status': 404,
-            'elapsed_ms': stopwatch.elapsedMilliseconds,
-          },
-        );
-        return (exists: false, content: '');
-      }
-      if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
-        throw WebDavException(
-          localizations.errorAuthFailedLoad,
-          statusCode: status,
-        );
-      }
-      throw WebDavException(
-        localizations.errorLoadMarkdownFailed,
-        statusCode: status,
+      return await _handleGetResponse(
+        response,
+        uri,
+        localizations,
+        stopwatch,
+        useConditionalCache: useConditionalCache,
       );
     } on WebDavException catch (error) {
       AppLogger.event(
@@ -303,6 +359,152 @@ class WebDavRepository {
     }
   }
 
+  /// Processes the [response] from an HTTP GET request, evaluating `304 Not Modified`, `2xx`, and `404` states.
+  Future<({bool exists, String content})> _handleGetResponse(
+    HttpClientResponse response,
+    Uri uri,
+    AppLocalizations localizations,
+    Stopwatch stopwatch, {
+    required bool useConditionalCache,
+  }) async {
+    final status = response.statusCode;
+    if (status == HttpStatus.notModified && useConditionalCache) {
+      if (_cachedContent case final cachedBody? when _cachedUri == uri) {
+        await response.drain<void>().timeout(timeout);
+        _updateConditionalCache(
+          uri,
+          cachedBody,
+          response.headers,
+          preserveExistingValidators: true,
+        );
+        _lastFetchNotModified = true;
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          'webdav.get',
+          fields: <String, Object?>{
+            'uri': uri.toString(),
+            'status': HttpStatus.notModified,
+            'not_modified': true,
+            'etag': _cachedEtag,
+            'elapsed_ms': stopwatch.elapsedMilliseconds,
+          },
+        );
+        return (exists: true, content: cachedBody);
+      }
+    }
+
+    final body = await _readBoundedUtf8Body(response, localizations);
+    if (status >= 200 && status < 300) {
+      if (useConditionalCache) {
+        _updateConditionalCache(uri, body, response.headers);
+      }
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'webdav.get',
+        fields: <String, Object?>{
+          'uri': uri.toString(),
+          'status': status,
+          'bytes': body.length,
+          if (useConditionalCache && _cachedEtag != null) 'etag': _cachedEtag,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return (exists: true, content: body);
+    }
+    if (status == HttpStatus.notFound) {
+      if (useConditionalCache) {
+        clearCache();
+      }
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'webdav.get',
+        fields: <String, Object?>{
+          'uri': uri.toString(),
+          'status': HttpStatus.notFound,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return (exists: false, content: '');
+    }
+    if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
+      throw WebDavException(
+        localizations.errorAuthFailedLoad,
+        statusCode: status,
+      );
+    }
+    throw WebDavException(
+      localizations.errorLoadMarkdownFailed,
+      statusCode: status,
+    );
+  }
+
+  /// Evaluates the status code and headers of an HTTP PUT [response].
+  void _handlePutResponse(
+    HttpClientResponse response,
+    Uri uri,
+    String payload,
+    int byteLength,
+    AppLocalizations localizations,
+    Stopwatch stopwatch, {
+    required String eventName,
+    required bool logOnSuccess,
+    required bool useConditionalCache,
+  }) {
+    final status = response.statusCode;
+    if (status >= 200 && status < 300) {
+      if (useConditionalCache) {
+        _cachedUri = uri;
+        _cachedContent = payload;
+        _cachedEtag = _normalizeHeaderValue(
+          response.headers.value(HttpHeaders.etagHeader),
+        );
+        _cachedLastModified = _normalizeHeaderValue(
+          response.headers.value(HttpHeaders.lastModifiedHeader),
+        );
+        _lastFetchNotModified = false;
+      }
+      if (logOnSuccess) {
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          eventName,
+          fields: <String, Object?>{
+            'uri': uri.toString(),
+            'status': status,
+            'bytes': byteLength,
+            if (useConditionalCache && _cachedEtag != null) 'etag': _cachedEtag,
+            'elapsed_ms': stopwatch.elapsedMilliseconds,
+          },
+        );
+      }
+      return;
+    }
+    if (status == HttpStatus.preconditionFailed && useConditionalCache) {
+      _cachedEtag = null;
+      _cachedLastModified = null;
+    }
+    if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
+      throw WebDavException(
+        localizations.errorAuthFailedSave,
+        statusCode: status,
+      );
+    }
+    throw WebDavException(
+      localizations.errorSaveMarkdownFailed,
+      statusCode: status,
+    );
+  }
+
+  /// Trims [rawValue] and returns `null` when absent or empty.
+  static String? _normalizeHeaderValue(String? rawValue) {
+    if (rawValue == null) return null;
+    final trimmed = rawValue.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
   /// Executes an HTTP PUT sending [payload] to [uri].
   Future<void> _putToUri(
     Uri uri,
@@ -310,6 +512,7 @@ class WebDavRepository {
     AppLocalizations localizations, {
     String eventName = 'webdav.put',
     bool logOnSuccess = true,
+    bool useConditionalCache = false,
   }) async {
     final stopwatch = Stopwatch()..start();
     final client = _clientFactory();
@@ -322,6 +525,9 @@ class WebDavRepository {
         HttpHeaders.contentTypeHeader,
         'text/plain; charset=utf-8',
       );
+      if (useConditionalCache) {
+        _applyConditionalPutHeaders(request, uri);
+      }
 
       final bytes = utf8.encode(payload);
       request.contentLength = bytes.length;
@@ -329,33 +535,16 @@ class WebDavRepository {
 
       final response = await request.close().timeout(timeout);
       await response.drain<void>().timeout(timeout);
-
-      final status = response.statusCode;
-      if (status >= 200 && status < 300) {
-        if (logOnSuccess) {
-          AppLogger.event(
-            LogLevel.info,
-            LogTag.storage,
-            eventName,
-            fields: <String, Object?>{
-              'uri': uri.toString(),
-              'status': status,
-              'bytes': bytes.length,
-              'elapsed_ms': stopwatch.elapsedMilliseconds,
-            },
-          );
-        }
-        return;
-      }
-      if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
-        throw WebDavException(
-          localizations.errorAuthFailedSave,
-          statusCode: status,
-        );
-      }
-      throw WebDavException(
-        localizations.errorSaveMarkdownFailed,
-        statusCode: status,
+      _handlePutResponse(
+        response,
+        uri,
+        payload,
+        bytes.length,
+        localizations,
+        stopwatch,
+        eventName: eventName,
+        logOnSuccess: logOnSuccess,
+        useConditionalCache: useConditionalCache,
       );
     } on WebDavException catch (error) {
       AppLogger.event(
@@ -478,5 +667,29 @@ class WebDavRepository {
       }
     }
     throw WebDavException(localizations.errorSaveMarkdownFailed);
+  }
+
+  /// Updates the conditional validator cache for [uri] from [content] and response [headers].
+  void _updateConditionalCache(
+    Uri uri,
+    String content,
+    HttpHeaders headers, {
+    bool preserveExistingValidators = false,
+  }) {
+    final sameUri = _cachedUri == uri;
+    final nextEtag = _normalizeHeaderValue(
+      headers.value(HttpHeaders.etagHeader),
+    );
+    final nextLastModified = _normalizeHeaderValue(
+      headers.value(HttpHeaders.lastModifiedHeader),
+    );
+    _cachedUri = uri;
+    _cachedContent = content;
+    _cachedEtag =
+        nextEtag ??
+        (preserveExistingValidators && sameUri ? _cachedEtag : null);
+    _cachedLastModified =
+        nextLastModified ??
+        (preserveExistingValidators && sameUri ? _cachedLastModified : null);
   }
 }

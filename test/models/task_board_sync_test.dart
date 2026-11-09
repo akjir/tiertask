@@ -1025,6 +1025,30 @@ label 000001OkD2 {
         await repository.loadWorkspaceSyncState(AppWorkspace.defaultId),
         equals(state),
       );
+
+      final withRemoteValidators = state.copyWith(
+        remoteEtag: '"etag-v1-a1b2c3"',
+        remoteLastModified: 'Mon, 09 Nov 2026 22:00:00 GMT',
+      );
+      expect(withRemoteValidators.remoteEtag, equals('"etag-v1-a1b2c3"'));
+      expect(
+        withRemoteValidators.remoteLastModified,
+        equals('Mon, 09 Nov 2026 22:00:00 GMT'),
+      );
+      expect(withRemoteValidators, isNot(equals(state)));
+      final validatorBytes = withRemoteValidators.toBytes();
+      expect(validatorBytes[3], equals(3));
+      final decodedValidators = WorkspaceSyncState.fromBytes(validatorBytes);
+      expect(decodedValidators, equals(withRemoteValidators));
+      expect(decodedValidators.hashCode, equals(withRemoteValidators.hashCode));
+
+      final clearedValidators = decodedValidators.copyWith(
+        clearRemoteEtag: true,
+        clearRemoteLastModified: true,
+      );
+      expect(clearedValidators.remoteEtag, isNull);
+      expect(clearedValidators.remoteLastModified, isNull);
+      expect(clearedValidators, equals(state));
     });
   });
 }

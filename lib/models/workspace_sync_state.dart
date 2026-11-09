@@ -32,6 +32,8 @@ class WorkspaceSyncState {
     this.acknowledgedLocalGeneration = 0,
     this.acknowledgedRemoteGeneration = 0,
     this.localSourceDigest,
+    this.remoteEtag,
+    this.remoteLastModified,
   }) : deletedLabelTimestamps = Map<String, DateTime>.unmodifiable(
          <String, DateTime>{
            for (final entry in deletedLabelTimestamps.entries)
@@ -53,7 +55,9 @@ class WorkspaceSyncState {
       deletedLocationTimestamps = const <String, DateTime>{},
       acknowledgedLocalGeneration = 0,
       acknowledgedRemoteGeneration = 0,
-      localSourceDigest = null;
+      localSourceDigest = null,
+      remoteEtag = null,
+      remoteLastModified = null;
 
   /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x01`, `TTS\x02`, or `TTS\x03` binary payload,
   /// returning [empty] if [bytes] is empty or malformed.
@@ -89,18 +93,19 @@ class WorkspaceSyncState {
       }
       var deletedLocations = const <String, DateTime>{};
       String? localDigest;
+      String? remoteEtag;
+      String? remoteLastModified;
       if (version >= _binaryVersionV3) {
-        final (locations, afterLocations) = _readDeletedEntityMap(
+        (
+          deletedLocations,
+          localDigest,
+          remoteEtag,
+          remoteLastModified,
+          cursor,
+        ) = _readV3Payload(
           source,
           cursor,
         );
-        final (digest, afterDigest) = _readNullableString(
-          source,
-          afterLocations,
-        );
-        deletedLocations = locations;
-        localDigest = digest;
-        cursor = afterDigest;
       }
       if (cursor != source.length) return empty;
       return WorkspaceSyncState(
@@ -111,6 +116,8 @@ class WorkspaceSyncState {
         acknowledgedLocalGeneration: localGen,
         acknowledgedRemoteGeneration: remoteGen,
         localSourceDigest: localDigest,
+        remoteEtag: remoteEtag,
+        remoteLastModified: remoteLastModified,
       );
     } on FormatException {
       return empty;
@@ -153,6 +160,12 @@ class WorkspaceSyncState {
   /// SHA-256 hex digest of the local `.tdf` file from the last successful local publication.
   final String? localSourceDigest;
 
+  /// Cached HTTP `ETag` validator header from the last successful WebDAV synchronization.
+  final String? remoteEtag;
+
+  /// Cached HTTP `Last-Modified` validator header from the last successful WebDAV synchronization.
+  final String? remoteLastModified;
+
   /// Returns a copy of this [WorkspaceSyncState] with updated fields.
   WorkspaceSyncState copyWith({
     String? lastSyncedLocalTdf,
@@ -165,6 +178,10 @@ class WorkspaceSyncState {
     int? acknowledgedRemoteGeneration,
     String? localSourceDigest,
     bool clearLocalSourceDigest = false,
+    String? remoteEtag,
+    bool clearRemoteEtag = false,
+    String? remoteLastModified,
+    bool clearRemoteLastModified = false,
   }) {
     return WorkspaceSyncState(
       lastSyncedLocalTdf: clearLastSyncedLocalTdf
@@ -184,6 +201,10 @@ class WorkspaceSyncState {
       localSourceDigest: clearLocalSourceDigest
           ? null
           : (localSourceDigest ?? this.localSourceDigest),
+      remoteEtag: clearRemoteEtag ? null : (remoteEtag ?? this.remoteEtag),
+      remoteLastModified: clearRemoteLastModified
+          ? null
+          : (remoteLastModified ?? this.remoteLastModified),
     );
   }
 
@@ -198,6 +219,10 @@ class WorkspaceSyncState {
     _writeInt64(builder, acknowledgedRemoteGeneration);
     _writeDeletedEntityMap(builder, deletedLocationTimestamps);
     _writeNullableString(builder, localSourceDigest);
+    if (remoteEtag != null || remoteLastModified != null) {
+      _writeNullableString(builder, remoteEtag);
+      _writeNullableString(builder, remoteLastModified);
+    }
     return builder.toBytes();
   }
 
@@ -277,6 +302,28 @@ class WorkspaceSyncState {
     return (decoded, end);
   }
 
+  /// Reads the `TTS\x03` location deletion map, local digest, and optional WebDAV HTTP validators from [source] at [offset].
+  static (
+    Map<String, DateTime> deletedLocations,
+    String? localDigest,
+    String? remoteEtag,
+    String? remoteLastModified,
+    int nextOffset,
+  )
+  _readV3Payload(Uint8List source, int offset) {
+    final (locations, afterLocations) = _readDeletedEntityMap(source, offset);
+    final (digest, afterDigest) = _readNullableString(source, afterLocations);
+    if (afterDigest >= source.length) {
+      return (locations, digest, null, null, afterDigest);
+    }
+    final (etag, afterEtag) = _readNullableString(source, afterDigest);
+    final (lastModified, afterLastModified) = _readNullableString(
+      source,
+      afterEtag,
+    );
+    return (locations, digest, etag, lastModified, afterLastModified);
+  }
+
   /// Appends a 16-bit count-prefixed map of `(entityId, deletedAt)` entries to [builder].
   static void _writeDeletedEntityMap(
     BytesBuilder builder,
@@ -337,6 +384,8 @@ class WorkspaceSyncState {
         other.acknowledgedLocalGeneration == acknowledgedLocalGeneration &&
         other.acknowledgedRemoteGeneration == acknowledgedRemoteGeneration &&
         other.localSourceDigest == localSourceDigest &&
+        other.remoteEtag == remoteEtag &&
+        other.remoteLastModified == remoteLastModified &&
         mapEquals(other.deletedLabelTimestamps, deletedLabelTimestamps) &&
         mapEquals(other.deletedLocationTimestamps, deletedLocationTimestamps);
   }
@@ -348,6 +397,8 @@ class WorkspaceSyncState {
     acknowledgedLocalGeneration,
     acknowledgedRemoteGeneration,
     localSourceDigest,
+    remoteEtag,
+    remoteLastModified,
     Object.hashAllUnordered(
       deletedLabelTimestamps.entries.map(
         (entry) => Object.hash(entry.key, entry.value),

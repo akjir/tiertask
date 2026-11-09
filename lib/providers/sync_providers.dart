@@ -29,6 +29,7 @@ import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
 import '../models/workspace_sync_state.dart';
 import '../repositories/local_file_repository.dart';
+import '../repositories/webdav_repository.dart';
 import '../services/app_logger.dart';
 import '../services/tdf_id_migration.dart';
 import '../services/tdf_importer.dart';
@@ -199,8 +200,13 @@ class TaskSyncPipeline {
       await ref.read(localFileRepositoryProvider).saveTdf(content);
       localDigest = TdfIdMigration.sha256Hex(utf8.encode(content));
     }
+    String? remoteEtag;
+    String? remoteLastModified;
     if (config.storageMode.usesWebDav && config.isWebDavConfigured) {
-      await ref.read(webDavRepositoryProvider).saveTdf(content);
+      final webDavRepo = ref.read(webDavRepositoryProvider)..clearCache();
+      await webDavRepo.saveTdf(content);
+      remoteEtag = webDavRepo.cachedEtag;
+      remoteLastModified = webDavRepo.cachedLastModified;
     }
     final generation = importResult.board.deletedBlock.generation;
     await ref
@@ -213,6 +219,8 @@ class TaskSyncPipeline {
             acknowledgedLocalGeneration: generation,
             acknowledgedRemoteGeneration: generation,
             localSourceDigest: localDigest,
+            remoteEtag: remoteEtag,
+            remoteLastModified: remoteLastModified,
           ),
         );
     AppLogger.info(
@@ -281,6 +289,8 @@ class TaskSyncPipeline {
         acknowledgedLocalGeneration: 0,
         acknowledgedRemoteGeneration: current.acknowledgedRemoteGeneration,
         localSourceDigest: null,
+        remoteEtag: current.remoteEtag,
+        remoteLastModified: current.remoteLastModified,
       ),
     );
   }
@@ -584,6 +594,71 @@ class TaskSyncPipeline {
     );
   }
 
+  /// Parses [rawRemote] and merges it with [working] against [baselineTdf], or reuses [working] on `HTTP 304 Not Modified`.
+  static (TaskBoard, bool) _mergeRemoteSnapshot(
+    Ref ref,
+    WebDavConfig config, {
+    required String rawRemote,
+    required bool notModified,
+    required TaskBoard working,
+    required bool hasWorking,
+    required String? baselineTdf,
+    required int acknowledgedGeneration,
+    required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) {
+    final trimmedRemote = rawRemote.trim();
+    final canBypassMerge =
+        notModified &&
+        deletedLabels.isEmpty &&
+        deletedLocations.isEmpty &&
+        taskConflictResolutions.isEmpty &&
+        labelConflictResolutions.isEmpty &&
+        locationConflictResolutions.isEmpty;
+    if (canBypassMerge) {
+      if (hasWorking) {
+        return (working, true);
+      }
+      if (trimmedRemote.isNotEmpty) {
+        return (
+          _parseRemoteOrThrow(ref, config, rawRemote, utcNow, localNow),
+          true,
+        );
+      }
+      return (working, false);
+    }
+    if (trimmedRemote.isEmpty) {
+      return (working, hasWorking);
+    }
+    final remoteBoard = _parseRemoteOrThrow(
+      ref,
+      config,
+      rawRemote,
+      utcNow,
+      localNow,
+    );
+    final baseline = _tryParseBaseline(ref, baselineTdf, utcNow, localNow);
+    final merged = TaskBoardSync.merge(
+      primary: hasWorking ? working : remoteBoard,
+      secondary: remoteBoard,
+      baseline: baseline ?? (hasWorking ? null : remoteBoard),
+      acknowledgedGeneration: baseline != null ? acknowledgedGeneration : null,
+      deletedLabelTimestamps: deletedLabels,
+      deletedLocationTimestamps: deletedLocations,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    return (merged, true);
+  }
+
   /// Parses [rawLocal] and converts [TdfErrorKind.unsupportedVersion] into [UnsupportedTdfVersionException].
   static Future<TaskBoard> _parseLocalOrThrow(
     Ref ref,
@@ -698,6 +773,55 @@ class TaskSyncPipeline {
     );
   }
 
+  /// Publishes [serializedCandidate] to WebDAV with bounded `412 Precondition Failed` CAS retry.
+  static Future<(TaskBoard, String)> _publishRemoteWithCasLoop(
+    Ref ref,
+    WebDavConfig config, {
+    required WebDavRepository webDavRepo,
+    required TaskBoard working,
+    required String serializedCandidate,
+    required WorkspaceSyncState syncState,
+    required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    var loopWorking = working;
+    TaskBoard? loopBaseline;
+    var currentSerialized = serializedCandidate;
+    for (var attempt = 0; attempt <= maxCasRetries; attempt++) {
+      try {
+        await webDavRepo.saveTdf(currentSerialized);
+        return (loopWorking, currentSerialized);
+      } on WebDavException catch (error) {
+        if (!error.isPreconditionFailed || attempt >= maxCasRetries) rethrow;
+        (
+          loopBaseline,
+          loopWorking,
+          currentSerialized,
+        ) = await _retryRemoteCasMergeStep(
+          ref,
+          config,
+          webDavRepo: webDavRepo,
+          loopWorking: loopWorking,
+          loopBaseline: loopBaseline,
+          syncState: syncState,
+          deletedLabels: deletedLabels,
+          deletedLocations: deletedLocations,
+          taskConflictResolutions: taskConflictResolutions,
+          labelConflictResolutions: labelConflictResolutions,
+          locationConflictResolutions: locationConflictResolutions,
+          utcNow: utcNow,
+          localNow: localNow,
+        );
+      }
+    }
+    return (loopWorking, currentSerialized);
+  }
+
   /// Resolves a single CAS mismatch iteration against the freshly read [disk] snapshot.
   static Future<(TaskBoard?, TaskBoard, String?)> _retryCasMergeStep(
     Ref ref,
@@ -765,9 +889,70 @@ class TaskSyncPipeline {
     return (diskBoard, normalized, disk.digest);
   }
 
+  /// Resolves a single WebDAV `412 Precondition Failed` CAS mismatch against the freshly fetched remote snapshot.
+  static Future<(TaskBoard, TaskBoard, String)> _retryRemoteCasMergeStep(
+    Ref ref,
+    WebDavConfig config, {
+    required WebDavRepository webDavRepo,
+    required TaskBoard loopWorking,
+    required TaskBoard? loopBaseline,
+    required WorkspaceSyncState syncState,
+    required Map<String, DateTime> deletedLabels,
+    required Map<String, DateTime> deletedLocations,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    final retryRaw = await webDavRepo.fetchTdf();
+    final retryRemote = retryRaw.trim().isEmpty
+        ? TaskBoard.empty()
+        : _parseRemoteOrThrow(ref, config, retryRaw, utcNow, localNow);
+    final fallbackBaseline =
+        loopBaseline ??
+        _tryParseBaseline(ref, syncState.lastSyncedRemoteTdf, utcNow, localNow);
+    final merged = TaskBoardSync.merge(
+      primary: loopWorking,
+      secondary: retryRemote,
+      baseline: fallbackBaseline,
+      acknowledgedGeneration: fallbackBaseline != null
+          ? (loopBaseline?.deletedBlock.generation ??
+                syncState.acknowledgedRemoteGeneration)
+          : null,
+      deletedLabelTimestamps: deletedLabels,
+      deletedLocationTimestamps: deletedLocations,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    final normalized = TaskBoardSync.stampAndNormalize(
+      merged,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+    return (retryRemote, normalized, _serializeTdf(ref, normalized));
+  }
+
   /// Serializes [board] into canonical `.tdf` text.
   static String _serializeTdf(Ref ref, TaskBoard board) =>
       ref.read(tdfServiceProvider).serialize(board);
+
+  /// Returns whether [trimmedFinal] must be uploaded to WebDAV given [trimmedRemote].
+  static bool _shouldSaveToRemote(
+    WebDavConfig config, {
+    required String trimmedRemote,
+    required String trimmedFinal,
+    required bool requireTargets,
+    required bool hasCandidate,
+  }) => trimmedRemote.isEmpty
+      ? (requireTargets ||
+            hasCandidate ||
+            config.storageMode == StorageMode.both ||
+            trimmedFinal.isNotEmpty)
+      : trimmedRemote != trimmedFinal;
 
   /// Executes the first-stage local file merge and write-back for [workspaceId].
   static Future<(TaskBoard, bool, WorkspaceSyncState)> _synchronizeLocalStage(
@@ -892,41 +1077,35 @@ class TaskSyncPipeline {
     required DateTime utcNow,
     required DateTime localNow,
   }) async {
-    final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
-    final trimmedRemote = rawRemote.trim();
-    var nextWorking = working;
-    var nextHasWorking = hasWorking;
-    if (trimmedRemote.isNotEmpty) {
-      final remoteBoard = _parseRemoteOrThrow(
-        ref,
-        config,
-        rawRemote,
-        utcNow,
-        localNow,
-      );
-      final baseline = _tryParseBaseline(
-        ref,
-        syncState.lastSyncedRemoteTdf,
-        utcNow,
-        localNow,
-      );
-      nextWorking = TaskBoardSync.merge(
-        primary: nextHasWorking ? nextWorking : remoteBoard,
-        secondary: remoteBoard,
-        baseline: baseline ?? (nextHasWorking ? null : remoteBoard),
-        acknowledgedGeneration: baseline != null
-            ? syncState.acknowledgedRemoteGeneration
-            : null,
-        deletedLabelTimestamps: deletedLabels,
-        deletedLocationTimestamps: deletedLocations,
-        taskConflictResolutions: taskConflictResolutions,
-        labelConflictResolutions: labelConflictResolutions,
-        locationConflictResolutions: locationConflictResolutions,
-        evaluationTime: utcNow,
-        localEvaluationTime: localNow,
-      );
-      nextHasWorking = true;
+    final webDavRepo = ref.read(webDavRepositoryProvider);
+    webDavRepo.seedCacheIfEmpty(
+      etag: syncState.remoteEtag,
+      lastModified: syncState.remoteLastModified,
+      content: syncState.lastSyncedRemoteTdf,
+    );
+    final rawRemote = await webDavRepo.fetchTdf();
+    final notModified = webDavRepo.lastFetchWasNotModified;
+    if (notModified) {
+      AppLogger.event(LogLevel.info, LogTag.sync, 'sync.remote.not_modified');
     }
+    final trimmedRemote = rawRemote.trim();
+    var (nextWorking, nextHasWorking) = _mergeRemoteSnapshot(
+      ref,
+      config,
+      rawRemote: rawRemote,
+      notModified: notModified,
+      working: working,
+      hasWorking: hasWorking,
+      baselineTdf: syncState.lastSyncedRemoteTdf,
+      acknowledgedGeneration: syncState.acknowledgedRemoteGeneration,
+      deletedLabels: deletedLabels,
+      deletedLocations: deletedLocations,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
     if (trimmedRemote.isEmpty && !nextHasWorking && !requireTargets) {
       return (nextWorking, nextHasWorking, syncState);
     }
@@ -935,17 +1114,39 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
     );
-    final serializedFinal = _serializeTdf(ref, nextWorking);
-    final trimmedFinal = serializedFinal.trim();
-    if (requireTargets ||
-        hasCandidate ||
-        config.storageMode == StorageMode.both ||
-        trimmedRemote != trimmedFinal) {
-      await ref.read(webDavRepositoryProvider).saveTdf(serializedFinal);
+    var serializedFinal = _serializeTdf(ref, nextWorking);
+    var trimmedFinal = serializedFinal.trim();
+    if (_shouldSaveToRemote(
+      config,
+      trimmedRemote: trimmedRemote,
+      trimmedFinal: trimmedFinal,
+      requireTargets: requireTargets,
+      hasCandidate: hasCandidate,
+    )) {
+      (nextWorking, serializedFinal) = await _publishRemoteWithCasLoop(
+        ref,
+        config,
+        webDavRepo: webDavRepo,
+        working: nextWorking,
+        serializedCandidate: serializedFinal,
+        syncState: syncState,
+        deletedLabels: deletedLabels,
+        deletedLocations: deletedLocations,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
+        utcNow: utcNow,
+        localNow: localNow,
+      );
+      trimmedFinal = serializedFinal.trim();
     }
     var nextSyncState = syncState.copyWith(
       lastSyncedRemoteTdf: serializedFinal,
       acknowledgedRemoteGeneration: nextWorking.deletedBlock.generation,
+      remoteEtag: webDavRepo.cachedEtag,
+      clearRemoteEtag: webDavRepo.cachedEtag == null,
+      remoteLastModified: webDavRepo.cachedLastModified,
+      clearRemoteLastModified: webDavRepo.cachedLastModified == null,
     );
     if (config.storageMode.usesLocal &&
         (requireTargets || config.isLocalConfigured)) {

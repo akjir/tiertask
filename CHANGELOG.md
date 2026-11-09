@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Changed WebDAV synchronization to cache server entity tags and modification timestamps, skipping unchanged downloads, parser passes, and redundant uploads while automatically merging concurrent remote edits when a write precondition fails.
 - Changed task cards to collapse more than three status indicator icons into a single summary indicator icon.
 - Changed task creation to pre-select the currently active label filter.
 
