@@ -22,11 +22,13 @@ import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/widgets/task_info_dialog.dart';
 import 'package:tiertask/ui/widgets/tier_task_pill.dart';
 
 import '../test_helpers.dart';
@@ -772,6 +774,228 @@ task c20000OkD2 {
         find.textContaining('2026-11-15'),
         findsOneWidget,
         reason: 'Due badge must display the formatted local due date',
+      );
+    },
+  );
+
+  testWidgets(
+    'TierTaskPill renders suspended, blocked_by, and conditions indicators when count is at most 3 and collapses 4 or more indicators into a single summary icon',
+    (WidgetTester tester) async {
+      final now = DateTime.utc(2026, 11, 1, 12, 0);
+      final threeIndicatorsTask = TaskItem(
+        id: 'threeInd01',
+        title: 'Three Indicators Task',
+        createdAt: now,
+        suspendedAt: DateTime.utc(2026, 11, 3, 12, 0),
+        dependencies: const [
+          TdfTaskDependency(taskId: 'prereq0001', requiredCompletion: 1),
+        ],
+        conditions: [
+          DayTaskCondition.fromWeekdays(const [DateTime.monday]),
+        ],
+      );
+      final fourIndicatorsTask = TaskItem(
+        id: 'fourInd002',
+        title: 'Four Indicators Task',
+        createdAt: now,
+        isPriority: true,
+        suspendedAt: DateTime.utc(2026, 11, 3, 12, 0),
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+        subtasks: const [
+          SubtaskItem(title: 'Step 1', isCompleted: true),
+          SubtaskItem(title: 'Step 2', isCompleted: false),
+        ],
+      );
+      final board = TaskBoard(
+        blocked: [threeIndicatorsTask, fourIndicatorsTask],
+      );
+
+      await pumpLeafWidget(
+        tester,
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TierTaskPill(
+              task: threeIndicatorsTask,
+              canDowngrade: false,
+              isCompleted: false,
+            ),
+            TierTaskPill(
+              task: fourIndicatorsTask,
+              canDowngrade: false,
+              isCompleted: false,
+            ),
+          ],
+        ),
+        board: board,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('suspended_task_indicator_threeInd01')),
+        findsOneWidget,
+        reason: 'Suspended task with 3 indicators must render suspended icon',
+      );
+      expect(
+        find.byKey(const ValueKey('blocked_by_task_indicator_threeInd01')),
+        findsOneWidget,
+        reason: 'Task with dependencies and 3 indicators must render blocked_by icon',
+      );
+      expect(
+        find.byKey(const ValueKey('conditions_task_indicator_threeInd01')),
+        findsOneWidget,
+        reason:
+            'Task with conditions and 3 indicators must render conditions icon',
+      );
+      expect(
+        find.byKey(const ValueKey('summary_task_indicator_threeInd01')),
+        findsNothing,
+        reason: 'Task with 3 indicators must not collapse into summary icon',
+      );
+
+      final summaryFinder = find.byKey(
+        const ValueKey('summary_task_indicator_fourInd002'),
+      );
+      expect(
+        summaryFinder,
+        findsOneWidget,
+        reason: 'Task with more than 3 indicators must render a single summary icon',
+      );
+      final summaryIcon = tester.widget<Icon>(summaryFinder);
+      expect(summaryIcon.icon, equals(Icons.info_outline_rounded));
+
+      expect(
+        find.byKey(const ValueKey('priority_task_indicator_fourInd002')),
+        findsNothing,
+        reason: 'Individual priority icon must be hidden when collapsed into summary icon',
+      );
+      expect(
+        find.byKey(const ValueKey('suspended_task_indicator_fourInd002')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('repeat_task_indicator_fourInd002')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('subtasks_task_indicator_fourInd002')),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'Clicking or tapping task indicator icons with mouse or finger opens TaskInfoDialog without expanding or collapsing subtasks',
+    (WidgetTester tester) async {
+      final now = DateTime.utc(2026, 11, 1, 12, 0);
+      final task = TaskItem(
+        id: 'tapInd0001',
+        title: 'Interactive Indicator Task',
+        createdAt: now,
+        suspendedAt: DateTime.utc(2026, 11, 2, 15, 0),
+        subtasks: const [
+          SubtaskItem(title: 'Step A', isCompleted: true),
+          SubtaskItem(title: 'Step B', isCompleted: false),
+          SubtaskItem(title: 'Step C', isCompleted: false),
+          SubtaskItem(title: 'Step D', isCompleted: false),
+        ],
+      );
+      final board = TaskBoard(blocked: [task]);
+
+      await pumpLeafWidget(
+        tester,
+        TierTaskPill(task: task, canDowngrade: false, isCompleted: false),
+        board: board,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      final subtasksIconFinder = find.byKey(
+        const ValueKey('subtasks_task_indicator_tapInd0001'),
+      );
+      final suspendedIconFinder = find.byKey(
+        const ValueKey('suspended_task_indicator_tapInd0001'),
+      );
+      final step0Finder = find.byKey(
+        const ValueKey('subtask_step_tapInd0001_0'),
+      );
+
+      expect(step0Finder, findsNothing);
+
+      final mouseGesture = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+      );
+      await mouseGesture.addPointer(
+        location: tester.getCenter(subtasksIconFinder),
+      );
+      addTearDown(mouseGesture.removePointer);
+      await mouseGesture.down(tester.getCenter(subtasksIconFinder));
+      await mouseGesture.up();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byType(TaskInfoDialog),
+        findsOneWidget,
+        reason: 'Mouse click on subtasks indicator must open TaskInfoDialog',
+      );
+      expect(find.text('1 of 4 completed'), findsOneWidget);
+      expect(
+        step0Finder,
+        findsNothing,
+        reason: 'Mouse click on subtasks indicator must not expand subtasks section',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byType(TaskInfoDialog), findsNothing);
+
+      await tester.tap(suspendedIconFinder, kind: PointerDeviceKind.touch);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byType(TaskInfoDialog),
+        findsOneWidget,
+        reason: 'Finger tap on suspended indicator must open TaskInfoDialog',
+      );
+      expect(find.textContaining('1 d 3 h remaining'), findsOneWidget);
+      expect(
+        step0Finder,
+        findsNothing,
+        reason: 'Finger tap on suspended indicator must not expand subtasks section',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Interactive Indicator Task'));
+      await tester.pumpAndSettle();
+      expect(
+        step0Finder,
+        findsOneWidget,
+        reason: 'Tapping the task title must still expand subtasks section',
+      );
+
+      await tester.tap(subtasksIconFinder, kind: PointerDeviceKind.touch);
+      await tester.pumpAndSettle();
+      expect(
+        find.byType(TaskInfoDialog),
+        findsOneWidget,
+        reason:
+            'Finger tap on indicator while expanded must open TaskInfoDialog',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        step0Finder,
+        findsOneWidget,
+        reason: 'Tapping an indicator while subtasks are expanded must not collapse subtasks',
       );
     },
   );

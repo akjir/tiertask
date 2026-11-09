@@ -24,6 +24,9 @@ import '../../models/tdf_metadata.dart';
 import '../../repositories/link_launcher_repository.dart';
 import '../../services/app_logger.dart';
 
+/// Maximum number of individual status indicator icons rendered on a task pill before collapsing into a summary icon.
+const int maxVisibleTaskIndicators = 3;
+
 /// Animation duration for expanding and collapsing task subtasks, notes, and links.
 const Duration subtaskExpandDuration = Duration(milliseconds: 220);
 
@@ -482,6 +485,24 @@ resolveTaskIndicatorSpecs(TaskItem task, AppLocalizations localizations) {
         icon: Icons.bolt_rounded,
         keyPrefix: 'priority_task_indicator',
         tooltip: localizations.tooltipIndicatorPriority,
+      ),
+    if (task.isSuspendedForever || task.suspendedAt != null)
+      (
+        icon: Icons.pause_circle_outline_rounded,
+        keyPrefix: 'suspended_task_indicator',
+        tooltip: localizations.tooltipIndicatorSuspended,
+      ),
+    if (task.dependencies.isNotEmpty)
+      (
+        icon: Icons.lock_outline_rounded,
+        keyPrefix: 'blocked_by_task_indicator',
+        tooltip: localizations.tooltipIndicatorBlockedBy,
+      ),
+    if (task.conditions.isNotEmpty)
+      (
+        icon: Icons.rule_rounded,
+        keyPrefix: 'conditions_task_indicator',
+        tooltip: localizations.tooltipIndicatorConditions,
       ),
     if (task.repeatRule != null)
       (

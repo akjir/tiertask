@@ -487,7 +487,9 @@ task plain1OkD2 {
       await _pumpSeededApp(tester, seededTdf);
 
       final noteOnlyIndicatorFinder = _byKey('note_task_indicator_not001OkD2');
-      final fullNoteIndicatorFinder = _byKey('note_task_indicator_all001OkD2');
+      final fullSummaryIndicatorFinder = _byKey(
+        'summary_task_indicator_all001OkD2',
+      );
       final plainNoteIndicatorFinder = _byKey('note_task_indicator_plain1OkD2');
 
       _expectOne(
@@ -495,8 +497,12 @@ task plain1OkD2 {
         'Task with note must display the passive note indicator icon',
       );
       _expectOne(
-        fullNoteIndicatorFinder,
-        'Task with note, links, and subtasks must display the passive note indicator icon',
+        fullSummaryIndicatorFinder,
+        'Task with 5 indicators (priority, repeat, note, links, subtasks) must collapse into the single summary indicator icon',
+      );
+      _expectNone(
+        _byKey('note_task_indicator_all001OkD2'),
+        'Individual note indicator must be hidden when collapsed into the summary indicator icon',
       );
       _expectNone(
         plainNoteIndicatorFinder,
@@ -506,27 +512,10 @@ task plain1OkD2 {
       final noteIndicatorIcon = tester.widget<Icon>(noteOnlyIndicatorFinder);
       expect(noteIndicatorIcon.icon, equals(Icons.notes_rounded));
       _expectTooltip(tester, 'note_task_indicator_not001OkD2', 'Note');
-
-      final priorityLeft = tester
-          .getTopLeft(_byKey('priority_task_indicator_all001OkD2'))
-          .dx;
-      final repeatLeft = tester
-          .getTopLeft(_byKey('repeat_task_indicator_all001OkD2'))
-          .dx;
-      final noteLeft = tester.getTopLeft(fullNoteIndicatorFinder).dx;
-      final linksLeft = tester
-          .getTopLeft(_byKey('links_task_indicator_all001OkD2'))
-          .dx;
-      final subtasksLeft = tester
-          .getTopLeft(_byKey('subtasks_task_indicator_all001OkD2'))
-          .dx;
-
-      _expectTrue(
-        priorityLeft < repeatLeft &&
-            repeatLeft < noteLeft &&
-            noteLeft < linksLeft &&
-            linksLeft < subtasksLeft,
-        'Passive indicators must be ordered Priority, Repeat, Note, Links, then Subtasks',
+      _expectTooltip(
+        tester,
+        'summary_task_indicator_all001OkD2',
+        'Task information (5 indicators)',
       );
 
       final noteOnlyRowFinder = _byKey('task_note_not001OkD2');

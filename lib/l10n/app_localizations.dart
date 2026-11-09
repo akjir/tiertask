@@ -2227,6 +2227,132 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).'**
   String get locationResolveErrorInvalidPlusCode;
+
+  /// Tooltip for the suspended task indicator icon.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended'**
+  String get tooltipIndicatorSuspended;
+
+  /// Tooltip for the prerequisite tasks indicator icon.
+  ///
+  /// In en, this message translates to:
+  /// **'Prerequisite tasks'**
+  String get tooltipIndicatorBlockedBy;
+
+  /// Tooltip for the activation conditions indicator icon.
+  ///
+  /// In en, this message translates to:
+  /// **'Activation conditions'**
+  String get tooltipIndicatorConditions;
+
+  /// Tooltip for the summary indicator icon when more than 3 indicators are active.
+  ///
+  /// In en, this message translates to:
+  /// **'Task information ({count} indicators)'**
+  String tooltipIndicatorSummary(String count);
+
+  /// Dialog title for the task information overlay.
+  ///
+  /// In en, this message translates to:
+  /// **'Task Information'**
+  String get taskInfoDialogTitle;
+
+  /// Value text shown for a prioritized task in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Prioritized in queue'**
+  String get taskInfoPriorityValue;
+
+  /// Value text shown when a task is suspended indefinitely.
+  ///
+  /// In en, this message translates to:
+  /// **'Indefinitely'**
+  String get taskInfoSuspendedForever;
+
+  /// Value text shown when a task is suspended until a future timestamp with remaining duration.
+  ///
+  /// In en, this message translates to:
+  /// **'Until {timestamp} ({duration})'**
+  String taskInfoSuspendedUntil(String timestamp, String duration);
+
+  /// Value text shown when a task's suspension timestamp is in the past.
+  ///
+  /// In en, this message translates to:
+  /// **'Elapsed ({timestamp})'**
+  String taskInfoSuspendedElapsed(String timestamp);
+
+  /// Section label for the due deadline in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Due'**
+  String get taskInfoDueLabel;
+
+  /// Value text shown when a task has a future due timestamp with remaining duration.
+  ///
+  /// In en, this message translates to:
+  /// **'{timestamp} ({duration})'**
+  String taskInfoDueAt(String timestamp, String duration);
+
+  /// Value text shown when a task's due timestamp has passed.
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue ({timestamp})'**
+  String taskInfoDueOverdue(String timestamp);
+
+  /// Remaining duration formatted in days and hours.
+  ///
+  /// In en, this message translates to:
+  /// **'{days} d {hours} h remaining'**
+  String taskInfoDurationDaysHours(String days, String hours);
+
+  /// Remaining duration formatted in hours and minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{hours} h {minutes} min remaining'**
+  String taskInfoDurationHoursMinutes(String hours, String minutes);
+
+  /// Remaining duration formatted in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min remaining'**
+  String taskInfoDurationMinutes(String minutes);
+
+  /// Subtask completion progress shown in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'{completed} of {total} completed'**
+  String taskInfoSubtasksProgress(String completed, String total);
+
+  /// Detail line indicating that subtasks auto-finish is enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-finish enabled'**
+  String get taskInfoSubtasksAutoFinishSuffix;
+
+  /// Prerequisite task completion progress shown in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'{satisfied} of {total} satisfied'**
+  String taskInfoBlockedByProgress(String satisfied, String total);
+
+  /// Recurrence interval summary shown in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Every {count} {unit}'**
+  String taskInfoRepeatEvery(String count, String unit);
+
+  /// Cumulative completion count shown in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed {count} times'**
+  String taskInfoRepeatCompletions(String count);
+
+  /// Count of links shown in the task information dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} links'**
+  String taskInfoLinksCount(String count);
 }
 
 class _AppLocalizationsDelegate

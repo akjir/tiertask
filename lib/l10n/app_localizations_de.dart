@@ -1222,4 +1222,94 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get locationResolveErrorInvalidPlusCode =>
       'Gültigen Plus Code eingeben (z. B. 9F2PXXH7+F4 oder XXH7+F4 Erfurt).';
+
+  @override
+  String get tooltipIndicatorSuspended => 'Zurückgestellt';
+
+  @override
+  String get tooltipIndicatorBlockedBy => 'Voraussetzungen';
+
+  @override
+  String get tooltipIndicatorConditions => 'Aktivierungsbedingungen';
+
+  @override
+  String tooltipIndicatorSummary(String count) {
+    return 'Aufgabeninformationen ($count Merkmale)';
+  }
+
+  @override
+  String get taskInfoDialogTitle => 'Aufgabeninformationen';
+
+  @override
+  String get taskInfoPriorityValue => 'Priorisiert in der Warteschlange';
+
+  @override
+  String get taskInfoSuspendedForever => 'Unbegrenzt';
+
+  @override
+  String taskInfoSuspendedUntil(String timestamp, String duration) {
+    return 'Bis $timestamp ($duration)';
+  }
+
+  @override
+  String taskInfoSuspendedElapsed(String timestamp) {
+    return 'Abgelaufen ($timestamp)';
+  }
+
+  @override
+  String get taskInfoDueLabel => 'Fällig';
+
+  @override
+  String taskInfoDueAt(String timestamp, String duration) {
+    return '$timestamp ($duration)';
+  }
+
+  @override
+  String taskInfoDueOverdue(String timestamp) {
+    return 'Überfällig ($timestamp)';
+  }
+
+  @override
+  String taskInfoDurationDaysHours(String days, String hours) {
+    return 'noch $days T. $hours Std.';
+  }
+
+  @override
+  String taskInfoDurationHoursMinutes(String hours, String minutes) {
+    return 'noch $hours Std. $minutes Min.';
+  }
+
+  @override
+  String taskInfoDurationMinutes(String minutes) {
+    return 'noch $minutes Min.';
+  }
+
+  @override
+  String taskInfoSubtasksProgress(String completed, String total) {
+    return '$completed von $total erledigt';
+  }
+
+  @override
+  String get taskInfoSubtasksAutoFinishSuffix =>
+      'Automatisch abschließen aktiv';
+
+  @override
+  String taskInfoBlockedByProgress(String satisfied, String total) {
+    return '$satisfied von $total erfüllt';
+  }
+
+  @override
+  String taskInfoRepeatEvery(String count, String unit) {
+    return 'Alle $count $unit';
+  }
+
+  @override
+  String taskInfoRepeatCompletions(String count) {
+    return '$count-mal abgeschlossen';
+  }
+
+  @override
+  String taskInfoLinksCount(String count) {
+    return '$count Links';
+  }
 }

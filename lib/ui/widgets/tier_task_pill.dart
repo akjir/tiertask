@@ -25,6 +25,7 @@ import '../../models/tdf_metadata.dart';
 import '../../providers/config_providers.dart';
 import '../../providers/task_providers.dart';
 import '../edit_task_screen.dart';
+import 'task_info_dialog.dart';
 import 'tier_task_subtasks_section.dart';
 
 /// Animation duration for closing, downgrading, or restoring a task pill.
@@ -189,12 +190,12 @@ sealed class _TaskExitAction {
   const _TaskExitAction();
 }
 
-/// Passive right-side status indicator icons for priority, repeating, note-bearing, link-bearing, and subtask-bearing tasks.
+/// Interactive right-side status indicator icons that open [TaskInfoDialog] when clicked or tapped.
 class _TierTaskIndicators extends StatelessWidget {
   /// Creates a [_TierTaskIndicators] row.
   const _TierTaskIndicators({required this.task});
 
-  /// Task item whose passive indicators are displayed.
+  /// Task item whose status indicators are displayed.
   final TaskItem task;
 
   @override
@@ -207,37 +208,98 @@ class _TierTaskIndicators extends StatelessWidget {
     }
     final color = Theme.of(context).colorScheme.onSurfaceVariant
         .withValues(alpha: 0.55);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (dueAt != null)
-          Padding(
-            padding: const EdgeInsets.only(left: 6),
-            child: Text(
-              localizations.pillDuePrefix(TaskItem.formatIsoDate(dueAt)),
-              key: ValueKey('due_task_badge_${task.id}'),
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        for (final spec in specs)
-          Padding(
-            padding: const EdgeInsets.only(left: 6),
-            child: Tooltip(
-              message: spec.tooltip,
-              child: Icon(
-                spec.icon,
-                key: ValueKey('${spec.keyPrefix}_${task.id}'),
-                size: 16,
-                color: color,
-              ),
-            ),
-          ),
-      ],
+    final displayedSpecs = _resolveDisplayedSpecs(specs, localizations);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showTaskInfoDialog(context, task: task),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 36),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (dueAt != null)
+              _buildDueBadge(context, localizations, dueAt, color),
+            for (final spec in displayedSpecs)
+              _buildIndicatorItem(context, spec, color),
+          ],
+        ),
+      ),
     );
+  }
+
+  /// Builds the tappable due date badge on the left of the indicator strip.
+  Widget _buildDueBadge(
+    BuildContext context,
+    AppLocalizations localizations,
+    DateTime dueAt,
+    Color color,
+  ) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showTaskInfoDialog(
+        context,
+        task: task,
+        initialIndicatorKeyPrefix: 'due_task_badge',
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 6),
+        child: Text(
+          localizations.pillDuePrefix(TaskItem.formatIsoDate(dueAt)),
+          key: ValueKey('due_task_badge_${task.id}'),
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds a single interactive indicator icon wrapped in a [Tooltip].
+  Widget _buildIndicatorItem(
+    BuildContext context,
+    ({IconData icon, String keyPrefix, String tooltip}) spec,
+    Color color,
+  ) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => showTaskInfoDialog(
+        context,
+        task: task,
+        initialIndicatorKeyPrefix: spec.keyPrefix,
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(left: 6),
+        child: Tooltip(
+          message: spec.tooltip,
+          child: Icon(
+            spec.icon,
+            key: ValueKey('${spec.keyPrefix}_${task.id}'),
+            size: 16,
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Collapses [specs] into a single summary indicator when more than [maxVisibleTaskIndicators] are active.
+  static List<({IconData icon, String keyPrefix, String tooltip})>
+  _resolveDisplayedSpecs(
+    List<({IconData icon, String keyPrefix, String tooltip})> specs,
+    AppLocalizations localizations,
+  ) {
+    if (specs.length <= maxVisibleTaskIndicators) {
+      return specs;
+    }
+    return [
+      (
+        icon: Icons.info_outline_rounded,
+        keyPrefix: 'summary_task_indicator',
+        tooltip: localizations.tooltipIndicatorSummary(specs.length.toString()),
+      ),
+    ];
   }
 }
 

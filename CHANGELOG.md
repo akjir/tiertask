@@ -8,7 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added interactive task status indicator icons for suspension, prerequisite tasks, and activation conditions that open a task information dialog on click or tap.
 - Added a POSIX user-space build and installation script for Linux with desktop launcher integration.
+
+### Changed
+
+- Changed task cards to collapse more than three status indicator icons into a single summary indicator icon.
 
 ## [0.2.0] - 2026-11-09
 

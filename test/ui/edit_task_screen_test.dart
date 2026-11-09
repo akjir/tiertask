@@ -454,7 +454,7 @@ task 000001OkD2 {
         equals(const TaskRepeatRule(count: 2, unit: RepeatUnit.weeks)),
       );
       expect(
-        find.byKey(ValueKey('repeat_task_indicator_$rotateTaskId')),
+        find.byKey(ValueKey('summary_task_indicator_$rotateTaskId')),
         findsOneWidget,
       );
     },

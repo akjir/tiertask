@@ -1621,5 +1621,175 @@
   "locationResolveErrorInvalidPlusCode": "Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).",
   "@locationResolveErrorInvalidPlusCode": {
     "description": "Validation error when the entered Plus Code syntax is invalid."
+  },
+  "tooltipIndicatorSuspended": "Suspended",
+  "@tooltipIndicatorSuspended": {
+    "description": "Tooltip for the suspended task indicator icon."
+  },
+  "tooltipIndicatorBlockedBy": "Prerequisite tasks",
+  "@tooltipIndicatorBlockedBy": {
+    "description": "Tooltip for the prerequisite tasks indicator icon."
+  },
+  "tooltipIndicatorConditions": "Activation conditions",
+  "@tooltipIndicatorConditions": {
+    "description": "Tooltip for the activation conditions indicator icon."
+  },
+  "tooltipIndicatorSummary": "Task information ({count} indicators)",
+  "@tooltipIndicatorSummary": {
+    "description": "Tooltip for the summary indicator icon when more than 3 indicators are active.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDialogTitle": "Task Information",
+  "@taskInfoDialogTitle": {
+    "description": "Dialog title for the task information overlay."
+  },
+  "taskInfoPriorityValue": "Prioritized in queue",
+  "@taskInfoPriorityValue": {
+    "description": "Value text shown for a prioritized task in the task information dialog."
+  },
+  "taskInfoSuspendedForever": "Indefinitely",
+  "@taskInfoSuspendedForever": {
+    "description": "Value text shown when a task is suspended indefinitely."
+  },
+  "taskInfoSuspendedUntil": "Until {timestamp} ({duration})",
+  "@taskInfoSuspendedUntil": {
+    "description": "Value text shown when a task is suspended until a future timestamp with remaining duration.",
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoSuspendedElapsed": "Elapsed ({timestamp})",
+  "@taskInfoSuspendedElapsed": {
+    "description": "Value text shown when a task's suspension timestamp is in the past.",
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDueLabel": "Due",
+  "@taskInfoDueLabel": {
+    "description": "Section label for the due deadline in the task information dialog."
+  },
+  "taskInfoDueAt": "{timestamp} ({duration})",
+  "@taskInfoDueAt": {
+    "description": "Value text shown when a task has a future due timestamp with remaining duration.",
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      },
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDueOverdue": "Overdue ({timestamp})",
+  "@taskInfoDueOverdue": {
+    "description": "Value text shown when a task's due timestamp has passed.",
+    "placeholders": {
+      "timestamp": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDurationDaysHours": "{days} d {hours} h remaining",
+  "@taskInfoDurationDaysHours": {
+    "description": "Remaining duration formatted in days and hours.",
+    "placeholders": {
+      "days": {
+        "type": "String"
+      },
+      "hours": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDurationHoursMinutes": "{hours} h {minutes} min remaining",
+  "@taskInfoDurationHoursMinutes": {
+    "description": "Remaining duration formatted in hours and minutes.",
+    "placeholders": {
+      "hours": {
+        "type": "String"
+      },
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDurationMinutes": "{minutes} min remaining",
+  "@taskInfoDurationMinutes": {
+    "description": "Remaining duration formatted in minutes.",
+    "placeholders": {
+      "minutes": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoSubtasksProgress": "{completed} of {total} completed",
+  "@taskInfoSubtasksProgress": {
+    "description": "Subtask completion progress shown in the task information dialog.",
+    "placeholders": {
+      "completed": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoSubtasksAutoFinishSuffix": "Auto-finish enabled",
+  "@taskInfoSubtasksAutoFinishSuffix": {
+    "description": "Detail line indicating that subtasks auto-finish is enabled."
+  },
+  "taskInfoBlockedByProgress": "{satisfied} of {total} satisfied",
+  "@taskInfoBlockedByProgress": {
+    "description": "Prerequisite task completion progress shown in the task information dialog.",
+    "placeholders": {
+      "satisfied": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoRepeatEvery": "Every {count} {unit}",
+  "@taskInfoRepeatEvery": {
+    "description": "Recurrence interval summary shown in the task information dialog.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "unit": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoRepeatCompletions": "Completed {count} times",
+  "@taskInfoRepeatCompletions": {
+    "description": "Cumulative completion count shown in the task information dialog.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoLinksCount": "{count} links",
+  "@taskInfoLinksCount": {
+    "description": "Count of links shown in the task information dialog.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
   }
 }
