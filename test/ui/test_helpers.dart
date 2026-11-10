@@ -18,6 +18,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
@@ -62,7 +63,12 @@ class FakeTaskNotifier extends TaskNotifier {
   }
 
   @override
-  Future<void> pushToRemote(TaskBoard board, {TaskBoard? fallbackBoard}) async {
+  Future<void> pushToRemote(
+    TaskBoard board, {
+    TaskBoard? fallbackBoard,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    int? mutationEpoch,
+  }) async {
     state = AsyncData(board);
   }
 }

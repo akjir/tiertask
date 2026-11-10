@@ -861,31 +861,18 @@ task 000002OkD2 {
       expect(find.text('Delete Task'), findsOneWidget);
       expect(
         find.text(
-          'Delete task "Audit Firewall"? This action cannot be undone.',
+          'Delete task "Audit Firewall"? This action can be undone while the workspace remains open.',
         ),
         findsOneWidget,
       );
       expect(
         tester.widget<FilledButton>(confirmButtonFinder).onPressed,
-        isNull,
-        reason: 'Confirm button must be disabled initially during 3s countdown',
-      );
-      expect(find.text('Delete (3s)'), findsOneWidget);
-
-      await tester.tap(confirmButtonFinder, warnIfMissed: false);
-      await tester.pump(const Duration(seconds: 2));
-      expect(
-        dialogFinder,
-        findsOneWidget,
+        isNotNull,
         reason:
-            'Tapping disabled confirm button before 3s must not close dialog',
+            'Confirm button must be immediately enabled without a 3s countdown',
       );
-      expect(
-        tester.widget<FilledButton>(confirmButtonFinder).onPressed,
-        isNull,
-        reason: 'Confirm button must remain disabled before 3s have elapsed',
-      );
-      expect(find.text('Delete (1s)'), findsOneWidget);
+      expect(find.text('Delete (3s)'), findsNothing);
+      expect(find.text('Delete'), findsWidgets);
 
       await _tapKey(tester, 'delete_task_cancel_button');
       expect(
@@ -911,16 +898,9 @@ task 000002OkD2 {
       await tester.pump();
       expect(
         tester.widget<FilledButton>(confirmButtonFinder).onPressed,
-        isNull,
-        reason: 'Re-opened confirmation dialog must restart the 3s timer',
-      );
-      await tester.pump(const Duration(seconds: 3));
-      expect(
-        tester.widget<FilledButton>(confirmButtonFinder).onPressed,
         isNotNull,
-        reason: 'Confirm button must become enabled once 3s have elapsed',
+        reason: 'Re-opened confirmation dialog must have Delete enabled immediately',
       );
-      expect(find.text('Delete'), findsWidgets);
       await _tapKey(tester, 'delete_task_confirm_button');
 
       expect(
@@ -928,6 +908,12 @@ task 000002OkD2 {
         findsNothing,
         reason: 'Confirming deletion must close EditTaskScreen',
       );
+      expect(
+        find.text('Deleted "Audit Firewall".'),
+        findsOneWidget,
+        reason: 'Undo SnackBar on HomeScreen must remain visible after EditTaskScreen pops',
+      );
+      expect(find.text('Undo'), findsOneWidget);
       final boardAfterFirstDelete = container
           .read(taskNotifierProvider)
           .requireValue;
@@ -942,6 +928,17 @@ task 000002OkD2 {
         reason: 'Confirmed task deletion must record a TDF tombstone',
       );
 
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('000001OkD2'),
+        isNotNull,
+        reason: 'Tapping Undo on SnackBar must restore the deleted task',
+      );
+
       await container
           .read(webDavConfigProvider.notifier)
           .updateLanguage(AppLanguage.german);
@@ -949,18 +946,23 @@ task 000002OkD2 {
 
       await _tapKey(tester, 'edit_task_button_000002OkD2');
       await _tapKey(tester, 'task_editor_delete_button', settle: false);
+      await tester.pumpAndSettle();
 
       expect(find.text('Aufgabe löschen'), findsOneWidget);
       expect(
         find.text(
-          'Aufgabe „Rotate Certificates“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.',
+          'Aufgabe „Rotate Certificates“ löschen? Diese Aktion kann rückgängig gemacht werden, solange der Arbeitsbereich geöffnet bleibt.',
         ),
         findsOneWidget,
       );
-      expect(find.text('Löschen (3s)'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 3));
+      expect(find.text('Löschen (3s)'), findsNothing);
       await _tapKey(tester, 'delete_task_confirm_button');
 
+      expect(
+        find.text('„Rotate Certificates“ gelöscht.'),
+        findsOneWidget,
+        reason: 'German Undo SnackBar must be shown on HomeScreen after delete',
+      );
       expect(
         container
             .read(taskNotifierProvider)
@@ -968,6 +970,17 @@ task 000002OkD2 {
             .findTask('000002OkD2'),
         isNull,
         reason: 'German confirmation must also delete the task',
+      );
+      await tester.tap(find.text('Rückgängig'));
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('000002OkD2'),
+        isNotNull,
+        reason:
+            'Tapping German Rückgängig action must restore the deleted task',
       );
     },
   );

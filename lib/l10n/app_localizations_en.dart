@@ -1297,7 +1297,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String deleteTaskConfirmMessage(String title) {
-    return 'Delete task \"$title\"? This action cannot be undone.';
+    return 'Delete task \"$title\"? This action can be undone while the workspace remains open.';
   }
 
   @override
@@ -1305,4 +1305,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noteCopiedSnackBar => 'Note copied to clipboard.';
+
+  @override
+  String get actionUndo => 'Undo';
+
+  @override
+  String taskCompletedUndoSnackBar(String title) {
+    return 'Completed \"$title\".';
+  }
+
+  @override
+  String taskDowngradedUndoSnackBar(String title) {
+    return 'Downgraded \"$title\".';
+  }
+
+  @override
+  String taskDeletedUndoSnackBar(String title) {
+    return 'Deleted \"$title\".';
+  }
 }

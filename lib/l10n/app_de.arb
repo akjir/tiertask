@@ -377,7 +377,11 @@
   "taskInfoRepeatCompletions": "{count}-mal abgeschlossen",
   "taskInfoLinksCount": "{count} Links",
   "deleteTaskDialogTitle": "Aufgabe löschen",
-  "deleteTaskConfirmMessage": "Aufgabe „{title}“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+  "deleteTaskConfirmMessage": "Aufgabe „{title}“ löschen? Diese Aktion kann rückgängig gemacht werden, solange der Arbeitsbereich geöffnet bleibt.",
   "tooltipCopyNote": "Notiz kopieren",
-  "noteCopiedSnackBar": "Notiz in die Zwischenablage kopiert."
+  "noteCopiedSnackBar": "Notiz in die Zwischenablage kopiert.",
+  "actionUndo": "Rückgängig",
+  "taskCompletedUndoSnackBar": "„{title}“ abgeschlossen.",
+  "taskDowngradedUndoSnackBar": "„{title}“ herabgestuft.",
+  "taskDeletedUndoSnackBar": "„{title}“ gelöscht."
 }

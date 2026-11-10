@@ -13,8 +13,6 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -66,58 +64,21 @@ class EditTaskScreen extends ConsumerStatefulWidget {
 }
 
 /// Confirmation dialog shown before deleting an existing task from [EditTaskScreen].
-class _DeleteTaskConfirmDialog extends StatefulWidget {
+class _DeleteTaskConfirmDialog extends StatelessWidget {
   /// Creates a [_DeleteTaskConfirmDialog].
   const _DeleteTaskConfirmDialog({required this.taskTitle});
-
-  /// Total delay in seconds (`3` s) before the Delete button unlocks.
-  static const int confirmDelaySeconds = 3;
-
-  /// Countdown tick interval (`1` s).
-  static const Duration tickInterval = Duration(seconds: 1);
 
   /// Title of the task pending deletion.
   final String taskTitle;
 
   @override
-  State<_DeleteTaskConfirmDialog> createState() =>
-      _DeleteTaskConfirmDialogState();
-}
-
-/// State for [_DeleteTaskConfirmDialog] managing the 3-second confirmation countdown.
-class _DeleteTaskConfirmDialogState extends State<_DeleteTaskConfirmDialog> {
-  int _remainingSeconds = _DeleteTaskConfirmDialog.confirmDelaySeconds;
-  Timer? _timer;
-
-  /// Whether the countdown has finished and the Delete button is enabled.
-  bool get _isConfirmEnabled => _remainingSeconds <= 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(
-      _DeleteTaskConfirmDialog.tickInterval,
-      _handleTimerTick,
-    );
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
-    final deleteLabel = _isConfirmEnabled
-        ? localizations.actionDelete
-        : '${localizations.actionDelete} (${_remainingSeconds}s)';
     return AlertDialog(
       key: const ValueKey('delete_task_confirm_dialog'),
       title: Text(localizations.deleteTaskDialogTitle),
-      content: Text(localizations.deleteTaskConfirmMessage(widget.taskTitle)),
+      content: Text(localizations.deleteTaskConfirmMessage(taskTitle)),
       actions: [
         TextButton(
           key: const ValueKey('delete_task_cancel_button'),
@@ -130,28 +91,11 @@ class _DeleteTaskConfirmDialogState extends State<_DeleteTaskConfirmDialog> {
             backgroundColor: colorScheme.error,
             foregroundColor: colorScheme.onError,
           ),
-          onPressed: _isConfirmEnabled
-              ? () => Navigator.of(context).pop(true)
-              : null,
-          child: Text(deleteLabel),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(localizations.actionDelete),
         ),
       ],
     );
-  }
-
-  /// Decrements [_remainingSeconds] on each tick and cancels [timer] once unlocked.
-  void _handleTimerTick(Timer timer) {
-    final nextSeconds = _remainingSeconds - 1;
-    if (nextSeconds <= 0) {
-      timer.cancel();
-      if (mounted) {
-        setState(() => _remainingSeconds = 0);
-      }
-      return;
-    }
-    if (mounted) {
-      setState(() => _remainingSeconds = nextSeconds);
-    }
   }
 }
 
@@ -205,6 +149,50 @@ class _EditTaskFormColumn extends StatelessWidget {
           isSuspended: state._isSuspended,
         ),
       ],
+    );
+  }
+}
+
+/// Body layout inside [EditTaskScreen] separating scrollable form cards from bottom actions.
+class _EditTaskScaffoldBody extends StatelessWidget {
+  /// Creates an [_EditTaskScaffoldBody].
+  const _EditTaskScaffoldBody({
+    required this.board,
+    required this.isEditing,
+    required this.state,
+  });
+
+  /// Current [TaskBoard] snapshot.
+  final TaskBoard board;
+
+  /// Whether [EditTaskScreen] is editing an existing task.
+  final bool isEditing;
+
+  /// Owning [_EditTaskScreenState].
+  final _EditTaskScreenState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: _EditTaskFormColumn(board: board, state: state),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+            child: TaskEditorActionsRow(
+              onCancel: () => Navigator.of(context).pop(),
+              onDelete: isEditing ? state._confirmDeleteTask : null,
+              onSave: state._submit,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -295,6 +283,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final TextEditingController _repeatCountController;
   String? _repeatErrorMessage;
   late RepeatUnit _repeatUnit;
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
   final _subtaskController = TextEditingController();
   late final List<SubtaskItem> _subtasks;
   late final TextEditingController _suspendedController;
@@ -382,29 +372,16 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final title = isEditing
         ? localizations.editTaskTitle
         : localizations.advancedTaskTitle;
-    return Scaffold(
-      key: const ValueKey('edit_task_screen'),
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(title: Text(title)),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: _EditTaskFormColumn(board: board, state: this),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: TaskEditorActionsRow(
-                onCancel: () => Navigator.of(context).pop(),
-                onDelete: isEditing ? _confirmDeleteTask : null,
-                onSave: _submit,
-              ),
-            ),
-          ],
+    return ScaffoldMessenger(
+      key: _scaffoldMessengerKey,
+      child: Scaffold(
+        key: const ValueKey('edit_task_screen'),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        appBar: AppBar(title: Text(title)),
+        body: _EditTaskScaffoldBody(
+          board: board,
+          isEditing: isEditing,
+          state: this,
         ),
       ),
     );
@@ -549,7 +526,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     } on LinkLaunchException {
       if (!mounted) return;
       final text = AppLocalizations.of(context).errorOpenLinkFailed;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(text)),
+      );
     }
   }
 

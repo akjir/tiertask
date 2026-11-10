@@ -13,13 +13,18 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/app_workspace.dart';
 import '../models/location_state.dart';
 import '../models/task_board.dart';
+import '../models/task_board_undo.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
@@ -169,6 +174,94 @@ class _FloatingSyncButton extends ConsumerWidget {
   }
 }
 
+/// Primary [Scaffold] subtree for [HomeScreen].
+class _HomeScaffold extends StatelessWidget {
+  /// Creates a [_HomeScaffold].
+  const _HomeScaffold({
+    required this.activeLabel,
+    required this.activeTier,
+    required this.activeWorkspace,
+    required this.board,
+    required this.isQuickAddOpen,
+    required this.isSearching,
+    required this.pageController,
+    required this.searchController,
+    required this.searchQuery,
+    required this.onCloseQuickAdd,
+    required this.onOpenEditLabels,
+    required this.onOpenEditLocations,
+    required this.onOpenQuickAdd,
+    required this.onOpenSettings,
+    required this.onPageChanged,
+    required this.onSearchChanged,
+    required this.onSelectLabel,
+    required this.onSelectTier,
+    required this.onSyncRemote,
+    required this.onToggleSearch,
+  });
+
+  final TdfLabel? activeLabel;
+  final TaskTier activeTier;
+  final AppWorkspace activeWorkspace;
+  final TaskBoard board;
+  final bool isQuickAddOpen;
+  final bool isSearching;
+  final VoidCallback onCloseQuickAdd;
+  final ValueChanged<bool> onOpenEditLabels;
+  final ValueChanged<bool> onOpenEditLocations;
+  final VoidCallback onOpenQuickAdd;
+  final VoidCallback onOpenSettings;
+  final ValueChanged<int> onPageChanged;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String?> onSelectLabel;
+  final ValueChanged<TaskTier> onSelectTier;
+  final VoidCallback onSyncRemote;
+  final VoidCallback onToggleSearch;
+  final PageController pageController;
+  final TextEditingController searchController;
+  final String searchQuery;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      drawer: HomeDrawer(
+        activeLabelId: activeLabel?.id,
+        activeWorkspace: activeWorkspace,
+        board: board,
+        onManageWorkspaces: () => showWorkspaceDialog(context),
+        onOpenEditLabels: onOpenEditLabels,
+        onOpenEditLocations: onOpenEditLocations,
+        onOpenSettings: onOpenSettings,
+        onSelectLabel: onSelectLabel,
+        onSyncRemote: onSyncRemote,
+      ),
+      floatingActionButton: isQuickAddOpen
+          ? null
+          : _LandingFloatingButtons(onOpenQuickAdd: onOpenQuickAdd),
+      bottomNavigationBar: isQuickAddOpen
+          ? _QuickAddBottomBar(
+              initialLabelId: activeLabel?.id,
+              onClose: onCloseQuickAdd,
+            )
+          : null,
+      body: _LandingScaffoldBody(
+        activeLabel: activeLabel,
+        activeTier: activeTier,
+        isSearching: isSearching,
+        pageController: pageController,
+        searchController: searchController,
+        searchQuery: searchQuery,
+        onOpenSettings: onOpenSettings,
+        onPageChanged: onPageChanged,
+        onSearchChanged: onSearchChanged,
+        onSelectTier: onSelectTier,
+        onToggleSearch: onToggleSearch,
+      ),
+    );
+  }
+}
+
 /// State for [HomeScreen].
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _activeLabelId;
@@ -180,7 +273,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   String _searchQuery = '';
 
   @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleUndoKeyEvent);
+  }
+
+  @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleUndoKeyEvent);
     _pageController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -189,42 +289,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final state = _watchScaffoldState();
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      drawer: HomeDrawer(
-        activeLabelId: state.activeLabel?.id,
-        activeWorkspace: state.workspace,
-        board: state.board,
-        onManageWorkspaces: () => showWorkspaceDialog(context),
-        onOpenEditLabels: _openEditLabels,
-        onOpenEditLocations: _openEditLocations,
-        onOpenSettings: _openSettings,
-        onSelectLabel: _selectLabel,
-        onSyncRemote: () =>
-            ref.read(taskNotifierProvider.notifier).syncFromRemote(),
-      ),
-      floatingActionButton: _isQuickAddOpen
-          ? null
-          : _LandingFloatingButtons(onOpenQuickAdd: _openQuickAdd),
-      bottomNavigationBar: _isQuickAddOpen
-          ? _QuickAddBottomBar(
-              initialLabelId: state.activeLabel?.id,
-              onClose: _closeQuickAdd,
-            )
-          : null,
-      body: _LandingScaffoldBody(
-        activeLabel: state.activeLabel,
-        activeTier: _activeTier,
-        isSearching: _isSearching,
-        pageController: _pageController,
-        searchController: _searchController,
-        searchQuery: _searchQuery,
-        onOpenSettings: _openSettings,
-        onPageChanged: _handlePageChanged,
-        onSearchChanged: _updateSearchQuery,
-        onSelectTier: _selectTierPane,
-        onToggleSearch: _toggleSearch,
-      ),
+    return _HomeScaffold(
+      activeLabel: state.activeLabel,
+      activeTier: _activeTier,
+      activeWorkspace: state.workspace,
+      board: state.board,
+      isQuickAddOpen: _isQuickAddOpen,
+      isSearching: _isSearching,
+      pageController: _pageController,
+      searchController: _searchController,
+      searchQuery: _searchQuery,
+      onCloseQuickAdd: _closeQuickAdd,
+      onOpenEditLabels: _openEditLabels,
+      onOpenEditLocations: _openEditLocations,
+      onOpenQuickAdd: _openQuickAdd,
+      onOpenSettings: _openSettings,
+      onPageChanged: _handlePageChanged,
+      onSearchChanged: _updateSearchQuery,
+      onSelectLabel: _selectLabel,
+      onSelectTier: _selectTierPane,
+      onSyncRemote: () =>
+          ref.read(taskNotifierProvider.notifier).syncFromRemote(),
+      onToggleSearch: _toggleSearch,
     );
   }
 
@@ -240,11 +326,122 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _pageController = PageController(initialPage: _activeTier.index);
   }
 
+  /// Formats the localized undo [SnackBar] message for [notice].
+  String _formatUndoMessage(
+    AppLocalizations localizations,
+    TaskUndoNotice notice,
+  ) {
+    return switch (notice.kind) {
+      TaskUndoActionKind.complete => localizations.taskCompletedUndoSnackBar(
+        notice.taskTitle,
+      ),
+      TaskUndoActionKind.downgrade => localizations.taskDowngradedUndoSnackBar(
+        notice.taskTitle,
+      ),
+      TaskUndoActionKind.delete => localizations.taskDeletedUndoSnackBar(
+        notice.taskTitle,
+      ),
+    };
+  }
+
   /// Synchronizes [_activeTier] when the user swipes between tier pages.
   void _handlePageChanged(int index) {
     if (_activeTier.index != index) {
       setState(() => _activeTier = TaskTier.values[index]);
     }
+  }
+
+  /// Handles desktop `Ctrl+Z` key-down events when [HomeScreen] is active and no text input is focused.
+  bool _handleUndoKeyEvent(KeyEvent event) {
+    final platform = defaultTargetPlatform;
+    if (platform != TargetPlatform.linux &&
+        platform != TargetPlatform.windows) {
+      return false;
+    }
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyZ) {
+      return false;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    if (!keyboard.isControlPressed ||
+        keyboard.isShiftPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return false;
+    }
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) {
+      return false;
+    }
+    if (_isEditableTextFocused()) {
+      return false;
+    }
+    final undoState = ref.read(taskUndoStateProvider);
+    if (!undoState.canUndo) {
+      return false;
+    }
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.ui,
+        'ui.undo.shortcut',
+        fields: <String, Object?>{'depth': undoState.stackDepth},
+      );
+    }
+    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+    unawaited(ref.read(taskNotifierProvider.notifier).undoLastAction());
+    return true;
+  }
+
+  /// Displays or hides the floating Undo [SnackBar] when [taskUndoStateProvider] changes.
+  void _handleUndoNoticeChanged(
+    TaskUndoNotice? previous,
+    TaskUndoNotice? next,
+  ) {
+    if (!mounted) {
+      return;
+    }
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) {
+      return;
+    }
+    if (next == null) {
+      messenger.hideCurrentSnackBar();
+      return;
+    }
+    if (previous?.sequence == next.sequence) {
+      return;
+    }
+    final localizations = AppLocalizations.of(context);
+    final message = _formatUndoMessage(localizations, next);
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.ui,
+        'ui.undo.snackbar_shown',
+        fields: <String, Object?>{
+          'id': next.taskId,
+          'kind': next.kind.name,
+          'seq': next.sequence,
+        },
+      );
+    }
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: ValueKey('task_undo_snackbar_${next.sequence}'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 5),
+          persist: false,
+          margin: _isQuickAddOpen
+              ? const EdgeInsets.fromLTRB(16, 0, 16, 60)
+              : null,
+          content: Text(message, maxLines: 2, overflow: TextOverflow.ellipsis),
+          action: SnackBarAction(
+            label: localizations.actionUndo,
+            onPressed: () => _triggerSnackBarUndo(next),
+          ),
+        ),
+      );
   }
 
   /// Resets ephemeral filters when the active workspace changes.
@@ -263,6 +460,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         _pageController.jumpToPage(TaskTier.focus.index);
       }
     });
+  }
+
+  /// Returns `true` when the primary keyboard focus resides inside an [EditableText].
+  bool _isEditableTextFocused() {
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    if (focusedContext == null) {
+      return false;
+    }
+    return focusedContext.widget is EditableText ||
+        focusedContext.findAncestorStateOfType<EditableTextState>() != null;
   }
 
   /// Pushes [EditLabelsScreen] onto the navigation stack.
@@ -327,6 +534,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     () => _isSearching ? _closeSearchToActiveTier() : _isSearching = true,
   );
 
+  /// Dispatches [TaskNotifier.undoLastAction] for [notice] when the SnackBar action is pressed.
+  void _triggerSnackBarUndo(TaskUndoNotice notice) {
+    if (!mounted) {
+      return;
+    }
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.ui,
+        'ui.undo.snackbar_action',
+        fields: <String, Object?>{
+          'id': notice.taskId,
+          'kind': notice.kind.name,
+          'seq': notice.sequence,
+        },
+      );
+    }
+    unawaited(
+      ref
+          .read(taskNotifierProvider.notifier)
+          .undoLastAction(expectedSequence: notice.sequence),
+    );
+  }
+
   /// Updates the active search filter query.
   void _updateSearchQuery(String value) => setState(() => _searchQuery = value);
 
@@ -336,6 +567,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     ref.listen<String?>(
       activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
       _handleWorkspaceChanged,
+    );
+    ref.listen<TaskUndoNotice?>(
+      taskUndoStateProvider.select((state) => state.latestNotice),
+      _handleUndoNoticeChanged,
     );
     final workspace =
         ref.watch(activeWorkspaceProvider).asData?.value ??

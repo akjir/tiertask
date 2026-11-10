@@ -13,7 +13,9 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
@@ -540,6 +542,217 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'HomeScreen shows localized floating Undo SnackBar for complete, auto-finish subtask, and downgrade without obstructing TierPageIndicator',
+    (WidgetTester tester) async {
+      const initialTdf = '''
+tdf 0.6.0
+
+queue {
+    modified 2026-11-01 08:00:00
+    task 000001OkD2
+    task 000002OkD2
+}
+
+task 000001OkD2 priority {
+    name "Focus Alpha"
+    created 2026-11-01 08:00
+}
+
+task 000002OkD2 priority {
+    name "Auto Subtask Beta"
+    created 2026-11-01 08:05
+    subtasks auto-finish {
+        step false "Final Checklist Step"
+    }
+}
+''';
+      final container = await _pumpHomeAppWithContainer(
+        tester,
+        initialTdf: initialTdf,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_000001OkD2')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Completed "Focus Alpha".'), findsOneWidget);
+      expect(find.text('Undo'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('tier_indicator_item_completed')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('COMPLETED TASKS'), findsOneWidget);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('000001OkD2')!
+            .isCompleted,
+        isFalse,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('tier_indicator_item_focus')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('downgrade_task_button_000001OkD2')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Downgraded "Focus Alpha".'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('add_task_fab')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Auto Subtask Beta'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Final Checklist Step'));
+      await tester.pumpAndSettle();
+      expect(find.text('Completed "Auto Subtask Beta".'), findsOneWidget);
+      expect(find.text('Downgraded "Focus Alpha".'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('tier_indicator_item_ready')));
+      await tester.pumpAndSettle();
+      expect(find.text('READY TASKS'), findsOneWidget);
+
+      await tester.tap(find.text('Undo'));
+      await tester.pumpAndSettle();
+      final restoredBeta = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('000002OkD2')!;
+      expect(restoredBeta.isCompleted, isFalse);
+      expect(restoredBeta.subtasks.single.isCompleted, isFalse);
+    },
+  );
+
+  testWidgets(
+    'Desktop Ctrl+Z reverses stacked actions on Linux and Windows even after SnackBar dismissal and respects Android, modifier, route, and EditableText guards',
+    (WidgetTester tester) async {
+      const initialTdf = '''
+tdf 0.6.0
+
+queue {
+    modified 2026-11-01 08:00:00
+    task 000001OkD2
+    task 000002OkD2
+}
+
+task 000001OkD2 priority {
+    name "Shortcut Task One"
+    created 2026-11-01 08:00
+}
+
+task 000002OkD2 priority {
+    name "Shortcut Task Two"
+    created 2026-11-01 08:05
+}
+''';
+      try {
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        final container = await _pumpHomeAppWithContainer(
+          tester,
+          initialTdf: initialTdf,
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey('complete_task_button_000001OkD2')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const ValueKey('downgrade_task_button_000002OkD2')),
+        );
+        await tester.pumpAndSettle();
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(2));
+
+        await tester.pump(const Duration(seconds: 6));
+        await tester.pumpAndSettle();
+        expect(find.byType(SnackBar), findsNothing);
+
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        await _sendCtrlZ(tester);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(2),
+          reason: 'Ctrl+Z must not fire on Android',
+        );
+
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        await _sendCtrlZ(tester, withShift: true);
+        await _sendCtrlZRepeat(tester);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(2),
+          reason: 'Ctrl+Shift+Z and KeyRepeatEvent must not trigger undo',
+        );
+
+        await tester.tap(find.byKey(const ValueKey('add_task_fab')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('quick_add_input')));
+        await tester.pump();
+        await _sendCtrlZ(tester);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(2),
+          reason: 'Ctrl+Z must not hijack focused QuickAddBar input',
+        );
+        await tester.tap(find.byKey(const ValueKey('quick_add_cancel_button')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const ValueKey('top_bar_search_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(TextField).first);
+        await tester.pump();
+        await _sendCtrlZ(tester);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(2),
+          reason: 'Ctrl+Z must not hijack focused search TextField',
+        );
+        await tester.tap(find.byKey(const ValueKey('top_bar_search_button')));
+        await tester.pumpAndSettle();
+
+        await openSettingsFromMenu(tester);
+        await _sendCtrlZ(tester);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(2),
+          reason: 'Ctrl+Z must not fire while a pushed route is on top',
+        );
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+
+        await _sendCtrlZ(tester);
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(1));
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('000002OkD2')!
+              .isPriority,
+          isTrue,
+        );
+
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+        await _sendCtrlZ(tester);
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(0));
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('000001OkD2')!
+              .isCompleted,
+          isFalse,
+        );
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
 }
 
 /// Pumps [TierTaskApp] with optional [config] and [initialTdf] overrides.
@@ -603,6 +816,32 @@ Future<void> _selectStorageModeAndReturn(
   await tester.tap(find.text(modeLabel));
   await tester.pumpAndSettle();
   await tester.tap(find.byType(BackButton));
+  await tester.pumpAndSettle();
+}
+
+/// Dispatches a `Ctrl+Z` (or `Ctrl+Shift+Z`) hardware key-down and key-up sequence.
+Future<void> _sendCtrlZ(WidgetTester tester, {bool withShift = false}) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  if (withShift) {
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+  }
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
+  if (withShift) {
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  }
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pumpAndSettle();
+}
+
+/// Dispatches only a `KeyRepeatEvent` for `Z` while `Ctrl` is held down.
+Future<void> _sendCtrlZRepeat(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  await simulateKeyRepeatEvent(
+    LogicalKeyboardKey.keyZ,
+    physicalKey: PhysicalKeyboardKey.keyZ,
+  );
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
   await tester.pumpAndSettle();
 }
 

@@ -1796,9 +1796,9 @@
   "@deleteTaskDialogTitle": {
     "description": "Dialog title when confirming deletion of a task."
   },
-  "deleteTaskConfirmMessage": "Delete task \"{title}\"? This action cannot be undone.",
+  "deleteTaskConfirmMessage": "Delete task \"{title}\"? This action can be undone while the workspace remains open.",
   "@deleteTaskConfirmMessage": {
-    "description": "Confirmation message shown in the dialog before deleting a task.",
+    "description": "Confirmation prompt shown before deleting a task.",
     "placeholders": {
       "title": {
         "type": "String"
@@ -1812,5 +1812,36 @@
   "noteCopiedSnackBar": "Note copied to clipboard.",
   "@noteCopiedSnackBar": {
     "description": "SnackBar confirmation message shown after copying a task note to the clipboard."
+  },
+  "actionUndo": "Undo",
+  "@actionUndo": {
+    "description": "Confirmation prompt shown before deleting a task."
+  },
+  "taskCompletedUndoSnackBar": "Completed \"{title}\".",
+  "@taskCompletedUndoSnackBar": {
+    "description": "Confirmation prompt shown before deleting a task.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "taskDowngradedUndoSnackBar": "Downgraded \"{title}\".",
+  "@taskDowngradedUndoSnackBar": {
+    "description": "Confirmation prompt shown before deleting a task.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "taskDeletedUndoSnackBar": "Deleted \"{title}\".",
+  "@taskDeletedUndoSnackBar": {
+    "description": "Confirmation prompt shown before deleting a task.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
   }
 }

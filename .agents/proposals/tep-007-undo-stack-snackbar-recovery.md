@@ -1,7 +1,7 @@
 ---
 id: TEP-007
 title: In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery
-status: planned
+status: review
 type: feature
 created: 2026-11-10
 updated: 2026-11-10
@@ -28,7 +28,7 @@ In the current implementation, one-tap task transitions in `TierTaskPill` (`lib/
      - Task downgrade in `TierTaskPill` (`TaskNotifier.downgradeTask`),
      - Task deletion in `EditTaskScreen` (`TaskNotifier.deleteTask`).
   2. Implement targeted per-entity and relative-queue reversal in `lib/models/task_board_undo.dart` so undoing an earlier action across up to `10` stack entries preserves unrelated tasks, labels, locations, and metadata edits made in the interim while complying with all `spec/TDF_SPEC_0.6.0.md` invariants (monotonic `completions`, `decisionRevision` and `deleted.generation` advancement via `TdfDeletionResolution.undelete`, prerequisite re-arming for previously blocked dependents, and live `label` / `location` reference sanitization).
-  3. Present a localized floating Undo `SnackBar` on `HomeScreen` (`5`-second display duration, replacing any prior `SnackBar` immediately) via a dedicated `HomeScreen` `ScaffoldMessenger` so popping `EditTaskScreen` after task deletion never cancels the active `SnackBar` and `TierPageIndicator` remains unobstructed.
+  3. Present a localized floating Undo `SnackBar` on `HomeScreen` (`5`-second display duration, `persist: false`, replacing any prior `SnackBar` immediately) via `MaterialApp`'s root `ScaffoldMessenger` while isolating `EditTaskScreen` in its own `ScaffoldMessenger` so active `HomeScreen` `SnackBar`s never cover `EditTaskScreen` controls, popping `EditTaskScreen` after task deletion keeps `HomeScreen`'s `SnackBar` visible, and `TierPageIndicator` remains unobstructed.
   4. Support `Ctrl+Z` (`KeyDownEvent` only, without `Shift`, `Alt`, or `Meta`) on Linux and Windows (`defaultTargetPlatform == TargetPlatform.linux || defaultTargetPlatform == TargetPlatform.windows`) when `HomeScreen` is the current modal route and no `EditableText` input holds focus, stepping back through all retained stack entries even after the `SnackBar` has auto-dismissed.
   5. Remove the 3-second countdown timer from `_DeleteTaskConfirmDialog` in `EditTaskScreen` so the `Delete` confirmation button is immediately enabled, and update `deleteTaskConfirmMessage` in `app_en.arb` and `app_de.arb` to reflect in-memory Undo availability.
   6. Clear the in-memory undo stack deterministically on workspace switch/unload (`prepareForWorkspaceUnload`, `activeWorkspaceProvider` ID change in `build`, `selectLocalFile`), TDF import (`importLegacyTdf`), and local or remote file wipe (`wipeLocalFile`, `wipeRemoteFile`) while preserving the stack across same-workspace preference updates (`updateLanguage`, `updateThemeMode`, `updateDiagnosticsEnabled`), and preserve atomic state rollback (`P-ATOMIC-STATE`) when local persistence fails.
@@ -60,14 +60,15 @@ In the current implementation, one-tap task transitions in `TierTaskPill` (`lib/
 
 #### 1.4.2 UI Behavior: Undo `SnackBar`, `Ctrl+Z` Shortcut & Delete Confirmation
 1. **Undo `SnackBar` on `HomeScreen`:**
-   - `HomeScreen` wraps its `Scaffold` in a dedicated `ScaffoldMessenger(key: _scaffoldMessengerKey, ...)` isolated from pushed child routes (`EditTaskScreen`, `SettingsScreen`, `EditLabelsScreen`, `EditLocationsScreen`). When `EditTaskScreen` confirms task deletion and pops back to `HomeScreen`, unmounting `EditTaskScreen`'s `Scaffold` does not dismiss `HomeScreen`'s Undo `SnackBar`.
-   - When `taskUndoStateProvider` emits a new `TaskUndoNotice`, `HomeScreen` calls `_scaffoldMessengerKey.currentState?..hideCurrentSnackBar()..showSnackBar(...)` with:
+   - `HomeScreen` presents Undo `SnackBar`s on `MaterialApp`'s root `ScaffoldMessenger` (`ScaffoldMessenger.maybeOf(context)`), preserving root `Scaffold` registration for overlay dialogs (`LogViewerDialog`), while `EditTaskScreen` wraps its `Scaffold` in a local `ScaffoldMessenger` so active `HomeScreen` `SnackBar`s do not bleed over `EditTaskScreen`'s bottom action row and popping `EditTaskScreen` after task deletion leaves `HomeScreen`'s Undo `SnackBar` intact.
+   - When `taskUndoStateProvider` emits a new `TaskUndoNotice`, `HomeScreen` calls `messenger..hideCurrentSnackBar()..showSnackBar(...)` with:
      - `behavior: SnackBarBehavior.floating`,
+     - `persist: false` (overriding Material 3's persistent default when `SnackBarAction` is attached),
      - `margin: _isQuickAddOpen ? const EdgeInsets.fromLTRB(16, 0, 16, 60) : null` (positioning the floating `SnackBar` above `FloatingActionButton` when closed and above the `48 px` `TierPageIndicator` when `QuickAddBar` is open so `TierPageIndicator` taps are never blocked),
      - `duration: const Duration(seconds: 5)`,
      - Localized message (`taskCompletedUndoSnackBar`, `taskDowngradedUndoSnackBar`, or `taskDeletedUndoSnackBar`) and `SnackBarAction` (`actionUndo`) invoking `undoLastAction(expectedSequence: notice.sequence)`.
    - Binding the `SnackBarAction` to `expectedSequence: notice.sequence` prevents a double-trigger (for example, pressing `Ctrl+Z` and clicking `Undo` in the same frame) from popping a second, older stack entry.
-   - When `latestNotice` transitions to `null` (via `Ctrl+Z`, `SnackBar` action, stack clear, or local persistence rollback), `HomeScreen` calls `_scaffoldMessengerKey.currentState?.hideCurrentSnackBar()`.
+   - When `latestNotice` transitions to `null` (via `Ctrl+Z`, `SnackBar` action, stack clear, or local persistence rollback), `HomeScreen` calls `ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar()`.
 2. **Desktop `Ctrl+Z` Shortcut (Linux & Windows):**
    - `_HomeScreenState` registers `HardwareKeyboard.instance.addHandler(_handleUndoKeyEvent)` in `initState()` and removes it in `dispose()`.
    - `_handleUndoKeyEvent` triggers `undoLastAction()` and returns `true` only when all of the following hold:
@@ -87,7 +88,7 @@ In the current implementation, one-tap task transitions in `TierTaskPill` (`lib/
    - Across a 10-entry undo stack, replacing `TaskBoard` with a full board snapshot captured minutes earlier would overwrite intermediate task additions, task edits, label/location changes, and remote WebDAV merges.
    - Restoring a pre-completion `TaskItem` with a lower `completions` counter (`c < c + 1`) violates `spec/TDF_SPEC_0.6.0.md` Section 6.9.1 and triggers `TdfSyncOutcomeKind.recoveryRequired` in `TaskBoardReconciler.verifyGenerationsAndCompletionHistory` (`lib/models/task_board_reconciler.dart`), and restoring a deleted task without advancing `deleted.generation` and passing `TdfDeletionResolution.undelete` triggers `TdfSyncOutcomeKind.deletionConflict` during two-stage synchronization.
 2. **Delaying Mutation & Persistence Until the 5-Second `SnackBar` Closes:** Rejected because holding pending completions, downgrades, or deletions out of `TaskBoard` for 5 seconds breaks deterministic Auto-Pull Cascade slot refilling, leaves stale tasks on screen or out of sync on workspace/app close, and prevents multi-step `Ctrl+Z` history after the `SnackBar` closes.
-3. **Using the Root `MaterialApp` `ScaffoldMessenger` Directly Without a Dedicated `HomeScreen` `ScaffoldMessenger`:** Rejected because Flutter's `ScaffoldMessengerState.unregister` cancels active `SnackBar`s when a child route's `Scaffold` (`EditTaskScreen`) finishes its pop transition and disposes.
+3. **Wrapping `HomeScreen`'s `Scaffold` in a Nested `ScaffoldMessenger`:** Rejected because detaching `HomeScreen`'s `Scaffold` from `MaterialApp`'s root `ScaffoldMessenger` leaves root overlay dialogs (`LogViewerDialog`) with zero registered `Scaffold`s on `ScaffoldMessenger.of(context)`. Instead, `HomeScreen` uses `MaterialApp`'s root `ScaffoldMessenger` while `EditTaskScreen` wraps its own `Scaffold` in a dedicated `ScaffoldMessenger`.
 
 ## Part 2: Technical Design & Code Changes
 
@@ -97,11 +98,11 @@ In the current implementation, one-tap task transitions in `TierTaskPill` (`lib/
 * **Domain Models (`lib/models/` — Layer Rank `1`):**
   - `lib/models/task_board_undo.dart` *(new leaf file)*: Defines `TaskUndoActionKind`, `TaskUndoEntry`, `TaskUndoOutcome`, and stateless helper `TaskBoardUndo` (`const TaskBoardUndo._()`) implementing capture metadata extraction and TDF-compliant reversal for `complete`, `downgrade`, and `delete`. Imports only `dart:math`, `package:flutter/foundation.dart`, `../services/app_logger.dart`, and lower/peer `lib/models/*.dart` files (`task_board.dart`, `task_board_evaluator.dart`, `task_item.dart`, `tdf_error.dart`, `tdf_location.dart`, `tdf_metadata.dart`, `tdf_sync_metadata.dart`, `tdf_timezone.dart`), preserving `0` circular import SCCs (`P-ACYCLIC-DAG`).
 * **Providers (`lib/providers/` — Layer Rank `5`):**
-  - `lib/providers/task_providers.dart`: Adds `taskUndoStateProvider` (`NotifierProvider<TaskUndoStateNotifier, TaskUndoState>`), `TaskUndoNotice`, `TaskUndoState`, `TaskUndoStateNotifier` (watching `activeWorkspaceProvider` ID in `build()`), bounded `_undoStack` (`ListQueue<TaskUndoEntry>`) with `_undoWorkspaceId` tracking, monotonic `_mutationEpoch` UI-flicker guard and `_lastPushRolledBack` rollback tracking in `TaskNotifier`, `taskConflictResolutions` forwarding on `pushToRemote` / `_executePushToRemote`, undo capture in `completeTask` / `toggleSubtask` / `downgradeTask` / `deleteTask`, `Future<bool> undoLastAction({int? expectedSequence, DateTime? currentDate})`, and stack clearing on workspace ID change in `build` plus imperative resets in `prepareForWorkspaceUnload` / `selectLocalFile` / `importLegacyTdf` / `_executeWipe`.
+  - `lib/providers/task_providers.dart`: Adds `taskUndoStateProvider` (`NotifierProvider<TaskUndoStateNotifier, TaskUndoState>`), `TaskUndoNotice`, `TaskUndoState`, `TaskUndoStateNotifier` (watching `activeWorkspaceProvider` ID in `build()`), bounded `_undoStack` (`ListQueue<TaskUndoEntry>`) with `_undoWorkspaceId` tracking, monotonic `_mutationEpoch` UI-flicker guard and per-epoch `_rolledBackEpochs` rollback tracking in `TaskNotifier`, `taskConflictResolutions` forwarding on `pushToRemote` / `_executePushToRemote`, undo capture in `completeTask` / `toggleSubtask` / `downgradeTask` / `deleteTask`, `Future<bool> undoLastAction({int? expectedSequence, DateTime? currentDate})`, and stack clearing on workspace ID change in `build` plus imperative resets in `prepareForWorkspaceUnload` / `selectLocalFile` / `importLegacyTdf` / `_executeWipe`.
 * **UI (`lib/ui/` — Layer Rank `6`):**
   - `lib/ui/app_theme.dart`: Sets `actionTextColor: primaryAccent` on `SnackBarThemeData` in `AppTheme.toThemeData()` for accessible `Undo` / `Rückgängig` button contrast across all 4 `AppTheme` variants.
-  - `lib/ui/edit_task_screen.dart`: Simplifies `_DeleteTaskConfirmDialog` to a `StatelessWidget` with an immediately enabled `delete_task_confirm_button` (removing `_DeleteTaskConfirmDialogState`, `confirmDelaySeconds`, `tickInterval`, and `dart:async` `Timer` if unused).
-  - `lib/ui/home_screen.dart`: Wraps `HomeScreen`'s `Scaffold` in a dedicated `ScaffoldMessenger(key: _scaffoldMessengerKey, ...)`, listens to `taskUndoStateProvider.select((state) => state.latestNotice)` to present or dismiss the floating Undo `SnackBar`, and registers the desktop `Ctrl+Z` `HardwareKeyboard` handler with route-current and `EditableText`-focus guards.
+  - `lib/ui/edit_task_screen.dart`: Simplifies `_DeleteTaskConfirmDialog` to a `StatelessWidget` with an immediately enabled `delete_task_confirm_button` (removing `_DeleteTaskConfirmDialogState`, `confirmDelaySeconds`, `tickInterval`, and unused `dart:async` import) and wraps `EditTaskScreen`'s `Scaffold` in a dedicated `ScaffoldMessenger(key: _scaffoldMessengerKey, ...)`.
+  - `lib/ui/home_screen.dart`: Listens to `taskUndoStateProvider.select((state) => state.latestNotice)` to present or dismiss the floating Undo `SnackBar` (`persist: false`) via `ScaffoldMessenger.maybeOf(context)`, and registers the desktop `Ctrl+Z` `HardwareKeyboard` handler with route-current and `EditableText`-focus guards.
 * **Tests (`test/` — `P-TEST-MIRROR`):**
   - `test/models/task_board_undo_test.dart` *(new mirror suite for `lib/models/task_board_undo.dart`)*: Exhaustive unit tests for `TaskBoardUndo` across all action kinds, TDF `0.6.0` invariants, bounds, and sanitization edge cases.
   - `test/providers/task_providers_test.dart`: Unit and integration tests for `TaskNotifier` undo stack bounds (`9`, `10`, `11`), two-stage Local + WebDAV sync with `TdfDeletionResolution.undelete` and monotonic `completions`, rollback atomicity, and workspace/import/wipe stack clearing.
@@ -264,7 +265,7 @@ Follow strict Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR`):
    - Verify multi-delete and out-of-order relative queue slot restoration (`[A, B, C, D]` deleting first/middle/last elements and undoing in LIFO order while preserving newly added task `E`).
    - Verify deleted `label` (including `scoped`-only flood protection to `Someday`) and deleted `location` (including `GroupResetTaskCondition` `location any` override preservation) sanitization when a referenced label or location is deleted between capture and undo.
 3. **`M-IO-TESTS` (`test/providers/task_providers_test.dart`):**
-   - Test end-to-end two-stage persistence (`LocalFileRepository` + `FakeWebDavRepository` / loopback `HttpServer` with `HttpOverrides.global = null` in `setUp()`) across `StorageMode.localOnly`, `StorageMode.webDavOnly`, and `StorageMode.localAndWebDav`:
+   - Test end-to-end two-stage persistence (`LocalFileRepository` + `FakeWebDavRepository` / loopback `HttpServer` with `HttpOverrides.global = null` in `setUp()`) across `StorageMode.local`, `StorageMode.webdav`, and `StorageMode.both`:
      - Complete -> Sync -> Undo -> Sync: verify `completions` stays monotonic (`c + 1`) without throwing `TdfSyncOutcomeKind.recoveryRequired` and previously blocked dependents re-arm to `c + 2`.
      - Delete -> Sync -> Undo -> Sync: verify `TdfDeletionResolution.undelete` retires the `.tdf` tombstone and increments `deleted.generation` by `1` without throwing `TdfSyncOutcomeKind.deletionConflict`.
      - Slow WebDAV in-flight `PUT` + immediate `undoLastAction()`: verify `_mutationEpoch` prevents UI state flicker and converges cleanly.
@@ -279,19 +280,20 @@ Follow strict Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR`):
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
-- [ ] Update `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` and run `flutter gen-l10n`.
-- [ ] Write failing unit tests in `test/models/task_board_undo_test.dart` and `test/providers/task_providers_test.dart` and failing widget tests in `test/ui/edit_task_screen_test.dart` and `test/ui/home_screen_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
-- [ ] Implement `lib/models/task_board_undo.dart`, `lib/providers/task_providers.dart`, `lib/ui/app_theme.dart`, `lib/ui/edit_task_screen.dart`, `lib/ui/home_screen.dart`, and `test/ui/test_helpers.dart` with `AppLogger` instrumentation (TDD Green & Refactor Phase).
-- [ ] Update Parts 1 and 2 if implementation details evolve.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
-- [ ] Synchronize `README.md`, `ARCHITECTURE.md`, and `AGENTS.md` per **`update-documentation`**.
-- [ ] Add a user-facing `CHANGELOG.md` entry under `## [Unreleased]` per **`changelog-updater`**.
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
+- [x] Update `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` and run `flutter gen-l10n`.
+- [x] Write failing unit tests in `test/models/task_board_undo_test.dart` and `test/providers/task_providers_test.dart` and failing widget tests in `test/ui/edit_task_screen_test.dart` and `test/ui/home_screen_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
+- [x] Implement `lib/models/task_board_undo.dart`, `lib/providers/task_providers.dart`, `lib/ui/app_theme.dart`, `lib/ui/edit_task_screen.dart`, `lib/ui/home_screen.dart`, and `test/ui/test_helpers.dart` with `AppLogger` instrumentation (TDD Green & Refactor Phase).
+- [x] Update Parts 1 and 2 if implementation details evolve.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
+- [x] Synchronize `README.md`, `ARCHITECTURE.md`, and `AGENTS.md` per **`update-documentation`**.
+- [x] Add a user-facing `CHANGELOG.md` entry under `## [Unreleased]` per **`changelog-updater`**.
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
 - [ ] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-10:** Created `TEP-007` in `planned` status incorporating user decisions on bounded 10-entry LIFO stack retention (`Ctrl+Z` across session until workspace switch, import, or wipe), immediate delete confirmation dialog without the 3-second countdown lock, and undo scope covering direct completion, `subtasks auto-finish` completion, and downgrade in `TierTaskPill` plus task deletion in `EditTaskScreen`.
+* **2026-11-10:** Implemented `TEP-007` via strict Red-Green-Refactor TDD across `lib/models/task_board_undo.dart`, `lib/providers/task_providers.dart` (using per-epoch `_rolledBackEpochs` tracking for concurrency-safe rollback atomicity), `lib/ui/app_theme.dart`, `lib/ui/edit_task_screen.dart`, and `lib/ui/home_screen.dart` (setting `persist: false` on Material 3 `SnackBar` with `SnackBarAction` so the 5-second auto-dismiss timer fires reliably). Synchronized `ARCHITECTURE.md` and `CHANGELOG.md`, verified full suite via `tiertask_dev.py verify --full --fix`, and moved `TEP-007` to `review`.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*

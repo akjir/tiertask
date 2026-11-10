@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +23,7 @@ import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
@@ -612,6 +615,403 @@ void main() {
         equals([task.id, focusTopId, munichTaskId]),
         reason: 'TaskNotifier.downgradeTask must pass currentFix coordinates so GPS-blocked tasks are excluded from E_ctx',
       );
+    });
+
+    group('In-memory undo stack, bounds, rollback, and two-stage sync', () {
+      setUp(() {
+        HttpOverrides.global = null;
+      });
+
+      test('enforces maxUndoEntries = 10 (9, 10, 11 bounds), filters no-ops, checks expectedSequence, and retains entries across unrelated mutations and preference updates', () async {
+        var localStore = 'tdf 0.6.0\n';
+        const config = WebDavConfig(storageMode: StorageMode.local);
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => _ControllableLocalRepository(
+                config: ref.read(webDavConfigProvider).asData?.value ?? config,
+                getStore: () => localStore,
+                setStore: (value) => localStore = value,
+                shouldFailSave: () => false,
+              ),
+            ),
+            clockProvider.overrideWithValue(() => fixedDate),
+          ],
+        );
+        addTearDown(container.dispose);
+        await container.read(taskNotifierProvider.future);
+        final notifier = container.read(taskNotifierProvider.notifier);
+
+        for (var i = 1; i <= 11; i++) {
+          final id = 'tk${i.toString().padLeft(4, '0')}OkD2';
+          await notifier.addTask(
+            'Task $i',
+            id: id,
+            targetTier: TaskTier.planned,
+            subtasksAutoFinish: i == 2,
+            subtasks: i == 2
+                ? const <SubtaskItem>[SubtaskItem(title: 'Only step')]
+                : const <SubtaskItem>[
+                    SubtaskItem(title: 'Step A'),
+                    SubtaskItem(title: 'Step B'),
+                  ],
+          );
+        }
+
+        // Non-completing subtask toggle, missing delete, and Someday downgrade must be no-ops for undo:
+        await notifier.toggleSubtask('tk0001OkD2', 0);
+        await notifier.deleteTask('nonExiOkD2');
+        await notifier.addTask(
+          'Someday Noop',
+          id: 'someNpOkD2',
+          targetTier: TaskTier.someday,
+        );
+        await notifier.downgradeTask('someNpOkD2');
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(0),
+          reason: 'Non-completing subtask toggles, missing task deletes, and Someday no-op downgrades must record 0 undo entries',
+        );
+
+        // Perform 11 undoable actions (1=complete, 2=auto-finish subtask, 3..9=delete, 10=downgrade, 11=complete):
+        await notifier.completeTask('tk0001OkD2');
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(1));
+        await notifier.toggleSubtask('tk0002OkD2', 0);
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(2));
+        for (var i = 3; i <= 9; i++) {
+          final id = 'tk${i.toString().padLeft(4, '0')}OkD2';
+          await notifier.deleteTask(id);
+        }
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(9),
+          reason: 'N - 1 = 9 entries must be retained',
+        );
+
+        await notifier.downgradeTask('tk0010OkD2');
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(10),
+          reason: 'N = 10 entries must be retained',
+        );
+
+        // 11th undoable action evicts tk0001OkD2:
+        await notifier.completeTask('tk0011OkD2');
+        final stateAt11 = container.read(taskUndoStateProvider);
+        expect(
+          stateAt11.stackDepth,
+          equals(10),
+          reason: 'N + 1 = 11th entry must cap stackDepth at 10',
+        );
+        expect(stateAt11.latestNotice?.taskId, equals('tk0011OkD2'));
+
+        // Unrelated mutations & same-workspace preference updates must preserve the stack:
+        await notifier.addLabel('Ops');
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateLanguage(AppLanguage.german);
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateThemeMode(AppThemeMode.dark);
+        await container.read(taskNotifierProvider.future);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(10),
+          reason: 'Same-workspace preference updates and label additions must preserve undo stack',
+        );
+
+        // Mismatched expectedSequence must return false without popping:
+        expect(await notifier.undoLastAction(expectedSequence: 9999), isFalse);
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(10));
+
+        // Undo all 10 retained actions in LIFO order (entries 11 down to 2):
+        for (var remaining = 9; remaining >= 0; remaining--) {
+          expect(await notifier.undoLastAction(), isTrue);
+          expect(
+            container.read(taskUndoStateProvider).stackDepth,
+            equals(remaining),
+          );
+        }
+        expect(await notifier.undoLastAction(), isFalse);
+
+        final finalBoard = container.read(taskNotifierProvider).requireValue;
+        expect(
+          finalBoard.findTierOfTask('tk0001OkD2'),
+          equals(TaskTier.completed),
+          reason: 'Evicted 1st entry must remain completed after 10 undos',
+        );
+        expect(
+          finalBoard.findTierOfTask('tk0002OkD2'),
+          isNot(TaskTier.completed),
+          reason: '2nd entry (auto-finish subtask) must be restored to open',
+        );
+        expect(finalBoard.findTask('tk0009OkD2'), isNotNull);
+        expect(
+          finalBoard.findTierOfTask('tk0011OkD2'),
+          isNot(TaskTier.completed),
+        );
+      });
+
+      test('synchronizes complete+undo and delete+undo over Local + loopback WebDAV HttpServer, guards slow in-flight PUT epochs, rolls back on LocalFileException, and clears on workspace/file/import/wipe', () async {
+        var remoteTdf = 'tdf 0.6.0\n';
+        Completer<void>? putGate;
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((HttpRequest request) async {
+          if (request.method == 'GET') {
+            request.response
+              ..statusCode = HttpStatus.ok
+              ..write(remoteTdf);
+            await request.response.close();
+            return;
+          }
+          if (request.method == 'PUT') {
+            final body = await utf8.decoder.bind(request).join();
+            if (putGate case final gate?) {
+              await gate.future;
+            }
+            remoteTdf = body;
+            request.response.statusCode = HttpStatus.noContent;
+            await request.response.close();
+            return;
+          }
+          request.response.statusCode = HttpStatus.methodNotAllowed;
+          await request.response.close();
+        });
+
+        final tempDir = await Directory.systemTemp.createTemp('tiertask_undo_');
+        addTearDown(() => tempDir.delete(recursive: true));
+
+        var failLocalSave = false;
+        var localStore = 'tdf 0.6.0\n';
+        final initialConfig = WebDavConfig(
+          storageMode: StorageMode.both,
+          serverUrl: 'http://127.0.0.1:${server.port}',
+          filePath: '/tasks.tdf',
+          username: 'example-user',
+          password: 'example-password',
+        );
+        final settingsRepo = InMemorySettingsRepository(initialConfig);
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepo),
+            localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => _ControllableLocalRepository(
+                config:
+                    ref.read(webDavConfigProvider).asData?.value ??
+                    initialConfig,
+                getStore: () => localStore,
+                setStore: (value) => localStore = value,
+                shouldFailSave: () => failLocalSave,
+              ),
+            ),
+            clockProvider.overrideWithValue(() => fixedDate),
+          ],
+        );
+        addTearDown(container.dispose);
+        await container.read(taskNotifierProvider.future);
+        final notifier = container.read(taskNotifierProvider.notifier);
+
+        await notifier.addTask(
+          'Deploy Gateway',
+          id: 'depGtwOkD2',
+          targetTier: TaskTier.focus,
+          isPriority: true,
+        );
+        await notifier.addTask(
+          'Verify Metrics',
+          id: 'verMetOkD2',
+          targetTier: TaskTier.planned,
+          dependencies: const <TdfTaskDependency>[
+            TdfTaskDependency(taskId: 'depGtwOkD2', requiredCompletion: 1),
+          ],
+        );
+
+        // 1. Complete -> Sync -> Undo -> Sync:
+        await notifier.completeTask('depGtwOkD2');
+        expect(await notifier.undoLastAction(), isTrue);
+        var board = container.read(taskNotifierProvider).requireValue;
+        expect(board.findTask('depGtwOkD2')!.isCompleted, isFalse);
+        expect(board.findTask('depGtwOkD2')!.completions, equals(1));
+        expect(
+          board.findTask('verMetOkD2')!.dependencies.single.requiredCompletion,
+          equals(2),
+        );
+        expect(remoteTdf, contains('completions 1'));
+        expect(remoteTdf, contains('depGtwOkD2:2'));
+
+        // 2. Delete -> Sync -> Undo -> Sync:
+        await notifier.deleteTask('depGtwOkD2');
+        expect(remoteTdf, contains('deleted {'));
+        expect(await notifier.undoLastAction(), isTrue);
+        board = container.read(taskNotifierProvider).requireValue;
+        expect(board.findTask('depGtwOkD2'), isNotNull);
+        expect(board.deletedBlock.generation, equals(1));
+        expect(board.deletedBlock.findTaskRecord('depGtwOkD2'), isNull);
+        expect(remoteTdf, contains('generation 1'));
+        expect(remoteTdf, contains('task depGtwOkD2 priority {'));
+
+        // 3. Slow in-flight WebDAV PUT + immediate Undo (_mutationEpoch guard):
+        putGate = Completer<void>();
+        final pendingDeleteFuture = notifier.deleteTask('depGtwOkD2');
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('depGtwOkD2'),
+          isNull,
+        );
+        final undoDuringSlowPut = notifier.undoLastAction();
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('depGtwOkD2'),
+          isNotNull,
+          reason: 'Optimistic undo state must appear immediately even while prior WebDAV PUT is in flight',
+        );
+        putGate.complete();
+        putGate = null;
+        await pendingDeleteFuture;
+        expect(await undoDuringSlowPut, isTrue);
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('depGtwOkD2'),
+          isNotNull,
+          reason: 'Stale in-flight delete completion must not overwrite newer undo epoch',
+        );
+
+        // 4. LocalFileException rollback atomicity (forward & undo):
+        failLocalSave = true;
+        await notifier.completeTask('depGtwOkD2');
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('depGtwOkD2')!
+              .isCompleted,
+          isFalse,
+          reason: 'Failed local save must roll back task completion',
+        );
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(0),
+          reason:
+              'Rolled-back forward mutation must remove optimistic undo entry',
+        );
+
+        failLocalSave = false;
+        await notifier.completeTask('depGtwOkD2');
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(1));
+        failLocalSave = true;
+        expect(await notifier.undoLastAction(), isFalse);
+        expect(
+          container.read(taskUndoStateProvider).stackDepth,
+          equals(1),
+          reason: 'Failed local save during undo must re-insert popped entry',
+        );
+        failLocalSave = false;
+        expect(await notifier.undoLastAction(), isTrue);
+        expect(container.read(taskUndoStateProvider).stackDepth, equals(0));
+
+        // 5. Stack clearing on importLegacyTdf, wipeLocalFile, wipeRemoteFile, and workspace switch:
+        await notifier.downgradeTask('depGtwOkD2');
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+        await notifier.importLegacyTdf(
+          'tdf 0.6.0\ntask imp001OkD2 {\n    name "Imported"\n    created 2026-11-01 08:00\n}\n',
+        );
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isFalse,
+          reason: 'importLegacyTdf must clear undo stack',
+        );
+
+        await notifier.deleteTask('imp001OkD2');
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+        await notifier.wipeLocalFile(initialConfig);
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isFalse,
+          reason: 'wipeLocalFile must clear undo stack',
+        );
+
+        await notifier.addTask('Remote Wipe Target', id: 'remWipOkD2');
+        await notifier.deleteTask('remWipOkD2');
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+        await notifier.wipeRemoteFile(initialConfig);
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isFalse,
+          reason: 'wipeRemoteFile must clear undo stack',
+        );
+
+        await notifier.addTask('Select Local Target', id: 'selLocOkD2');
+        await notifier.deleteTask('selLocOkD2');
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+        await notifier.selectLocalFile(
+          initialConfig.copyWith(localFilePath: 'other.tdf'),
+        );
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isFalse,
+          reason: 'selectLocalFile must clear undo stack',
+        );
+
+        await notifier.addTask('Workspace Switch Target', id: 'wsSwitOkD2');
+        await notifier.deleteTask('wsSwitOkD2');
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+        remoteTdf = 'tdf 0.6.0\n';
+        await container
+            .read(activeWorkspaceProvider.notifier)
+            .createWorkspace(
+              'Second',
+              config: WebDavConfig(
+                storageMode: StorageMode.webdav,
+                localFilePath: 'second.tdf',
+                serverUrl: 'http://127.0.0.1:${server.port}',
+                filePath: '/second.tdf',
+                username: 'example-user',
+                password: 'example-password',
+              ),
+              activate: true,
+            );
+        await container.read(taskNotifierProvider.future);
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isFalse,
+          reason: 'Switching active workspace must clear undo stack',
+        );
+
+        // 6. WebDAV-only complete+undo and delete+undo in Second workspace:
+        final secondNotifier = container.read(taskNotifierProvider.notifier);
+        await secondNotifier.addTask('WebDAV Only Task', id: 'webOnlOkD2');
+        await secondNotifier.completeTask('webOnlOkD2');
+        expect(await secondNotifier.undoLastAction(), isTrue);
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('webOnlOkD2')!
+              .isCompleted,
+          isFalse,
+        );
+        await secondNotifier.deleteTask('webOnlOkD2');
+        expect(await secondNotifier.undoLastAction(), isTrue);
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('webOnlOkD2'),
+          isNotNull,
+        );
+      });
     });
   });
 }

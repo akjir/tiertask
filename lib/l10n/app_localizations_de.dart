@@ -1318,7 +1318,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String deleteTaskConfirmMessage(String title) {
-    return 'Aufgabe „$title“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.';
+    return 'Aufgabe „$title“ löschen? Diese Aktion kann rückgängig gemacht werden, solange der Arbeitsbereich geöffnet bleibt.';
   }
 
   @override
@@ -1326,4 +1326,22 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get noteCopiedSnackBar => 'Notiz in die Zwischenablage kopiert.';
+
+  @override
+  String get actionUndo => 'Rückgängig';
+
+  @override
+  String taskCompletedUndoSnackBar(String title) {
+    return '„$title“ abgeschlossen.';
+  }
+
+  @override
+  String taskDowngradedUndoSnackBar(String title) {
+    return '„$title“ herabgestuft.';
+  }
+
+  @override
+  String taskDeletedUndoSnackBar(String title) {
+    return '„$title“ gelöscht.';
+  }
 }

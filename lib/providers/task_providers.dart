@@ -13,13 +13,15 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:ui';
+import 'dart:collection';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/app_workspace.dart';
 import '../models/task_board.dart';
+import '../models/task_board_undo.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
@@ -42,13 +44,24 @@ final taskNotifierProvider = AsyncNotifierProvider<TaskNotifier, TaskBoard>(
   retry: disableProviderRetry,
 );
 
+/// Provides the ephemeral [TaskUndoState] for the active workspace session.
+final taskUndoStateProvider =
+    NotifierProvider<TaskUndoStateNotifier, TaskUndoState>(
+      TaskUndoStateNotifier.new,
+    );
+
 /// Manages the in-memory [TaskBoard] and synchronizes mutations to local files and WebDAV.
 class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<void>? _inFlightSync;
+  int _mutationEpoch = 0;
+  int _nextUndoSequence = 0;
   final Map<String, DateTime> _pendingDeletedLabelTimestamps =
       <String, DateTime>{};
   final Map<String, DateTime> _pendingDeletedLocationTimestamps =
       <String, DateTime>{};
+  final Set<int> _rolledBackEpochs = <int>{};
+  final ListQueue<TaskUndoEntry> _undoStack = ListQueue<TaskUndoEntry>();
+  String? _undoWorkspaceId;
 
   /// Returns the current [TaskBoard] snapshot or an empty board if not yet loaded.
   TaskBoard get _currentBoard => state.asData?.value ?? TaskBoard.empty();
@@ -58,10 +71,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     ref
         .read(workspaceUnloadCoordinatorProvider)
         .register(prepareForWorkspaceUnload);
+    _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
     _pendingDeletedLabelTimestamps.clear();
     _pendingDeletedLocationTimestamps.clear();
     state = const AsyncLoading();
     final config = await ref.watch(webDavConfigProvider.future);
+    _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
     if (!config.hasActiveStorage) {
       return TaskBoard.empty();
     }
@@ -191,14 +206,27 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? currentDate,
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
-      _currentBoard.completeTask(
-        taskId,
-        expectedCompletions: expectedCompletions,
-        currentDate: utcNow,
-        localEvaluationTime: localNow,
-      ),
+    final boardBefore = _currentBoard;
+    final taskBefore = boardBefore.findTask(taskId);
+    final updatedBoard = boardBefore.completeTask(
+      taskId,
+      expectedCompletions: expectedCompletions,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
+    final updatedTask = updatedBoard.findTask(taskId);
+    final undoEntry =
+        taskBefore != null &&
+            updatedTask != null &&
+            updatedTask.completions > taskBefore.completions
+        ? TaskBoardUndo.capture(
+            sequence: ++_nextUndoSequence,
+            kind: TaskUndoActionKind.complete,
+            boardBefore: boardBefore,
+            taskBefore: taskBefore,
+          )
+        : null;
+    await _commitMutation(updatedBoard, undoEntry: undoEntry);
   }
 
   /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
@@ -249,13 +277,23 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Deletes the task with [taskId], removes its `queue` entry, and persists to storage.
   Future<void> deleteTask(String taskId, {DateTime? currentDate}) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
-      _currentBoard.deleteTask(
-        taskId,
-        currentDate: utcNow,
-        localEvaluationTime: localNow,
-      ),
+    final boardBefore = _currentBoard;
+    final taskBefore = boardBefore.findTask(taskId);
+    final updatedBoard = boardBefore.deleteTask(
+      taskId,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
+    final undoEntry =
+        taskBefore != null && updatedBoard.findTask(taskId) == null
+        ? TaskBoardUndo.capture(
+            sequence: ++_nextUndoSequence,
+            kind: TaskUndoActionKind.delete,
+            boardBefore: boardBefore,
+            taskBefore: taskBefore,
+          )
+        : null;
+    await _commitMutation(updatedBoard, undoEntry: undoEntry);
   }
 
   /// Downgrades an active task per `TDF_SPEC.md` Section 6.3 and persists to storage.
@@ -266,16 +304,34 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final locationFix = ref.read(locationStateProvider).fix;
-    await _commitMutation(
-      _currentBoard.downgradeTask(
-        taskId,
-        activeLabelId: activeFilterLabelId,
-        currentLatitude: locationFix?.latitude,
-        currentLongitude: locationFix?.longitude,
-        currentDate: utcNow,
-        localEvaluationTime: localNow,
-      ),
+    final boardBefore = _currentBoard;
+    final taskBefore = boardBefore.findTask(taskId);
+    final updatedBoard = boardBefore.downgradeTask(
+      taskId,
+      activeLabelId: activeFilterLabelId,
+      currentLatitude: locationFix?.latitude,
+      currentLongitude: locationFix?.longitude,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
+    final updatedTask = updatedBoard.findTask(taskId);
+    final didDowngradeMutate =
+        taskBefore != null &&
+        updatedTask != null &&
+        (updatedTask != taskBefore ||
+            !listEquals(
+              updatedBoard.queueBlock.taskIds,
+              boardBefore.queueBlock.taskIds,
+            ));
+    final undoEntry = didDowngradeMutate
+        ? TaskBoardUndo.capture(
+            sequence: ++_nextUndoSequence,
+            kind: TaskUndoActionKind.downgrade,
+            boardBefore: boardBefore,
+            taskBefore: taskBefore,
+          )
+        : null;
+    await _commitMutation(updatedBoard, undoEntry: undoEntry);
   }
 
   /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.1`) or `0.6.0` [rawTdf]
@@ -292,6 +348,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       sourceTimeZone: sourceTimeZone,
       currentDate: currentDate,
     );
+    _clearUndoStack('import_tdf');
     state = AsyncData(importResult.board);
     return importResult;
   }
@@ -317,26 +374,24 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Awaits any in-flight synchronization and flushes the outgoing [TaskBoard] to local storage if populated before switching workspaces.
   Future<void> prepareForWorkspaceUnload() async {
-    await _awaitInFlightSync();
-    final currentWorkspace = ref.read(activeWorkspaceProvider).asData?.value;
-    final currentBoard = state.asData?.value;
-    if (currentWorkspace != null &&
-        currentBoard != null &&
-        (currentBoard.allTasks.isNotEmpty ||
-            currentBoard.labels.isNotEmpty ||
-            currentBoard.locations.isNotEmpty)) {
-      await TaskSyncPipeline.flushOutgoingLocalBoard(
-        ref,
-        currentWorkspace,
-        currentBoard,
-      );
-    }
+    await _flushOutgoingWorkspaceBoard();
+    _clearUndoStack('workspace_unload');
   }
 
   /// Synchronizes and persists the in-memory [board] state across the configured local and WebDAV stages.
-  Future<void> pushToRemote(TaskBoard board, {TaskBoard? fallbackBoard}) async {
+  Future<void> pushToRemote(
+    TaskBoard board, {
+    TaskBoard? fallbackBoard,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    int? mutationEpoch,
+  }) async {
     await _awaitInFlightSync();
-    final operation = _executePushToRemote(board, fallbackBoard: fallbackBoard);
+    final operation = _executePushToRemote(
+      board,
+      fallbackBoard: fallbackBoard,
+      taskConflictResolutions: taskConflictResolutions,
+      mutationEpoch: mutationEpoch,
+    );
     _inFlightSync = operation;
     try {
       await operation;
@@ -384,7 +439,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Switches the active workspace's local `.tdf` file to [newConfig] without moving or deleting the previous file, initializes the target file if missing, and reloads the board.
   Future<void> selectLocalFile(WebDavConfig newConfig) async {
-    await prepareForWorkspaceUnload();
+    await _flushOutgoingWorkspaceBoard();
     final previousConfig = resolveCurrentConfig(ref);
     final localizations = lookupAppLocalizations(
       newConfig.language.resolveLocale(PlatformDispatcher.instance.locale),
@@ -420,6 +475,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final workspace = await ref.read(activeWorkspaceProvider.future);
     _pendingDeletedLabelTimestamps.clear();
     _pendingDeletedLocationTimestamps.clear();
+    _clearUndoStack('select_local_file');
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
     final updatedConfig = await ref.read(webDavConfigProvider.future);
@@ -483,14 +539,98 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? currentDate,
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
-      _currentBoard.toggleSubtask(
-        taskId,
-        stepIndex,
-        currentDate: utcNow,
-        localEvaluationTime: localNow,
-      ),
+    final boardBefore = _currentBoard;
+    final taskBefore = boardBefore.findTask(taskId);
+    final updatedBoard = boardBefore.toggleSubtask(
+      taskId,
+      stepIndex,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
     );
+    final updatedTask = updatedBoard.findTask(taskId);
+    final didAutoFinishComplete =
+        taskBefore != null &&
+        !taskBefore.isCompleted &&
+        taskBefore.completedAt == null &&
+        updatedTask != null &&
+        updatedTask.completions > taskBefore.completions;
+    final undoEntry = didAutoFinishComplete
+        ? TaskBoardUndo.capture(
+            sequence: ++_nextUndoSequence,
+            kind: TaskUndoActionKind.complete,
+            boardBefore: boardBefore,
+            taskBefore: taskBefore,
+          )
+        : null;
+    await _commitMutation(updatedBoard, undoEntry: undoEntry);
+  }
+
+  /// Pops and reverses the most recent undoable task mutation when available.
+  Future<bool> undoLastAction({
+    int? expectedSequence,
+    DateTime? currentDate,
+  }) async {
+    if (_undoStack.isEmpty) {
+      return false;
+    }
+    if (expectedSequence != null &&
+        _undoStack.last.sequence != expectedSequence) {
+      return false;
+    }
+    final entry = _undoStack.removeLast();
+    ref
+        .read(taskUndoStateProvider.notifier)
+        .update(TaskUndoState(stackDepth: _undoStack.length));
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final outcome = TaskBoardUndo.apply(
+      _currentBoard,
+      entry,
+      utcNow: utcNow,
+      localEvaluationTime: localNow,
+    );
+    if (outcome == null) {
+      return false;
+    }
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.domain,
+        'task.undo.apply',
+        fields: <String, Object?>{
+          'id': entry.snapshotTask.id,
+          'kind': entry.kind.name,
+          'seq': entry.sequence,
+          'remaining': _undoStack.length,
+        },
+      );
+    }
+    final persisted = await _commitMutation(
+      outcome.board,
+      taskConflictResolutions: outcome.taskConflictResolutions,
+    );
+    if (!persisted) {
+      if (_undoStack.length < TaskBoardUndo.maxUndoEntries) {
+        _undoStack.addLast(entry);
+      }
+      ref
+          .read(taskUndoStateProvider.notifier)
+          .update(TaskUndoState(stackDepth: _undoStack.length));
+      if (AppLogger.shouldLog(LogLevel.warn)) {
+        AppLogger.event(
+          LogLevel.warn,
+          LogTag.domain,
+          'task.undo.rollback',
+          fields: <String, Object?>{
+            'id': entry.snapshotTask.id,
+            'kind': entry.kind.name,
+            'seq': entry.sequence,
+            'direction': 'undo',
+          },
+        );
+      }
+      return false;
+    }
+    return true;
   }
 
   /// Updates an existing label with [labelId] and persists the updated board to storage.
@@ -654,17 +794,57 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
+  /// Clears [_undoStack] for [reason] and optionally resets [taskUndoStateProvider].
+  void _clearUndoStack(String reason, {bool resetProvider = true}) {
+    final cleared = _undoStack.length;
+    _rolledBackEpochs.clear();
+    if (cleared > 0) {
+      _undoStack.clear();
+      if (AppLogger.shouldLog(LogLevel.info)) {
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.domain,
+          'task.undo.clear',
+          fields: <String, Object?>{'reason': reason, 'cleared': cleared},
+        );
+      }
+    }
+    if (resetProvider) {
+      ref.read(taskUndoStateProvider.notifier).update(TaskUndoState.empty);
+    }
+  }
+
   /// Updates the in-memory board state and executes the two-stage persistence pipeline, rolling back on local failure.
-  Future<void> _commitMutation(TaskBoard updatedBoard) async {
+  Future<bool> _commitMutation(
+    TaskBoard updatedBoard, {
+    TaskUndoEntry? undoEntry,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+  }) async {
+    final epoch = ++_mutationEpoch;
     final previousBoard = _currentBoard;
     state = AsyncData(updatedBoard);
-    await pushToRemote(updatedBoard, fallbackBoard: previousBoard);
+    final evictedEntry = undoEntry != null
+        ? _recordOptimisticUndoEntry(undoEntry)
+        : null;
+    await pushToRemote(
+      updatedBoard,
+      fallbackBoard: previousBoard,
+      taskConflictResolutions: taskConflictResolutions,
+      mutationEpoch: epoch,
+    );
+    final rolledBack = _rolledBackEpochs.remove(epoch);
+    if (rolledBack && undoEntry != null) {
+      _rollbackOptimisticUndoEntry(undoEntry, evictedEntry: evictedEntry);
+    }
+    return !rolledBack;
   }
 
   /// Executes a single [pushToRemote] persistence pass for [board].
   Future<void> _executePushToRemote(
     TaskBoard board, {
     TaskBoard? fallbackBoard,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    int? mutationEpoch,
   }) async {
     final workspace = await ref.read(activeWorkspaceProvider.future);
     final WebDavConfig config =
@@ -682,21 +862,35 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         config,
         pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
         pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
+        taskConflictResolutions: taskConflictResolutions,
         candidateBoard: board,
         onLocalStageMerged: (mergedBoard) {
           localStageSucceeded = true;
-          state = AsyncData(mergedBoard);
+          if (mutationEpoch == null || mutationEpoch == _mutationEpoch) {
+            state = AsyncData(mergedBoard);
+          }
         },
       );
-      if (ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
+      final isCurrentEpoch =
+          mutationEpoch == null || mutationEpoch == _mutationEpoch;
+      if (isCurrentEpoch &&
+          ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
         state = AsyncData(converged);
       }
       ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
     } on Object catch (error) {
-      if (!localStageSucceeded &&
-          fallbackBoard != null &&
-          ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
-        state = AsyncData(fallbackBoard);
+      if (!localStageSucceeded) {
+        if (mutationEpoch != null) {
+          _rolledBackEpochs.add(mutationEpoch);
+        }
+        final isCurrentEpoch =
+            mutationEpoch == null || mutationEpoch == _mutationEpoch;
+        if (isCurrentEpoch &&
+            fallbackBoard != null &&
+            ref.read(activeWorkspaceProvider).asData?.value.id ==
+                workspace.id) {
+          state = AsyncData(fallbackBoard);
+        }
       }
       ref.read(syncStateProvider.notifier).setError(error.toString());
     }
@@ -717,6 +911,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final workspace = await ref.read(activeWorkspaceProvider.future);
       _pendingDeletedLabelTimestamps.clear();
       _pendingDeletedLocationTimestamps.clear();
+      _clearUndoStack(isRemote ? 'wipe_remote' : 'wipe_local');
       await ref
           .read(settingsRepositoryProvider)
           .saveWorkspaceSyncState(workspace.id, WorkspaceSyncState.empty);
@@ -734,10 +929,102 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
+  /// Awaits any in-flight sync and flushes the populated outgoing [TaskBoard] to local storage.
+  Future<void> _flushOutgoingWorkspaceBoard() async {
+    await _awaitInFlightSync();
+    final currentWorkspace = ref.read(activeWorkspaceProvider).asData?.value;
+    final currentBoard = state.asData?.value;
+    if (currentWorkspace != null &&
+        currentBoard != null &&
+        (currentBoard.allTasks.isNotEmpty ||
+            currentBoard.labels.isNotEmpty ||
+            currentBoard.locations.isNotEmpty)) {
+      await TaskSyncPipeline.flushOutgoingLocalBoard(
+        ref,
+        currentWorkspace,
+        currentBoard,
+      );
+    }
+  }
+
+  /// Pushes [undoEntry] onto [_undoStack], publishes [TaskUndoState], and returns any evicted oldest entry.
+  TaskUndoEntry? _recordOptimisticUndoEntry(TaskUndoEntry undoEntry) {
+    _undoWorkspaceId ??= ref.read(activeWorkspaceProvider).asData?.value.id;
+    final evicted = _undoStack.length >= TaskBoardUndo.maxUndoEntries
+        ? _undoStack.removeFirst()
+        : null;
+    _undoStack.addLast(undoEntry);
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.domain,
+        'task.undo.push',
+        fields: <String, Object?>{
+          'id': undoEntry.snapshotTask.id,
+          'kind': undoEntry.kind.name,
+          'seq': undoEntry.sequence,
+          'depth': _undoStack.length,
+        },
+      );
+    }
+    ref
+        .read(taskUndoStateProvider.notifier)
+        .update(
+          TaskUndoState(
+            stackDepth: _undoStack.length,
+            latestNotice: TaskUndoNotice(
+              sequence: undoEntry.sequence,
+              kind: undoEntry.kind,
+              taskId: undoEntry.snapshotTask.id,
+              taskTitle: undoEntry.snapshotTask.title,
+            ),
+          ),
+        );
+    return evicted;
+  }
+
   /// Resolves the normalized UTC timestamp and configured local wall-clock timestamp.
   (DateTime utcNow, DateTime localNow) _resolveTimestamps(
     DateTime? currentDate,
   ) => TaskSyncPipeline.resolveTimestamps(ref, currentDate);
+
+  /// Removes [undoEntry] after a local persistence rollback and restores [evictedEntry] if applicable.
+  void _rollbackOptimisticUndoEntry(
+    TaskUndoEntry undoEntry, {
+    required TaskUndoEntry? evictedEntry,
+  }) {
+    final removed = _undoStack.remove(undoEntry);
+    if (removed &&
+        evictedEntry != null &&
+        _undoStack.length < TaskBoardUndo.maxUndoEntries) {
+      _undoStack.addFirst(evictedEntry);
+    }
+    final currentNotice = ref.read(taskUndoStateProvider).latestNotice;
+    final preservedNotice = currentNotice?.sequence == undoEntry.sequence
+        ? null
+        : currentNotice;
+    ref
+        .read(taskUndoStateProvider.notifier)
+        .update(
+          TaskUndoState(
+            stackDepth: _undoStack.length,
+            latestNotice: preservedNotice,
+          ),
+        );
+    if (AppLogger.shouldLog(LogLevel.warn)) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.domain,
+        'task.undo.rollback',
+        fields: <String, Object?>{
+          'id': undoEntry.snapshotTask.id,
+          'kind': undoEntry.kind.name,
+          'seq': undoEntry.sequence,
+          'direction': 'forward',
+        },
+      );
+    }
+  }
 
   /// Wraps [TaskSyncPipeline.runSyncWithStatus] for [config].
   Future<TaskBoard> _runSyncWithStatus(
@@ -757,4 +1044,98 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       state = AsyncData(mergedBoard);
     },
   );
+
+  /// Synchronizes [_undoWorkspaceId] during [build] and clears [_undoStack] when switching workspaces.
+  void _syncUndoWorkspaceId(String? workspaceId) {
+    if (workspaceId == null) {
+      return;
+    }
+    if (_undoWorkspaceId != null && _undoWorkspaceId != workspaceId) {
+      _clearUndoStack('workspace_build', resetProvider: false);
+    }
+    _undoWorkspaceId = workspaceId;
+  }
+}
+
+/// Immutable UI notification payload describing the latest recorded undoable action.
+@immutable
+class TaskUndoNotice {
+  /// Creates a [TaskUndoNotice].
+  const TaskUndoNotice({
+    required this.sequence,
+    required this.kind,
+    required this.taskId,
+    required this.taskTitle,
+  });
+
+  /// Category of the recorded action.
+  final TaskUndoActionKind kind;
+
+  /// Monotonically increasing session sequence number.
+  final int sequence;
+
+  /// Identifier of the affected task.
+  final String taskId;
+
+  /// Display title of the affected task at the time of mutation.
+  final String taskTitle;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskUndoNotice &&
+        other.sequence == sequence &&
+        other.kind == kind &&
+        other.taskId == taskId &&
+        other.taskTitle == taskTitle;
+  }
+
+  @override
+  int get hashCode => Object.hash(sequence, kind, taskId, taskTitle);
+}
+
+/// Immutable UI state snapshot for the active workspace's in-memory undo stack.
+@immutable
+class TaskUndoState {
+  /// Creates a [TaskUndoState].
+  const TaskUndoState({this.stackDepth = 0, this.latestNotice});
+
+  /// Empty default undo state with zero entries and no active notice.
+  static const TaskUndoState empty = TaskUndoState();
+
+  /// Latest undoable mutation notice to present as a `SnackBar`, or `null` when dismissed/cleared.
+  final TaskUndoNotice? latestNotice;
+
+  /// Number of undo entries currently retained in `TaskNotifier` (`0..10`).
+  final int stackDepth;
+
+  /// Whether at least one action can currently be undone.
+  bool get canUndo => stackDepth > 0;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskUndoState &&
+        other.stackDepth == stackDepth &&
+        other.latestNotice == latestNotice;
+  }
+
+  @override
+  int get hashCode => Object.hash(stackDepth, latestNotice);
+}
+
+/// Manages the ephemeral [TaskUndoState] for the active workspace.
+class TaskUndoStateNotifier extends Notifier<TaskUndoState> {
+  @override
+  TaskUndoState build() {
+    ref.watch(
+      activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
+    );
+    return TaskUndoState.empty;
+  }
+
+  /// Replaces the current [TaskUndoState] with [next].
+  void update(TaskUndoState next) {
+    state = next;
+  }
 }

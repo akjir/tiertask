@@ -694,6 +694,7 @@ class AppTheme extends ThemeExtension<AppTheme> {
       ),
       progressIndicatorTheme: ProgressIndicatorThemeData(color: primaryAccent),
       snackBarTheme: SnackBarThemeData(
+        actionTextColor: primaryAccent,
         backgroundColor: cardColor,
         contentTextStyle: TextStyle(color: primaryTextColor),
       ),

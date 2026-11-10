@@ -2360,10 +2360,10 @@ abstract class AppLocalizations {
   /// **'Delete Task'**
   String get deleteTaskDialogTitle;
 
-  /// Confirmation message shown in the dialog before deleting a task.
+  /// Confirmation prompt shown before deleting a task.
   ///
   /// In en, this message translates to:
-  /// **'Delete task \"{title}\"? This action cannot be undone.'**
+  /// **'Delete task \"{title}\"? This action can be undone while the workspace remains open.'**
   String deleteTaskConfirmMessage(String title);
 
   /// Tooltip for the button that copies the expanded task note to the clipboard.
@@ -2377,6 +2377,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Note copied to clipboard.'**
   String get noteCopiedSnackBar;
+
+  /// Confirmation prompt shown before deleting a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get actionUndo;
+
+  /// Confirmation prompt shown before deleting a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed \"{title}\".'**
+  String taskCompletedUndoSnackBar(String title);
+
+  /// Confirmation prompt shown before deleting a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Downgraded \"{title}\".'**
+  String taskDowngradedUndoSnackBar(String title);
+
+  /// Confirmation prompt shown before deleting a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted \"{title}\".'**
+  String taskDeletedUndoSnackBar(String title);
 }
 
 class _AppLocalizationsDelegate

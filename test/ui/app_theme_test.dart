@@ -217,6 +217,18 @@ task 000001OkD2 priority {
       equals(slateDark.onSecondaryContainerColor),
       reason: 'M3 Badge theme must use onSecondaryContainerColor',
     );
+    for (final variant in <AppTheme>[
+      slateDark,
+      slateLight,
+      navyDark,
+      navyLight,
+    ]) {
+      expect(
+        variant.toThemeData().snackBarTheme.actionTextColor,
+        equals(variant.primaryAccent),
+        reason: 'SnackBarThemeData.actionTextColor must match primaryAccent across all 4 AppTheme variants',
+      );
+    }
     final selectedSegmentBg = slateDarkThemeData
         .segmentedButtonTheme
         .style
