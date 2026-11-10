@@ -2365,6 +2365,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete task \"{title}\"? This action cannot be undone.'**
   String deleteTaskConfirmMessage(String title);
+
+  /// Tooltip for the button that copies the expanded task note to the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy note'**
+  String get tooltipCopyNote;
+
+  /// SnackBar confirmation message shown after copying a task note to the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Note copied to clipboard.'**
+  String get noteCopiedSnackBar;
 }
 
 class _AppLocalizationsDelegate

@@ -15,15 +15,18 @@
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/widgets/tier_task_pill.dart';
 
 import '../test_helpers.dart';
 
@@ -566,6 +569,209 @@ task plain1OkD2 {
       _expectTrue(
         linkTop < subtaskTop,
         'Expanded links must always be rendered above subtasks',
+      );
+    },
+  );
+
+  testWidgets(
+    'Expanded task note displays a right-aligned copy button that copies the note to the clipboard, shows a localized SnackBar, and keeps the note expanded',
+    (WidgetTester tester) async {
+      String? copiedClipboardText;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (MethodCall methodCall) async {
+          if (methodCall.method == 'Clipboard.setData') {
+            final arguments = methodCall.arguments;
+            if (arguments is Map<Object?, Object?>) {
+              final text = arguments['text'];
+              if (text is String) {
+                copiedClipboardText = text;
+              }
+            }
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+      });
+
+      const noteContent =
+          'First line of runbook\nSecond line with #hash & "quotes"';
+      final taskWithNote = TaskItem(
+        id: 'cpy001OkD2',
+        title: 'Task With Copyable Note',
+        note: noteContent,
+      );
+      final taskWithoutNote = TaskItem(
+        id: 'sub001OkD2',
+        title: 'Subtasks Only Task',
+        subtasks: const [SubtaskItem(title: 'Step one')],
+      );
+
+      await pumpLeafWidget(
+        tester,
+        Column(
+          children: [
+            TierTaskPill(
+              canDowngrade: true,
+              isCompleted: false,
+              task: taskWithNote,
+            ),
+            TierTaskPill(
+              canDowngrade: false,
+              isCompleted: false,
+              task: taskWithoutNote,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final noteRowFinder = _byKey('task_note_cpy001OkD2');
+      final copyButtonFinder = _byKey('copy_task_note_cpy001OkD2');
+      _expectNone(
+        copyButtonFinder,
+        'Copy button must not be rendered while the task note is collapsed',
+      );
+
+      await tester.tap(find.text('Subtasks Only Task'));
+      await tester.pumpAndSettle();
+      _expectNone(
+        _byKey('copy_task_note_sub001OkD2'),
+        'Expanding a task without a note must not render a note copy button',
+      );
+
+      await tester.tap(find.text('Task With Copyable Note'));
+      await tester.pumpAndSettle();
+
+      _expectOne(
+        noteRowFinder,
+        'Note row must be rendered when the task is expanded',
+      );
+      _expectOne(
+        copyButtonFinder,
+        'Expanded note row must render a copy button',
+      );
+      _expectOne(
+        find.descendant(
+          of: copyButtonFinder,
+          matching: find.byIcon(Icons.copy_rounded),
+        ),
+        'Note copy button must display Icons.copy_rounded',
+      );
+
+      final copyButtonWidget = tester.widget<IconButton>(copyButtonFinder);
+      expect(
+        copyButtonWidget.tooltip,
+        equals('Copy note'),
+        reason: 'English tooltip must describe copying the note',
+      );
+
+      final noteTextRight = tester.getTopRight(find.text(noteContent)).dx;
+      final copyButtonLeft = tester.getTopLeft(copyButtonFinder).dx;
+      final copyButtonCenterX = tester.getCenter(copyButtonFinder).dx;
+      final editButtonCenterX = tester
+          .getCenter(_byKey('edit_task_button_cpy001OkD2'))
+          .dx;
+
+      _expectTrue(
+        copyButtonLeft >= noteTextRight,
+        'Copy button must be placed on the right side of the expanded note text',
+      );
+      expect(
+        copyButtonCenterX,
+        closeTo(editButtonCenterX, 1.0),
+        reason: 'Copy button must align horizontally with the trailing action column on the right side of the task pill',
+      );
+
+      await tester.tap(copyButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        copiedClipboardText,
+        equals(noteContent),
+        reason: 'Tapping the copy button must copy the exact task note text',
+      );
+      _expectOne(
+        find.text('Note copied to clipboard.'),
+        'Copying the task note must display a confirmation SnackBar',
+      );
+      _expectOne(
+        noteRowFinder,
+        'Tapping the copy button must keep the task note expanded',
+      );
+    },
+  );
+
+  testWidgets(
+    'Expanded task note copy button uses German tooltip and SnackBar strings when German locale is active',
+    (WidgetTester tester) async {
+      String? copiedClipboardText;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (MethodCall methodCall) async {
+          if (methodCall.method == 'Clipboard.setData') {
+            final arguments = methodCall.arguments;
+            if (arguments is Map<Object?, Object?>) {
+              final text = arguments['text'];
+              if (text is String) {
+                copiedClipboardText = text;
+              }
+            }
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+      });
+
+      final taskWithNote = TaskItem(
+        id: 'deu001OkD2',
+        title: 'Aufgabe mit Notiz',
+        note: 'Wichtige Notiz',
+      );
+
+      await pumpLeafWidget(
+        tester,
+        TierTaskPill(
+          canDowngrade: false,
+          isCompleted: false,
+          task: taskWithNote,
+        ),
+        locale: const Locale('de'),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Aufgabe mit Notiz'));
+      await tester.pumpAndSettle();
+
+      final copyButtonFinder = _byKey('copy_task_note_deu001OkD2');
+      final copyButtonWidget = tester.widget<IconButton>(copyButtonFinder);
+      expect(
+        copyButtonWidget.tooltip,
+        equals('Notiz kopieren'),
+        reason: 'German tooltip must be localized',
+      );
+
+      await tester.tap(copyButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        copiedClipboardText,
+        equals('Wichtige Notiz'),
+        reason: 'German locale copy button must copy the note text',
+      );
+      _expectOne(
+        find.text('Notiz in die Zwischenablage kopiert.'),
+        'German confirmation SnackBar must be localized',
       );
     },
   );

@@ -1299,4 +1299,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String deleteTaskConfirmMessage(String title) {
     return 'Delete task \"$title\"? This action cannot be undone.';
   }
+
+  @override
+  String get tooltipCopyNote => 'Copy note';
+
+  @override
+  String get noteCopiedSnackBar => 'Note copied to clipboard.';
 }

@@ -1804,5 +1804,13 @@
         "type": "String"
       }
     }
+  },
+  "tooltipCopyNote": "Copy note",
+  "@tooltipCopyNote": {
+    "description": "Tooltip for the button that copies the expanded task note to the clipboard."
+  },
+  "noteCopiedSnackBar": "Note copied to clipboard.",
+  "@noteCopiedSnackBar": {
+    "description": "SnackBar confirmation message shown after copying a task note to the clipboard."
   }
 }

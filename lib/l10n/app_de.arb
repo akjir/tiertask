@@ -377,5 +377,7 @@
   "taskInfoRepeatCompletions": "{count}-mal abgeschlossen",
   "taskInfoLinksCount": "{count} Links",
   "deleteTaskDialogTitle": "Aufgabe löschen",
-  "deleteTaskConfirmMessage": "Aufgabe „{title}“ löschen? Diese Aktion kann nicht rückgängig gemacht werden."
+  "deleteTaskConfirmMessage": "Aufgabe „{title}“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+  "tooltipCopyNote": "Notiz kopieren",
+  "noteCopiedSnackBar": "Notiz in die Zwischenablage kopiert."
 }

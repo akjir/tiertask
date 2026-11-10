@@ -17,6 +17,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
@@ -139,8 +140,9 @@ class _SubtaskStepsColumn extends StatelessWidget {
         children: [
           if (activeNote != null && activeNote.isNotEmpty)
             _TierNoteRow(
-              noteKey: ValueKey('task_note_$taskId'),
+              copyButtonKey: ValueKey('copy_task_note_$taskId'),
               note: activeNote,
+              noteKey: ValueKey('task_note_$taskId'),
             ),
           for (var i = 0; i < links.length; i++)
             _TierLinkRow(
@@ -247,12 +249,19 @@ class _TierLinkRowContent extends StatelessWidget {
   }
 }
 
-/// Row displaying the task [note] with a leading note icon inside [_SubtaskStepsColumn].
+/// Row displaying the task [note] with a leading note icon and trailing copy button inside [_SubtaskStepsColumn].
 class _TierNoteRow extends StatelessWidget {
   /// Creates a [_TierNoteRow].
-  const _TierNoteRow({required this.note, required this.noteKey});
+  const _TierNoteRow({
+    required this.copyButtonKey,
+    required this.note,
+    required this.noteKey,
+  });
 
-  /// Note text to render.
+  /// Deterministic widget key for the trailing copy button.
+  final Key copyButtonKey;
+
+  /// Note text to render and copy.
   final String note;
 
   /// Deterministic widget key for the note row.
@@ -262,36 +271,53 @@ class _TierNoteRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       key: noteKey,
-      padding: const EdgeInsets.fromLTRB(22, 8, 20, 8),
-      child: _TierNoteRowContent(note: note),
+      padding: const EdgeInsets.fromLTRB(22, 4, 12, 4),
+      child: _TierNoteRowContent(copyButtonKey: copyButtonKey, note: note),
     );
   }
 }
 
-/// Inner icon and text layout for [_TierNoteRow].
+/// Inner icon, text, and copy action layout for [_TierNoteRow].
 class _TierNoteRowContent extends StatelessWidget {
   /// Creates a [_TierNoteRowContent].
-  const _TierNoteRowContent({required this.note});
+  const _TierNoteRowContent({required this.copyButtonKey, required this.note});
 
-  /// Note text to display.
+  /// Deterministic widget key for the trailing copy button.
+  final Key copyButtonKey;
+
+  /// Note text to display and copy.
   final String note;
 
   @override
   Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
     final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Row(
       children: [
         Icon(Icons.notes_rounded, size: 18, color: mutedColor),
         const SizedBox(width: 18),
         Expanded(
-          child: Text(
-            note,
-            style: TextStyle(
-              color: mutedColor,
-              fontSize: 14,
-              fontWeight: FontWeight.w400,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              note,
+              style: TextStyle(
+                color: mutedColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
             ),
           ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          key: copyButtonKey,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          tooltip: localizations.tooltipCopyNote,
+          icon: Icon(Icons.copy_rounded, size: 18, color: mutedColor),
+          onPressed: () => copyTaskNoteToClipboard(context, note),
         ),
       ],
     );
@@ -430,6 +456,19 @@ computeSubtaskExitStageTiming({
         : 0.0,
     totalDuration: Duration(microseconds: totalMicroseconds),
   );
+}
+
+/// Copies [note] to the system clipboard and displays a localized confirmation [SnackBar] on [context].
+Future<void> copyTaskNoteToClipboard(BuildContext context, String note) async {
+  final localizations = AppLocalizations.of(context);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  await Clipboard.setData(ClipboardData(text: note));
+  if (!context.mounted) {
+    return;
+  }
+  messenger
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(localizations.noteCopiedSnackBar)));
 }
 
 /// Returns `true` when [task] has a non-empty note, at least one link, or at least one subtask.

@@ -1320,4 +1320,10 @@ class AppLocalizationsDe extends AppLocalizations {
   String deleteTaskConfirmMessage(String title) {
     return 'Aufgabe „$title“ löschen? Diese Aktion kann nicht rückgängig gemacht werden.';
   }
+
+  @override
+  String get tooltipCopyNote => 'Notiz kopieren';
+
+  @override
+  String get noteCopiedSnackBar => 'Notiz in die Zwischenablage kopiert.';
 }
