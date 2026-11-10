@@ -14,6 +14,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | TEP-004 | TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation | feature | review | [`tep-004-tdf-0-6-0-implementation.md`](tep-004-tdf-0-6-0-implementation.md) |
 | TEP-005 | Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation | feature | review | [`tep-005-location-source-resolution.md`](tep-005-location-source-resolution.md) |
 | TEP-006 | TDF Specification 0.7.0 Exploratory Design and Idea Collection | spec | concept | [`tep-006-tdf-spec-0-7-0.md`](tep-006-tdf-spec-0-7-0.md) |
+| TEP-007 | In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery | feature | planned | [`tep-007-undo-stack-snackbar-recovery.md`](tep-007-undo-stack-snackbar-recovery.md) |
 
 ### Completed Proposals
 
