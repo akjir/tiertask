@@ -14,10 +14,10 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -751,6 +751,52 @@ task 000002OkD2 priority {
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
+    },
+  );
+
+  testWidgets(
+    'TierTaskApp and pumpLeafWidget resolve standalone material_ui MaterialLocalizations in English and German',
+    (WidgetTester tester) async {
+      await _pumpHomeApp(
+        tester,
+        config: const WebDavConfig(language: AppLanguage.english),
+      );
+      final enContext = tester.element(find.byType(Scaffold));
+      expect(
+        MaterialLocalizations.of(enContext).cancelButtonLabel,
+        equals('Cancel'),
+        reason: 'English TierTaskApp must provide standalone material_ui MaterialLocalizations',
+      );
+
+      await _pumpHomeApp(
+        tester,
+        config: const WebDavConfig(language: AppLanguage.german),
+      );
+      final deContext = tester.element(find.byType(Scaffold));
+      expect(
+        MaterialLocalizations.of(deContext).cancelButtonLabel,
+        equals('Abbrechen'),
+        reason: 'German TierTaskApp must register material_ui GlobalMaterialLocalizations',
+      );
+      expect(
+        MaterialLocalizations.of(deContext).firstDayOfWeekIndex,
+        equals(1),
+        reason: 'German Material calendar week must start on Monday',
+      );
+
+      await pumpLeafWidget(
+        tester,
+        const SizedBox(key: ValueKey<String>('leaf_probe')),
+        locale: const Locale('de'),
+      );
+      final leafDeContext = tester.element(
+        find.byKey(const ValueKey<String>('leaf_probe')),
+      );
+      expect(
+        MaterialLocalizations.of(leafDeContext).cancelButtonLabel,
+        equals('Abbrechen'),
+        reason: 'German pumpLeafWidget must register material_ui GlobalMaterialLocalizations',
+      );
     },
   );
 }

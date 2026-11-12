@@ -16,8 +16,8 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_ui/material_ui.dart';
 
 import 'l10n/app_localizations.dart';
 import 'models/webdav_config.dart';
@@ -70,7 +70,10 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       debugShowCheckedModeBanner: false,
       locale: locale,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        ...GlobalMaterialLocalizations.delegates,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       themeMode: _toFlutterThemeMode(appThemeMode),
       theme: appThemeSet.light.toThemeData(),

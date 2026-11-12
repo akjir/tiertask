@@ -13,9 +13,9 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
@@ -200,7 +200,10 @@ Future<ProviderContainer> pumpLeafWidget(
       container: container,
       child: MaterialApp(
         locale: locale,
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          ...GlobalMaterialLocalizations.delegates,
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         theme: effectiveThemeSet.light.toThemeData(),
         darkTheme: effectiveThemeSet.dark.toThemeData(),

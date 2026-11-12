@@ -16,8 +16,8 @@
 /// Unified application theme definition and Material 3 [ThemeData] builder.
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';

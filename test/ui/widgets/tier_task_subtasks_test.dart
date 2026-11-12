@@ -14,10 +14,10 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/webdav_config.dart';

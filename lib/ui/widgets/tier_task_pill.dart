@@ -16,8 +16,8 @@
 /// Task pill card with animated subtask expansion, closing, upgrade, and downgrade transitions.
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';

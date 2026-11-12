@@ -200,7 +200,7 @@ tiertask/
 | `analysis_options.yaml` | Dart analyzer configuration excluding `build/**`, `android/**`, `linux/**`, `windows/**`, and generated `lib/l10n/app_localizations*.dart` files. |
 | `install.sh` | POSIX user-space Linux build and installation script installing the release bundle, executable symlink, icons, and desktop entry into `$HOME/.local`. |
 | `l10n.yaml` | Flutter `gen-l10n` configuration pointing to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`. |
-| `pubspec.yaml` | Package metadata and dependencies (`flutter`, `flutter_localizations`, `flutter_riverpod`, `flutter_secure_storage`, `intl`). |
+| `pubspec.yaml` | Package metadata and dependencies (`flutter`, `flutter_localizations`, `flutter_riverpod`, `flutter_secure_storage`, `intl`, `material_ui`). |
 | `spec/TDF_SPEC_0.6.0.md` | Normative specification for the TierTask Data Format (`.tdf`) lexical grammar, blocks, directives, 6-tier derivation pipeline, mutations, and error bounds. |
 
 ## Localization
@@ -278,7 +278,7 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
-| `lib/main.dart` | Application entry point initializing `LocalFileLogSink`, global crash hooks (`FlutterError.onError` and `PlatformDispatcher.instance.onError`), and `AppLifecycleListener`, and mounting `TierTaskApp` inside `ProviderScope` with Material 3 themes and `AppLocalizations` delegates. |
+| `lib/main.dart` | Application entry point registering global crash hooks (`FlutterError.onError` and `PlatformDispatcher.instance.onError`) and `AppLifecycleListener`, and mounting `TierTaskApp` inside `ProviderScope` with Material 3 themes, `AppLocalizations.delegate`, and `GlobalMaterialLocalizations.delegates`. |
 | `lib/ui/app_theme.dart` | Unified Material 3 theme definition (`AppTheme`, `AppThemeSet`, `appThemeProvider`) implementing `ThemeExtension<AppTheme>` and `toThemeData()` for the `Slate` and `Navy` light and dark palettes. |
 | `lib/ui/edit_labels_screen.dart` | Dedicated label overview screen (`EditLabelsScreen`) and label editor panel (`EditLabelScreen`, `openEditLabelScreen`) for creating, editing, and deleting `TdfLabel` definitions with `scoped` queue toggle, custom color wheel selection, color presets, notes, and inherited conditions. |
 | `lib/ui/edit_locations_screen.dart` | Dedicated location overview screen (`EditLocationsScreen`) and location editor panel (`EditLocationScreen`, `openEditLocationScreen`) for creating, editing, and deleting reusable `TdfLocation` entities with selectable source resolution (`GPS Coordinates`, `Address`, `Google Plus Code`), forward-geocoding candidate disambiguation, radius in meters, and notes. |

@@ -19,8 +19,8 @@ Tasks and metadata are stored as plain text in a `.tdf` document, while operatio
 
 | Component | Requirement |
 | :--- | :--- |
-| Flutter SDK | `>=3.47.0` (`stable`) |
-| Dart SDK | `^3.13.7` |
+| Flutter SDK | `>=3.50.0` (`stable`) |
+| Dart SDK | `^3.14.0` |
 | Platforms | Linux (`x64`, `arm64`), Android (`arm64-v8a`, `x86_64`), Windows (`x64`) |
 | Localization | English (`en`, default), German (`de`) |
 | Storage | Local `.tdf` file, HTTP/HTTPS WebDAV server, or both |

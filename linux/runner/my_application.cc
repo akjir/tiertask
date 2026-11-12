@@ -397,9 +397,82 @@ static void on_location_method_call(FlMethodChannel* channel,
   fl_method_call_respond(method_call, response, nullptr);
 }
 
+// Locates Flutter 3.50's Wayland subsurface renderer widget inside FlView.
+static GtkWidget* find_subsurface_renderer(FlView* view) {
+  if (view == nullptr || !GTK_IS_CONTAINER(view)) {
+    return nullptr;
+  }
+  g_autoptr(GList) children = gtk_container_get_children(GTK_CONTAINER(view));
+  for (GList* item = children; item != nullptr; item = item->next) {
+    GtkWidget* child = GTK_WIDGET(item->data);
+    if (GTK_IS_BIN(child)) {
+      GtkWidget* grandchild = gtk_bin_get_child(GTK_BIN(child));
+      if (grandchild != nullptr &&
+          g_strcmp0(G_OBJECT_TYPE_NAME(grandchild),
+                    "FlViewRendererSubsurface") == 0) {
+        return grandchild;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Recreates FlViewRendererSubsurface's Wayland subsurface when the GTK scale
+// factor changes across mixed-DPI Wayland outputs (Flutter 3.50 sets
+// wl_surface_set_buffer_scale only once during subsurface creation).
+static void sync_wayland_subsurface_scale(FlView* view) {
+  GtkWidget* renderer = find_subsurface_renderer(view);
+  if (renderer == nullptr || !gtk_widget_get_realized(renderer)) {
+    return;
+  }
+  GtkWidget* toplevel = gtk_widget_get_toplevel(renderer);
+  if (toplevel == nullptr || !GTK_IS_WINDOW(toplevel)) {
+    return;
+  }
+  GdkWindow* gdk_window = gtk_widget_get_window(toplevel);
+  if (gdk_window == nullptr) {
+    return;
+  }
+
+  const gint current_scale = gtk_widget_get_scale_factor(renderer);
+  const gint previous_scale = GPOINTER_TO_INT(
+      g_object_get_data(G_OBJECT(renderer), "tiertask-subsurface-scale"));
+  if (current_scale == previous_scale) {
+    return;
+  }
+  g_object_set_data(G_OBJECT(renderer), "tiertask-subsurface-scale",
+                    GINT_TO_POINTER(current_scale));
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(renderer, &allocation);
+  GtkWidgetClass* widget_class = GTK_WIDGET_GET_CLASS(renderer);
+  if (widget_class == nullptr || widget_class->size_allocate == nullptr) {
+    return;
+  }
+
+  g_object_ref(gdk_window);
+  g_object_freeze_notify(G_OBJECT(toplevel));
+  gtk_widget_set_window(toplevel, nullptr);
+  widget_class->size_allocate(renderer, &allocation);
+  gtk_widget_set_window(toplevel, gdk_window);
+  g_object_thaw_notify(G_OBJECT(toplevel));
+  widget_class->size_allocate(renderer, &allocation);
+  g_object_unref(gdk_window);
+}
+
+static void on_wayland_scale_factor_notify(GObject* object,
+                                           GParamSpec* pspec,
+                                           gpointer user_data) {
+  (void)object;
+  (void)pspec;
+  sync_wayland_subsurface_scale(FL_VIEW(user_data));
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
+  (void)self;
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  sync_wayland_subsurface_scale(view);
 }
 
 // Implements GApplication::activate.
@@ -465,6 +538,16 @@ static void my_application_activate(GApplication* application) {
   g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
                            self);
   gtk_widget_realize(GTK_WIDGET(view));
+  GtkWidget* subsurface_renderer = find_subsurface_renderer(view);
+  if (subsurface_renderer != nullptr) {
+    g_object_set_data(
+        G_OBJECT(subsurface_renderer), "tiertask-subsurface-scale",
+        GINT_TO_POINTER(gtk_widget_get_scale_factor(subsurface_renderer)));
+    g_signal_connect_after(view, "notify::scale-factor",
+                           G_CALLBACK(on_wayland_scale_factor_notify), view);
+    g_signal_connect_after(subsurface_renderer, "notify::scale-factor",
+                           G_CALLBACK(on_wayland_scale_factor_notify), view);
+  }
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
