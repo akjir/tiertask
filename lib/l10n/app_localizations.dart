@@ -2413,6 +2413,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Automatically merge edits saved by external editors, scripts, or file-sync tools.'**
   String get localWatchDescription;
+
+  /// Subtle label displaying the task identifier at the top of an expanded task card.
+  ///
+  /// In en, this message translates to:
+  /// **'ID: {id}'**
+  String taskIdRowLabel(String id);
+
+  /// Tooltip for the button that copies the task ID to the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy task ID'**
+  String get tooltipCopyTaskId;
+
+  /// SnackBar confirmation message shown after copying a task ID to the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Task ID copied to clipboard.'**
+  String get taskIdCopiedSnackBar;
 }
 
 class _AppLocalizationsDelegate

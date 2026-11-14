@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added a subtle task ID header with a copy button at the top of expanded task cards, allowing every task card to expand on tap.
 - Added automatic synchronization for external edits to the local TDF file, with a per-workspace toggle in Settings.
 - Added in-memory undo via a notification bar action and the Ctrl+Z desktop shortcut for task completion, downgrade, and deletion.
 - Added a copy button on the right side of expanded task notes to copy note text to the clipboard.

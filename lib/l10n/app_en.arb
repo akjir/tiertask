@@ -1851,5 +1851,22 @@
   "localWatchDescription": "Automatically merge edits saved by external editors, scripts, or file-sync tools.",
   "@localWatchDescription": {
     "description": "Description for the local external file watcher toggle in settings."
+  },
+  "taskIdRowLabel": "ID: {id}",
+  "@taskIdRowLabel": {
+    "description": "Subtle label displaying the task identifier at the top of an expanded task card.",
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "tooltipCopyTaskId": "Copy task ID",
+  "@tooltipCopyTaskId": {
+    "description": "Tooltip for the button that copies the task ID to the clipboard."
+  },
+  "taskIdCopiedSnackBar": "Task ID copied to clipboard.",
+  "@taskIdCopiedSnackBar": {
+    "description": "SnackBar confirmation message shown after copying a task ID to the clipboard."
   }
 }

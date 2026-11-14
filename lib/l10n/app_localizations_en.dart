@@ -1330,4 +1330,15 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get localWatchDescription =>
       'Automatically merge edits saved by external editors, scripts, or file-sync tools.';
+
+  @override
+  String taskIdRowLabel(String id) {
+    return 'ID: $id';
+  }
+
+  @override
+  String get tooltipCopyTaskId => 'Copy task ID';
+
+  @override
+  String get taskIdCopiedSnackBar => 'Task ID copied to clipboard.';
 }

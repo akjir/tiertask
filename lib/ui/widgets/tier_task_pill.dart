@@ -387,8 +387,8 @@ class _TierTaskPillRow extends StatelessWidget {
   /// Callback invoked when the edit button is pressed.
   final VoidCallback onEdit;
 
-  /// Optional callback invoked when the task body is tapped to expand or collapse subtasks.
-  final VoidCallback? onToggleExpand;
+  /// Callback invoked when the task body is tapped to expand or collapse task details.
+  final VoidCallback onToggleExpand;
 
   /// Task item displayed in this pill row.
   final TaskItem task;
@@ -566,7 +566,7 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
   @override
   void didUpdateWidget(covariant TierTaskPill oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!hasExpandableTaskDetails(widget.task) && _isExpanded) {
+    if (oldWidget.task.id != widget.task.id && _isExpanded) {
       _isExpanded = false;
       _subtaskController.value = 0.0;
     }
@@ -582,9 +582,6 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
 
   @override
   Widget build(BuildContext context) {
-    final task = widget.task;
-    final hasExpandableDetails = hasExpandableTaskDetails(task);
-
     return _AnimatedTaskTransitionWrapper(
       entryAnimation: _entryController,
       exitAction: _exitAction,
@@ -596,14 +593,14 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
           color: Theme.of(context).cardColor,
           clipBehavior: Clip.antiAlias,
           borderRadius: BorderRadius.circular(16),
-          child: _buildCardColumn(task, hasExpandableDetails),
+          child: _buildCardColumn(widget.task),
         ),
       ),
     );
   }
 
   /// Builds the pill header row and expandable details section for [task].
-  Widget _buildCardColumn(TaskItem task, bool hasExpandableDetails) {
+  Widget _buildCardColumn(TaskItem task) {
     final sortedLabels = task.labelIds.isEmpty
         ? const <TdfLabel>[]
         : ref.watch(
@@ -622,12 +619,12 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
           onComplete: _handleCompletePressed,
           onDowngrade: widget.canDowngrade ? _handleDowngradePressed : null,
           onEdit: () => openEditTaskScreen(context, initialTask: task),
-          onToggleExpand: hasExpandableDetails ? _toggleExpanded : null,
+          onToggleExpand: _toggleExpanded,
         ),
         AnimatedSubtasksSection(
           autoFinishingStepIndex: _autoFinishingStepIndex,
           controller: _subtaskController,
-          isExpanded: _isExpanded && hasExpandableDetails,
+          isExpanded: _isExpanded,
           task: task,
           onOpenLink: _handleOpenLink,
           onToggleSubtask: widget.isCompleted ? null : _handleToggleSubtask,

@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,6 +28,7 @@ import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/ui/widgets/tier_task_pill.dart';
 
 import '../test_helpers.dart';
@@ -772,6 +775,354 @@ task plain1OkD2 {
       _expectOne(
         find.text('Notiz in die Zwischenablage kopiert.'),
         'German confirmation SnackBar must be localized',
+      );
+    },
+  );
+
+  testWidgets(
+    'Plain tasks expand on tap to reveal a subtle top-most task ID row, collapse cleanly on second tap or Stage 1 completion, and render above notes, links, and subtasks',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.6.0
+
+queue {
+  modified 2026-11-01 08:10:00
+  task pln001OkD2
+  task ful001OkD2
+}
+
+task pln001OkD2 {
+  name "Plain Title Only Task"
+  created 2026-11-01 08:00
+}
+task ful001OkD2 {
+  name "Full Details With Id Task"
+  note "Detailed task note"
+  created 2026-11-01 08:05
+  link "Spec" "https://example.com/spec"
+  subtasks {
+    step false "Verify ID row order"
+  }
+}
+''';
+      final container = await _pumpSeededApp(tester, seededTdf);
+
+      final plainIdRowFinder = _byKey('task_id_pln001OkD2');
+      final plainCopyIdFinder = _byKey('copy_task_id_pln001OkD2');
+      final secondPillFinder = _byKey('tier_pill_focus_ful001OkD2');
+
+      _expectNone(
+        plainIdRowFinder,
+        'Task ID row must not be rendered while a plain task pill is collapsed',
+      );
+      _expectNone(
+        plainCopyIdFinder,
+        'Task ID copy button must not be rendered while collapsed',
+      );
+      _expectNone(
+        _byKey('summary_task_indicator_pln001OkD2'),
+        'Plain task must not display any passive status indicator icon for its ID',
+      );
+
+      final initialSecondTop = tester.getTopLeft(secondPillFinder).dy;
+
+      await tester.tap(find.text('Plain Title Only Task'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 110));
+
+      final midExpandSecondTop = tester.getTopLeft(secondPillFinder).dy;
+      _expectTrue(
+        midExpandSecondTop > initialSecondTop,
+        'Expanding a plain task pill must smoothly shift lower tasks downward',
+      );
+
+      await tester.pumpAndSettle();
+
+      final expandedSecondTop = tester.getTopLeft(secondPillFinder).dy;
+      _expectTrue(
+        expandedSecondTop > midExpandSecondTop,
+        'Settled plain task expansion must reach full downward offset',
+      );
+      _expectOne(
+        plainIdRowFinder,
+        'Tapping a plain task pill must expand its task ID row',
+      );
+      _expectOne(
+        plainCopyIdFinder,
+        'Expanded plain task pill must render its task ID copy button',
+      );
+      _expectOne(
+        find.text('ID: pln001OkD2'),
+        'Expanded task ID row must display the formatted task ID label',
+      );
+      _expectOne(
+        find.descendant(
+          of: plainIdRowFinder,
+          matching: find.byIcon(Icons.tag_rounded),
+        ),
+        'Expanded task ID row must render a subtle leading tag icon',
+      );
+
+      await tester.tap(find.text('Plain Title Only Task'));
+      await tester.pumpAndSettle();
+
+      _expectNone(
+        plainIdRowFinder,
+        'Tapping an expanded plain task pill a second time must collapse its ID row',
+      );
+      expect(
+        tester.getTopLeft(secondPillFinder).dy,
+        closeTo(initialSecondTop, 0.01),
+        reason: 'Collapsing a plain task pill must restore subsequent tasks to their exact initial offset',
+      );
+
+      await tester.tap(find.text('Plain Title Only Task'));
+      await tester.pumpAndSettle();
+      _expectOne(plainIdRowFinder, 'Plain task must re-expand before closing');
+
+      await tester.tap(_byKey('complete_task_button_pln001OkD2'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 110));
+      _expectOne(
+        plainIdRowFinder,
+        'Stage 1 completion of an expanded plain task must animate ID collapse before removal',
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(taskNotifierProvider).value!.completed.single.id,
+        equals('pln001OkD2'),
+        reason: 'Completing expanded plain task must move it to Completed',
+      );
+
+      await tester.tap(find.text('Full Details With Id Task'));
+      await tester.pumpAndSettle();
+
+      final fullIdRowFinder = _byKey('task_id_ful001OkD2');
+      final fullNoteRowFinder = _byKey('task_note_ful001OkD2');
+      final fullLinkRowFinder = _byKey('task_link_ful001OkD2_0');
+      final fullSubtaskRowFinder = _byKey('subtask_step_ful001OkD2_0');
+
+      _expectOne(fullIdRowFinder, 'Expanded full task must render task ID row');
+      final idTop = tester.getTopLeft(fullIdRowFinder).dy;
+      final noteTop = tester.getTopLeft(fullNoteRowFinder).dy;
+      final linkTop = tester.getTopLeft(fullLinkRowFinder).dy;
+      final subtaskTop = tester.getTopLeft(fullSubtaskRowFinder).dy;
+
+      _expectTrue(
+        idTop < noteTop,
+        'Task ID row must be rendered at the very top above the task note',
+      );
+      _expectTrue(
+        noteTop < linkTop && linkTop < subtaskTop,
+        'Note, link, and subtask ordering below the task ID row must remain intact',
+      );
+
+      final idTextWidget = tester.widget<Text>(find.text('ID: ful001OkD2'));
+      final noteTextWidget = tester.widget<Text>(
+        find.text('Detailed task note'),
+      );
+      final titleTextWidget = tester.widget<Text>(
+        find.text('Full Details With Id Task'),
+      );
+      final idCopyIcon = tester.widget<Icon>(
+        find.descendant(
+          of: _byKey('copy_task_id_ful001OkD2'),
+          matching: find.byIcon(Icons.copy_rounded),
+        ),
+      );
+      final noteCopyIcon = tester.widget<Icon>(
+        find.descendant(
+          of: _byKey('copy_task_note_ful001OkD2'),
+          matching: find.byIcon(Icons.copy_rounded),
+        ),
+      );
+
+      expect(
+        idTextWidget.style!.fontSize!,
+        lessThan(noteTextWidget.style!.fontSize!),
+        reason: 'Task ID text must use a smaller font size than the task note',
+      );
+      expect(
+        noteTextWidget.style!.fontSize!,
+        lessThan(titleTextWidget.style!.fontSize!),
+        reason: 'Task note font size must remain smaller than the task title',
+      );
+      expect(
+        idTextWidget.style!.color!.a,
+        lessThan(noteTextWidget.style!.color!.a),
+        reason: 'Task ID text color must have lower opacity than the task note to stay visually subtle',
+      );
+      expect(
+        idCopyIcon.size!,
+        lessThan(noteCopyIcon.size!),
+        reason: 'Task ID copy icon must be smaller than the note copy icon',
+      );
+      expect(
+        idCopyIcon.color!.a,
+        lessThan(noteCopyIcon.color!.a),
+        reason:
+            'Task ID copy icon must have lower opacity than the note copy icon',
+      );
+
+      await tester.tap(_byKey('tier_indicator_item_completed'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plain Title Only Task'));
+      await tester.pumpAndSettle();
+      _expectOne(
+        _byKey('task_id_pln001OkD2'),
+        'Completed plain task must still expand on tap to expose its task ID',
+      );
+    },
+  );
+
+  testWidgets(
+    'Task ID copy button aligns with the right action column, copies raw task ID in English and German, logs task.id.copied, and handles unmount while Clipboard.setData is suspended',
+    (WidgetTester tester) async {
+      String? copiedClipboardText;
+      Completer<void>? pendingClipboardWrite;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (MethodCall methodCall) async {
+          if (methodCall.method == 'Clipboard.setData') {
+            final arguments = methodCall.arguments;
+            if (arguments is Map<Object?, Object?>) {
+              final text = arguments['text'];
+              if (text is String) {
+                copiedClipboardText = text;
+              }
+            }
+            if (pendingClipboardWrite case final completer?) {
+              await completer.future;
+            }
+          }
+          return null;
+        },
+      );
+      AppLogger.clear();
+      AppLogger.setEnabled(
+        true,
+        persistToDisk: false,
+        minimumLevel: LogLevel.info,
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        );
+        AppLogger.setEnabled(false, persistToDisk: false);
+        AppLogger.clear();
+      });
+
+      final englishTask = TaskItem(id: 'idc001OkD2', title: 'Copyable ID Task');
+
+      await pumpLeafWidget(
+        tester,
+        TierTaskPill(canDowngrade: true, isCompleted: false, task: englishTask),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Copyable ID Task'));
+      await tester.pumpAndSettle();
+
+      final idRowFinder = _byKey('task_id_idc001OkD2');
+      final copyIdButtonFinder = _byKey('copy_task_id_idc001OkD2');
+      _expectOne(copyIdButtonFinder, 'Expanded task ID copy button must exist');
+
+      final copyIdButtonWidget = tester.widget<IconButton>(copyIdButtonFinder);
+      expect(
+        copyIdButtonWidget.tooltip,
+        equals('Copy task ID'),
+        reason: 'English tooltip must describe copying the task ID',
+      );
+
+      final idLabelRight = tester.getTopRight(find.text('ID: idc001OkD2')).dx;
+      final copyButtonLeft = tester.getTopLeft(copyIdButtonFinder).dx;
+      final copyButtonCenterX = tester.getCenter(copyIdButtonFinder).dx;
+      final editButtonCenterX = tester
+          .getCenter(_byKey('edit_task_button_idc001OkD2'))
+          .dx;
+
+      _expectTrue(
+        copyButtonLeft >= idLabelRight,
+        'Task ID copy button must sit to the right of the ID label text',
+      );
+      expect(
+        copyButtonCenterX,
+        closeTo(editButtonCenterX, 1.0),
+        reason: 'Task ID copy button must align horizontally with the trailing action column',
+      );
+
+      await tester.tap(copyIdButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        copiedClipboardText,
+        equals('idc001OkD2'),
+        reason: 'Copying the task ID must write only the raw 10-character Base62 ID without the ID prefix',
+      );
+      _expectOne(
+        find.text('Task ID copied to clipboard.'),
+        'Copying the task ID must display a localized confirmation SnackBar',
+      );
+      _expectOne(
+        idRowFinder,
+        'Tapping the task ID copy button must keep the task card expanded',
+      );
+      expect(
+        AppLogger.fullLogText,
+        contains('task.id.copied | task=idc001OkD2'),
+        reason:
+            'Copying a task ID must emit a structured UI diagnostic log event',
+      );
+
+      final germanTask = TaskItem(
+        id: 'deuId1OkD2',
+        title: 'Aufgabe ohne Details',
+      );
+      await pumpLeafWidget(
+        tester,
+        TierTaskPill(canDowngrade: false, isCompleted: false, task: germanTask),
+        locale: const Locale('de'),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Aufgabe ohne Details'));
+      await tester.pumpAndSettle();
+
+      final germanCopyButtonFinder = _byKey('copy_task_id_deuId1OkD2');
+      final germanCopyWidget = tester.widget<IconButton>(
+        germanCopyButtonFinder,
+      );
+      expect(
+        germanCopyWidget.tooltip,
+        equals('Aufgaben-ID kopieren'),
+        reason: 'German tooltip for copying the task ID must be localized',
+      );
+
+      await tester.tap(germanCopyButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        copiedClipboardText,
+        equals('deuId1OkD2'),
+        reason: 'German copy action must copy the raw task ID',
+      );
+      _expectOne(
+        find.text('Aufgaben-ID in die Zwischenablage kopiert.'),
+        'German confirmation SnackBar for copying the task ID must be localized',
+      );
+
+      pendingClipboardWrite = Completer<void>();
+      await tester.tap(germanCopyButtonFinder);
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+      pendingClipboardWrite.complete();
+      await tester.pumpAndSettle();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'Unmounting TierTaskPill while Clipboard.setData is suspended must not throw unmounted BuildContext errors',
       );
     },
   );

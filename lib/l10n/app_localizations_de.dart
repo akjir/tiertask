@@ -1351,4 +1351,16 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get localWatchDescription =>
       'Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen.';
+
+  @override
+  String taskIdRowLabel(String id) {
+    return 'ID: $id';
+  }
+
+  @override
+  String get tooltipCopyTaskId => 'Aufgaben-ID kopieren';
+
+  @override
+  String get taskIdCopiedSnackBar =>
+      'Aufgaben-ID in die Zwischenablage kopiert.';
 }

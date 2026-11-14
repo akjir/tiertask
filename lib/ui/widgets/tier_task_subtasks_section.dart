@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-/// Expandable note, repeatable links, and interactive subtask checklist section for task pills.
+/// Expandable task ID, note, repeatable links, and interactive subtask checklist section for task pills.
 library;
 
 import 'package:flutter/services.dart';
@@ -31,7 +31,7 @@ const int maxVisibleTaskIndicators = 3;
 /// Animation duration for expanding and collapsing task subtasks, notes, and links.
 const Duration subtaskExpandDuration = Duration(milliseconds: 220);
 
-/// Animated container that glides the task note, links, and subtask checklist downward or upward driven by [controller].
+/// Animated container that glides the task ID, note, links, and subtask checklist downward or upward driven by [controller].
 class AnimatedSubtasksSection extends StatelessWidget {
   /// Creates an [AnimatedSubtasksSection].
   const AnimatedSubtasksSection({
@@ -50,7 +50,7 @@ class AnimatedSubtasksSection extends StatelessWidget {
   /// Animation controller driving the expansion progress between `0.0` and `1.0`.
   final Animation<double> controller;
 
-  /// Whether the note, link, and subtask list is currently expanded.
+  /// Whether the task ID, note, link, and subtask list is currently expanded.
   final bool isExpanded;
 
   /// Callback invoked when a link row is tapped.
@@ -59,20 +59,22 @@ class AnimatedSubtasksSection extends StatelessWidget {
   /// Callback invoked with the zero-based step index when a subtask row is tapped, or `null` when locked.
   final ValueChanged<int>? onToggleSubtask;
 
-  /// Parent task whose note, links, and subtasks are displayed.
+  /// Parent task whose ID, note, links, and subtasks are displayed.
   final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
-    if (!hasExpandableTaskDetails(task)) {
-      return const SizedBox.shrink();
-    }
-    final displayedSubtasks = resolveDisplayedSubtasks(
-      task.subtasks,
-      autoFinishingStepIndex: autoFinishingStepIndex,
-    );
+    final detailsChild = isExpanded || controller.value > 0.0
+        ? _SubtaskStepsColumn(
+            autoFinishingStepIndex: autoFinishingStepIndex,
+            task: task,
+            onOpenLink: onOpenLink,
+            onToggleSubtask: onToggleSubtask,
+          )
+        : null;
     return AnimatedBuilder(
       animation: controller,
+      child: detailsChild,
       builder: (context, child) {
         final rawValue = controller.value;
         if (!isExpanded && rawValue <= 0.0) {
@@ -83,39 +85,33 @@ class AnimatedSubtasksSection extends StatelessWidget {
           child: Align(
             alignment: Alignment.bottomCenter,
             heightFactor: progress,
-            child: child,
+            child:
+                child ??
+                _SubtaskStepsColumn(
+                  autoFinishingStepIndex: autoFinishingStepIndex,
+                  task: task,
+                  onOpenLink: onOpenLink,
+                  onToggleSubtask: onToggleSubtask,
+                ),
           ),
         );
       },
-      child: _SubtaskStepsColumn(
-        links: task.links,
-        note: task.note,
-        subtasks: displayedSubtasks,
-        taskId: task.id,
-        onOpenLink: onOpenLink,
-        onToggleSubtask: onToggleSubtask,
-      ),
     );
   }
 }
 
-/// Column of note, interactive link, and subtask rows rendered below the main task pill header.
+/// Column of task ID, note, interactive link, and subtask rows rendered below the main task pill header.
 class _SubtaskStepsColumn extends StatelessWidget {
   /// Creates a [_SubtaskStepsColumn].
   const _SubtaskStepsColumn({
-    required this.links,
-    required this.note,
-    required this.subtasks,
-    required this.taskId,
+    required this.autoFinishingStepIndex,
+    required this.task,
     required this.onOpenLink,
     required this.onToggleSubtask,
   });
 
-  /// Resource links belonging to [taskId].
-  final List<TaskLink> links;
-
-  /// Optional task note belonging to [taskId].
-  final String? note;
+  /// Zero-based step index currently triggering Stage 1 auto-finish collapse, if any.
+  final int? autoFinishingStepIndex;
 
   /// Callback invoked when a link row is tapped.
   final ValueChanged<String> onOpenLink;
@@ -123,21 +119,25 @@ class _SubtaskStepsColumn extends StatelessWidget {
   /// Callback invoked with the zero-based step index when a subtask row is tapped, or `null` when locked.
   final ValueChanged<int>? onToggleSubtask;
 
-  /// Ordered checklist steps belonging to [taskId].
-  final List<SubtaskItem> subtasks;
-
-  /// Identifier of the parent task.
-  final String taskId;
+  /// Parent task whose details are rendered.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
-    final activeNote = note;
+    final taskId = task.id;
+    final activeNote = task.note;
+    final links = task.links;
+    final subtasks = resolveDisplayedSubtasks(
+      task.subtasks,
+      autoFinishingStepIndex: autoFinishingStepIndex,
+    );
     final toggleCallback = onToggleSubtask;
     return _SubtaskStepsDividerBox(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          _TierTaskIdRow(taskId: taskId),
           if (activeNote != null && activeNote.isNotEmpty)
             _TierNoteRow(
               copyButtonKey: ValueKey('copy_task_note_$taskId'),
@@ -424,6 +424,81 @@ class _TierSubtaskStepTitle extends StatelessWidget {
   }
 }
 
+/// Subtle header row displaying the task [taskId] and a trailing copy button at the top of [_SubtaskStepsColumn].
+class _TierTaskIdRow extends StatelessWidget {
+  /// Creates a [_TierTaskIdRow].
+  const _TierTaskIdRow({required this.taskId});
+
+  /// Task identifier to render and copy.
+  final String taskId;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: ValueKey('task_id_$taskId'),
+      padding: const EdgeInsets.fromLTRB(22, 2, 12, 2),
+      child: _TierTaskIdRowContent(
+        copyButtonKey: ValueKey('copy_task_id_$taskId'),
+        taskId: taskId,
+      ),
+    );
+  }
+}
+
+/// Inner tag icon, subtle task ID label, and copy action layout for [_TierTaskIdRow].
+class _TierTaskIdRowContent extends StatelessWidget {
+  /// Creates a [_TierTaskIdRowContent].
+  const _TierTaskIdRowContent({
+    required this.copyButtonKey,
+    required this.taskId,
+  });
+
+  /// Deterministic widget key for the trailing copy button.
+  final Key copyButtonKey;
+
+  /// Task identifier to display and copy.
+  final String taskId;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final subtleColor = Theme.of(context).colorScheme.onSurfaceVariant
+        .withValues(alpha: 0.6);
+    return Row(
+      children: [
+        SizedBox(
+          width: 18,
+          child: Icon(Icons.tag_rounded, size: 14, color: subtleColor),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          child: Text(
+            localizations.taskIdRowLabel(taskId),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: subtleColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          key: copyButtonKey,
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 28),
+          tooltip: localizations.tooltipCopyTaskId,
+          icon: Icon(Icons.copy_rounded, size: 15, color: subtleColor),
+          onPressed: () => copyTaskIdToClipboard(context, taskId),
+        ),
+      ],
+    );
+  }
+}
+
 /// Logs a UI debug trace and forwards or reverses [controller] when [isExpanded] changes for [taskId].
 void animateSubtaskSectionToggle(
   AnimationController controller, {
@@ -458,25 +533,40 @@ computeSubtaskExitStageTiming({
   );
 }
 
-/// Copies [note] to the system clipboard and displays a localized confirmation [SnackBar] on [context].
-Future<void> copyTaskNoteToClipboard(BuildContext context, String note) async {
-  final localizations = AppLocalizations.of(context);
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  await Clipboard.setData(ClipboardData(text: note));
-  if (!context.mounted) {
-    return;
+/// Copies [taskId] to the system clipboard and displays a localized confirmation [SnackBar] on [context].
+Future<void> copyTaskIdToClipboard(BuildContext context, String taskId) async {
+  if (AppLogger.shouldLog(LogLevel.info)) {
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'task.id.copied',
+      fields: {'task': taskId},
+    );
   }
-  messenger
-    ?..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(localizations.noteCopiedSnackBar)));
+  final localizations = AppLocalizations.of(context);
+  await _copyTextToClipboardWithSnackBar(
+    context,
+    snackBarMessage: localizations.taskIdCopiedSnackBar,
+    text: taskId,
+  );
 }
 
-/// Returns `true` when [task] has a non-empty note, at least one link, or at least one subtask.
-bool hasExpandableTaskDetails(TaskItem task) {
-  final note = task.note;
-  return (note != null && note.isNotEmpty) ||
-      task.links.isNotEmpty ||
-      task.subtasks.isNotEmpty;
+/// Copies [note] to the system clipboard and displays a localized confirmation [SnackBar] on [context].
+Future<void> copyTaskNoteToClipboard(BuildContext context, String note) async {
+  if (AppLogger.shouldLog(LogLevel.info)) {
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'task.note.copied',
+      fields: {'length': note.length},
+    );
+  }
+  final localizations = AppLocalizations.of(context);
+  await _copyTextToClipboardWithSnackBar(
+    context,
+    snackBarMessage: localizations.noteCopiedSnackBar,
+    text: note,
+  );
 }
 
 /// Opens [uri] via [repository] and shows a localized failure [SnackBar] on [context] if launching fails.
@@ -630,4 +720,20 @@ bool _areAllOtherSubtasksCompleted(
     }
   }
   return true;
+}
+
+/// Copies [text] to the system clipboard and shows [snackBarMessage] when [context] remains mounted.
+Future<void> _copyTextToClipboardWithSnackBar(
+  BuildContext context, {
+  required String snackBarMessage,
+  required String text,
+}) async {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  await Clipboard.setData(ClipboardData(text: text));
+  if (!context.mounted) {
+    return;
+  }
+  messenger
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(snackBarMessage)));
 }

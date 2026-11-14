@@ -385,5 +385,8 @@
   "taskDowngradedUndoSnackBar": "„{title}“ herabgestuft.",
   "taskDeletedUndoSnackBar": "„{title}“ gelöscht.",
   "localWatchLabel": "Externe Dateiänderungen überwachen",
-  "localWatchDescription": "Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen."
+  "localWatchDescription": "Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen.",
+  "taskIdRowLabel": "ID: {id}",
+  "tooltipCopyTaskId": "Aufgaben-ID kopieren",
+  "taskIdCopiedSnackBar": "Aufgaben-ID in die Zwischenablage kopiert."
 }
