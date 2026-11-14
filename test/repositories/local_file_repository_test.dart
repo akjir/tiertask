@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -850,6 +851,278 @@ void main() {
         isEmpty,
         reason: 'Failed atomic save must unlink its temporary file before rethrowing',
       );
+    });
+  });
+
+  group('LocalFileRepository Directory Watch & Event Filtering', () {
+    late Directory watchTempRoot;
+
+    setUp(() async {
+      watchTempRoot = await Directory.systemTemp.createTemp(
+        'tiertask_watch_repo_',
+      );
+    });
+
+    tearDown(() async {
+      if (await watchTempRoot.exists()) {
+        await watchTempRoot.delete(recursive: true);
+      }
+    });
+
+    test('matchesWatchedFileName and isRelevantWatchEvent enforce zero-trim basename matching, case rules, and Delete/tmp/bak/log suppression', () {
+      const operations = LocalFileOperations<LocalFileException>(
+        LocalFileException.new,
+      );
+
+      expect(
+        operations.matchesWatchedFileName(
+          '/home/user/tasks.tdf',
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isTrue,
+      );
+      expect(
+        operations.matchesWatchedFileName(
+          r'C:\Users\alice\TierTask\tasks.tdf',
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isTrue,
+      );
+      expect(
+        operations.matchesWatchedFileName(
+          'tasks.tdf',
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isTrue,
+      );
+
+      for (final rejectedPath in <String>[
+        '',
+        '/',
+        r'\',
+        '/home/user/',
+        r'C:\Users\alice\',
+        '/home/user/tasks.tdf ',
+        '/home/user/ tasks.tdf',
+        '/home/user/work.tdf',
+        '/home/user/.tasks.tdf.tmp.0123456789abcdef0123456789abcdef',
+        '/home/user/tasks.tdf.bak',
+        '/home/user/tasks.tdf.bak.001',
+        '/home/user/tiertask_2026-11-14_linux_tasks.log',
+      ]) {
+        expect(
+          operations.matchesWatchedFileName(
+            rejectedPath,
+            'tasks.tdf',
+            caseInsensitive: true,
+          ),
+          isFalse,
+          reason: 'Path "$rejectedPath" must not match tasks.tdf',
+        );
+      }
+      expect(
+        operations.matchesWatchedFileName(
+          '/home/user/tasks.tdf',
+          '',
+          caseInsensitive: true,
+        ),
+        isFalse,
+      );
+
+      expect(
+        operations.matchesWatchedFileName(
+          '/home/user/Tasks.TDF',
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isFalse,
+      );
+      expect(
+        operations.matchesWatchedFileName(
+          r'C:\Users\alice\Tasks.TDF',
+          'tasks.tdf',
+          caseInsensitive: true,
+        ),
+        isTrue,
+      );
+
+      expect(
+        operations.isRelevantWatchEvent(
+          FileSystemCreateEvent('/dir/tasks.tdf', false),
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isTrue,
+      );
+      expect(
+        operations.isRelevantWatchEvent(
+          FileSystemModifyEvent('/dir/tasks.tdf', false, true),
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isTrue,
+      );
+      expect(
+        operations.isRelevantWatchEvent(
+          FileSystemDeleteEvent('/dir/tasks.tdf', false),
+          'tasks.tdf',
+          caseInsensitive: true,
+        ),
+        isFalse,
+        reason: 'FileSystemDeleteEvent must always be suppressed',
+      );
+      expect(
+        operations.isRelevantWatchEvent(
+          FileSystemMoveEvent(
+            '/dir/.tasks.tdf.tmp.abcd',
+            false,
+            '/dir/tasks.tdf',
+          ),
+          'tasks.tdf',
+          caseInsensitive: false,
+        ),
+        isTrue,
+        reason: 'Atomic temp-to-target rename must match via destination',
+      );
+      expect(
+        operations.isRelevantWatchEvent(
+          FileSystemMoveEvent('/dir/TASKS.TDF', false, '/dir/other.bak'),
+          'tasks.tdf',
+          caseInsensitive: true,
+        ),
+        isTrue,
+      );
+      expect(
+        operations.isRelevantWatchEvent(
+          FileSystemMoveEvent(
+            '/dir/.work.tdf.tmp.abcd',
+            false,
+            '/dir/work.tdf',
+          ),
+          'tasks.tdf',
+          caseInsensitive: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('guards in-memory fallback, traversal paths, and missing directories, and emits events for direct write, same-dir atomic swap, and cross-dir rename', () async {
+      final inMemoryRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        inMemoryStore: <String, String>{},
+      );
+      expect(inMemoryRepo.canWatchDirectory, isFalse);
+      expect(inMemoryRepo.directoryExists(), isTrue);
+      expect(await inMemoryRepo.watchTdfChanges().isEmpty, isTrue);
+
+      final traversalRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: '../escape.tdf'),
+        baseDirectoryPath: watchTempRoot.path,
+      );
+      expect(traversalRepo.directoryExists(), isFalse);
+      expect(await traversalRepo.watchTdfChanges().isEmpty, isTrue);
+
+      final missingDirPath = '${watchTempRoot.path}/not_created_yet';
+      final missingDirRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: missingDirPath,
+      );
+      expect(missingDirRepo.directoryExists(), isFalse);
+      expect(await missingDirRepo.watchTdfChanges().isEmpty, isTrue);
+
+      if (!FileSystemEntity.isWatchSupported) {
+        return;
+      }
+
+      final watchedDir = Directory('${watchTempRoot.path}/watched')
+        ..createSync(recursive: true);
+      final externalStagingDir = Directory('${watchTempRoot.path}/staging')
+        ..createSync(recursive: true);
+      final repo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: watchedDir.path,
+      );
+      expect(repo.canWatchDirectory, isTrue);
+      expect(repo.directoryExists(), isTrue);
+
+      var eventCount = 0;
+      Completer<void>? nextEvent;
+      final doneCompleter = Completer<void>();
+
+      final subscription = repo.watchTdfChanges().listen(
+        (_) {
+          eventCount++;
+          if (nextEvent case final pending? when !pending.isCompleted) {
+            pending.complete();
+          }
+        },
+        onDone: () {
+          if (!doneCompleter.isCompleted) {
+            doneCompleter.complete();
+          }
+        },
+      );
+      addTearDown(subscription.cancel);
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // Noise files and delete events must not emit notifications.
+      File('${watchedDir.path}/work.tdf').writeAsStringSync('tdf 0.6.0\n');
+      File('${watchedDir.path}/.tasks.tdf.tmp.0123456789abcdef0123456789abcdef')
+          .writeAsStringSync('staging');
+      File('${watchedDir.path}/tasks.tdf.bak').writeAsStringSync('backup');
+      File('${watchedDir.path}/tiertask_2026-11-14_linux_tasks.log')
+          .writeAsStringSync('log line\n');
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(
+        eventCount,
+        equals(0),
+        reason: 'Sibling .tdf, .tmp, .bak, and .log writes must be ignored',
+      );
+
+      // 1. Direct writeAsString on target file.
+      nextEvent = Completer<void>();
+      final targetFile = File(repo.resolveFilePath());
+      await targetFile.writeAsString('tdf 0.6.0\n', flush: true);
+      await nextEvent.future.timeout(const Duration(seconds: 3));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      final countBeforeDelete = eventCount;
+      targetFile.deleteSync();
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(
+        eventCount,
+        equals(countBeforeDelete),
+        reason: 'FileSystemDeleteEvent on tasks.tdf must be ignored',
+      );
+
+      // 2. Same-directory atomic .tmp -> rename save.
+      nextEvent = Completer<void>();
+      final countBeforeAtomic = eventCount;
+      await repo.saveTdf('tdf 0.6.0\n\nqueue {\n}\n');
+      await nextEvent.future.timeout(const Duration(seconds: 3));
+      expect(eventCount, greaterThan(countBeforeAtomic));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      // 3. Cross-directory rename onto target file.
+      nextEvent = Completer<void>();
+      final countBeforeCrossDir = eventCount;
+      final stagedExternal = File('${externalStagingDir.path}/incoming.tmp')
+        ..writeAsStringSync('tdf 0.6.0\n', flush: true);
+      stagedExternal.renameSync(repo.resolveFilePath());
+      await nextEvent.future.timeout(const Duration(seconds: 3));
+      expect(eventCount, greaterThan(countBeforeCrossDir));
+
+      // Runtime watched-directory deletion must not emit uncaught errors.
+      watchedDir.deleteSync(recursive: true);
+      await Future.any(<Future<void>>[
+        doneCompleter.future,
+        Future<void>.delayed(const Duration(milliseconds: 120)),
+      ]);
+      await subscription.cancel();
     });
   });
 }

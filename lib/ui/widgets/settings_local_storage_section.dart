@@ -109,6 +109,8 @@ class LocalStorageSection extends StatelessWidget {
   const LocalStorageSection({
     super.key,
     required this.resolvedLocalPath,
+    this.localWatchEnabled = true,
+    this.onLocalWatchEnabledChanged,
     this.onSelectLocalFile,
     this.onMoveLocalFile,
     this.onRenameLocalFile,
@@ -117,6 +119,12 @@ class LocalStorageSection extends StatelessWidget {
 
   /// Pattern matching POSIX (`/`) or Windows (`\`) path separators.
   static final RegExp _pathSeparatorPattern = RegExp(r'[/\\]');
+
+  /// Whether automatic external local `.tdf` file watching is enabled.
+  final bool localWatchEnabled;
+
+  /// Optional callback invoked when the local file watcher switch changes.
+  final ValueChanged<bool>? onLocalWatchEnabledChanged;
 
   /// Optional callback to move the local `.tdf` file into another directory.
   final VoidCallback? onMoveLocalFile;
@@ -156,6 +164,10 @@ class LocalStorageSection extends StatelessWidget {
             onMoveLocalFile: onMoveLocalFile,
             onRenameLocalFile: onRenameLocalFile,
             onWipeLocalFile: onWipeLocalFile,
+          ),
+          _LocalWatchToggleRow(
+            localWatchEnabled: localWatchEnabled,
+            onChanged: onLocalWatchEnabledChanged,
           ),
         ],
       ),
@@ -306,6 +318,56 @@ class WipeStorageButton extends StatelessWidget {
       onPressed: onPressed,
       icon: Icon(Icons.delete_sweep_outlined, size: compact ? 18 : null),
       label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+  }
+}
+
+/// Toggle row inside [LocalStorageSection] for enabling or disabling external `.tdf` file watching.
+class _LocalWatchToggleRow extends StatelessWidget {
+  /// Creates a [_LocalWatchToggleRow].
+  const _LocalWatchToggleRow({
+    required this.localWatchEnabled,
+    required this.onChanged,
+  });
+
+  /// Whether automatic external local `.tdf` file watching is enabled.
+  final bool localWatchEnabled;
+
+  /// Optional callback invoked when the user toggles the switch.
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Row(
+      spacing: 12,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 2,
+            children: [
+              Text(
+                localizations.localWatchLabel,
+                style: theme.textTheme.titleSmall,
+              ),
+              Text(
+                localizations.localWatchDescription,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Switch(
+          key: const ValueKey('settings_local_watch_switch'),
+          value: localWatchEnabled,
+          onChanged: onChanged,
+        ),
+      ],
     );
   }
 }

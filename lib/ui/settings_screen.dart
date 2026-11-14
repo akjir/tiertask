@@ -343,6 +343,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         if (storageMode.usesLocal)
           LocalStorageSection(
             resolvedLocalPath: _resolvePreviewLocalPath(currentConfig),
+            localWatchEnabled: _preferences.localWatchEnabled,
+            onLocalWatchEnabledChanged: _isTesting
+                ? null
+                : _handleLocalWatchChanged,
             onSelectLocalFile: _isTesting ? null : _handleSelectLocalFile,
             onMoveLocalFile: (!canPickDirectory || _isTesting)
                 ? null
@@ -406,6 +410,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  /// Toggles automatic local `.tdf` file watching via [_handlePreferenceChanged].
+  Future<void> _handleLocalWatchChanged(bool enabled) {
+    return _handlePreferenceChanged(
+      _buildCurrentConfig().copyWith(localWatchEnabled: enabled),
+    );
+  }
+
   /// Moves (`rename: false`) or renames (`rename: true`) the local `.tdf` file and updates state.
   Future<void> _handleMoveOrRenameLocalFile({required bool rename}) {
     return _applyLocalFileUpdate(
@@ -426,6 +437,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _handlePreferenceChanged(WebDavConfig updatedConfig) async {
     final diagnosticsChanged =
         updatedConfig.diagnosticsEnabled != _preferences.diagnosticsEnabled;
+    final localWatchChanged =
+        updatedConfig.localWatchEnabled != _preferences.localWatchEnabled;
     final logLevelChanged = updatedConfig.logLevel != _preferences.logLevel;
     final logStorageChanged =
         updatedConfig.logStorageMode != _preferences.logStorageMode;
@@ -436,6 +449,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final notifier = ref.read(webDavConfigProvider.notifier);
     if (diagnosticsChanged) {
       await notifier.updateDiagnosticsEnabled(updatedConfig.diagnosticsEnabled);
+    } else if (localWatchChanged) {
+      await notifier.updateLocalWatchEnabled(updatedConfig.localWatchEnabled);
     } else if (logLevelChanged) {
       await notifier.updateLogLevel(updatedConfig.logLevel);
     } else if (logStorageChanged) {

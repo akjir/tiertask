@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,9 +23,27 @@ import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
+import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/widgets/settings_local_storage_section.dart';
 
 import 'test_helpers.dart';
+
+class _StreamLocalFileRepository extends LocalFileRepository {
+  _StreamLocalFileRepository({
+    required super.config,
+    required super.baseDirectoryPath,
+    required this.watchStream,
+  });
+
+  final Stream<void> watchStream;
+
+  @override
+  bool get canWatchDirectory => true;
+
+  @override
+  Stream<void> watchTdfChanges() => watchStream;
+}
 
 void main() {
   late Directory sourceDir;
@@ -492,6 +511,193 @@ void main() {
 
       await tester.pump(const Duration(seconds: 4));
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'LocalStorageSection defaults localWatchEnabled switch to true and renders English labels',
+    (WidgetTester tester) async {
+      await pumpLeafWidget(
+        tester,
+        const Scaffold(
+          body: LocalStorageSection(resolvedLocalPath: '/tmp/tasks.tdf'),
+        ),
+      );
+
+      final switchFinder = find.byKey(
+        const ValueKey('settings_local_watch_switch'),
+      );
+      expect(
+        switchFinder,
+        findsOneWidget,
+        reason: 'LocalStorageSection must render settings_local_watch_switch',
+      );
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isTrue,
+        reason: 'settings_local_watch_switch must default to true',
+      );
+      expect(find.text('Watch for external file changes'), findsOneWidget);
+      expect(
+        find.text(
+          'Automatically merge edits saved by external editors, scripts, or file-sync tools.',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'TierTaskApp watches localFileWatcherProvider at root, pauses when toggled off, and catches up when re-enabled',
+    (WidgetTester tester) async {
+      final tdfPath = '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
+      File(tdfPath).writeAsStringSync(
+        'tdf 0.6.0\n\n'
+        'queue {\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '  task 000001OkD2\n'
+        '}\n\n'
+        'task 000001OkD2 {\n'
+        '  name "Initial Focus Task"\n'
+        '  created 2026-11-01 08:00:00\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '}\n',
+        flush: true,
+      );
+      final watchEvents = StreamController<void>.broadcast();
+      addTearDown(watchEvents.close);
+
+      final settingsRepository = InMemorySettingsRepository(
+        WebDavConfig(
+          localFilePath: tdfPath,
+          storageMode: StorageMode.local,
+          language: AppLanguage.english,
+        ),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localStorageDirectoryPathProvider.overrideWithValue(sourceDir.path),
+            localFileRepositoryProvider.overrideWith((ref) {
+              final currentConfig =
+                  ref.watch(webDavConfigProvider).asData?.value ??
+                  WebDavConfig(localFilePath: tdfPath);
+              return _StreamLocalFileRepository(
+                config: currentConfig,
+                baseDirectoryPath: sourceDir.path,
+                watchStream: watchEvents.stream,
+              );
+            }),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Initial Focus Task'), findsOneWidget);
+      expect(
+        watchEvents.hasListener,
+        isTrue,
+        reason: 'TierTaskApp must subscribe to localFileWatcherProvider',
+      );
+
+      File(tdfPath).writeAsStringSync(
+        'tdf 0.6.0\n\n'
+        'queue {\n'
+        '  modified 2026-11-01 08:30:00\n'
+        '  task 000001OkD2\n'
+        '  task 000002OkD2\n'
+        '}\n\n'
+        'task 000001OkD2 {\n'
+        '  name "Initial Focus Task"\n'
+        '  created 2026-11-01 08:00:00\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '}\n'
+        'task 000002OkD2 {\n'
+        '  name "External Live Task"\n'
+        '  created 2026-11-01 08:30:00\n'
+        '  modified 2026-11-01 08:30:00\n'
+        '}\n',
+        flush: true,
+      );
+      watchEvents.add(null);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('External Live Task'),
+        findsOneWidget,
+        reason: 'External write must merge automatically onto HomeScreen',
+      );
+
+      await openSettingsFromMenu(tester);
+      final switchFinder = find.byKey(
+        const ValueKey('settings_local_watch_switch'),
+      );
+      await tester.ensureVisible(switchFinder);
+      await tester.tap(switchFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        watchEvents.hasListener,
+        isFalse,
+        reason:
+            'Disabling localWatchEnabled must cancel directory watch stream',
+      );
+
+      File(tdfPath).writeAsStringSync(
+        'tdf 0.6.0\n\n'
+        'queue {\n'
+        '  modified 2026-11-01 08:45:00\n'
+        '  task 000001OkD2\n'
+        '  task 000002OkD2\n'
+        '  task 000003OkD2\n'
+        '}\n\n'
+        'task 000001OkD2 {\n'
+        '  name "Initial Focus Task"\n'
+        '  created 2026-11-01 08:00:00\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '}\n'
+        'task 000002OkD2 {\n'
+        '  name "External Live Task"\n'
+        '  created 2026-11-01 08:30:00\n'
+        '  modified 2026-11-01 08:30:00\n'
+        '}\n'
+        'task 000003OkD2 {\n'
+        '  name "Saved While Paused"\n'
+        '  created 2026-11-01 08:45:00\n'
+        '  modified 2026-11-01 08:45:00\n'
+        '}\n',
+        flush: true,
+      );
+      watchEvents.add(null);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Saved While Paused'),
+        findsNothing,
+        reason: 'External write must not merge while watcher is disabled',
+      );
+
+      await openSettingsFromMenu(tester);
+      await tester.ensureVisible(switchFinder);
+      await tester.tap(switchFinder);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Saved While Paused'),
+        findsOneWidget,
+        reason: 'Re-enabling watcher must catch up external edits immediately',
+      );
     },
   );
 }

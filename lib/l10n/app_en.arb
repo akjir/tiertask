@@ -1843,5 +1843,13 @@
         "type": "String"
       }
     }
+  },
+  "localWatchLabel": "Watch for external file changes",
+  "@localWatchLabel": {
+    "description": "Label for the local external file watcher toggle in settings."
+  },
+  "localWatchDescription": "Automatically merge edits saved by external editors, scripts, or file-sync tools.",
+  "@localWatchDescription": {
+    "description": "Description for the local external file watcher toggle in settings."
   }
 }

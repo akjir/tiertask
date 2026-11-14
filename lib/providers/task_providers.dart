@@ -38,6 +38,11 @@ import 'location_providers.dart';
 import 'sync_providers.dart';
 import 'workspace_providers.dart';
 
+/// Provides the transient OS file-lock retry delay (`250 ms` by default) for external local watch reads.
+final localFileWatchReadRetryDelayProvider = Provider<Duration>(
+  (ref) => TaskNotifier.defaultWatchReadRetryDelay,
+);
+
 /// Provides the [TaskNotifier] managing the in-memory [TaskBoard] and persistence.
 final taskNotifierProvider = AsyncNotifierProvider<TaskNotifier, TaskBoard>(
   TaskNotifier.new,
@@ -52,7 +57,14 @@ final taskUndoStateProvider =
 
 /// Manages the in-memory [TaskBoard] and synchronizes mutations to local files and WebDAV.
 class TaskNotifier extends AsyncNotifier<TaskBoard> {
+  /// Default single-retry delay (`250 ms`) when an external local `.tdf` read encounters a transient OS file lock.
+  static const Duration defaultWatchReadRetryDelay = Duration(
+    milliseconds: 250,
+  );
+
+  String? _conflictWatchDigest;
   Future<void>? _inFlightSync;
+  String? _lastFailedWatchDigest;
   int _mutationEpoch = 0;
   int _nextUndoSequence = 0;
   final Map<String, DateTime> _pendingDeletedLabelTimestamps =
@@ -74,13 +86,29 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
     _pendingDeletedLabelTimestamps.clear();
     _pendingDeletedLocationTimestamps.clear();
+    _conflictWatchDigest = null;
+    _lastFailedWatchDigest = null;
     state = const AsyncLoading();
-    final config = await ref.watch(webDavConfigProvider.future);
-    _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
+    final selectedConfig = await ref.watch(
+      webDavConfigProvider.selectAsync(
+        (value) => value.copyWith(localWatchEnabled: true),
+      ),
+    );
+    final activeWorkspaceId = ref.watch(
+      activeWorkspaceProvider.select((value) => value.asData?.value.id),
+    );
+    final config =
+        ref.read(webDavConfigProvider).asData?.value ?? selectedConfig;
+    _syncUndoWorkspaceId(activeWorkspaceId);
     if (!config.hasActiveStorage) {
       return TaskBoard.empty();
     }
-    return _runSyncWithStatus(config, isInitialLoad: true);
+    try {
+      return await _runSyncWithStatus(config, isInitialLoad: true);
+    } on TdfSyncOutcomeException {
+      await _recordConflictWatchDigestIfLocal(config);
+      rethrow;
+    }
   }
 
   /// Adds a new TDF `label` block with [name] and optional `#RRGGBB` [color] and persists to storage.
@@ -348,6 +376,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       sourceTimeZone: sourceTimeZone,
       currentDate: currentDate,
     );
+    _conflictWatchDigest = null;
+    _lastFailedWatchDigest = null;
     _clearUndoStack('import_tdf');
     state = AsyncData(importResult.board);
     return importResult;
@@ -386,6 +416,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     int? mutationEpoch,
   }) async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return;
+    }
     final operation = _executePushToRemote(
       board,
       fallbackBoard: fallbackBoard,
@@ -395,6 +428,35 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _inFlightSync = operation;
     try {
       await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
+    }
+  }
+
+  /// Reconciles external on-disk `.tdf` edits into memory (and WebDAV in `Both` mode) when the local digest changed.
+  Future<bool> reconcileExternalLocalChanges() async {
+    if (!_canStartExternalLocalReconcile()) {
+      return false;
+    }
+    await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return false;
+    }
+    final workspace = ref.read(activeWorkspaceProvider).asData?.value;
+    final config =
+        ref.read(webDavConfigProvider).asData?.value ?? workspace?.config;
+    if (workspace == null ||
+        config == null ||
+        !_isExternalWatchActiveForConfig(config) ||
+        (!state.hasValue && state.isLoading)) {
+      return false;
+    }
+    final operation = _executeExternalLocalReconcile(workspace.id, config);
+    _inFlightSync = operation;
+    try {
+      return await operation;
     } finally {
       if (identical(_inFlightSync, operation)) {
         _inFlightSync = null;
@@ -475,13 +537,20 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final workspace = await ref.read(activeWorkspaceProvider.future);
     _pendingDeletedLabelTimestamps.clear();
     _pendingDeletedLocationTimestamps.clear();
+    _conflictWatchDigest = null;
+    _lastFailedWatchDigest = null;
     _clearUndoStack('select_local_file');
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
     final updatedConfig = await ref.read(webDavConfigProvider.future);
-    state = AsyncData(
-      await _runSyncWithStatus(updatedConfig, isInitialLoad: true),
-    );
+    try {
+      state = AsyncData(
+        await _runSyncWithStatus(updatedConfig, isInitialLoad: true),
+      );
+    } on TdfSyncOutcomeException {
+      await _recordConflictWatchDigestIfLocal(updatedConfig);
+      rethrow;
+    }
     AppLogger.info(
       LogTag.sync,
       'Selected local TDF file workspace=${workspace.id} path=$targetPath',
@@ -490,46 +559,30 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Synchronizes the in-memory board with the configured local and/or WebDAV storage backends.
   Future<void> syncFromRemote() async {
-    final config = await ref.read(webDavConfigProvider.future);
-    final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
-    if (config.storageMode.usesWebDav && !config.isWebDavConfigured) {
-      ref
-          .read(syncStateProvider.notifier)
-          .setError(localizations.errorWebDavNotConfigured);
-      return;
+    await _awaitInFlightSync();
+    final operation = _executeSyncFromRemote();
+    _inFlightSync = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
     }
-    if (config.storageMode.usesLocal && !config.isLocalConfigured) {
-      ref
-          .read(syncStateProvider.notifier)
-          .setError(localizations.errorInvalidLocalFilePath);
-      return;
-    }
-
-    final existingBoard = state.asData?.value;
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _runSyncWithStatus(config, candidateBoard: existingBoard),
-    );
   }
 
   /// Tests storage access using [config], runs the two-stage merge pipeline, and updates the board.
   Future<void> testConnectionAndSync(WebDavConfig config) async {
-    final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
-    if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
-      final exception = WebDavException(localizations.errorWebDavNotConfigured);
-      ref.read(syncStateProvider.notifier).setError(exception.toString());
-      throw exception;
+    await _awaitInFlightSync();
+    final operation = _executeTestConnectionAndSync(config);
+    _inFlightSync = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
     }
-
-    final existingBoard = state.asData?.value;
-    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
-    state = AsyncData(
-      await _runSyncWithStatus(
-        config,
-        candidateBoard: existingBoard,
-        requireTargets: true,
-      ),
-    );
   }
 
   /// Toggles the subtask step at [stepIndex] on [taskId] and persists to storage.
@@ -783,15 +836,52 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     );
   }
 
-  /// Awaits any currently running synchronization operation without propagating its exception.
+  /// Applies [nextBoard] to [state] and selectively prunes [_undoStack] when [workspaceId] and [epoch] remain current.
+  void _applyExternalReconciledBoard({
+    required String workspaceId,
+    required int epoch,
+    required TaskBoard? previousBoard,
+    required TaskBoard nextBoard,
+  }) {
+    final isActive =
+        ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId;
+    if (!isActive || epoch != _mutationEpoch) {
+      return;
+    }
+    if (previousBoard == null) {
+      _clearUndoStack('external_local_recovery');
+    } else if (nextBoard != previousBoard) {
+      _pruneInvalidatedUndoEntries(previousBoard, nextBoard);
+    }
+    state = AsyncData(nextBoard);
+  }
+
+  /// Awaits all currently running synchronization operations in FIFO order without propagating their exceptions.
   Future<void> _awaitInFlightSync() async {
-    if (_inFlightSync case final pending?) {
+    while (_inFlightSync != null) {
+      final pending = _inFlightSync;
+      if (pending == null) {
+        break;
+      }
       try {
         await pending;
       } on Object {
         // Proceed after in-flight sync finishes.
       }
     }
+  }
+
+  /// Returns `true` when synchronous workspace, configuration, and board-loading guards permit an external local reconcile.
+  bool _canStartExternalLocalReconcile() {
+    final workspace = ref.read(activeWorkspaceProvider).asData?.value;
+    final config =
+        ref.read(webDavConfigProvider).asData?.value ?? workspace?.config;
+    if (workspace == null ||
+        config == null ||
+        !_isExternalWatchActiveForConfig(config)) {
+      return false;
+    }
+    return state.hasValue || !state.isLoading;
   }
 
   /// Clears [_undoStack] for [reason] and optionally resets [taskUndoStateProvider].
@@ -839,6 +929,73 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return !rolledBack;
   }
 
+  /// Returns `true` when any dependent task in [dependentIds] changed between [previousBoard] and [nextBoard].
+  bool _didAnyDependentChange(
+    Set<String> dependentIds,
+    TaskBoard previousBoard,
+    TaskBoard nextBoard,
+  ) {
+    for (final dependentId in dependentIds) {
+      if (previousBoard.findTask(dependentId) !=
+          nextBoard.findTask(dependentId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Executes digest-gated reconciliation of an external local `.tdf` file change for [workspaceId].
+  Future<bool> _executeExternalLocalReconcile(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    final ({String content, String? digest, bool exists}) disk;
+    try {
+      disk = await _readWatchSnapshotWithRetry(workspaceId);
+    } on LocalFileException catch (error) {
+      if (!ref.mounted) {
+        return false;
+      }
+      _logWatchError(workspaceId, config.storageMode, error);
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+      return false;
+    }
+    if (!ref.mounted) {
+      return false;
+    }
+    if (!disk.exists || disk.content.trim().isEmpty) {
+      _logWatchSkip(workspaceId, 'missing_or_empty');
+      return false;
+    }
+    final syncState = await ref
+        .read(settingsRepositoryProvider)
+        .loadWorkspaceSyncState(workspaceId);
+    if (!ref.mounted) {
+      return false;
+    }
+    final activeId = ref.read(activeWorkspaceProvider).asData?.value.id;
+    if (activeId != workspaceId || !readCurrentConfig(ref).localWatchEnabled) {
+      return false;
+    }
+    if (disk.digest != null && disk.digest == syncState.localSourceDigest) {
+      _lastFailedWatchDigest = null;
+      _conflictWatchDigest = null;
+      _logWatchSkip(workspaceId, 'digest_unchanged');
+      return false;
+    }
+    if (ref.read(syncStateProvider).hasOpenConflict &&
+        (_conflictWatchDigest == null || disk.digest == _conflictWatchDigest)) {
+      _conflictWatchDigest = disk.digest;
+      _logWatchSkip(workspaceId, 'open_conflict');
+      return false;
+    }
+    if (disk.digest != null && disk.digest == _lastFailedWatchDigest) {
+      _logWatchSkip(workspaceId, 'repeat_failed_digest');
+      return false;
+    }
+    return _runExternalWatchSynchronize(workspaceId, config, disk.digest);
+  }
+
   /// Executes a single [pushToRemote] persistence pass for [board].
   Future<void> _executePushToRemote(
     TaskBoard board, {
@@ -864,8 +1021,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
         taskConflictResolutions: taskConflictResolutions,
         candidateBoard: board,
+        candidateOriginBoard: fallbackBoard,
         onLocalStageMerged: (mergedBoard) {
           localStageSucceeded = true;
+          _conflictWatchDigest = null;
+          _lastFailedWatchDigest = null;
           if (mutationEpoch == null || mutationEpoch == _mutationEpoch) {
             state = AsyncData(mergedBoard);
           }
@@ -877,6 +1037,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
         state = AsyncData(converged);
       }
+      _conflictWatchDigest = null;
+      _lastFailedWatchDigest = null;
       ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
     } on Object catch (error) {
       if (!localStageSucceeded) {
@@ -892,11 +1054,77 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           state = AsyncData(fallbackBoard);
         }
       }
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      if (error is TdfSyncOutcomeException) {
+        ref.read(syncStateProvider.notifier).setConflict(error.toString());
+        await _recordConflictWatchDigestIfLocal(config);
+      } else {
+        ref.read(syncStateProvider.notifier).setError(error.toString());
+      }
     }
   }
 
-  /// Executes a local or remote `.tdf` file wipe for [config] and resets workspace synchronization baselines.
+  /// Executes a serialized [syncFromRemote] pass.
+  Future<void> _executeSyncFromRemote() async {
+    final config = await ref.read(webDavConfigProvider.future);
+    final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
+    if (config.storageMode.usesWebDav && !config.isWebDavConfigured) {
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(localizations.errorWebDavNotConfigured);
+      return;
+    }
+    if (config.storageMode.usesLocal && !config.isLocalConfigured) {
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(localizations.errorInvalidLocalFilePath);
+      return;
+    }
+
+    final existingBoard = state.asData?.value;
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      try {
+        final board = await _runSyncWithStatus(
+          config,
+          candidateBoard: existingBoard,
+        );
+        _conflictWatchDigest = null;
+        _lastFailedWatchDigest = null;
+        return board;
+      } on TdfSyncOutcomeException {
+        await _recordConflictWatchDigestIfLocal(config);
+        rethrow;
+      }
+    });
+  }
+
+  /// Executes a serialized [testConnectionAndSync] pass for [config].
+  Future<void> _executeTestConnectionAndSync(WebDavConfig config) async {
+    final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
+    if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
+      final exception = WebDavException(localizations.errorWebDavNotConfigured);
+      ref.read(syncStateProvider.notifier).setError(exception.toString());
+      throw exception;
+    }
+
+    final existingBoard = state.asData?.value;
+    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    try {
+      final board = await _runSyncWithStatus(
+        config,
+        candidateBoard: existingBoard,
+        requireTargets: true,
+      );
+      _conflictWatchDigest = null;
+      _lastFailedWatchDigest = null;
+      state = AsyncData(board);
+    } on TdfSyncOutcomeException {
+      await _recordConflictWatchDigestIfLocal(config);
+      rethrow;
+    }
+  }
+
+  /// Serializes and executes a local or remote `.tdf` file wipe for [config].
   Future<void> _executeWipe(
     WebDavConfig config, {
     required bool isRemote,
@@ -904,28 +1132,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     required Future<void> Function() wipeTarget,
   }) async {
     await _awaitInFlightSync();
-    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
-    ref.read(syncStateProvider.notifier).setSyncing();
+    final operation = _performWipe(
+      config,
+      isRemote: isRemote,
+      createBackup: createBackup,
+      wipeTarget: wipeTarget,
+    );
+    _inFlightSync = operation;
     try {
-      await wipeTarget();
-      final workspace = await ref.read(activeWorkspaceProvider.future);
-      _pendingDeletedLabelTimestamps.clear();
-      _pendingDeletedLocationTimestamps.clear();
-      _clearUndoStack(isRemote ? 'wipe_remote' : 'wipe_local');
-      await ref
-          .read(settingsRepositoryProvider)
-          .saveWorkspaceSyncState(workspace.id, WorkspaceSyncState.empty);
-      if (!isRemote || !config.storageMode.usesLocal) {
-        state = AsyncData(TaskBoard.empty());
+      await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
       }
-      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
-      AppLogger.info(
-        LogTag.sync,
-        'Wiped ${isRemote ? 'remote WebDAV' : 'local'} TDF file workspace=${workspace.id} backup=$createBackup',
-      );
-    } on Object catch (error) {
-      ref.read(syncStateProvider.notifier).setError(error.toString());
-      rethrow;
     }
   }
 
@@ -944,6 +1163,241 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentWorkspace,
         currentBoard,
       );
+    }
+  }
+
+  /// Records conflict state and `_conflictWatchDigest` when [reconcileExternalLocalChanges] encounters [error].
+  Future<bool> _handleWatchConflictException({
+    required String workspaceId,
+    required WebDavConfig config,
+    required TdfSyncOutcomeException error,
+    required bool localStageSucceeded,
+    required String? diskDigest,
+  }) async {
+    _logWatchError(workspaceId, config.storageMode, error);
+    ref.read(syncStateProvider.notifier).setConflict(error.toString());
+    if (localStageSucceeded) {
+      await _recordConflictWatchDigestIfLocal(config);
+      return true;
+    }
+    _conflictWatchDigest = diskDigest;
+    return false;
+  }
+
+  /// Returns `true` when [config] enables local directory watching and has a valid local target.
+  bool _isExternalWatchActiveForConfig(WebDavConfig config) =>
+      config.localWatchEnabled &&
+      config.storageMode.usesLocal &&
+      config.isLocalConfigured;
+
+  /// Returns `true` when [entry]'s target task, tombstone, or blocked dependents changed between [previousBoard] and [nextBoard].
+  bool _isUndoEntryInvalidated(
+    TaskUndoEntry entry,
+    TaskBoard previousBoard,
+    TaskBoard nextBoard,
+  ) {
+    final taskId = entry.snapshotTask.id;
+    if (previousBoard.findTask(taskId) != nextBoard.findTask(taskId)) {
+      return true;
+    }
+    if (previousBoard.deletedBlock.findTaskRecord(taskId) !=
+        nextBoard.deletedBlock.findTaskRecord(taskId)) {
+      return true;
+    }
+    return _didAnyDependentChange(
+      entry.previouslyBlockedDependentIds,
+      previousBoard,
+      nextBoard,
+    );
+  }
+
+  /// Logs a `sync.watch.error` diagnostic event for [workspaceId] and [mode].
+  void _logWatchError(String workspaceId, StorageMode mode, Object error) {
+    if (!AppLogger.shouldLog(LogLevel.warn)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.warn,
+      LogTag.sync,
+      'sync.watch.error',
+      fields: <String, Object?>{'workspace': workspaceId, 'mode': mode.name},
+      error: error,
+    );
+  }
+
+  /// Logs a `sync.watch.skip` diagnostic event for [workspaceId] and [reason].
+  void _logWatchSkip(String workspaceId, String reason) {
+    if (!AppLogger.shouldLog(LogLevel.debug)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.sync,
+      'sync.watch.skip',
+      fields: <String, Object?>{'workspace': workspaceId, 'reason': reason},
+    );
+  }
+
+  /// Executes a local or remote `.tdf` wipe and preserves opposite-stage synchronization metadata via `copyWith`.
+  Future<void> _performWipe(
+    WebDavConfig config, {
+    required bool isRemote,
+    required bool createBackup,
+    required Future<void> Function() wipeTarget,
+  }) async {
+    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    ref.read(syncStateProvider.notifier).setSyncing();
+    try {
+      await wipeTarget();
+      final workspace = await ref.read(activeWorkspaceProvider.future);
+      final settingsRepo = ref.read(settingsRepositoryProvider);
+      final currentSyncState = await settingsRepo.loadWorkspaceSyncState(
+        workspace.id,
+      );
+      _pendingDeletedLabelTimestamps.clear();
+      _pendingDeletedLocationTimestamps.clear();
+      _conflictWatchDigest = null;
+      _lastFailedWatchDigest = null;
+      _clearUndoStack(isRemote ? 'wipe_remote' : 'wipe_local');
+      final WorkspaceSyncState updatedSyncState;
+      if (!isRemote) {
+        final wipedDigest =
+            config.storageMode.usesLocal && config.isLocalConfigured
+            ? (await ref.read(localFileRepositoryProvider).readTdfWithDigest())
+                  .digest
+            : null;
+        updatedSyncState = currentSyncState.copyWith(
+          clearLastSyncedLocalTdf: true,
+          acknowledgedLocalGeneration: 0,
+          deletedLabelTimestamps: const <String, DateTime>{},
+          deletedLocationTimestamps: const <String, DateTime>{},
+          localSourceDigest: wipedDigest,
+          clearLocalSourceDigest: wipedDigest == null,
+        );
+      } else {
+        final webDavRepo = ref.read(webDavRepositoryProvider);
+        updatedSyncState = currentSyncState.copyWith(
+          clearLastSyncedRemoteTdf: true,
+          acknowledgedRemoteGeneration: 0,
+          deletedLabelTimestamps: const <String, DateTime>{},
+          deletedLocationTimestamps: const <String, DateTime>{},
+          remoteEtag: webDavRepo.cachedEtag,
+          clearRemoteEtag: webDavRepo.cachedEtag == null,
+          remoteLastModified: webDavRepo.cachedLastModified,
+          clearRemoteLastModified: webDavRepo.cachedLastModified == null,
+        );
+      }
+      await settingsRepo.saveWorkspaceSyncState(workspace.id, updatedSyncState);
+      if (!isRemote || !config.storageMode.usesLocal) {
+        state = AsyncData(TaskBoard.empty());
+      }
+      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+      AppLogger.info(
+        LogTag.sync,
+        'Wiped ${isRemote ? 'remote WebDAV' : 'local'} TDF file workspace=${workspace.id} backup=$createBackup',
+      );
+    } on Object catch (error) {
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+      rethrow;
+    }
+  }
+
+  /// Removes invalidated entries from [_undoStack] when external reconciliation modifies target or dependent tasks.
+  void _pruneInvalidatedUndoEntries(
+    TaskBoard previousBoard,
+    TaskBoard nextBoard,
+  ) {
+    if (_undoStack.isEmpty) {
+      return;
+    }
+    final currentNotice = ref.read(taskUndoStateProvider).latestNotice;
+    var noticePruned = false;
+    final retained = <TaskUndoEntry>[];
+    var prunedCount = 0;
+    for (final entry in _undoStack) {
+      if (_isUndoEntryInvalidated(entry, previousBoard, nextBoard)) {
+        prunedCount++;
+        if (currentNotice?.sequence == entry.sequence) {
+          noticePruned = true;
+        }
+      } else {
+        retained.add(entry);
+      }
+    }
+    if (prunedCount == 0) {
+      return;
+    }
+    _undoStack
+      ..clear()
+      ..addAll(retained);
+    ref
+        .read(taskUndoStateProvider.notifier)
+        .update(
+          TaskUndoState(
+            stackDepth: _undoStack.length,
+            latestNotice: noticePruned ? null : currentNotice,
+          ),
+        );
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.domain,
+        'task.undo.prune',
+        fields: <String, Object?>{
+          'pruned': prunedCount,
+          'remaining': _undoStack.length,
+        },
+      );
+    }
+  }
+
+  /// Reads the local `.tdf` snapshot with digest, retrying once after [localFileWatchReadRetryDelayProvider] on a transient OS file lock.
+  Future<({String content, String? digest, bool exists})>
+  _readWatchSnapshotWithRetry(String workspaceId) async {
+    try {
+      return await ref.read(localFileRepositoryProvider).readTdfWithDigest();
+    } on LocalFileException catch (error) {
+      if (!error.isTransientFileSystemError) {
+        rethrow;
+      }
+      final delay = ref.read(localFileWatchReadRetryDelayProvider);
+      if (AppLogger.shouldLog(LogLevel.info)) {
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.sync,
+          'sync.watch.retry',
+          fields: <String, Object?>{
+            'workspace': workspaceId,
+            'delay_ms': delay.inMilliseconds,
+          },
+        );
+      }
+      await Future<void>.delayed(delay);
+      if (!ref.mounted) {
+        return (content: '', digest: null, exists: false);
+      }
+      final activeId = ref.read(activeWorkspaceProvider).asData?.value.id;
+      final latestConfig = readCurrentConfig(ref);
+      if (activeId != workspaceId ||
+          !_isExternalWatchActiveForConfig(latestConfig)) {
+        return (content: '', digest: null, exists: false);
+      }
+      return ref.read(localFileRepositoryProvider).readTdfWithDigest();
+    }
+  }
+
+  /// Records the current on-disk SHA-256 digest into [_conflictWatchDigest] when local storage is active.
+  Future<void> _recordConflictWatchDigestIfLocal(WebDavConfig config) async {
+    if (!config.storageMode.usesLocal || !config.isLocalConfigured) {
+      return;
+    }
+    try {
+      final snapshot = await ref
+          .read(localFileRepositoryProvider)
+          .readTdfWithDigest();
+      _conflictWatchDigest = snapshot.digest;
+    } on LocalFileException {
+      // Keep prior conflict digest if reading local storage fails.
     }
   }
 
@@ -1023,6 +1477,80 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           'direction': 'forward',
         },
       );
+    }
+  }
+
+  /// Runs the two-stage merge pipeline for an external local `.tdf` edit and isolates Stage 1 vs Stage 2 errors.
+  Future<bool> _runExternalWatchSynchronize(
+    String workspaceId,
+    WebDavConfig config,
+    String? diskDigest,
+  ) async {
+    final existingBoard = state.asData?.value;
+    final epoch = _mutationEpoch;
+    var localStageSucceeded = false;
+    TaskBoard? stage1Board;
+    ref.read(syncStateProvider.notifier).setSyncing();
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.sync,
+        'sync.watch.reconcile',
+        fields: <String, Object?>{
+          'workspace': workspaceId,
+          'mode': config.storageMode.name,
+        },
+      );
+    }
+    try {
+      final converged = await TaskSyncPipeline.synchronize(
+        ref,
+        config,
+        pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
+        pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
+        candidateBoard: existingBoard ?? TaskBoard.empty(),
+        isInitialLoad: existingBoard == null,
+        onLocalStageMerged: (mergedBoard) {
+          localStageSucceeded = true;
+          stage1Board = mergedBoard;
+          _lastFailedWatchDigest = null;
+          _conflictWatchDigest = null;
+          _applyExternalReconciledBoard(
+            workspaceId: workspaceId,
+            epoch: epoch,
+            previousBoard: existingBoard,
+            nextBoard: mergedBoard,
+          );
+        },
+      );
+      _applyExternalReconciledBoard(
+        workspaceId: workspaceId,
+        epoch: epoch,
+        previousBoard: stage1Board ?? existingBoard,
+        nextBoard: converged,
+      );
+      _lastFailedWatchDigest = null;
+      _conflictWatchDigest = null;
+      ref
+          .read(syncStateProvider.notifier)
+          .setSuccess(ref.read(clockProvider)().toUtc());
+      return true;
+    } on TdfSyncOutcomeException catch (error) {
+      return _handleWatchConflictException(
+        workspaceId: workspaceId,
+        config: config,
+        error: error,
+        localStageSucceeded: localStageSucceeded,
+        diskDigest: diskDigest,
+      );
+    } on Object catch (error) {
+      _logWatchError(workspaceId, config.storageMode, error);
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+      if (!localStageSucceeded) {
+        _lastFailedWatchDigest = diskDigest;
+        return false;
+      }
+      return true;
     }
   }
 

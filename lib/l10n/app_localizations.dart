@@ -2401,6 +2401,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Deleted \"{title}\".'**
   String taskDeletedUndoSnackBar(String title);
+
+  /// Label for the local external file watcher toggle in settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Watch for external file changes'**
+  String get localWatchLabel;
+
+  /// Description for the local external file watcher toggle in settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically merge edits saved by external editors, scripts, or file-sync tools.'**
+  String get localWatchDescription;
 }
 
 class _AppLocalizationsDelegate

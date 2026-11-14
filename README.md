@@ -11,7 +11,7 @@ Tasks and metadata are stored as plain text in a `.tdf` document, while operatio
 
 - **Deterministic Pull System:** Separates `Completed`, `Someday`, and `Blocked` tasks first, then slices active `queue` tasks into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`, pruning completed tasks and deletion tombstones after `30` days (UTC).
 - **Scoped Queues & Conditions:** Supports global and label-scoped queues (`scoped`), prerequisite task dependencies, temporal deferral (`suspended`), recurrence (`repeat`), deadlines (`due`), and `day`, `time`, and geofence (`location`) conditions.
-- **Three-Way Synchronization:** Reconciles in-memory state, a local `.tdf` file, and a WebDAV server at entity and field granularity using 10-character Base62 IDs, UTC modification timestamps, and `deleted` tombstones.
+- **Three-Way Synchronization:** Reconciles in-memory state, watched local `.tdf` file edits, and a WebDAV server at entity and field granularity using 10-character Base62 IDs, UTC modification timestamps, and `deleted` tombstones.
 - **Workspaces & Local Security:** Isolates independent task boards and storage credentials into switchable workspaces persisted via `flutter_secure_storage`.
 - **Diagnostic Logging:** Writes opt-in, redacted runtime logs per workspace to local storage or WebDAV with an in-app filterable viewer.
 

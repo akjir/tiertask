@@ -1344,4 +1344,11 @@ class AppLocalizationsDe extends AppLocalizations {
   String taskDeletedUndoSnackBar(String title) {
     return '„$title“ gelöscht.';
   }
+
+  @override
+  String get localWatchLabel => 'Externe Dateiänderungen überwachen';
+
+  @override
+  String get localWatchDescription =>
+      'Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen.';
 }

@@ -383,5 +383,7 @@
   "actionUndo": "Rückgängig",
   "taskCompletedUndoSnackBar": "„{title}“ abgeschlossen.",
   "taskDowngradedUndoSnackBar": "„{title}“ herabgestuft.",
-  "taskDeletedUndoSnackBar": "„{title}“ gelöscht."
+  "taskDeletedUndoSnackBar": "„{title}“ gelöscht.",
+  "localWatchLabel": "Externe Dateiänderungen überwachen",
+  "localWatchDescription": "Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen."
 }

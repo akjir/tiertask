@@ -187,6 +187,7 @@ class WebDavConfig {
     this.diagnosticsEnabled = false,
     this.logLevel = LogLevel.info,
     this.logStorageMode = StorageMode.local,
+    this.localWatchEnabled = true,
   }) : storageMode =
            storageMode ??
            (serverUrl != '' && username != '' && password != ''
@@ -296,6 +297,9 @@ class WebDavConfig {
   /// Persistence target for diagnostic logs (`local`, `webdav`, or `both`).
   final StorageMode logStorageMode;
 
+  /// Whether automatic parent-directory observation for external local `.tdf` edits is enabled.
+  final bool localWatchEnabled;
+
   /// Whether opt-in diagnostic logging is enabled (alias for [diagnosticsEnabled]).
   bool get enableLogging => diagnosticsEnabled;
 
@@ -344,6 +348,7 @@ class WebDavConfig {
     bool? diagnosticsEnabled,
     LogLevel? logLevel,
     StorageMode? logStorageMode,
+    bool? localWatchEnabled,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -362,6 +367,7 @@ class WebDavConfig {
       diagnosticsEnabled: diagnosticsEnabled ?? this.diagnosticsEnabled,
       logLevel: logLevel ?? this.logLevel,
       logStorageMode: logStorageMode ?? this.logStorageMode,
+      localWatchEnabled: localWatchEnabled ?? this.localWatchEnabled,
     );
   }
 
@@ -590,7 +596,8 @@ class WebDavConfig {
         other.manualTimeZoneOffsetMinutes == manualTimeZoneOffsetMinutes &&
         other.diagnosticsEnabled == diagnosticsEnabled &&
         other.logLevel == logLevel &&
-        other.logStorageMode == logStorageMode;
+        other.logStorageMode == logStorageMode &&
+        other.localWatchEnabled == localWatchEnabled;
   }
 
   @override
@@ -610,6 +617,7 @@ class WebDavConfig {
     diagnosticsEnabled,
     logLevel,
     logStorageMode,
+    localWatchEnabled,
   );
 
   @override

@@ -229,9 +229,7 @@ class AppWorkspace {
     final config = workspace.config;
     final remoteLogFlag = config.logStorageMode == StorageMode.local ? 0 : 1;
     builder.addByte(
-      (config.storageMode.id & 0x03) |
-          ((config.language.id & 0x03) << 2) |
-          ((config.themeMode.id & 0x03) << 4) |
+      _encodeLowFlagsBits(config) |
           ((config.themePalette.id & 0x01) << 6) |
           (remoteLogFlag << 7),
     );
@@ -296,6 +294,41 @@ class AppWorkspace {
     };
   }
 
+  /// Decodes `(storageMode, language, themeMode, localWatchEnabled)` from the low 6 bits of [flags].
+  static (StorageMode, AppLanguage, AppThemeMode, bool) _decodeLowFlagsBits(
+    int flags,
+  ) {
+    final lane0 = flags & 0x03;
+    final lane1 = (flags >> 2) & 0x03;
+    final lane2 = (flags >> 4) & 0x03;
+    if (lane0 < 3 && lane1 < 3 && lane2 < 3) {
+      return (
+        StorageMode.fromId(lane0),
+        AppLanguage.fromId(lane1),
+        AppThemeMode.fromId(lane2),
+        true,
+      );
+    }
+    final int comboIndex;
+    if (lane0 == 3) {
+      comboIndex = (flags >> 2) & 0x0F;
+    } else if (lane1 == 3) {
+      final rem = lane0 + (lane2 * 3);
+      if (rem > 10) {
+        _throwCorrupt('Invalid encoded workspace flag combination.');
+      }
+      comboIndex = 16 + rem;
+    } else {
+      _throwCorrupt('Reserved workspace flag bit pattern.');
+    }
+    return (
+      StorageMode.fromId(comboIndex % 3),
+      AppLanguage.fromId((comboIndex ~/ 3) % 3),
+      AppThemeMode.fromId(comboIndex ~/ 9),
+      false,
+    );
+  }
+
   /// Decodes `(manualTimeZoneOffsetMinutes, logStorageMode)` from [flags] bit 7 and [tzWord].
   static (int, StorageMode) _decodeOffsetAndLogStorage(int flags, int tzWord) {
     final rawOffsetField = tzWord & 0x07FF;
@@ -340,6 +373,8 @@ class AppWorkspace {
     final tzWord = (source[cursor] << 8) | source[cursor + 1];
     cursor += 2;
 
+    final (storageMode, language, themeMode, localWatchEnabled) =
+        _decodeLowFlagsBits(flags);
     final (manualOffsetMinutes, logStorageMode) = _decodeOffsetAndLogStorage(
       flags,
       tzWord,
@@ -355,9 +390,9 @@ class AppWorkspace {
         password: fields[4],
         filePath: filePath.isEmpty ? defaultFileName : filePath,
         localFilePath: localPath.isEmpty ? defaultFileName : localPath,
-        storageMode: StorageMode.fromId(flags & 0x03),
-        language: AppLanguage.fromId((flags >> 2) & 0x03),
-        themeMode: AppThemeMode.fromId((flags >> 4) & 0x03),
+        storageMode: storageMode,
+        language: language,
+        themeMode: themeMode,
         themePalette: AppThemePalette.fromId((flags >> 6) & 0x01),
         locationEnabled: ((tzWord >> 14) & 0x01) == 1,
         timeZoneMode: AppTimeZoneMode.fromId((tzWord >> 15) & 0x01),
@@ -365,6 +400,7 @@ class AppWorkspace {
         diagnosticsEnabled: ((tzWord >> 13) & 0x01) == 1,
         logLevel: _decodeLogLevelBits((tzWord >> 11) & 0x03),
         logStorageMode: logStorageMode,
+        localWatchEnabled: localWatchEnabled,
       ),
     );
     if (workspace.id.isEmpty ||
@@ -389,6 +425,24 @@ class AppWorkspace {
       LogLevel.warn => 2,
       LogLevel.error || LogLevel.crash => 3,
     };
+  }
+
+  /// Encodes `(storageMode, language, themeMode, localWatchEnabled)` into the low 6 bits of `flags`.
+  static int _encodeLowFlagsBits(WebDavConfig config) {
+    if (config.localWatchEnabled) {
+      return (config.storageMode.id & 0x03) |
+          ((config.language.id & 0x03) << 2) |
+          ((config.themeMode.id & 0x03) << 4);
+    }
+    final comboIndex =
+        config.storageMode.id +
+        (config.language.id * 3) +
+        (config.themeMode.id * 9);
+    if (comboIndex < 16) {
+      return 0x03 | (comboIndex << 2);
+    }
+    final rem = comboIndex - 16;
+    return (rem % 3) | 0x0C | ((rem ~/ 3) << 4);
   }
 
   /// Encodes [offsetMinutes] and [logStorageMode] into the 11-bit `tzWord` offset field.

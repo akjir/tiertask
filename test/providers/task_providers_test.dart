@@ -47,6 +47,12 @@ class _ControllableLocalRepository extends LocalFileRepository {
   final bool Function() shouldFailSave;
 
   @override
+  bool get canWatchDirectory => false;
+
+  @override
+  bool fileExists() => getStore().isNotEmpty;
+
+  @override
   Future<String> loadTdf() async => getStore();
 
   @override
@@ -1014,4 +1020,540 @@ void main() {
       });
     });
   });
+
+  group('External Local File Reconciliation, Serialization, Undo Pruning & Wipe Convergence', () {
+    late Directory watchTempDir;
+
+    setUp(() async {
+      HttpOverrides.global = null;
+      watchTempDir = await Directory.systemTemp.createTemp(
+        'tiertask_ext_reconcile_',
+      );
+    });
+
+    tearDown(() async {
+      if (await watchTempDir.exists()) {
+        await watchTempDir.delete(recursive: true);
+      }
+    });
+
+    test('serializes reconcileExternalLocalChanges pre-check I/O strictly in FIFO order with user mutations and retries transient FileSystemException locks once', () async {
+      var diskTdf = 'tdf 0.6.0\n';
+      Completer<void>? readGate;
+      var activePreCheckOrSyncOps = 0;
+      var maxConcurrentOps = 0;
+      var transientLockRemaining = 0;
+      var readDigestCalls = 0;
+      var maxFileBytesOverride = LocalFileRepository.defaultMaxFileBytes;
+
+      final settingsRepo = InMemorySettingsRepository(
+        const WebDavConfig(storageMode: StorageMode.local),
+      );
+      var currentTime = DateTime.utc(2026, 11, 14, 10, 0);
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          clockProvider.overrideWithValue(() => currentTime),
+          localFileWatchReadRetryDelayProvider.overrideWithValue(
+            const Duration(milliseconds: 10),
+          ),
+          localFileRepositoryProvider.overrideWith((ref) {
+            final cfg =
+                ref.watch(webDavConfigProvider).asData?.value ??
+                const WebDavConfig();
+            return _GateableWatchLocalRepository(
+              config: cfg,
+              maxFileBytes: maxFileBytesOverride,
+              getStore: () => diskTdf,
+              setStore: (value) => diskTdf = value,
+              onReadTdfWithDigest: () async {
+                readDigestCalls++;
+                activePreCheckOrSyncOps++;
+                if (activePreCheckOrSyncOps > maxConcurrentOps) {
+                  maxConcurrentOps = activePreCheckOrSyncOps;
+                }
+                try {
+                  if (readGate case final gate?) {
+                    await gate.future;
+                  }
+                  if (transientLockRemaining > 0) {
+                    transientLockRemaining--;
+                    throw const LocalFileException(
+                      'File temporarily locked',
+                      cause: FileSystemException('Sharing violation'),
+                    );
+                  }
+                  final bytes = utf8.encode(diskTdf);
+                  if (bytes.length > maxFileBytesOverride) {
+                    throw const LocalFileException('Local file too large');
+                  }
+                } finally {
+                  activePreCheckOrSyncOps--;
+                }
+              },
+            );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      // 1. Strict FIFO serialization while readTdfWithDigest() is suspended at await.
+      diskTdf =
+          'tdf 0.6.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-14 10:01:00\n'
+          '    task extFifo001\n'
+          '}\n\n'
+          'task extFifo001 {\n'
+          '    name "External FIFO Task"\n'
+          '    created 2026-11-14 10:01:00\n'
+          '    modified 2026-11-14 10:01:00\n'
+          '}\n';
+      readGate = Completer<void>();
+
+      final firstReconcile = notifier.reconcileExternalLocalChanges();
+      await Future<void>.delayed(Duration.zero);
+      currentTime = DateTime.utc(2026, 11, 14, 10, 2);
+      final concurrentAdd = notifier.addTask(
+        'In-App Queued Task',
+        id: 'appFifo001',
+      );
+      final secondReconcile = notifier.reconcileExternalLocalChanges();
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+
+      expect(
+        maxConcurrentOps,
+        equals(1),
+        reason: 'Concurrent addTask and second reconcile must queue behind _inFlightSync',
+      );
+
+      final gateToRelease = readGate;
+      readGate = null;
+      gateToRelease.complete();
+
+      expect(await firstReconcile, isTrue);
+      await concurrentAdd;
+      expect(
+        await secondReconcile,
+        isFalse,
+        reason: 'Queued reconcile after converged addTask must skip on matching localSourceDigest',
+      );
+      expect(maxConcurrentOps, equals(1));
+
+      final mergedTitles = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .allTasks
+          .map((task) => task.title)
+          .toList();
+      expect(
+        mergedTitles,
+        containsAll(<String>['External FIFO Task', 'In-App Queued Task']),
+      );
+
+      // 2. Single 250ms-equivalent retry recovers from transient OS FileSystemException lock.
+      diskTdf =
+          '$diskTdf\n'
+          'task extLock001 {\n'
+          '    name "Recovered After Lock"\n'
+          '    created 2026-11-14 10:03:00\n'
+          '    modified 2026-11-14 10:03:00\n'
+          '}\n';
+      transientLockRemaining = 1;
+      readDigestCalls = 0;
+      expect(await notifier.reconcileExternalLocalChanges(), isTrue);
+      expect(
+        readDigestCalls,
+        greaterThanOrEqualTo(2),
+        reason: 'Must retry readTdfWithDigest once after transient FileSystemException',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('extLock001')
+            ?.title,
+        equals('Recovered After Lock'),
+      );
+      expect(container.read(syncStateProvider).errorMessage, isNull);
+
+      // 3. Persistent lock on both initial read and retry surfaces error and preserves board.
+      transientLockRemaining = 2;
+      expect(await notifier.reconcileExternalLocalChanges(), isFalse);
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        contains('File temporarily locked'),
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('extLock001'),
+        isNotNull,
+      );
+      transientLockRemaining = 0;
+
+      // 4. Oversized file (> maxFileBytes) fails immediately without retry.
+      maxFileBytesOverride = 16;
+      readDigestCalls = 0;
+      expect(await notifier.reconcileExternalLocalChanges(), isFalse);
+      expect(
+        readDigestCalls,
+        equals(1),
+        reason: 'Non-FileSystemException maxFileBytes failure must not retry',
+      );
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        contains('Local file too large'),
+      );
+    });
+
+    test('selectively prunes only invalidated undo entries across external merges while preserving unrelated undo entries', () async {
+      final settingsRepo = InMemorySettingsRepository(
+        const WebDavConfig(
+          localFilePath: 'undo_reconcile.tdf',
+          storageMode: StorageMode.local,
+        ),
+      );
+      var currentTime = DateTime.utc(2026, 11, 14, 11, 0);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          localStorageDirectoryPathProvider.overrideWithValue(
+            watchTempDir.path,
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      await notifier.addTask('Keep Undo Task', id: 'uKeep00001');
+      await notifier.addTask('Edit Target Task', id: 'uEdit00001');
+      await notifier.addTask('Blocker Task', id: 'uBlkr00001');
+      await notifier.addTask(
+        'Dependent Task',
+        id: 'uDepn00001',
+        blockedByTaskIds: const <String>['uBlkr00001'],
+      );
+
+      currentTime = DateTime.utc(2026, 11, 14, 11, 1);
+      await notifier.deleteTask('uKeep00001');
+      currentTime = DateTime.utc(2026, 11, 14, 11, 2);
+      await notifier.completeTask('uEdit00001');
+      currentTime = DateTime.utc(2026, 11, 14, 11, 3);
+      await notifier.completeTask('uBlkr00001');
+      expect(container.read(taskUndoStateProvider).stackDepth, equals(3));
+
+      // 1. Externally adding a task, label, and location keeps all 3 undo entries valid.
+      final localFile = File('${watchTempDir.path}/undo_reconcile.tdf');
+      final currentRaw = await localFile.readAsString();
+      final withExternalAdditions =
+          '$currentRaw\n'
+          'location extLoc0001 {\n'
+          '    name "External Office"\n'
+          '    coordinates 52.52 13.405\n'
+          '    radius 150\n'
+          '    modified 2026-11-14 11:04:00\n'
+          '}\n\n'
+          'label extLbl0001 {\n'
+          '    name "External Label"\n'
+          '    color "#336699"\n'
+          '    modified 2026-11-14 11:04:00\n'
+          '}\n\n'
+          'task extTsk0001 {\n'
+          '    name "Externally Added Someday"\n'
+          '    created 2026-11-14 11:04:00\n'
+          '    modified 2026-11-14 11:04:00\n'
+          '    labels extLbl0001\n'
+          '}\n';
+      await localFile.writeAsString(withExternalAdditions, flush: true);
+      currentTime = DateTime.utc(2026, 11, 14, 11, 5);
+      expect(await notifier.reconcileExternalLocalChanges(), isTrue);
+      expect(
+        container.read(taskUndoStateProvider).stackDepth,
+        equals(3),
+        reason: 'Unrelated external task/label/location additions must keep all undo entries',
+      );
+
+      // 2. Externally modifying uEdit00001 and dependent uDepn00001 prunes those 2 entries, leaving uKeep00001.
+      final afterAddBoard = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .updateTask(
+            'uEdit00001',
+            title: 'Externally Renamed Target',
+            currentDate: DateTime.utc(2026, 11, 14, 11, 6),
+            localEvaluationTime: DateTime(2026, 11, 14, 11, 6),
+          )
+          .updateTask(
+            'uDepn00001',
+            title: 'Externally Edited Dependent',
+            currentDate: DateTime.utc(2026, 11, 14, 11, 6),
+            localEvaluationTime: DateTime(2026, 11, 14, 11, 6),
+          );
+      final externallyEdited = container
+          .read(tdfServiceProvider)
+          .serialize(afterAddBoard);
+      await localFile.writeAsString(externallyEdited, flush: true);
+      currentTime = DateTime.utc(2026, 11, 14, 11, 7);
+      expect(await notifier.reconcileExternalLocalChanges(), isTrue);
+      expect(
+        container.read(taskUndoStateProvider).stackDepth,
+        equals(1),
+        reason: 'External edits to target and dependent tasks must prune only those 2 undo entries',
+      );
+      expect(
+        container.read(taskUndoStateProvider).latestNotice,
+        isNull,
+        reason:
+            'latestNotice belonging to pruned uBlkr00001 entry must be cleared',
+      );
+
+      // Remaining undo entry (uKeep00001 deletion) still reverses cleanly without losing external items!
+      currentTime = DateTime.utc(2026, 11, 14, 11, 8);
+      expect(await notifier.undoLastAction(), isTrue);
+      final finalBoard = container.read(taskNotifierProvider).requireValue;
+      expect(
+        finalBoard.findTask('uKeep00001')?.title,
+        equals('Keep Undo Task'),
+      );
+      expect(
+        finalBoard.findTask('extTsk0001')?.title,
+        equals('Externally Added Someday'),
+      );
+      expect(
+        finalBoard.labels.map((label) => label.id),
+        contains('extLbl0001'),
+      );
+      expect(finalBoard.locations.map((loc) => loc.id), contains('extLoc0001'));
+    });
+
+    test('handles StorageMode.both online WebDAV PUT convergence, offline Stage 1 commit, and wipeLocalFile + HTTP 304 cached remote recovery', () async {
+      var remoteTdf = 'tdf 0.6.0\n';
+      var remoteEtag = '"etag-1"';
+      var etagCounter = 1;
+      var failWebDav = false;
+      var getCount = 0;
+      var get304Count = 0;
+      var putCount = 0;
+
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        if (failWebDav) {
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'GET') {
+          getCount++;
+          final ifNoneMatch = request.headers.value(
+            HttpHeaders.ifNoneMatchHeader,
+          );
+          if (ifNoneMatch == remoteEtag) {
+            get304Count++;
+            request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+            request.response.statusCode = HttpStatus.notModified;
+            await request.response.close();
+            return;
+          }
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          request.response.statusCode = HttpStatus.ok;
+          request.response.write(remoteTdf);
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'PUT') {
+          putCount++;
+          remoteTdf = await utf8.decoder.bind(request).join();
+          etagCounter++;
+          remoteEtag = '"etag-$etagCounter"';
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      });
+
+      final bothConfig = WebDavConfig(
+        serverUrl: 'http://127.0.0.1:${server.port}',
+        username: 'example-user',
+        password: 'example-password',
+        filePath: '/both_tasks.tdf',
+        localFilePath: 'both_tasks.tdf',
+        storageMode: StorageMode.both,
+      );
+      final settingsRepo = InMemorySettingsRepository(bothConfig);
+      var currentTime = DateTime.utc(2026, 11, 14, 12, 0);
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          localStorageDirectoryPathProvider.overrideWithValue(
+            watchTempDir.path,
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+      await notifier.addTask('Initial Shared Task', id: 'shr0000001');
+      final localFile = File('${watchTempDir.path}/both_tasks.tdf');
+
+      // (a) Online external local edit -> automatic 3-way merge -> WebDAV PUT -> zero self-trigger loop.
+      final baseLocal = await localFile.readAsString();
+      await localFile.writeAsString(
+        '$baseLocal\n'
+        'task extOnline1 {\n'
+        '    name "External Online Task"\n'
+        '    created 2026-11-14 12:01:00\n'
+        '    modified 2026-11-14 12:01:00\n'
+        '}\n',
+        flush: true,
+      );
+      final putsBeforeOnline = putCount;
+      currentTime = DateTime.utc(2026, 11, 14, 12, 2);
+      expect(await notifier.reconcileExternalLocalChanges(), isTrue);
+      expect(
+        putCount,
+        equals(putsBeforeOnline + 1),
+        reason: 'External local edit in Both mode must upload merged board via WebDAV PUT',
+      );
+      expect(remoteTdf, contains('External Online Task'));
+      final getsAfterConverge = getCount;
+      expect(
+        await notifier.reconcileExternalLocalChanges(),
+        isFalse,
+        reason: 'Stage 2 local convergence must update localSourceDigest so follow-up watch events skip immediately',
+      );
+      expect(getCount, equals(getsAfterConverge));
+
+      // (b) Offline WebDAV during external local edit commits Stage 1 locally and surfaces WebDAV error.
+      failWebDav = true;
+      final beforeOfflineRaw = await localFile.readAsString();
+      await localFile.writeAsString(
+        '$beforeOfflineRaw\n'
+        'task extOfflin1 {\n'
+        '    name "External Offline Task"\n'
+        '    created 2026-11-14 12:03:00\n'
+        '    modified 2026-11-14 12:03:00\n'
+        '}\n',
+        flush: true,
+      );
+      currentTime = DateTime.utc(2026, 11, 14, 12, 4);
+      expect(
+        await notifier.reconcileExternalLocalChanges(),
+        isTrue,
+        reason: 'Stage 1 local merge must commit in Both mode even when WebDAV fails',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('extOfflin1')
+            ?.title,
+        equals('External Offline Task'),
+      );
+      expect(container.read(syncStateProvider).errorMessage, isNotNull);
+
+      // Bring WebDAV back online and sync so local + remote converge.
+      failWebDav = false;
+      currentTime = DateTime.utc(2026, 11, 14, 12, 5);
+      await notifier.syncFromRemote();
+      expect(container.read(syncStateProvider).errorMessage, isNull);
+      expect(remoteTdf, contains('External Offline Task'));
+
+      // (c) wipeLocalFile in StorageMode.both suppresses watcher self-triggers and preserves remoteEtag / lastSyncedRemoteTdf for lossless HTTP 304 sync recovery.
+      currentTime = DateTime.utc(2026, 11, 14, 12, 6);
+      await notifier.wipeLocalFile(bothConfig);
+      expect(
+        container.read(taskNotifierProvider).requireValue.allTasks,
+        isEmpty,
+      );
+      final getsBeforeWipeWatchCheck = getCount;
+      expect(
+        await notifier.reconcileExternalLocalChanges(),
+        isFalse,
+        reason: 'wipeLocalFile must record wipedDigest in localSourceDigest to suppress self-triggers',
+      );
+      expect(getCount, equals(getsBeforeWipeWatchCheck));
+
+      final syncStateAfterWipe = await settingsRepo.loadWorkspaceSyncState(
+        'tasks',
+      );
+      expect(syncStateAfterWipe.remoteEtag, equals(remoteEtag));
+      expect(
+        syncStateAfterWipe.lastSyncedRemoteTdf,
+        contains('External Offline Task'),
+      );
+
+      final prev304 = get304Count;
+      currentTime = DateTime.utc(2026, 11, 14, 12, 7);
+      await notifier.syncFromRemote();
+      expect(
+        get304Count,
+        equals(prev304 + 1),
+        reason: 'Preserved remoteEtag after wipeLocalFile must allow HTTP 304 Not Modified',
+      );
+      final recoveredTitles = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .allTasks
+          .map((task) => task.title)
+          .toList();
+      expect(
+        recoveredTitles,
+        containsAll(<String>[
+          'Initial Shared Task',
+          'External Online Task',
+          'External Offline Task',
+        ]),
+        reason: 'HTTP 304 Not Modified after wipeLocalFile must merge cached remote tasks back into the board',
+      );
+    });
+  });
+}
+
+class _GateableWatchLocalRepository extends LocalFileRepository {
+  _GateableWatchLocalRepository({
+    required super.config,
+    required super.maxFileBytes,
+    required this.getStore,
+    required this.setStore,
+    required this.onReadTdfWithDigest,
+  });
+
+  final String Function() getStore;
+  final Future<void> Function() onReadTdfWithDigest;
+  final void Function(String value) setStore;
+
+  @override
+  bool get canWatchDirectory => false;
+
+  @override
+  bool fileExists() => getStore().isNotEmpty;
+
+  @override
+  Future<String> loadTdf() async => getStore();
+
+  @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    await onReadTdfWithDigest();
+    return super.readTdfWithDigest();
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async => setStore(tdfContent);
 }

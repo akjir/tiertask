@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -39,12 +41,24 @@ class FakeLocalFileRepository extends LocalFileRepository {
   String initialTdf;
 
   @override
+  bool get canWatchDirectory => false;
+
+  @override
+  bool directoryExists() => true;
+
+  @override
+  bool fileExists() => initialTdf.isNotEmpty;
+
+  @override
   Future<String> loadTdf() async => initialTdf;
 
   @override
   Future<void> saveTdf(String tdfContent) async {
     initialTdf = tdfContent;
   }
+
+  @override
+  Stream<void> watchTdfChanges() => const Stream<void>.empty();
 }
 
 /// In-memory [TaskNotifier] test double that returns [initialBoard] and commits mutations in-memory without filesystem or network I/O.
@@ -71,6 +85,9 @@ class FakeTaskNotifier extends TaskNotifier {
   }) async {
     state = AsyncData(board);
   }
+
+  @override
+  Future<bool> reconcileExternalLocalChanges() async => false;
 }
 
 /// Fake [WebDavRepository] for deterministic widget tests of connection status banners.

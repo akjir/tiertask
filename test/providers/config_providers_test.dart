@@ -271,6 +271,27 @@ void main() {
         isFalse,
         reason: 'Disabling diagnostics must immediately delete dated log file',
       );
+
+      expect(
+        container.read(webDavConfigProvider).requireValue.localWatchEnabled,
+        isTrue,
+      );
+      await notifier.updateLocalWatchEnabled(false);
+      expect(
+        container.read(webDavConfigProvider).requireValue.localWatchEnabled,
+        isFalse,
+      );
+      expect(
+        (await settingsRepo.loadConfig()).localWatchEnabled,
+        isFalse,
+        reason:
+            'updateLocalWatchEnabled(false) must persist to SettingsRepository',
+      );
+      await notifier.updateLocalWatchEnabled(true);
+      expect(
+        container.read(webDavConfigProvider).requireValue.localWatchEnabled,
+        isTrue,
+      );
     });
   });
 

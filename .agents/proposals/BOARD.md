@@ -12,7 +12,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
 | TEP-006 | TDF Specification 0.7.0 Exploratory Design and Idea Collection | spec | concept | [`tep-006-tdf-spec-0-7-0.md`](tep-006-tdf-spec-0-7-0.md) |
-| TEP-008 | Automatic Local TDF Directory Watching, Digest-Gated Reconciliation, and Per-Workspace Settings Toggle | feature | planned | [`tep-008-local-file-directory-watch-sync.md`](tep-008-local-file-directory-watch-sync.md) |
+| TEP-008 | Automatic Local TDF Directory Watching, Digest-Gated Reconciliation, and Per-Workspace Settings Toggle | feature | review | [`tep-008-local-file-directory-watch-sync.md`](tep-008-local-file-directory-watch-sync.md) |
 
 ### Completed Proposals
 

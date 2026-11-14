@@ -22,6 +22,7 @@ import 'package:material_ui/material_ui.dart';
 import 'l10n/app_localizations.dart';
 import 'models/webdav_config.dart';
 import 'providers/config_providers.dart';
+import 'providers/local_file_watch_providers.dart';
 import 'providers/workspace_providers.dart';
 import 'services/app_logger.dart';
 import 'ui/app_theme.dart';
@@ -61,6 +62,7 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
   @override
   Widget build(BuildContext context) {
     ref.watch(diagnosticsEnabledProvider);
+    ref.watch(localFileWatcherProvider);
     final locale = ref.watch(appLocaleProvider);
     final appThemeMode = ref.watch(appThemeModeProvider);
     final appThemeSet = ref.watch(appThemeProvider);

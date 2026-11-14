@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -36,6 +37,9 @@ class LocalFileException implements Exception {
 
   /// Human-readable error message.
   final String message;
+
+  /// Whether [cause] is an operating-system [FileSystemException] eligible for a transient watch read retry.
+  bool get isTransientFileSystemError => cause is FileSystemException;
 
   @override
   String toString() => message;
@@ -130,6 +134,10 @@ class LocalFileRepository {
   /// Maximum allowed file size in bytes before rejecting a read or write.
   final int maxFileBytes;
 
+  /// Whether parent-directory observation is supported for this repository instance.
+  bool get canWatchDirectory =>
+      !_useInMemoryFallback && FileSystemEntity.isWatchSupported;
+
   /// Host operating system version string reported by the Dart VM.
   static String get hostOsVersion => Platform.operatingSystemVersion;
 
@@ -185,6 +193,18 @@ class LocalFileRepository {
     inMemory: _useInMemoryFallback,
     inMemoryStore: inMemoryStore,
   );
+
+  /// Returns `true` when the resolved parent directory exists on disk or in memory, or `false` if invalid or missing.
+  bool directoryExists() {
+    final directoryPath = tryResolveDirectoryPath();
+    if (directoryPath == null) {
+      return false;
+    }
+    return _operations.directoryExists(
+      directoryPath,
+      inMemory: _useInMemoryFallback,
+    );
+  }
 
   /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
   static String ensureTdfExtension(String rawName) =>
@@ -637,6 +657,23 @@ class LocalFileRepository {
           AppLanguage.english.resolveLocale(PlatformDispatcher.instance.locale),
         ),
   );
+
+  /// Emits `null` whenever the configured `.tdf` file is created, modified, or moved into its parent directory.
+  Stream<void> watchTdfChanges() {
+    if (!canWatchDirectory) {
+      return const Stream<void>.empty();
+    }
+    final filePath = tryResolveFilePath();
+    final directoryPath = tryResolveDirectoryPath();
+    if (filePath == null || directoryPath == null) {
+      return const Stream<void>.empty();
+    }
+    return _operations.watchTdfFile(
+      directoryPath: directoryPath,
+      targetFileName: extractFileNameFromPath(filePath),
+      inMemory: _useInMemoryFallback,
+    );
+  }
 
   /// Empties and re-initializes the local `.tdf` file as a blank TDF document, optionally creating a `.bak` or `.bak.001`+ backup first if the file exists.
   Future<void> wipeTdf({bool createBackup = false}) async {

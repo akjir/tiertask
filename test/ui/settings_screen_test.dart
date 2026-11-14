@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -22,11 +23,28 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 
 import 'test_helpers.dart';
+
+class _DelayedWebDavRepository extends WebDavRepository {
+  _DelayedWebDavRepository({required super.config, required this.fetchGate});
+
+  final Future<void> Function() fetchGate;
+
+  @override
+  Future<String> fetchTdf() async {
+    await fetchGate();
+    return 'tdf 0.6.0\n';
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {}
+}
 
 void main() {
   testWidgets('SettingsScreen does not display Open Task Count section', (
@@ -556,6 +574,171 @@ task 000004OkD2 {
         find.byKey(const ValueKey('drawer_diagnostic_log_tile')),
         findsNothing,
       );
+    },
+  );
+
+  testWidgets(
+    'SettingsScreen shows local watch switch in Local and Both modes, hides in WebDAV mode, renders EN/DE labels, disables while testing, and persists without reloading TaskBoard',
+    (WidgetTester tester) async {
+      const seededTdf =
+          'tdf 0.6.0\n\n'
+          'queue {\n'
+          '  modified 2026-11-01 08:00:00\n'
+          '  task 000001OkD2\n'
+          '}\n\n'
+          'task 000001OkD2 {\n'
+          '  name "Keep Board Loaded"\n'
+          '  created 2026-11-01 08:00:00\n'
+          '  modified 2026-11-01 08:00:00\n'
+          '}\n';
+      const initialConfig = WebDavConfig(
+        language: AppLanguage.english,
+        storageMode: StorageMode.both,
+        serverUrl: 'https://dav.example.com/remote.php/dav/files/alice',
+        username: 'alice',
+        password: 'secret-app-password',
+      );
+      final settingsRepository = InMemorySettingsRepository(initialConfig);
+      Future<void> Function() currentFetchGate = () async {};
+      var sawLoadingAfterReady = false;
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: initialConfig,
+                initialTdf: seededTdf,
+              ),
+            ),
+            webDavRepositoryProvider.overrideWith((ref) {
+              final currentConfig =
+                  ref.watch(webDavConfigProvider).asData?.value ??
+                  initialConfig;
+              return _DelayedWebDavRepository(
+                config: currentConfig,
+                fetchGate: () => currentFetchGate(),
+              );
+            }),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: Consumer(
+            builder: (context, ref, child) {
+              ref.listen(taskNotifierProvider, (previous, next) {
+                if ((previous?.hasValue ?? false) && next.isLoading) {
+                  sawLoadingAfterReady = true;
+                }
+              });
+              return child!;
+            },
+            child: const TierTaskApp(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await openSettingsFromMenu(tester);
+
+      final switchFinder = find.byKey(
+        const ValueKey('settings_local_watch_switch'),
+      );
+      await tester.ensureVisible(switchFinder);
+      expect(
+        switchFinder,
+        findsOneWidget,
+        reason: 'Switch must appear in StorageMode.both',
+      );
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isTrue,
+        reason: 'Switch must default to true',
+      );
+      expect(find.text('Watch for external file changes'), findsOneWidget);
+      expect(
+        find.text(
+          'Automatically merge edits saved by external editors, scripts, or file-sync tools.',
+        ),
+        findsOneWidget,
+      );
+
+      sawLoadingAfterReady = false;
+      await _tapVisible(tester, switchFinder);
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isFalse,
+        reason: 'Tapping switch must flip value to false',
+      );
+      expect(
+        (await settingsRepository.loadConfig()).localWatchEnabled,
+        isFalse,
+        reason: 'Tapping switch must persist localWatchEnabled: false',
+      );
+      expect(
+        sawLoadingAfterReady,
+        isFalse,
+        reason: 'Toggling localWatchEnabled must not reload TaskNotifier',
+      );
+
+      await _tapVisible(tester, switchFinder);
+      expect(tester.widget<Switch>(switchFinder).value, isTrue);
+      expect((await settingsRepository.loadConfig()).localWatchEnabled, isTrue);
+      expect(sawLoadingAfterReady, isFalse);
+
+      await _tapVisible(tester, find.text('Deutsch'));
+      await tester.ensureVisible(switchFinder);
+      expect(find.text('Externe Dateiänderungen überwachen'), findsOneWidget);
+      expect(
+        find.text(
+          'Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen.',
+        ),
+        findsOneWidget,
+      );
+      await _tapVisible(tester, find.text('English'));
+
+      await _tapVisible(tester, find.text('WebDAV'));
+      expect(
+        switchFinder,
+        findsNothing,
+        reason: 'Switch must hide in StorageMode.webdav',
+      );
+
+      await _tapVisible(tester, find.text('Local'));
+      await tester.ensureVisible(switchFinder);
+      expect(
+        switchFinder,
+        findsOneWidget,
+        reason: 'Switch must appear in StorageMode.local',
+      );
+
+      await _tapVisible(tester, find.text('Both'));
+      final syncGate = Completer<void>();
+      currentFetchGate = () => syncGate.future;
+
+      final syncButton = find.widgetWithText(
+        FilledButton,
+        'Test Connection / Sync Now',
+      );
+      await tester.tap(syncButton);
+      await tester.pump();
+
+      await tester.ensureVisible(switchFinder);
+      expect(
+        tester.widget<Switch>(switchFinder).onChanged,
+        isNull,
+        reason: 'Switch must be disabled while _isTesting is true',
+      );
+
+      syncGate.complete();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<Switch>(switchFinder).onChanged,
+        isNotNull,
+        reason: 'Switch must re-enable after _isTesting finishes',
+      );
+
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
     },
   );
 }

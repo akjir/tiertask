@@ -24,6 +24,8 @@ import '../models/task_board.dart';
 import '../models/task_board_sync.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
+import '../models/tdf_location.dart';
+import '../models/tdf_metadata.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
@@ -49,10 +51,14 @@ class SyncState {
     this.isSyncing = false,
     this.lastSyncedAt,
     this.errorMessage,
+    this.hasOpenConflict = false,
   });
 
   /// Optional error message from the most recent synchronization attempt.
   final String? errorMessage;
+
+  /// Whether an unresolved `TdfSyncOutcomeException` synchronization conflict is active.
+  final bool hasOpenConflict;
 
   /// Whether a synchronization request is currently in flight.
   final bool isSyncing;
@@ -66,10 +72,13 @@ class SyncState {
     DateTime? lastSyncedAt,
     String? errorMessage,
     bool clearError = false,
+    bool? hasOpenConflict,
   }) => SyncState(
     isSyncing: isSyncing ?? this.isSyncing,
     lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
     errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+    hasOpenConflict:
+        hasOpenConflict ?? (clearError ? false : this.hasOpenConflict),
   );
 
   @override
@@ -78,10 +87,12 @@ class SyncState {
       (other is SyncState &&
           other.isSyncing == isSyncing &&
           other.lastSyncedAt == lastSyncedAt &&
-          other.errorMessage == errorMessage);
+          other.errorMessage == errorMessage &&
+          other.hasOpenConflict == hasOpenConflict);
 
   @override
-  int get hashCode => Object.hash(isSyncing, lastSyncedAt, errorMessage);
+  int get hashCode =>
+      Object.hash(isSyncing, lastSyncedAt, errorMessage, hasOpenConflict);
 }
 
 /// Manages [SyncState] updates during local and WebDAV load and save operations.
@@ -95,19 +106,33 @@ class SyncStateNotifier extends Notifier<SyncState> {
   }
 
   /// Clears any active synchronization error banner.
-  void clearError() => state = state.copyWith(clearError: true);
+  void clearError() =>
+      state = state.copyWith(clearError: true, hasOpenConflict: false);
+
+  /// Records an unresolved synchronization conflict with [message].
+  void setConflict(String message) => state = state.copyWith(
+    isSyncing: false,
+    errorMessage: message,
+    hasOpenConflict: true,
+  );
 
   /// Records a synchronization failure with [message].
-  void setError(String message) =>
-      state = state.copyWith(isSyncing: false, errorMessage: message);
+  void setError(String message) => state = state.copyWith(
+    isSyncing: false,
+    errorMessage: message,
+    hasOpenConflict: false,
+  );
 
   /// Records a successful synchronization at [timestamp].
   void setSuccess(DateTime timestamp) =>
       state = SyncState(isSyncing: false, lastSyncedAt: timestamp);
 
   /// Marks synchronization as in progress and clears previous errors.
-  void setSyncing() =>
-      state = state.copyWith(isSyncing: true, clearError: true);
+  void setSyncing() => state = state.copyWith(
+    isSyncing: true,
+    clearError: true,
+    hasOpenConflict: false,
+  );
 }
 
 /// Stateless two-stage local and WebDAV synchronization and migration pipeline.
@@ -346,7 +371,11 @@ class TaskSyncPipeline {
         fields: <String, Object?>{'mode': config.storageMode.name},
         error: error,
       );
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      if (error is TdfSyncOutcomeException) {
+        ref.read(syncStateProvider.notifier).setConflict(error.toString());
+      } else {
+        ref.read(syncStateProvider.notifier).setError(error.toString());
+      }
       rethrow;
     }
   }
@@ -361,6 +390,7 @@ class TaskSyncPipeline {
     Map<String, TdfDeletionResolution> labelConflictResolutions = const {},
     Map<String, TdfDeletionResolution> locationConflictResolutions = const {},
     TaskBoard? candidateBoard,
+    TaskBoard? candidateOriginBoard,
     bool isInitialLoad = false,
     bool requireTargets = false,
     void Function(TaskBoard mergedBoard)? onLocalStageMerged,
@@ -381,6 +411,13 @@ class TaskSyncPipeline {
     var syncState = await settingsRepository.loadWorkspaceSyncState(
       workspace.id,
     );
+    final hadLocalBaseline =
+        !config.storageMode.usesLocal || syncState.lastSyncedLocalTdf != null;
+    final hadPriorLocalConvergence =
+        !config.storageMode.usesLocal ||
+        (syncState.lastSyncedLocalTdf != null &&
+            syncState.lastSyncedLocalTdf?.trim() ==
+                (syncState.lastSyncedRemoteTdf ?? '').trim());
     final deletedLabels = <String, DateTime>{
       ...syncState.deletedLabelTimestamps,
       ...pendingDeletedLabelTimestamps,
@@ -401,6 +438,7 @@ class TaskSyncPipeline {
         config,
         workspaceId: workspace.id,
         working: working,
+        candidateOriginBoard: candidateOriginBoard,
         hasWorking: hasWorking,
         hasCandidate: hasCandidate,
         requireTargets: requireTargets,
@@ -435,6 +473,8 @@ class TaskSyncPipeline {
         working: working,
         hasWorking: hasWorking,
         hasCandidate: hasCandidate,
+        hadLocalBaseline: hadLocalBaseline,
+        hadPriorLocalConvergence: hadPriorLocalConvergence,
         requireTargets: requireTargets,
         syncState: syncState,
         deletedLabels: deletedLabels,
@@ -594,6 +634,91 @@ class TaskSyncPipeline {
     );
   }
 
+  /// Returns `true` when [storedBaseline] contains entities absent from or newer than [originTasks], [originLabels], or [originLocations].
+  static bool _didBaselineAdvancePastOrigin(
+    TaskBoard storedBaseline,
+    Map<String, TaskItem> originTasks,
+    Map<String, TdfLabel> originLabels,
+    Map<String, TdfLocation> originLocations,
+  ) {
+    for (final item in storedBaseline.allTasks) {
+      final origin = originTasks[item.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt.isBefore(item.effectiveModifiedAt)) {
+        return true;
+      }
+    }
+    for (final label in storedBaseline.labels) {
+      final origin = originLabels[label.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt.isBefore(label.effectiveModifiedAt)) {
+        return true;
+      }
+    }
+    for (final location in storedBaseline.locations) {
+      final origin = originLocations[location.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt.isBefore(location.effectiveModifiedAt)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Retains baseline labels known to [originLabels], preferring earlier [originLabels] revisions.
+  static List<TdfLabel> _filterBaselineLabels(
+    List<TdfLabel> baselineLabels,
+    Map<String, TdfLabel> originLabels,
+  ) {
+    final result = <TdfLabel>[];
+    for (final label in baselineLabels) {
+      if (originLabels[label.id] case final origin?) {
+        result.add(
+          origin.effectiveModifiedAt.isBefore(label.effectiveModifiedAt)
+              ? origin
+              : label,
+        );
+      }
+    }
+    return result;
+  }
+
+  /// Retains baseline locations known to [originLocations], preferring earlier [originLocations] revisions.
+  static List<TdfLocation> _filterBaselineLocations(
+    List<TdfLocation> baselineLocations,
+    Map<String, TdfLocation> originLocations,
+  ) {
+    final result = <TdfLocation>[];
+    for (final location in baselineLocations) {
+      if (originLocations[location.id] case final origin?) {
+        result.add(
+          origin.effectiveModifiedAt.isBefore(location.effectiveModifiedAt)
+              ? origin
+              : location,
+        );
+      }
+    }
+    return result;
+  }
+
+  /// Retains baseline tasks known to [originTasks], preferring earlier [originTasks] revisions.
+  static List<TaskItem> _filterBaselineTasks(
+    Iterable<TaskItem> baselineTasks,
+    Map<String, TaskItem> originTasks,
+  ) {
+    final result = <TaskItem>[];
+    for (final item in baselineTasks) {
+      if (originTasks[item.id] case final origin?) {
+        result.add(
+          origin.effectiveModifiedAt.isBefore(item.effectiveModifiedAt)
+              ? origin
+              : item,
+        );
+      }
+    }
+    return result;
+  }
+
   /// Parses [rawRemote] and merges it with [working] against [baselineTdf], or reuses [working] on `HTTP 304 Not Modified`.
   static (TaskBoard, bool) _mergeRemoteSnapshot(
     Ref ref,
@@ -602,6 +727,7 @@ class TaskSyncPipeline {
     required bool notModified,
     required TaskBoard working,
     required bool hasWorking,
+    required bool hadPriorLocalConvergence,
     required String? baselineTdf,
     required int acknowledgedGeneration,
     required Map<String, DateTime> deletedLabels,
@@ -621,16 +747,18 @@ class TaskSyncPipeline {
         labelConflictResolutions.isEmpty &&
         locationConflictResolutions.isEmpty;
     if (canBypassMerge) {
-      if (hasWorking) {
+      if (hasWorking && hadPriorLocalConvergence) {
         return (working, true);
       }
-      if (trimmedRemote.isNotEmpty) {
-        return (
-          _parseRemoteOrThrow(ref, config, rawRemote, utcNow, localNow),
-          true,
-        );
+      if (!hasWorking) {
+        if (trimmedRemote.isNotEmpty) {
+          return (
+            _parseRemoteOrThrow(ref, config, rawRemote, utcNow, localNow),
+            true,
+          );
+        }
+        return (working, false);
       }
-      return (working, false);
     }
     if (trimmedRemote.isEmpty) {
       return (working, hasWorking);
@@ -936,6 +1064,54 @@ class TaskSyncPipeline {
     return (retryRemote, normalized, _serializeTdf(ref, normalized));
   }
 
+  /// Scopes [storedBaseline] to entities known to [candidateOriginBoard] so queued optimistic mutations preserve newly merged external entities.
+  static TaskBoard? _scopeBaselineToCandidateOrigin(
+    TaskBoard? storedBaseline,
+    TaskBoard? candidateOriginBoard, {
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) {
+    if (storedBaseline == null || candidateOriginBoard == null) {
+      return storedBaseline;
+    }
+    final originTasks = <String, TaskItem>{
+      for (final item in candidateOriginBoard.allTasks) item.id: item,
+    };
+    final originLabels = <String, TdfLabel>{
+      for (final label in candidateOriginBoard.labels) label.id: label,
+    };
+    final originLocations = <String, TdfLocation>{
+      for (final location in candidateOriginBoard.locations)
+        location.id: location,
+    };
+    final queueAdvanced = candidateOriginBoard.queueBlock.modifiedAt.isBefore(
+      storedBaseline.queueBlock.modifiedAt,
+    );
+    if (!_didBaselineAdvancePastOrigin(
+          storedBaseline,
+          originTasks,
+          originLabels,
+          originLocations,
+        ) &&
+        !queueAdvanced) {
+      return storedBaseline;
+    }
+    return TaskBoard.evaluate(
+      tasks: _filterBaselineTasks(storedBaseline.allTasks, originTasks),
+      labels: _filterBaselineLabels(storedBaseline.labels, originLabels),
+      locations: _filterBaselineLocations(
+        storedBaseline.locations,
+        originLocations,
+      ),
+      deletedBlock: storedBaseline.deletedBlock,
+      queueBlock: queueAdvanced
+          ? candidateOriginBoard.queueBlock
+          : storedBaseline.queueBlock,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+    );
+  }
+
   /// Serializes [board] into canonical `.tdf` text.
   static String _serializeTdf(Ref ref, TaskBoard board) =>
       ref.read(tdfServiceProvider).serialize(board);
@@ -960,6 +1136,7 @@ class TaskSyncPipeline {
     WebDavConfig config, {
     required String workspaceId,
     required TaskBoard working,
+    required TaskBoard? candidateOriginBoard,
     required bool hasWorking,
     required bool hasCandidate,
     required bool requireTargets,
@@ -990,11 +1167,17 @@ class TaskSyncPipeline {
         utcNow,
         localNow,
       );
-      final baseline = _tryParseBaseline(
+      final rawBaseline = _tryParseBaseline(
         ref,
         syncState.lastSyncedLocalTdf,
         utcNow,
         localNow,
+      );
+      final baseline = _scopeBaselineToCandidateOrigin(
+        rawBaseline,
+        candidateOriginBoard,
+        utcNow: utcNow,
+        localNow: localNow,
       );
       nextWorking = TaskBoardSync.merge(
         primary: nextHasWorking ? nextWorking : localBoard,
@@ -1067,6 +1250,8 @@ class TaskSyncPipeline {
     required TaskBoard working,
     required bool hasWorking,
     required bool hasCandidate,
+    required bool hadLocalBaseline,
+    required bool hadPriorLocalConvergence,
     required bool requireTargets,
     required WorkspaceSyncState syncState,
     required Map<String, DateTime> deletedLabels,
@@ -1096,7 +1281,8 @@ class TaskSyncPipeline {
       notModified: notModified,
       working: working,
       hasWorking: hasWorking,
-      baselineTdf: syncState.lastSyncedRemoteTdf,
+      hadPriorLocalConvergence: hadPriorLocalConvergence,
+      baselineTdf: hadLocalBaseline ? syncState.lastSyncedRemoteTdf : null,
       acknowledgedGeneration: syncState.acknowledgedRemoteGeneration,
       deletedLabels: deletedLabels,
       deletedLocations: deletedLocations,

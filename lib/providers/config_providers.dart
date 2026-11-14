@@ -278,6 +278,7 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
       'config.update',
       fields: <String, Object?>{
         'storage': newConfig.storageMode.name,
+        'local_watch': newConfig.localWatchEnabled,
         'log_storage': newConfig.logStorageMode.name,
         'log_level': newConfig.logLevel.label,
         'tz_mode': newConfig.timeZoneMode.name,
@@ -306,6 +307,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   Future<void> updateLanguage(AppLanguage language) async {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(language: language);
+    await updateConfig(updated);
+  }
+
+  /// Updates only the [localWatchEnabled] preference and persists it immediately.
+  Future<void> updateLocalWatchEnabled(bool localWatchEnabled) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(localWatchEnabled: localWatchEnabled);
     await updateConfig(updated);
   }
 

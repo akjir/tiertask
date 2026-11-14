@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -133,6 +134,18 @@ class LocalFileOperations<E extends Exception> {
     }
   }
 
+  /// Returns `true` when [inMemory] is `true` or [directoryPath] exists on disk.
+  bool directoryExists(String directoryPath, {required bool inMemory}) {
+    if (inMemory) {
+      return true;
+    }
+    try {
+      return Directory(directoryPath).existsSync();
+    } on FileSystemException {
+      return false;
+    }
+  }
+
   /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
   String ensureTdfExtension(String rawName) {
     final trimmed = rawName.trim();
@@ -188,6 +201,34 @@ class LocalFileOperations<E extends Exception> {
   bool isAbsolutePath(String rawPath) =>
       rawPath.startsWith('/') || _windowsDrivePattern.hasMatch(rawPath);
 
+  /// Returns `true` when [event] is a create, modify, or move event targeting [targetFileName].
+  bool isRelevantWatchEvent(
+    FileSystemEvent event,
+    String targetFileName, {
+    required bool caseInsensitive,
+  }) {
+    if (event is FileSystemDeleteEvent) {
+      return false;
+    }
+    if (matchesWatchedFileName(
+      event.path,
+      targetFileName,
+      caseInsensitive: caseInsensitive,
+    )) {
+      return true;
+    }
+    if (event is FileSystemMoveEvent) {
+      if (event.destination case final destination?) {
+        return matchesWatchedFileName(
+          destination,
+          targetFileName,
+          caseInsensitive: caseInsensitive,
+        );
+      }
+    }
+    return false;
+  }
+
   /// Returns `true` when [rawName] is a valid single `.tdf` file name or base name without path separators or control characters.
   bool isValidSingleFileName(String rawName) {
     final trimmed = rawName.trim();
@@ -224,6 +265,32 @@ class LocalFileOperations<E extends Exception> {
       _ => _mapMoveErrorByText(error, path, messages),
     };
     return createException(text, cause: error);
+  }
+
+  /// Returns `true` when the exact trailing basename of [candidatePath] equals [targetFileName] without trimming.
+  bool matchesWatchedFileName(
+    String candidatePath,
+    String targetFileName, {
+    required bool caseInsensitive,
+  }) {
+    if (candidatePath.isEmpty || targetFileName.isEmpty) {
+      return false;
+    }
+    final trailingCodeUnit = candidatePath.codeUnitAt(candidatePath.length - 1);
+    if (trailingCodeUnit == 0x2F || trailingCodeUnit == 0x5C) {
+      return false;
+    }
+    final lastSlash = candidatePath.lastIndexOf('/');
+    final lastBackslash = candidatePath.lastIndexOf(r'\');
+    final separatorIndex = lastSlash > lastBackslash
+        ? lastSlash
+        : lastBackslash;
+    final candidateName = separatorIndex < 0
+        ? candidatePath
+        : candidatePath.substring(separatorIndex + 1);
+    return caseInsensitive
+        ? candidateName.toLowerCase() == targetFileName.toLowerCase()
+        : candidateName == targetFileName;
   }
 
   /// Safely moves the `.tdf` file from [fromPath] to [toPath] inside [targetDirectoryPath] without overwriting existing entities.
@@ -472,6 +539,36 @@ class LocalFileOperations<E extends Exception> {
     return joined;
   }
 
+  /// Watches [directoryPath] non-recursively and emits `null` whenever [targetFileName] is created, modified, or moved in.
+  Stream<void> watchTdfFile({
+    required String directoryPath,
+    required String targetFileName,
+    required bool inMemory,
+  }) {
+    if (inMemory || !FileSystemEntity.isWatchSupported) {
+      return const Stream<void>.empty();
+    }
+    late final StreamController<void> controller;
+    StreamSubscription<FileSystemEvent>? subscription;
+    controller = StreamController<void>(
+      onListen: () {
+        subscription = _startDirectoryWatch(
+          controller,
+          directoryPath: directoryPath,
+          targetFileName: targetFileName,
+        );
+      },
+      onCancel: () {
+        if (subscription != null) {
+          _logWatchStop(directoryPath);
+          unawaited(subscription?.cancel());
+          subscription = null;
+        }
+      },
+    );
+    return controller.stream;
+  }
+
   /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
   void writeLogFileSync(String path, String content, {required bool append}) {
     try {
@@ -630,6 +727,31 @@ class LocalFileOperations<E extends Exception> {
     return '$cleanDirectory${Platform.pathSeparator}$childPath';
   }
 
+  /// Logs a `local.watch.error` diagnostic event at `WARN` level for [directoryPath].
+  void _logWatchError(String directoryPath, Object error) {
+    if (AppLogger.shouldLog(LogLevel.warn)) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'local.watch.error',
+        fields: <String, Object?>{'path': directoryPath},
+        error: error,
+      );
+    }
+  }
+
+  /// Logs a `local.watch.stop` diagnostic event at `DEBUG` level for [directoryPath].
+  void _logWatchStop(String directoryPath) {
+    if (AppLogger.shouldLog(LogLevel.debug)) {
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.storage,
+        'local.watch.stop',
+        fields: <String, Object?>{'path': directoryPath},
+      );
+    }
+  }
+
   /// Fallback text matcher when `osError.errorCode` is not populated or uses a non-standard code.
   String _mapMoveErrorByText(
     FileSystemException error,
@@ -685,6 +807,62 @@ class LocalFileOperations<E extends Exception> {
         return;
       }
       throw mapMoveFileSystemException(error, targetPath, messages);
+    }
+  }
+
+  /// Subscribes [controller] to `Directory(directoryPath).watch(recursive: false)` with isolated error handling.
+  StreamSubscription<FileSystemEvent>? _startDirectoryWatch(
+    StreamController<void> controller, {
+    required String directoryPath,
+    required String targetFileName,
+  }) {
+    final directory = Directory(directoryPath);
+    try {
+      if (!directory.existsSync()) {
+        unawaited(controller.close());
+        return null;
+      }
+      if (AppLogger.shouldLog(LogLevel.info)) {
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          'local.watch.start',
+          fields: <String, Object?>{'path': directoryPath},
+        );
+      }
+      return directory
+          .watch(recursive: false)
+          .listen(
+            (event) {
+              if (!controller.isClosed &&
+                  isRelevantWatchEvent(
+                    event,
+                    targetFileName,
+                    caseInsensitive: Platform.isWindows,
+                  )) {
+                controller.add(null);
+              }
+            },
+            onError: (Object error) {
+              _logWatchError(directoryPath, error);
+              if (!controller.isClosed) {
+                unawaited(controller.close());
+              }
+            },
+            onDone: () {
+              _logWatchStop(directoryPath);
+              if (!controller.isClosed) {
+                unawaited(controller.close());
+              }
+            },
+            cancelOnError: false,
+          );
+    } on FileSystemException catch (error) {
+      _logWatchError(directoryPath, error);
+      if (!controller.isClosed) {
+        unawaited(controller.close());
+      }
+      return null;
     }
   }
 

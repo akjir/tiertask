@@ -1323,4 +1323,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String taskDeletedUndoSnackBar(String title) {
     return 'Deleted \"$title\".';
   }
+
+  @override
+  String get localWatchLabel => 'Watch for external file changes';
+
+  @override
+  String get localWatchDescription =>
+      'Automatically merge edits saved by external editors, scripts, or file-sync tools.';
 }

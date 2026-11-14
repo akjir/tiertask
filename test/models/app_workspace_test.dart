@@ -237,6 +237,73 @@ void main() {
       }
     });
 
+    test('encodes and decodes localWatchEnabled losslessly across all 27 storage/language/theme combinations in 51-byte TTW v1 records', () {
+      final legacyDefaultBytes = <int>[
+        0x54,
+        0x54,
+        0x57,
+        0x01,
+        0x01,
+        0x00,
+        ..._buildRawRecord(),
+      ];
+      final legacyDecoded = AppWorkspace.fromBytes(legacyDefaultBytes);
+      expect(
+        legacyDecoded.config.localWatchEnabled,
+        isTrue,
+        reason: 'Existing 51-byte TTW v1 records must decode with localWatchEnabled == true',
+      );
+      expect(
+        AppWorkspace.defaultWorkspace.toBytes(),
+        equals(Uint8List.fromList(legacyDefaultBytes)),
+        reason: 'Default workspace must remain bit-for-bit identical to legacy 51-byte TTW v1',
+      );
+
+      final configs = <WebDavConfig>[
+        for (final watchEnabled in <bool>[true, false])
+          for (final storageMode in StorageMode.values)
+            for (final language in AppLanguage.values)
+              for (final themeMode in AppThemeMode.values)
+                for (final palette in AppThemePalette.values)
+                  for (final logMode in StorageMode.values)
+                    for (final logLevel in LogLevel.configurableLevels)
+                      WebDavConfig(
+                        storageMode: storageMode,
+                        language: language,
+                        themeMode: themeMode,
+                        themePalette: palette,
+                        localWatchEnabled: watchEnabled,
+                        logStorageMode: logMode,
+                        logLevel: logLevel,
+                        diagnosticsEnabled: !watchEnabled,
+                      ),
+      ];
+
+      for (final config in configs) {
+        final workspace = AppWorkspace.defaultWorkspace.copyWith(
+          config: config,
+        );
+        final bytes = workspace.toBytes();
+        expect(
+          bytes.length,
+          equals(51),
+          reason:
+              'TTW v1 record must remain 51 bytes for watch=${config.localWatchEnabled}, '
+              'storage=${config.storageMode.name}, lang=${config.language.name}, '
+              'theme=${config.themeMode.name}',
+        );
+        final decoded = AppWorkspace.fromBytes(bytes);
+        expect(
+          decoded.config,
+          equals(config),
+          reason:
+              'Decoded config must match encoded config for watch=${config.localWatchEnabled}, '
+              'storage=${config.storageMode.name}, lang=${config.language.name}, '
+              'theme=${config.themeMode.name}, palette=${config.themePalette.name}',
+        );
+      }
+    });
+
     test('resolveLogEndpointUri resolves sibling WebDAV log URLs and rejects traversal or non-.log filenames', () {
       const nextcloudConfig = WebDavConfig(
         serverUrl: 'https://cloud.example.com/remote.php/dav/files/alice',
@@ -517,6 +584,9 @@ void main() {
       final recordOverlongName = _buildRawRecord(
         name: 'A' * (AppWorkspace.maxNameLength + 1),
       );
+      final recordReservedLane2 = _buildRawRecord(flags: 0x30);
+      final recordReservedLane2Alt = _buildRawRecord(flags: 0x35);
+      final recordOverflowRem11 = _buildRawRecord(flags: 0x3E);
 
       for (final corruptBytes in <List<int>>[
         <int>[],
@@ -538,6 +608,9 @@ void main() {
         <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordBiDiPath],
         <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordTraversalPath],
         <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordOverlongName],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordReservedLane2],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordReservedLane2Alt],
+        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordOverflowRem11],
         <int>[
           0x54,
           0x54,

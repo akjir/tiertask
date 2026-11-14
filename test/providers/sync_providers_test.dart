@@ -22,6 +22,7 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/models/workspace_sync_state.dart';
@@ -73,6 +74,12 @@ class _InMemorySyncLocalRepository extends LocalFileRepository {
 
   final String Function() getTdf;
   final void Function(String value) setTdf;
+
+  @override
+  bool get canWatchDirectory => false;
+
+  @override
+  bool fileExists() => getTdf().isNotEmpty;
 
   @override
   Future<String> loadTdf() async => getTdf();
@@ -183,14 +190,39 @@ void main() {
 
     notifier.setError('Connection failed');
     expect(container.read(syncStateProvider).isSyncing, isFalse);
+    expect(container.read(syncStateProvider).hasOpenConflict, isFalse);
     expect(
       container.read(syncStateProvider).errorMessage,
       equals('Connection failed'),
     );
 
+    notifier.setConflict('Deletion conflict on taskA');
+    expect(container.read(syncStateProvider).isSyncing, isFalse);
+    expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+    expect(
+      container.read(syncStateProvider).errorMessage,
+      equals('Deletion conflict on taskA'),
+    );
+
     notifier.clearError();
     expect(container.read(syncStateProvider).errorMessage, isNull);
+    expect(
+      container.read(syncStateProvider).hasOpenConflict,
+      isFalse,
+      reason: 'clearError must reset hasOpenConflict to false',
+    );
     expect(container.read(syncStateProvider).lastSyncedAt, equals(syncedAt));
+
+    notifier.setConflict('Another conflict');
+    notifier.setSyncing();
+    expect(
+      container.read(syncStateProvider).hasOpenConflict,
+      isFalse,
+      reason: 'setSyncing must reset hasOpenConflict to false',
+    );
+    notifier.setConflict('Conflict before success');
+    notifier.setSuccess(syncedAt);
+    expect(container.read(syncStateProvider).hasOpenConflict, isFalse);
 
     notifier.setError('Stale workspace error');
     await container
@@ -905,5 +937,82 @@ void main() {
     expect(container2.read(syncStateProvider).errorMessage, isNull);
     expect(get200Count, equals(2));
     expect(putCount, equals(2));
+  });
+
+  test('TaskSyncPipeline.runSyncWithStatus sets SyncState.hasOpenConflict when TdfSyncOutcomeException is thrown', () async {
+    final settingsRepository = InMemorySettingsRepository(
+      const WebDavConfig(storageMode: StorageMode.local),
+    );
+    const baselineTdf =
+        'tdf 0.6.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 10:00:00\n'
+        '    task cflTask001\n'
+        '}\n\n'
+        'task cflTask001 {\n'
+        '    name "Baseline Title"\n'
+        '    created 2026-11-01 10:00:00\n'
+        '    modified 2026-11-01 10:00:00\n'
+        '}\n';
+    const externalDeletedTdf =
+        'tdf 0.6.0\n\n'
+        'deleted {\n'
+        '    generation 0\n'
+        '    task cflTask001 2026-11-01 10:05:00\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 10:05:00\n'
+        '}\n';
+    var currentDisk = baselineTdf;
+
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
+        clockProvider.overrideWithValue(
+          () => DateTime.utc(2026, 11, 1, 10, 10),
+        ),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncLocalRepository(
+            config:
+                ref.watch(webDavConfigProvider).asData?.value ??
+                const WebDavConfig(),
+            getTdf: () => currentDisk,
+            setTdf: (value) => currentDisk = value,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final initialBoard = await container.read(taskNotifierProvider.future);
+    final editedBoard = initialBoard.updateTask(
+      'cflTask001',
+      title: 'Concurrent Local Edit',
+      currentDate: DateTime.utc(2026, 11, 1, 10, 6),
+      localEvaluationTime: DateTime(2026, 11, 1, 10, 6),
+    );
+    currentDisk = externalDeletedTdf;
+
+    final runConflictSync = container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.runSyncWithStatus(
+              ref,
+              const WebDavConfig(storageMode: StorageMode.local),
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: editedBoard,
+            ),
+      ),
+    );
+    await expectLater(runConflictSync, throwsA(isA<TdfSyncOutcomeException>()));
+
+    final syncState = container.read(syncStateProvider);
+    expect(
+      syncState.hasOpenConflict,
+      isTrue,
+      reason:
+          'TdfSyncOutcomeException must mark SyncState.hasOpenConflict == true',
+    );
+    expect(syncState.errorMessage, contains('deletionConflict'));
   });
 }

@@ -23,6 +23,7 @@ import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
+import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/services/tdf_id_migration.dart';
 
 void main() {
@@ -550,6 +551,36 @@ void main() {
           reason: 'Vector $id expectedNewSuspendedUtc',
         );
       }
+    });
+  });
+
+  group('WebDavConfig.localWatchEnabled Primitives', () {
+    test('defaults localWatchEnabled to true and supports copyWith, equality, and hashCode', () {
+      const defaultConfig = WebDavConfig();
+      expect(
+        defaultConfig.localWatchEnabled,
+        isTrue,
+        reason:
+            'New WebDavConfig must enable local directory watching by default',
+      );
+
+      final disabled = defaultConfig.copyWith(localWatchEnabled: false);
+      expect(disabled.localWatchEnabled, isFalse);
+      expect(disabled, isNot(equals(defaultConfig)));
+      expect(disabled.hashCode, isNot(equals(defaultConfig.hashCode)));
+
+      final preservedDisabled = disabled.copyWith(
+        themePalette: AppThemePalette.navy,
+      );
+      expect(
+        preservedDisabled.localWatchEnabled,
+        isFalse,
+        reason: 'copyWith without localWatchEnabled must preserve false',
+      );
+
+      final reEnabled = disabled.copyWith(localWatchEnabled: true);
+      expect(reEnabled, equals(defaultConfig));
+      expect(reEnabled.hashCode, equals(defaultConfig.hashCode));
     });
   });
 }
