@@ -1,10 +1,10 @@
 ---
 id: TEP-005
 title: Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation
-status: review
+status: completed
 type: feature
 created: 2026-11-08
-updated: 2026-11-09
+updated: 2026-11-14
 ---
 
 # TEP-005: Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation
@@ -246,11 +246,16 @@ No grammar or semantic changes to `spec/TDF_SPEC_0.6.0.md` are required. `spec/T
 - [x] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
 - [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
 - [x] Set `status: review` in `tep-005-location-source-resolution.md` and `BOARD.md` and request user approval.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-08:** Created `TEP-005` in `planned` status following internet research on What3words API restrictions, OpenStreetMap Nominatim forward geocoding, and offline Open Location Code decoding.
 * **2026-11-08:** Updated `TEP-005` with 6 technical refinements: optional `localitySuffix` preservation on `FullPlusCodeInput`, single-line `<text>` normalization and 500-rune truncation for `GeocodingCandidate.displayName`, 6-decimal `GeocodingCandidate.formattedCoordinates` alignment, anchor-derived `_isSourceResolved` tracking, `_resolveGeneration` async cancellation and in-flight control locking, and Nominatim rate-limit guard plus short Plus Code source string preservation.
 * **2026-11-09:** Implemented `TEP-005` via Red-Green-Refactor TDD across `lib/models/location_state.dart`, `lib/services/plus_code_service.dart`, `lib/repositories/location_repository.dart`, `lib/ui/widgets/clearable_text_field.dart`, `lib/ui/edit_locations_screen.dart`, and `lib/l10n/app_*.arb`.
+* **2026-11-14:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+* **Domain Models (`lib/models/`):** [`lib/models/location_state.dart`](../../lib/models/location_state.dart), [`lib/models/tdf_location.dart`](../../lib/models/tdf_location.dart).
+* **Services & Repositories (`lib/services/`, `lib/repositories/`):** [`lib/services/plus_code_service.dart`](../../lib/services/plus_code_service.dart), [`lib/repositories/location_repository.dart`](../../lib/repositories/location_repository.dart).
+* **Localization & UI (`lib/l10n/`, `lib/ui/`):** [`lib/l10n/app_en.arb`](../../lib/l10n/app_en.arb), [`lib/l10n/app_de.arb`](../../lib/l10n/app_de.arb), [`lib/ui/widgets/clearable_text_field.dart`](../../lib/ui/widgets/clearable_text_field.dart), [`lib/ui/edit_locations_screen.dart`](../../lib/ui/edit_locations_screen.dart).
+* **Tests & Documentation (`test/`, root):** [`test/models/location_state_test.dart`](../../test/models/location_state_test.dart), [`test/models/tdf_location_test.dart`](../../test/models/tdf_location_test.dart), [`test/services/plus_code_service_test.dart`](../../test/services/plus_code_service_test.dart), [`test/repositories/location_repository_test.dart`](../../test/repositories/location_repository_test.dart), [`test/ui/edit_locations_screen_test.dart`](../../test/ui/edit_locations_screen_test.dart), [`test/ui/widgets/clearable_text_field_test.dart`](../../test/ui/widgets/clearable_text_field_test.dart), [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`CHANGELOG.md`](../../CHANGELOG.md).

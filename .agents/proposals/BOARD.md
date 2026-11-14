@@ -11,10 +11,8 @@ This directory serves as the collaborative feature roadmap and specification hub
 
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
-| TEP-004 | TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation | feature | review | [`tep-004-tdf-0-6-0-implementation.md`](tep-004-tdf-0-6-0-implementation.md) |
-| TEP-005 | Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation | feature | review | [`tep-005-location-source-resolution.md`](tep-005-location-source-resolution.md) |
 | TEP-006 | TDF Specification 0.7.0 Exploratory Design and Idea Collection | spec | concept | [`tep-006-tdf-spec-0-7-0.md`](tep-006-tdf-spec-0-7-0.md) |
-| TEP-007 | In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery | feature | review | [`tep-007-undo-stack-snackbar-recovery.md`](tep-007-undo-stack-snackbar-recovery.md) |
+| TEP-008 | Automatic Local TDF Directory Watching, Digest-Gated Reconciliation, and Per-Workspace Settings Toggle | feature | planned | [`tep-008-local-file-directory-watch-sync.md`](tep-008-local-file-directory-watch-sync.md) |
 
 ### Completed Proposals
 
@@ -23,6 +21,9 @@ This directory serves as the collaborative feature roadmap and specification hub
 | TEP-001 | Agent-Optimized Codebase Architecture, Acyclic Import DAG, and Sub-5s TDD Harness | architecture | completed | [`tep-001-agent-optimized-architecture.md`](tep-001-agent-optimized-architecture.md) |
 | TEP-002 | Structured Diagnostic Logging, Configurable Log Levels, and Local/WebDAV Log Persistence | feature | completed | [`tep-002-structured-logging-and-persistence.md`](tep-002-structured-logging-and-persistence.md) |
 | TEP-003 | TDF Specification 0.6.0 Exploratory Design and Conformance Roadmap | spec | completed | [`tep-003-tdf-spec-0-6-0.md`](tep-003-tdf-spec-0-6-0.md) |
+| TEP-004 | TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation | feature | completed | [`tep-004-tdf-0-6-0-implementation.md`](tep-004-tdf-0-6-0-implementation.md) |
+| TEP-005 | Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation | feature | completed | [`tep-005-location-source-resolution.md`](tep-005-location-source-resolution.md) |
+| TEP-007 | In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery | feature | completed | [`tep-007-undo-stack-snackbar-recovery.md`](tep-007-undo-stack-snackbar-recovery.md) |
 
 ## Status Lifecycle
 

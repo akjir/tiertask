@@ -1,10 +1,10 @@
 ---
 id: TEP-004
 title: TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation
-status: review
+status: completed
 type: feature
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-14
 ---
 
 # TEP-004: TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation
@@ -115,6 +115,7 @@ Every stage follows strict Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR
 * **2026-11-08:** Executed `spec-verification-loop` on `TEP-004` and resolved 4 codebase/spec coherence defects: (1) removed references to non-existent `lib/providers/task_mutation_helpers.dart`, (2) added `lib/services/tdf_historical_parser.dart`, `lib/services/tdf_historical_serializer.dart`, `TdfImporter.schemaRef051`, and `TdfImporter.migrate051To060` to Stage 2 and clarified read-only in-memory load-time conversion vs. explicit historical import, (3) aligned Stage 1–6 test file paths in Part 3.1 with `ARCHITECTURE.md` and `_SUBSYSTEM_TEST_MAP` in `.agents/scripts/tiertask_dev.py` (`P-TEST-MIRROR`), and (4) added `deletedLocationTimestamps` persistence in `WorkspaceSyncState` (`TTS\x03`), `TaskSyncPipeline.persistPendingLocationDeletion`, `TaskNotifier._pendingDeletedLocationTimestamps`, and `TaskBoardSync.combineInitialDeletedRecords` per Sections 6.8.2 and 6.8.4.
 * **2026-11-08:** Completed Stages 1–6 following strict Red-Green-Refactor TDD (`P-TDD-FIRST`), verified all `spec/conformance/v0.6.0/` fixtures and vectors, synchronized `ARCHITECTURE.md`, `README.md`, `AGENTS.md`, and `CHANGELOG.md`, and transitioned `TEP-004` to `status: review`.
 * **2026-11-08:** Audited the completed implementation against `TEP-003` and `TEP-004` and resolved 8 edge-case findings via TDD: (1) preserved tombstoned labels in $L_{\text{before}}(T)$ during `TdfPayloadComparison._mergeLabelSets` so Step 4 `stripDeletedLabelsAndValidateReferences` enforces `scoped` flood protection and Section 6.7.6 revision reuse on concurrent task/queue edits, (2) enforced `maxTdfLocations`, `maxTdfArgsPerStmt`, and `maxTdfLocationRefsPerEntity` in `TaskBoardSync.validateMergedGraphAndBounds`, (3) rewrote `labels`, `blocked`, and `condition location` references on shared surviving local entities in `TaskBoardSync.recoverAmbiguousEntities`, (4) enforced `EmptyText` -> `LimitExceeded` -> `InvalidUri` precedence in `TdfDirectiveParser._parseTaskLink` and Unicode scalar length in `TaskLink.isValidUri`, (5) aligned `TdfImporter.schemaRef051` SHA-1 pins with `spec/TDF_SPEC_0.6.0.md` Section 10.1.1, (6) enforced `FileMode.writeOnly` and `0600` POSIX permissions on `.tmp.<32hex>` files in `LocalFileOperations.writeTdfAtomicallySync`, (7) forwarded active GPS coordinates in `TaskBoardQueueMutator.downgradeTask` and `TaskNotifier.downgradeTask`, and (8) replaced `RegExp` patterns in `TdfDirectiveParser` with single-pass code-unit helpers and expanded `tdf_v060_conformance_test.dart` assertions.
+* **2026-11-14:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
 * **Domain Models (`lib/models/`):** [`lib/models/tdf_location.dart`](../../lib/models/tdf_location.dart), [`lib/models/tdf_error.dart`](../../lib/models/tdf_error.dart), [`lib/models/tdf_metadata.dart`](../../lib/models/tdf_metadata.dart), [`lib/models/task_item.dart`](../../lib/models/task_item.dart), [`lib/models/tdf_sync_metadata.dart`](../../lib/models/tdf_sync_metadata.dart), [`lib/models/task_board.dart`](../../lib/models/task_board.dart), [`lib/models/task_board_evaluator.dart`](../../lib/models/task_board_evaluator.dart), [`lib/models/task_board_mutator.dart`](../../lib/models/task_board_mutator.dart), [`lib/models/task_board_queue_mutator.dart`](../../lib/models/task_board_queue_mutator.dart), [`lib/models/tdf_payload_comparison.dart`](../../lib/models/tdf_payload_comparison.dart), [`lib/models/task_board_reconciler.dart`](../../lib/models/task_board_reconciler.dart), [`lib/models/task_board_sync.dart`](../../lib/models/task_board_sync.dart), [`lib/models/workspace_sync_state.dart`](../../lib/models/workspace_sync_state.dart).

@@ -1,10 +1,10 @@
 ---
 id: TEP-007
 title: In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery
-status: review
+status: completed
 type: feature
 created: 2026-11-10
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # TEP-007: In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery
@@ -289,11 +289,15 @@ Follow strict Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR`):
 - [x] Synchronize `README.md`, `ARCHITECTURE.md`, and `AGENTS.md` per **`update-documentation`**.
 - [x] Add a user-facing `CHANGELOG.md` entry under `## [Unreleased]` per **`changelog-updater`**.
 - [x] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-10:** Created `TEP-007` in `planned` status incorporating user decisions on bounded 10-entry LIFO stack retention (`Ctrl+Z` across session until workspace switch, import, or wipe), immediate delete confirmation dialog without the 3-second countdown lock, and undo scope covering direct completion, `subtasks auto-finish` completion, and downgrade in `TierTaskPill` plus task deletion in `EditTaskScreen`.
 * **2026-11-10:** Implemented `TEP-007` via strict Red-Green-Refactor TDD across `lib/models/task_board_undo.dart`, `lib/providers/task_providers.dart` (using per-epoch `_rolledBackEpochs` tracking for concurrency-safe rollback atomicity), `lib/ui/app_theme.dart`, `lib/ui/edit_task_screen.dart`, and `lib/ui/home_screen.dart` (setting `persist: false` on Material 3 `SnackBar` with `SnackBarAction` so the 5-second auto-dismiss timer fires reliably). Synchronized `ARCHITECTURE.md` and `CHANGELOG.md`, verified full suite via `tiertask_dev.py verify --full --fix`, and moved `TEP-007` to `review`.
+* **2026-11-14:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+* **Domain Models (`lib/models/`):** [`lib/models/task_board_undo.dart`](../../lib/models/task_board_undo.dart).
+* **Providers (`lib/providers/`):** [`lib/providers/task_providers.dart`](../../lib/providers/task_providers.dart).
+* **Localization & UI (`lib/l10n/`, `lib/ui/`):** [`lib/l10n/app_en.arb`](../../lib/l10n/app_en.arb), [`lib/l10n/app_de.arb`](../../lib/l10n/app_de.arb), [`lib/ui/app_theme.dart`](../../lib/ui/app_theme.dart), [`lib/ui/edit_task_screen.dart`](../../lib/ui/edit_task_screen.dart), [`lib/ui/home_screen.dart`](../../lib/ui/home_screen.dart).
+* **Tests & Tooling (`test/`, `.agents/scripts/`):** [`test/models/task_board_undo_test.dart`](../../test/models/task_board_undo_test.dart), [`test/providers/task_providers_test.dart`](../../test/providers/task_providers_test.dart), [`test/ui/edit_task_screen_test.dart`](../../test/ui/edit_task_screen_test.dart), [`test/ui/home_screen_test.dart`](../../test/ui/home_screen_test.dart), [`test/ui/test_helpers.dart`](../../test/ui/test_helpers.dart), [`.agents/scripts/tiertask_dev.py`](../scripts/tiertask_dev.py).
