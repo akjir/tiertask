@@ -556,6 +556,18 @@ class LocalFileOperations<E extends Exception> {
           controller,
           directoryPath: directoryPath,
           targetFileName: targetFileName,
+          onStreamDone: () {
+            if (subscription != null) {
+              subscription = null;
+              _logWatchStop(directoryPath);
+            }
+          },
+          onStreamError: () {
+            if (subscription != null) {
+              unawaited(subscription?.cancel());
+              subscription = null;
+            }
+          },
         );
       },
       onCancel: () {
@@ -815,6 +827,8 @@ class LocalFileOperations<E extends Exception> {
     StreamController<void> controller, {
     required String directoryPath,
     required String targetFileName,
+    required void Function() onStreamDone,
+    required void Function() onStreamError,
   }) {
     final directory = Directory(directoryPath);
     try {
@@ -845,12 +859,13 @@ class LocalFileOperations<E extends Exception> {
             },
             onError: (Object error) {
               _logWatchError(directoryPath, error);
+              onStreamError();
               if (!controller.isClosed) {
                 unawaited(controller.close());
               }
             },
             onDone: () {
-              _logWatchStop(directoryPath);
+              onStreamDone();
               if (!controller.isClosed) {
                 unawaited(controller.close());
               }

@@ -6,14 +6,16 @@ description: Updates and maintains CHANGELOG.md adhering to Keep a Changelog und
 **Goal:** Maintain `CHANGELOG.md` per Keep a Changelog 1.1.0 & SemVer 2.0.0 with concise, strictly end-user-relevant entries.
 
 ## USE WHEN
-- Adding, changing, or removing features, settings, or file format capabilities that directly affect end-user behavior.
-- Fixing bugs or improving performance in ways observable by the user.
+- Adding, changing, or removing features, settings, or file format capabilities that directly affect end-user behavior relative to the latest released version.
+- Fixing bugs or improving performance in already-released behavior observable by the user.
+- **NEVER USE WHEN:** Fixing bugs, discrepancies, or regressions in an unreleased feature or implementation already under `## [Unreleased]`. Correcting an unreleased implementation MUST NEVER modify `CHANGELOG.md` or add `### Fixed` entries.
 
 ## RULES
 - **Section:** Place new entries ONLY under `## [Unreleased]`. If `## [Unreleased]` does not exist (for example, right after a release), insert `## [Unreleased]` directly above the latest `## [X.Y.Z] - YYYY-MM-DD` section. Never commit or leave an empty `## [Unreleased]` section.
 - **Allowed Categories:** `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`. Include only non-empty categories, separated by a blank line after each heading.
-- **Scope (End-User Behavior ONLY):**
-  - **INCLUDE:** New user-facing features, observable behavior changes, workflow or UI improvements, `.tdf` format capabilities, synchronization changes, and user-facing bug or performance fixes.
+- **Scope (End-User Behavior Relative to Last Release ONLY):**
+  - **INCLUDE:** New user-facing features, observable behavior changes, workflow or UI improvements, `.tdf` format capabilities, synchronization changes, and user-facing bug or performance fixes affecting released versions.
+  - **BANNED (Fixes to Unreleased Implementations):** Bug fixes, audit remediations, edge-case corrections, or spec-alignment fixes for code introduced after the latest release tag (`## [Unreleased]`). Leave `CHANGELOG.md` untouched for such corrections.
   - **BANNED (Internal Changes):** Internal formatting, code restructuring, modularization, refactoring, architecture adjustments, build/analyzer configuration, agent skills/rules, or test changes (`M-*` rules) that do not alter observable program behavior.
   - **BANNED (Code-Specific Details):** Source file paths (`lib/...`), class, method, function, or widget identifiers (`TaskBoard`, `PageView`, `TierPageIndicator`), internal state/storage representations (`Base64Service`, binary encodings, `step true`), algorithm complexity notation (`O(N)`), and widget keys.
 - **Outcome-Focused & Concise Wording (`P-LANG-RULES`):**
@@ -24,6 +26,6 @@ description: Updates and maintains CHANGELOG.md adhering to Keep a Changelog und
   - Consolidate or update existing `## [Unreleased]` bullets when an unreleased change is modified or superseded before release.
 
 ## WORKFLOW
-1. Verify observable end-user impact. Skip immediately if the change is internal, structural, or test-only.
+1. Verify observable end-user impact relative to the latest release. Skip immediately without touching `CHANGELOG.md` if the change is internal, structural, test-only, or fixes a bug in an unreleased implementation.
 2. Locate or create `## [Unreleased]` at the top of `CHANGELOG.md`.
 3. Add or update a concise, code-free entry under the matching category (`### Added`, `### Changed`, `### Fixed`, `### Removed`, etc.).

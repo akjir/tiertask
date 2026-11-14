@@ -26,6 +26,7 @@ import '../models/task_item.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
+import '../models/tdf_payload_comparison.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
@@ -471,6 +472,9 @@ class TaskSyncPipeline {
         ref,
         config,
         working: working,
+        candidateOriginBoard: !config.storageMode.usesLocal
+            ? candidateOriginBoard
+            : null,
         hasWorking: hasWorking,
         hasCandidate: hasCandidate,
         hadLocalBaseline: hadLocalBaseline,
@@ -634,89 +638,316 @@ class TaskSyncPipeline {
     );
   }
 
-  /// Returns `true` when [storedBaseline] contains entities absent from or newer than [originTasks], [originLabels], or [originLocations].
+  /// Returns `true` when [storedBaseline] diverged from [originTasks], [originLabels], or [originLocations] via additions, deletions, or payload/timestamp edits.
   static bool _didBaselineAdvancePastOrigin(
     TaskBoard storedBaseline,
     Map<String, TaskItem> originTasks,
     Map<String, TdfLabel> originLabels,
     Map<String, TdfLocation> originLocations,
+  ) =>
+      _didBaselineTasksAdvance(storedBaseline, originTasks) ||
+      _didBaselineLabelsAdvance(storedBaseline, originLabels) ||
+      _didBaselineLocationsAdvance(storedBaseline, originLocations);
+
+  /// Returns `true` when [storedBaseline] added, deleted, or modified any label relative to [originLabels].
+  static bool _didBaselineLabelsAdvance(
+    TaskBoard storedBaseline,
+    Map<String, TdfLabel> originLabels,
   ) {
-    for (final item in storedBaseline.allTasks) {
-      final origin = originTasks[item.id];
-      if (origin == null ||
-          origin.effectiveModifiedAt.isBefore(item.effectiveModifiedAt)) {
-        return true;
-      }
-    }
+    final storedIds = <String>{};
     for (final label in storedBaseline.labels) {
+      storedIds.add(label.id);
       final origin = originLabels[label.id];
       if (origin == null ||
-          origin.effectiveModifiedAt.isBefore(label.effectiveModifiedAt)) {
+          origin.effectiveModifiedAt != label.effectiveModifiedAt ||
+          TdfPayloadComparison.compareLabelPayloads(origin, label) != 0) {
         return true;
       }
     }
-    for (final location in storedBaseline.locations) {
-      final origin = originLocations[location.id];
-      if (origin == null ||
-          origin.effectiveModifiedAt.isBefore(location.effectiveModifiedAt)) {
+    for (final id in originLabels.keys) {
+      if (!storedIds.contains(id) &&
+          storedBaseline.deletedBlock.findLabelRecord(id) != null) {
         return true;
       }
     }
     return false;
   }
 
-  /// Retains baseline labels known to [originLabels], preferring earlier [originLabels] revisions.
+  /// Returns `true` when [storedBaseline] added, deleted, or modified any location relative to [originLocations].
+  static bool _didBaselineLocationsAdvance(
+    TaskBoard storedBaseline,
+    Map<String, TdfLocation> originLocations,
+  ) {
+    final storedIds = <String>{};
+    for (final location in storedBaseline.locations) {
+      storedIds.add(location.id);
+      final origin = originLocations[location.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != location.effectiveModifiedAt ||
+          TdfPayloadComparison.compareLocationPayloads(origin, location) != 0) {
+        return true;
+      }
+    }
+    for (final id in originLocations.keys) {
+      if (!storedIds.contains(id) &&
+          storedBaseline.deletedBlock.findLocationRecord(id) != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` when [storedBaseline] added, deleted, or modified any task relative to [originTasks].
+  static bool _didBaselineTasksAdvance(
+    TaskBoard storedBaseline,
+    Map<String, TaskItem> originTasks,
+  ) {
+    final storedIds = <String>{};
+    for (final item in storedBaseline.allTasks) {
+      storedIds.add(item.id);
+      final origin = originTasks[item.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != item.effectiveModifiedAt ||
+          TdfPayloadComparison.compareTaskPayloads(origin, item) != 0) {
+        return true;
+      }
+    }
+    for (final id in originTasks.keys) {
+      if (!storedIds.contains(id) &&
+          storedBaseline.deletedBlock.findTaskRecord(id) != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` when [candidate] modified or newly referenced any retired entity from [originTasks], [originLabels], or [originLocations].
+  static bool _didCandidateModifyRetiredEntities(
+    TaskBoard candidate, {
+    required Map<String, TaskItem> originTasks,
+    required Map<String, TdfLabel> originLabels,
+    required Map<String, TdfLocation> originLocations,
+    required Set<String> retiredTaskIds,
+    required Set<String> retiredLabelIds,
+    required Set<String> retiredLocationIds,
+  }) =>
+      _didCandidateModifyRetiredTasks(candidate, originTasks, retiredTaskIds) ||
+      _didCandidateModifyRetiredLabels(
+        candidate,
+        originTasks,
+        originLabels,
+        retiredLabelIds,
+      ) ||
+      _didCandidateModifyRetiredLocations(
+        candidate,
+        originTasks,
+        originLabels,
+        originLocations,
+        retiredLocationIds,
+      );
+
+  /// Returns `true` when [candidate] modified a label in [retiredLabelIds] or modified a task that references [retiredLabelIds].
+  static bool _didCandidateModifyRetiredLabels(
+    TaskBoard candidate,
+    Map<String, TaskItem> originTasks,
+    Map<String, TdfLabel> originLabels,
+    Set<String> retiredLabelIds,
+  ) {
+    if (retiredLabelIds.isEmpty) {
+      return false;
+    }
+    for (final label in candidate.labels) {
+      if (!retiredLabelIds.contains(label.id)) continue;
+      final origin = originLabels[label.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != label.effectiveModifiedAt ||
+          TdfPayloadComparison.compareLabelPayloads(origin, label) != 0) {
+        return true;
+      }
+    }
+    for (final item in candidate.allTasks) {
+      if (!_hasAnyId(item.labelIds, retiredLabelIds)) continue;
+      final origin = originTasks[item.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != item.effectiveModifiedAt ||
+          TdfPayloadComparison.compareTaskPayloads(origin, item) != 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` when [candidate] modified a location in [retiredLocationIds] or modified a task/label referencing [retiredLocationIds].
+  static bool _didCandidateModifyRetiredLocations(
+    TaskBoard candidate,
+    Map<String, TaskItem> originTasks,
+    Map<String, TdfLabel> originLabels,
+    Map<String, TdfLocation> originLocations,
+    Set<String> retiredLocationIds,
+  ) {
+    if (retiredLocationIds.isEmpty) {
+      return false;
+    }
+    for (final location in candidate.locations) {
+      if (!retiredLocationIds.contains(location.id)) continue;
+      final origin = originLocations[location.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != location.effectiveModifiedAt ||
+          TdfPayloadComparison.compareLocationPayloads(origin, location) != 0) {
+        return true;
+      }
+    }
+    for (final label in candidate.labels) {
+      final locIds = _extractConditionLocationIds(label.conditions);
+      if (!_hasAnyId(locIds, retiredLocationIds)) continue;
+      final origin = originLabels[label.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != label.effectiveModifiedAt ||
+          TdfPayloadComparison.compareLabelPayloads(origin, label) != 0) {
+        return true;
+      }
+    }
+    for (final item in candidate.allTasks) {
+      final locIds = _extractConditionLocationIds(item.conditions);
+      if (!_hasAnyId(locIds, retiredLocationIds)) continue;
+      final origin = originTasks[item.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != item.effectiveModifiedAt ||
+          TdfPayloadComparison.compareTaskPayloads(origin, item) != 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Returns `true` when [candidate] modified any task in [retiredTaskIds].
+  static bool _didCandidateModifyRetiredTasks(
+    TaskBoard candidate,
+    Map<String, TaskItem> originTasks,
+    Set<String> retiredTaskIds,
+  ) {
+    if (retiredTaskIds.isEmpty) {
+      return false;
+    }
+    for (final item in candidate.allTasks) {
+      if (!retiredTaskIds.contains(item.id)) continue;
+      final origin = originTasks[item.id];
+      if (origin == null ||
+          origin.effectiveModifiedAt != item.effectiveModifiedAt ||
+          TdfPayloadComparison.compareTaskPayloads(origin, item) != 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Extracts all referenced location IDs from [conditions].
+  static Set<String> _extractConditionLocationIds(
+    List<TaskCondition> conditions,
+  ) {
+    final ids = <String>{};
+    for (final rule in conditions) {
+      if (rule is LocationTaskCondition && rule.locationIds.isNotEmpty) {
+        ids.addAll(rule.locationIds);
+      }
+    }
+    return ids;
+  }
+
+  /// Retains baseline labels known to [originLabels] (including tombstoned or retired labels when requested), preferring pre-reconcile [originLabels] revisions unless [baselineLabels] predates [originLabels].
   static List<TdfLabel> _filterBaselineLabels(
     List<TdfLabel> baselineLabels,
     Map<String, TdfLabel> originLabels,
-  ) {
+    TdfDeletedBlock storedDeleted, {
+    bool includeRetired = false,
+  }) {
     final result = <TdfLabel>[];
+    final seenIds = <String>{};
     for (final label in baselineLabels) {
+      seenIds.add(label.id);
       if (originLabels[label.id] case final origin?) {
         result.add(
-          origin.effectiveModifiedAt.isBefore(label.effectiveModifiedAt)
-              ? origin
-              : label,
+          label.effectiveModifiedAt.isBefore(origin.effectiveModifiedAt)
+              ? label
+              : origin,
         );
+      }
+    }
+    for (final origin in originLabels.values) {
+      if (!seenIds.contains(origin.id) &&
+          (includeRetired ||
+              storedDeleted.findLabelRecord(origin.id) != null)) {
+        result.add(origin);
       }
     }
     return result;
   }
 
-  /// Retains baseline locations known to [originLocations], preferring earlier [originLocations] revisions.
+  /// Retains baseline locations known to [originLocations] (including tombstoned or retired locations when requested), preferring pre-reconcile [originLocations] revisions unless [baselineLocations] predates [originLocations].
   static List<TdfLocation> _filterBaselineLocations(
     List<TdfLocation> baselineLocations,
     Map<String, TdfLocation> originLocations,
-  ) {
+    TdfDeletedBlock storedDeleted, {
+    bool includeRetired = false,
+  }) {
     final result = <TdfLocation>[];
+    final seenIds = <String>{};
     for (final location in baselineLocations) {
+      seenIds.add(location.id);
       if (originLocations[location.id] case final origin?) {
         result.add(
-          origin.effectiveModifiedAt.isBefore(location.effectiveModifiedAt)
-              ? origin
-              : location,
+          location.effectiveModifiedAt.isBefore(origin.effectiveModifiedAt)
+              ? location
+              : origin,
         );
+      }
+    }
+    for (final origin in originLocations.values) {
+      if (!seenIds.contains(origin.id) &&
+          (includeRetired ||
+              storedDeleted.findLocationRecord(origin.id) != null)) {
+        result.add(origin);
       }
     }
     return result;
   }
 
-  /// Retains baseline tasks known to [originTasks], preferring earlier [originTasks] revisions.
+  /// Retains baseline tasks known to [originTasks] (including tombstoned or retired tasks when requested), preferring pre-reconcile [originTasks] revisions unless [baselineTasks] predates [originTasks].
   static List<TaskItem> _filterBaselineTasks(
     Iterable<TaskItem> baselineTasks,
     Map<String, TaskItem> originTasks,
-  ) {
+    TdfDeletedBlock storedDeleted, {
+    bool includeRetired = false,
+  }) {
     final result = <TaskItem>[];
+    final seenIds = <String>{};
     for (final item in baselineTasks) {
+      seenIds.add(item.id);
       if (originTasks[item.id] case final origin?) {
         result.add(
-          origin.effectiveModifiedAt.isBefore(item.effectiveModifiedAt)
-              ? origin
-              : item,
+          item.effectiveModifiedAt.isBefore(origin.effectiveModifiedAt)
+              ? item
+              : origin,
         );
       }
     }
+    for (final origin in originTasks.values) {
+      if (!seenIds.contains(origin.id) &&
+          (includeRetired || storedDeleted.findTaskRecord(origin.id) != null)) {
+        result.add(origin);
+      }
+    }
     return result;
+  }
+
+  /// Returns `true` when any identifier in [ids] is contained in [targetSet].
+  static bool _hasAnyId(Iterable<String> ids, Set<String> targetSet) {
+    for (final id in ids) {
+      if (targetSet.contains(id)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Parses [rawRemote] and merges it with [working] against [baselineTdf], or reuses [working] on `HTTP 304 Not Modified`.
@@ -726,6 +957,7 @@ class TaskSyncPipeline {
     required String rawRemote,
     required bool notModified,
     required TaskBoard working,
+    required TaskBoard? candidateOriginBoard,
     required bool hasWorking,
     required bool hadPriorLocalConvergence,
     required String? baselineTdf,
@@ -770,12 +1002,23 @@ class TaskSyncPipeline {
       utcNow,
       localNow,
     );
-    final baseline = _tryParseBaseline(ref, baselineTdf, utcNow, localNow);
+    final rawBaseline = _tryParseBaseline(ref, baselineTdf, utcNow, localNow);
+    final scoped = _scopeCandidateAndBaseline(
+      candidate: working,
+      hasCandidate: hasWorking,
+      storedBaseline: rawBaseline,
+      candidateOriginBoard: candidateOriginBoard,
+      storedAckGeneration: acknowledgedGeneration,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
     final merged = TaskBoardSync.merge(
-      primary: hasWorking ? working : remoteBoard,
+      primary: hasWorking ? scoped.candidate : remoteBoard,
       secondary: remoteBoard,
-      baseline: baseline ?? (hasWorking ? null : remoteBoard),
-      acknowledgedGeneration: baseline != null ? acknowledgedGeneration : null,
+      baseline: scoped.baseline ?? (hasWorking ? null : remoteBoard),
+      acknowledgedGeneration: scoped.baseline != null
+          ? scoped.ackGeneration
+          : null,
       deletedLabelTimestamps: deletedLabels,
       deletedLocationTimestamps: deletedLocations,
       taskConflictResolutions: taskConflictResolutions,
@@ -950,6 +1193,60 @@ class TaskSyncPipeline {
     return (loopWorking, currentSerialized);
   }
 
+  /// Rebases [candidate] onto [targetGeneration] after stripping untouched entities retired by an already-acknowledged generation bump.
+  static TaskBoard _rebaseCandidateToGeneration(
+    TaskBoard candidate, {
+    required int targetGeneration,
+    required Set<String> retiredTaskIds,
+    required Set<String> retiredLabelIds,
+    required Set<String> retiredLocationIds,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) {
+    final nextTasks = retiredTaskIds.isEmpty
+        ? candidate.allTasks
+        : <TaskItem>[
+            for (final item in candidate.allTasks)
+              if (!retiredTaskIds.contains(item.id)) item,
+          ];
+    final nextLabels = retiredLabelIds.isEmpty
+        ? candidate.labels
+        : <TdfLabel>[
+            for (final label in candidate.labels)
+              if (!retiredLabelIds.contains(label.id)) label,
+          ];
+    final nextLocations = retiredLocationIds.isEmpty
+        ? candidate.locations
+        : <TdfLocation>[
+            for (final loc in candidate.locations)
+              if (!retiredLocationIds.contains(loc.id)) loc,
+          ];
+    final nextQueue = retiredTaskIds.isEmpty
+        ? candidate.queueBlock
+        : TdfQueueBlock(
+            modifiedAt: candidate.queueBlock.modifiedAt,
+            taskIds: <String>[
+              for (final id in candidate.queueBlock.taskIds)
+                if (!retiredTaskIds.contains(id)) id,
+            ],
+          );
+    return TaskBoard.evaluate(
+      tasks: nextTasks,
+      labels: nextLabels,
+      locations: nextLocations,
+      deletedBlock: TdfDeletedBlock(
+        generation: targetGeneration,
+        tasks: candidate.deletedBlock.tasks,
+        labels: candidate.deletedBlock.labels,
+        locations: candidate.deletedBlock.locations,
+      ),
+      queueBlock: nextQueue,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+      pruneExpiredCompleted: false,
+    );
+  }
+
   /// Resolves a single CAS mismatch iteration against the freshly read [disk] snapshot.
   static Future<(TaskBoard?, TaskBoard, String?)> _retryCasMergeStep(
     Ref ref,
@@ -1064,15 +1361,87 @@ class TaskSyncPipeline {
     return (retryRemote, normalized, _serializeTdf(ref, normalized));
   }
 
-  /// Scopes [storedBaseline] to entities known to [candidateOriginBoard] so queued optimistic mutations preserve newly merged external entities.
-  static TaskBoard? _scopeBaselineToCandidateOrigin(
-    TaskBoard? storedBaseline,
-    TaskBoard? candidateOriginBoard, {
+  /// Scopes [storedBaseline] to [originTasks], [originLabels], and [originLocations] for a queued optimistic mutation.
+  static TaskBoard _scopeBaselineToCandidateOrigin(
+    TaskBoard storedBaseline,
+    TaskBoard candidateOriginBoard, {
+    required Map<String, TaskItem> originTasks,
+    required Map<String, TdfLabel> originLabels,
+    required Map<String, TdfLocation> originLocations,
+    required bool useOriginGeneration,
     required DateTime utcNow,
     required DateTime localNow,
   }) {
-    if (storedBaseline == null || candidateOriginBoard == null) {
+    final queueAdvanced =
+        !storedBaseline.queueBlock.modifiedAt.isBefore(
+          candidateOriginBoard.queueBlock.modifiedAt,
+        ) &&
+        TdfPayloadComparison.compareQueueBlocks(
+              candidateOriginBoard.queueBlock,
+              storedBaseline.queueBlock,
+            ) !=
+            0;
+    if (!useOriginGeneration &&
+        !queueAdvanced &&
+        !_didBaselineAdvancePastOrigin(
+          storedBaseline,
+          originTasks,
+          originLabels,
+          originLocations,
+        )) {
       return storedBaseline;
+    }
+    final storedDeleted = storedBaseline.deletedBlock;
+    return TaskBoard.evaluate(
+      tasks: _filterBaselineTasks(
+        storedBaseline.allTasks,
+        originTasks,
+        storedDeleted,
+        includeRetired: useOriginGeneration,
+      ),
+      labels: _filterBaselineLabels(
+        storedBaseline.labels,
+        originLabels,
+        storedDeleted,
+        includeRetired: useOriginGeneration,
+      ),
+      locations: _filterBaselineLocations(
+        storedBaseline.locations,
+        originLocations,
+        storedDeleted,
+        includeRetired: useOriginGeneration,
+      ),
+      deletedBlock: useOriginGeneration
+          ? candidateOriginBoard.deletedBlock
+          : storedDeleted,
+      queueBlock: queueAdvanced
+          ? candidateOriginBoard.queueBlock
+          : storedBaseline.queueBlock,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+      pruneExpiredCompleted: false,
+    );
+  }
+
+  /// Aligns [candidate], [storedBaseline], and [storedAckGeneration] against [candidateOriginBoard] across concurrent reconciles and generation bumps.
+  static ({TaskBoard candidate, TaskBoard? baseline, int ackGeneration})
+  _scopeCandidateAndBaseline({
+    required TaskBoard candidate,
+    required bool hasCandidate,
+    required TaskBoard? storedBaseline,
+    required TaskBoard? candidateOriginBoard,
+    required int storedAckGeneration,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) {
+    if (!hasCandidate ||
+        storedBaseline == null ||
+        candidateOriginBoard == null) {
+      return (
+        candidate: candidate,
+        baseline: storedBaseline,
+        ackGeneration: storedAckGeneration,
+      );
     }
     final originTasks = <String, TaskItem>{
       for (final item in candidateOriginBoard.allTasks) item.id: item,
@@ -1084,31 +1453,72 @@ class TaskSyncPipeline {
       for (final location in candidateOriginBoard.locations)
         location.id: location,
     };
-    final queueAdvanced = candidateOriginBoard.queueBlock.modifiedAt.isBefore(
-      storedBaseline.queueBlock.modifiedAt,
-    );
-    if (!_didBaselineAdvancePastOrigin(
-          storedBaseline,
-          originTasks,
-          originLabels,
-          originLocations,
-        ) &&
-        !queueAdvanced) {
-      return storedBaseline;
+    final originGen = candidateOriginBoard.deletedBlock.generation;
+    final storedGen = storedBaseline.deletedBlock.generation;
+    var rebasedCandidate = candidate;
+    var useOriginGen = false;
+    var effectiveAckGen = storedAckGeneration;
+
+    if (originGen < storedGen && storedGen <= storedAckGeneration) {
+      final retiredTaskIds = <String>{
+        for (final id in originTasks.keys)
+          if (storedBaseline.findTask(id) == null &&
+              storedBaseline.deletedBlock.findTaskRecord(id) == null)
+            id,
+      };
+      final retiredLabelIds = <String>{
+        for (final id in originLabels.keys)
+          if (storedBaseline.findLabel(id) == null &&
+              storedBaseline.deletedBlock.findLabelRecord(id) == null)
+            id,
+      };
+      final retiredLocationIds = <String>{
+        for (final id in originLocations.keys)
+          if (storedBaseline.findLocation(id) == null &&
+              storedBaseline.deletedBlock.findLocationRecord(id) == null)
+            id,
+      };
+      if (_didCandidateModifyRetiredEntities(
+        candidate,
+        originTasks: originTasks,
+        originLabels: originLabels,
+        originLocations: originLocations,
+        retiredTaskIds: retiredTaskIds,
+        retiredLabelIds: retiredLabelIds,
+        retiredLocationIds: retiredLocationIds,
+      )) {
+        useOriginGen = true;
+        effectiveAckGen = originGen;
+      } else if (candidate.deletedBlock.generation == originGen) {
+        rebasedCandidate = _rebaseCandidateToGeneration(
+          candidate,
+          targetGeneration: storedGen,
+          retiredTaskIds: retiredTaskIds,
+          retiredLabelIds: retiredLabelIds,
+          retiredLocationIds: retiredLocationIds,
+          utcNow: utcNow,
+          localNow: localNow,
+        );
+      }
+    } else if (originGen < storedAckGeneration) {
+      useOriginGen = originGen < storedGen;
+      effectiveAckGen = originGen;
     }
-    return TaskBoard.evaluate(
-      tasks: _filterBaselineTasks(storedBaseline.allTasks, originTasks),
-      labels: _filterBaselineLabels(storedBaseline.labels, originLabels),
-      locations: _filterBaselineLocations(
-        storedBaseline.locations,
-        originLocations,
-      ),
-      deletedBlock: storedBaseline.deletedBlock,
-      queueBlock: queueAdvanced
-          ? candidateOriginBoard.queueBlock
-          : storedBaseline.queueBlock,
-      evaluationTime: utcNow,
-      localEvaluationTime: localNow,
+
+    final scopedBaseline = _scopeBaselineToCandidateOrigin(
+      storedBaseline,
+      candidateOriginBoard,
+      originTasks: originTasks,
+      originLabels: originLabels,
+      originLocations: originLocations,
+      useOriginGeneration: useOriginGen,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
+    return (
+      candidate: rebasedCandidate,
+      baseline: scopedBaseline,
+      ackGeneration: effectiveAckGen,
     );
   }
 
@@ -1173,18 +1583,21 @@ class TaskSyncPipeline {
         utcNow,
         localNow,
       );
-      final baseline = _scopeBaselineToCandidateOrigin(
-        rawBaseline,
-        candidateOriginBoard,
+      final scoped = _scopeCandidateAndBaseline(
+        candidate: nextWorking,
+        hasCandidate: nextHasWorking,
+        storedBaseline: rawBaseline,
+        candidateOriginBoard: candidateOriginBoard,
+        storedAckGeneration: syncState.acknowledgedLocalGeneration,
         utcNow: utcNow,
         localNow: localNow,
       );
       nextWorking = TaskBoardSync.merge(
-        primary: nextHasWorking ? nextWorking : localBoard,
+        primary: nextHasWorking ? scoped.candidate : localBoard,
         secondary: localBoard,
-        baseline: baseline ?? (nextHasWorking ? null : localBoard),
-        acknowledgedGeneration: baseline != null
-            ? syncState.acknowledgedLocalGeneration
+        baseline: scoped.baseline ?? (nextHasWorking ? null : localBoard),
+        acknowledgedGeneration: scoped.baseline != null
+            ? scoped.ackGeneration
             : null,
         deletedLabelTimestamps: deletedLabels,
         deletedLocationTimestamps: deletedLocations,
@@ -1248,6 +1661,7 @@ class TaskSyncPipeline {
     Ref ref,
     WebDavConfig config, {
     required TaskBoard working,
+    required TaskBoard? candidateOriginBoard,
     required bool hasWorking,
     required bool hasCandidate,
     required bool hadLocalBaseline,
@@ -1280,6 +1694,7 @@ class TaskSyncPipeline {
       rawRemote: rawRemote,
       notModified: notModified,
       working: working,
+      candidateOriginBoard: candidateOriginBoard,
       hasWorking: hasWorking,
       hadPriorLocalConvergence: hadPriorLocalConvergence,
       baselineTdf: hadLocalBaseline ? syncState.lastSyncedRemoteTdf : null,

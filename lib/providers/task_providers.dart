@@ -103,11 +103,18 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     if (!config.hasActiveStorage) {
       return TaskBoard.empty();
     }
+    await _awaitInFlightSync();
+    final operation = _runSyncWithStatus(config, isInitialLoad: true);
+    _inFlightSync = operation;
     try {
-      return await _runSyncWithStatus(config, isInitialLoad: true);
+      return await operation;
     } on TdfSyncOutcomeException {
       await _recordConflictWatchDigestIfLocal(config);
       rethrow;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
     }
   }
 
@@ -370,17 +377,20 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TdfTimeZoneContext? sourceTimeZone,
     DateTime? currentDate,
   }) async {
-    final importResult = await TaskSyncPipeline.importLegacyTdf(
-      ref,
+    await _awaitInFlightSync();
+    final operation = _executeImportLegacyTdf(
       rawTdf,
       sourceTimeZone: sourceTimeZone,
       currentDate: currentDate,
     );
-    _conflictWatchDigest = null;
-    _lastFailedWatchDigest = null;
-    _clearUndoStack('import_tdf');
-    state = AsyncData(importResult.board);
-    return importResult;
+    _inFlightSync = operation;
+    try {
+      return await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
+    }
   }
 
   /// Moves [taskId] within the shared `queue` block and persists to storage.
@@ -543,13 +553,18 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
     final updatedConfig = await ref.read(webDavConfigProvider.future);
+    await _awaitInFlightSync();
+    final operation = _runSyncWithStatus(updatedConfig, isInitialLoad: true);
+    _inFlightSync = operation;
     try {
-      state = AsyncData(
-        await _runSyncWithStatus(updatedConfig, isInitialLoad: true),
-      );
+      state = AsyncData(await operation);
     } on TdfSyncOutcomeException {
       await _recordConflictWatchDigestIfLocal(updatedConfig);
       rethrow;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
+      }
     }
     AppLogger.info(
       LogTag.sync,
@@ -881,7 +896,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         !_isExternalWatchActiveForConfig(config)) {
       return false;
     }
-    return state.hasValue || !state.isLoading;
+    return _inFlightSync != null || state.hasValue || !state.isLoading;
   }
 
   /// Clears [_undoStack] for [reason] and optionally resets [taskUndoStateProvider].
@@ -902,6 +917,22 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     if (resetProvider) {
       ref.read(taskUndoStateProvider.notifier).update(TaskUndoState.empty);
     }
+  }
+
+  /// Collects IDs in [queue] before [limitIndex] that are also present in [sharedMembers].
+  Set<String> _collectSharedPredecessors(
+    List<String> queue,
+    int limitIndex,
+    Set<String> sharedMembers,
+  ) {
+    final predecessors = <String>{};
+    for (var i = 0; i < limitIndex; i++) {
+      final candidate = queue[i];
+      if (sharedMembers.contains(candidate)) {
+        predecessors.add(candidate);
+      }
+    }
+    return predecessors;
   }
 
   /// Updates the in-memory board state and executes the two-stage persistence pipeline, rolling back on local failure.
@@ -944,6 +975,34 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return false;
   }
 
+  /// Returns `true` when [taskId]'s queue membership or relative order among shared queued tasks changed between [previousQueue] and [nextQueue].
+  bool _didTaskQueuePlacementChange(
+    String taskId,
+    List<String> previousQueue,
+    List<String> nextQueue,
+  ) {
+    final previousIndex = previousQueue.indexOf(taskId);
+    final nextIndex = nextQueue.indexOf(taskId);
+    if ((previousIndex >= 0) != (nextIndex >= 0)) {
+      return true;
+    }
+    if (previousIndex < 0) {
+      return false;
+    }
+    final sharedMembers = previousQueue.toSet().intersection(nextQueue.toSet());
+    final previousPredecessors = _collectSharedPredecessors(
+      previousQueue,
+      previousIndex,
+      sharedMembers,
+    );
+    final nextPredecessors = _collectSharedPredecessors(
+      nextQueue,
+      nextIndex,
+      sharedMembers,
+    );
+    return !setEquals(previousPredecessors, nextPredecessors);
+  }
+
   /// Executes digest-gated reconciliation of an external local `.tdf` file change for [workspaceId].
   Future<bool> _executeExternalLocalReconcile(
     String workspaceId,
@@ -951,7 +1010,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   ) async {
     final ({String content, String? digest, bool exists}) disk;
     try {
-      disk = await _readWatchSnapshotWithRetry(workspaceId);
+      disk = await _readWatchSnapshotWithRetry(workspaceId, config);
     } on LocalFileException catch (error) {
       if (!ref.mounted) {
         return false;
@@ -960,7 +1019,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       ref.read(syncStateProvider.notifier).setError(error.toString());
       return false;
     }
-    if (!ref.mounted) {
+    if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
       return false;
     }
     if (!disk.exists || disk.content.trim().isEmpty) {
@@ -970,22 +1029,25 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final syncState = await ref
         .read(settingsRepositoryProvider)
         .loadWorkspaceSyncState(workspaceId);
-    if (!ref.mounted) {
+    if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
       return false;
     }
-    final activeId = ref.read(activeWorkspaceProvider).asData?.value.id;
-    if (activeId != workspaceId || !readCurrentConfig(ref).localWatchEnabled) {
-      return false;
+    final latestConfig = readCurrentConfig(ref);
+    final hasOpenConflict = ref.read(syncStateProvider).hasOpenConflict;
+    if (!hasOpenConflict) {
+      _conflictWatchDigest = null;
     }
     if (disk.digest != null && disk.digest == syncState.localSourceDigest) {
       _lastFailedWatchDigest = null;
-      _conflictWatchDigest = null;
+      if (hasOpenConflict) {
+        _conflictWatchDigest ??= disk.digest;
+      }
       _logWatchSkip(workspaceId, 'digest_unchanged');
       return false;
     }
-    if (ref.read(syncStateProvider).hasOpenConflict &&
-        (_conflictWatchDigest == null || disk.digest == _conflictWatchDigest)) {
-      _conflictWatchDigest = disk.digest;
+    if (hasOpenConflict &&
+        disk.digest != null &&
+        disk.digest == _conflictWatchDigest) {
       _logWatchSkip(workspaceId, 'open_conflict');
       return false;
     }
@@ -993,7 +1055,35 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _logWatchSkip(workspaceId, 'repeat_failed_digest');
       return false;
     }
-    return _runExternalWatchSynchronize(workspaceId, config, disk.digest);
+    return _runExternalWatchSynchronize(workspaceId, latestConfig, disk.digest);
+  }
+
+  /// Executes a serialized [importLegacyTdf] pass and updates [syncStateProvider].
+  Future<TdfImportResult> _executeImportLegacyTdf(
+    String rawTdf, {
+    TdfTimeZoneContext? sourceTimeZone,
+    DateTime? currentDate,
+  }) async {
+    ref.read(syncStateProvider.notifier).setSyncing();
+    try {
+      final importResult = await TaskSyncPipeline.importLegacyTdf(
+        ref,
+        rawTdf,
+        sourceTimeZone: sourceTimeZone,
+        currentDate: currentDate,
+      );
+      _conflictWatchDigest = null;
+      _lastFailedWatchDigest = null;
+      _clearUndoStack('import_tdf');
+      state = AsyncData(importResult.board);
+      ref
+          .read(syncStateProvider.notifier)
+          .setSuccess(ref.read(clockProvider)().toUtc());
+      return importResult;
+    } on Object catch (error) {
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+      rethrow;
+    }
   }
 
   /// Executes a single [pushToRemote] persistence pass for [board].
@@ -1039,7 +1129,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       }
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
-      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+      ref
+          .read(syncStateProvider.notifier)
+          .setSuccess(ref.read(clockProvider)().toUtc());
     } on Object catch (error) {
       if (!localStageSucceeded) {
         if (mutationEpoch != null) {
@@ -1190,7 +1282,22 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       config.storageMode.usesLocal &&
       config.isLocalConfigured;
 
-  /// Returns `true` when [entry]'s target task, tombstone, or blocked dependents changed between [previousBoard] and [nextBoard].
+  /// Returns `true` when [workspaceId] and [initialConfig]'s local watch target remain active after an asynchronous gap.
+  bool _isSameActiveWatchTarget(
+    String workspaceId,
+    WebDavConfig initialConfig,
+  ) {
+    final activeId = ref.read(activeWorkspaceProvider).asData?.value.id;
+    if (activeId != workspaceId) {
+      return false;
+    }
+    final latestConfig = readCurrentConfig(ref);
+    return _isExternalWatchActiveForConfig(latestConfig) &&
+        latestConfig.storageMode == initialConfig.storageMode &&
+        latestConfig.localFilePath.trim() == initialConfig.localFilePath.trim();
+  }
+
+  /// Returns `true` when [entry]'s target task, tombstone, queue placement, or blocked dependents changed between [previousBoard] and [nextBoard].
   bool _isUndoEntryInvalidated(
     TaskUndoEntry entry,
     TaskBoard previousBoard,
@@ -1202,6 +1309,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
     if (previousBoard.deletedBlock.findTaskRecord(taskId) !=
         nextBoard.deletedBlock.findTaskRecord(taskId)) {
+      return true;
+    }
+    if (entry.kind == TaskUndoActionKind.downgrade &&
+        _didTaskQueuePlacementChange(
+          taskId,
+          previousBoard.queueBlock.taskIds,
+          nextBoard.queueBlock.taskIds,
+        )) {
       return true;
     }
     return _didAnyDependentChange(
@@ -1291,7 +1406,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       if (!isRemote || !config.storageMode.usesLocal) {
         state = AsyncData(TaskBoard.empty());
       }
-      ref.read(syncStateProvider.notifier).setSuccess(DateTime.now());
+      ref
+          .read(syncStateProvider.notifier)
+          .setSuccess(ref.read(clockProvider)().toUtc());
       AppLogger.info(
         LogTag.sync,
         'Wiped ${isRemote ? 'remote WebDAV' : 'local'} TDF file workspace=${workspace.id} backup=$createBackup',
@@ -1353,7 +1470,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Reads the local `.tdf` snapshot with digest, retrying once after [localFileWatchReadRetryDelayProvider] on a transient OS file lock.
   Future<({String content, String? digest, bool exists})>
-  _readWatchSnapshotWithRetry(String workspaceId) async {
+  _readWatchSnapshotWithRetry(
+    String workspaceId,
+    WebDavConfig initialConfig,
+  ) async {
     try {
       return await ref.read(localFileRepositoryProvider).readTdfWithDigest();
     } on LocalFileException catch (error) {
@@ -1373,13 +1493,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         );
       }
       await Future<void>.delayed(delay);
-      if (!ref.mounted) {
-        return (content: '', digest: null, exists: false);
-      }
-      final activeId = ref.read(activeWorkspaceProvider).asData?.value.id;
-      final latestConfig = readCurrentConfig(ref);
-      if (activeId != workspaceId ||
-          !_isExternalWatchActiveForConfig(latestConfig)) {
+      if (!ref.mounted ||
+          !_isSameActiveWatchTarget(workspaceId, initialConfig)) {
         return (content: '', digest: null, exists: false);
       }
       return ref.read(localFileRepositoryProvider).readTdfWithDigest();

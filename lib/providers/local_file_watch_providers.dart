@@ -218,6 +218,14 @@ class LocalFileWatcherNotifier extends Notifier<void> {
         _rebindIfClosed(target, debounce);
       }
     });
+    ref.listen<bool>(syncStateProvider.select((sync) => sync.isSyncing), (
+      _,
+      isSyncing,
+    ) {
+      if (!isSyncing) {
+        _rebindIfClosed(target, debounce);
+      }
+    });
     ref.listen<DateTime?>(
       syncStateProvider.select((sync) => sync.lastSyncedAt),
       (_, _) => _rebindIfClosed(target, debounce),

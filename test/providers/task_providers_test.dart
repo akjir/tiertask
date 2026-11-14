@@ -1522,6 +1522,224 @@ void main() {
         reason: 'HTTP 304 Not Modified after wipeLocalFile must merge cached remote tasks back into the board',
       );
     });
+
+    test('prunes pending downgrade undo entry on external queue-only edits while preserving unaffected downgrade entries', () async {
+      var diskContent = '';
+      var currentTime = DateTime.utc(2026, 11, 14, 13, 0);
+      final settingsRepo = InMemorySettingsRepository(
+        const WebDavConfig(
+          localFilePath: 'tasks.tdf',
+          storageMode: StorageMode.local,
+          localWatchEnabled: true,
+        ),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          clockProvider.overrideWithValue(() => currentTime),
+          localFileRepositoryProvider.overrideWith((ref) {
+            final config = resolveCurrentConfig(ref);
+            return _GateableWatchLocalRepository(
+              config: config,
+              maxFileBytes: 10485760,
+              getStore: () => diskContent,
+              setStore: (value) => diskContent = value,
+              onReadTdfWithDigest: () async {},
+            );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      // Populate Ready (3 tasks) + Planned (2 tasks) so downgrades mutate only queue {}.
+      await notifier.addTask('Ready 1', id: 'qReady0001');
+      await notifier.addTask('Ready 2', id: 'qReady0002');
+      await notifier.addTask('Ready 3', id: 'qReady0003');
+      await notifier.addTask('Planned Keep', id: 'qPlanKep01');
+      await notifier.addTask('Planned Target', id: 'qPlanTrg01');
+
+      // Downgrade qPlanKep01 (Planned -> Someday) and qReady0001 (Ready -> Planned).
+      currentTime = DateTime.utc(2026, 11, 14, 13, 1);
+      await notifier.downgradeTask('qPlanKep01');
+      currentTime = DateTime.utc(2026, 11, 14, 13, 2);
+      await notifier.downgradeTask('qReady0001');
+      expect(container.read(taskUndoStateProvider).stackDepth, equals(2));
+
+      // External editor modifies ONLY queue {}: removes qReady0001 from queue (Planned -> Someday)
+      // while leaving qPlanKep01 untouched (still absent from queue) and all task {} blocks untouched!
+      final updatedQueueOnly = diskContent
+          .replaceFirst('    task qReady0001\n', '')
+          .replaceFirst(
+            'queue {\n    modified 2026-11-14 13:02:00\n',
+            'queue {\n    modified 2026-11-14 13:03:00\n',
+          );
+      expect(updatedQueueOnly, isNot(equals(diskContent)));
+      diskContent = updatedQueueOnly;
+
+      currentTime = DateTime.utc(2026, 11, 14, 13, 4);
+      final merged = await notifier.reconcileExternalLocalChanges();
+      expect(merged, isTrue);
+      expect(
+        container.read(taskUndoStateProvider).stackDepth,
+        equals(1),
+        reason: 'Downgrade undo entry for qReady0001 must be pruned after external queue removal, while qPlanKep01 remains valid',
+      );
+
+      // Undoing remaining entry must restore qPlanKep01 without pulling qReady0001 back out of Someday!
+      currentTime = DateTime.utc(2026, 11, 14, 13, 5);
+      await notifier.undoLastAction();
+      final finalBoard = container.read(taskNotifierProvider).requireValue;
+      expect(
+        finalBoard.queueBlock.taskIds.contains('qPlanKep01'),
+        isTrue,
+        reason: 'Unaffected downgrade undo entry must still restore qPlanKep01',
+      );
+      expect(
+        finalBoard.queueBlock.taskIds.contains('qReady0001'),
+        isFalse,
+        reason: 'Pruned downgrade undo entry must never overwrite external queue removal of qReady0001',
+      );
+    });
+
+    test('queues reconcileExternalLocalChanges behind syncFromRemote AsyncLoading and clears open conflict on importLegacyTdf', () async {
+      var diskContent = 'tdf 0.6.0\n\ntask broken0001 {\n';
+      var remoteContent = 'tdf 0.6.0\n';
+      Completer<void>? remoteFetchGate;
+      var currentTime = DateTime.utc(2026, 11, 14, 14, 0);
+
+      var failNextRemoteGet = false;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        if (request.method == 'GET') {
+          if (remoteFetchGate case final gate?) {
+            await gate.future;
+          }
+          if (failNextRemoteGet) {
+            failNextRemoteGet = false;
+            request.response.statusCode = HttpStatus.serviceUnavailable;
+            await request.response.close();
+            return;
+          }
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..headers.set(HttpHeaders.etagHeader, '"v1"')
+            ..write(remoteContent);
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'PUT') {
+          remoteContent = await utf8.decoder.bind(request).join();
+          request.response
+            ..statusCode = HttpStatus.noContent
+            ..headers.set(HttpHeaders.etagHeader, '"v2"');
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      });
+
+      final config = WebDavConfig(
+        serverUrl: 'http://127.0.0.1:${server.port}',
+        username: 'example-user',
+        password: 'example-password',
+        filePath: 'tasks.tdf',
+        localFilePath: 'tasks.tdf',
+        storageMode: StorageMode.both,
+        localWatchEnabled: true,
+      );
+      final settingsRepo = InMemorySettingsRepository(config);
+      final container = ProviderContainer(
+        retry: disableProviderRetry,
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          clockProvider.overrideWithValue(() => currentTime),
+          localFileRepositoryProvider.overrideWith((ref) {
+            final latest = resolveCurrentConfig(ref);
+            return _GateableWatchLocalRepository(
+              config: latest,
+              maxFileBytes: 10485760,
+              getStore: () => diskContent,
+              setStore: (value) => diskContent = value,
+              onReadTdfWithDigest: () async {},
+            );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // Startup fails into AsyncError (!state.hasValue).
+      await expectLater(
+        () => container.read(taskNotifierProvider.future),
+        throwsA(anything),
+      );
+      await container.pump();
+      expect(container.read(taskNotifierProvider).hasError, isTrue);
+
+      // Repair disk file, start syncFromRemote() (sets state = AsyncLoading() with !state.hasValue), and pause on Stage 2 GET!
+      diskContent = 'tdf 0.6.0\n';
+      failNextRemoteGet = true;
+      remoteFetchGate = Completer<void>();
+      final notifier = container.read(taskNotifierProvider.notifier);
+      final syncFuture = notifier.syncFromRemote();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(container.read(taskNotifierProvider).isLoading, isTrue);
+
+      // External edit arrives while syncFromRemote() is still in-flight!
+      diskContent =
+          'tdf 0.6.0\n\n'
+          'task extSync001 {\n'
+          '    name "Saved During SyncFromRemote"\n'
+          '    created 2026-11-14 14:01:00\n'
+          '    modified 2026-11-14 14:01:00\n'
+          '}\n';
+      final reconcileFuture = notifier.reconcileExternalLocalChanges();
+
+      remoteFetchGate.complete();
+      remoteFetchGate = null;
+      await syncFuture;
+      final reconciled = await reconcileFuture;
+      expect(
+        reconciled,
+        isTrue,
+        reason: 'reconcileExternalLocalChanges must queue behind in-flight syncFromRemote even when state started without a prior value',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('extSync001')
+            ?.title,
+        equals('Saved During SyncFromRemote'),
+      );
+
+      // Also verify importLegacyTdf clears SyncState.hasOpenConflict!
+      container
+          .read(syncStateProvider.notifier)
+          .setConflict('Unresolved deletionConflict');
+      expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+
+      currentTime = DateTime.utc(2026, 11, 14, 14, 5);
+      await notifier.importLegacyTdf(
+        'tdf 0.6.0\n\n'
+        'task import0001 {\n'
+        '    name "Imported Clean Board"\n'
+        '    created 2026-11-14 14:05:00\n'
+        '    modified 2026-11-14 14:05:00\n'
+        '}\n',
+      );
+      expect(
+        container.read(syncStateProvider).hasOpenConflict,
+        isFalse,
+        reason: 'importLegacyTdf must clear SyncState.hasOpenConflict',
+      );
+      expect(container.read(syncStateProvider).errorMessage, isNull);
+    });
   });
 }
 

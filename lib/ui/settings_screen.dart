@@ -196,7 +196,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _initialized = false;
   bool _isBannerVisible = false;
   bool _isTesting = false;
+  WebDavConfig? _lastSyncedConfig;
   bool _obscurePassword = true;
+  int _pendingPreferenceSaves = 0;
   WebDavConfig _preferences = const WebDavConfig();
   String? _statusBannerMessage;
   StatusBannerTone _statusTone = StatusBannerTone.success;
@@ -442,21 +444,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final logLevelChanged = updatedConfig.logLevel != _preferences.logLevel;
     final logStorageChanged =
         updatedConfig.logStorageMode != _preferences.logStorageMode;
+    _pendingPreferenceSaves++;
     setState(() {
       _preferences = updatedConfig;
       _clearStatusBanner();
     });
     final notifier = ref.read(webDavConfigProvider.notifier);
-    if (diagnosticsChanged) {
-      await notifier.updateDiagnosticsEnabled(updatedConfig.diagnosticsEnabled);
-    } else if (localWatchChanged) {
-      await notifier.updateLocalWatchEnabled(updatedConfig.localWatchEnabled);
-    } else if (logLevelChanged) {
-      await notifier.updateLogLevel(updatedConfig.logLevel);
-    } else if (logStorageChanged) {
-      await notifier.updateLogStorageMode(updatedConfig.logStorageMode);
-    } else {
-      await notifier.updateConfig(updatedConfig);
+    try {
+      if (diagnosticsChanged) {
+        await notifier.updateDiagnosticsEnabled(
+          updatedConfig.diagnosticsEnabled,
+        );
+      } else if (localWatchChanged) {
+        await notifier.updateLocalWatchEnabled(updatedConfig.localWatchEnabled);
+      } else if (logLevelChanged) {
+        await notifier.updateLogLevel(updatedConfig.logLevel);
+      } else if (logStorageChanged) {
+        await notifier.updateLogStorageMode(updatedConfig.logStorageMode);
+      } else {
+        await notifier.updateConfig(updatedConfig);
+      }
+      _lastSyncedConfig =
+          ref.read(webDavConfigProvider).asData?.value ?? updatedConfig;
+    } finally {
+      _pendingPreferenceSaves--;
     }
   }
 
@@ -521,6 +532,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Synchronizes [_preferences] and initializes the text controllers once when [config] finishes loading.
   void _populateFieldsIfNeeded(WebDavConfig config) {
+    if (_initialized &&
+        (config == _lastSyncedConfig || _pendingPreferenceSaves > 0)) {
+      return;
+    }
+    _lastSyncedConfig = config;
     final rawLocal = config.localFilePath.trim();
     _preferences = config.copyWith(
       localFilePath: rawLocal.isEmpty ? WebDavConfig.defaultFileName : rawLocal,

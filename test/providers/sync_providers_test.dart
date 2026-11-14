@@ -1015,4 +1015,262 @@ void main() {
     );
     expect(syncState.errorMessage, contains('deletionConflict'));
   });
+
+  test('TaskSyncPipeline.synchronize scopes baseline across external task/label/location deletions, generation bumps, and same-timestamp external edits without false deletionConflict or overwrite', () async {
+    const gen0Initial =
+        'tdf 0.6.0\n\n'
+        'deleted {\n'
+        '    generation 0\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '    task sameTs0001\n'
+        '    task keepTsk001\n'
+        '}\n\n'
+        'location locDel0001 {\n'
+        '    name "Office"\n'
+        '    coordinates 52.5200 13.4050\n'
+        '    source "gps"\n'
+        '    radius 150\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n\n'
+        'label lblDel0001 {\n'
+        '    name "Deprecated"\n'
+        '    color "#AA3344"\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n\n'
+        'task delTask001 {\n'
+        '    name "Deleted Externally"\n'
+        '    created 2026-11-14 10:00:00\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n\n'
+        'task sameTs0001 {\n'
+        '    name "Alpha Original"\n'
+        '    created 2026-11-14 10:00:00\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n\n'
+        'task keepTsk001 {\n'
+        '    name "Keep Existing"\n'
+        '    created 2026-11-14 10:00:00\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n';
+
+    var currentDisk = gen0Initial;
+    var clockTime = DateTime.utc(2026, 11, 14, 10, 0);
+    final settingsRepository = InMemorySettingsRepository(
+      const WebDavConfig(storageMode: StorageMode.local),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepository),
+        clockProvider.overrideWithValue(() => clockTime),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _InMemorySyncLocalRepository(
+            config:
+                ref.watch(webDavConfigProvider).asData?.value ??
+                const WebDavConfig(),
+            getTdf: () => currentDisk,
+            setTdf: (value) => currentDisk = value,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final originBoard = await container.read(taskNotifierProvider.future);
+    expect(originBoard.deletedBlock.generation, equals(0));
+
+    // User queues an optimistic Someday addTask on top of originBoard BEFORE external reconcile finishes (without modifying queueBlock).
+    clockTime = DateTime.utc(2026, 11, 14, 10, 2);
+    final candidateBoard = originBoard.addTask(
+      'Queued User Task',
+      id: 'usrQueue01',
+      targetTier: TaskTier.someday,
+      currentDate: clockTime,
+      localEvaluationTime: clockTime,
+    );
+
+    // Case A: Same generation (0 -> 0) external deletions + same-timestamp external task & queue edits!
+    const externalSameGenTdf =
+        'tdf 0.6.0\n\n'
+        'deleted {\n'
+        '    generation 0\n'
+        '    task delTask001 2026-11-14 10:01:00\n'
+        '    label lblDel0001 2026-11-14 10:01:00\n'
+        '    location locDel0001 2026-11-14 10:01:00\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '    task keepTsk001\n'
+        '}\n\n'
+        'task sameTs0001 {\n'
+        '    name "Zulu Same Timestamp"\n'
+        '    created 2026-11-14 10:00:00\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n\n'
+        'task keepTsk001 {\n'
+        '    name "Keep Existing"\n'
+        '    created 2026-11-14 10:00:00\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n';
+    currentDisk = externalSameGenTdf;
+
+    final runExternalReconcile = container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              const WebDavConfig(storageMode: StorageMode.local),
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: originBoard,
+            ),
+      ),
+    );
+    final afterExternal = await runExternalReconcile();
+    expect(afterExternal.findTask('delTask001'), isNull);
+    expect(
+      afterExternal.findTask('sameTs0001')?.title,
+      equals('Zulu Same Timestamp'),
+    );
+    expect(afterExternal.queueBlock.taskIds.contains('sameTs0001'), isFalse);
+
+    // Queued user mutation runs against same-generation external deletion + same-timestamp edit:
+    final runQueuedMutation = container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              const WebDavConfig(storageMode: StorageMode.local),
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: candidateBoard,
+              candidateOriginBoard: originBoard,
+            ),
+      ),
+    );
+    final convergedSameGen = await runQueuedMutation();
+    expect(
+      convergedSameGen.findTask('usrQueue01')?.title,
+      equals('Queued User Task'),
+    );
+    expect(
+      convergedSameGen.findTask('delTask001'),
+      isNull,
+      reason: 'Externally deleted task untouched by user must remain deleted without false deletionConflict',
+    );
+    expect(
+      convergedSameGen.labels.where((label) => label.id == 'lblDel0001'),
+      isEmpty,
+      reason: 'Externally deleted label untouched by user must remain deleted',
+    );
+    expect(
+      convergedSameGen.locations.where((loc) => loc.id == 'locDel0001'),
+      isEmpty,
+      reason:
+          'Externally deleted location untouched by user must remain deleted',
+    );
+    expect(
+      convergedSameGen.findTask('sameTs0001')?.title,
+      equals('Zulu Same Timestamp'),
+      reason: 'Same-timestamp external title edit must not be overwritten by stale candidateBoard copy',
+    );
+    expect(
+      convergedSameGen.queueBlock.taskIds.contains('sameTs0001'),
+      isFalse,
+      reason: 'Same-timestamp external queue removal must not be undone by stale candidateBoard queue',
+    );
+
+    // Case B: External reconcile bumps deleted.generation (0 -> 1) and retires sameTs0001 without a tombstone while mutations are queued from generation 0:
+    const externalBumpedGenTdf =
+        'tdf 0.6.0\n\n'
+        'deleted {\n'
+        '    generation 1\n'
+        '    task delTask001 2026-11-14 10:01:00\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '    task keepTsk001\n'
+        '}\n\n'
+        'task keepTsk001 {\n'
+        '    name "Keep Existing"\n'
+        '    created 2026-11-14 10:00:00\n'
+        '    modified 2026-11-14 10:00:00\n'
+        '}\n\n'
+        'task usrQueue01 {\n'
+        '    name "Queued User Task"\n'
+        '    created 2026-11-14 10:02:00\n'
+        '    modified 2026-11-14 10:02:00\n'
+        '}\n';
+    currentDisk = externalBumpedGenTdf;
+    final afterGenBump = await container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              const WebDavConfig(storageMode: StorageMode.local),
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: convergedSameGen,
+            ),
+      ),
+    )();
+    expect(afterGenBump.deletedBlock.generation, equals(1));
+    expect(afterGenBump.findTask('sameTs0001'), isNull);
+    expect(afterGenBump.deletedBlock.findTaskRecord('sameTs0001'), isNull);
+
+    clockTime = DateTime.utc(2026, 11, 14, 10, 4);
+    final candidateEditedRetired = convergedSameGen.updateTask(
+      'sameTs0001',
+      title: 'Edited Retired Task',
+      currentDate: clockTime,
+      localEvaluationTime: clockTime,
+    );
+    await expectLater(
+      () => container.read(
+        Provider<Future<TaskBoard> Function()>(
+          (ref) =>
+              () => TaskSyncPipeline.synchronize(
+                ref,
+                const WebDavConfig(storageMode: StorageMode.local),
+                pendingDeletedLabelTimestamps: <String, DateTime>{},
+                candidateBoard: candidateEditedRetired,
+                candidateOriginBoard: convergedSameGen,
+              ),
+        ),
+      )(),
+      throwsA(
+        isA<TdfSyncOutcomeException>().having(
+          (error) => error.kind,
+          'kind',
+          TdfSyncOutcomeKind.recoveryRequired,
+        ),
+      ),
+    );
+
+    final candidateGen0 = convergedSameGen.addTask(
+      'Queued Across Gen Bump',
+      id: 'usrGenBmp1',
+      targetTier: TaskTier.someday,
+      currentDate: clockTime,
+      localEvaluationTime: clockTime,
+    );
+    final convergedGenBump = await container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              const WebDavConfig(storageMode: StorageMode.local),
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: candidateGen0,
+              candidateOriginBoard: convergedSameGen,
+            ),
+      ),
+    )();
+    expect(convergedGenBump.deletedBlock.generation, equals(1));
+    expect(convergedGenBump.findTask('sameTs0001'), isNull);
+    expect(convergedGenBump.deletedBlock.findTaskRecord('sameTs0001'), isNull);
+    expect(
+      convergedGenBump.findTask('usrGenBmp1')?.title,
+      equals('Queued Across Gen Bump'),
+      reason: 'Queued mutation originating at generation 0 must converge cleanly after external generation 0 -> 1 bump without syncGenerationRollback or recoveryRequired',
+    );
+  });
 }

@@ -23,6 +23,7 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/models/workspace_sync_state.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/local_file_watch_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
@@ -783,6 +784,382 @@ void main() {
           equals('Recovered Startup Board'),
         );
       });
+
+      test('real Directory.watch self-write and resumed after Stage 2 deletionConflict preserve _conflictWatchDigest and reconcile the next external file edit immediately', () async {
+        if (!FileSystemEntity.isWatchSupported) {
+          return;
+        }
+        var currentTime = DateTime.utc(2026, 11, 14, 16, 0);
+        const initialSharedTdf =
+            'tdf 0.6.0\n\n'
+            'queue {\n'
+            '    modified 2026-11-14 16:00:00\n'
+            '    task stage2Cf01\n'
+            '}\n\n'
+            'task stage2Cf01 {\n'
+            '    name "Shared Baseline"\n'
+            '    created 2026-11-14 16:00:00\n'
+            '    modified 2026-11-14 16:00:00\n'
+            '}\n';
+        var remoteContent = initialSharedTdf;
+        var remoteEtag = '"s2-v1"';
+        var webDavRequests = 0;
+
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((request) async {
+          webDavRequests++;
+          if (request.method == 'GET') {
+            if (request.headers.value(HttpHeaders.ifNoneMatchHeader) ==
+                remoteEtag) {
+              request.response
+                ..statusCode = HttpStatus.notModified
+                ..headers.set(HttpHeaders.etagHeader, remoteEtag);
+              await request.response.close();
+              return;
+            }
+            request.response
+              ..statusCode = HttpStatus.ok
+              ..headers.set(HttpHeaders.etagHeader, remoteEtag)
+              ..write(remoteContent);
+            await request.response.close();
+            return;
+          }
+          if (request.method == 'PUT') {
+            remoteContent = await const SystemEncoding().decoder
+                .bind(request)
+                .join();
+            remoteEtag = '"s2-v$webDavRequests"';
+            request.response
+              ..statusCode = HttpStatus.noContent
+              ..headers.set(HttpHeaders.etagHeader, remoteEtag);
+            await request.response.close();
+            return;
+          }
+          request.response.statusCode = HttpStatus.methodNotAllowed;
+          await request.response.close();
+        });
+
+        final watchedDir = Directory('${tempDir.path}/real_stage2_conflict')
+          ..createSync(recursive: true);
+        final localFile = File('${watchedDir.path}/tasks.tdf')
+          ..writeAsStringSync(initialSharedTdf, flush: true);
+
+        final settingsRepo = InMemorySettingsRepository(
+          WebDavConfig(
+            serverUrl: 'http://127.0.0.1:${server.port}',
+            username: 'example-user',
+            password: 'example-password',
+            filePath: 'tasks.tdf',
+            localFilePath: 'tasks.tdf',
+            storageMode: StorageMode.both,
+            localWatchEnabled: true,
+          ),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepo),
+            localStorageDirectoryPathProvider.overrideWithValue(
+              watchedDir.path,
+            ),
+            localFileWatchDebounceProvider.overrideWithValue(
+              const Duration(milliseconds: 30),
+            ),
+            clockProvider.overrideWithValue(() => currentTime),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.listen(
+          localFileWatcherProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
+
+        await container.read(taskNotifierProvider.future);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // Remote modifies stage2Cf01 while external local save deletes stage2Cf01 -> Stage 1 succeeds, Stage 2 throws deletionConflict!
+        remoteContent =
+            'tdf 0.6.0\n\n'
+            'queue {\n'
+            '    modified 2026-11-14 16:01:00\n'
+            '    task stage2Cf01\n'
+            '}\n\n'
+            'task stage2Cf01 {\n'
+            '    name "Remote Concurrent Edit"\n'
+            '    created 2026-11-14 16:00:00\n'
+            '    modified 2026-11-14 16:01:00\n'
+            '}\n';
+        remoteEtag = '"s2-v99"';
+
+        currentTime = DateTime.utc(2026, 11, 14, 16, 2);
+        await localFile.writeAsString(
+          'tdf 0.6.0\n\n'
+          'deleted {\n'
+          '    generation 0\n'
+          '    task stage2Cf01 2026-11-14 16:02:00\n'
+          '}\n\n'
+          'queue {\n'
+          '    modified 2026-11-14 16:02:00\n'
+          '}\n',
+          flush: true,
+        );
+
+        // Wait long enough for BOTH the external write event AND Stage 1's own atomic self-write watch event to settle!
+        await Future<void>.delayed(const Duration(milliseconds: 180));
+        expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+
+        final requestsAfterStage2Conflict = webDavRequests;
+        TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(
+          webDavRequests,
+          equals(requestsAfterStage2Conflict),
+          reason: 'Self-write and resumed checks on unchanged Stage 1 digest must perform zero WebDAV requests',
+        );
+        expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+
+        // Now user saves a NEW external .tdf file (D2 != D1) restoring stage2Cf01 + adding extAftCf01!
+        currentTime = DateTime.utc(2026, 11, 14, 16, 3);
+        await localFile.writeAsString(
+          'tdf 0.6.0\n\n'
+          'deleted {\n'
+          '    generation 1\n'
+          '}\n\n'
+          'queue {\n'
+          '    modified 2026-11-14 16:03:00\n'
+          '    task stage2Cf01\n'
+          '    task extAftCf01\n'
+          '}\n\n'
+          'task stage2Cf01 {\n'
+          '    name "Externally Resolved Conflict"\n'
+          '    created 2026-11-14 16:00:00\n'
+          '    modified 2026-11-14 16:03:00\n'
+          '}\n\n'
+          'task extAftCf01 {\n'
+          '    name "Saved After Open Conflict"\n'
+          '    created 2026-11-14 16:03:00\n'
+          '    modified 2026-11-14 16:03:00\n'
+          '}\n',
+          flush: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+
+        expect(
+          container.read(syncStateProvider).hasOpenConflict,
+          isFalse,
+          reason: 'Saving a new external file digest after a Stage 2 conflict must reconcile immediately instead of being swallowed by _conflictWatchDigest == null',
+        );
+        final resolvedBoard = container.read(taskNotifierProvider).requireValue;
+        expect(
+          resolvedBoard.findTask('extAftCf01')?.title,
+          equals('Saved After Open Conflict'),
+        );
+        expect(
+          resolvedBoard.findTask('stage2Cf01')?.title,
+          equals('Externally Resolved Conflict'),
+        );
+      });
+
+      test('aborts in-flight external reconcile when StorageMode or localFilePath changes during loadWorkspaceSyncState await, and rebinds missing directory on offline first save in StorageMode.both', () async {
+        if (!FileSystemEntity.isWatchSupported) {
+          return;
+        }
+        var currentTime = DateTime.utc(2026, 11, 14, 17, 0);
+        final staleDir = Directory('${tempDir.path}/stale_guard')
+          ..createSync(recursive: true);
+        File('${staleDir.path}/tasks.tdf').writeAsStringSync(
+          'tdf 0.6.0\n\n'
+          'task initStal01 {\n'
+          '    name "Initial Task"\n'
+          '    created 2026-11-14 17:00:00\n'
+          '    modified 2026-11-14 17:00:00\n'
+          '}\n',
+          flush: true,
+        );
+
+        Completer<void>? syncStateLoadGate;
+        final gatedSettings = _SyncStateGateSettingsRepository(
+          const WebDavConfig(
+            serverUrl: 'https://cloud.example.com',
+            username: 'example-user',
+            password: 'example-password',
+            filePath: 'tasks.tdf',
+            localFilePath: 'tasks.tdf',
+            storageMode: StorageMode.local,
+            localWatchEnabled: true,
+          ),
+          onLoadSyncState: () async {
+            if (syncStateLoadGate case final gate?) {
+              await gate.future;
+            }
+          },
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(gatedSettings),
+            localStorageDirectoryPathProvider.overrideWithValue(staleDir.path),
+            clockProvider.overrideWithValue(() => currentTime),
+            webDavRepositoryProvider.overrideWith(
+              (ref) => _CountingWebDavRepository(
+                config:
+                    ref.watch(webDavConfigProvider).asData?.value ??
+                    const WebDavConfig(),
+                onRequest: () {},
+              ),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await container.read(taskNotifierProvider.future);
+
+        File('${staleDir.path}/tasks.tdf').writeAsStringSync(
+          'tdf 0.6.0\n\n'
+          'task staleExt01 {\n'
+          '    name "Should Abort On Mode Switch"\n'
+          '    created 2026-11-14 17:01:00\n'
+          '    modified 2026-11-14 17:01:00\n'
+          '}\n',
+          flush: true,
+        );
+
+        syncStateLoadGate = Completer<void>();
+        final notifier = container.read(taskNotifierProvider.notifier);
+        final reconcileFuture = notifier.reconcileExternalLocalChanges();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+
+        // Switch StorageMode to webdav (localWatchEnabled remains true in same workspace!) while loadWorkspaceSyncState is suspended!
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateConfig(
+              const WebDavConfig(
+                serverUrl: 'https://cloud.example.com',
+                username: 'example-user',
+                password: 'example-password',
+                filePath: 'tasks.tdf',
+                localFilePath: 'tasks.tdf',
+                storageMode: StorageMode.webdav,
+                localWatchEnabled: true,
+              ),
+            );
+        syncStateLoadGate.complete();
+        syncStateLoadGate = null;
+
+        final didReconcile = await reconcileFuture;
+        expect(
+          didReconcile,
+          isFalse,
+          reason: 'Switching StorageMode to webdav during pre-check await must abort stale local reconcile',
+        );
+        await container.read(taskNotifierProvider.future);
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('staleExt01'),
+          isNull,
+          reason: 'Aborted stale local reconcile must never merge local-only edits into WebDAV-only board',
+        );
+
+        // Part 2: Offline first-save missing-directory rebind in StorageMode.both!
+        final offlineMissingDirPath = '${tempDir.path}/offline_missing_both';
+        final offlineSettings = InMemorySettingsRepository(
+          const WebDavConfig(
+            serverUrl: 'http://127.0.0.1:1',
+            username: 'example-user',
+            password: 'example-password',
+            filePath: 'tasks.tdf',
+            localFilePath: 'tasks.tdf',
+            storageMode: StorageMode.both,
+            localWatchEnabled: true,
+          ),
+        );
+        final offlineContainer = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(offlineSettings),
+            localStorageDirectoryPathProvider.overrideWithValue(
+              offlineMissingDirPath,
+            ),
+            localFileWatchDebounceProvider.overrideWithValue(
+              const Duration(milliseconds: 30),
+            ),
+            clockProvider.overrideWithValue(() => currentTime),
+          ],
+        );
+        addTearDown(offlineContainer.dispose);
+        offlineContainer.listen(
+          localFileWatcherProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
+
+        await expectLater(
+          () => offlineContainer.read(taskNotifierProvider.future),
+          throwsA(anything),
+        );
+        await offlineContainer.pump();
+        expect(Directory(offlineMissingDirPath).existsSync(), isFalse);
+
+        // First addTask creates offlineMissingDirPath in Stage 1, then fails Stage 2 offline so lastSyncedAt stays null!
+        currentTime = DateTime.utc(2026, 11, 14, 17, 5);
+        await offlineContainer
+            .read(taskNotifierProvider.notifier)
+            .addTask('Created Offline Dir', id: 'offDir0001');
+        expect(Directory(offlineMissingDirPath).existsSync(), isTrue);
+        expect(offlineContainer.read(syncStateProvider).lastSyncedAt, isNull);
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        // External edit in newly created directory must be detected by rebound Directory.watch even while WebDAV remains offline!
+        currentTime = DateTime.utc(2026, 11, 14, 17, 6);
+        await File('$offlineMissingDirPath/tasks.tdf').writeAsString(
+          'tdf 0.6.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-14 17:06:00\n'
+          '    task offDir0001\n'
+          '    task offExt0002\n'
+          '}\n\n'
+          'task offDir0001 {\n'
+          '    name "Created Offline Dir"\n'
+          '    created 2026-11-14 17:05:00\n'
+          '    modified 2026-11-14 17:05:00\n'
+          '}\n\n'
+          'task offExt0002 {\n'
+          '    name "Detected After Offline Dir Creation"\n'
+          '    created 2026-11-14 17:06:00\n'
+          '    modified 2026-11-14 17:06:00\n'
+          '}\n',
+          flush: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        expect(
+          offlineContainer
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('offExt0002')
+              ?.title,
+          equals('Detected After Offline Dir Creation'),
+          reason: 'LocalFileWatcherNotifier must rebind missing directory when Stage 1 creates it even if Stage 2 fails offline and lastSyncedAt stays null',
+        );
+      });
     },
   );
+}
+
+class _SyncStateGateSettingsRepository extends InMemorySettingsRepository {
+  _SyncStateGateSettingsRepository(
+    super.initialConfig, {
+    required this.onLoadSyncState,
+  });
+
+  final Future<void> Function() onLoadSyncState;
+
+  @override
+  Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId) async {
+    await onLoadSyncState();
+    return super.loadWorkspaceSyncState(workspaceId);
+  }
 }

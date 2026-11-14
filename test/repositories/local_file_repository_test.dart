@@ -21,6 +21,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/repositories/local_file_operations.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -1116,13 +1117,28 @@ void main() {
       await nextEvent.future.timeout(const Duration(seconds: 3));
       expect(eventCount, greaterThan(countBeforeCrossDir));
 
-      // Runtime watched-directory deletion must not emit uncaught errors.
+      // Runtime watched-directory deletion must not emit uncaught errors or duplicate local.watch.stop events.
+      AppLogger.resetForTesting();
+      addTearDown(AppLogger.resetForTesting);
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
       watchedDir.deleteSync(recursive: true);
       await Future.any(<Future<void>>[
         doneCompleter.future,
         Future<void>.delayed(const Duration(milliseconds: 120)),
       ]);
       await subscription.cancel();
+      final stopLines = AppLogger.lines
+          .where((line) => line.contains('local.watch.stop'))
+          .toList();
+      expect(
+        stopLines.length,
+        equals(1),
+        reason: 'Closing watch stream on directory deletion plus cancel() must emit local.watch.stop exactly once',
+      );
     });
   });
 }

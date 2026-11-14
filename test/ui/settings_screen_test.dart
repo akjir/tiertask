@@ -741,6 +741,84 @@ task 000004OkD2 {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets(
+    'SettingsScreen keeps local watch switch at optimistic value without snapping back while async saveConfig is pending',
+    (WidgetTester tester) async {
+      const initialConfig = WebDavConfig(
+        language: AppLanguage.english,
+        storageMode: StorageMode.local,
+        localWatchEnabled: true,
+      );
+      Completer<void>? saveGate;
+      final settingsRepository = _AsyncSaveSettingsRepository(
+        initialConfig,
+        onSaveConfig: () async {
+          if (saveGate case final gate?) {
+            await gate.future;
+          }
+        },
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: initialConfig,
+                initialTdf: 'tdf 0.6.0\n',
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openSettingsFromMenu(tester);
+
+      final switchFinder = find.byKey(
+        const ValueKey('settings_local_watch_switch'),
+      );
+      await tester.ensureVisible(switchFinder);
+      expect(tester.widget<Switch>(switchFinder).value, isTrue);
+
+      saveGate = Completer<void>();
+      await tester.tap(switchFinder);
+      await tester.pump();
+
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isFalse,
+        reason: 'Switch must remain false on the pending rebuild frame before async saveConfig resolves',
+      );
+
+      saveGate.complete();
+      saveGate = null;
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+      expect(
+        (await settingsRepository.loadConfig()).localWatchEnabled,
+        isFalse,
+      );
+    },
+  );
+}
+
+class _AsyncSaveSettingsRepository extends InMemorySettingsRepository {
+  _AsyncSaveSettingsRepository(
+    super.initialConfig, {
+    required this.onSaveConfig,
+  });
+
+  final Future<void> Function() onSaveConfig;
+
+  @override
+  Future<void> saveConfig(WebDavConfig config) async {
+    await onSaveConfig();
+    await super.saveConfig(config);
+  }
 }
 
 /// Pumps [TierTaskApp] with shared settings overrides and optionally opens Settings.
