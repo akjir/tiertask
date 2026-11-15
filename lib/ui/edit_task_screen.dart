@@ -20,7 +20,9 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
+import '../models/tdf_error.dart';
 import '../models/tdf_metadata.dart';
+import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
@@ -100,6 +102,49 @@ class _DeleteTaskConfirmDialog extends StatelessWidget {
   }
 }
 
+/// Prerequisite task blocker card rendered when candidate tasks exist on [board].
+class _EditTaskBlockedBySection extends StatelessWidget {
+  /// Creates an [_EditTaskBlockedBySection].
+  const _EditTaskBlockedBySection({required this.board, required this.state});
+
+  /// Current [TaskBoard] snapshot.
+  final TaskBoard board;
+
+  /// Owning [_EditTaskScreenState].
+  final _EditTaskScreenState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final candidates = TaskEditorBoardHelper.collectCandidateBlockerTasks(
+      board: board,
+      currentTaskId: state.widget.initialTask?.id,
+      selectedBlockedByIds: state._blockedByIds,
+    );
+    if (candidates.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: ValueListenableBuilder<TextEditingValue>(
+        valueListenable: state._blockedSearchController,
+        builder: (context, searchValue, _) => TaskEditorBlockedBySection(
+          candidateTasks: candidates,
+          disabledTaskIds: TaskEditorBoardHelper.collectDisabledBlockerIds(
+            board: board,
+            currentTask: state.widget.initialTask,
+            candidates: candidates,
+          ),
+          searchController: state._blockedSearchController,
+          searchQuery: searchValue.text,
+          selectedBlockedByIds: state._blockedByIds,
+          onClearSearch: state._blockedSearchController.clear,
+          onToggleBlockedBy: (id) => state._toggleBlockedBy(board, id),
+        ),
+      ),
+    );
+  }
+}
+
 /// Settings-style scrollable card column inside [EditTaskScreen].
 class _EditTaskFormColumn extends StatelessWidget {
   /// Creates an [_EditTaskFormColumn].
@@ -113,36 +158,20 @@ class _EditTaskFormColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final candidates = TaskEditorBoardHelper.collectCandidateBlockerTasks(
-      board: board,
-      currentTaskId: state.widget.initialTask?.id,
-      selectedBlockedByIds: state._blockedByIds,
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        TaskEditorDetailsCard(
+          titleController: state._titleController,
+          noteController: state._noteController,
+          errorMessage: state._errorMessage,
+          onSubmit: state._submit,
+        ),
+        const SizedBox(height: 10),
         _EditTaskSchedulingSection(state: state),
         const SizedBox(height: 10),
         _EditTaskSubtasksAndLinksSection(board: board, state: state),
-        if (candidates.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          ValueListenableBuilder<TextEditingValue>(
-            valueListenable: state._blockedSearchController,
-            builder: (context, searchValue, _) => TaskEditorBlockedBySection(
-              candidateTasks: candidates,
-              disabledTaskIds: TaskEditorBoardHelper.collectDisabledBlockerIds(
-                board: board,
-                currentTask: state.widget.initialTask,
-                candidates: candidates,
-              ),
-              searchController: state._blockedSearchController,
-              searchQuery: searchValue.text,
-              selectedBlockedByIds: state._blockedByIds,
-              onClearSearch: state._blockedSearchController.clear,
-              onToggleBlockedBy: (id) => state._toggleBlockedBy(board, id),
-            ),
-          ),
-        ],
+        _EditTaskBlockedBySection(board: board, state: state),
         const SizedBox(height: 10),
         TaskEditorConditionsSection(
           controller: state._conditionController,
@@ -198,7 +227,7 @@ class _EditTaskScaffoldBody extends StatelessWidget {
   }
 }
 
-/// Details and scheduling cards wired to [_EditTaskScreenState].
+/// Scheduling card wired to [_EditTaskScreenState].
 class _EditTaskSchedulingSection extends StatelessWidget {
   /// Creates an [_EditTaskSchedulingSection].
   const _EditTaskSchedulingSection({required this.state});
@@ -208,56 +237,39 @@ class _EditTaskSchedulingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        TaskEditorDetailsCard(
-          titleController: state._titleController,
-          noteController: state._noteController,
-          errorMessage: state._errorMessage,
-          onSubmit: state._submit,
-        ),
-        const SizedBox(height: 10),
-        TaskEditorSchedulingCard(
-          autoPrioritizeDue: state._autoPrioritizeDue,
-          dueController: state._dueController,
-          dueErrorMessage: state._dueErrorMessage,
-          hasDue: state._hasDue,
-          isRepeating: state._isRepeating,
-          isSuspended: state._isSuspended,
-          mode: state._mode,
-          repeatCountController: state._repeatCountController,
-          repeatErrorMessage: state._repeatErrorMessage,
-          repeatUnit: state._repeatUnit,
-          showDueAutoPrioritizeToggle: !state._isCompletedTask,
-          suspendedController: state._suspendedController,
-          suspendedErrorMessage: state._suspendedErrorMessage,
-          onClearDue: state._dueController.clear,
-          onClearSuspended: state._suspendedController.clear,
-          onPickDueDate: () => state._pickDueTimestamp(
-            TaskEditorSuspendedField.pickSuspendedDate,
-          ),
-          onPickDueTime: () => state._pickDueTimestamp(
-            TaskEditorSuspendedField.pickSuspendedTime,
-          ),
-          onPickSuspendedDate: () => state._pickSuspendedTimestamp(
-            TaskEditorSuspendedField.pickSuspendedDate,
-          ),
-          onPickSuspendedTime: () => state._pickSuspendedTimestamp(
-            TaskEditorSuspendedField.pickSuspendedTime,
-          ),
-          onSelectRepeatUnit: (unit) =>
-              state._update(() => state._repeatUnit = unit),
-          onToggleAutoPrioritizeDue: state._toggleAutoPrioritizeDue,
-          onToggleDue: state._toggleDue,
-          onTogglePriority: () => state._toggleMode(QuickAddMode.priority),
-          onToggleRepeat: () =>
-              state._update(() => state._isRepeating = !state._isRepeating),
-          onToggleSomeday: () => state._toggleMode(QuickAddMode.someday),
-          onToggleSuspended: () =>
-              state._update(() => state._isSuspended = !state._isSuspended),
-        ),
-      ],
+    return TaskEditorSchedulingCard(
+      autoPrioritizeDue: state._autoPrioritizeDue,
+      dueController: state._dueController,
+      dueErrorMessage: state._dueErrorMessage,
+      dueNoteController: state._dueNoteController,
+      dueNoteErrorMessage: state._dueNoteErrorMessage,
+      hasDue: state._hasDue,
+      isRepeating: state._isRepeating,
+      isSuspended: state._isSuspended,
+      mode: state._mode,
+      onClearDue: state._dueController.clear,
+      onClearSuspended: state._suspendedController.clear,
+      onPickDueDate: state._pickDueDate,
+      onPickDueTime: state._pickDueTime,
+      onPickSuspendedDate: state._pickSuspendedDate,
+      onPickSuspendedTime: state._pickSuspendedTime,
+      onSelectRepeatUnit: state._selectRepeatUnit,
+      onToggleAutoPrioritizeDue: state._toggleAutoPrioritizeDue,
+      onToggleDue: state._toggleDue,
+      onTogglePriority: state._togglePriorityMode,
+      onToggleRepeat: state._toggleRepeat,
+      onToggleSomeday: state._toggleSomedayMode,
+      onToggleSuspended: state._toggleSuspended,
+      repeatCountController: state._repeatCountController,
+      repeatErrorMessage: state._repeatErrorMessage,
+      repeatLeadDaysController: state._repeatLeadDaysController,
+      repeatLeadDaysErrorMessage: state._repeatLeadDaysErrorMessage,
+      repeatUnit: state._repeatUnit,
+      showDueAutoPrioritizeToggle: !state._isCompletedTask,
+      suspendedController: state._suspendedController,
+      suspendedErrorMessage: state._suspendedErrorMessage,
+      suspendedNoteController: state._suspendedNoteController,
+      suspendedNoteErrorMessage: state._suspendedNoteErrorMessage,
     );
   }
 }
@@ -272,12 +284,16 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   bool _didUserToggleAutoPrioritizeDue = false;
   late final TextEditingController _dueController;
   String? _dueErrorMessage;
+  late final TextEditingController _dueNoteController;
+  String? _dueNoteErrorMessage;
   String? _errorMessage;
-  late final bool _hadActiveInitialSuspension;
   late bool _hasDue;
   bool _hasSubtaskText = false;
   late final DateTime? _initialDueAt;
+  late final String? _initialDueNote;
   late final String _initialDueText;
+  late final QuickAddMode _initialEditorMode;
+  late final String? _initialSuspendedNote;
   late bool _isRepeating;
   late bool _isSuspended;
   late final Set<String> _labelIds;
@@ -290,6 +306,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final TextEditingController _noteController;
   late final TextEditingController _repeatCountController;
   String? _repeatErrorMessage;
+  late final TextEditingController _repeatLeadDaysController;
+  String? _repeatLeadDaysErrorMessage;
   late RepeatUnit _repeatUnit;
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
@@ -297,6 +315,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final List<SubtaskItem> _subtasks;
   late final TextEditingController _suspendedController;
   String? _suspendedErrorMessage;
+  late final TextEditingController _suspendedNoteController;
+  String? _suspendedNoteErrorMessage;
   late final TextEditingController _titleController;
 
   /// Whether the add-link button is currently enabled.
@@ -327,6 +347,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _mode = task != null
         ? TaskEditorBoardHelper.resolveInitialMode(task, initialBoard)
         : widget.initialMode;
+    _initialEditorMode = _mode;
     _labelIds = Set.of(task?.labelIds ?? widget.initialLabelIds);
     _autoFinish = task?.subtasksAutoFinish ?? false;
     _subtasks = List.of(task?.subtasks ?? const []);
@@ -334,13 +355,16 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _blockedByIds = Set.of(task?.blockedByTaskIds ?? const []);
     final nowUtc = ref.read(clockProvider)().toUtc();
     final hasActiveSuspension = task?.hasActiveSuspendedAt(nowUtc) ?? false;
-    _hadActiveInitialSuspension = hasActiveSuspension;
     _isSuspended = hasActiveSuspension;
     _suspendedController = TextEditingController(
       text: hasActiveSuspension
           ? TaskEditorSuspendedField.formatInitialText(task?.suspendedAt)
           : '',
     )..addListener(_handleSuspendedChanged);
+    _initialSuspendedNote = hasActiveSuspension ? task?.suspendedNote : null;
+    _suspendedNoteController = TextEditingController(
+      text: _initialSuspendedNote ?? '',
+    )..addListener(_handleSuspendedNoteChanged);
     _hasDue = task?.dueAt != null;
     final initialFormattedDue = switch (task?.dueAt) {
       final dueAt? => TaskItem.formatTdfTimestamp(dueAt),
@@ -350,11 +374,18 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       ..addListener(_handleDueChanged);
     _initialDueAt = task?.dueAt;
     _initialDueText = _dueController.text.trim();
+    _initialDueNote = _hasDue ? task?.dueNote : null;
+    _dueNoteController = TextEditingController(text: _initialDueNote ?? '')
+      ..addListener(_handleDueNoteChanged);
     _autoPrioritizeDue = !(task?.isDuePassive ?? false);
     _isRepeating = task?.repeatRule != null;
     _repeatCountController = TextEditingController(
       text: (task?.repeatRule?.count ?? 1).toString(),
     )..addListener(_handleRepeatCountChanged);
+    final initialLeadDays = task?.repeatRule?.leadDays ?? 0;
+    _repeatLeadDaysController = TextEditingController(
+      text: initialLeadDays > 0 ? initialLeadDays.toString() : '',
+    )..addListener(_handleRepeatLeadDaysChanged);
     _repeatUnit = task?.repeatRule?.unit ?? RepeatUnit.days;
     _conditionController = ConditionEditorController(
       initialConditions: task?.conditions ?? const [],
@@ -372,8 +403,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _linkTitleController.dispose();
     _linkUriController.dispose();
     _suspendedController.dispose();
+    _suspendedNoteController.dispose();
     _dueController.dispose();
+    _dueNoteController.dispose();
     _repeatCountController.dispose();
+    _repeatLeadDaysController.dispose();
     _blockedSearchController.dispose();
     _conditionController.dispose();
     super.dispose();
@@ -443,12 +477,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   }
 
   /// Validates any pending link input and assembles the [_ValidatedTaskDraft] for saving.
-  _ValidatedTaskDraft? _buildDraft(
-    TaskBoard board,
-    DateTime? suspendedAt,
-    DateTime? dueAt,
-    TaskRepeatRule? repeatRule,
-  ) {
+  _ValidatedTaskDraft? _buildDraft({
+    required TaskBoard board,
+    required DateTime? dueAt,
+    required String? dueNote,
+    required TaskRepeatRule? repeatRule,
+    required DateTime? suspendedAt,
+    required String? suspendedNote,
+  }) {
     final hasPendingLink =
         _linkTitleController.text.trim().isNotEmpty ||
         _linkUriController.text.trim().isNotEmpty;
@@ -460,6 +496,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         _blockedByIds,
       ),
       dueAt: dueAt,
+      dueNote: dueNote,
       labelIds: TaskEditorBoardHelper.collectOrderedLabelIds(board, _labelIds),
       links: _links,
       repeatRule: repeatRule,
@@ -469,6 +506,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           SubtaskItem(title: pendingSubtask, isCompleted: _isCompletedTask),
       ],
       suspendedAt: suspendedAt,
+      suspendedNote: suspendedNote,
     );
   }
 
@@ -481,12 +519,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       builder: (_) => _DeleteTaskConfirmDialog(taskTitle: existingTask.title),
     );
     if (!mounted || confirmed != true) return;
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      'ui.delete_task.confirmed',
-      fields: <String, Object?>{'id': existingTask.id},
-    );
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.ui,
+        'ui.delete_task.confirmed',
+        fields: <String, Object?>{'id': existingTask.id},
+      );
+    }
     await ref.read(taskNotifierProvider.notifier).deleteTask(existingTask.id);
     if (!mounted) return;
     Navigator.of(context).pop();
@@ -510,6 +550,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     }
   }
 
+  /// Clears any deadline note validation error when the user edits [_dueNoteController].
+  void _handleDueNoteChanged() {
+    if (_dueNoteErrorMessage != null) {
+      setState(() => _dueNoteErrorMessage = null);
+    }
+  }
+
   /// Rebuilds when the add-link button state changes or clears any active link validation error.
   void _handleLinkInputChanged() {
     final canAdd = _canAddLink;
@@ -520,10 +567,47 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Routes synchronous domain persistence rejections to a visible inline field error without closing [EditTaskScreen].
+  void _handlePersistFailure(
+    String kindLabel,
+    TdfErrorKind? kind,
+    AppLocalizations localizations,
+  ) {
+    if (AppLogger.shouldLog(LogLevel.warn)) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.ui,
+        'ui.edit_task.persist_rejected',
+        fields: <String, Object?>{'kind': kindLabel},
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      if (kind == TdfErrorKind.invalidTimestamp && _isRepeating && _hasDue) {
+        _repeatLeadDaysErrorMessage = localizations.repeatLeadDaysErrorInvalid;
+      } else if (kind == TdfErrorKind.invalidTimestamp && _isSuspended) {
+        _suspendedErrorMessage = localizations.taskSuspendedErrorInvalid;
+      } else if (kind == TdfErrorKind.invalidTimestamp && _hasDue) {
+        _dueErrorMessage = localizations.taskSuspendedErrorInvalid;
+      } else if (kind == TdfErrorKind.invalidTimestamp) {
+        _errorMessage = localizations.taskSuspendedErrorInvalid;
+      } else {
+        _errorMessage = localizations.schedulingNoteErrorTooLong;
+      }
+    });
+  }
+
   /// Clears any repeat interval validation error when the user edits the repeat count field.
   void _handleRepeatCountChanged() {
     if (_repeatErrorMessage != null) {
       setState(() => _repeatErrorMessage = null);
+    }
+  }
+
+  /// Clears any preparation lead validation error when the user edits [_repeatLeadDaysController].
+  void _handleRepeatLeadDaysChanged() {
+    if (_repeatLeadDaysErrorMessage != null) {
+      setState(() => _repeatLeadDaysErrorMessage = null);
     }
   }
 
@@ -539,6 +623,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   void _handleSuspendedChanged() {
     if (_suspendedErrorMessage != null) {
       setState(() => _suspendedErrorMessage = null);
+    }
+  }
+
+  /// Clears any deferral note validation error when the user edits [_suspendedNoteController].
+  void _handleSuspendedNoteChanged() {
+    if (_suspendedNoteErrorMessage != null) {
+      setState(() => _suspendedNoteErrorMessage = null);
     }
   }
 
@@ -561,6 +652,52 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         TaskItem.normalizeTimestamp(initialDueAt);
   }
 
+  /// Emits redacted `AppLogger` telemetry after [draft] saves without logging raw note contents.
+  void _logTaskSaved(_ValidatedTaskDraft draft) {
+    if (!AppLogger.shouldLog(LogLevel.info)) return;
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.edit_task.saved',
+      fields: <String, Object?>{
+        'id': widget.initialTask?.id ?? 'new',
+        'is_suspended': _isSuspended,
+        'has_suspended_note': draft.suspendedNote != null,
+        'has_due': _hasDue,
+        'has_due_note': draft.dueNote != null,
+        'is_repeating': _isRepeating,
+        'lead_days': draft.repeatRule?.leadDays ?? 0,
+      },
+    );
+  }
+
+  /// Emits redacted `AppLogger` telemetry when form validation rejects submission.
+  void _logValidationFailed({
+    required bool hasDueError,
+    required bool hasDueNoteError,
+    required bool hasLeadDaysError,
+    required bool hasRepeatError,
+    required bool hasSuspendedError,
+    required bool hasSuspendedNoteError,
+    required bool hasTitleError,
+  }) {
+    if (!AppLogger.shouldLog(LogLevel.warn)) return;
+    AppLogger.event(
+      LogLevel.warn,
+      LogTag.ui,
+      'ui.edit_task.validation_failed',
+      fields: <String, Object?>{
+        'title': hasTitleError,
+        'suspended': hasSuspendedError,
+        'suspended_note': hasSuspendedNoteError,
+        'due': hasDueError,
+        'due_note': hasDueNoteError,
+        'repeat': hasRepeatError,
+        'lead_days': hasLeadDaysError,
+      },
+    );
+  }
+
   /// Opens [uri] via [linkLauncherRepositoryProvider] and displays a SnackBar if launching fails.
   Future<void> _openLink(String uri) async {
     try {
@@ -578,6 +715,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   Future<void> _persistTask(_ValidatedTaskDraft draft) {
     final note = _noteController.text.trim();
     final notifier = ref.read(taskNotifierProvider.notifier);
+    final isIndefiniteSuspension =
+        _isSuspended && _suspendedController.text.trim().isEmpty;
+    final effectiveSuspendedAt = isIndefiniteSuspension
+        ? null
+        : draft.suspendedAt;
     if (widget.initialTask case final existingTask?) {
       final isDuePassive = !_hasDue
           ? false
@@ -585,26 +727,30 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
                     _isSameDueTimestamp(draft.dueAt, existingTask.dueAt)
                 ? existingTask.isDuePassive
                 : !_autoPrioritizeDue);
-      final keepSuspendedNote = _isSuspended && _hadActiveInitialSuspension;
+      final effectiveTargetTier =
+          (!_isCompletedTask && _mode == _initialEditorMode)
+          ? null
+          : _mode.targetTier;
       return notifier.updateTask(
         existingTask.id,
         title: _titleController.text.trim(),
         note: note,
-        targetTier: _mode.targetTier,
+        targetTier: effectiveTargetTier,
         isPriority: _mode == QuickAddMode.priority,
         subtasksAutoFinish: _autoFinish,
         subtasks: draft.subtasks,
         labelIds: draft.labelIds,
         dueAt: draft.dueAt,
         isDuePassive: isDuePassive,
-        dueNote: _hasDue ? existingTask.dueNote : null,
+        dueNote: draft.dueNote,
         clearDueAt: !_hasDue,
-        clearDueNote: !_hasDue,
+        clearDueNote: !_hasDue || draft.dueNote == null,
         origin: existingTask.origin,
-        suspendedAt: draft.suspendedAt,
-        suspendedNote: keepSuspendedNote ? existingTask.suspendedNote : null,
+        suspendedAt: effectiveSuspendedAt,
+        isSuspendedForever: _isSuspended ? isIndefiniteSuspension : false,
+        suspendedNote: draft.suspendedNote,
         clearSuspendedAt: !_isSuspended,
-        clearSuspendedNote: !keepSuspendedNote,
+        clearSuspendedNote: !_isSuspended || draft.suspendedNote == null,
         repeatRule: draft.repeatRule,
         clearRepeatRule: !_isRepeating,
         blockedByTaskIds: draft.blockedByIds,
@@ -623,13 +769,24 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       labelIds: draft.labelIds,
       dueAt: draft.dueAt,
       isDuePassive: _hasDue && !_autoPrioritizeDue,
-      suspendedAt: draft.suspendedAt,
+      dueNote: draft.dueNote,
+      suspendedAt: effectiveSuspendedAt,
+      isSuspendedForever: isIndefiniteSuspension,
+      suspendedNote: draft.suspendedNote,
       repeatRule: draft.repeatRule,
       blockedByTaskIds: draft.blockedByIds,
       links: draft.links,
       conditions: _conditionController.buildConditions(),
     );
   }
+
+  /// Opens the Material 3 date picker for [_dueController].
+  Future<void> _pickDueDate() =>
+      _pickDueTimestamp(TaskEditorSuspendedField.pickSuspendedDate);
+
+  /// Opens the 24-hour time picker for [_dueController].
+  Future<void> _pickDueTime() =>
+      _pickDueTimestamp(TaskEditorSuspendedField.pickSuspendedTime);
 
   /// Opens [picker] and updates [_dueController] with the selected date or time.
   Future<void> _pickDueTimestamp(
@@ -640,9 +797,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     })
     picker,
   ) async {
-    final config =
+    final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final now = config.toLocalWallClock(ref.read(clockProvider)().toUtc());
+    final now = configuration.toLocalWallClock(
+      ref.read(clockProvider)().toUtc(),
+    );
     final updated = await picker(
       context: context,
       currentText: _dueController.text,
@@ -655,6 +814,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Opens the Material 3 date picker for [_suspendedController].
+  Future<void> _pickSuspendedDate() =>
+      _pickSuspendedTimestamp(TaskEditorSuspendedField.pickSuspendedDate);
+
+  /// Opens the 24-hour time picker for [_suspendedController].
+  Future<void> _pickSuspendedTime() =>
+      _pickSuspendedTimestamp(TaskEditorSuspendedField.pickSuspendedTime);
+
   /// Opens [picker] and updates [_suspendedController] with the selected date or time.
   Future<void> _pickSuspendedTimestamp(
     Future<String?> Function({
@@ -664,9 +831,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     })
     picker,
   ) async {
-    final config =
+    final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final now = config.toLocalWallClock(ref.read(clockProvider)().toUtc());
+    final now = configuration.toLocalWallClock(
+      ref.read(clockProvider)().toUtc(),
+    );
     final updated = await picker(
       context: context,
       currentText: _suspendedController.text,
@@ -707,51 +876,43 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     return TaskItem.tryParseTdfTimestampInput(trimmed);
   }
 
+  /// Resolves an optional scheduling note, preserving [initialNote] verbatim when untouched.
+  static String? _resolveSchedulingNote({
+    required String? initialNote,
+    required bool isEnabled,
+    required String rawText,
+  }) {
+    if (!isEnabled) {
+      return null;
+    }
+    if (initialNote != null && rawText == initialNote) {
+      return initialNote;
+    }
+    return TaskEditorSchedulingNoteField.normalizeSchedulingNote(rawText);
+  }
+
+  /// Updates the active [RepeatUnit] selection.
+  void _selectRepeatUnit(RepeatUnit unit) {
+    setState(() => _repeatUnit = unit);
+  }
+
   /// Validates the task inputs and saves the created or updated task.
   Future<void> _submit() async {
     final board =
         ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final localizations = AppLocalizations.of(context);
-    final titleError = TaskEditorBoardHelper.validateTitle(
-      board: board,
-      rawTitle: _titleController.text,
-      excludingTaskId: widget.initialTask?.id,
-      localizations: localizations,
-    );
-    final suspendedAt = TaskEditorSuspendedField.parseSuspendedTimestamp(
-      isSuspended: _isSuspended,
-      rawText: _suspendedController.text,
-    );
-    final dueAt = _resolveCurrentEditorDueAt();
-    final parsedRepeatRule = TaskEditorRepeatField.parseRepeatRule(
-      isRepeating: _isRepeating,
-      rawCount: _repeatCountController.text,
-      unit: _repeatUnit,
-    );
-    final existingRepeat = widget.initialTask?.repeatRule;
-    final repeatRule = parsedRepeatRule?.copyWith(
-      clock: existingRepeat?.clock,
-      leadDays: existingRepeat?.leadDays ?? 0,
-    );
-    if (titleError != null ||
-        (_isSuspended && suspendedAt == null) ||
-        (_hasDue && dueAt == null) ||
-        (_isRepeating && repeatRule == null)) {
-      setState(() {
-        _errorMessage = titleError;
-        if (titleError == null && _isSuspended && suspendedAt == null) {
-          _suspendedErrorMessage = localizations.taskSuspendedErrorInvalid;
-        } else if (titleError == null && _hasDue && dueAt == null) {
-          _dueErrorMessage = localizations.taskSuspendedErrorInvalid;
-        } else if (titleError == null) {
-          _repeatErrorMessage = localizations.repeatErrorInvalid;
-        }
-      });
+    final draft = _validateAndBuildDraft(board, localizations);
+    if (draft == null) return;
+    try {
+      await _persistTask(draft);
+    } on TdfException catch (error) {
+      _handlePersistFailure(error.kind.name, error.kind, localizations);
+      return;
+    } on FormatException {
+      _handlePersistFailure('FormatException', null, localizations);
       return;
     }
-    final draft = _buildDraft(board, suspendedAt, dueAt, repeatRule);
-    if (draft == null) return;
-    await _persistTask(draft);
+    _logTaskSaved(draft);
     if (!mounted) return;
     Navigator.of(context).pop();
     widget.onSubmitted?.call();
@@ -776,12 +937,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Toggles [_hasDue] and resets deadline auto-prioritization state when disabled.
+  /// Toggles [_hasDue] and clears deadline-dependent validation errors when disabled.
   void _toggleDue() {
     setState(() {
       _hasDue = !_hasDue;
       if (!_hasDue) {
         _dueErrorMessage = null;
+        _dueNoteErrorMessage = null;
+        _repeatLeadDaysErrorMessage = null;
         _autoPrioritizeDue = true;
         _didUserToggleAutoPrioritizeDue = false;
       }
@@ -801,6 +964,23 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Toggles the `Priority` scheduling chip.
+  void _togglePriorityMode() => _toggleMode(QuickAddMode.priority);
+
+  /// Toggles [_isRepeating] and clears repeat validation errors when disabled.
+  void _toggleRepeat() {
+    setState(() {
+      _isRepeating = !_isRepeating;
+      if (!_isRepeating) {
+        _repeatErrorMessage = null;
+        _repeatLeadDaysErrorMessage = null;
+      }
+    });
+  }
+
+  /// Toggles the `Someday` scheduling chip.
+  void _toggleSomedayMode() => _toggleMode(QuickAddMode.someday);
+
   /// Toggles completion state of the subtask step at [index].
   void _toggleSubtaskStep(int index) {
     if (_isCompletedTask || index < 0 || index >= _subtasks.length) return;
@@ -810,8 +990,121 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     );
   }
 
+  /// Toggles [_isSuspended] and clears deferral validation errors when disabled.
+  void _toggleSuspended() {
+    setState(() {
+      _isSuspended = !_isSuspended;
+      if (!_isSuspended) {
+        _suspendedErrorMessage = null;
+        _suspendedNoteErrorMessage = null;
+      }
+    });
+  }
+
   /// Applies [callback] inside [setState] to update form state.
   void _update(VoidCallback callback) => setState(callback);
+
+  /// Validates all form fields, updates per-field error messages on failure, or returns a [_ValidatedTaskDraft].
+  _ValidatedTaskDraft? _validateAndBuildDraft(
+    TaskBoard board,
+    AppLocalizations localizations,
+  ) {
+    final titleError = TaskEditorBoardHelper.validateTitle(
+      board: board,
+      rawTitle: _titleController.text,
+      excludingTaskId: widget.initialTask?.id,
+      localizations: localizations,
+    );
+    final suspendedAt = TaskEditorSuspendedField.parseSuspendedTimestamp(
+      isSuspended: _isSuspended,
+      rawText: _suspendedController.text,
+    );
+    final suspendedNote = _resolveSchedulingNote(
+      initialNote: _initialSuspendedNote,
+      isEnabled: _isSuspended,
+      rawText: _suspendedNoteController.text,
+    );
+    final suspendedNoteError =
+        TaskEditorSchedulingNoteField.validateSchedulingNote(
+          suspendedNote,
+          localizations,
+        );
+    final dueAt = _resolveCurrentEditorDueAt();
+    final dueNote = _resolveSchedulingNote(
+      initialNote: _initialDueNote,
+      isEnabled: _hasDue,
+      rawText: _dueNoteController.text,
+    );
+    final dueNoteError = TaskEditorSchedulingNoteField.validateSchedulingNote(
+      dueNote,
+      localizations,
+    );
+    final repeatCount = TaskEditorRepeatField.parseRepeatCount(
+      isRepeating: _isRepeating,
+      rawCount: _repeatCountController.text,
+    );
+    final leadDays = TaskEditorRepeatField.parseLeadDays(
+      hasDue: _hasDue,
+      isRepeating: _isRepeating,
+      rawLeadDays: _repeatLeadDaysController.text,
+    );
+    final hasSuspendedError = _isSuspended && suspendedAt == null;
+    final hasDueError = _hasDue && dueAt == null;
+    final hasRepeatError = _isRepeating && repeatCount == null;
+    final hasLeadDaysError = _isRepeating && _hasDue && leadDays == null;
+    if (titleError != null ||
+        hasSuspendedError ||
+        suspendedNoteError != null ||
+        hasDueError ||
+        dueNoteError != null ||
+        hasRepeatError ||
+        hasLeadDaysError) {
+      setState(() {
+        _errorMessage = titleError;
+        _suspendedErrorMessage = hasSuspendedError
+            ? localizations.taskSuspendedErrorInvalid
+            : null;
+        _suspendedNoteErrorMessage = suspendedNoteError;
+        _dueErrorMessage = hasDueError
+            ? localizations.taskSuspendedErrorInvalid
+            : null;
+        _dueNoteErrorMessage = dueNoteError;
+        _repeatErrorMessage = hasRepeatError
+            ? localizations.repeatErrorInvalid
+            : null;
+        _repeatLeadDaysErrorMessage = hasLeadDaysError
+            ? localizations.repeatLeadDaysErrorInvalid
+            : null;
+      });
+      _logValidationFailed(
+        hasDueError: hasDueError,
+        hasDueNoteError: dueNoteError != null,
+        hasLeadDaysError: hasLeadDaysError,
+        hasRepeatError: hasRepeatError,
+        hasSuspendedError: hasSuspendedError,
+        hasSuspendedNoteError: suspendedNoteError != null,
+        hasTitleError: titleError != null,
+      );
+      return null;
+    }
+    final repeatRule = TaskEditorRepeatField.parseRepeatRule(
+      existingClock:
+          widget.initialTask?.repeatRule?.clock ?? TdfRepeatClock.midnight,
+      hasDue: _hasDue,
+      isRepeating: _isRepeating,
+      rawCount: _repeatCountController.text,
+      rawLeadDays: _repeatLeadDaysController.text,
+      unit: _repeatUnit,
+    );
+    return _buildDraft(
+      board: board,
+      dueAt: dueAt,
+      dueNote: dueNote,
+      repeatRule: repeatRule,
+      suspendedAt: suspendedAt,
+      suspendedNote: suspendedNote,
+    );
+  }
 }
 
 /// Labels, subtasks, and links sections wired to [_EditTaskScreenState].
@@ -872,11 +1165,13 @@ class _EditTaskSubtasksAndLinksSection extends StatelessWidget {
 typedef _ValidatedTaskDraft = ({
   List<String> blockedByIds,
   DateTime? dueAt,
+  String? dueNote,
   List<String> labelIds,
   List<TaskLink> links,
   TaskRepeatRule? repeatRule,
   List<SubtaskItem> subtasks,
   DateTime? suspendedAt,
+  String? suspendedNote,
 });
 
 /// Pushes [EditTaskScreen] onto the navigation stack for extended task creation or task editing.

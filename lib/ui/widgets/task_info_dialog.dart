@@ -51,18 +51,20 @@ class TaskInfoDialog extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final board =
         ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+    final currentTask = board.findTask(task.id) ?? task;
     final configuration =
         ref.watch(webDavConfigProvider).asData?.value ?? const WebDavConfig();
     final nowUtc = ref.watch(clockProvider)().toUtc();
     final sections = _buildSections(
       board: board,
       configuration: configuration,
+      currentTask: currentTask,
       localizations: localizations,
       nowUtc: nowUtc,
     );
 
     return AlertDialog(
-      title: _buildDialogTitle(context, localizations),
+      title: _buildDialogTitle(context, localizations, currentTask),
       content: _buildDialogContent(sections),
       actions: [
         FilledButton(
@@ -160,10 +162,11 @@ class TaskInfoDialog extends ConsumerWidget {
     );
   }
 
-  /// Builds the dialog header displaying the dialog title and [task] title.
-  Widget _buildDialogTitle(
+  /// Builds the dialog header displaying the dialog title and [currentTask] title.
+  static Widget _buildDialogTitle(
     BuildContext context,
     AppLocalizations localizations,
+    TaskItem currentTask,
   ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -172,7 +175,7 @@ class TaskInfoDialog extends ConsumerWidget {
         Text(localizations.taskInfoDialogTitle),
         const SizedBox(height: 4),
         Text(
-          task.title,
+          currentTask.title,
           style: Theme.of(context).textTheme.bodyMedium
               ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
@@ -212,6 +215,8 @@ class TaskInfoDialog extends ConsumerWidget {
       ),
       icon: Icons.event_rounded,
       keyPrefix: 'due_task_badge',
+      noteBody: task.dueNote,
+      noteKey: const ValueKey('task_info_due_note'),
       title: localizations.taskInfoDueLabel,
       value: valueText,
     );
@@ -351,6 +356,8 @@ class TaskInfoDialog extends ConsumerWidget {
     final details = <String>[
       if (task.completions > 0)
         localizations.taskInfoRepeatCompletions(task.completions.toString()),
+      if (repeatRule.leadDays > 0 && task.dueAt != null)
+        localizations.taskInfoRepeatLeadDays(repeatRule.leadDays.toString()),
     ];
     return _TaskInfoSectionData(
       details: details,
@@ -364,24 +371,30 @@ class TaskInfoDialog extends ConsumerWidget {
     );
   }
 
-  /// Collects all active [_TaskInfoSectionData] entries for [task].
-  List<_TaskInfoSectionData> _buildSections({
+  /// Collects all active [_TaskInfoSectionData] entries for [currentTask].
+  static List<_TaskInfoSectionData> _buildSections({
     required TaskBoard board,
     required WebDavConfig configuration,
+    required TaskItem currentTask,
     required AppLocalizations localizations,
     required DateTime nowUtc,
   }) {
     return <_TaskInfoSectionData>[
-      ?_buildPrioritySection(task, localizations),
-      ?_buildSuspendedSection(task, configuration, localizations, nowUtc),
-      ?_buildDueSection(task, configuration, localizations, nowUtc),
-      ?_buildBlockedBySection(task, board, localizations),
-      ?_buildConditionsSection(task, board, localizations),
-      ?_buildRepeatSection(task, localizations),
-      ?_buildLabelsSection(task, board, localizations),
-      ?_buildNoteSection(task, localizations),
-      ?_buildLinksSection(task, localizations),
-      ?_buildSubtasksSection(task, localizations),
+      ?_buildPrioritySection(currentTask, localizations),
+      ?_buildSuspendedSection(
+        currentTask,
+        configuration,
+        localizations,
+        nowUtc,
+      ),
+      ?_buildDueSection(currentTask, configuration, localizations, nowUtc),
+      ?_buildBlockedBySection(currentTask, board, localizations),
+      ?_buildConditionsSection(currentTask, board, localizations),
+      ?_buildRepeatSection(currentTask, localizations),
+      ?_buildLabelsSection(currentTask, board, localizations),
+      ?_buildNoteSection(currentTask, localizations),
+      ?_buildLinksSection(currentTask, localizations),
+      ?_buildSubtasksSection(currentTask, localizations),
     ];
   }
 
@@ -436,6 +449,8 @@ class TaskInfoDialog extends ConsumerWidget {
       return _TaskInfoSectionData(
         icon: Icons.pause_circle_outline_rounded,
         keyPrefix: 'suspended_task_indicator',
+        noteBody: task.suspendedNote,
+        noteKey: const ValueKey('task_info_suspended_note'),
         title: localizations.taskSuspendedLabel,
         value: localizations.taskInfoSuspendedForever,
       );
@@ -452,6 +467,8 @@ class TaskInfoDialog extends ConsumerWidget {
     return _TaskInfoSectionData(
       icon: Icons.pause_circle_outline_rounded,
       keyPrefix: 'suspended_task_indicator',
+      noteBody: task.suspendedNote,
+      noteKey: const ValueKey('task_info_suspended_note'),
       title: localizations.taskSuspendedLabel,
       value: valueText,
     );
@@ -537,6 +554,30 @@ class _TaskInfoLabelChips extends StatelessWidget {
   }
 }
 
+/// Multi-line selectable scheduling note block rendered inside [_TaskInfoSectionCard].
+class _TaskInfoNoteBody extends StatelessWidget {
+  /// Creates a [_TaskInfoNoteBody].
+  const _TaskInfoNoteBody({required this.note, this.noteKey});
+
+  /// Multi-line scheduling note text.
+  final String note;
+
+  /// Optional deterministic widget key for testing.
+  final Key? noteKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: SelectableText(
+        note,
+        key: noteKey,
+        style: Theme.of(context).textTheme.bodySmall,
+      ),
+    );
+  }
+}
+
 /// Card rendering a single active indicator section inside [TaskInfoDialog].
 class _TaskInfoSectionCard extends StatelessWidget {
   /// Creates a [_TaskInfoSectionCard].
@@ -574,6 +615,8 @@ class _TaskInfoSectionCard extends StatelessWidget {
             const SizedBox(height: 6),
             _buildDetailsList(context),
           ],
+          if (data.noteBody case final note? when note.isNotEmpty)
+            _TaskInfoNoteBody(note: note, noteKey: data.noteKey),
         ],
       ),
     );
@@ -649,6 +692,8 @@ class _TaskInfoSectionData {
     required this.icon,
     required this.keyPrefix,
     this.labels = const <TdfLabel>[],
+    this.noteBody,
+    this.noteKey,
     this.progressValue,
     required this.title,
     required this.value,
@@ -665,6 +710,12 @@ class _TaskInfoSectionData {
 
   /// Resolved labels when rendering the labels section.
   final List<TdfLabel> labels;
+
+  /// Optional multi-line scheduling note rendered below [details].
+  final String? noteBody;
+
+  /// Optional widget key attached to the rendered [SelectableText] note body.
+  final Key? noteKey;
 
   /// Optional progress fraction (`0.0` to `1.0`) for completion bars.
   final double? progressValue;

@@ -2599,6 +2599,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Deadline auto-priority disabled in settings'**
   String get taskInfoDueLeadWindowOffHint;
+
+  /// Input label for the optional deferral note field shown when Suspended is enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Deferral note (optional)'**
+  String get taskSuspendedNoteLabel;
+
+  /// Placeholder hint for the optional deferral note input field.
+  ///
+  /// In en, this message translates to:
+  /// **'Why is this task deferred?'**
+  String get taskSuspendedNoteHint;
+
+  /// Input label for the optional deadline note field shown when Due is enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Deadline note (optional)'**
+  String get taskDueNoteLabel;
+
+  /// Placeholder hint for the optional deadline note input field.
+  ///
+  /// In en, this message translates to:
+  /// **'Cutoff details or submission requirements'**
+  String get taskDueNoteHint;
+
+  /// Validation error shown when a deferral or deadline note exceeds 2,000 Unicode scalar values.
+  ///
+  /// In en, this message translates to:
+  /// **'Note must not exceed 2,000 characters.'**
+  String get schedulingNoteErrorTooLong;
+
+  /// Validation error shown when a deferral or deadline note contains disallowed control characters or unpaired surrogates.
+  ///
+  /// In en, this message translates to:
+  /// **'Note contains unsupported control characters.'**
+  String get schedulingNoteErrorInvalid;
+
+  /// Input label for the recurring preparation lead window in days when both Repeat and Due are enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparation lead (days, optional)'**
+  String get repeatLeadDaysLabel;
+
+  /// Placeholder hint for the optional recurring preparation lead days input field.
+  ///
+  /// In en, this message translates to:
+  /// **'0 (activate immediately after rollover)'**
+  String get repeatLeadDaysHint;
+
+  /// Validation error shown when the recurring preparation lead input is not an integer in 0..3650.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a whole number between 0 and 3650 days.'**
+  String get repeatLeadDaysErrorInvalid;
+
+  /// Detail line in TaskInfoDialog describing the Mode 2 recurring preparation lead offset.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparation window opens {days} day(s) before due date'**
+  String taskInfoRepeatLeadDays(String days);
 }
 
 class _AppLocalizationsDelegate

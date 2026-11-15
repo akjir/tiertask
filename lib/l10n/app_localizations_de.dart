@@ -1456,4 +1456,39 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get taskInfoDueLeadWindowOffHint =>
       'Fälligkeits-Priorisierung in Einstellungen deaktiviert';
+
+  @override
+  String get taskSuspendedNoteLabel => 'Zurückstellungsnotiz (optional)';
+
+  @override
+  String get taskSuspendedNoteHint => 'Warum ist diese Aufgabe zurückgestellt?';
+
+  @override
+  String get taskDueNoteLabel => 'Fälligkeitsnotiz (optional)';
+
+  @override
+  String get taskDueNoteHint => 'Fristdetails oder Abgabebedingungen';
+
+  @override
+  String get schedulingNoteErrorTooLong =>
+      'Notiz darf maximal 2.000 Zeichen lang sein.';
+
+  @override
+  String get schedulingNoteErrorInvalid =>
+      'Notiz enthält nicht unterstützte Steuerzeichen.';
+
+  @override
+  String get repeatLeadDaysLabel => 'Vorbereitungszeit (Tage, optional)';
+
+  @override
+  String get repeatLeadDaysHint => '0 (sofort nach Wiederholung aktivieren)';
+
+  @override
+  String get repeatLeadDaysErrorInvalid =>
+      'Ganze Zahl zwischen 0 und 3650 Tagen eingeben.';
+
+  @override
+  String taskInfoRepeatLeadDays(String days) {
+    return 'Vorbereitungsfenster öffnet $days Tag(e) vor Fälligkeit';
+  }
 }

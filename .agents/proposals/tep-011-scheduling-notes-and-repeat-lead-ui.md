@@ -1,7 +1,7 @@
 ---
 id: TEP-011
 title: Deferral and Deadline Notes and Recurring Preparation Lead Editor UI
-status: planned
+status: review
 type: feature
 created: 2026-11-14
 updated: 2026-11-15
@@ -275,7 +275,7 @@ Every key in `lib/l10n/app_en.arb` includes a matching `@<key>` metadata block w
     - On success, invokes `_logTaskSaved(draft)` to emit gated `LogLevel.info` `LogTag.ui` event `'ui.edit_task.saved'` with fields `{'id': widget.initialTask?.id ?? 'new', 'is_suspended': _isSuspended, 'has_suspended_note': draft.suspendedNote != null, 'has_due': _hasDue, 'has_due_note': draft.dueNote != null, 'is_repeating': _isRepeating, 'lead_days': draft.repeatRule?.leadDays ?? 0}` (`P-SECRET-HYGIENE`), checks `if (!mounted) return;`, pops the route, and invokes `widget.onSubmitted?.call()`.
   - In `_persistTask(_ValidatedTaskDraft draft)`:
     - Computes `final isIndefiniteSuspension = _isSuspended && _suspendedController.text.trim().isEmpty;` and `final effectiveSuspendedAt = isIndefiniteSuspension ? null : draft.suspendedAt;` so blank deferral input persists `isSuspendedForever: true` (`suspended forever ["<note>"]`) rather than a finite `TaskItem.defaultSuspendedAt` (`9999-12-31 23:59`) across both `addTask` (where `TaskNotifier.addTask` defaults `isSuspendedForever = false`) and `updateTask`, while preserving an explicitly typed `9999-12-31 23:59` as a finite timestamp.
-    - `updateTask` branch passes `dueNote: draft.dueNote`, `clearDueNote: !_hasDue || draft.dueNote == null`, `suspendedAt: effectiveSuspendedAt`, `isSuspendedForever: _isSuspended ? isIndefiniteSuspension : false`, `suspendedNote: draft.suspendedNote`, `clearSuspendedAt: !_isSuspended`, and `clearSuspendedNote: !_isSuspended || draft.suspendedNote == null`.
+    - `updateTask` branch passes `targetTier: (!_isCompletedTask && _mode == _initialEditorMode) ? null : _mode.targetTier` (preventing spurious `task.modified` bumps on no-op saves of open `Focus`/`Ready`/`Blocked` tasks), `dueNote: draft.dueNote`, `clearDueNote: !_hasDue || draft.dueNote == null`, `suspendedAt: effectiveSuspendedAt`, `isSuspendedForever: _isSuspended ? isIndefiniteSuspension : false`, `suspendedNote: draft.suspendedNote`, `clearSuspendedAt: !_isSuspended`, and `clearSuspendedNote: !_isSuspended || draft.suspendedNote == null`.
     - `addTask` branch passes `dueNote: draft.dueNote`, `suspendedAt: effectiveSuspendedAt`, `isSuspendedForever: isIndefiniteSuspension`, and `suspendedNote: draft.suspendedNote`.
 
 #### 2.3.3 `TaskInfoDialog` Live Resolution & Section Rendering (`lib/ui/widgets/task_info_dialog.dart`)
@@ -321,22 +321,23 @@ All tests are written first (`P-TDD-FIRST`) in `test/ui/edit_task_screen_test.da
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline on top of `TEP-006`, `TEP-008`, and `TEP-010`.
-- [ ] Add the 10 English (`lib/l10n/app_en.arb`) and German (`lib/l10n/app_de.arb`) localization keys with `@key` metadata and run `flutter gen-l10n`.
-- [ ] Write failing unit and widget tests first in `test/ui/edit_task_screen_test.dart` and `test/ui/widgets/task_info_dialog_test.dart` covering `M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`, and `M-REAL-MECHANICS-TESTS` (TDD Red Phase — `P-TDD-FIRST`).
-- [ ] Implement `TaskEditorSchedulingNoteField`, `_RepeatLeadDaysInput`, `parseRepeatCount`, `parseLeadDays`, `_TaskEditorSuspendedSection`, and `_TaskEditorDueSection` updates in `lib/ui/widgets/task_editor_scheduling_card.dart` keeping all `build()` methods `< 40` lines (TDD Green Phase).
-- [ ] Wire `_suspendedNoteController`, `_dueNoteController`, `_repeatLeadDaysController`, untouched-note preservation, `_validateAndBuildDraft`, `TdfException`/`FormatException` persistence boundary handling, controller disposal, and redacted `AppLogger` telemetry in `lib/ui/edit_task_screen.dart`, removing obsolete `_hadActiveInitialSuspension` (TDD Green Phase).
-- [ ] Implement live `board.findTask(task.id) ?? task` resolution, `_TaskInfoNoteBody` (`SelectableText`), `task_info_suspended_note`, `task_info_due_note`, and `taskInfoRepeatLeadDays` rendering in `lib/ui/widgets/task_info_dialog.dart` (TDD Green & Refactor Phase).
-- [ ] Update Parts 1 and 2 if implementation details evolve during TDD.
-- [ ] Follow **`update-documentation`** to update `ARCHITECTURE.md` (`edit_task_screen.dart`, `task_editor_scheduling_card.dart`, `task_info_dialog.dart` within `<= 65` words per row) and run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree`.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, static `AGENTS.md` / `P-ACYCLIC-DAG` / `audit_l10n` checks, and `flutter test`).
-- [ ] Follow **`changelog-updater`** to add a concise user-facing `CHANGELOG.md` entry under `## [Unreleased]`.
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline on top of `TEP-006`, `TEP-008`, and `TEP-010`.
+- [x] Add the 10 English (`lib/l10n/app_en.arb`) and German (`lib/l10n/app_de.arb`) localization keys with `@key` metadata and run `flutter gen-l10n`.
+- [x] Write failing unit and widget tests first in `test/ui/edit_task_screen_test.dart` and `test/ui/widgets/task_info_dialog_test.dart` covering `M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`, and `M-REAL-MECHANICS-TESTS` (TDD Red Phase — `P-TDD-FIRST`).
+- [x] Implement `TaskEditorSchedulingNoteField`, `_RepeatLeadDaysInput`, `parseRepeatCount`, `parseLeadDays`, `_TaskEditorSuspendedSection`, `_TaskEditorDueSection`, and `_TaskEditorRepeatSection` updates in `lib/ui/widgets/task_editor_scheduling_card.dart` keeping all `build()` methods `< 40` lines (TDD Green Phase).
+- [x] Wire `_suspendedNoteController`, `_dueNoteController`, `_repeatLeadDaysController`, untouched-note preservation, `_initialEditorMode` no-op save preservation, `_validateAndBuildDraft`, `TdfException`/`FormatException` persistence boundary handling, controller disposal, and redacted `AppLogger` telemetry in `lib/ui/edit_task_screen.dart`, removing obsolete `_hadActiveInitialSuspension` (TDD Green Phase).
+- [x] Implement live `board.findTask(task.id) ?? task` resolution, `_TaskInfoNoteBody` (`SelectableText`), `task_info_suspended_note`, `task_info_due_note`, and `taskInfoRepeatLeadDays` rendering in `lib/ui/widgets/task_info_dialog.dart` (TDD Green & Refactor Phase).
+- [x] Update Parts 1 and 2 if implementation details evolve during TDD.
+- [x] Follow **`update-documentation`** to update `ARCHITECTURE.md` (`edit_task_screen.dart`, `task_editor_scheduling_card.dart`, `task_info_dialog.dart` within `<= 65` words per row) and run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree`.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, static `AGENTS.md` / `P-ACYCLIC-DAG` / `audit_l10n` checks, and `flutter test`).
+- [x] Follow **`changelog-updater`** to add a concise user-facing `CHANGELOG.md` entry under `## [Unreleased]`.
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
 - [ ] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-14:** Drafted initial `TEP-011` feature concept proposing `suspendedNote`, `dueNote`, and `repeat ... lead <N> days` authoring in `EditTaskScreen` / `TaskEditorSchedulingCard` and inspection in `TaskInfoDialog` on top of `TEP-006` (`TDF 0.7.0`).
 * **2026-11-15:** Elaborated `TEP-011` to `status: planned` against the implemented `TEP-006` and `TEP-010` codebase (`TaskItem.hasActiveSuspendedAt`, `maxTdfNoteLength`, `maxTdfNumberLength`, `TaskRepeatRule.maxRepeatCount`, `TdfCalendar.countUnicodeScalars`, `TdfRepeatClock`, `_TaskEditorDueAutoPrioritizeRow`), added separate `schedulingNoteErrorInvalid` and `parseRepeatCount`/`parseLeadDays` validation, untouched-note `\r` preservation, `TdfException` submit guard, live `board.findTask(task.id) ?? task` lookup in `TaskInfoDialog`, `< 40`-line widget decompositions (`P-FLATTEN-BUILD`), and removal of obsolete `_hadActiveInitialSuspension` (`P-NO-DEAD-CODE`).
+* **2026-11-15:** Implemented `TEP-011` end-to-end via Red-Green-Refactor TDD across `lib/l10n/`, `lib/ui/widgets/task_editor_scheduling_card.dart`, `lib/ui/edit_task_screen.dart`, and `lib/ui/widgets/task_info_dialog.dart`. Added `_initialEditorMode` tracking in `EditTaskScreen` so saving an open task without switching its Priority/Someday mode passes `targetTier: null` to `TaskBoardMutator.updateTask`, preserving `task.modifiedAt` on no-op saves of tasks currently evaluated into `Focus`, `Ready`, or `Blocked`. Extracted `_TaskEditorRepeatSection` alongside `_TaskEditorSuspendedSection` and `_TaskEditorDueSection` so `TaskEditorSchedulingCard.build` remains `< 40` lines (`P-FLATTEN-BUILD`). Synchronized `ARCHITECTURE.md` and `CHANGELOG.md`, verified full workspace gates, and advanced `TEP-011` to `status: review`.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*

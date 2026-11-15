@@ -19,6 +19,8 @@ import '../../l10n/app_localizations.dart';
 import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_timezone.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -123,15 +125,18 @@ class TaskEditorModeRow extends StatelessWidget {
   }
 }
 
-/// Recurrence interval (`repeat <count> <days|weeks|months>`) input row inside the task editor.
+/// Recurrence interval (`repeat <count> <days|weeks|months> [<repeat-time>] [lead <lead-count> days]`) inputs inside the task editor.
 class TaskEditorRepeatField extends StatelessWidget {
   /// Creates a [TaskEditorRepeatField].
   const TaskEditorRepeatField({
     super.key,
     required this.countController,
     required this.errorMessage,
+    this.leadDaysController,
+    this.leadDaysErrorMessage,
     required this.onSelectUnit,
     required this.selectedUnit,
+    this.showLeadDays = false,
   });
 
   /// Controller for the numeric repeat interval count (`1..3650`).
@@ -140,11 +145,20 @@ class TaskEditorRepeatField extends StatelessWidget {
   /// Optional validation error message for the repeat interval count.
   final String? errorMessage;
 
+  /// Optional controller for the Mode 2 preparation lead offset in days (`0..3650`).
+  final TextEditingController? leadDaysController;
+
+  /// Optional validation error message for the preparation lead offset.
+  final String? leadDaysErrorMessage;
+
   /// Callback invoked when a [RepeatUnit] chip is selected.
   final ValueChanged<RepeatUnit> onSelectUnit;
 
   /// Currently selected recurrence unit.
   final RepeatUnit selectedUnit;
+
+  /// Whether the conditional preparation lead input is visible (`isRepeating && hasDue`).
+  final bool showLeadDays;
 
   @override
   Widget build(BuildContext context) {
@@ -157,37 +171,84 @@ class TaskEditorRepeatField extends StatelessWidget {
         _buildCountField(localizations, appTheme),
         const SizedBox(height: 8),
         _buildUnitChips(localizations, appTheme),
+        if (leadDaysController case final activeLeadController?
+            when showLeadDays) ...[
+          const SizedBox(height: 8),
+          _RepeatLeadDaysInput(
+            controller: activeLeadController,
+            errorMessage: leadDaysErrorMessage,
+          ),
+        ],
       ],
     );
   }
 
-  /// Resolves the `repeat` rule when [isRepeating] is enabled, or `null` when disabled or invalid.
-  static TaskRepeatRule? parseRepeatRule({
+  /// Parses [rawLeadDays] into a bounded integer in `0..3650`, returning `0` when disabled or blank, or `null` when invalid.
+  static int? parseLeadDays({
+    required bool hasDue,
+    required bool isRepeating,
+    required String rawLeadDays,
+  }) {
+    if (!isRepeating || !hasDue) {
+      return 0;
+    }
+    final trimmed = rawLeadDays.trim();
+    if (trimmed.isEmpty) {
+      return 0;
+    }
+    return _tryParseBoundedUnsignedInt(
+      trimmed,
+      min: 0,
+      max: TaskRepeatRule.maxRepeatCount,
+    );
+  }
+
+  /// Parses [rawCount] into a bounded integer in `1..3650` when [isRepeating] is enabled, or returns `null`.
+  static int? parseRepeatCount({
     required bool isRepeating,
     required String rawCount,
-    required RepeatUnit unit,
   }) {
     if (!isRepeating) {
       return null;
     }
-    final parsedCount = int.tryParse(rawCount.trim());
-    if (parsedCount == null ||
-        parsedCount < 1 ||
-        parsedCount > TaskRepeatRule.maxRepeatCount) {
+    return _tryParseBoundedUnsignedInt(
+      rawCount.trim(),
+      min: 1,
+      max: TaskRepeatRule.maxRepeatCount,
+    );
+  }
+
+  /// Resolves the `repeat` rule when [isRepeating] is enabled, preserving [existingClock], or returns `null` when disabled or invalid.
+  static TaskRepeatRule? parseRepeatRule({
+    TdfRepeatClock existingClock = TdfRepeatClock.midnight,
+    bool hasDue = false,
+    required bool isRepeating,
+    required String rawCount,
+    String rawLeadDays = '',
+    required RepeatUnit unit,
+  }) {
+    final parsedCount = parseRepeatCount(
+      isRepeating: isRepeating,
+      rawCount: rawCount,
+    );
+    final parsedLeadDays = parseLeadDays(
+      hasDue: hasDue,
+      isRepeating: isRepeating,
+      rawLeadDays: rawLeadDays,
+    );
+    if (parsedCount == null || parsedLeadDays == null) {
       return null;
     }
-    return TaskRepeatRule(count: parsedCount, unit: unit);
+    return TaskRepeatRule(
+      count: parsedCount,
+      unit: unit,
+      clock: existingClock,
+      leadDays: parsedLeadDays,
+    );
   }
 
   /// Builds the numeric recurrence interval count text field.
   Widget _buildCountField(AppLocalizations localizations, AppTheme appTheme) {
-    final borderRadius = BorderRadius.circular(14);
-    final defaultBorder = OutlineInputBorder(
-      borderRadius: borderRadius,
-      borderSide: BorderSide(
-        color: appTheme.mutedTextColor.withValues(alpha: 0.35),
-      ),
-    );
     return ClearableTextField(
       fieldKey: const ValueKey('task_editor_repeat_count_input'),
       controller: countController,
@@ -195,23 +256,11 @@ class TaskEditorRepeatField extends StatelessWidget {
       cursorColor: appTheme.tertiaryAccent,
       clearIconColor: appTheme.mutedTextColor,
       style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
-      decoration: InputDecoration(
-        labelText: localizations.repeatIntervalLabel,
-        labelStyle: TextStyle(color: appTheme.mutedTextColor),
+      decoration: _buildSchedulingInputDecoration(
+        appTheme: appTheme,
         errorText: errorMessage,
-        isDense: true,
-        filled: true,
-        fillColor: appTheme.canvasColor,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-        border: defaultBorder,
-        enabledBorder: defaultBorder,
-        focusedBorder: OutlineInputBorder(
-          borderRadius: borderRadius,
-          borderSide: BorderSide(color: appTheme.tertiaryAccent, width: 1.6),
-        ),
+        focusedColor: appTheme.tertiaryAccent,
+        labelText: localizations.repeatIntervalLabel,
       ),
     );
   }
@@ -251,7 +300,7 @@ class TaskEditorRepeatField extends StatelessWidget {
   }
 }
 
-/// Card grouping the scheduling mode chips, optional `suspended` timestamp field, optional `due` timestamp field, and optional `repeat` rule.
+/// Card grouping the scheduling mode chips, optional `suspended` timestamp and note, optional `due` timestamp and note, and optional `repeat` rule.
 class TaskEditorSchedulingCard extends StatelessWidget {
   /// Creates a [TaskEditorSchedulingCard].
   const TaskEditorSchedulingCard({
@@ -259,16 +308,12 @@ class TaskEditorSchedulingCard extends StatelessWidget {
     this.autoPrioritizeDue = true,
     this.dueController,
     this.dueErrorMessage,
+    this.dueNoteController,
+    this.dueNoteErrorMessage,
     this.hasDue = false,
     required this.isRepeating,
     required this.isSuspended,
     required this.mode,
-    required this.repeatCountController,
-    required this.repeatErrorMessage,
-    required this.repeatUnit,
-    this.showDueAutoPrioritizeToggle = false,
-    required this.suspendedController,
-    required this.suspendedErrorMessage,
     this.onClearDue,
     required this.onClearSuspended,
     this.onPickDueDate,
@@ -282,6 +327,16 @@ class TaskEditorSchedulingCard extends StatelessWidget {
     required this.onToggleRepeat,
     required this.onToggleSomeday,
     required this.onToggleSuspended,
+    required this.repeatCountController,
+    required this.repeatErrorMessage,
+    this.repeatLeadDaysController,
+    this.repeatLeadDaysErrorMessage,
+    required this.repeatUnit,
+    this.showDueAutoPrioritizeToggle = false,
+    required this.suspendedController,
+    required this.suspendedErrorMessage,
+    this.suspendedNoteController,
+    this.suspendedNoteErrorMessage,
   });
 
   /// Whether deadline auto-prioritization (`!isDuePassive`) is enabled.
@@ -292,6 +347,12 @@ class TaskEditorSchedulingCard extends StatelessWidget {
 
   /// Optional validation error message for the `due` timestamp.
   final String? dueErrorMessage;
+
+  /// Optional controller for the multi-line `dueNote` input.
+  final TextEditingController? dueNoteController;
+
+  /// Optional validation error message for the `dueNote` input.
+  final String? dueNoteErrorMessage;
 
   /// Whether the task has a `due` timestamp enabled.
   final bool hasDue;
@@ -350,6 +411,12 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Optional validation error message for the repeat interval count.
   final String? repeatErrorMessage;
 
+  /// Optional controller for the Mode 2 preparation lead days input.
+  final TextEditingController? repeatLeadDaysController;
+
+  /// Optional validation error message for the preparation lead days input.
+  final String? repeatLeadDaysErrorMessage;
+
   /// Selected recurrence unit.
   final RepeatUnit repeatUnit;
 
@@ -362,10 +429,15 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Optional validation error message for the suspended timestamp.
   final String? suspendedErrorMessage;
 
+  /// Optional controller for the multi-line `suspendedNote` input.
+  final TextEditingController? suspendedNoteController;
+
+  /// Optional validation error message for the `suspendedNote` input.
+  final String? suspendedNoteErrorMessage;
+
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final activeDueController = dueController;
     return TaskEditorSectionCard(
       cardKey: const ValueKey('task_editor_scheduling_card'),
       icon: Icons.tune_rounded,
@@ -385,39 +457,115 @@ class TaskEditorSchedulingCard extends StatelessWidget {
             onToggleSomeday: onToggleSomeday,
             onToggleSuspended: onToggleSuspended,
           ),
-          if (isSuspended) ...[
-            const SizedBox(height: 8),
-            TaskEditorSuspendedField(
-              controller: suspendedController,
-              errorMessage: suspendedErrorMessage,
-              onClear: onClearSuspended,
-              onPickDate: onPickSuspendedDate,
-              onPickTime: onPickSuspendedTime,
-            ),
-          ],
-          if (hasDue && activeDueController != null)
-            _TaskEditorDueSection(
-              autoPrioritizeDue: autoPrioritizeDue,
-              controller: activeDueController,
-              errorMessage: dueErrorMessage,
-              onClear: onClearDue,
-              onPickDate: onPickDueDate,
-              onPickTime: onPickDueTime,
-              onToggleAutoPrioritizeDue: onToggleAutoPrioritizeDue,
-              showAutoPrioritizeToggle: showDueAutoPrioritizeToggle,
-            ),
-          if (isRepeating) ...[
-            const SizedBox(height: 8),
-            TaskEditorRepeatField(
-              countController: repeatCountController,
-              errorMessage: repeatErrorMessage,
-              selectedUnit: repeatUnit,
-              onSelectUnit: onSelectRepeatUnit,
-            ),
-          ],
+          if (isSuspended) _TaskEditorSuspendedSection(card: this),
+          if (dueController case final activeDueController? when hasDue)
+            _TaskEditorDueSection(card: this, controller: activeDueController),
+          if (isRepeating) _TaskEditorRepeatSection(card: this),
         ],
       ),
     );
+  }
+}
+
+/// Clearable multi-line text field (`1..3` visible lines, `<= 2000` Unicode scalars) for `suspendedNote` and `dueNote`.
+class TaskEditorSchedulingNoteField extends StatelessWidget {
+  /// Creates a [TaskEditorSchedulingNoteField].
+  const TaskEditorSchedulingNoteField({
+    super.key,
+    required this.clearButtonKey,
+    required this.controller,
+    this.errorMessage,
+    required this.fieldKey,
+    required this.focusedColor,
+    required this.hintText,
+    required this.labelText,
+  });
+
+  /// Widget key for the inline clear button.
+  final Key clearButtonKey;
+
+  /// Controller managing the note text.
+  final TextEditingController controller;
+
+  /// Optional localized validation error message.
+  final String? errorMessage;
+
+  /// Widget key for the underlying [TextField].
+  final Key fieldKey;
+
+  /// Accent color applied to the cursor and focused border.
+  final Color focusedColor;
+
+  /// Placeholder hint displayed when the field is empty.
+  final String hintText;
+
+  /// Floating input label text.
+  final String labelText;
+
+  @override
+  Widget build(BuildContext context) {
+    final appTheme = AppTheme.of(context);
+    return ClearableTextField(
+      fieldKey: fieldKey,
+      clearButtonKey: clearButtonKey,
+      clearIconColor: appTheme.mutedTextColor,
+      showClearWhenUnfocused: true,
+      controller: controller,
+      cursorColor: focusedColor,
+      keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.newline,
+      minLines: 1,
+      maxLines: 3,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
+      decoration: _buildSchedulingInputDecoration(
+        appTheme: appTheme,
+        errorText: errorMessage,
+        focusedColor: focusedColor,
+        hintText: hintText,
+        labelText: labelText,
+      ),
+    );
+  }
+
+  /// Normalizes user-edited [rawText], collapsing ASCII-whitespace-only strings to `null` and CR/CRLF line breaks to `\n`.
+  static String? normalizeSchedulingNote(String rawText) {
+    var hasGraphic = false;
+    var firstCrIndex = -1;
+    for (var i = 0; i < rawText.length; i++) {
+      final unit = rawText.codeUnitAt(i);
+      if (unit == 0x0D && firstCrIndex < 0) {
+        firstCrIndex = i;
+      }
+      if (unit != 0x09 && unit != 0x0A && unit != 0x0D && unit != 0x20) {
+        hasGraphic = true;
+      }
+    }
+    if (!hasGraphic) {
+      return null;
+    }
+    if (firstCrIndex < 0) {
+      return rawText;
+    }
+    return _collapseCrLineEndings(rawText, firstCrIndex);
+  }
+
+  /// Validates [normalizedNote] against `<note>` control-character, surrogate, and `maxTdfNoteLength` (`2000`) bounds.
+  static String? validateSchedulingNote(
+    String? normalizedNote,
+    AppLocalizations localizations,
+  ) {
+    if (normalizedNote == null) {
+      return null;
+    }
+    final scalarCount = TdfCalendar.countUnicodeScalars(normalizedNote);
+    if (scalarCount == null ||
+        _containsIllegalNoteControlChar(normalizedNote)) {
+      return localizations.schedulingNoteErrorInvalid;
+    }
+    if (scalarCount > maxTdfNoteLength) {
+      return localizations.schedulingNoteErrorTooLong;
+    }
+    return null;
   }
 }
 
@@ -697,6 +845,43 @@ class TaskEditorSuspendedField extends StatelessWidget {
   }
 }
 
+/// Numeric preparation lead offset (`lead <lead-count> days`) field shown when both `Repeat` and `Due` are active.
+class _RepeatLeadDaysInput extends StatelessWidget {
+  /// Creates a [_RepeatLeadDaysInput].
+  const _RepeatLeadDaysInput({required this.controller, this.errorMessage});
+
+  /// Controller for the numeric preparation lead days (`0..3650`).
+  final TextEditingController controller;
+
+  /// Optional localized validation error message.
+  final String? errorMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
+    return ClearableTextField(
+      fieldKey: const ValueKey('task_editor_repeat_lead_days_input'),
+      clearButtonKey: const ValueKey(
+        'task_editor_repeat_lead_days_clear_button',
+      ),
+      clearIconColor: appTheme.mutedTextColor,
+      showClearWhenUnfocused: true,
+      controller: controller,
+      keyboardType: TextInputType.number,
+      cursorColor: appTheme.tertiaryAccent,
+      style: TextStyle(color: appTheme.primaryTextColor, fontSize: 14),
+      decoration: _buildSchedulingInputDecoration(
+        appTheme: appTheme,
+        errorText: errorMessage,
+        focusedColor: appTheme.tertiaryAccent,
+        hintText: localizations.repeatLeadDaysHint,
+        labelText: localizations.repeatLeadDaysLabel,
+      ),
+    );
+  }
+}
+
 /// Labeled switch row toggling deadline auto-prioritization (`!isDuePassive`).
 class _TaskEditorDueAutoPrioritizeRow extends StatelessWidget {
   /// Creates a [_TaskEditorDueAutoPrioritizeRow].
@@ -747,22 +932,67 @@ class _TaskEditorDueAutoPrioritizeRow extends StatelessWidget {
   }
 }
 
-/// Renders the `due` timestamp input field and optional auto-prioritization toggle row.
+/// Renders the `due` timestamp input, optional auto-prioritization switch, and optional `dueNote` input.
 class _TaskEditorDueSection extends StatelessWidget {
   /// Creates a [_TaskEditorDueSection].
-  const _TaskEditorDueSection({
-    required this.autoPrioritizeDue,
+  const _TaskEditorDueSection({required this.card, required this.controller});
+
+  /// Parent scheduling card configuration.
+  final TaskEditorSchedulingCard card;
+
+  /// Active controller for the `due` timestamp input.
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 8),
+        _TaskEditorDueTimestampField(
+          controller: controller,
+          errorMessage: card.dueErrorMessage,
+          onClear: card.onClearDue,
+          onPickDate: card.onPickDueDate,
+          onPickTime: card.onPickDueTime,
+        ),
+        if (card.showDueAutoPrioritizeToggle) ...[
+          const SizedBox(height: 8),
+          _TaskEditorDueAutoPrioritizeRow(
+            autoPrioritizeDue: card.autoPrioritizeDue,
+            onChanged: card.onToggleAutoPrioritizeDue,
+          ),
+        ],
+        if (card.dueNoteController case final activeNoteController?) ...[
+          const SizedBox(height: 8),
+          TaskEditorSchedulingNoteField(
+            clearButtonKey: const ValueKey('task_editor_due_note_clear_button'),
+            controller: activeNoteController,
+            errorMessage: card.dueNoteErrorMessage,
+            fieldKey: const ValueKey('task_editor_due_note_input'),
+            focusedColor: appTheme.secondaryAccent,
+            hintText: localizations.taskDueNoteHint,
+            labelText: localizations.taskDueNoteLabel,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Renders the `due` timestamp picker field inside [_TaskEditorDueSection].
+class _TaskEditorDueTimestampField extends StatelessWidget {
+  /// Creates a [_TaskEditorDueTimestampField].
+  const _TaskEditorDueTimestampField({
     required this.controller,
     required this.errorMessage,
     required this.onClear,
     required this.onPickDate,
     required this.onPickTime,
-    required this.onToggleAutoPrioritizeDue,
-    required this.showAutoPrioritizeToggle,
   });
-
-  /// Whether deadline auto-prioritization is enabled.
-  final bool autoPrioritizeDue;
 
   /// Controller for the `due` timestamp input.
   final TextEditingController controller;
@@ -779,41 +1009,176 @@ class _TaskEditorDueSection extends StatelessWidget {
   /// Optional callback invoked to pick a `due` time.
   final VoidCallback? onPickTime;
 
-  /// Optional callback invoked when the auto-prioritize switch is toggled.
-  final ValueChanged<bool>? onToggleAutoPrioritizeDue;
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return TaskEditorSuspendedField(
+      controller: controller,
+      errorMessage: errorMessage,
+      fieldKey: const ValueKey('task_editor_due_input'),
+      clearButtonKey: const ValueKey('task_editor_due_clear_button'),
+      datePickerKey: const ValueKey('task_editor_due_date_picker_button'),
+      timePickerKey: const ValueKey('task_editor_due_time_picker_button'),
+      labelTextOverride: localizations.taskDueButtonLabel,
+      clearTooltipOverride: localizations.taskDueClearTooltip,
+      onClear: onClear ?? controller.clear,
+      onPickDate: onPickDate ?? () {},
+      onPickTime: onPickTime ?? () {},
+    );
+  }
+}
 
-  /// Whether to render [_TaskEditorDueAutoPrioritizeRow].
-  final bool showAutoPrioritizeToggle;
+/// Renders the recurrence section inside [TaskEditorSchedulingCard].
+class _TaskEditorRepeatSection extends StatelessWidget {
+  /// Creates a [_TaskEditorRepeatSection].
+  const _TaskEditorRepeatSection({required this.card});
+
+  /// Parent scheduling card configuration.
+  final TaskEditorSchedulingCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: TaskEditorRepeatField(
+        countController: card.repeatCountController,
+        errorMessage: card.repeatErrorMessage,
+        leadDaysController: card.repeatLeadDaysController,
+        leadDaysErrorMessage: card.repeatLeadDaysErrorMessage,
+        onSelectUnit: card.onSelectRepeatUnit,
+        selectedUnit: card.repeatUnit,
+        showLeadDays: card.hasDue,
+      ),
+    );
+  }
+}
+
+/// Renders the `suspended` timestamp field and optional multi-line `suspendedNote` field.
+class _TaskEditorSuspendedSection extends StatelessWidget {
+  /// Creates a [_TaskEditorSuspendedSection].
+  const _TaskEditorSuspendedSection({required this.card});
+
+  /// Parent scheduling card configuration.
+  final TaskEditorSchedulingCard card;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final appTheme = AppTheme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 8),
         TaskEditorSuspendedField(
-          controller: controller,
-          errorMessage: errorMessage,
-          fieldKey: const ValueKey('task_editor_due_input'),
-          clearButtonKey: const ValueKey('task_editor_due_clear_button'),
-          datePickerKey: const ValueKey('task_editor_due_date_picker_button'),
-          timePickerKey: const ValueKey('task_editor_due_time_picker_button'),
-          labelTextOverride: localizations.taskDueButtonLabel,
-          clearTooltipOverride: localizations.taskDueClearTooltip,
-          onClear: onClear ?? controller.clear,
-          onPickDate: onPickDate ?? () {},
-          onPickTime: onPickTime ?? () {},
+          controller: card.suspendedController,
+          errorMessage: card.suspendedErrorMessage,
+          onClear: card.onClearSuspended,
+          onPickDate: card.onPickSuspendedDate,
+          onPickTime: card.onPickSuspendedTime,
         ),
-        if (showAutoPrioritizeToggle) ...[
+        if (card.suspendedNoteController case final activeNoteController?) ...[
           const SizedBox(height: 8),
-          _TaskEditorDueAutoPrioritizeRow(
-            autoPrioritizeDue: autoPrioritizeDue,
-            onChanged: onToggleAutoPrioritizeDue,
+          TaskEditorSchedulingNoteField(
+            clearButtonKey: const ValueKey(
+              'task_editor_suspended_note_clear_button',
+            ),
+            controller: activeNoteController,
+            errorMessage: card.suspendedNoteErrorMessage,
+            fieldKey: const ValueKey('task_editor_suspended_note_input'),
+            focusedColor: appTheme.warningAccent,
+            hintText: localizations.taskSuspendedNoteHint,
+            labelText: localizations.taskSuspendedNoteLabel,
           ),
         ],
       ],
     );
   }
+}
+
+/// Builds a shared dense Material 3 [InputDecoration] for scheduling text inputs.
+InputDecoration _buildSchedulingInputDecoration({
+  required AppTheme appTheme,
+  String? errorText,
+  required Color focusedColor,
+  String? hintText,
+  required String labelText,
+}) {
+  final borderRadius = BorderRadius.circular(14);
+  final defaultBorder = OutlineInputBorder(
+    borderRadius: borderRadius,
+    borderSide: BorderSide(
+      color: appTheme.mutedTextColor.withValues(alpha: 0.35),
+    ),
+  );
+  return InputDecoration(
+    labelText: labelText,
+    labelStyle: TextStyle(color: appTheme.mutedTextColor),
+    hintText: hintText,
+    hintStyle: TextStyle(color: appTheme.mutedTextColor),
+    errorText: errorText,
+    isDense: true,
+    filled: true,
+    fillColor: appTheme.canvasColor,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    border: defaultBorder,
+    enabledBorder: defaultBorder,
+    focusedBorder: OutlineInputBorder(
+      borderRadius: borderRadius,
+      borderSide: BorderSide(color: focusedColor, width: 1.6),
+    ),
+  );
+}
+
+/// Collapses `\r\n` and standalone `\r` sequences starting at [firstCrIndex] into `\n` in a single pass.
+String _collapseCrLineEndings(String rawText, int firstCrIndex) {
+  final buffer = StringBuffer(rawText.substring(0, firstCrIndex));
+  for (var i = firstCrIndex; i < rawText.length; i++) {
+    final unit = rawText.codeUnitAt(i);
+    if (unit == 0x0D) {
+      buffer.write('\n');
+      if (i + 1 < rawText.length && rawText.codeUnitAt(i + 1) == 0x0A) {
+        i++;
+      }
+      continue;
+    }
+    buffer.writeCharCode(unit);
+  }
+  return buffer.toString();
+}
+
+/// Returns whether [text] contains any control character disallowed by `<note>` (`0x00..0x1F` except `\t`, `\n`, `\r`, or `0x7F`).
+bool _containsIllegalNoteControlChar(String text) {
+  for (var i = 0; i < text.length; i++) {
+    final unit = text.codeUnitAt(i);
+    final isDisallowedLowControl =
+        unit <= 0x1F && unit != 0x09 && unit != 0x0A && unit != 0x0D;
+    if (isDisallowedLowControl || unit == 0x7F) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Parses an unsigned ASCII decimal integer in `[min, max]` bounded by `maxTdfNumberLength`, or returns `null`.
+int? _tryParseBoundedUnsignedInt(
+  String trimmed, {
+  required int min,
+  required int max,
+}) {
+  if (trimmed.isEmpty || trimmed.length > maxTdfNumberLength) {
+    return null;
+  }
+  var value = 0;
+  for (var i = 0; i < trimmed.length; i++) {
+    final unit = trimmed.codeUnitAt(i);
+    if (unit < 0x30 || unit > 0x39) {
+      return null;
+    }
+    value = (value * 10) + (unit - 0x30);
+    if (value > max) {
+      return null;
+    }
+  }
+  return value >= min ? value : null;
 }

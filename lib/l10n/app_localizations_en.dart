@@ -1432,4 +1432,39 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get taskInfoDueLeadWindowOffHint =>
       'Deadline auto-priority disabled in settings';
+
+  @override
+  String get taskSuspendedNoteLabel => 'Deferral note (optional)';
+
+  @override
+  String get taskSuspendedNoteHint => 'Why is this task deferred?';
+
+  @override
+  String get taskDueNoteLabel => 'Deadline note (optional)';
+
+  @override
+  String get taskDueNoteHint => 'Cutoff details or submission requirements';
+
+  @override
+  String get schedulingNoteErrorTooLong =>
+      'Note must not exceed 2,000 characters.';
+
+  @override
+  String get schedulingNoteErrorInvalid =>
+      'Note contains unsupported control characters.';
+
+  @override
+  String get repeatLeadDaysLabel => 'Preparation lead (days, optional)';
+
+  @override
+  String get repeatLeadDaysHint => '0 (activate immediately after rollover)';
+
+  @override
+  String get repeatLeadDaysErrorInvalid =>
+      'Enter a whole number between 0 and 3650 days.';
+
+  @override
+  String taskInfoRepeatLeadDays(String days) {
+    return 'Preparation window opens $days day(s) before due date';
+  }
 }

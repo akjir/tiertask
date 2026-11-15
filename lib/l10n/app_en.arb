@@ -1980,5 +1980,50 @@
   "taskInfoDueLeadWindowOffHint": "Deadline auto-priority disabled in settings",
   "@taskInfoDueLeadWindowOffHint": {
     "description": "Status line in task info dialog when workspace deadline auto-priority is turned off."
+  },
+  "taskSuspendedNoteLabel": "Deferral note (optional)",
+  "@taskSuspendedNoteLabel": {
+    "description": "Input label for the optional deferral note field shown when Suspended is enabled."
+  },
+  "taskSuspendedNoteHint": "Why is this task deferred?",
+  "@taskSuspendedNoteHint": {
+    "description": "Placeholder hint for the optional deferral note input field."
+  },
+  "taskDueNoteLabel": "Deadline note (optional)",
+  "@taskDueNoteLabel": {
+    "description": "Input label for the optional deadline note field shown when Due is enabled."
+  },
+  "taskDueNoteHint": "Cutoff details or submission requirements",
+  "@taskDueNoteHint": {
+    "description": "Placeholder hint for the optional deadline note input field."
+  },
+  "schedulingNoteErrorTooLong": "Note must not exceed 2,000 characters.",
+  "@schedulingNoteErrorTooLong": {
+    "description": "Validation error shown when a deferral or deadline note exceeds 2,000 Unicode scalar values."
+  },
+  "schedulingNoteErrorInvalid": "Note contains unsupported control characters.",
+  "@schedulingNoteErrorInvalid": {
+    "description": "Validation error shown when a deferral or deadline note contains disallowed control characters or unpaired surrogates."
+  },
+  "repeatLeadDaysLabel": "Preparation lead (days, optional)",
+  "@repeatLeadDaysLabel": {
+    "description": "Input label for the recurring preparation lead window in days when both Repeat and Due are enabled."
+  },
+  "repeatLeadDaysHint": "0 (activate immediately after rollover)",
+  "@repeatLeadDaysHint": {
+    "description": "Placeholder hint for the optional recurring preparation lead days input field."
+  },
+  "repeatLeadDaysErrorInvalid": "Enter a whole number between 0 and 3650 days.",
+  "@repeatLeadDaysErrorInvalid": {
+    "description": "Validation error shown when the recurring preparation lead input is not an integer in 0..3650."
+  },
+  "taskInfoRepeatLeadDays": "Preparation window opens {days} day(s) before due date",
+  "@taskInfoRepeatLeadDays": {
+    "description": "Detail line in TaskInfoDialog describing the Mode 2 recurring preparation lead offset.",
+    "placeholders": {
+      "days": {
+        "type": "String"
+      }
+    }
   }
 }

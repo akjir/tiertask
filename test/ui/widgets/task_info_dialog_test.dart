@@ -849,4 +849,473 @@ void main() {
       expect(find.text('Prioritized by deadline lead window'), findsOneWidget);
     },
   );
+
+  testWidgets(
+    'TaskInfoDialog renders SelectableText suspendedNote, dueNote, and Mode 2 repeat leadDays across English and German locales and omits inactive branches',
+    (WidgetTester tester) async {
+      final now = DateTime.utc(2026, 11, 1, 12, 0);
+      const suspendedMultiLine =
+          'Waiting on vendor quote #412\nCheck portal\t"rev-2" #tag {block}';
+      const dueMultiLine =
+          'Submit signed PDF before 17:00 CET\nAttach annex\\B\u00A0copy';
+
+      // 1. Indefinite suspension with multi-line suspendedNote in English & German.
+      final foreverWithNote = TaskItem(
+        id: 'infForNt01',
+        title: 'Vendor Procurement',
+        createdAt: now,
+        isSuspendedForever: true,
+        suspendedNote: suspendedMultiLine,
+      );
+      for (final (locale, language) in <(Locale, AppLanguage)>[
+        (const Locale('en'), AppLanguage.english),
+        (const Locale('de'), AppLanguage.german),
+      ]) {
+        await pumpLeafWidget(
+          tester,
+          TaskInfoDialog(task: foreverWithNote),
+          board: TaskBoard(blocked: [foreverWithNote]),
+          config: WebDavConfig(language: language),
+          locale: locale,
+          clock: () => now,
+        );
+        await tester.pumpAndSettle();
+        final noteFinder = find.byKey(
+          const ValueKey('task_info_suspended_note'),
+        );
+        expect(
+          noteFinder,
+          findsOneWidget,
+          reason:
+              'Active forever deferral with suspendedNote must render SelectableText in $locale',
+        );
+        final selectable = tester.widget<SelectableText>(noteFinder);
+        expect(selectable.data, equals(suspendedMultiLine));
+      }
+
+      // 2. Finite future suspension with and without suspendedNote, plus expired suspension.
+      final futureWithNote = TaskItem(
+        id: 'infFutNt02',
+        title: 'Future Deferred Task',
+        createdAt: now,
+        suspendedAt: DateTime.utc(2026, 11, 3, 9, 0),
+        suspendedNote: 'Hold until Tuesday release freeze lifts',
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: futureWithNote),
+        board: TaskBoard(blocked: [futureWithNote]),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_suspended_note')),
+            )
+            .data,
+        equals('Hold until Tuesday release freeze lifts'),
+      );
+
+      final futureWithoutNote = TaskItem(
+        id: 'infFutNo03',
+        title: 'Future Deferred Without Note',
+        createdAt: now,
+        suspendedAt: DateTime.utc(2026, 11, 3, 9, 0),
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: futureWithoutNote),
+        board: TaskBoard(blocked: [futureWithoutNote]),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(
+          const ValueKey('task_info_section_suspended_task_indicator'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_suspended_note')),
+        findsNothing,
+        reason: 'Null suspendedNote must omit task_info_suspended_note widget',
+      );
+
+      final expiredWithNote = TaskItem(
+        id: 'infExpNt04',
+        title: 'Expired Deferred With Stale Note',
+        createdAt: DateTime.utc(2026, 11, 1, 8, 0),
+        suspendedAt: DateTime.utc(2026, 11, 1, 12, 0),
+        suspendedNote: 'Stale note at exact boundary',
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: expiredWithNote),
+        board: TaskBoard(focus: [expiredWithNote]),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(
+          const ValueKey('task_info_section_suspended_task_indicator'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_suspended_note')),
+        findsNothing,
+        reason:
+            'Expired deferral must hide both section card and suspendedNote',
+      );
+
+      // 3. dueNote across upcoming, overdue, passive, Completed, and detached fallback tasks.
+      final dueCases = <TaskItem>[
+        TaskItem(
+          id: 'infDueUp05',
+          title: 'Upcoming Due With Note',
+          createdAt: now,
+          dueAt: DateTime.utc(2026, 11, 5, 17, 0),
+          dueNote: dueMultiLine,
+        ),
+        TaskItem(
+          id: 'infDueOv06',
+          title: 'Overdue Due With Note',
+          createdAt: DateTime.utc(2026, 10, 29, 8, 0),
+          dueAt: DateTime.utc(2026, 11, 1, 12, 0),
+          dueNote: dueMultiLine,
+        ),
+        TaskItem(
+          id: 'infDuePa07',
+          title: 'Passive Due With Note',
+          createdAt: now,
+          dueAt: DateTime.utc(2026, 11, 5, 17, 0),
+          isDuePassive: true,
+          dueNote: dueMultiLine,
+        ),
+        TaskItem(
+          id: 'infDueDn08',
+          title: 'Completed Due With Note',
+          createdAt: DateTime.utc(2026, 10, 25, 8, 0),
+          isCompleted: true,
+          completedAt: DateTime.utc(2026, 10, 30, 10, 0),
+          completions: 1,
+          dueAt: DateTime.utc(2026, 10, 31, 17, 0),
+          dueNote: dueMultiLine,
+        ),
+      ];
+      for (final item in dueCases) {
+        await pumpLeafWidget(
+          tester,
+          TaskInfoDialog(task: item),
+          board: TaskBoard.empty(),
+          clock: () => now,
+        );
+        await tester.pumpAndSettle();
+        final dueNoteFinder = find.byKey(const ValueKey('task_info_due_note'));
+        expect(
+          dueNoteFinder,
+          findsOneWidget,
+          reason:
+              'dueNote must render via fallback task when mounted on empty board (${item.id})',
+        );
+        expect(
+          tester.widget<SelectableText>(dueNoteFinder).data,
+          equals(dueMultiLine),
+        );
+      }
+
+      // 4. Mode 2 repeat leadDays in English & German vs Mode 1 (no due) vs leadDays == 0.
+      final mode2LeadTask = TaskItem(
+        id: 'infRepM209',
+        title: 'Monthly Tax Filing',
+        createdAt: now,
+        completions: 2,
+        dueAt: DateTime.utc(2026, 11, 30, 18, 0),
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.months,
+          leadDays: 7,
+        ),
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: mode2LeadTask),
+        board: TaskBoard(planned: [mode2LeadTask]),
+        config: const WebDavConfig(language: AppLanguage.english),
+        locale: const Locale('en'),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Completed 2 times'), findsOneWidget);
+      expect(
+        find.text('Preparation window opens 7 day(s) before due date'),
+        findsOneWidget,
+      );
+
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: mode2LeadTask),
+        board: TaskBoard(planned: [mode2LeadTask]),
+        config: const WebDavConfig(language: AppLanguage.german),
+        locale: const Locale('de'),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Vorbereitungsfenster öffnet 7 Tag(e) vor Fälligkeit'),
+        findsOneWidget,
+      );
+
+      final mode1WithStoredLead = TaskItem(
+        id: 'infRepM110',
+        title: 'Restored Without Due',
+        createdAt: now,
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.months,
+          leadDays: 7,
+        ),
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: mode1WithStoredLead),
+        board: TaskBoard(planned: [mode1WithStoredLead]),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Preparation window opens'),
+        findsNothing,
+        reason: 'Mode 1 recurring task without dueAt must omit preparation lead summary',
+      );
+
+      final mode2ZeroLead = TaskItem(
+        id: 'infRepZr11',
+        title: 'Zero Lead Recurring Due',
+        createdAt: now,
+        dueAt: DateTime.utc(2026, 11, 30, 18, 0),
+        repeatRule: const TaskRepeatRule(
+          count: 2,
+          unit: RepeatUnit.weeks,
+          leadDays: 0,
+        ),
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: mode2ZeroLead),
+        board: TaskBoard(planned: [mode2ZeroLead]),
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Preparation window opens'),
+        findsNothing,
+        reason: 'leadDays == 0 must omit preparation lead summary',
+      );
+    },
+  );
+
+  testWidgets(
+    'TaskInfoDialog reactively updates title, scheduling notes, and Mode 2 lead days on real Directory.watch edits and hides expired deferral note on boundaryTickProvider',
+    (WidgetTester tester) async {
+      late Directory tempDir;
+      late File tdfFile;
+      await tester.runAsync(() async {
+        tempDir = await Directory.systemTemp.createTemp(
+          'tiertask_info_sched_watch_',
+        );
+        tdfFile = File('${tempDir.path}/tasks.tdf');
+        await tdfFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    task tskSched01\n'
+          '}\n\n'
+          'task tskSched01 {\n'
+          '    name      "Initial Filing"\n'
+          '    created   2026-11-11 11:00:00\n'
+          '    modified  2026-11-11 12:00:00\n'
+          '    suspended 2026-11-11 12:05:00 "Initial vendor hold"\n'
+          '    due       2026-11-20 17:00:00 "Initial PDF cutoff"\n'
+          '    repeat    1 months lead 5 days\n'
+          '}\n',
+          flush: true,
+        );
+      });
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          if (tempDir.existsSync()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
+      });
+
+      var currentTime = DateTime.utc(2026, 11, 11, 12, 0);
+      const watchConfig = WebDavConfig(
+        language: AppLanguage.english,
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        localWatchEnabled: true,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(watchConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          localFileWatchDebounceProvider.overrideWithValue(
+            const Duration(milliseconds: 25),
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+        ],
+      );
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          container.dispose();
+        });
+      });
+
+      late TaskItem initialSnapshot;
+      await tester.runAsync(() async {
+        container.listen(
+          localFileWatcherProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
+        final initialBoard = await container.read(taskNotifierProvider.future);
+        initialSnapshot = initialBoard.findTask('tskSched01')!;
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+      });
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const ValueKey('open_sched_info_btn'),
+                  onPressed: () =>
+                      showTaskInfoDialog(context, task: initialSnapshot),
+                  child: const Text('Open Info'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_sched_info_btn')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Initial Filing'), findsOneWidget);
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_suspended_note')),
+            )
+            .data,
+        equals('Initial vendor hold'),
+      );
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_due_note')),
+            )
+            .data,
+        equals('Initial PDF cutoff'),
+      );
+      expect(
+        find.text('Preparation window opens 5 day(s) before due date'),
+        findsOneWidget,
+      );
+
+      // External edit on disk updates title, suspendedNote, dueNote, and leadDays while dialog stays open.
+      currentTime = DateTime.utc(2026, 11, 11, 12, 2);
+      await tester.runAsync(() async {
+        await tdfFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-11 12:02:00\n'
+          '    task tskSched01\n'
+          '}\n\n'
+          'task tskSched01 {\n'
+          '    name      "Updated Service Filing"\n'
+          '    created   2026-11-11 11:00:00\n'
+          '    modified  2026-11-11 12:02:00\n'
+          '    suspended 2026-11-11 12:05:00 "Escalated vendor hold\\nLine 2"\n'
+          '    due       2026-11-20 17:00:00 "Signed PDF + annex"\n'
+          '    repeat    1 months lead 10 days\n'
+          '}\n',
+          flush: true,
+        );
+        for (var attempt = 0; attempt < 25; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          final updated = container
+              .read(taskNotifierProvider)
+              .asData
+              ?.value
+              .findTask('tskSched01');
+          if (updated?.title == 'Updated Service Filing') {
+            break;
+          }
+        }
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Updated Service Filing'),
+        findsOneWidget,
+        reason: 'Open TaskInfoDialog header must resolve live task title from taskNotifierProvider',
+      );
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_suspended_note')),
+            )
+            .data,
+        equals('Escalated vendor hold\nLine 2'),
+      );
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_due_note')),
+            )
+            .data,
+        equals('Signed PDF + annex'),
+      );
+      expect(
+        find.text('Preparation window opens 10 day(s) before due date'),
+        findsOneWidget,
+      );
+
+      // Advance clock to exact suspendedAt (12:05:00Z) and tick boundaryTickProvider -> hides suspended card & note.
+      currentTime = DateTime.utc(2026, 11, 11, 12, 5);
+      container.read(boundaryTickProvider.notifier).increment();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(
+          const ValueKey('task_info_section_suspended_task_indicator'),
+        ),
+        findsNothing,
+        reason: 'Elapsed finite deferral must hide suspended section on boundaryTickProvider',
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_suspended_note')),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('task_info_due_note')), findsOneWidget);
+      expect(
+        find.text('Preparation window opens 10 day(s) before due date'),
+        findsOneWidget,
+      );
+    },
+  );
 }

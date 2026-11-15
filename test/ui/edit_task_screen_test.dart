@@ -13,9 +13,12 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
@@ -26,9 +29,29 @@ import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/edit_task_screen.dart';
+import 'package:tiertask/ui/widgets/task_editor_scheduling_card.dart';
 
 import 'test_helpers.dart';
+
+class _SuspendingLocalFileRepository extends FakeLocalFileRepository {
+  _SuspendingLocalFileRepository({
+    required super.config,
+    required super.initialTdf,
+  });
+
+  Completer<void>? saveGate;
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    if (saveGate case final gate?) {
+      await gate.future;
+    }
+    await super.saveTdf(tdfContent);
+  }
+}
 
 void main() {
   testWidgets(
@@ -1480,6 +1503,857 @@ task doneDue003 {
 
       board = container.read(taskNotifierProvider).requireValue;
       expect(board.findTask('doneDue003')!.isDuePassive, isTrue);
+    },
+  );
+
+  test('TaskEditorSchedulingNoteField and TaskEditorRepeatField enforce zero-copy normalization, Unicode scalar and control-char bounds, and 0..3650 lead-day parsing', () {
+    final en = lookupAppLocalizations(const Locale('en'));
+    final de = lookupAppLocalizations(const Locale('de'));
+
+    // 1. normalizeSchedulingNote: empty & ASCII whitespace -> null; non-CR preserved identically; CRLF/CR collapsed.
+    for (final blank in <String>['', '   ', '\t\n\r\n  ']) {
+      expect(
+        TaskEditorSchedulingNoteField.normalizeSchedulingNote(blank),
+        isNull,
+        reason: 'ASCII-whitespace-only note "$blank" must collapse to null',
+      );
+    }
+    const nonBreaking = '\u00A0';
+    expect(
+      identical(
+        TaskEditorSchedulingNoteField.normalizeSchedulingNote(nonBreaking),
+        nonBreaking,
+      ),
+      isTrue,
+      reason: 'U+00A0 graphic whitespace without CR must be returned zero-copy',
+    );
+    const cleanMultiLine = '  Keep spaces\t"quoted" #hash {brace}\nLine 2  ';
+    expect(
+      identical(
+        TaskEditorSchedulingNoteField.normalizeSchedulingNote(cleanMultiLine),
+        cleanMultiLine,
+      ),
+      isTrue,
+      reason: 'LF multi-line note without CR must be returned zero-copy',
+    );
+    expect(
+      TaskEditorSchedulingNoteField.normalizeSchedulingNote(
+        'Line 1\r\nLine 2\rLine 3\r\n',
+      ),
+      equals('Line 1\nLine 2\nLine 3\n'),
+    );
+
+    // 2. validateSchedulingNote: scalar boundaries (0, 1, 2000 ASCII, 2000 astral, 2001) + illegal control chars & surrogates.
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote(null, en),
+      isNull,
+    );
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote('A', en),
+      isNull,
+    );
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote('a' * 2000, en),
+      isNull,
+    );
+    final astral2000 = '\u{1F4CB}' * 2000;
+    expect(astral2000.length, equals(4000));
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote(astral2000, en),
+      isNull,
+      reason: '2000 astral Unicode scalars (4000 UTF-16 code units) must pass',
+    );
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote('a' * 2001, en),
+      equals('Note must not exceed 2,000 characters.'),
+    );
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote(
+        '\u{1F4CB}' * 2001,
+        de,
+      ),
+      equals('Notiz darf maximal 2.000 Zeichen lang sein.'),
+    );
+    expect(
+      TaskEditorSchedulingNoteField.validateSchedulingNote(
+        'Allowed\t\n\rcontrols',
+        en,
+      ),
+      isNull,
+    );
+    for (final invalidControl in <String>[
+      'Wait\x00now',
+      'Due\x07bell',
+      'Esc\x1Bseq',
+      'Del\x7Fchar',
+      String.fromCharCodes(<int>[0xD800]),
+      String.fromCharCodes(<int>[0xDC00]),
+    ]) {
+      expect(
+        TaskEditorSchedulingNoteField.validateSchedulingNote(
+          invalidControl,
+          en,
+        ),
+        equals('Note contains unsupported control characters.'),
+        reason: 'Disallowed control or surrogate input must fail inline in EN',
+      );
+      expect(
+        TaskEditorSchedulingNoteField.validateSchedulingNote(
+          invalidControl,
+          de,
+        ),
+        equals('Notiz enthält nicht unterstützte Steuerzeichen.'),
+        reason: 'Disallowed control or surrogate input must fail inline in DE',
+      );
+    }
+
+    // 3. parseRepeatCount, parseLeadDays, and parseRepeatRule boundaries.
+    expect(
+      TaskEditorRepeatField.parseRepeatCount(isRepeating: false, rawCount: '5'),
+      isNull,
+    );
+    expect(
+      TaskEditorRepeatField.parseRepeatCount(isRepeating: true, rawCount: '0'),
+      isNull,
+    );
+    expect(
+      TaskEditorRepeatField.parseRepeatCount(isRepeating: true, rawCount: '1'),
+      equals(1),
+    );
+    expect(
+      TaskEditorRepeatField.parseRepeatCount(
+        isRepeating: true,
+        rawCount: '3650',
+      ),
+      equals(3650),
+    );
+    expect(
+      TaskEditorRepeatField.parseRepeatCount(
+        isRepeating: true,
+        rawCount: '3651',
+      ),
+      isNull,
+    );
+
+    expect(
+      TaskEditorRepeatField.parseLeadDays(
+        hasDue: false,
+        isRepeating: true,
+        rawLeadDays: '999999',
+      ),
+      equals(0),
+      reason: 'Lead days must resolve to 0 whenever hasDue is false',
+    );
+    expect(
+      TaskEditorRepeatField.parseLeadDays(
+        hasDue: true,
+        isRepeating: false,
+        rawLeadDays: '14',
+      ),
+      equals(0),
+    );
+    for (final (raw, expected) in <(String, int?)>[
+      ('', 0),
+      ('   ', 0),
+      ('0', 0),
+      ('00', 0),
+      ('1', 1),
+      ('3650', 3650),
+      ('000000000000000000003650', 3650),
+      ('3651', null),
+      ('-1', null),
+      ('-0', null),
+      ('+5', null),
+      ('14.5', null),
+      ('abc', null),
+      ('0000000000000000000000001', null),
+      ('999999999999999999999999', null),
+    ]) {
+      expect(
+        TaskEditorRepeatField.parseLeadDays(
+          hasDue: true,
+          isRepeating: true,
+          rawLeadDays: raw,
+        ),
+        equals(expected),
+        reason: 'parseLeadDays("$raw") must return $expected',
+      );
+    }
+
+    const customClock = TdfRepeatClock(hour: 8, minute: 30, second: 15);
+    expect(
+      TaskEditorRepeatField.parseRepeatRule(
+        existingClock: customClock,
+        hasDue: true,
+        isRepeating: true,
+        rawCount: '2',
+        rawLeadDays: '10',
+        unit: RepeatUnit.weeks,
+      ),
+      equals(
+        const TaskRepeatRule(
+          count: 2,
+          unit: RepeatUnit.weeks,
+          clock: customClock,
+          leadDays: 10,
+        ),
+      ),
+    );
+    expect(
+      TaskEditorRepeatField.parseRepeatRule(
+        existingClock: customClock,
+        hasDue: false,
+        isRepeating: true,
+        rawCount: '2',
+        rawLeadDays: '10',
+        unit: RepeatUnit.weeks,
+      ),
+      equals(
+        const TaskRepeatRule(
+          count: 2,
+          unit: RepeatUnit.weeks,
+          clock: customClock,
+          leadDays: 0,
+        ),
+      ),
+    );
+  });
+
+  testWidgets(
+    'EditTaskScreen authors, validates, clears, and preserves suspendedNote, dueNote, and repeat leadDays across open, expired, CRLF, and Completed tasks',
+    (WidgetTester tester) async {
+      const tdfService = TdfService();
+      final seededBoard = tdfService.parse(
+        'tdf 0.7.0\n\n'
+        'queue {\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '  task crlfTask01\n'
+        '  task expDead002\n'
+        '}\n\n'
+        'task crlfTask01 {\n'
+        '  name "CRLF Preserved Task"\n'
+        '  created 2026-11-01 08:00:00\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '  suspended 2026-11-06 09:00:00 "Hold line 1\\r\\nHold line 2"\n'
+        '  due 2026-11-12 17:00:00 passive "Due line 1\\r\\nDue line 2"\n'
+        '}\n\n'
+        'task expDead002 {\n'
+        '  name "Elapsed Deferral Task"\n'
+        '  created 2026-11-01 08:00:00\n'
+        '  modified 2026-11-01 08:00:00\n'
+        '  suspended 2026-11-01 09:00:00 "Stale morning deferral"\n'
+        '}\n\n'
+        'task doneNote03 {\n'
+        '  name "Completed With Deadline Note"\n'
+        '  created 2026-10-25 08:00:00\n'
+        '  modified 2026-10-29 12:00:00\n'
+        '  finished 2026-10-29 12:00:00\n'
+        '  completions 1\n'
+        '  due 2026-10-30 15:00:00 passive "Archived filing cutoff"\n'
+        '}\n',
+      );
+      final initialSerialized = tdfService.serialize(seededBoard);
+      final container = await _pumpEditorApp(
+        tester,
+        initialTdf: initialSerialized,
+        clock: DateTime.utc(2026, 11, 1, 12, 0),
+      );
+
+      final suspNoteFinder = find.byKey(
+        const ValueKey('task_editor_suspended_note_input'),
+      );
+      final suspNoteClearFinder = find.byKey(
+        const ValueKey('task_editor_suspended_note_clear_button'),
+      );
+      final dueNoteFinder = find.byKey(
+        const ValueKey('task_editor_due_note_input'),
+      );
+      final dueNoteClearFinder = find.byKey(
+        const ValueKey('task_editor_due_note_clear_button'),
+      );
+      final leadDaysFinder = find.byKey(
+        const ValueKey('task_editor_repeat_lead_days_input'),
+      );
+      final leadDaysClearFinder = find.byKey(
+        const ValueKey('task_editor_repeat_lead_days_clear_button'),
+      );
+
+      // 1. New task: note & lead inputs hidden initially; blank suspended + note persists `suspended forever "<note>"`.
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
+
+      expect(suspNoteFinder, findsNothing);
+      expect(dueNoteFinder, findsNothing);
+      expect(leadDaysFinder, findsNothing);
+
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      expect(suspNoteFinder, findsOneWidget);
+      final suspNoteField = tester.widget<TextField>(suspNoteFinder);
+      expect(suspNoteField.minLines, equals(1));
+      expect(suspNoteField.maxLines, equals(3));
+      expect(suspNoteField.keyboardType, equals(TextInputType.multiline));
+      expect(suspNoteField.textInputAction, equals(TextInputAction.newline));
+
+      // Toggle Repeat on without Due -> leadDays remains hidden.
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_repeat_button')),
+      );
+      expect(leadDaysFinder, findsNothing);
+
+      // Toggle Due on -> both dueNote and leadDays appear.
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(dueNoteFinder, findsOneWidget);
+      expect(leadDaysFinder, findsOneWidget);
+
+      // Independent error validation on count, leadDays, suspendedNote, and dueNote.
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Vendor Contract Renewal',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-11-25 17:00',
+      );
+      await tester.enterText(suspNoteFinder, 'a' * 2001);
+      await tester.enterText(dueNoteFinder, 'Bad\x07bell');
+      await tester.enterText(leadDaysFinder, '3651');
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      expect(
+        find.byKey(const ValueKey('edit_task_screen')),
+        findsOneWidget,
+        reason: 'Invalid scheduling note or lead days must keep EditTaskScreen open',
+      );
+      expect(
+        find.text('Note must not exceed 2,000 characters.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Note contains unsupported control characters.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Enter a whole number between 0 and 3650 days.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Enter a valid interval between 1 and 3650.'),
+        findsNothing,
+        reason: 'Invalid leadDays must not mark a valid repeat count invalid',
+      );
+
+      // Editing each field clears its error; test delimiter injection + CRLF normalization + unfocused clear button visibility.
+      const complexSuspNoteInput =
+          'Waiting on "quote #412"\r\nPath C:\\legal\t{draft}\u00A0ok';
+      const expectedSuspNote =
+          'Waiting on "quote #412"\nPath C:\\legal\t{draft}\u00A0ok';
+      const complexDueNote =
+          'Sign PDF before 17:00 CET\nInclude #appendix {v2}';
+      await tester.enterText(suspNoteFinder, complexSuspNoteInput);
+      await tester.enterText(dueNoteFinder, complexDueNote);
+      await tester.enterText(leadDaysFinder, '14');
+      await tester.pump();
+      expect(find.text('Note must not exceed 2,000 characters.'), findsNothing);
+      expect(
+        find.text('Note contains unsupported control characters.'),
+        findsNothing,
+      );
+      expect(
+        find.text('Enter a whole number between 0 and 3650 days.'),
+        findsNothing,
+      );
+
+      // Focus title field -> unfocused clear buttons on populated note and lead fields stay visible!
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_title_input')),
+      );
+      expect(suspNoteClearFinder, findsOneWidget);
+      expect(dueNoteClearFinder, findsOneWidget);
+      expect(leadDaysClearFinder, findsOneWidget);
+
+      // Toggle Due off and back on -> retains draft leadDays ('14') and dueNote in controllers during session!
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(dueNoteFinder, findsNothing);
+      expect(leadDaysFinder, findsNothing);
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(
+        tester.widget<TextField>(leadDaysFinder).controller?.text,
+        equals('14'),
+      );
+      expect(
+        tester.widget<TextField>(dueNoteFinder).controller?.text,
+        equals(complexDueNote),
+      );
+
+      await _tapKey(tester, 'task_editor_save_button');
+
+      var board = container.read(taskNotifierProvider).requireValue;
+      var created = board.allTasks.singleWhere(
+        (task) => task.title == 'Vendor Contract Renewal',
+      );
+      expect(
+        created.isSuspendedForever,
+        isTrue,
+        reason: 'Blank deferral timestamp on new task must persist suspended forever',
+      );
+      expect(created.suspendedAt, isNull);
+      expect(created.suspendedNote, equals(expectedSuspNote));
+      expect(created.dueAt, equals(DateTime.utc(2026, 11, 25, 17, 0)));
+      expect(created.dueNote, equals(complexDueNote));
+      expect(
+        created.repeatRule,
+        equals(
+          const TaskRepeatRule(count: 1, unit: RepeatUnit.days, leadDays: 14),
+        ),
+      );
+
+      // Round-trip serialized .tdf to verify delimiter escaping and `suspended forever "<note>"`.
+      final roundTrip = tdfService.parse(tdfService.serialize(board));
+      final reparsedCreated = roundTrip.findTask(created.id)!;
+      expect(reparsedCreated.isSuspendedForever, isTrue);
+      expect(reparsedCreated.suspendedNote, equals(expectedSuspNote));
+      expect(reparsedCreated.dueNote, equals(complexDueNote));
+      expect(reparsedCreated.repeatRule?.leadDays, equals(14));
+
+      // 2. Clear buttons strip only suspendedNote / dueNote / leadDays while keeping parent directives active.
+      await _tapKey(tester, 'tier_indicator_item_blocked');
+      await _tapKey(tester, 'edit_task_button_${created.id}');
+      await _tapVisible(tester, suspNoteClearFinder);
+      await tester.enterText(dueNoteFinder, '   \n\t  ');
+      await _tapVisible(tester, leadDaysClearFinder);
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      created = board.findTask(created.id)!;
+      expect(created.isSuspendedForever, isTrue);
+      expect(
+        created.suspendedNote,
+        isNull,
+        reason: 'Clearing deferral note must keep indefinite suspension active',
+      );
+      expect(created.dueAt, equals(DateTime.utc(2026, 11, 25, 17, 0)));
+      expect(
+        created.dueNote,
+        isNull,
+        reason: 'ASCII-whitespace-only deadline note must collapse to null',
+      );
+      expect(created.repeatRule?.leadDays, equals(0));
+
+      // 3. Untouched CRLF notes loaded from .tdf preserve `\r\n` verbatim and do not bump modifiedAt on no-op save.
+      await _tapKey(tester, 'edit_task_button_crlfTask01');
+      expect(
+        tester.widget<TextField>(suspNoteFinder).controller?.text,
+        equals('Hold line 1\r\nHold line 2'),
+      );
+      expect(
+        tester.widget<TextField>(dueNoteFinder).controller?.text,
+        equals('Due line 1\r\nDue line 2'),
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      final crlfTask = board.findTask('crlfTask01')!;
+      expect(crlfTask.suspendedNote, equals('Hold line 1\r\nHold line 2'));
+      expect(crlfTask.dueNote, equals('Due line 1\r\nDue line 2'));
+      expect(
+        crlfTask.modifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 8, 0)),
+        reason: 'Saving untouched CRLF scheduling notes must be a pure no-op without bumping modifiedAt',
+      );
+
+      // 4. Open task with elapsed finite deferral: re-enabling Suspended starts with clean empty deferral note.
+      await _tapKey(tester, 'tier_indicator_item_focus');
+      if (find
+          .byKey(const ValueKey('edit_task_button_expDead002'))
+          .evaluate()
+          .isEmpty) {
+        await _tapKey(tester, 'tier_indicator_item_ready');
+      }
+      await _tapKey(tester, 'edit_task_button_expDead002');
+      expect(suspNoteFinder, findsNothing);
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      expect(
+        tester.widget<TextField>(suspNoteFinder).controller?.text,
+        isEmpty,
+        reason: 'Re-enabling Suspended after an elapsed deferral must not resurrect stale expired deferral text',
+      );
+      await _tapKey(tester, 'task_editor_cancel_button');
+
+      // 5. Completed task displays dueNote directly below due timestamp (with auto-prioritize switch hidden) and allows editing it.
+      await _tapKey(tester, 'tier_indicator_item_completed');
+      await _tapKey(tester, 'edit_task_button_doneNote03');
+      expect(
+        find.byKey(const ValueKey('task_editor_due_auto_prioritize_switch')),
+        findsNothing,
+      );
+      expect(dueNoteFinder, findsOneWidget);
+      expect(
+        tester.widget<TextField>(dueNoteFinder).controller?.text,
+        equals('Archived filing cutoff'),
+      );
+      await _tapVisible(tester, dueNoteClearFinder);
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      final doneTask = board.findTask('doneNote03')!;
+      expect(doneTask.dueAt, equals(DateTime.utc(2026, 10, 30, 15, 0)));
+      expect(doneTask.isDuePassive, isTrue);
+      expect(doneTask.dueNote, isNull);
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen integrates Mode 2 rollover + Undo, custom repeat clock preservation, restoreTask lead reveal, 0001 horizon TdfException guard, mid-flight Completer, and AppLogger secret hygiene',
+    (WidgetTester tester) async {
+      AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 1, 12, 0));
+      AppLogger.setEnabled(
+        true,
+        persistToDisk: false,
+        minimumLevel: LogLevel.debug,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      const seededTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task clkLead001
+}
+
+task clkLead001 {
+  name "Clock Preserved Task"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+  due 2026-11-20 12:00:00 "Noon cutoff"
+  repeat 2 weeks 08:30 lead 5 days
+}
+
+task doneRest02 {
+  name "Completed Recurring Template"
+  created 2026-10-15 08:00:00
+  modified 2026-10-28 09:00:00
+  finished 2026-10-28 09:00:00
+  completions 1
+  due 2026-10-30 17:00:00
+  repeat 1 months 09:00 lead 5 days
+}
+''';
+      var currentClock = DateTime.utc(2026, 11, 1, 12, 0);
+      const config = WebDavConfig(
+        language: AppLanguage.english,
+        diagnosticsEnabled: true,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+      );
+      final repository = _SuspendingLocalFileRepository(
+        config: config,
+        initialTdf: seededTdf,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWithValue(repository),
+          clockProvider.overrideWith(
+            (ref) =>
+                () => currentClock,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 1. Custom <repeat-time> (08:30) preserved when updating leadDays from 5 to 10; mid-flight Completer & AppLogger secret hygiene.
+      await _tapKey(tester, 'tier_indicator_item_planned');
+      if (find
+          .byKey(const ValueKey('edit_task_button_clkLead001'))
+          .evaluate()
+          .isEmpty) {
+        await _tapKey(tester, 'tier_indicator_item_ready');
+      }
+      if (find
+          .byKey(const ValueKey('edit_task_button_clkLead001'))
+          .evaluate()
+          .isEmpty) {
+        await _tapKey(tester, 'tier_indicator_item_focus');
+      }
+      await _tapKey(tester, 'edit_task_button_clkLead001');
+
+      final leadInput = find.byKey(
+        const ValueKey('task_editor_repeat_lead_days_input'),
+      );
+      expect(tester.widget<TextField>(leadInput).controller?.text, equals('5'));
+      await tester.enterText(leadInput, '10');
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_suspended_input')),
+        '2026-11-05 09:00',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_suspended_note_input')),
+        'SECRET_DEFER_TOKEN_991',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_note_input')),
+        'SECRET_DUE_TOKEN_882',
+      );
+      await tester.pump();
+
+      final saveGate = Completer<void>();
+      repository.saveGate = saveGate;
+      await tester.tap(find.byKey(const ValueKey('task_editor_save_button')));
+      await tester.pump();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: 'Mid-flight frame while saveTdf Completer is suspended must not throw',
+      );
+      saveGate.complete();
+      repository.saveGate = null;
+      await tester.pumpAndSettle();
+
+      expect(
+        repository.initialTdf,
+        contains('2 weeks 08:30 lead 10 days'),
+        reason: 'Updating leadDays must preserve existing 08:30 repeat clock in .tdf output',
+      );
+      expect(
+        const TdfService()
+            .parse(repository.initialTdf)
+            .findTask('clkLead001')
+            ?.repeatRule,
+        equals(
+          const TaskRepeatRule(
+            count: 2,
+            unit: RepeatUnit.weeks,
+            clock: TdfRepeatClock(hour: 8, minute: 30),
+            leadDays: 10,
+          ),
+        ),
+      );
+      final logDump = AppLogger.fullLogText;
+      expect(logDump, contains('ui.edit_task.saved'));
+      expect(logDump, contains('has_suspended_note=true'));
+      expect(logDump, contains('has_due_note=true'));
+      expect(logDump, contains('lead_days=10'));
+      expect(
+        logDump,
+        isNot(contains('SECRET_DEFER_TOKEN_991')),
+        reason: 'AppLogger must never record raw deferral note contents (P-SECRET-HYGIENE)',
+      );
+      expect(
+        logDump,
+        isNot(contains('SECRET_DUE_TOKEN_882')),
+        reason: 'AppLogger must never record raw deadline note contents (P-SECRET-HYGIENE)',
+      );
+
+      // 2. Mode 2 completeTask rollover + TaskInfoDialog inspection + TEP-007 Undo recovery!
+      await container
+          .read(taskNotifierProvider.notifier)
+          .completeTask('clkLead001');
+      await tester.pumpAndSettle();
+
+      var board = container.read(taskNotifierProvider).requireValue;
+      final rolledTask = board.findTask('clkLead001')!;
+      expect(rolledTask.dueAt, equals(DateTime.utc(2026, 12, 4, 12, 0)));
+      expect(
+        rolledTask.suspendedAt,
+        equals(DateTime.utc(2026, 11, 24, 8, 30)),
+        reason: 'Mode 2 rollover must set suspendedAt = (2026-12-04 - 10 days) at 08:30 repeat clock',
+      );
+      expect(
+        rolledTask.suspendedNote,
+        isNull,
+        reason: 'Mode 2 completion rollover must clear one-off suspendedNote',
+      );
+      expect(rolledTask.dueNote, equals('SECRET_DUE_TOKEN_882'));
+      expect(rolledTask.repeatRule?.leadDays, equals(10));
+
+      await _tapKey(tester, 'tier_indicator_item_blocked');
+      await _tapKey(tester, 'due_task_badge_clkLead001');
+      expect(
+        find.byKey(const ValueKey('task_info_suspended_note')),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_due_note')),
+            )
+            .data,
+        equals('SECRET_DUE_TOKEN_882'),
+      );
+      expect(
+        find.text('Preparation window opens 10 day(s) before due date'),
+        findsOneWidget,
+      );
+      await _tapKey(tester, 'task_info_dialog_close_button');
+
+      final undone = await container
+          .read(taskNotifierProvider.notifier)
+          .undoLastAction();
+      await tester.pumpAndSettle();
+      expect(undone, isTrue);
+      board = container.read(taskNotifierProvider).requireValue;
+      final restoredPreComplete = board.findTask('clkLead001')!;
+      expect(
+        restoredPreComplete.dueAt,
+        equals(DateTime.utc(2026, 11, 20, 12, 0)),
+      );
+      expect(
+        restoredPreComplete.suspendedAt,
+        equals(DateTime.utc(2026, 11, 5, 9, 0)),
+      );
+      expect(
+        restoredPreComplete.suspendedNote,
+        equals('SECRET_DEFER_TOKEN_991'),
+        reason: 'Undo must restore pre-completion one-off suspendedNote',
+      );
+
+      // 3. Restore Completed task with repeat ... lead 5 days -> strips due, hides lead input, and reveals '5' when Due is re-enabled; saving without Due resets leadDays to 0.
+      await container
+          .read(taskNotifierProvider.notifier)
+          .restoreTask('doneRest02');
+      await tester.pumpAndSettle();
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(board.findTask('doneRest02')!.dueAt, isNull);
+      expect(board.findTask('doneRest02')!.repeatRule?.leadDays, equals(5));
+
+      await _tapKey(tester, 'tier_indicator_item_planned');
+      if (find
+          .byKey(const ValueKey('edit_task_button_doneRest02'))
+          .evaluate()
+          .isEmpty) {
+        await _tapKey(tester, 'tier_indicator_item_ready');
+      }
+      if (find
+          .byKey(const ValueKey('edit_task_button_doneRest02'))
+          .evaluate()
+          .isEmpty) {
+        await _tapKey(tester, 'tier_indicator_item_focus');
+      }
+      await _tapKey(tester, 'edit_task_button_doneRest02');
+      expect(
+        leadInput,
+        findsNothing,
+        reason:
+            'Restored Mode 1 task without Due must hide Preparation lead input',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(
+        tester.widget<TextField>(leadInput).controller?.text,
+        equals('5'),
+        reason: 'Re-enabling Due on restored task must reveal stored leadDays ("5")',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(
+        board.findTask('doneRest02')!.repeatRule?.leadDays,
+        equals(0),
+        reason: 'Saving while Due is disabled must normalize leadDays to 0',
+      );
+
+      // 4. Calendar 0001-01-01 underflow guard (`0001-01-03` due + `repeat 1 days` + `leadDays = 10` + `auto-finish` completed step at `0001-01-02`).
+      currentClock = DateTime.utc(1, 1, 2, 12, 0);
+      container.invalidate(clockProvider);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Horizon Underflow Task',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '0001-01-03 12:00',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_repeat_button')),
+      );
+      await tester.enterText(leadInput, '10');
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_auto_finish_toggle')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_subtask_input')),
+        'Done step',
+      );
+      await tester.pump();
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_subtask_add_button')),
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_toggle_subtask_0')),
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      expect(
+        find.byKey(const ValueKey('edit_task_screen')),
+        findsOneWidget,
+        reason: '0001-01-01 proleptic calendar underflow must be caught atomically without closing EditTaskScreen',
+      );
+      expect(
+        find.text('Enter a whole number between 0 and 3650 days.'),
+        findsOneWidget,
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .allTasks
+            .any((task) => task.title == 'Horizon Underflow Task'),
+        isFalse,
+        reason: 'Rejected horizon underflow must leave TaskBoard untouched',
+      );
+      expect(AppLogger.fullLogText, contains('ui.edit_task.persist_rejected'));
     },
   );
 }

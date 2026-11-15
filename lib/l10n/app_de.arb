@@ -416,5 +416,15 @@
   "taskInfoDueAutoPromoteAtDue": "Automatische Priorisierung bei Fälligkeit",
   "taskInfoDueAutoPromoteScheduled": "Automatische Priorisierung {window} vor Fälligkeit",
   "taskInfoDuePassiveHint": "Informativer Termin (Auto-Priorität aus)",
-  "taskInfoDueLeadWindowOffHint": "Fälligkeits-Priorisierung in Einstellungen deaktiviert"
+  "taskInfoDueLeadWindowOffHint": "Fälligkeits-Priorisierung in Einstellungen deaktiviert",
+  "taskSuspendedNoteLabel": "Zurückstellungsnotiz (optional)",
+  "taskSuspendedNoteHint": "Warum ist diese Aufgabe zurückgestellt?",
+  "taskDueNoteLabel": "Fälligkeitsnotiz (optional)",
+  "taskDueNoteHint": "Fristdetails oder Abgabebedingungen",
+  "schedulingNoteErrorTooLong": "Notiz darf maximal 2.000 Zeichen lang sein.",
+  "schedulingNoteErrorInvalid": "Notiz enthält nicht unterstützte Steuerzeichen.",
+  "repeatLeadDaysLabel": "Vorbereitungszeit (Tage, optional)",
+  "repeatLeadDaysHint": "0 (sofort nach Wiederholung aktivieren)",
+  "repeatLeadDaysErrorInvalid": "Ganze Zahl zwischen 0 und 3650 Tagen eingeben.",
+  "taskInfoRepeatLeadDays": "Vorbereitungsfenster öffnet {days} Tag(e) vor Fälligkeit"
 }
