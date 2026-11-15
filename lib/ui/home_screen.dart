@@ -25,6 +25,7 @@ import '../models/app_workspace.dart';
 import '../models/location_state.dart';
 import '../models/task_board.dart';
 import '../models/task_board_undo.dart';
+import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
@@ -51,6 +52,84 @@ class HomeScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+/// Stateless boundary computation and delay-clamping helper for [HomeScreen]'s single wall-clock [Timer].
+class HomeScreenBoundaryTimer {
+  const HomeScreenBoundaryTimer._();
+
+  /// Maximum single [Timer] chunk (`7 days`) preventing 32-bit millisecond overflow on far-future timestamps.
+  static const Duration maxTimerChunk = Duration(days: 7);
+
+  /// Minimum [Timer] delay (`25 ms`) avoiding sub-millisecond busy spin on sub-second early wakeups.
+  static const Duration minTimerDelay = Duration(milliseconds: 25);
+
+  /// Clamps [rawDelay] into `[minTimerDelay, maxTimerChunk]`.
+  static Duration clampTimerDelay(Duration rawDelay) {
+    if (rawDelay <= minTimerDelay) {
+      return minTimerDelay;
+    }
+    if (rawDelay > maxTimerChunk) {
+      return maxTimerChunk;
+    }
+    return rawDelay;
+  }
+
+  /// Computes the earliest future wall-clock boundary (`> normalizeTimestamp(nowUtc)`) across open [tasks].
+  static DateTime? nextBoundaryUtc({
+    required Iterable<TaskItem> tasks,
+    required DateTime nowUtc,
+    required Duration? dueLeadWindow,
+  }) {
+    final now = TaskItem.normalizeTimestamp(nowUtc);
+    DateTime? earliest;
+    for (final task in tasks) {
+      final candidate = _earliestTaskBoundary(task, now, dueLeadWindow);
+      if (candidate != null) {
+        earliest = _minUtc(earliest, candidate);
+      }
+    }
+    return earliest;
+  }
+
+  /// Returns the earliest future deferral, lead-window start, or exact deadline boundary for a single open [task].
+  static DateTime? _earliestTaskBoundary(
+    TaskItem task,
+    DateTime now,
+    Duration? dueLeadWindow,
+  ) {
+    if (task.isCompleted || task.completedAt != null) {
+      return null;
+    }
+    DateTime? candidate;
+    if (!task.isSuspendedForever) {
+      if (task.suspendedAt case final suspendedAt?
+          when suspendedAt != TaskItem.defaultSuspendedAt &&
+              suspendedAt.isAfter(now)) {
+        candidate = _minUtc(candidate, suspendedAt);
+      }
+    }
+    if (task.dueAt case final dueAt?) {
+      if (dueLeadWindow != null && !task.isDuePassive) {
+        final leadStart = dueAt.subtract(dueLeadWindow);
+        if (leadStart.isAfter(now)) {
+          candidate = _minUtc(candidate, leadStart);
+        }
+      }
+      if (dueAt.isAfter(now)) {
+        candidate = _minUtc(candidate, dueAt);
+      }
+    }
+    return candidate;
+  }
+
+  /// Returns the earlier UTC instant between [current] and [candidate].
+  static DateTime _minUtc(DateTime? current, DateTime candidate) {
+    if (current == null || candidate.isBefore(current)) {
+      return candidate;
+    }
+    return current;
+  }
 }
 
 /// Action buttons row inside [_ErrorStateView].
@@ -266,9 +345,13 @@ class _HomeScaffold extends StatelessWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   String? _activeLabelId;
   TaskTier _activeTier = TaskTier.focus;
+  Timer? _boundaryTimer;
+  bool _isAppResumed = true;
   bool _isQuickAddOpen = false;
   bool _isSearching = false;
+  AppLifecycleListener? _lifecycleListener;
   PageController _pageController = PageController();
+  DateTime? _scheduledBoundaryUtc;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -276,10 +359,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleUndoKeyEvent);
+    _lifecycleListener = AppLifecycleListener(
+      onStateChange: _handleAppLifecycleStateChanged,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _syncBoundaryTimerFromProviders();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _boundaryTimer?.cancel();
+    _lifecycleListener?.dispose();
     HardwareKeyboard.instance.removeHandler(_handleUndoKeyEvent);
     _pageController.dispose();
     _searchController.dispose();
@@ -314,6 +407,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// Cancels any active [_boundaryTimer] and clears [_scheduledBoundaryUtc].
+  void _cancelBoundaryTimer() {
+    _boundaryTimer?.cancel();
+    _boundaryTimer = null;
+    _scheduledBoundaryUtc = null;
+  }
+
   /// Closes the inline [QuickAddBar] and restores the add button.
   void _closeQuickAdd() => setState(() => _isQuickAddOpen = false);
 
@@ -342,6 +442,45 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         notice.taskTitle,
       ),
     };
+  }
+
+  /// Pauses [_boundaryTimer] in the background and catches up crossed boundaries on foreground resume.
+  void _handleAppLifecycleStateChanged(AppLifecycleState lifecycleState) {
+    if (lifecycleState == AppLifecycleState.resumed) {
+      _isAppResumed = true;
+      ref.read(boundaryTickProvider.notifier).increment();
+      _syncBoundaryTimerFromProviders();
+      return;
+    }
+    _isAppResumed = false;
+    _cancelBoundaryTimer();
+  }
+
+  /// Advances [boundaryTickProvider] once the scheduled wall-clock boundary is reached, or re-arms on sub-second/chunked early wakeups.
+  void _handleBoundaryTimerFired() {
+    if (!mounted || !_isAppResumed) {
+      return;
+    }
+    final rawUtcNow = ref.read(clockProvider)().toUtc();
+    final normalizedNow = TaskItem.normalizeTimestamp(rawUtcNow);
+    if (_scheduledBoundaryUtc case final target?
+        when normalizedNow.isBefore(target)) {
+      final remainingDelay = HomeScreenBoundaryTimer.clampTimerDelay(
+        target.difference(rawUtcNow),
+      );
+      _boundaryTimer = Timer(remainingDelay, _handleBoundaryTimerFired);
+      return;
+    }
+    _scheduledBoundaryUtc = null;
+    if (AppLogger.shouldLog(LogLevel.debug)) {
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.ui,
+        'ui.boundary_timer.fired',
+        fields: <String, Object?>{'now_utc': normalizedNow.toIso8601String()},
+      );
+    }
+    ref.read(boundaryTickProvider.notifier).increment();
   }
 
   /// Synchronizes [_activeTier] when the user swipes between tier pages.
@@ -502,6 +641,24 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         .push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
 
+  /// Registers provider listeners that keep [_boundaryTimer] synchronized with board, lead-window, and tick state.
+  void _registerBoundaryListeners() {
+    ref.listen<AsyncValue<TaskBoard>>(
+      taskNotifierProvider,
+      (_, _) => _syncBoundaryTimerFromProviders(),
+    );
+    ref.listen<DueLeadWindow?>(
+      webDavConfigProvider.select(
+        (asyncConfiguration) => asyncConfiguration.asData?.value.dueLeadWindow,
+      ),
+      (_, _) => _syncBoundaryTimerFromProviders(),
+    );
+    ref.listen<int>(
+      boundaryTickProvider,
+      (_, _) => _syncBoundaryTimerFromProviders(),
+    );
+  }
+
   /// Returns the selected [TdfLabel] when [_activeLabelId] exists in [board].
   TdfLabel? _resolveActiveLabel(TaskBoard board) {
     for (final label in board.labels) {
@@ -527,6 +684,54 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (_pageController.hasClients) {
       _pageController.jumpToPage(tier.index);
     }
+  }
+
+  /// Schedules or cancels [_boundaryTimer] for the earliest future open-task boundary on [board].
+  void _syncBoundaryTimer(TaskBoard? board, WebDavConfig configuration) {
+    if (!mounted || !_isAppResumed || board == null) {
+      _cancelBoundaryTimer();
+      return;
+    }
+    final rawUtcNow = ref.read(clockProvider)().toUtc();
+    final nextBoundary = HomeScreenBoundaryTimer.nextBoundaryUtc(
+      tasks: board.allTasks,
+      nowUtc: rawUtcNow,
+      dueLeadWindow: configuration.dueLeadWindow.duration,
+    );
+    if (nextBoundary == _scheduledBoundaryUtc &&
+        (_boundaryTimer?.isActive ?? false)) {
+      return;
+    }
+    _cancelBoundaryTimer();
+    _scheduledBoundaryUtc = nextBoundary;
+    if (nextBoundary == null) {
+      return;
+    }
+    final clampedDelay = HomeScreenBoundaryTimer.clampTimerDelay(
+      nextBoundary.difference(rawUtcNow),
+    );
+    _boundaryTimer = Timer(clampedDelay, _handleBoundaryTimerFired);
+    if (AppLogger.shouldLog(LogLevel.debug)) {
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.ui,
+        'ui.boundary_timer.scheduled',
+        fields: <String, Object?>{
+          'target_utc': nextBoundary.toIso8601String(),
+          'delay_ms': clampedDelay.inMilliseconds,
+        },
+      );
+    }
+  }
+
+  /// Reads the latest board and configuration from providers and updates [_boundaryTimer].
+  void _syncBoundaryTimerFromProviders() {
+    final board = ref.read(taskNotifierProvider).asData?.value;
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ??
+        ref.read(activeWorkspaceProvider).asData?.value.config ??
+        const WebDavConfig();
+    _syncBoundaryTimer(board, configuration);
   }
 
   /// Toggles the top-right search bar and resets the query when closing.
@@ -564,6 +769,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// Watches the active workspace and task board snapshot for [HomeScreen].
   ({AppWorkspace workspace, TaskBoard board, TdfLabel? activeLabel})
   _watchScaffoldState() {
+    _registerBoundaryListeners();
     ref.listen<String?>(
       activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
       _handleWorkspaceChanged,
@@ -651,6 +857,7 @@ class _LandingContentSwitcher extends ConsumerWidget {
     TaskBoard board,
     LocationFix? activeFix,
   ) {
+    ref.watch(boundaryTickProvider);
     final configuration =
         ref.watch(webDavConfigProvider).asData?.value ?? const WebDavConfig();
     final evaluationTime = ref.watch(clockProvider)().toUtc();
@@ -660,6 +867,7 @@ class _LandingContentSwitcher extends ConsumerWidget {
       currentLongitude: activeFix?.longitude,
       evaluationTime: evaluationTime,
       localEvaluationTime: configuration.toLocalWallClock(evaluationTime),
+      dueLeadWindow: configuration.dueLeadWindow.duration,
     );
   }
 }

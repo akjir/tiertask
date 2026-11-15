@@ -56,6 +56,12 @@ final appVersionRepositoryProvider = Provider<AppVersionRepository>((ref) {
   return const PlatformAppVersionRepository();
 });
 
+/// Monotonic tick counter incremented when a wall-clock task boundary fires or
+/// when the application resumes to the foreground.
+final boundaryTickProvider = NotifierProvider<BoundaryTickNotifier, int>(
+  BoundaryTickNotifier.new,
+);
+
 /// Injectable clock function for deterministic date handling in unit tests.
 final clockProvider = Provider<DateTime Function()>((ref) {
   return DateTime.now;
@@ -197,6 +203,17 @@ final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
   return WebDavRepository(config: config);
 });
 
+/// Monotonic state notifier backing [boundaryTickProvider].
+class BoundaryTickNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  /// Advances the reactive boundary tick counter by one.
+  void increment() {
+    state++;
+  }
+}
+
 /// Manages the persisted [WebDavConfig] state for the currently active workspace.
 class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   @override
@@ -279,6 +296,7 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
       fields: <String, Object?>{
         'storage': newConfig.storageMode.name,
         'local_watch': newConfig.localWatchEnabled,
+        'due_lead': newConfig.dueLeadWindow.name,
         'log_storage': newConfig.logStorageMode.name,
         'log_level': newConfig.logLevel.label,
         'tz_mode': newConfig.timeZoneMode.name,
@@ -300,6 +318,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
             .deleteLog(AppLogger.activeLogFileName),
       );
     }
+    await updateConfig(updated);
+  }
+
+  /// Updates only the per-workspace [dueLeadWindow] preference and persists it immediately.
+  Future<void> updateDueLeadWindow(DueLeadWindow dueLeadWindow) async {
+    final current = state.asData?.value ?? await future;
+    final updated = current.copyWith(dueLeadWindow: dueLeadWindow);
     await updateConfig(updated);
   }
 

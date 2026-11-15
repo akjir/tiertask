@@ -9,7 +9,7 @@
 
 Tasks and metadata are stored as plain text in a `.tdf` document, while operational tiers are computed at runtime.
 
-- **Deterministic Pull System:** Separates `Completed`, `Someday`, and `Blocked` tasks first, slices active `queue` tasks into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned` with 24-hour deadline (`due`) auto-promotion, clears expired `suspended` locks and resolved one-shot `blocked` prerequisites on sync, and prunes completed tasks and tombstones after `30` days (UTC).
+- **Deterministic Pull System:** Separates `Completed`, `Someday`, and `Blocked` tasks first, slices active `queue` tasks into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned` with configurable deadline (`due`) lead-window auto-promotion (`24` hours by default), clears expired `suspended` locks and resolved one-shot `blocked` prerequisites on sync, and prunes completed tasks and tombstones after `30` days (UTC).
 - **Scoped Queues & Conditions:** Supports global and label-scoped queues (`scoped`), label and task reference `link` entries, prerequisite dependencies, deferral (`suspended`) and deadline (`due`) notes, recurrence with preparation lead days (`repeat ... lead`), persistent task progress logs (`history`), and `day`, `time`, and geofence (`location`) conditions.
 - **Three-Way Synchronization:** Reconciles in-memory state, watched local `.tdf` file edits, and a WebDAV server at entity and field granularity using 10-character Base62 IDs, UTC modification timestamps, and `deleted` tombstones.
 - **Workspaces & Local Security:** Isolates independent task boards and storage credentials into switchable workspaces persisted via `flutter_secure_storage`.
@@ -48,7 +48,7 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 
 ## Quick Start
 
-1. Open **Settings** from the navigation drawer to configure language, theme, and time zone.
+1. Open **Settings** from the navigation drawer to configure language, theme, time zone, and deadline lead window.
 2. Select a storage mode (`Local`, `WebDAV`, or `Both`) and set the local `.tdf` path (`tasks.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, remote path `tasks.tdf`).
 3. Add tasks via the bottom bar (`Priority`, `Someday`, `Labels`, or `Advanced` for subtasks, conditions, and recurrence).
 4. Switch between the global board and `scoped` label queues in the navigation drawer, or inspect a label's notes, reference links, and conditions in its context hub; changes persist and synchronize automatically.

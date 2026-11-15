@@ -1895,5 +1895,90 @@
   "tooltipSaveLink": "Update link",
   "@tooltipSaveLink": {
     "description": "Tooltip for confirming an inline link edit."
+  },
+  "dueLeadWindowSectionTitle": "Deadline Auto-Priority",
+  "@dueLeadWindowSectionTitle": {
+    "description": "Section title for the per-workspace deadline auto-priority lead window setting."
+  },
+  "dueLeadWindowSectionDescription": "Automatically prioritize scheduled open tasks into Focus and Ready when their due date approaches.",
+  "@dueLeadWindowSectionDescription": {
+    "description": "Section description for the deadline auto-priority lead window setting."
+  },
+  "dueLeadWindowLabel": "Lead Window",
+  "@dueLeadWindowLabel": {
+    "description": "Dropdown label for selecting the deadline auto-priority lead window."
+  },
+  "dueLeadWindowOff": "Off (never auto-prioritize)",
+  "@dueLeadWindowOff": {
+    "description": "Option disabling automatic priority promotion near deadlines."
+  },
+  "dueLeadWindowAtDue": "At deadline (0 hours)",
+  "@dueLeadWindowAtDue": {
+    "description": "Option enabling automatic priority promotion at exact deadline arrival."
+  },
+  "dueLeadWindow12Hours": "12 hours before deadline",
+  "@dueLeadWindow12Hours": {
+    "description": "Option enabling automatic priority promotion 12 hours before deadline."
+  },
+  "dueLeadWindow24Hours": "24 hours before deadline (Default)",
+  "@dueLeadWindow24Hours": {
+    "description": "Default option enabling automatic priority promotion 24 hours before deadline."
+  },
+  "dueLeadWindow48Hours": "48 hours before deadline",
+  "@dueLeadWindow48Hours": {
+    "description": "Option enabling automatic priority promotion 48 hours before deadline."
+  },
+  "dueLeadWindow7Days": "7 days before deadline",
+  "@dueLeadWindow7Days": {
+    "description": "Option enabling automatic priority promotion 7 days before deadline."
+  },
+  "dueLeadWindowShort12Hours": "12 h",
+  "@dueLeadWindowShort12Hours": {
+    "description": "Short 12-hour lead window label used in task info status text."
+  },
+  "dueLeadWindowShort24Hours": "24 h",
+  "@dueLeadWindowShort24Hours": {
+    "description": "Short 24-hour lead window label used in task info status text."
+  },
+  "dueLeadWindowShort48Hours": "48 h",
+  "@dueLeadWindowShort48Hours": {
+    "description": "Short 48-hour lead window label used in task info status text."
+  },
+  "dueLeadWindowShort7Days": "7 d",
+  "@dueLeadWindowShort7Days": {
+    "description": "Short 7-day lead window label used in task info status text."
+  },
+  "taskDueAutoPrioritizeLabel": "Auto-prioritize near deadline",
+  "@taskDueAutoPrioritizeLabel": {
+    "description": "Switch title in task editor controlling whether a due date auto-prioritizes the task."
+  },
+  "taskDueAutoPrioritizeSubtitle": "Pull ahead of regular queued tasks once the lead window opens.",
+  "@taskDueAutoPrioritizeSubtitle": {
+    "description": "Switch subtitle in task editor explaining deadline lead-window auto-priority."
+  },
+  "taskInfoDueAutoPromotedActive": "Prioritized by deadline lead window",
+  "@taskInfoDueAutoPromotedActive": {
+    "description": "Status line in task info dialog when an open task is inside the deadline lead window."
+  },
+  "taskInfoDueAutoPromoteAtDue": "Auto-prioritizes at deadline",
+  "@taskInfoDueAutoPromoteAtDue": {
+    "description": "Status line in task info dialog when workspace lead window is set to 0 hours."
+  },
+  "taskInfoDueAutoPromoteScheduled": "Auto-prioritizes {window} before deadline",
+  "@taskInfoDueAutoPromoteScheduled": {
+    "description": "Status line in task info dialog showing when deadline auto-priority will activate.",
+    "placeholders": {
+      "window": {
+        "type": "String"
+      }
+    }
+  },
+  "taskInfoDuePassiveHint": "Informational deadline (auto-priority off)",
+  "@taskInfoDuePassiveHint": {
+    "description": "Status line in task info dialog when a task deadline is marked passive."
+  },
+  "taskInfoDueLeadWindowOffHint": "Deadline auto-priority disabled in settings",
+  "@taskInfoDueLeadWindowOffHint": {
+    "description": "Status line in task info dialog when workspace deadline auto-priority is turned off."
   }
 }

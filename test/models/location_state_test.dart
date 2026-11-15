@@ -247,8 +247,8 @@ void main() {
     });
   });
 
-  group('WebDavConfig.locationEnabled & TTW\\x01 Binary Persistence', () {
-    test('defaults locationEnabled to false and round-trips locationEnabled in TTW\\x01 binary workspace records', () {
+  group('WebDavConfig.locationEnabled & TTW\\x02 Binary Persistence', () {
+    test('defaults locationEnabled to false and round-trips locationEnabled in TTW\\x02 binary workspace records', () {
       const defaultConfig = WebDavConfig();
       expect(
         defaultConfig.locationEnabled,
@@ -278,8 +278,8 @@ void main() {
       final encodedEnabled = workspaceEnabled.toBytes();
       expect(
         encodedEnabled.length,
-        equals(51),
-        reason: 'Encoding locationEnabled in tzWord bit 14 must keep 51-byte record size',
+        equals(52),
+        reason: 'Encoding locationEnabled in tzWord bit 14 must keep 52-byte TTW\\x02 record size',
       );
 
       final decodedEnabled = AppWorkspace.fromBytes(encodedEnabled);

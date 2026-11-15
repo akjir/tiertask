@@ -28,6 +28,7 @@ import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/app_theme.dart';
 import 'package:tiertask/ui/widgets/task_info_dialog.dart';
 import 'package:tiertask/ui/widgets/tier_task_pill.dart';
 
@@ -1148,6 +1149,185 @@ task c20000OkD2 {
         findsOneWidget,
         reason: 'Dependency with liveTarget.completions < requiredCompletion must render blocked_by_task_indicator',
       );
+    },
+  );
+
+  testWidgets(
+    'TierTaskPill formats due badge in local wall-clock time, applies warningAccent inside lead window and error when overdue, and suppresses urgency colors on completed and completing tasks',
+    (WidgetTester tester) async {
+      final now = DateTime.utc(2026, 11, 1, 12, 0);
+      const config = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+        dueLeadWindow: DueLeadWindow.hours24,
+      );
+
+      final overdueTask = TaskItem(
+        id: 'dueOver001',
+        title: 'Overdue Task',
+        createdAt: now,
+        dueAt: now,
+        isDuePassive: true,
+      );
+      final warningLocalRollTask = TaskItem(
+        id: 'dueWarn002',
+        title: 'Within Lead Window Next Local Day',
+        createdAt: now,
+        dueAt: DateTime.utc(2026, 11, 1, 23, 0),
+      );
+      final passiveInsideTask = TaskItem(
+        id: 'duePass003',
+        title: 'Passive Inside Window',
+        createdAt: now,
+        dueAt: DateTime.utc(2026, 11, 1, 18, 0),
+        isDuePassive: true,
+      );
+      final outsideWindowTask = TaskItem(
+        id: 'dueFar0004',
+        title: 'Outside Window Task',
+        createdAt: now,
+        dueAt: DateTime.utc(2026, 11, 3, 12, 0),
+      );
+      final completedOverdueTask = TaskItem(
+        id: 'dueDone005',
+        title: 'Completed Overdue Task',
+        createdAt: DateTime.utc(2026, 10, 29, 8, 0),
+        isCompleted: true,
+        completedAt: DateTime.utc(2026, 10, 31, 10, 0),
+        completions: 1,
+        dueAt: DateTime.utc(2026, 10, 30, 12, 0),
+      );
+
+      final board = TaskBoard(
+        focus: [
+          overdueTask,
+          warningLocalRollTask,
+          passiveInsideTask,
+          outsideWindowTask,
+        ],
+        completed: [completedOverdueTask],
+      );
+
+      await pumpLeafWidget(
+        tester,
+        SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in [
+                overdueTask,
+                warningLocalRollTask,
+                passiveInsideTask,
+                outsideWindowTask,
+              ])
+                TierTaskPill(
+                  key: ValueKey('pill_${item.id}'),
+                  task: item,
+                  canDowngrade: false,
+                  isCompleted: false,
+                ),
+              TierTaskPill(
+                key: ValueKey('pill_${completedOverdueTask.id}'),
+                task: completedOverdueTask,
+                canDowngrade: false,
+                isCompleted: true,
+              ),
+            ],
+          ),
+        ),
+        board: board,
+        config: config,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      final pillElement = tester.element(
+        find.byKey(const ValueKey('pill_dueOver001')),
+      );
+      final colorScheme = Theme.of(pillElement).colorScheme;
+      final appTheme = AppTheme.of(pillElement);
+      final mutedColor = colorScheme.onSurfaceVariant.withValues(alpha: 0.55);
+
+      // Local wall-clock date formatting: 2026-11-01 23:00Z + 02:00 = 2026-11-02 01:00 local.
+      final warningBadge = tester.widget<Text>(
+        find.byKey(const ValueKey('due_task_badge_dueWarn002')),
+      );
+      expect(
+        warningBadge.data,
+        contains('2026-11-02'),
+        reason:
+            'Due badge must format dueAt in configured local wall-clock time',
+      );
+      expect(
+        warningBadge.style?.color,
+        equals(appTheme.warningAccent),
+        reason: 'Non-passive task within lead window must use AppTheme.warningAccent',
+      );
+
+      // Overdue (even at exact dueAt == now and even if passive) uses colorScheme.error.
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_dueOver001')),
+            )
+            .style
+            ?.color,
+        equals(colorScheme.error),
+        reason: 'Task at or past dueAt must use colorScheme.error',
+      );
+
+      // Passive before dueAt and task outside window use mutedColor.
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_duePass003')),
+            )
+            .style
+            ?.color,
+        equals(mutedColor),
+        reason: 'Passive task before dueAt must keep mutedColor',
+      );
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_dueFar0004')),
+            )
+            .style
+            ?.color,
+        equals(mutedColor),
+        reason: 'Task outside lead window must keep mutedColor',
+      );
+
+      // Completed task suppresses urgency colors even when overdue.
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_dueDone005')),
+            )
+            .style
+            ?.color,
+        equals(mutedColor),
+        reason: 'Completed overdue task must suppress error badge color',
+      );
+
+      // Mid-completion exit animation on overdue open task immediately switches badge to mutedColor.
+      await tester.tap(
+        find.byKey(const ValueKey('complete_task_button_dueOver001')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_dueOver001')),
+            )
+            .style
+            ?.color,
+        equals(mutedColor),
+        reason: 'Overdue task mid-completion exit animation must immediately suppress error color',
+      );
+      await tester.pumpAndSettle();
     },
   );
 }

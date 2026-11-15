@@ -134,6 +134,51 @@ enum AppTimeZoneMode {
   }
 }
 
+/// Per-workspace lead horizon before `due` during which non-`passive` open
+/// queued tasks gain derived effective priority (`spec/TDF_SPEC_0.7.0.md` Section 5.5).
+enum DueLeadWindow {
+  /// Disables deadline-driven effective priority (`W_due = null`).
+  off(id: 0, duration: null),
+
+  /// Enables effective priority at exact deadline arrival (`W_due = 0s`).
+  atDue(id: 1, duration: Duration.zero),
+
+  /// Enables effective priority `12 hours` (`43,200s`) before `due`.
+  hours12(id: 2, duration: Duration(hours: 12)),
+
+  /// Normative default lead window of `24 hours` (`86,400s`) before `due`.
+  hours24(id: 3, duration: Duration(hours: 24)),
+
+  /// Enables effective priority `48 hours` (`172,800s`) before `due`.
+  hours48(id: 4, duration: Duration(hours: 48)),
+
+  /// Enables effective priority `7 days` (`604,800s`) before `due`.
+  days7(id: 5, duration: Duration(days: 7));
+
+  /// Creates a [DueLeadWindow] option.
+  const DueLeadWindow({required this.id, required this.duration});
+
+  /// Lead-window duration passed to `TaskBoard`, or `null` when [off].
+  final Duration? duration;
+
+  /// Compact 1-byte identifier (`0..5`) persisted in `TTW\x02` workspace records.
+  final int id;
+
+  /// Resolves a [DueLeadWindow] from its persisted 1-byte [rawId], defaulting
+  /// unknown values to [DueLeadWindow.hours24].
+  static DueLeadWindow fromId(int rawId) {
+    return switch (rawId) {
+      0 => DueLeadWindow.off,
+      1 => DueLeadWindow.atDue,
+      2 => DueLeadWindow.hours12,
+      3 => DueLeadWindow.hours24,
+      4 => DueLeadWindow.hours48,
+      5 => DueLeadWindow.days7,
+      _ => DueLeadWindow.hours24,
+    };
+  }
+}
+
 /// Supported TDF persistence and synchronization modes in TierTask.
 enum StorageMode {
   /// Persists the `.tdf` file only on the local filesystem.
@@ -188,6 +233,7 @@ class WebDavConfig {
     this.logLevel = LogLevel.info,
     this.logStorageMode = StorageMode.local,
     this.localWatchEnabled = true,
+    this.dueLeadWindow = DueLeadWindow.hours24,
   }) : storageMode =
            storageMode ??
            (serverUrl != '' && username != '' && password != ''
@@ -300,6 +346,9 @@ class WebDavConfig {
   /// Whether automatic parent-directory observation for external local `.tdf` edits is enabled.
   final bool localWatchEnabled;
 
+  /// Per-workspace lead horizon before `due` for automatic effective priority promotion.
+  final DueLeadWindow dueLeadWindow;
+
   /// Whether opt-in diagnostic logging is enabled (alias for [diagnosticsEnabled]).
   bool get enableLogging => diagnosticsEnabled;
 
@@ -349,6 +398,7 @@ class WebDavConfig {
     LogLevel? logLevel,
     StorageMode? logStorageMode,
     bool? localWatchEnabled,
+    DueLeadWindow? dueLeadWindow,
   }) {
     return WebDavConfig(
       serverUrl: serverUrl ?? this.serverUrl,
@@ -368,6 +418,7 @@ class WebDavConfig {
       logLevel: logLevel ?? this.logLevel,
       logStorageMode: logStorageMode ?? this.logStorageMode,
       localWatchEnabled: localWatchEnabled ?? this.localWatchEnabled,
+      dueLeadWindow: dueLeadWindow ?? this.dueLeadWindow,
     );
   }
 
@@ -597,7 +648,8 @@ class WebDavConfig {
         other.diagnosticsEnabled == diagnosticsEnabled &&
         other.logLevel == logLevel &&
         other.logStorageMode == logStorageMode &&
-        other.localWatchEnabled == localWatchEnabled;
+        other.localWatchEnabled == localWatchEnabled &&
+        other.dueLeadWindow == dueLeadWindow;
   }
 
   @override
@@ -618,6 +670,7 @@ class WebDavConfig {
     logLevel,
     logStorageMode,
     localWatchEnabled,
+    dueLeadWindow,
   );
 
   @override
@@ -625,5 +678,6 @@ class WebDavConfig {
       'WebDavConfig(serverUrl: $serverUrl, username: $username, '
       'password: ${password.isEmpty ? "" : "[REDACTED]"}, '
       'filePath: $filePath, localFilePath: $localFilePath, '
-      'storageMode: ${storageMode.name})';
+      'storageMode: ${storageMode.name}, '
+      'dueLeadWindow: ${dueLeadWindow.name})';
 }

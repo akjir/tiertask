@@ -897,6 +897,8 @@ class TaskBoardMutator {
     final isFocus =
         (isPriority ?? basePriority) || targetTier == TaskTier.focus;
     final nextPriority = !isSomeday && allowPriority && isFocus;
+    final explicitlyPromotedPriority =
+        (isPriority == true || targetTier == TaskTier.focus) && nextPriority;
     final stamp = prior != null
         ? TaskItem.nextModifiedTimestamp(now, prior.effectiveModifiedAt)
         : TaskItem.normalizeTimestamp(modifiedAt ?? now);
@@ -916,7 +918,9 @@ class TaskBoardMutator {
     };
     final nextIsDuePassive = normalizedNextDueAt == null
         ? false
-        : (prior != null && normalizedNextDueAt == normalizedPriorDueAt
+        : (prior != null &&
+                  normalizedNextDueAt == normalizedPriorDueAt &&
+                  !explicitlyPromotedPriority
               ? (isDuePassive ?? prior.isDuePassive)
               : (isDuePassive ?? false));
     final nextDueNote = (normalizedNextDueAt == null || clearDueNote)

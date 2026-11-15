@@ -435,8 +435,13 @@ class TaskBoardQueueMutator {
 
     final wasCompleted = existing.isCompleted || existing.completedAt != null;
     final effectivePriority = isPriority || existing.isPriority;
+    final nextDuePassive = (wasCompleted || isPriority)
+        ? false
+        : existing.isDuePassive;
     final taskAttributesChanged =
-        wasCompleted || effectivePriority != existing.isPriority;
+        wasCompleted ||
+        effectivePriority != existing.isPriority ||
+        nextDuePassive != existing.isDuePassive;
     final nextQueueBlock = appendTaskToQueue(board.queueBlock, taskId, now);
     if (!taskAttributesChanged && identical(nextQueueBlock, board.queueBlock)) {
       return board;
@@ -448,6 +453,9 @@ class TaskBoardQueueMutator {
             clearCompletedAt: true,
             clearSuspendedAt: wasCompleted,
             clearSuspendedNote: wasCompleted,
+            clearDueAt: wasCompleted,
+            clearDueNote: wasCompleted,
+            isDuePassive: nextDuePassive,
             isSuspendedForever: wasCompleted
                 ? false
                 : existing.isSuspendedForever,

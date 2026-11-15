@@ -439,6 +439,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _handlePreferenceChanged(WebDavConfig updatedConfig) async {
     final diagnosticsChanged =
         updatedConfig.diagnosticsEnabled != _preferences.diagnosticsEnabled;
+    final dueLeadWindowChanged =
+        updatedConfig.dueLeadWindow != _preferences.dueLeadWindow;
     final localWatchChanged =
         updatedConfig.localWatchEnabled != _preferences.localWatchEnabled;
     final logLevelChanged = updatedConfig.logLevel != _preferences.logLevel;
@@ -455,6 +457,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         await notifier.updateDiagnosticsEnabled(
           updatedConfig.diagnosticsEnabled,
         );
+      } else if (dueLeadWindowChanged) {
+        await notifier.updateDueLeadWindow(updatedConfig.dueLeadWindow);
       } else if (localWatchChanged) {
         await notifier.updateLocalWatchEnabled(updatedConfig.localWatchEnabled);
       } else if (logLevelChanged) {

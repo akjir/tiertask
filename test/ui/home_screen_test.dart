@@ -24,6 +24,8 @@ import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/ui/app_theme.dart';
 
 import 'test_helpers.dart';
 
@@ -1010,6 +1012,253 @@ task tskHubOkD2 {
         findsOneWidget,
         reason: 'Tapping active label title while search is open must open LabelHubDialog',
       );
+    },
+  );
+
+  testWidgets(
+    'HomeScreen single boundary timer handles sub-second early wakeups, lead-window promotion, overdue transitions, suspension wakeups, 7-day chunk clamping, and lifecycle pause/resume',
+    (WidgetTester tester) async {
+      AppLogger.clear();
+      addTearDown(() {
+        AppLogger.setEnabled(false, persistToDisk: false);
+        AppLogger.clear();
+      });
+
+      var currentUtc = DateTime.utc(2026, 11, 1, 4, 59, 50);
+      const seededTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 04:00:00
+  task focusReg01
+  task focusReg02
+  task focusPas03
+  task planLead04
+  task suspWake05
+  task maxHoriz06
+}
+
+task focusReg01 {
+  name "Confidential Focus 1"
+  created 2026-11-01 04:00:00
+  modified 2026-11-01 04:00:00
+}
+task focusReg02 {
+  name "Confidential Focus 2"
+  created 2026-11-01 04:00:00
+  modified 2026-11-01 04:00:00
+}
+task focusPas03 {
+  name "Secret Passive Focus"
+  created 2026-11-01 04:00:00
+  modified 2026-11-01 04:00:00
+  due 2026-11-01 17:05:00 passive
+}
+task planLead04 {
+  name "Secret Planned Urgent"
+  note "Top secret due note"
+  created 2026-11-01 04:00:00
+  modified 2026-11-01 04:00:00
+  due 2026-11-01 17:00:00
+}
+task suspWake05 priority {
+  name "Secret Deferred Priority"
+  created 2026-11-01 04:00:00
+  modified 2026-11-01 04:00:00
+  suspended 2026-11-01 17:10:00 "Private deferral note"
+}
+task maxHoriz06 {
+  name "Far Future Horizon"
+  created 2026-11-01 04:00:00
+  modified 2026-11-01 04:00:00
+  due 9999-12-31 23:59:59 passive
+}
+''';
+      const config = WebDavConfig(
+        language: AppLanguage.english,
+        diagnosticsEnabled: true,
+        logLevel: LogLevel.debug,
+        logStorageMode: StorageMode.webdav,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+        dueLeadWindow: DueLeadWindow.hours12,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) =>
+                FakeLocalFileRepository(config: config, initialTdf: seededTdf),
+          ),
+          clockProvider.overrideWithValue(() => currentUtc),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Initially at 04:59:50Z: planLead04 (due 17:00:00Z, 12h leadStart 05:00:00Z) stays in Planned.
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_planLead04')),
+        findsNothing,
+        reason: 'Before 05:00:00Z lead-window start, planLead04 must stay in Planned',
+      );
+      expect(container.read(boundaryTickProvider), equals(0));
+
+      // 1. Sub-second early timer wakeup: clock is at 04:59:59.990Z when the 10s timer fires.
+      currentUtc = DateTime.utc(2026, 11, 1, 4, 59, 59, 990);
+      await tester.pump(const Duration(seconds: 10));
+      expect(
+        container.read(boundaryTickProvider),
+        equals(0),
+        reason: 'Sub-second early wakeup (04:59:59.990Z < 05:00:00Z) must re-arm >= 25ms without premature tick',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_planLead04')),
+        findsNothing,
+      );
+
+      // Advance 25ms with clock at 05:00:00.015Z -> re-armed timer fires and promotes planLead04 into Focus with warningAccent.
+      currentUtc = DateTime.utc(2026, 11, 1, 5, 0, 0, 15);
+      await tester.pump(const Duration(milliseconds: 25));
+      await tester.pumpAndSettle();
+      expect(container.read(boundaryTickProvider), equals(1));
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_planLead04')),
+        findsOneWidget,
+        reason: 'planLead04 must pull into Focus automatically when lead window opens at 05:00:00Z',
+      );
+      final homeElement = tester.element(
+        find.byKey(const ValueKey('tier_pill_focus_planLead04')),
+      );
+      final appTheme = AppTheme.of(homeElement);
+      final colorScheme = Theme.of(homeElement).colorScheme;
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_planLead04')),
+            )
+            .style
+            ?.color,
+        equals(appTheme.warningAccent),
+      );
+
+      // 2. Open TaskInfoDialog on planLead04, then advance 12h to exact dueAt (17:00:00Z):
+      // Both the open dialog AND due_task_badge_planLead04 transition live to overdue / colorScheme.error.
+      await tester.tap(find.byKey(const ValueKey('due_task_badge_planLead04')));
+      await tester.pumpAndSettle();
+      expect(find.text('Overdue (2026-11-01 17:00)'), findsNothing);
+
+      currentUtc = DateTime.utc(2026, 11, 1, 17, 0, 0);
+      await tester.pump(const Duration(hours: 12));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Overdue (2026-11-01 17:00)'),
+        findsOneWidget,
+        reason: 'Open TaskInfoDialog must transition live to Overdue at exact dueAt',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_planLead04')),
+            )
+            .style
+            ?.color,
+        equals(colorScheme.error),
+      );
+
+      // 3. Passive task (focusPas03, due 17:05:00Z) transitions due_task_badge live to colorScheme.error at 17:05:00Z.
+      currentUtc = DateTime.utc(2026, 11, 1, 17, 5, 0);
+      await tester.pump(const Duration(minutes: 5));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tier_indicator_item_ready')));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<Text>(
+              find.byKey(const ValueKey('due_task_badge_focusPas03')),
+            )
+            .style
+            ?.color,
+        equals(colorScheme.error),
+        reason: 'Passive task must switch due badge to error at exact dueAt',
+      );
+
+      // 4. AppLifecycleState.paused cancels active timer; crossing suspendedAt (17:10:00Z) while paused does NOT tick until AppLifecycleState.resumed.
+      final tickBeforePause = container.read(boundaryTickProvider);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      currentUtc = DateTime.utc(2026, 11, 1, 17, 10, 0);
+      await tester.pump(const Duration(minutes: 10));
+      expect(
+        container.read(boundaryTickProvider),
+        equals(tickBeforePause),
+        reason:
+            'Paused lifecycle must cancel boundary timer while backgrounded',
+      );
+
+      await tester.tap(find.byKey(const ValueKey('tier_indicator_item_focus')));
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(
+        container.read(boundaryTickProvider),
+        greaterThan(tickBeforePause),
+        reason: 'Resuming lifecycle must immediately increment boundaryTickProvider',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_suspWake05')),
+        findsOneWidget,
+        reason: 'Deferred priority task must wake into Focus on resume after 17:10:00Z',
+      );
+      expect(
+        find.byKey(const ValueKey('suspended_task_indicator_suspWake05')),
+        findsNothing,
+        reason: 'Woken task must hide suspended_task_indicator once suspendedAt <= now',
+      );
+
+      // 5. Only remaining future boundary is maxHoriz06 (9999-12-31 23:59:59Z) -> timer delay is clamped to 7 days (604,800,000 ms).
+      final tickAfterResume = container.read(boundaryTickProvider);
+      expect(
+        AppLogger.lines.any(
+          (line) =>
+              line.contains('ui.boundary_timer.scheduled') &&
+              line.contains('delay_ms=604800000'),
+        ),
+        isTrue,
+        reason: 'Far-future 9999-12-31 boundary must clamp timer chunk to 7 days (604800000 ms)',
+      );
+      currentUtc = DateTime.utc(2026, 11, 8, 17, 10, 0);
+      await tester.pump(const Duration(days: 7));
+      expect(
+        container.read(boundaryTickProvider),
+        equals(tickAfterResume),
+        reason: 'Intermediate 7-day chunk before 9999-12-31 must re-arm without incrementing boundaryTickProvider',
+      );
+
+      // Secret hygiene: diagnostic boundary timer logs must never include task titles or notes.
+      final boundaryLogs = AppLogger.lines
+          .where((line) => line.contains('ui.boundary_timer.'))
+          .join('\n');
+      expect(boundaryLogs, isNotEmpty);
+      expect(boundaryLogs, isNot(contains('Secret')));
+      expect(boundaryLogs, isNot(contains('Confidential')));
+      expect(boundaryLogs, isNot(contains('Private deferral note')));
     },
   );
 }

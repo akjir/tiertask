@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added a per-workspace deadline lead window setting in Settings to choose when upcoming deadlines automatically advance tasks toward Focus.
+- Added an explicit deadline auto-prioritization toggle in the task editor, urgency badge colors and status details for upcoming and overdue deadlines, and live wall-clock updates for deadlines and deferrals.
 - Added a label context dialog accessible from the active top-bar label title, navigation drawer label rows, and task details label chips to view and copy notes, open reference links, inspect conditions, and edit labels.
 - Added reference link management with inline editing and up/down reordering in the label editor.
 - Added support for TierTask Data Format (TDF) 0.7.0 with automatic migration from version 0.6.0.
@@ -22,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Changed queued tasks with deadlines within 24 hours to automatically advance toward Focus unless marked as passive.
+- Changed queued tasks with deadlines within the configured workspace lead window (24 hours by default) to automatically advance toward Focus unless marked as passive, and reset passive deadline status when explicitly promoting a task to Priority.
 - Changed synchronization and task updates to automatically clear expired suspension locks and completed one-time task dependencies.
 - Changed WebDAV synchronization to cache server entity tags and modification timestamps, skipping unchanged downloads, parser passes, and redundant uploads while automatically merging concurrent remote edits when a write precondition fails.
 - Changed task cards to collapse more than three status indicator icons into a single summary indicator icon.

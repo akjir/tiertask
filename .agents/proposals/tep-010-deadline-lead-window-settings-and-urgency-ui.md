@@ -1,7 +1,7 @@
 ---
 id: TEP-010
 title: Configurable Deadline Lead-Window Preferences, Live Boundary Timer, and Urgency Indicators
-status: planned
+status: review
 type: feature
 created: 2026-11-14
 updated: 2026-11-15
@@ -386,20 +386,21 @@ On `WebDavConfig`:
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
-- [ ] Add all `20` English and German localization keys to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` via `tiertask_dev.py l10n --set` (with placeholder metadata for `taskInfoDueAutoPromoteScheduled`) and run `flutter gen-l10n`.
-- [ ] Write failing unit and widget tests in `test/models/app_workspace_test.dart`, `test/models/tdf_v050_primitives_test.dart`, `test/models/task_board_mutation_test.dart`, `test/models/task_board_lifecycle_test.dart`, `test/providers/config_providers_test.dart`, `test/providers/task_providers_test.dart`, `test/ui/settings_screen_test.dart`, `test/ui/edit_task_screen_test.dart`, `test/ui/home_screen_test.dart`, `test/ui/widgets/tier_task_pill_test.dart`, and `test/ui/widgets/task_info_dialog_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
-- [ ] Implement `DueLeadWindow` in `lib/models/webdav_config.dart`, `TTW\x02` persistence in `lib/models/app_workspace.dart`, Section 6.2/6.6 `isDuePassive` resets in `lib/models/task_board_queue_mutator.dart` and `lib/models/task_board_mutator.dart`, acyclic provider wiring (`boundaryTickProvider`, `updateDueLeadWindow`, `TaskSyncPipeline`, `TaskNotifier`) in `lib/providers/`, `DueLeadWindowSelectionCard` in `lib/ui/widgets/settings_preference_cards.dart` and `lib/ui/settings_screen.dart`, `Auto-prioritize near deadline` switch in `lib/ui/widgets/task_editor_scheduling_card.dart` and `lib/ui/edit_task_screen.dart`, `HomeScreenBoundaryTimer` in `lib/ui/home_screen.dart`, and urgency badges/status in `lib/ui/widgets/tier_task_pill.dart` and `lib/ui/widgets/task_info_dialog.dart` (TDD Green & Refactor Phase).
-- [ ] Update Parts 1 and 2 if implementation details evolve during development.
-- [ ] Synchronize `ARCHITECTURE.md`, `README.md`, and `AGENTS.md` per **`update-documentation`**.
-- [ ] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
+- [x] Add all `20` English and German localization keys to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` via `tiertask_dev.py l10n --set` (with placeholder metadata for `taskInfoDueAutoPromoteScheduled`) and run `flutter gen-l10n`.
+- [x] Write failing unit and widget tests in `test/models/app_workspace_test.dart`, `test/models/location_state_test.dart`, `test/models/tdf_v050_primitives_test.dart`, `test/models/task_board_mutation_test.dart`, `test/models/task_board_lifecycle_test.dart`, `test/providers/config_providers_test.dart`, `test/providers/task_providers_test.dart`, `test/ui/settings_screen_test.dart`, `test/ui/edit_task_screen_test.dart`, `test/ui/home_screen_test.dart`, `test/ui/widgets/tier_task_pill_test.dart`, and `test/ui/widgets/task_info_dialog_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
+- [x] Implement `DueLeadWindow` in `lib/models/webdav_config.dart`, `TTW\x02` persistence in `lib/models/app_workspace.dart`, Section 6.2/6.6 `isDuePassive` resets in `lib/models/task_board_queue_mutator.dart` and `lib/models/task_board_mutator.dart`, acyclic provider wiring (`boundaryTickProvider`, `updateDueLeadWindow`, `TaskSyncPipeline`, `TaskNotifier`) in `lib/providers/`, `DueLeadWindowSelectionCard` in `lib/ui/widgets/settings_preference_cards.dart` and `lib/ui/settings_screen.dart`, `Auto-prioritize near deadline` switch in `lib/ui/widgets/task_editor_scheduling_card.dart` and `lib/ui/edit_task_screen.dart`, `HomeScreenBoundaryTimer` in `lib/ui/home_screen.dart`, and urgency badges/status in `lib/ui/widgets/tier_task_pill.dart` and `lib/ui/widgets/task_info_dialog.dart` (TDD Green & Refactor Phase).
+- [x] Update Parts 1 and 2 if implementation details evolve during development.
+- [x] Synchronize `ARCHITECTURE.md`, `README.md`, and `AGENTS.md` per **`update-documentation`**.
+- [x] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
 - [ ] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-14:** Drafted initial concept (`status: concept`) for configurable `DueLeadWindow` preferences (`TTW\x02`), deterministic `Auto-prioritize near deadline` editor toggle, `HomeScreen` live boundary timer, and deadline urgency indicators on top of `TEP-006` (`spec/TDF_SPEC_0.7.0.md` Topic 2).
 * **2026-11-15:** Elaborated complete technical design (`status: planned`): enforced `P-ACYCLIC-DAG` via `ref.listen` in `TaskNotifier` and `boundaryTickProvider` in `config_providers.dart`; specified full `TaskSyncPipeline` and `20`-method `TaskNotifier` `dueLeadWindow` forwarding; aligned explicit `priority` promotion `isDuePassive` resets with `spec/TDF_SPEC_0.7.0.md` Sections 6.2 and 6.6; specified `TTW\x02` `+ 5` pre-allocation `maxBinaryBytes` bound check; added `7-day` `Timer` chunk clamping for `<= 9999` timestamps; and defined the `6`-branch `TaskInfoDialog` status decision table and `M-*` TDD test matrix.
+* **2026-11-15:** Completed Red-Green-Refactor TDD implementation across localization (`app_en.arb`, `app_de.arb`), models (`DueLeadWindow`, `TTW\x02` binary workspace records with `TTW\x01` compatibility, and Sections 6.2/6.6 `isDuePassive` resets), acyclic providers (`boundaryTickProvider`, `updateDueLeadWindow`, `TaskSyncPipeline`, and `TaskNotifier` in-memory lead-window re-evaluation), and UI (`DueLeadWindowSelectionCard`, `task_editor_due_auto_prioritize_switch` with lossless `TaskItem.formatTdfTimestamp` initial formatting, `HomeScreenBoundaryTimer` single lifecycle-aware wall-clock timer, `TierTaskPill` local wall-clock urgency badge colors, and `TaskInfoDialog` 6-branch deadline status lines). Synchronized `ARCHITECTURE.md`, `README.md`, and `CHANGELOG.md`, verified `tiertask_dev.py verify --full --fix`, and transitioned proposal to `status: review`.
 
 ### 3.3 Delivered Artifacts
-*(Pending — proposal is in `planned` stage)*
+*(Pending user approval — proposal is in `review` stage)*

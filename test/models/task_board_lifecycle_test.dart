@@ -877,5 +877,76 @@ task manualOkD2 {
         equals(500),
       );
     });
+
+    test('scheduleTask resets isDuePassive on explicit priority promotion (Section 6.2) and clears due on completed task scheduling (Section 6.5)', () {
+      final t0 = DateTime.utc(2026, 11, 15, 9, 0);
+      final dueTime = DateTime.utc(2026, 11, 16, 8, 0);
+      var board = TaskBoard.empty().addTask(
+        'Someday Passive Task',
+        targetTier: TaskTier.someday,
+        dueAt: dueTime,
+        isDuePassive: true,
+        dueNote: 'Informational',
+        currentDate: t0,
+      );
+      final somedayId = board.someday.single.id;
+
+      // Scheduling without priority preserves isDuePassive == true:
+      final t1 = t0.add(const Duration(minutes: 5));
+      board = board.scheduleTask(somedayId, isPriority: false, currentDate: t1);
+      expect(
+        board.findTask(somedayId)!.isDuePassive,
+        isTrue,
+        reason: 'Non-priority scheduleTask must preserve passive flag',
+      );
+
+      // Explicit scheduleTask(isPriority: true) resets isDuePassive to false and advances modifiedAt:
+      final t2 = t1.add(const Duration(minutes: 5));
+      board = board.scheduleTask(somedayId, isPriority: true, currentDate: t2);
+      final promoted = board.findTask(somedayId)!;
+      expect(promoted.isPriority, isTrue);
+      expect(
+        promoted.isDuePassive,
+        isFalse,
+        reason: 'Section 6.2: scheduleTask with isPriority: true must reset passive to false',
+      );
+      expect(promoted.dueAt, equals(dueTime));
+      expect(promoted.dueNote, equals('Informational'));
+      expect(promoted.effectiveModifiedAt, equals(t2));
+
+      // Even if a task already has isPriority: true and isDuePassive: true, scheduleTask(isPriority: true) resets passive:
+      final t3 = t2.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        somedayId,
+        isPriority: true,
+        isDuePassive: true,
+        currentDate: t3,
+      );
+      expect(board.findTask(somedayId)!.isDuePassive, isTrue);
+      final t4 = t3.add(const Duration(minutes: 5));
+      board = board.scheduleTask(somedayId, isPriority: true, currentDate: t4);
+      expect(
+        board.findTask(somedayId)!.isDuePassive,
+        isFalse,
+        reason: 'Explicit priority scheduleTask must reset passive even when already priority',
+      );
+      expect(board.findTask(somedayId)!.effectiveModifiedAt, equals(t4));
+
+      // Scheduling a completed task clears dueAt, dueNote, and isDuePassive (Section 6.5):
+      final t5 = t4.add(const Duration(minutes: 5));
+      board = board.completeTask(somedayId, currentDate: t5);
+      expect(board.findTask(somedayId)!.dueAt, equals(dueTime));
+      final t6 = t5.add(const Duration(minutes: 5));
+      board = board.scheduleTask(somedayId, isPriority: false, currentDate: t6);
+      final rescheduledCompleted = board.findTask(somedayId)!;
+      expect(rescheduledCompleted.isCompleted, isFalse);
+      expect(
+        rescheduledCompleted.dueAt,
+        isNull,
+        reason: 'Scheduling a completed task must clear dueAt per Section 6.5',
+      );
+      expect(rescheduledCompleted.dueNote, isNull);
+      expect(rescheduledCompleted.isDuePassive, isFalse);
+    });
   });
 }

@@ -60,7 +60,9 @@ class AppWorkspace {
   static const int maxWorkspaces = 32;
 
   static const int _binaryHeaderBytes = 6;
-  static const int _binaryVersion = 1;
+  static const int _binaryVersion = 2;
+  static const int _legacyBinaryVersion = 1;
+  static const int _minRecordBytesV2 = 18;
   static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
 
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
@@ -90,17 +92,22 @@ class AppWorkspace {
         config: config ?? this.config,
       );
 
-  /// Decodes a compact `TTW\x01` binary payload into all persisted [AppWorkspace]s and the active workspace ID.
+  /// Decodes a compact `TTW\x01` or `TTW\x02` binary payload into all persisted [AppWorkspace]s and the active workspace ID.
   static ({List<AppWorkspace> workspaces, String activeId})
   decodePersistedState(List<int> bytes) {
-    final (workspaceCount, activeIndex) = _validateBinaryHeader(bytes);
+    final header = _validateBinaryHeader(bytes);
     final source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     final workspaces = <AppWorkspace>[];
     final summaries = <WorkspaceSummary>[];
     var offset = _binaryHeaderBytes;
 
-    for (var i = 0; i < workspaceCount; i++) {
-      final (workspace, nextOffset) = _decodeRecord(source, offset, summaries);
+    for (var i = 0; i < header.count; i++) {
+      final (workspace, nextOffset) = _decodeRecord(
+        source,
+        offset,
+        summaries,
+        version: header.version,
+      );
       workspaces.add(workspace);
       summaries.add(workspace.summary);
       offset = nextOffset;
@@ -111,7 +118,7 @@ class AppWorkspace {
     }
     return (
       workspaces: List<AppWorkspace>.unmodifiable(workspaces),
-      activeId: workspaces[activeIndex].id,
+      activeId: workspaces[header.activeIndex].id,
     );
   }
 
@@ -131,7 +138,7 @@ class AppWorkspace {
     return '${base}_$suffix';
   }
 
-  /// Encodes [workspaces] and [activeId] into a single compact `TTW\x01` binary [Uint8List] payload.
+  /// Encodes [workspaces] and [activeId] into a single compact `TTW\x02` binary [Uint8List] payload.
   static Uint8List encodePersistedState(
     List<AppWorkspace> workspaces, {
     required String activeId,
@@ -169,7 +176,7 @@ class AppWorkspace {
     return '${slug.isEmpty ? 'workspace' : slug}.tdf';
   }
 
-  /// Serializes this single [AppWorkspace] into a compact `TTW\x01` binary [Uint8List].
+  /// Serializes this single [AppWorkspace] into a compact `TTW\x02` binary [Uint8List].
   Uint8List toBytes() =>
       encodePersistedState(<AppWorkspace>[this], activeId: id);
 
@@ -221,11 +228,14 @@ class AppWorkspace {
     return trimmed;
   }
 
-  /// Appends a single [workspace] binary record to [builder], enforcing size bounds.
+  /// Appends a single [workspace] `TTW\x02` binary record to [builder], enforcing size bounds.
   static void _appendWorkspaceRecord(
     BytesBuilder builder,
     AppWorkspace workspace,
   ) {
+    if (builder.length + _minRecordBytesV2 > maxBinaryBytes) {
+      _throwCorrupt('Binary workspace payload exceeds maximum size.');
+    }
     final config = workspace.config;
     final remoteLogFlag = config.logStorageMode == StorageMode.local ? 0 : 1;
     builder.addByte(
@@ -233,7 +243,7 @@ class AppWorkspace {
           ((config.themePalette.id & 0x01) << 6) |
           (remoteLogFlag << 7),
     );
-    for (final rawField in <String>[
+    final rawFields = <String>[
       workspace.id.trim(),
       workspace.name.trim(),
       config.serverUrl.trim(),
@@ -241,10 +251,13 @@ class AppWorkspace {
       config.password,
       config.filePath.trim(),
       config.localFilePath.trim(),
-    ]) {
-      final encoded = _utf8Codec.encode(rawField);
+    ];
+    for (var i = 0; i < rawFields.length; i++) {
+      final encoded = _utf8Codec.encode(rawFields[i]);
+      final remainingFixedBytes = 5 + ((rawFields.length - 1 - i) * 2);
       if (encoded.length > 0xFFFF ||
-          builder.length + 4 + encoded.length > maxBinaryBytes) {
+          builder.length + remainingFixedBytes + encoded.length >
+              maxBinaryBytes) {
         _throwCorrupt('Binary workspace payload exceeds maximum size.');
       }
       builder
@@ -264,7 +277,8 @@ class AppWorkspace {
         (offsetField & 0x07FF);
     builder
       ..addByte((tzWord >> 8) & 0xFF)
-      ..addByte(tzWord & 0xFF);
+      ..addByte(tzWord & 0xFF)
+      ..addByte(config.dueLeadWindow.id & 0xFF);
   }
 
   /// Converts [input] into a lowercase ASCII identifier slug with `_` separators.
@@ -354,8 +368,9 @@ class AppWorkspace {
   static (AppWorkspace, int) _decodeRecord(
     Uint8List source,
     int offset,
-    List<WorkspaceSummary> existing,
-  ) {
+    List<WorkspaceSummary> existing, {
+    required int version,
+  }) {
     if (offset >= source.length) {
       _throwCorrupt('Unexpected end of binary workspace record.');
     }
@@ -367,11 +382,21 @@ class AppWorkspace {
       fields.add(decoded);
       cursor = nextCursor;
     }
-    if (cursor + 2 > source.length) {
-      _throwCorrupt('Truncated time zone bytes in binary workspace record.');
+    final trailingBytes = version == _binaryVersion ? 3 : 2;
+    if (cursor + trailingBytes > source.length) {
+      _throwCorrupt('Truncated trailing bytes in binary workspace record.');
     }
     final tzWord = (source[cursor] << 8) | source[cursor + 1];
     cursor += 2;
+    var dueLeadWindow = DueLeadWindow.hours24;
+    if (version == _binaryVersion) {
+      final rawDueLead = source[cursor];
+      cursor += 1;
+      if (rawDueLead > 5) {
+        _throwCorrupt('Workspace record contains invalid due lead window.');
+      }
+      dueLeadWindow = DueLeadWindow.fromId(rawDueLead);
+    }
 
     final (storageMode, language, themeMode, localWatchEnabled) =
         _decodeLowFlagsBits(flags);
@@ -401,6 +426,7 @@ class AppWorkspace {
         logLevel: _decodeLogLevelBits((tzWord >> 11) & 0x03),
         logStorageMode: logStorageMode,
         localWatchEnabled: localWatchEnabled,
+        dueLeadWindow: dueLeadWindow,
       ),
     );
     if (workspace.id.isEmpty ||
@@ -509,24 +535,27 @@ class AppWorkspace {
     _ => '_',
   };
 
-  /// Validates the 6-byte `TTW\x01` binary header and returns `(workspaceCount, activeIndex)`.
-  static (int, int) _validateBinaryHeader(List<int> bytes) {
+  /// Validates the 6-byte `TTW\x01` or `TTW\x02` binary header and returns `(version, count, activeIndex)`.
+  static ({int version, int count, int activeIndex}) _validateBinaryHeader(
+    List<int> bytes,
+  ) {
     if (bytes.length < _binaryHeaderBytes || bytes.length > maxBinaryBytes) {
       _throwCorrupt('Binary workspace payload size is out of bounds.');
     }
+    final version = bytes[3];
     final count = bytes[4];
     final activeIndex = bytes[5];
     if (bytes[0] != 0x54 ||
         bytes[1] != 0x54 ||
         bytes[2] != 0x57 ||
-        bytes[3] != _binaryVersion ||
+        (version != _legacyBinaryVersion && version != _binaryVersion) ||
         count < 1 ||
         count > maxWorkspaces ||
         activeIndex < 0 ||
         activeIndex >= count) {
       _throwCorrupt('Binary workspace header is invalid or out of range.');
     }
-    return (count, activeIndex);
+    return (version: version, count: count, activeIndex: activeIndex);
   }
 
   /// Validates that [rawPath] is a safe `.tdf` file path and returns its non-empty path segments.

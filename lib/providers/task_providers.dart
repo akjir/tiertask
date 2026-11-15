@@ -79,11 +79,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Returns the current [TaskBoard] snapshot or an empty board if not yet loaded.
   TaskBoard get _currentBoard => state.asData?.value ?? TaskBoard.empty();
 
+  /// Returns the active workspace's deadline lead-window duration (`null` when disabled).
+  Duration? get _currentDueLeadWindow =>
+      readCurrentConfig(ref).dueLeadWindow.duration;
+
   @override
   Future<TaskBoard> build() async {
     ref
         .read(workspaceUnloadCoordinatorProvider)
         .register(prepareForWorkspaceUnload);
+    ref.listen<DueLeadWindow?>(
+      webDavConfigProvider.select(
+        (asyncConfig) => asyncConfig.asData?.value.dueLeadWindow,
+      ),
+      _handleDueLeadWindowChanged,
+    );
     _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
     _pendingDeletedLabelTimestamps.clear();
     _pendingDeletedLocationTimestamps.clear();
@@ -92,7 +102,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     state = const AsyncLoading();
     final selectedConfig = await ref.watch(
       webDavConfigProvider.selectAsync(
-        (value) => value.copyWith(localWatchEnabled: true),
+        (value) => value.copyWith(
+          localWatchEnabled: true,
+          dueLeadWindow: DueLeadWindow.hours24,
+        ),
       ),
     );
     final activeWorkspaceId = ref.watch(
@@ -143,6 +156,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -171,6 +185,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -227,6 +242,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
         id: id,
       ),
     );
@@ -248,6 +264,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     if (updatedBoard == boardBefore) {
       return;
@@ -269,6 +286,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -289,6 +307,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     final updatedTask = updatedBoard.findTask(taskId);
     final undoEntry =
@@ -326,6 +345,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -353,6 +373,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -367,6 +388,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     final undoEntry =
         taskBefore != null && updatedBoard.findTask(taskId) == null
@@ -399,6 +421,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     final updatedTask = updatedBoard.findTask(taskId);
     final didDowngradeMutate =
@@ -460,6 +483,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -541,6 +565,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     if (updatedBoard == boardBefore) {
       return;
@@ -563,6 +588,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -581,6 +607,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -691,6 +718,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     final updatedTask = updatedBoard.findTask(taskId);
     final didAutoFinishComplete =
@@ -734,6 +762,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       utcNow: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     if (outcome == null) {
       return false;
@@ -808,6 +837,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -840,6 +870,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -908,6 +939,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentDate: utcNow,
         localEvaluationTime: localNow,
         timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
       ),
     );
   }
@@ -931,6 +963,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentDate: utcNow,
       localEvaluationTime: localNow,
       timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     if (updatedBoard == boardBefore) {
       return;
@@ -973,24 +1006,48 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     );
   }
 
+  /// Re-evaluates [board] when the active workspace's live [DueLeadWindow] changed from [evaluatedLeadWindow] across an asynchronous gap.
+  TaskBoard _alignBoardWithCurrentLeadWindow(
+    TaskBoard board,
+    DueLeadWindow evaluatedLeadWindow, {
+    DateTime? currentDate,
+  }) {
+    final liveLeadWindow = readCurrentConfig(ref).dueLeadWindow;
+    if (liveLeadWindow == evaluatedLeadWindow) {
+      return board;
+    }
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    return board.applyAutoPull(
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: liveLeadWindow.duration,
+    );
+  }
+
   /// Applies [nextBoard] to [state] and selectively prunes [_undoStack] when [workspaceId] and [epoch] remain current.
   void _applyExternalReconciledBoard({
     required String workspaceId,
     required int epoch,
     required TaskBoard? previousBoard,
     required TaskBoard nextBoard,
+    required DueLeadWindow evaluatedLeadWindow,
   }) {
     final isActive =
         ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId;
     if (!isActive || epoch != _mutationEpoch) {
       return;
     }
+    final alignedBoard = _alignBoardWithCurrentLeadWindow(
+      nextBoard,
+      evaluatedLeadWindow,
+    );
     if (previousBoard == null) {
       _clearUndoStack('external_local_recovery');
-    } else if (nextBoard != previousBoard) {
-      _pruneInvalidatedUndoEntries(previousBoard, nextBoard);
+    } else if (alignedBoard != previousBoard) {
+      _pruneInvalidatedUndoEntries(previousBoard, alignedBoard);
     }
-    state = AsyncData(nextBoard);
+    state = AsyncData(alignedBoard);
   }
 
   /// Awaits all currently running synchronization operations in FIFO order without propagating their exceptions.
@@ -1227,6 +1284,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TdfTimeZoneContext? sourceTimeZone,
     DateTime? currentDate,
   }) async {
+    final WebDavConfig initialConfig =
+        ref.read(webDavConfigProvider).asData?.value ??
+        await ref.read(webDavConfigProvider.future);
+    final initialLeadWindow = initialConfig.dueLeadWindow;
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
       final importResult = await TaskSyncPipeline.importLegacyTdf(
@@ -1238,11 +1299,24 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
       _clearUndoStack('import_tdf');
-      state = AsyncData(importResult.board);
+      final alignedBoard = _alignBoardWithCurrentLeadWindow(
+        importResult.board,
+        initialLeadWindow,
+        currentDate: currentDate,
+      );
+      state = AsyncData(alignedBoard);
       ref
           .read(syncStateProvider.notifier)
           .setSuccess(ref.read(clockProvider)().toUtc());
-      return importResult;
+      if (alignedBoard == importResult.board) {
+        return importResult;
+      }
+      return TdfImportResult(
+        sourceVersion: importResult.sourceVersion,
+        executedSteps: importResult.executedSteps,
+        migratedTdfContent: importResult.migratedTdfContent,
+        board: alignedBoard,
+      );
     } on Object catch (error) {
       ref.read(syncStateProvider.notifier).setError(error.toString());
       rethrow;
@@ -1280,7 +1354,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           _conflictWatchDigest = null;
           _lastFailedWatchDigest = null;
           if (mutationEpoch == null || mutationEpoch == _mutationEpoch) {
-            state = AsyncData(mergedBoard);
+            state = AsyncData(
+              _alignBoardWithCurrentLeadWindow(
+                mergedBoard,
+                config.dueLeadWindow,
+              ),
+            );
           }
         },
       );
@@ -1288,7 +1367,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           mutationEpoch == null || mutationEpoch == _mutationEpoch;
       if (isCurrentEpoch &&
           ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
-        state = AsyncData(converged);
+        state = AsyncData(
+          _alignBoardWithCurrentLeadWindow(converged, config.dueLeadWindow),
+        );
       }
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
@@ -1306,7 +1387,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             fallbackBoard != null &&
             ref.read(activeWorkspaceProvider).asData?.value.id ==
                 workspace.id) {
-          state = AsyncData(fallbackBoard);
+          state = AsyncData(
+            _alignBoardWithCurrentLeadWindow(
+              fallbackBoard,
+              config.dueLeadWindow,
+            ),
+          );
         }
       }
       if (error is TdfSyncOutcomeException) {
@@ -1424,6 +1510,38 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         currentWorkspace,
         currentBoard,
       );
+    }
+  }
+
+  /// Re-evaluates the loaded [TaskBoard] in memory without storage I/O when the active workspace's [DueLeadWindow] changes.
+  void _handleDueLeadWindowChanged(
+    DueLeadWindow? previous,
+    DueLeadWindow? next,
+  ) {
+    if (next == null || previous == next) {
+      return;
+    }
+    if (ref.read(activeWorkspaceProvider).asData?.value.id !=
+        _undoWorkspaceId) {
+      return;
+    }
+    if (state case AsyncData<TaskBoard>(value: final currentBoard)) {
+      final (utcNow, localNow) = _resolveTimestamps(null);
+      final reevaluated = currentBoard.applyAutoPull(
+        currentDate: utcNow,
+        localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: next.duration,
+      );
+      state = AsyncData(reevaluated);
+      if (AppLogger.shouldLog(LogLevel.debug)) {
+        AppLogger.event(
+          LogLevel.debug,
+          LogTag.domain,
+          'domain.lead_window.reevaluated',
+          fields: <String, Object?>{'due_lead': next.name},
+        );
+      }
     }
   }
 
@@ -1839,6 +1957,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             epoch: epoch,
             previousBoard: existingBoard,
             nextBoard: mergedBoard,
+            evaluatedLeadWindow: config.dueLeadWindow,
           );
         },
       );
@@ -1847,6 +1966,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         epoch: epoch,
         previousBoard: stage1Board ?? existingBoard,
         nextBoard: converged,
+        evaluatedLeadWindow: config.dueLeadWindow,
       );
       _lastFailedWatchDigest = null;
       _conflictWatchDigest = null;
@@ -1879,18 +1999,23 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TaskBoard? candidateBoard,
     bool isInitialLoad = false,
     bool requireTargets = false,
-  }) => TaskSyncPipeline.runSyncWithStatus(
-    ref,
-    config,
-    pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
-    pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
-    candidateBoard: candidateBoard,
-    isInitialLoad: isInitialLoad,
-    requireTargets: requireTargets,
-    onLocalStageMerged: (mergedBoard) {
-      state = AsyncData(mergedBoard);
-    },
-  );
+  }) async {
+    final board = await TaskSyncPipeline.runSyncWithStatus(
+      ref,
+      config,
+      pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
+      pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
+      candidateBoard: candidateBoard,
+      isInitialLoad: isInitialLoad,
+      requireTargets: requireTargets,
+      onLocalStageMerged: (mergedBoard) {
+        state = AsyncData(
+          _alignBoardWithCurrentLeadWindow(mergedBoard, config.dueLeadWindow),
+        );
+      },
+    );
+    return _alignBoardWithCurrentLeadWindow(board, config.dueLeadWindow);
+  }
 
   /// Synchronizes [_undoWorkspaceId] during [build] and clears [_undoStack] when switching workspaces.
   void _syncUndoWorkspaceId(String? workspaceId) {

@@ -219,6 +219,7 @@ class _EditTaskSchedulingSection extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         TaskEditorSchedulingCard(
+          autoPrioritizeDue: state._autoPrioritizeDue,
           dueController: state._dueController,
           dueErrorMessage: state._dueErrorMessage,
           hasDue: state._hasDue,
@@ -228,6 +229,7 @@ class _EditTaskSchedulingSection extends StatelessWidget {
           repeatCountController: state._repeatCountController,
           repeatErrorMessage: state._repeatErrorMessage,
           repeatUnit: state._repeatUnit,
+          showDueAutoPrioritizeToggle: !state._isCompletedTask,
           suspendedController: state._suspendedController,
           suspendedErrorMessage: state._suspendedErrorMessage,
           onClearDue: state._dueController.clear,
@@ -246,8 +248,8 @@ class _EditTaskSchedulingSection extends StatelessWidget {
           ),
           onSelectRepeatUnit: (unit) =>
               state._update(() => state._repeatUnit = unit),
-          onToggleDue: () =>
-              state._update(() => state._hasDue = !state._hasDue),
+          onToggleAutoPrioritizeDue: state._toggleAutoPrioritizeDue,
+          onToggleDue: state._toggleDue,
           onTogglePriority: () => state._toggleMode(QuickAddMode.priority),
           onToggleRepeat: () =>
               state._update(() => state._isRepeating = !state._isRepeating),
@@ -263,15 +265,19 @@ class _EditTaskSchedulingSection extends StatelessWidget {
 /// State for [EditTaskScreen].
 class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late bool _autoFinish;
+  late bool _autoPrioritizeDue;
   late final Set<String> _blockedByIds;
   final _blockedSearchController = TextEditingController();
   late final ConditionEditorController _conditionController;
+  bool _didUserToggleAutoPrioritizeDue = false;
   late final TextEditingController _dueController;
   String? _dueErrorMessage;
   String? _errorMessage;
   late final bool _hadActiveInitialSuspension;
   late bool _hasDue;
   bool _hasSubtaskText = false;
+  late final DateTime? _initialDueAt;
+  late final String _initialDueText;
   late bool _isRepeating;
   late bool _isSuspended;
   late final Set<String> _labelIds;
@@ -336,9 +342,15 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           : '',
     )..addListener(_handleSuspendedChanged);
     _hasDue = task?.dueAt != null;
-    _dueController = TextEditingController(
-      text: TaskEditorSuspendedField.formatInitialText(task?.dueAt),
-    )..addListener(_handleDueChanged);
+    final initialFormattedDue = switch (task?.dueAt) {
+      final dueAt? => TaskItem.formatTdfTimestamp(dueAt),
+      null => '',
+    };
+    _dueController = TextEditingController(text: initialFormattedDue)
+      ..addListener(_handleDueChanged);
+    _initialDueAt = task?.dueAt;
+    _initialDueText = _dueController.text.trim();
+    _autoPrioritizeDue = !(task?.isDuePassive ?? false);
     _isRepeating = task?.repeatRule != null;
     _repeatCountController = TextEditingController(
       text: (task?.repeatRule?.count ?? 1).toString(),
@@ -480,10 +492,21 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     Navigator.of(context).pop();
   }
 
-  /// Clears any due timestamp validation error when the user edits the due field.
+  /// Clears any due validation error and auto-resets passive status when the due timestamp changes without manual switch interaction.
   void _handleDueChanged() {
-    if (_dueErrorMessage != null) {
-      setState(() => _dueErrorMessage = null);
+    final candidateDueAt = _resolveCurrentEditorDueAt();
+    final shouldResetAutoPrioritize =
+        !_didUserToggleAutoPrioritizeDue &&
+        !_autoPrioritizeDue &&
+        candidateDueAt != null &&
+        !_isSameDueTimestamp(candidateDueAt, _initialDueAt);
+    if (_dueErrorMessage != null || shouldResetAutoPrioritize) {
+      setState(() {
+        _dueErrorMessage = null;
+        if (shouldResetAutoPrioritize) {
+          _autoPrioritizeDue = true;
+        }
+      });
     }
   }
 
@@ -556,7 +579,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final note = _noteController.text.trim();
     final notifier = ref.read(taskNotifierProvider.notifier);
     if (widget.initialTask case final existingTask?) {
-      final isSameDueAt = _isSameDueTimestamp(draft.dueAt, existingTask.dueAt);
+      final isDuePassive = !_hasDue
+          ? false
+          : (_isCompletedTask &&
+                    _isSameDueTimestamp(draft.dueAt, existingTask.dueAt)
+                ? existingTask.isDuePassive
+                : !_autoPrioritizeDue);
       final keepSuspendedNote = _isSuspended && _hadActiveInitialSuspension;
       return notifier.updateTask(
         existingTask.id,
@@ -568,7 +596,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         subtasks: draft.subtasks,
         labelIds: draft.labelIds,
         dueAt: draft.dueAt,
-        isDuePassive: isSameDueAt ? existingTask.isDuePassive : false,
+        isDuePassive: isDuePassive,
         dueNote: _hasDue ? existingTask.dueNote : null,
         clearDueAt: !_hasDue,
         clearDueNote: !_hasDue,
@@ -594,6 +622,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       subtasks: draft.subtasks,
       labelIds: draft.labelIds,
       dueAt: draft.dueAt,
+      isDuePassive: _hasDue && !_autoPrioritizeDue,
       suspendedAt: draft.suspendedAt,
       repeatRule: draft.repeatRule,
       blockedByTaskIds: draft.blockedByIds,
@@ -666,6 +695,18 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     setState(() => _subtasks.removeAt(index));
   }
 
+  /// Resolves the current `due` timestamp in the editor, preserving [_initialDueAt] when the text is unchanged.
+  DateTime? _resolveCurrentEditorDueAt() {
+    if (!_hasDue) {
+      return null;
+    }
+    final trimmed = _dueController.text.trim();
+    if (trimmed == _initialDueText && _initialDueAt != null) {
+      return _initialDueAt;
+    }
+    return TaskItem.tryParseTdfTimestampInput(trimmed);
+  }
+
   /// Validates the task inputs and saves the created or updated task.
   Future<void> _submit() async {
     final board =
@@ -681,9 +722,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       isSuspended: _isSuspended,
       rawText: _suspendedController.text,
     );
-    final dueAt = _hasDue
-        ? TaskItem.tryParseTdfTimestampInput(_dueController.text.trim())
-        : null;
+    final dueAt = _resolveCurrentEditorDueAt();
     final parsedRepeatRule = TaskEditorRepeatField.parseRepeatRule(
       isRepeating: _isRepeating,
       rawCount: _repeatCountController.text,
@@ -718,6 +757,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     widget.onSubmitted?.call();
   }
 
+  /// Updates [_autoPrioritizeDue] from explicit user interaction.
+  void _toggleAutoPrioritizeDue(bool value) {
+    setState(() {
+      _autoPrioritizeDue = value;
+      _didUserToggleAutoPrioritizeDue = true;
+    });
+  }
+
   /// Toggles prerequisite [taskId] if it does not introduce a dependency cycle.
   void _toggleBlockedBy(TaskBoard board, String taskId) {
     if (widget.initialTask case final currentTask?
@@ -729,9 +776,29 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Toggles [_mode] between [target] and [QuickAddMode.standard].
+  /// Toggles [_hasDue] and resets deadline auto-prioritization state when disabled.
+  void _toggleDue() {
+    setState(() {
+      _hasDue = !_hasDue;
+      if (!_hasDue) {
+        _dueErrorMessage = null;
+        _autoPrioritizeDue = true;
+        _didUserToggleAutoPrioritizeDue = false;
+      }
+    });
+  }
+
+  /// Toggles [_mode] between [target] and [QuickAddMode.standard], resetting passive due status on Priority promotion.
   void _toggleMode(QuickAddMode target) {
-    setState(() => _mode = _mode == target ? QuickAddMode.standard : target);
+    final nextMode = _mode == target ? QuickAddMode.standard : target;
+    setState(() {
+      _mode = nextMode;
+      if (nextMode == QuickAddMode.priority &&
+          !_didUserToggleAutoPrioritizeDue &&
+          !_autoPrioritizeDue) {
+        _autoPrioritizeDue = true;
+      }
+    });
   }
 
   /// Toggles completion state of the subtask step at [index].

@@ -47,6 +47,7 @@ class TaskInfoDialog extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(boundaryTickProvider);
     final localizations = AppLocalizations.of(context);
     final board =
         ref.watch(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
@@ -190,20 +191,78 @@ class TaskInfoDialog extends ConsumerWidget {
     if (dueAt == null) {
       return null;
     }
+    final normalizedNow = TaskItem.normalizeTimestamp(nowUtc);
     final localDue = configuration.toLocalWallClock(dueAt);
     final timestamp = TaskItem.formatTdfTimestamp(localDue);
-    final valueText = dueAt.isAfter(nowUtc)
+    final valueText = dueAt.isAfter(normalizedNow)
         ? localizations.taskInfoDueAt(
             timestamp,
-            _formatRemainingDuration(dueAt.difference(nowUtc), localizations),
+            _formatRemainingDuration(
+              dueAt.difference(normalizedNow),
+              localizations,
+            ),
           )
         : localizations.taskInfoDueOverdue(timestamp);
     return _TaskInfoSectionData(
+      details: _buildDueStatusDetails(
+        task,
+        configuration,
+        localizations,
+        normalizedNow,
+      ),
       icon: Icons.event_rounded,
       keyPrefix: 'due_task_badge',
       title: localizations.taskInfoDueLabel,
       value: valueText,
     );
+  }
+
+  /// Resolves the exhaustive deadline auto-priority status detail lines for [task].
+  static List<String> _buildDueStatusDetails(
+    TaskItem task,
+    WebDavConfig configuration,
+    AppLocalizations localizations,
+    DateTime normalizedNow,
+  ) {
+    if (task.isCompleted || task.completedAt != null) {
+      return const <String>[];
+    }
+    if (task.isDuePassive) {
+      return <String>[localizations.taskInfoDuePassiveHint];
+    }
+    final leadWindow = configuration.dueLeadWindow;
+    if (leadWindow == DueLeadWindow.off) {
+      return <String>[localizations.taskInfoDueLeadWindowOffHint];
+    }
+    if (task.isWithinDueLeadWindow(normalizedNow, leadWindow.duration)) {
+      return <String>[localizations.taskInfoDueAutoPromotedActive];
+    }
+    return switch (leadWindow) {
+      DueLeadWindow.off => <String>[localizations.taskInfoDueLeadWindowOffHint],
+      DueLeadWindow.atDue => <String>[
+        localizations.taskInfoDueAutoPromoteAtDue,
+      ],
+      DueLeadWindow.hours12 => <String>[
+        localizations.taskInfoDueAutoPromoteScheduled(
+          localizations.dueLeadWindowShort12Hours,
+        ),
+      ],
+      DueLeadWindow.hours24 => <String>[
+        localizations.taskInfoDueAutoPromoteScheduled(
+          localizations.dueLeadWindowShort24Hours,
+        ),
+      ],
+      DueLeadWindow.hours48 => <String>[
+        localizations.taskInfoDueAutoPromoteScheduled(
+          localizations.dueLeadWindowShort48Hours,
+        ),
+      ],
+      DueLeadWindow.days7 => <String>[
+        localizations.taskInfoDueAutoPromoteScheduled(
+          localizations.dueLeadWindowShort7Days,
+        ),
+      ],
+    };
   }
 
   /// Builds the assigned labels section when [task] references defined labels.

@@ -292,6 +292,76 @@ void main() {
         container.read(webDavConfigProvider).requireValue.localWatchEnabled,
         isTrue,
       );
+
+      expect(
+        container.read(boundaryTickProvider),
+        equals(0),
+        reason: 'boundaryTickProvider must initialize at 0',
+      );
+      container.read(boundaryTickProvider.notifier).increment();
+      container.read(boundaryTickProvider.notifier).increment();
+      expect(
+        container.read(boundaryTickProvider),
+        equals(2),
+        reason: 'BoundaryTickNotifier.increment() must advance monotonically',
+      );
+
+      await notifier.updateDiagnosticsEnabled(true);
+      for (final window in DueLeadWindow.values) {
+        await notifier.updateDueLeadWindow(window);
+        expect(
+          container.read(webDavConfigProvider).requireValue.dueLeadWindow,
+          equals(window),
+          reason: 'updateDueLeadWindow(${window.name}) must update state',
+        );
+        expect(
+          (await settingsRepo.loadConfig()).dueLeadWindow,
+          equals(window),
+          reason: 'updateDueLeadWindow(${window.name}) must persist to storage',
+        );
+      }
+      expect(
+        AppLogger.fullLogText,
+        contains('due_lead=days7'),
+        reason: 'config.update log event must record due_lead field',
+      );
+
+      // Verify per-workspace isolation across workspace switches:
+      await notifier.updateDueLeadWindow(DueLeadWindow.off);
+      final workWorkspace = await container
+          .read(activeWorkspaceProvider.notifier)
+          .createWorkspace(
+            'Engineering',
+            config: const WebDavConfig(
+              localFilePath: 'engineering.tdf',
+              filePath: 'engineering.tdf',
+              dueLeadWindow: DueLeadWindow.hours48,
+            ),
+            activate: true,
+          );
+      expect(
+        (await container.read(webDavConfigProvider.future)).dueLeadWindow,
+        equals(DueLeadWindow.hours48),
+        reason: 'Activated Engineering workspace must expose hours48',
+      );
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .switchWorkspace('tasks');
+      expect(
+        (await container.read(webDavConfigProvider.future)).dueLeadWindow,
+        equals(DueLeadWindow.off),
+        reason: 'Switching back to Tasks must restore DueLeadWindow.off',
+      );
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .switchWorkspace(workWorkspace.id);
+      expect(
+        (await container.read(webDavConfigProvider.future)).dueLeadWindow,
+        equals(DueLeadWindow.hours48),
+        reason:
+            'Switching back to Engineering must restore DueLeadWindow.hours48',
+      );
+      await notifier.updateDiagnosticsEnabled(false);
     });
   });
 

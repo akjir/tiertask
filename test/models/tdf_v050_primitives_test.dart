@@ -582,6 +582,97 @@ void main() {
       expect(reEnabled, equals(defaultConfig));
       expect(reEnabled.hashCode, equals(defaultConfig.hashCode));
     });
+
+    test('exposes DueLeadWindow variants, fromId fallback, and WebDavConfig dueLeadWindow copyWith/equality/toString', () {
+      expect(
+        DueLeadWindow.values,
+        equals(const <DueLeadWindow>[
+          DueLeadWindow.off,
+          DueLeadWindow.atDue,
+          DueLeadWindow.hours12,
+          DueLeadWindow.hours24,
+          DueLeadWindow.hours48,
+          DueLeadWindow.days7,
+        ]),
+        reason: 'DueLeadWindow must declare all 6 ordered horizon variants',
+      );
+
+      final expectedSpecs = <(DueLeadWindow, int, Duration?)>[
+        (DueLeadWindow.off, 0, null),
+        (DueLeadWindow.atDue, 1, Duration.zero),
+        (DueLeadWindow.hours12, 2, const Duration(hours: 12)),
+        (DueLeadWindow.hours24, 3, const Duration(hours: 24)),
+        (DueLeadWindow.hours48, 4, const Duration(hours: 48)),
+        (DueLeadWindow.days7, 5, const Duration(days: 7)),
+      ];
+      for (final (window, expectedId, expectedDuration) in expectedSpecs) {
+        expect(
+          window.id,
+          equals(expectedId),
+          reason: '${window.name} id must equal $expectedId',
+        );
+        expect(
+          window.duration,
+          equals(expectedDuration),
+          reason: '${window.name} duration must equal $expectedDuration',
+        );
+        expect(
+          DueLeadWindow.fromId(expectedId),
+          equals(window),
+          reason: 'fromId($expectedId) must resolve to ${window.name}',
+        );
+      }
+
+      expect(
+        DueLeadWindow.fromId(99),
+        equals(DueLeadWindow.hours24),
+        reason: 'Out-of-range positive ID must fall back to hours24',
+      );
+      expect(
+        DueLeadWindow.fromId(-1),
+        equals(DueLeadWindow.hours24),
+        reason: 'Negative ID must fall back to hours24',
+      );
+
+      const defaultConfig = WebDavConfig();
+      expect(
+        defaultConfig.dueLeadWindow,
+        equals(DueLeadWindow.hours24),
+        reason: 'WebDavConfig must default dueLeadWindow to 24 hours',
+      );
+      expect(
+        defaultConfig.toString(),
+        contains('dueLeadWindow: hours24'),
+        reason: 'WebDavConfig.toString() must include dueLeadWindow name',
+      );
+
+      for (final variant in DueLeadWindow.values) {
+        final updated = defaultConfig.copyWith(dueLeadWindow: variant);
+        expect(
+          updated.dueLeadWindow,
+          equals(variant),
+          reason: 'copyWith(dueLeadWindow: ${variant.name}) must apply variant',
+        );
+        if (variant == DueLeadWindow.hours24) {
+          expect(updated, equals(defaultConfig));
+          expect(updated.hashCode, equals(defaultConfig.hashCode));
+        } else {
+          expect(
+            updated,
+            isNot(equals(defaultConfig)),
+            reason: '${variant.name} must differ from default hours24 config',
+          );
+          expect(updated.hashCode, isNot(equals(defaultConfig.hashCode)));
+          final preserved = updated.copyWith(localWatchEnabled: false);
+          expect(
+            preserved.dueLeadWindow,
+            equals(variant),
+            reason:
+                'copyWith without dueLeadWindow must preserve ${variant.name}',
+          );
+        }
+      }
+    });
   });
 
   group('TDF 0.7.0 Primitives, Bounds, TdfLabel Links, TaskHistoryEntry & TaskItem Ownership', () {

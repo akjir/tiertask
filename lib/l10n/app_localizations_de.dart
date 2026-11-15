@@ -1387,4 +1387,73 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get tooltipSaveLink => 'Link aktualisieren';
+
+  @override
+  String get dueLeadWindowSectionTitle => 'Fälligkeits-Priorisierung';
+
+  @override
+  String get dueLeadWindowSectionDescription =>
+      'Geplante offene Aufgaben bei nahender Fälligkeit automatisch für Fokus und Bereit priorisieren.';
+
+  @override
+  String get dueLeadWindowLabel => 'Vorlaufzeit';
+
+  @override
+  String get dueLeadWindowOff => 'Aus (nie automatisch priorisieren)';
+
+  @override
+  String get dueLeadWindowAtDue => 'Bei Fälligkeit (0 Stunden)';
+
+  @override
+  String get dueLeadWindow12Hours => '12 Stunden vor Fälligkeit';
+
+  @override
+  String get dueLeadWindow24Hours => '24 Stunden vor Fälligkeit (Standard)';
+
+  @override
+  String get dueLeadWindow48Hours => '48 Stunden vor Fälligkeit';
+
+  @override
+  String get dueLeadWindow7Days => '7 Tage vor Fälligkeit';
+
+  @override
+  String get dueLeadWindowShort12Hours => '12 Std.';
+
+  @override
+  String get dueLeadWindowShort24Hours => '24 Std.';
+
+  @override
+  String get dueLeadWindowShort48Hours => '48 Std.';
+
+  @override
+  String get dueLeadWindowShort7Days => '7 Tg.';
+
+  @override
+  String get taskDueAutoPrioritizeLabel =>
+      'Bei nahender Fälligkeit priorisieren';
+
+  @override
+  String get taskDueAutoPrioritizeSubtitle =>
+      'Ab Beginn der Vorlaufzeit vor reguläre Aufgaben ziehen.';
+
+  @override
+  String get taskInfoDueAutoPromotedActive =>
+      'Durch Fälligkeits-Vorlaufzeit priorisiert';
+
+  @override
+  String get taskInfoDueAutoPromoteAtDue =>
+      'Automatische Priorisierung bei Fälligkeit';
+
+  @override
+  String taskInfoDueAutoPromoteScheduled(String window) {
+    return 'Automatische Priorisierung $window vor Fälligkeit';
+  }
+
+  @override
+  String get taskInfoDuePassiveHint =>
+      'Informativer Termin (Auto-Priorität aus)';
+
+  @override
+  String get taskInfoDueLeadWindowOffHint =>
+      'Fälligkeits-Priorisierung in Einstellungen deaktiviert';
 }

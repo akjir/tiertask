@@ -20,6 +20,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/location_state.dart';
+import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
@@ -34,6 +35,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/services/tdf_service.dart';
 
 class _ControllableLocalRepository extends LocalFileRepository {
   _ControllableLocalRepository({
@@ -2204,6 +2206,322 @@ void main() {
         reason: 'External deletion of depDel0003 (in previouslyBlockedDependencies) must prune delUndo004 delete undo entry',
       );
     });
+
+    test('forwards DueLeadWindow across initial load, zero-I/O preference updates, mutations, downgrade/undo, external watch, and mid-flight sync await gaps', () async {
+      var currentTime = DateTime.utc(2026, 11, 15, 12, 0);
+      final settingsRepo = InMemorySettingsRepository();
+      final localFiles = <String, String>{};
+      final remoteFiles = <String, String>{};
+      var localSaveCalls = 0;
+      var remoteSaveCalls = 0;
+      Completer<void>? remoteFetchGate;
+
+      // Seed 3 regular queued tasks (filling Focus WIP = 3) plus 1 non-passive task due in 5 days:
+      final dueIn5Days = currentTime.add(const Duration(days: 5));
+      var seededBoard = TaskBoard.empty()
+          .addTask('Regular 1', id: 'regTask001', currentDate: currentTime)
+          .addTask('Regular 2', id: 'regTask002', currentDate: currentTime)
+          .addTask('Regular 3', id: 'regTask003', currentDate: currentTime)
+          .addTask(
+            'Five Day Deadline',
+            id: 'due5Days01',
+            dueAt: dueIn5Days,
+            currentDate: currentTime,
+          );
+      const tdfService = TdfService();
+      localFiles['tasks.tdf'] = tdfService.serialize(seededBoard);
+      remoteFiles['/dav/tasks.tdf'] = localFiles['tasks.tdf']!;
+
+      await settingsRepo.saveConfig(
+        const WebDavConfig(
+          serverUrl: 'https://cloud.example.com/dav',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+          localFilePath: 'tasks.tdf',
+          storageMode: StorageMode.both,
+          dueLeadWindow: DueLeadWindow.days7,
+        ),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() => currentTime),
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          localFileRepositoryProvider.overrideWith((ref) {
+            final config = resolveCurrentConfig(ref);
+            final key = config.localFilePath;
+            return _GateableWatchLocalRepository(
+              config: config,
+              maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+              getStore: () => localFiles[key] ?? '',
+              setStore: (content) {
+                localSaveCalls++;
+                localFiles[key] = content;
+              },
+              onReadTdfWithDigest: () async {},
+            );
+          }),
+          webDavRepositoryProvider.overrideWith((ref) {
+            final config = resolveCurrentConfig(ref);
+            return _GatedCountingWebDavRepository(
+              config: config,
+              remoteFiles: remoteFiles,
+              onFetch: () async {
+                if (remoteFetchGate case final gate?) {
+                  await gate.future;
+                }
+              },
+              onSave: () => remoteSaveCalls++,
+            );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // 1. Initial load under DueLeadWindow.days7 pulls due5Days01 into Focus ahead of Regular 3:
+      final initialBoard = await container.read(taskNotifierProvider.future);
+      expect(
+        initialBoard.focus.map((task) => task.id),
+        equals(<String>['due5Days01', 'regTask001', 'regTask002']),
+        reason: 'Initial load must forward DueLeadWindow.days7 so 5-day deadline enters Focus',
+      );
+      expect(
+        initialBoard.ready.map((task) => task.id),
+        equals(<String>['regTask003']),
+      );
+
+      // 2. Changing DueLeadWindow updates tier slices in memory with zero AsyncLoading and zero I/O:
+      localSaveCalls = 0;
+      remoteSaveCalls = 0;
+      var sawLoading = false;
+      final sub = container.listen<AsyncValue<TaskBoard>>(
+        taskNotifierProvider,
+        (_, next) {
+          if (next is AsyncLoading<TaskBoard>) {
+            sawLoading = true;
+          }
+        },
+      );
+      addTearDown(sub.close);
+
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateDueLeadWindow(DueLeadWindow.off);
+      final offBoard = container.read(taskNotifierProvider).requireValue;
+      expect(
+        sawLoading,
+        isFalse,
+        reason: 'Updating DueLeadWindow must not trigger TaskNotifier.build() AsyncLoading',
+      );
+      expect(
+        localSaveCalls,
+        equals(0),
+        reason: 'Updating DueLeadWindow must perform zero local .tdf writes',
+      );
+      expect(
+        remoteSaveCalls,
+        equals(0),
+        reason: 'Updating DueLeadWindow must perform zero WebDAV writes',
+      );
+      expect(
+        offBoard.focus.map((task) => task.id),
+        equals(<String>['regTask001', 'regTask002', 'regTask003']),
+        reason: 'DueLeadWindow.off must drop 5-day deadline out of Focus into Ready',
+      );
+      expect(
+        offBoard.ready.map((task) => task.id),
+        equals(<String>['due5Days01']),
+      );
+
+      // 3. Switch back to days7: downgradeTask sets isDuePassive = true; undoLastAction restores Focus under days7:
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateDueLeadWindow(DueLeadWindow.days7);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .focus
+            .map((task) => task.id),
+        contains('due5Days01'),
+      );
+
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      await container
+          .read(taskNotifierProvider.notifier)
+          .downgradeTask('due5Days01');
+      final afterDowngradeDays7 = container
+          .read(taskNotifierProvider)
+          .requireValue;
+      expect(
+        afterDowngradeDays7.findTask('due5Days01')!.isDuePassive,
+        isTrue,
+        reason: 'Downgrading an urgent task under days7 must set isDuePassive = true',
+      );
+      expect(
+        afterDowngradeDays7.ready.map((task) => task.id),
+        contains('due5Days01'),
+      );
+
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      final didUndo = await container
+          .read(taskNotifierProvider.notifier)
+          .undoLastAction();
+      expect(didUndo, isTrue);
+      final afterUndoDays7 = container.read(taskNotifierProvider).requireValue;
+      expect(afterUndoDays7.findTask('due5Days01')!.isDuePassive, isFalse);
+      expect(
+        afterUndoDays7.focus.map((task) => task.id),
+        contains('due5Days01'),
+        reason: 'undoLastAction must forward DueLeadWindow.days7 so restored task re-enters Focus',
+      );
+
+      // 4. Under DueLeadWindow.off, downgrading a non-urgent task in Focus leaves isDuePassive = false:
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateDueLeadWindow(DueLeadWindow.off);
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      await container
+          .read(taskNotifierProvider.notifier)
+          .completeTask('regTask001');
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .focus
+            .map((task) => task.id),
+        contains('due5Days01'),
+        reason: 'Completing regTask001 frees capacity so due5Days01 enters Focus without urgency',
+      );
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      await container
+          .read(taskNotifierProvider.notifier)
+          .downgradeTask('due5Days01');
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('due5Days01')!
+            .isDuePassive,
+        isFalse,
+        reason: 'Under DueLeadWindow.off, due5Days01 was not urgent so downgrade must keep isDuePassive = false',
+      );
+
+      // Re-add a 3rd regular task so Focus WIP=3 is full again:
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      await container
+          .read(taskNotifierProvider.notifier)
+          .addTask('Regular 4', id: 'regTask004');
+      await container
+          .read(taskNotifierProvider.notifier)
+          .moveTaskInQueue('regTask004', beforeTaskId: 'due5Days01');
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .ready
+            .map((task) => task.id),
+        equals(<String>['due5Days01']),
+      );
+
+      // 5. External local-watch reconciliation preserves non-default DueLeadWindow.days7:
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateDueLeadWindow(DueLeadWindow.days7);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .focus
+            .map((task) => task.id),
+        contains('due5Days01'),
+      );
+      final externalBoard = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .addTask(
+            'External Note Task',
+            id: 'extWatch01',
+            currentDate: currentTime.add(const Duration(minutes: 2)),
+          );
+      localFiles['tasks.tdf'] = tdfService.serialize(externalBoard);
+      currentTime = currentTime.add(const Duration(minutes: 3));
+      final reconciled = await container
+          .read(taskNotifierProvider.notifier)
+          .reconcileExternalLocalChanges();
+      expect(reconciled, isTrue);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .focus
+            .map((task) => task.id),
+        contains('due5Days01'),
+        reason: 'External watch reconcile must preserve DueLeadWindow.days7 evaluation',
+      );
+
+      // 6. Mid-flight syncFromRemote suspended across await while DueLeadWindow changes from off -> days7:
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateDueLeadWindow(DueLeadWindow.off);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .ready
+            .map((task) => task.id),
+        contains('due5Days01'),
+      );
+      remoteFetchGate = Completer<void>();
+      final inFlightSync = container
+          .read(taskNotifierProvider.notifier)
+          .syncFromRemote();
+      await Future<void>.delayed(Duration.zero);
+
+      // Change DueLeadWindow to days7 while syncFromRemote is suspended in flight:
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateDueLeadWindow(DueLeadWindow.days7);
+      remoteFetchGate.complete();
+      remoteFetchGate = null;
+      await inFlightSync;
+
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .focus
+            .map((task) => task.id),
+        contains('due5Days01'),
+        reason: 'Post-await sync completion must align with live DueLeadWindow.days7',
+      );
+
+      // 7. Workspace switch to Workspace B with DueLeadWindow.off evaluates B independently:
+      localFiles['archive.tdf'] = localFiles['tasks.tdf']!;
+      remoteFiles['/dav/archive.tdf'] = localFiles['tasks.tdf']!;
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .createWorkspace(
+            'Archive',
+            config: const WebDavConfig(
+              serverUrl: 'https://cloud.example.com/dav',
+              username: 'alice',
+              password: 'secret',
+              filePath: 'archive.tdf',
+              localFilePath: 'archive.tdf',
+              storageMode: StorageMode.both,
+              dueLeadWindow: DueLeadWindow.off,
+            ),
+            activate: true,
+          );
+      final archiveBoard = await container.read(taskNotifierProvider.future);
+      expect(
+        archiveBoard.ready.map((task) => task.id),
+        contains('due5Days01'),
+        reason: 'Archive workspace with DueLeadWindow.off must keep 5-day task out of Focus',
+      );
+    });
   });
 }
 
@@ -2238,4 +2556,31 @@ class _GateableWatchLocalRepository extends LocalFileRepository {
 
   @override
   Future<void> saveTdf(String tdfContent) async => setStore(tdfContent);
+}
+
+class _GatedCountingWebDavRepository extends WebDavRepository {
+  _GatedCountingWebDavRepository({
+    required super.config,
+    required this.remoteFiles,
+    required this.onFetch,
+    required this.onSave,
+  });
+
+  final Future<void> Function() onFetch;
+  final void Function() onSave;
+  final Map<String, String> remoteFiles;
+
+  @override
+  Future<String> fetchTdf() async {
+    await onFetch();
+    final path = config.resolveEndpointUri()?.path ?? '';
+    return remoteFiles[path] ?? '';
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    onSave();
+    final path = config.resolveEndpointUri()?.path ?? '';
+    remoteFiles[path] = tdfContent;
+  }
 }

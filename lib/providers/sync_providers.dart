@@ -215,6 +215,8 @@ class TaskSyncPipeline {
       sourceTimeZone: resolvedZone,
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
+      evaluationTimeZone: resolveWorkspaceTimeZone(config, utcNow),
+      dueLeadWindow: config.dueLeadWindow.duration,
     );
     final workspace = await ref.read(activeWorkspaceProvider.future);
     final content = importResult.migratedTdfContent;
@@ -523,6 +525,7 @@ class TaskSyncPipeline {
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
         timeZone: timeZone,
+        dueLeadWindow: config.dueLeadWindow.duration,
       );
     }
 
@@ -1124,6 +1127,7 @@ class TaskSyncPipeline {
         utcNow: utcNow,
         localNow: localNow,
         timeZone: timeZone,
+        dueLeadWindow: config.dueLeadWindow.duration,
       );
       return (scopedEmpty.candidate, hasWorking);
     }
@@ -1150,6 +1154,7 @@ class TaskSyncPipeline {
       utcNow: utcNow,
       localNow: localNow,
       timeZone: timeZone,
+      dueLeadWindow: config.dueLeadWindow.duration,
     );
     final merged = TaskBoardSync.merge(
       primary: hasWorking ? scoped.candidate : remoteBoard,
@@ -1166,6 +1171,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: config.dueLeadWindow.duration,
     );
     return (merged, true);
   }
@@ -1229,6 +1235,7 @@ class TaskSyncPipeline {
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
         timeZone: resolveWorkspaceTimeZone(config, utcNow),
+        dueLeadWindow: config.dueLeadWindow.duration,
       );
 
   /// Executes the guarded local publication compare-and-swap (CAS) merge loop (`TDF_SPEC.md` Section 6.8.4).
@@ -1353,6 +1360,7 @@ class TaskSyncPipeline {
     required DateTime utcNow,
     required DateTime localNow,
     required TdfTimeZoneContext timeZone,
+    required Duration? dueLeadWindow,
   }) {
     final nextTasks = retiredTaskIds.isEmpty
         ? candidate.allTasks
@@ -1396,6 +1404,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     );
   }
@@ -1411,6 +1420,7 @@ class TaskSyncPipeline {
     required DateTime utcNow,
     required DateTime localNow,
     required TdfTimeZoneContext timeZone,
+    required Duration? dueLeadWindow,
   }) {
     final originQueuedIds = candidateOriginBoard.queueBlock.taskIds.toSet();
     final candidateQueuedIds = candidate.queueBlock.taskIds.toSet();
@@ -1458,6 +1468,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     );
   }
@@ -1480,6 +1491,7 @@ class TaskSyncPipeline {
     required DateTime localNow,
   }) async {
     final timeZone = resolveWorkspaceTimeZone(config, utcNow);
+    final dueLeadWindow = config.dueLeadWindow.duration;
     if (!disk.exists || disk.content.trim().isEmpty) {
       final mergedEmpty = TaskBoardSync.merge(
         primary: loopL,
@@ -1495,6 +1507,7 @@ class TaskSyncPipeline {
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
         timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
         applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
       );
       final normalized = TaskBoardSync.stampAndNormalize(
@@ -1502,6 +1515,7 @@ class TaskSyncPipeline {
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
         timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
         applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
       );
       return (null, normalized, disk.digest);
@@ -1527,6 +1541,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
     );
     final normalized = TaskBoardSync.stampAndNormalize(
@@ -1534,6 +1549,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
     );
     return (diskBoard, normalized, disk.digest);
@@ -1556,6 +1572,7 @@ class TaskSyncPipeline {
     required DateTime localNow,
   }) async {
     final timeZone = resolveWorkspaceTimeZone(config, utcNow);
+    final dueLeadWindow = config.dueLeadWindow.duration;
     final retryRaw = await webDavRepo.fetchTdf();
     final retryRemote = retryRaw.trim().isEmpty
         ? TaskBoard.empty()
@@ -1585,12 +1602,14 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
     final normalized = TaskBoardSync.stampAndNormalize(
       merged,
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
     return (retryRemote, normalized, _serializeTdf(ref, normalized));
   }
@@ -1606,6 +1625,7 @@ class TaskSyncPipeline {
     required DateTime utcNow,
     required DateTime localNow,
     required TdfTimeZoneContext timeZone,
+    required Duration? dueLeadWindow,
   }) {
     final queueAdvanced =
         !storedBaseline.queueBlock.modifiedAt.isBefore(
@@ -1665,6 +1685,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     );
   }
@@ -1680,6 +1701,7 @@ class TaskSyncPipeline {
     required DateTime utcNow,
     required DateTime localNow,
     required TdfTimeZoneContext timeZone,
+    required Duration? dueLeadWindow,
   }) {
     if (!hasCandidate || candidateOriginBoard == null) {
       return (
@@ -1707,6 +1729,7 @@ class TaskSyncPipeline {
       utcNow: utcNow,
       localNow: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
     if (storedBaseline == null) {
       return (
@@ -1770,6 +1793,7 @@ class TaskSyncPipeline {
           utcNow: utcNow,
           localNow: localNow,
           timeZone: timeZone,
+          dueLeadWindow: dueLeadWindow,
         );
       }
     } else if (originGen < storedAckGeneration) {
@@ -1787,6 +1811,7 @@ class TaskSyncPipeline {
       utcNow: utcNow,
       localNow: localNow,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
     return (
       candidate: rebasedCandidate,
@@ -1933,6 +1958,7 @@ class TaskSyncPipeline {
         utcNow: utcNow,
         localNow: localNow,
         timeZone: timeZone,
+        dueLeadWindow: config.dueLeadWindow.duration,
       );
       nextWorking = TaskBoardSync.merge(
         primary: nextHasWorking ? scoped.candidate : localBoard,
@@ -1949,6 +1975,7 @@ class TaskSyncPipeline {
         evaluationTime: utcNow,
         localEvaluationTime: localNow,
         timeZone: timeZone,
+        dueLeadWindow: config.dueLeadWindow.duration,
         applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
       );
       nextHasWorking = true;
@@ -1962,6 +1989,7 @@ class TaskSyncPipeline {
         utcNow: utcNow,
         localNow: localNow,
         timeZone: timeZone,
+        dueLeadWindow: config.dueLeadWindow.duration,
       );
       nextWorking = scopedEmpty.candidate;
     }
@@ -1973,6 +2001,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: config.dueLeadWindow.duration,
       applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
     );
     final published = await _publishLocalWithCasLoop(
@@ -2072,6 +2101,7 @@ class TaskSyncPipeline {
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
       timeZone: timeZone,
+      dueLeadWindow: config.dueLeadWindow.duration,
     );
     var serializedFinal = _serializeTdf(ref, nextWorking);
     var trimmedFinal = serializedFinal.trim();

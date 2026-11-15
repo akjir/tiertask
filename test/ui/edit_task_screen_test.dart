@@ -1259,6 +1259,229 @@ task forSusp003 {
       );
     },
   );
+
+  testWidgets(
+    'EditTaskScreen manages task_editor_due_auto_prioritize_switch across new, passive, seconds/9999-12-31, Priority/due auto-resets, manual overrides, and completed tasks',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task passSec001
+  task maxDue0002
+}
+
+task passSec001 {
+  name "Passive Subminute Task"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+  due 2026-11-10 14:30:45 passive "Keep note"
+}
+
+task maxDue0002 {
+  name "Max Horizon Due Task"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+  due 9999-12-31 23:59:59 passive
+}
+
+task doneDue003 {
+  name "Completed With Due"
+  created 2026-10-25 08:00:00
+  modified 2026-10-29 12:00:00
+  finished 2026-10-29 12:00:00
+  completions 1
+  due 2026-10-30 12:00:00 passive
+}
+''';
+      final container = await _pumpEditorApp(
+        tester,
+        initialTdf: seededTdf,
+        clock: DateTime.utc(2026, 11, 1, 12),
+      );
+      final switchFinder = find.byKey(
+        const ValueKey('task_editor_due_auto_prioritize_switch'),
+      );
+
+      // 1. New task via QuickAdd -> Advanced: hidden until Due is enabled, honors manual off on addTask.
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
+      expect(
+        switchFinder,
+        findsNothing,
+        reason: 'Auto-prioritize switch must hide when Due is disabled',
+      );
+
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(switchFinder, findsOneWidget);
+      expect(tester.widget<Switch>(switchFinder).value, isTrue);
+
+      await _tapVisible(tester, switchFinder);
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+
+      // Edit dueAt AFTER manual toggle -> manual choice (false) must stick!
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-11-05 18:00',
+      );
+      await tester.pump();
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isFalse,
+        reason: 'Manual switch override must not be clobbered by editing dueAt',
+      );
+
+      // Toggle Due off and back on -> resets autoPrioritizeDue to true.
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(switchFinder, findsNothing);
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      expect(tester.widget<Switch>(switchFinder).value, isTrue);
+      await _tapVisible(tester, switchFinder);
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-11-05 18:00',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Informational Milestone',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      var board = container.read(taskNotifierProvider).requireValue;
+      final addedTask = board.allTasks.singleWhere(
+        (task) => task.title == 'Informational Milestone',
+      );
+      expect(addedTask.dueAt, equals(DateTime.utc(2026, 11, 5, 18)));
+      expect(
+        addedTask.isDuePassive,
+        isTrue,
+        reason: 'addTask must honor manual auto-prioritize switch off',
+      );
+
+      // 2. Open passive task with sub-minute :45 seconds: initializes false and preserves :45 + passive when due untouched.
+      await _tapKey(tester, 'edit_task_button_passSec001');
+      expect(switchFinder, findsOneWidget);
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Touched note only',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      var passSecTask = board.findTask('passSec001')!;
+      expect(
+        passSecTask.dueAt,
+        equals(DateTime.utc(2026, 11, 10, 14, 30, 45)),
+        reason: 'Untouched due input must preserve sub-minute :SS seconds',
+      );
+      expect(passSecTask.isDuePassive, isTrue);
+      expect(passSecTask.dueNote, equals('Keep note'));
+
+      // 3. Open passive task with 9999-12-31 23:59:59: displays timestamp and preserves it on save!
+      await _tapKey(tester, 'edit_task_button_maxDue0002');
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_due_input')),
+            )
+            .controller
+            ?.text,
+        equals('9999-12-31 23:59:59'),
+      );
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Far horizon note',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      final maxDueTask = board.findTask('maxDue0002')!;
+      expect(
+        maxDueTask.dueAt,
+        equals(DateTime.utc(9999, 12, 31, 23, 59, 59)),
+        reason: '9999-12-31 23:59:59 due must not be wiped by defaultSuspendedAt filter',
+      );
+      expect(maxDueTask.isDuePassive, isTrue);
+
+      // 4. Toggling Priority chip on a passive task auto-resets switch to true -> saves isDuePassive == false.
+      await _tapKey(tester, 'edit_task_button_passSec001');
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_priority_button')),
+      );
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isTrue,
+        reason: 'Toggling Priority chip on must auto-reset switch to true',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      passSecTask = board.findTask('passSec001')!;
+      expect(passSecTask.isPriority, isTrue);
+      expect(passSecTask.isDuePassive, isFalse);
+
+      // 5. Editing dueAt auto-resets passive -> active, then manual toggle off overrides back to passive.
+      await _tapKey(tester, 'edit_task_button_maxDue0002');
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-11-12 09:00',
+      );
+      await tester.pump();
+      expect(
+        tester.widget<Switch>(switchFinder).value,
+        isTrue,
+        reason: 'Changing dueAt to a different timestamp must auto-reset switch to true',
+      );
+      await _tapVisible(tester, switchFinder);
+      expect(tester.widget<Switch>(switchFinder).value, isFalse);
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(
+        board.findTask('maxDue0002')!.isDuePassive,
+        isTrue,
+        reason:
+            'Manual toggle off after dueAt edit must save isDuePassive == true',
+      );
+
+      // 6. Completed task hides task_editor_due_auto_prioritize_switch and preserves passive when due untouched.
+      await _tapKey(tester, 'tier_indicator_item_completed');
+      await _tapKey(tester, 'edit_task_button_doneDue003');
+      expect(
+        switchFinder,
+        findsNothing,
+        reason: 'Completed tasks must hide the auto-prioritize switch',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Archive note',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      expect(board.findTask('doneDue003')!.isDuePassive, isTrue);
+    },
+  );
 }
 
 /// Asserts that the subtask toggle identified by [key] is checked and remains locked when tapped.

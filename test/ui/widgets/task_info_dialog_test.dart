@@ -664,4 +664,189 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'TaskInfoDialog renders all 6 due auto-priority status branches in English and German and refreshes live on boundaryTickProvider',
+    (WidgetTester tester) async {
+      var currentTime = DateTime.utc(2026, 11, 1, 12, 0);
+      final openFutureTask = TaskItem(
+        id: 'infoDue001',
+        title: 'Scheduled Deadline Task',
+        createdAt: currentTime,
+        dueAt: DateTime.utc(2026, 11, 10, 12, 0),
+      );
+      final passiveTask = TaskItem(
+        id: 'infoPas002',
+        title: 'Passive Deadline Task',
+        createdAt: currentTime,
+        dueAt: DateTime.utc(2026, 11, 1, 14, 0),
+        isDuePassive: true,
+      );
+      final completedDueTask = TaskItem(
+        id: 'infoDon003',
+        title: 'Completed Deadline Task',
+        createdAt: DateTime.utc(2026, 10, 29, 8, 0),
+        isCompleted: true,
+        completedAt: DateTime.utc(2026, 10, 31, 10, 0),
+        completions: 1,
+        dueAt: DateTime.utc(2026, 10, 30, 12, 0),
+      );
+
+      // 1. Completed task omits auto-priority status detail line.
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: completedDueTask),
+        board: TaskBoard(completed: [completedDueTask]),
+        clock: () => currentTime,
+      );
+      await tester.pumpAndSettle();
+      for (final unexpectedText in <String>[
+        'Informational deadline (auto-priority off)',
+        'Deadline auto-priority disabled in settings',
+        'Prioritized by deadline lead window',
+        'Auto-prioritizes at deadline',
+        'Auto-prioritizes 24 h before deadline',
+      ]) {
+        expect(find.text(unexpectedText), findsNothing);
+      }
+
+      // 2. Passive task in English & German.
+      for (final (locale, language, expectedLine)
+          in <(Locale, AppLanguage, String)>[
+            (
+              const Locale('en'),
+              AppLanguage.english,
+              'Informational deadline (auto-priority off)',
+            ),
+            (
+              const Locale('de'),
+              AppLanguage.german,
+              'Informativer Termin (Auto-Priorität aus)',
+            ),
+          ]) {
+        await pumpLeafWidget(
+          tester,
+          TaskInfoDialog(task: passiveTask),
+          board: TaskBoard(focus: [passiveTask]),
+          config: WebDavConfig(language: language),
+          locale: locale,
+          clock: () => currentTime,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(expectedLine), findsOneWidget);
+      }
+
+      // 3-6. Exhaustive DueLeadWindow variants outside window (off, atDue, 12h, 24h, 48h, 7d) in EN & DE.
+      const cases = <(DueLeadWindow, String, String)>[
+        (
+          DueLeadWindow.off,
+          'Deadline auto-priority disabled in settings',
+          'Fälligkeits-Priorisierung in Einstellungen deaktiviert',
+        ),
+        (
+          DueLeadWindow.atDue,
+          'Auto-prioritizes at deadline',
+          'Automatische Priorisierung bei Fälligkeit',
+        ),
+        (
+          DueLeadWindow.hours12,
+          'Auto-prioritizes 12 h before deadline',
+          'Automatische Priorisierung 12 Std. vor Fälligkeit',
+        ),
+        (
+          DueLeadWindow.hours24,
+          'Auto-prioritizes 24 h before deadline',
+          'Automatische Priorisierung 24 Std. vor Fälligkeit',
+        ),
+        (
+          DueLeadWindow.hours48,
+          'Auto-prioritizes 48 h before deadline',
+          'Automatische Priorisierung 48 Std. vor Fälligkeit',
+        ),
+        (
+          DueLeadWindow.days7,
+          'Auto-prioritizes 7 d before deadline',
+          'Automatische Priorisierung 7 Tg. vor Fälligkeit',
+        ),
+      ];
+      for (final (leadWindow, expectedEn, expectedDe) in cases) {
+        await pumpLeafWidget(
+          tester,
+          TaskInfoDialog(task: openFutureTask),
+          board: TaskBoard(focus: [openFutureTask]),
+          config: WebDavConfig(
+            language: AppLanguage.english,
+            dueLeadWindow: leadWindow,
+          ),
+          locale: const Locale('en'),
+          clock: () => currentTime,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text(expectedEn),
+          findsOneWidget,
+          reason: 'English branch for $leadWindow must render "$expectedEn"',
+        );
+
+        await pumpLeafWidget(
+          tester,
+          TaskInfoDialog(task: openFutureTask),
+          board: TaskBoard(focus: [openFutureTask]),
+          config: WebDavConfig(
+            language: AppLanguage.german,
+            dueLeadWindow: leadWindow,
+          ),
+          locale: const Locale('de'),
+          clock: () => currentTime,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text(expectedDe),
+          findsOneWidget,
+          reason: 'German branch for $leadWindow must render "$expectedDe"',
+        );
+      }
+
+      // Live boundaryTickProvider refresh across lead-window start and exact dueAt.
+      currentTime = DateTime.utc(2026, 11, 9, 11, 59);
+      final container = await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: openFutureTask),
+        board: TaskBoard(focus: [openFutureTask]),
+        config: const WebDavConfig(
+          language: AppLanguage.english,
+          timeZoneMode: AppTimeZoneMode.manual,
+          manualTimeZoneOffsetMinutes: 0,
+          dueLeadWindow: DueLeadWindow.hours24,
+        ),
+        clock: () => currentTime,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Auto-prioritizes 24 h before deadline'),
+        findsOneWidget,
+      );
+
+      // Advance into 24h lead window and tick boundaryTickProvider.
+      currentTime = DateTime.utc(2026, 11, 9, 12, 0);
+      container.read(boundaryTickProvider.notifier).increment();
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Prioritized by deadline lead window'),
+        findsOneWidget,
+        reason: 'Open TaskInfoDialog must switch to active lead-window status on boundaryTickProvider',
+      );
+
+      // Advance to exact dueAt and tick boundaryTickProvider -> switches to Overdue.
+      currentTime = DateTime.utc(2026, 11, 10, 12, 0);
+      container.read(boundaryTickProvider.notifier).increment();
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Overdue (2026-11-10 12:00)'),
+        findsOneWidget,
+        reason: 'Open TaskInfoDialog must switch to Overdue on boundaryTickProvider',
+      );
+      expect(find.text('Prioritized by deadline lead window'), findsOneWidget);
+    },
+  );
 }

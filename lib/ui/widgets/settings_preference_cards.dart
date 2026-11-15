@@ -81,6 +81,71 @@ class DiagnosticsSelectionCard extends StatelessWidget {
   }
 }
 
+/// Card for selecting the per-workspace deadline auto-priority lead window.
+class DueLeadWindowSelectionCard extends StatelessWidget {
+  /// Creates a [DueLeadWindowSelectionCard].
+  const DueLeadWindowSelectionCard({
+    super.key,
+    required this.selectedDueLeadWindow,
+    required this.onDueLeadWindowChanged,
+  });
+
+  /// Callback invoked when the user selects a new [DueLeadWindow].
+  final ValueChanged<DueLeadWindow> onDueLeadWindowChanged;
+
+  /// Currently selected [DueLeadWindow].
+  final DueLeadWindow selectedDueLeadWindow;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return SettingsSectionCard(
+      icon: Icons.hourglass_top_rounded,
+      title: localizations.dueLeadWindowSectionTitle,
+      description: localizations.dueLeadWindowSectionDescription,
+      child: KeyedSubtree(
+        key: ValueKey<DueLeadWindow>(selectedDueLeadWindow),
+        child: DropdownButtonFormField<DueLeadWindow>(
+          key: const ValueKey('settings_due_lead_window_dropdown'),
+          initialValue: selectedDueLeadWindow,
+          decoration: InputDecoration(
+            labelText: localizations.dueLeadWindowLabel,
+            prefixIcon: const Icon(Icons.timer_outlined),
+            border: const OutlineInputBorder(),
+          ),
+          items: [
+            for (final option in DueLeadWindow.values)
+              DropdownMenuItem<DueLeadWindow>(
+                value: option,
+                child: Text(_formatOptionLabel(localizations, option)),
+              ),
+          ],
+          onChanged: (selected) {
+            if (selected != null) {
+              onDueLeadWindowChanged(selected);
+            }
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Resolves the localized dropdown label for [option].
+  static String _formatOptionLabel(
+    AppLocalizations localizations,
+    DueLeadWindow option,
+  ) {
+    return switch (option) {
+      DueLeadWindow.off => localizations.dueLeadWindowOff,
+      DueLeadWindow.atDue => localizations.dueLeadWindowAtDue,
+      DueLeadWindow.hours12 => localizations.dueLeadWindow12Hours,
+      DueLeadWindow.hours24 => localizations.dueLeadWindow24Hours,
+      DueLeadWindow.hours48 => localizations.dueLeadWindow48Hours,
+      DueLeadWindow.days7 => localizations.dueLeadWindow7Days,
+    };
+  }
+}
+
 /// Card for choosing the application display language (`System`, `English`, or `Deutsch`).
 class LanguageSelectionCard extends StatelessWidget {
   /// Creates a [LanguageSelectionCard].
@@ -166,7 +231,7 @@ class LocationSelectionCard extends StatelessWidget {
   }
 }
 
-/// Groups the language, theme, color palette, time zone, location, diagnostics, and storage mode preference cards.
+/// Groups the language, theme, color palette, time zone, deadline lead window, location, diagnostics, and storage mode preference cards.
 class SettingsPreferenceCards extends StatelessWidget {
   /// Creates [SettingsPreferenceCards].
   const SettingsPreferenceCards({
@@ -210,6 +275,11 @@ class SettingsPreferenceCards extends StatelessWidget {
           onManualOffsetChanged: (value) => onPreferenceChanged(
             config.copyWith(manualTimeZoneOffsetMinutes: value),
           ),
+        ),
+        DueLeadWindowSelectionCard(
+          selectedDueLeadWindow: config.dueLeadWindow,
+          onDueLeadWindowChanged: (value) =>
+              onPreferenceChanged(config.copyWith(dueLeadWindow: value)),
         ),
         LocationSelectionCard(
           locationEnabled: config.locationEnabled,

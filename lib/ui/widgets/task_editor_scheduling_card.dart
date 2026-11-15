@@ -256,6 +256,7 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Creates a [TaskEditorSchedulingCard].
   const TaskEditorSchedulingCard({
     super.key,
+    this.autoPrioritizeDue = true,
     this.dueController,
     this.dueErrorMessage,
     this.hasDue = false,
@@ -265,6 +266,7 @@ class TaskEditorSchedulingCard extends StatelessWidget {
     required this.repeatCountController,
     required this.repeatErrorMessage,
     required this.repeatUnit,
+    this.showDueAutoPrioritizeToggle = false,
     required this.suspendedController,
     required this.suspendedErrorMessage,
     this.onClearDue,
@@ -274,12 +276,16 @@ class TaskEditorSchedulingCard extends StatelessWidget {
     required this.onPickSuspendedDate,
     required this.onPickSuspendedTime,
     required this.onSelectRepeatUnit,
+    this.onToggleAutoPrioritizeDue,
     this.onToggleDue,
     required this.onTogglePriority,
     required this.onToggleRepeat,
     required this.onToggleSomeday,
     required this.onToggleSuspended,
   });
+
+  /// Whether deadline auto-prioritization (`!isDuePassive`) is enabled.
+  final bool autoPrioritizeDue;
 
   /// Controller for the optional `due` timestamp input.
   final TextEditingController? dueController;
@@ -320,6 +326,9 @@ class TaskEditorSchedulingCard extends StatelessWidget {
   /// Callback invoked when a [RepeatUnit] is selected.
   final ValueChanged<RepeatUnit> onSelectRepeatUnit;
 
+  /// Callback invoked when the auto-prioritize deadline switch changes.
+  final ValueChanged<bool>? onToggleAutoPrioritizeDue;
+
   /// Callback invoked when Due is tapped.
   final VoidCallback? onToggleDue;
 
@@ -343,6 +352,9 @@ class TaskEditorSchedulingCard extends StatelessWidget {
 
   /// Selected recurrence unit.
   final RepeatUnit repeatUnit;
+
+  /// Whether the auto-prioritize deadline switch is visible when [hasDue] is `true`.
+  final bool showDueAutoPrioritizeToggle;
 
   /// Controller for the optional `suspended` timestamp input.
   final TextEditingController suspendedController;
@@ -383,26 +395,17 @@ class TaskEditorSchedulingCard extends StatelessWidget {
               onPickTime: onPickSuspendedTime,
             ),
           ],
-          if (hasDue && activeDueController != null) ...[
-            const SizedBox(height: 8),
-            TaskEditorSuspendedField(
+          if (hasDue && activeDueController != null)
+            _TaskEditorDueSection(
+              autoPrioritizeDue: autoPrioritizeDue,
               controller: activeDueController,
               errorMessage: dueErrorMessage,
-              fieldKey: const ValueKey('task_editor_due_input'),
-              clearButtonKey: const ValueKey('task_editor_due_clear_button'),
-              datePickerKey: const ValueKey(
-                'task_editor_due_date_picker_button',
-              ),
-              timePickerKey: const ValueKey(
-                'task_editor_due_time_picker_button',
-              ),
-              labelTextOverride: localizations.taskDueButtonLabel,
-              clearTooltipOverride: localizations.taskDueClearTooltip,
-              onClear: onClearDue ?? activeDueController.clear,
-              onPickDate: onPickDueDate ?? () {},
-              onPickTime: onPickDueTime ?? () {},
+              onClear: onClearDue,
+              onPickDate: onPickDueDate,
+              onPickTime: onPickDueTime,
+              onToggleAutoPrioritizeDue: onToggleAutoPrioritizeDue,
+              showAutoPrioritizeToggle: showDueAutoPrioritizeToggle,
             ),
-          ],
           if (isRepeating) ...[
             const SizedBox(height: 8),
             TaskEditorRepeatField(
@@ -691,5 +694,126 @@ class TaskEditorSuspendedField extends StatelessWidget {
       }
     }
     return DateTime.utc(fallback.year, fallback.month, fallback.day);
+  }
+}
+
+/// Labeled switch row toggling deadline auto-prioritization (`!isDuePassive`).
+class _TaskEditorDueAutoPrioritizeRow extends StatelessWidget {
+  /// Creates a [_TaskEditorDueAutoPrioritizeRow].
+  const _TaskEditorDueAutoPrioritizeRow({
+    required this.autoPrioritizeDue,
+    required this.onChanged,
+  });
+
+  /// Whether deadline auto-prioritization is enabled.
+  final bool autoPrioritizeDue;
+
+  /// Optional callback invoked when the switch is toggled.
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return Row(
+      spacing: 12,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 2,
+            children: [
+              Text(
+                localizations.taskDueAutoPrioritizeLabel,
+                style: theme.textTheme.titleSmall,
+              ),
+              Text(
+                localizations.taskDueAutoPrioritizeSubtitle,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Switch(
+          key: const ValueKey('task_editor_due_auto_prioritize_switch'),
+          value: autoPrioritizeDue,
+          onChanged: onChanged,
+        ),
+      ],
+    );
+  }
+}
+
+/// Renders the `due` timestamp input field and optional auto-prioritization toggle row.
+class _TaskEditorDueSection extends StatelessWidget {
+  /// Creates a [_TaskEditorDueSection].
+  const _TaskEditorDueSection({
+    required this.autoPrioritizeDue,
+    required this.controller,
+    required this.errorMessage,
+    required this.onClear,
+    required this.onPickDate,
+    required this.onPickTime,
+    required this.onToggleAutoPrioritizeDue,
+    required this.showAutoPrioritizeToggle,
+  });
+
+  /// Whether deadline auto-prioritization is enabled.
+  final bool autoPrioritizeDue;
+
+  /// Controller for the `due` timestamp input.
+  final TextEditingController controller;
+
+  /// Optional validation error message for the `due` timestamp.
+  final String? errorMessage;
+
+  /// Optional callback invoked to clear the `due` input.
+  final VoidCallback? onClear;
+
+  /// Optional callback invoked to pick a `due` date.
+  final VoidCallback? onPickDate;
+
+  /// Optional callback invoked to pick a `due` time.
+  final VoidCallback? onPickTime;
+
+  /// Optional callback invoked when the auto-prioritize switch is toggled.
+  final ValueChanged<bool>? onToggleAutoPrioritizeDue;
+
+  /// Whether to render [_TaskEditorDueAutoPrioritizeRow].
+  final bool showAutoPrioritizeToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 8),
+        TaskEditorSuspendedField(
+          controller: controller,
+          errorMessage: errorMessage,
+          fieldKey: const ValueKey('task_editor_due_input'),
+          clearButtonKey: const ValueKey('task_editor_due_clear_button'),
+          datePickerKey: const ValueKey('task_editor_due_date_picker_button'),
+          timePickerKey: const ValueKey('task_editor_due_time_picker_button'),
+          labelTextOverride: localizations.taskDueButtonLabel,
+          clearTooltipOverride: localizations.taskDueClearTooltip,
+          onClear: onClear ?? controller.clear,
+          onPickDate: onPickDate ?? () {},
+          onPickTime: onPickTime ?? () {},
+        ),
+        if (showAutoPrioritizeToggle) ...[
+          const SizedBox(height: 8),
+          _TaskEditorDueAutoPrioritizeRow(
+            autoPrioritizeDue: autoPrioritizeDue,
+            onChanged: onToggleAutoPrioritizeDue,
+          ),
+        ],
+      ],
+    );
   }
 }

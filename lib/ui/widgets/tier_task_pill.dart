@@ -23,8 +23,10 @@ import '../../l10n/app_localizations.dart';
 import '../../models/task_board.dart';
 import '../../models/task_item.dart';
 import '../../models/tdf_metadata.dart';
+import '../../models/webdav_config.dart';
 import '../../providers/config_providers.dart';
 import '../../providers/task_providers.dart';
+import '../app_theme.dart';
 import '../edit_task_screen.dart';
 import 'task_info_dialog.dart';
 import 'tier_task_subtasks_section.dart';
@@ -194,13 +196,17 @@ sealed class _TaskExitAction {
 /// Interactive right-side status indicator icons that open [TaskInfoDialog] when clicked or tapped.
 class _TierTaskIndicators extends ConsumerWidget {
   /// Creates a [_TierTaskIndicators] row.
-  const _TierTaskIndicators({required this.task});
+  const _TierTaskIndicators({required this.task, this.isCompleted = false});
+
+  /// Whether the owning pill is completed or animating into completion.
+  final bool isCompleted;
 
   /// Task item whose status indicators are displayed.
   final TaskItem task;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(boundaryTickProvider);
     final localizations = AppLocalizations.of(context);
     final specs = _resolveActiveSpecs(ref, localizations);
     final dueAt = task.dueAt;
@@ -219,7 +225,7 @@ class _TierTaskIndicators extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (dueAt != null)
-              _buildDueBadge(context, localizations, dueAt, color),
+              _buildDueBadge(context, ref, localizations, dueAt, color),
             for (final spec in displayedSpecs)
               _buildIndicatorItem(context, spec, color),
           ],
@@ -231,10 +237,31 @@ class _TierTaskIndicators extends ConsumerWidget {
   /// Builds the tappable due date badge on the left of the indicator strip.
   Widget _buildDueBadge(
     BuildContext context,
+    WidgetRef ref,
     AppLocalizations localizations,
     DateTime dueAt,
-    Color color,
+    Color mutedColor,
   ) {
+    final configuration =
+        ref.watch(
+          webDavConfigProvider.select(
+            (asyncConfiguration) => asyncConfiguration.asData?.value,
+          ),
+        ) ??
+        const WebDavConfig();
+    final normalizedNow = TaskItem.normalizeTimestamp(
+      ref.watch(clockProvider)().toUtc(),
+    );
+    final localDue = configuration.toLocalWallClock(dueAt);
+    final badgeColor = _resolveDueBadgeColor(
+      context: context,
+      task: task,
+      dueAt: dueAt,
+      normalizedNow: normalizedNow,
+      dueLeadWindow: configuration.dueLeadWindow.duration,
+      isCompleted: isCompleted,
+      mutedColor: mutedColor,
+    );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => showTaskInfoDialog(
@@ -245,10 +272,10 @@ class _TierTaskIndicators extends ConsumerWidget {
       child: Padding(
         padding: const EdgeInsets.only(left: 6),
         child: Text(
-          localizations.pillDuePrefix(TaskItem.formatIsoDate(dueAt)),
+          localizations.pillDuePrefix(TaskItem.formatIsoDate(localDue)),
           key: ValueKey('due_task_badge_${task.id}'),
           style: TextStyle(
-            color: color,
+            color: badgeColor,
             fontSize: 11,
             fontWeight: FontWeight.w600,
           ),
@@ -348,6 +375,28 @@ class _TierTaskIndicators extends ConsumerWidget {
         tooltip: localizations.tooltipIndicatorSummary(specs.length.toString()),
       ),
     ];
+  }
+
+  /// Resolves the semantic urgency color for the `due` badge on [task].
+  static Color _resolveDueBadgeColor({
+    required BuildContext context,
+    required TaskItem task,
+    required DateTime dueAt,
+    required DateTime normalizedNow,
+    required Duration? dueLeadWindow,
+    required bool isCompleted,
+    required Color mutedColor,
+  }) {
+    if (isCompleted || task.isCompleted || task.completedAt != null) {
+      return mutedColor;
+    }
+    if (!dueAt.isAfter(normalizedNow)) {
+      return Theme.of(context).colorScheme.error;
+    }
+    if (task.isWithinDueLeadWindow(normalizedNow, dueLeadWindow)) {
+      return AppTheme.of(context).warningAccent;
+    }
+    return mutedColor;
   }
 }
 
@@ -546,7 +595,7 @@ class _TierTaskPillRow extends StatelessWidget {
                 _buildCompletionButton(context),
                 const SizedBox(width: 16),
                 Expanded(child: Text(task.title, style: titleStyle)),
-                _TierTaskIndicators(task: task),
+                _TierTaskIndicators(task: task, isCompleted: isCompleted),
               ],
             ),
           ),

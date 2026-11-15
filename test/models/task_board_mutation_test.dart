@@ -1113,5 +1113,86 @@ label officeOkD2 {
         reason: 'Deleting a task must immediately strip blocked references targeting its newly tombstoned ID',
       );
     });
+
+    test('resets isDuePassive to false on explicit priority promotion in updateTask per Section 6.6 while honoring explicit overrides', () {
+      final t0 = DateTime.utc(2026, 11, 15, 10, 0);
+      final dueTime = DateTime.utc(2026, 11, 20, 12, 0);
+      var board = TaskBoard.empty().addTask(
+        'Passive Deadline Task',
+        targetTier: TaskTier.planned,
+        dueAt: dueTime,
+        isDuePassive: true,
+        dueNote: 'Cutoff',
+        currentDate: t0,
+      );
+      final taskId = board.allTasks.single.id;
+      expect(board.findTask(taskId)!.isDuePassive, isTrue);
+
+      // Explicit isPriority: true resets isDuePassive to false and advances modifiedAt:
+      final t1 = t0.add(const Duration(minutes: 5));
+      board = board.updateTask(taskId, isPriority: true, currentDate: t1);
+      final afterPriority = board.findTask(taskId)!;
+      expect(
+        afterPriority.isPriority,
+        isTrue,
+        reason: 'Task must have explicit priority enabled',
+      );
+      expect(
+        afterPriority.isDuePassive,
+        isFalse,
+        reason: 'Section 6.6: explicitly setting priority to true must reset passive to false',
+      );
+      expect(
+        afterPriority.dueNote,
+        equals('Cutoff'),
+        reason:
+            'Resetting passive must preserve dueNote when dueAt is unchanged',
+      );
+      expect(afterPriority.effectiveModifiedAt, equals(t1));
+
+      // Explicit isDuePassive: true alongside isPriority: true is honored:
+      final t2 = t1.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        taskId,
+        isPriority: true,
+        isDuePassive: true,
+        currentDate: t2,
+      );
+      expect(
+        board.findTask(taskId)!.isDuePassive,
+        isTrue,
+        reason: 'Explicit isDuePassive: true must be honored even on priority tasks',
+      );
+
+      // Editing an unrelated field (title) without passing isPriority or targetTier preserves isDuePassive:
+      final t3 = t2.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        taskId,
+        title: 'Passive Deadline Task Renamed',
+        currentDate: t3,
+      );
+      expect(
+        board.findTask(taskId)!.isDuePassive,
+        isTrue,
+        reason: 'Unrelated updateTask calls must preserve existing isDuePassive on priority tasks',
+      );
+
+      // Explicit targetTier: TaskTier.focus resets isDuePassive to false when isDuePassive is omitted:
+      final t4 = t3.add(const Duration(minutes: 5));
+      board = board.updateTask(taskId, isPriority: false, currentDate: t4);
+      expect(board.findTask(taskId)!.isDuePassive, isTrue);
+      final t5 = t4.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        taskId,
+        targetTier: TaskTier.focus,
+        currentDate: t5,
+      );
+      expect(
+        board.findTask(taskId)!.isDuePassive,
+        isFalse,
+        reason: 'Explicit targetTier: focus promotion must reset isDuePassive to false',
+      );
+      expect(board.findTask(taskId)!.effectiveModifiedAt, equals(t5));
+    });
   });
 }

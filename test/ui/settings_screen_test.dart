@@ -804,6 +804,143 @@ task 000004OkD2 {
       );
     },
   );
+
+  testWidgets(
+    'SettingsScreen selects all 6 DueLeadWindow options in English and German without saving unsaved WebDAV fields',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task task000001
+  task task000002
+  task task000003
+  task task000004
+}
+
+task task000001 {
+  name "Regular Focus 1"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+}
+task task000002 {
+  name "Regular Focus 2"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+}
+task task000003 {
+  name "Regular Focus 3"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+}
+task task000004 {
+  name "Due in 36h"
+  created 2026-11-01 08:00:00
+  modified 2026-11-01 08:00:00
+  due 2026-11-02 22:00:00
+}
+''';
+      final settingsRepository = await _pumpSettingsApp(
+        tester,
+        config: const WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.both,
+          serverUrl: 'https://initial.example.com/dav',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+        ),
+        initialTdf: seededTdf,
+        shouldFailWebDav: () => false,
+        clock: DateTime.utc(2026, 11, 1, 10),
+      );
+
+      final serverUrlField = find.widgetWithText(
+        TextFormField,
+        'WebDAV Server URL',
+      );
+      await tester.ensureVisible(serverUrlField);
+      await tester.enterText(
+        serverUrlField,
+        'https://unsaved-draft.example.com/dav',
+      );
+      await tester.pump();
+
+      expect(find.text('Deadline Auto-Priority'), findsOneWidget);
+      final dropdownFinder = find.byKey(
+        const ValueKey('settings_due_lead_window_dropdown'),
+      );
+      await tester.ensureVisible(dropdownFinder);
+      expect(dropdownFinder, findsOneWidget);
+
+      const englishOptions = <(DueLeadWindow, String)>[
+        (DueLeadWindow.off, 'Off (never auto-prioritize)'),
+        (DueLeadWindow.atDue, 'At deadline (0 hours)'),
+        (DueLeadWindow.hours12, '12 hours before deadline'),
+        (DueLeadWindow.hours48, '48 hours before deadline'),
+        (DueLeadWindow.days7, '7 days before deadline'),
+        (DueLeadWindow.hours24, '24 hours before deadline (Default)'),
+      ];
+      for (final (expectedVariant, labelText) in englishOptions) {
+        await tester.ensureVisible(dropdownFinder);
+        await tester.tap(dropdownFinder);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(labelText).last);
+        await tester.pumpAndSettle();
+
+        final persisted = await settingsRepository.loadConfig();
+        expect(
+          persisted.dueLeadWindow,
+          equals(expectedVariant),
+          reason: 'Selecting "$labelText" must persist $expectedVariant',
+        );
+        expect(
+          persisted.serverUrl,
+          equals('https://initial.example.com/dav'),
+          reason: 'Changing lead window must not prematurely save unsaved WebDAV serverUrl edits',
+        );
+      }
+
+      await _tapVisible(tester, find.text('Deutsch'));
+      await tester.ensureVisible(dropdownFinder);
+      expect(find.text('Fälligkeits-Priorisierung'), findsOneWidget);
+      expect(find.text('Vorlaufzeit'), findsOneWidget);
+
+      await tester.tap(dropdownFinder);
+      await tester.pumpAndSettle();
+      for (final germanLabel in <String>[
+        'Aus (nie automatisch priorisieren)',
+        'Bei Fälligkeit (0 Stunden)',
+        '12 Stunden vor Fälligkeit',
+        '24 Stunden vor Fälligkeit (Standard)',
+        '48 Stunden vor Fälligkeit',
+        '7 Tage vor Fälligkeit',
+      ]) {
+        expect(
+          find.text(germanLabel),
+          findsWidgets,
+          reason: 'German dropdown menu must render "$germanLabel"',
+        );
+      }
+      await tester.tap(find.text('48 Stunden vor Fälligkeit').last);
+      await tester.pumpAndSettle();
+      expect(
+        (await settingsRepository.loadConfig()).dueLeadWindow,
+        equals(DueLeadWindow.hours48),
+      );
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(MaterialApp)),
+      );
+      final liveBoard = container.read(taskNotifierProvider).requireValue;
+      expect(
+        liveBoard.focus.first.id,
+        equals('task000004'),
+        reason: 'Selecting 48h in Settings must immediately pull the 36h task into Focus in memory',
+      );
+    },
+  );
 }
 
 class _AsyncSaveSettingsRepository extends InMemorySettingsRepository {

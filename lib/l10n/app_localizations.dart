@@ -2479,6 +2479,126 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Update link'**
   String get tooltipSaveLink;
+
+  /// Section title for the per-workspace deadline auto-priority lead window setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Deadline Auto-Priority'**
+  String get dueLeadWindowSectionTitle;
+
+  /// Section description for the deadline auto-priority lead window setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Automatically prioritize scheduled open tasks into Focus and Ready when their due date approaches.'**
+  String get dueLeadWindowSectionDescription;
+
+  /// Dropdown label for selecting the deadline auto-priority lead window.
+  ///
+  /// In en, this message translates to:
+  /// **'Lead Window'**
+  String get dueLeadWindowLabel;
+
+  /// Option disabling automatic priority promotion near deadlines.
+  ///
+  /// In en, this message translates to:
+  /// **'Off (never auto-prioritize)'**
+  String get dueLeadWindowOff;
+
+  /// Option enabling automatic priority promotion at exact deadline arrival.
+  ///
+  /// In en, this message translates to:
+  /// **'At deadline (0 hours)'**
+  String get dueLeadWindowAtDue;
+
+  /// Option enabling automatic priority promotion 12 hours before deadline.
+  ///
+  /// In en, this message translates to:
+  /// **'12 hours before deadline'**
+  String get dueLeadWindow12Hours;
+
+  /// Default option enabling automatic priority promotion 24 hours before deadline.
+  ///
+  /// In en, this message translates to:
+  /// **'24 hours before deadline (Default)'**
+  String get dueLeadWindow24Hours;
+
+  /// Option enabling automatic priority promotion 48 hours before deadline.
+  ///
+  /// In en, this message translates to:
+  /// **'48 hours before deadline'**
+  String get dueLeadWindow48Hours;
+
+  /// Option enabling automatic priority promotion 7 days before deadline.
+  ///
+  /// In en, this message translates to:
+  /// **'7 days before deadline'**
+  String get dueLeadWindow7Days;
+
+  /// Short 12-hour lead window label used in task info status text.
+  ///
+  /// In en, this message translates to:
+  /// **'12 h'**
+  String get dueLeadWindowShort12Hours;
+
+  /// Short 24-hour lead window label used in task info status text.
+  ///
+  /// In en, this message translates to:
+  /// **'24 h'**
+  String get dueLeadWindowShort24Hours;
+
+  /// Short 48-hour lead window label used in task info status text.
+  ///
+  /// In en, this message translates to:
+  /// **'48 h'**
+  String get dueLeadWindowShort48Hours;
+
+  /// Short 7-day lead window label used in task info status text.
+  ///
+  /// In en, this message translates to:
+  /// **'7 d'**
+  String get dueLeadWindowShort7Days;
+
+  /// Switch title in task editor controlling whether a due date auto-prioritizes the task.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-prioritize near deadline'**
+  String get taskDueAutoPrioritizeLabel;
+
+  /// Switch subtitle in task editor explaining deadline lead-window auto-priority.
+  ///
+  /// In en, this message translates to:
+  /// **'Pull ahead of regular queued tasks once the lead window opens.'**
+  String get taskDueAutoPrioritizeSubtitle;
+
+  /// Status line in task info dialog when an open task is inside the deadline lead window.
+  ///
+  /// In en, this message translates to:
+  /// **'Prioritized by deadline lead window'**
+  String get taskInfoDueAutoPromotedActive;
+
+  /// Status line in task info dialog when workspace lead window is set to 0 hours.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-prioritizes at deadline'**
+  String get taskInfoDueAutoPromoteAtDue;
+
+  /// Status line in task info dialog showing when deadline auto-priority will activate.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-prioritizes {window} before deadline'**
+  String taskInfoDueAutoPromoteScheduled(String window);
+
+  /// Status line in task info dialog when a task deadline is marked passive.
+  ///
+  /// In en, this message translates to:
+  /// **'Informational deadline (auto-priority off)'**
+  String get taskInfoDuePassiveHint;
+
+  /// Status line in task info dialog when workspace deadline auto-priority is turned off.
+  ///
+  /// In en, this message translates to:
+  /// **'Deadline auto-priority disabled in settings'**
+  String get taskInfoDueLeadWindowOffHint;
 }
 
 class _AppLocalizationsDelegate

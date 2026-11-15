@@ -135,18 +135,23 @@ void main() {
       );
       expect(
         encodedBytes.sublist(0, 4),
-        equals(<int>[0x54, 0x54, 0x57, 0x01]),
-        reason: 'Binary payload must start with TTW\\x01 magic header',
+        equals(<int>[0x54, 0x54, 0x57, 0x02]),
+        reason: 'Binary payload must start with TTW\\x02 magic header',
       );
       expect(
         defaultWorkspace.toBytes().length,
-        equals(51),
-        reason: 'Default workspace binary encoding must be 51 bytes',
+        equals(52),
+        reason: 'Default workspace TTW\\x02 binary encoding must be 52 bytes',
+      );
+      expect(
+        defaultWorkspace.toBytes().last,
+        equals(DueLeadWindow.hours24.id),
+        reason: 'Default workspace TTW\\x02 record must end with hours24 byte (0x03)',
       );
       expect(
         encodedBytes.length,
-        equals(63),
-        reason: 'Updated workspace binary encoding must be 63 bytes',
+        equals(64),
+        reason: 'Updated workspace TTW\\x02 binary encoding must be 64 bytes',
       );
       final roundTrip = AppWorkspace.fromBytes(encodedBytes);
       expect(
@@ -188,12 +193,13 @@ void main() {
       );
     });
 
-    test('preserves logLevel and logStorageMode across all 37 UTC offsets without changing 51-byte default record size', () {
+    test('preserves logLevel and logStorageMode across all 37 UTC offsets without changing 52-byte default record size', () {
       const defaultWorkspace = AppWorkspace.defaultWorkspace;
       expect(
         defaultWorkspace.toBytes().length,
-        equals(51),
-        reason: 'Default workspace binary encoding must remain 51 bytes',
+        equals(52),
+        reason:
+            'Default workspace TTW\\x02 binary encoding must remain 52 bytes',
       );
 
       for (final level in LogLevel.configurableLevels) {
@@ -211,9 +217,9 @@ void main() {
             final bytes = workspace.toBytes();
             expect(
               bytes.length,
-              equals(51),
+              equals(52),
               reason:
-                  'Record size must remain 51 bytes for level=${level.label}, '
+                  'Record size must remain 52 bytes for level=${level.label}, '
                   'logMode=${logMode.name}, offset=$offset',
             );
             final decoded = AppWorkspace.fromBytes(bytes);
@@ -237,7 +243,7 @@ void main() {
       }
     });
 
-    test('encodes and decodes localWatchEnabled losslessly across all 27 storage/language/theme combinations in 51-byte TTW v1 records', () {
+    test('decodes legacy 51-byte TTW v1 records with DueLeadWindow.hours24 and round-trips TTW v2 across all flag and DueLeadWindow combinations', () {
       final legacyDefaultBytes = <int>[
         0x54,
         0x54,
@@ -254,9 +260,25 @@ void main() {
         reason: 'Existing 51-byte TTW v1 records must decode with localWatchEnabled == true',
       );
       expect(
+        legacyDecoded.config.dueLeadWindow,
+        equals(DueLeadWindow.hours24),
+        reason: 'Legacy 51-byte TTW v1 records must default dueLeadWindow to hours24',
+      );
+      expect(
         AppWorkspace.defaultWorkspace.toBytes(),
-        equals(Uint8List.fromList(legacyDefaultBytes)),
-        reason: 'Default workspace must remain bit-for-bit identical to legacy 51-byte TTW v1',
+        equals(
+          Uint8List.fromList(<int>[
+            0x54,
+            0x54,
+            0x57,
+            0x02,
+            0x01,
+            0x00,
+            ..._buildRawRecord(),
+            DueLeadWindow.hours24.id,
+          ]),
+        ),
+        reason: 'Default workspace must encode as 52-byte TTW v2 ending with hours24 byte',
       );
 
       final configs = <WebDavConfig>[
@@ -276,6 +298,11 @@ void main() {
                         logStorageMode: logMode,
                         logLevel: logLevel,
                         diagnosticsEnabled: !watchEnabled,
+                        dueLeadWindow:
+                            DueLeadWindow.values[(storageMode.id +
+                                    language.id +
+                                    themeMode.id) %
+                                DueLeadWindow.values.length],
                       ),
       ];
 
@@ -286,11 +313,11 @@ void main() {
         final bytes = workspace.toBytes();
         expect(
           bytes.length,
-          equals(51),
+          equals(52),
           reason:
-              'TTW v1 record must remain 51 bytes for watch=${config.localWatchEnabled}, '
+              'TTW v2 record must remain 52 bytes for watch=${config.localWatchEnabled}, '
               'storage=${config.storageMode.name}, lang=${config.language.name}, '
-              'theme=${config.themeMode.name}',
+              'theme=${config.themeMode.name}, dueLead=${config.dueLeadWindow.name}',
         );
         final decoded = AppWorkspace.fromBytes(bytes);
         expect(
@@ -299,9 +326,41 @@ void main() {
           reason:
               'Decoded config must match encoded config for watch=${config.localWatchEnabled}, '
               'storage=${config.storageMode.name}, lang=${config.language.name}, '
-              'theme=${config.themeMode.name}, palette=${config.themePalette.name}',
+              'theme=${config.themeMode.name}, palette=${config.themePalette.name}, '
+              'dueLead=${config.dueLeadWindow.name}',
         );
       }
+
+      // Multi-workspace 32-record (maxWorkspaces) TTW v2 round-trip cycling all 6 DueLeadWindow values:
+      final maxWorkspacesList = <AppWorkspace>[
+        for (var i = 0; i < AppWorkspace.maxWorkspaces; i++)
+          AppWorkspace(
+            id: 'ws_$i',
+            name: 'Workspace $i',
+            config: WebDavConfig(
+              localFilePath: 'ws_$i.tdf',
+              filePath: 'ws_$i.tdf',
+              dueLeadWindow:
+                  DueLeadWindow.values[i % DueLeadWindow.values.length],
+            ),
+          ),
+      ];
+      final multiEncoded = AppWorkspace.encodePersistedState(
+        maxWorkspacesList,
+        activeId: 'ws_17',
+      );
+      final multiDecoded = AppWorkspace.decodePersistedState(multiEncoded);
+      expect(
+        multiDecoded.activeId,
+        equals('ws_17'),
+        reason:
+            'Active workspace ID must survive 32-workspace TTW v2 round-trip',
+      );
+      expect(
+        multiDecoded.workspaces,
+        equals(maxWorkspacesList),
+        reason: 'All 32 workspaces and their DueLeadWindow variants must round-trip',
+      );
     });
 
     test('resolveLogEndpointUri resolves sibling WebDAV log URLs and rejects traversal or non-.log filenames', () {
@@ -593,7 +652,12 @@ void main() {
         <int>[0x54, 0x54, 0x57],
         <int>[0x00, 0x00, 0x00, 0x01, 0x01, 0x00],
         <int>[0x154, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordDefault],
+        <int>[0x54, 0x54, 0x57, 0x00, 0x01, 0x00, ...recordDefault],
         <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00],
+        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00, ...recordDefault],
+        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00, ...recordDefault, 0x06],
+        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00, ...recordDefault, 0xFF],
+        <int>[0x54, 0x54, 0x57, 0x03, 0x01, 0x00, ...recordDefault, 0x03],
         <int>[0x54, 0x54, 0x57, 0x01, 0x00, 0x00],
         <int>[0x54, 0x54, 0x57, 0x01, -1, 0x00, ...recordDefault],
         <int>[0x54, 0x54, 0x57, 0x01, 0x21, 0x00],
@@ -636,6 +700,48 @@ void main() {
               'Corrupt binary payload (length ${corruptBytes.length}) must throw corruptBinaryPayload',
         );
       }
+
+      const exactMaxPasswordLength = AppWorkspace.maxBinaryBytes - 52;
+      final exactMaxWorkspace = AppWorkspace(
+        id: 'tasks',
+        name: 'Tasks',
+        config: WebDavConfig(
+          password: 'P' * exactMaxPasswordLength,
+          dueLeadWindow: DueLeadWindow.days7,
+        ),
+      );
+      final exactMaxBytes = AppWorkspace.encodePersistedState(<AppWorkspace>[
+        exactMaxWorkspace,
+      ], activeId: 'tasks');
+      expect(
+        exactMaxBytes.length,
+        equals(AppWorkspace.maxBinaryBytes),
+        reason: 'Exact 65536-byte TTW v2 workspace payload must succeed',
+      );
+      expect(
+        AppWorkspace.fromBytes(exactMaxBytes).config.dueLeadWindow,
+        equals(DueLeadWindow.days7),
+        reason: 'Exact 65536-byte TTW v2 payload must decode trailing dueLeadWindow byte',
+      );
+
+      final oneByteOverWorkspace = AppWorkspace(
+        id: 'tasks',
+        name: 'Tasks',
+        config: WebDavConfig(password: 'P' * (exactMaxPasswordLength + 1)),
+      );
+      expect(
+        () => AppWorkspace.encodePersistedState(<AppWorkspace>[
+          oneByteOverWorkspace,
+        ], activeId: 'tasks'),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.corruptBinaryPayload,
+          ),
+        ),
+        reason: '65537-byte TTW v2 payload (maxBinaryBytes + 1) must fail pre-allocation bound check',
+      );
 
       final hugePasswordWorkspace = AppWorkspace(
         id: 'tasks',

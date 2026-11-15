@@ -1365,4 +1365,71 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipSaveLink => 'Update link';
+
+  @override
+  String get dueLeadWindowSectionTitle => 'Deadline Auto-Priority';
+
+  @override
+  String get dueLeadWindowSectionDescription =>
+      'Automatically prioritize scheduled open tasks into Focus and Ready when their due date approaches.';
+
+  @override
+  String get dueLeadWindowLabel => 'Lead Window';
+
+  @override
+  String get dueLeadWindowOff => 'Off (never auto-prioritize)';
+
+  @override
+  String get dueLeadWindowAtDue => 'At deadline (0 hours)';
+
+  @override
+  String get dueLeadWindow12Hours => '12 hours before deadline';
+
+  @override
+  String get dueLeadWindow24Hours => '24 hours before deadline (Default)';
+
+  @override
+  String get dueLeadWindow48Hours => '48 hours before deadline';
+
+  @override
+  String get dueLeadWindow7Days => '7 days before deadline';
+
+  @override
+  String get dueLeadWindowShort12Hours => '12 h';
+
+  @override
+  String get dueLeadWindowShort24Hours => '24 h';
+
+  @override
+  String get dueLeadWindowShort48Hours => '48 h';
+
+  @override
+  String get dueLeadWindowShort7Days => '7 d';
+
+  @override
+  String get taskDueAutoPrioritizeLabel => 'Auto-prioritize near deadline';
+
+  @override
+  String get taskDueAutoPrioritizeSubtitle =>
+      'Pull ahead of regular queued tasks once the lead window opens.';
+
+  @override
+  String get taskInfoDueAutoPromotedActive =>
+      'Prioritized by deadline lead window';
+
+  @override
+  String get taskInfoDueAutoPromoteAtDue => 'Auto-prioritizes at deadline';
+
+  @override
+  String taskInfoDueAutoPromoteScheduled(String window) {
+    return 'Auto-prioritizes $window before deadline';
+  }
+
+  @override
+  String get taskInfoDuePassiveHint =>
+      'Informational deadline (auto-priority off)';
+
+  @override
+  String get taskInfoDueLeadWindowOffHint =>
+      'Deadline auto-priority disabled in settings';
 }
