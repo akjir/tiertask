@@ -15,7 +15,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | TEP-008 | Automatic Local TDF Directory Watching, Digest-Gated Reconciliation, and Per-Workspace Settings Toggle | feature | review | [`tep-008-local-file-directory-watch-sync.md`](tep-008-local-file-directory-watch-sync.md) |
 | TEP-010 | Configurable Deadline Lead-Window Preferences, Live Boundary Timer, and Urgency Indicators | feature | review | [`tep-010-deadline-lead-window-settings-and-urgency-ui.md`](tep-010-deadline-lead-window-settings-and-urgency-ui.md) |
 | TEP-011 | Deferral and Deadline Notes and Recurring Preparation Lead Editor UI | feature | review | [`tep-011-scheduling-notes-and-repeat-lead-ui.md`](tep-011-scheduling-notes-and-repeat-lead-ui.md) |
-| TEP-012 | Interactive Task History Journal in Task Info Dialog and Task Editor | feature | concept | [`tep-012-task-history-journal-ui.md`](tep-012-task-history-journal-ui.md) |
+| TEP-012 | Interactive Task History Journal in Task Info Dialog and Task Editor | feature | planned | [`tep-012-task-history-journal-ui.md`](tep-012-task-history-journal-ui.md) |
 
 ### Completed Proposals
 
