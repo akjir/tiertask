@@ -4,31 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-16
 
 ### Added
 
 - Added an interactive task history journal in the task information dialog and task editor, with card history indicators.
 - Added multi-line deferral and deadline notes and recurring preparation lead days in the task editor and task information dialog.
 - Added a per-workspace deadline lead window setting in Settings to choose when upcoming deadlines automatically advance tasks toward Focus.
-- Added an explicit deadline auto-prioritization toggle in the task editor, urgency badge colors and status details for upcoming and overdue deadlines, and live wall-clock updates for deadlines and deferrals.
-- Added a label context dialog accessible from the active top-bar label title, navigation drawer label rows, and task details label chips to view and copy notes, open reference links, inspect conditions, and edit labels.
-- Added reference link management with inline editing and up/down reordering in the label editor.
+- Added a deadline auto-prioritization toggle in the task editor, urgency badges for upcoming and overdue deadlines, and live schedule updates.
+- Added a label details dialog in the top bar, drawer, and task cards to view notes, open links, inspect conditions, and edit labels.
+- Added reference link management with inline editing and reordering in the label editor.
 - Added support for TierTask Data Format (TDF) 0.7.0 with automatic migration from version 0.6.0.
 - Added TDF 0.7.0 support for label reference links, deferral and deadline notes, recurring preparation lead days, and task history logs.
-- Added a subtle task ID header with a copy button at the top of expanded task cards, allowing every task card to expand on tap.
+- Added a copyable task ID header on expanded task cards and enabled expanding every task card on tap.
 - Added automatic synchronization for external edits to the local TDF file, with a per-workspace toggle in Settings.
-- Added in-memory undo via a notification bar action and the Ctrl+Z desktop shortcut for task completion, downgrade, and deletion.
-- Added a copy button on the right side of expanded task notes to copy note text to the clipboard.
+- Added undo via the notification bar and Ctrl+Z shortcut for task completion, downgrade, and deletion.
+- Added a copy button on expanded task notes to copy note text to the clipboard.
 - Added a delete button with a confirmation dialog in the task editor when editing an existing task.
-- Added interactive task status indicator icons for suspension, prerequisite tasks, and activation conditions that open a task information dialog on click or tap.
-- Added a POSIX user-space build and installation script for Linux with desktop launcher integration.
+- Added interactive status indicator icons on task cards that open the task information dialog for deferrals, prerequisites, and conditions.
+- Added a user-space Linux build and installation script with desktop launcher integration.
 
 ### Changed
 
-- Changed queued tasks with deadlines within the configured workspace lead window (24 hours by default) to automatically advance toward Focus unless marked as passive, and reset passive deadline status when explicitly promoting a task to Priority.
+- Changed queued tasks with deadlines inside the lead window (24 hours by default) to advance toward Focus automatically, re-enabling auto-prioritization when promoted to Priority.
 - Changed synchronization and task updates to automatically clear expired suspension locks and completed one-time task dependencies.
-- Changed WebDAV synchronization to cache server entity tags and modification timestamps, skipping unchanged downloads, parser passes, and redundant uploads while automatically merging concurrent remote edits when a write precondition fails.
+- Changed WebDAV synchronization to skip unchanged transfers and automatically merge concurrent remote edits on save.
 - Changed task cards to collapse more than three status indicator icons into a single summary indicator icon.
 - Changed task creation to pre-select the currently active label filter.
 
