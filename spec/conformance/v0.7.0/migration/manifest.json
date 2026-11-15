@@ -1,0 +1,44 @@
+{
+  "version": "0.7.0",
+  "cases": [
+    {
+      "id": "01_v060_repeat_lead_and_blocked_cleanup",
+      "sourceVersion": "0.6.0",
+      "targetVersion": "0.7.0",
+      "sourceTimeZone": "Europe/Berlin",
+      "inputFile": "01_v060_repeat_lead_and_blocked_cleanup.input.tdf",
+      "expectedFile": "01_v060_repeat_lead_and_blocked_cleanup.expected.tdf",
+      "valid": true,
+      "loadTimePreservesRawBlockedOn3cDeFgHiJ3": [
+        "1aBcDeFgH1",
+        "2bCdEfGhI2",
+        "6uCk8N0aB1",
+        "9zYxWvUtS9"
+      ],
+      "description": "Migrates 0.6.0 -> 0.7.0 with Europe/Berlin, extracting lead 5 days and non-midnight repeat-time (09:00 and same-day 08:30) on open repeat + due + finite suspended < due tasks, stripping resolved one-shot and tombstoned blocked entries in explicit migration while preserving recurring-to-recurring and forward-reference blocked entries, and initializing history = [] and label.links = []."
+    },
+    {
+      "id": "02_v060_missing_timezone_invalid",
+      "sourceVersion": "0.6.0",
+      "targetVersion": "0.7.0",
+      "sourceTimeZone": null,
+      "inputFile": "02_v060_missing_timezone_invalid.tdf",
+      "expectedError": "ImportContextRequired",
+      "entityId": "8jKaCdOkD2",
+      "headerLine": 3,
+      "suspendedLine": 7,
+      "valid": false,
+      "description": "Rejects 0.6.0 -> 0.7.0 conversion without sourceTimeZone/timeZone when an open task carries repeat, due, and finite suspended < due."
+    },
+    {
+      "id": "03_v050_chained_to_v070",
+      "sourceVersion": "0.5.0",
+      "targetVersion": "0.7.0",
+      "sourceTimeZone": null,
+      "inputFile": "03_v050_chained_to_v070.input.tdf",
+      "expectedFile": "03_v050_chained_to_v070.expected.tdf",
+      "valid": true,
+      "description": "Chained conversion 0.5.0 -> 0.5.1 -> 0.6.0 -> 0.7.0 synthesizing modified from queued, extracting inline location rules to TDF-ID-MIGRATION-1 location blocks, and initializing label.links = [] and history = [] without requiring a time zone."
+    }
+  ]
+}

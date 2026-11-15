@@ -617,5 +617,79 @@ void main() {
         reason: 'Section 6.8.3: Stripping an expired prerequisite reference must advance task.modified',
       );
     });
+
+    test('preserves recurring-to-recurring blocked pipelines across prerequisite completion and rearms dependent on completion', () {
+      final recPrereq = TaskItem(
+        id: 'recPrereq1',
+        title: 'Daily Build',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+      );
+      final recDependent = TaskItem(
+        id: 'recDep0001',
+        title: 'Daily Smoke Test',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 1),
+        ],
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+      );
+      final oneOffDependent = TaskItem(
+        id: 'oneDep0001',
+        title: 'One-Off Verification',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 1),
+        ],
+      );
+
+      var board = TaskBoard.evaluate(
+        tasks: <TaskItem>[recPrereq, recDependent, oneOffDependent],
+        evaluationTime: fixedNow,
+        timeZone: TdfTimeZoneContext.utc,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: fixedNow,
+          taskIds: const <String>['recPrereq1', 'recDep0001', 'oneDep0001'],
+        ),
+      );
+
+      // Complete recurring prerequisite -> completions becomes 1:
+      final t1 = fixedNow.add(const Duration(minutes: 10));
+      board = board.completeTask(
+        'recPrereq1',
+        currentDate: t1,
+        timeZone: TdfTimeZoneContext.utc,
+      );
+      expect(
+        board.findTask('oneDep0001')!.dependencies,
+        isEmpty,
+        reason: 'Non-recurring dependent on recurring prerequisite has its satisfied blocked directive cleaned immediately',
+      );
+      expect(
+        board.findTask('recDep0001')!.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 1),
+        ]),
+        reason: 'Recurring-to-recurring pipeline must preserve blocked directive so dependent can rearm on completion',
+      );
+      expect(board.focus.map((t) => t.id), contains('recDep0001'));
+
+      // Complete recurring dependent -> rearms requiredCompletion to prereq.completions + 1 == 2!
+      final t2 = fixedNow.add(const Duration(minutes: 20));
+      board = board.completeTask(
+        'recDep0001',
+        currentDate: t2,
+        timeZone: TdfTimeZoneContext.utc,
+      );
+      expect(
+        board.findTask('recDep0001')!.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 2),
+        ]),
+      );
+    });
   });
 }

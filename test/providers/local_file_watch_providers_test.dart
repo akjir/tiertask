@@ -20,6 +20,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_board_evaluator.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -72,10 +74,12 @@ class _CountingParseTdfService extends TdfService {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
     onParse();
     return super.parse(
@@ -83,10 +87,12 @@ class _CountingParseTdfService extends TdfService {
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
+      targetSchema: targetSchema,
     );
   }
 }
@@ -1143,6 +1149,198 @@ void main() {
               ?.title,
           equals('Detected After Offline Dir Creation'),
           reason: 'LocalFileWatcherNotifier must rebind missing directory when Stage 1 creates it even if Stage 2 fails offline and lastSyncedAt stays null',
+        );
+      });
+
+      test('Directory.watch reconciles TDF 0.7.0 fields across Conflict -> Self-Write/Resume -> New External Input cycles and preserves/prunes undo stack accurately', () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'tiertask_watch_v070_',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final tdfFile = File('${tempDir.path}/tasks.tdf');
+
+        var currentTime = DateTime.utc(2026, 11, 11, 12, 0);
+        await tdfFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    task blockerW01\n'
+          '    task depWatch02\n'
+          '    task suspWatch3\n'
+          '    task conflict04\n'
+          '    task otherHist5\n'
+          '}\n\n'
+          'label wlbl000001 {\n'
+          '    name     "Docs"\n'
+          '    link     "Spec" "https://docs.example.com"\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '}\n\n'
+          'task blockerW01 {\n'
+          '    name     "Watch Blocker"\n'
+          '    created  2026-11-11 11:00:00\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '}\n\n'
+          'task depWatch02 {\n'
+          '    name     "Watch Dependent"\n'
+          '    created  2026-11-11 11:00:00\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    due      2026-11-12 09:00:00 passive "Soft target"\n'
+          '    labels   wlbl000001\n'
+          '    blocked  blockerW01\n'
+          '}\n\n'
+          'task suspWatch3 {\n'
+          '    name      "Expiring Watch Task"\n'
+          '    created   2026-11-11 11:00:00\n'
+          '    modified  2026-11-11 12:00:00\n'
+          '    suspended 2026-11-11 12:02:00 "Hold 2 min"\n'
+          '}\n\n'
+          'task conflict04 {\n'
+          '    name     "Conflict Target"\n'
+          '    created  2026-11-11 11:00:00\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    history  2026-11-11 11:30:00 "Created entry"\n'
+          '}\n\n'
+          'task otherHist5 {\n'
+          '    name     "Other History Task"\n'
+          '    created  2026-11-11 11:00:00\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '}\n',
+          flush: true,
+        );
+
+        const watchConfig = WebDavConfig(
+          storageMode: StorageMode.local,
+          localFilePath: 'tasks.tdf',
+          localWatchEnabled: true,
+        );
+        final settings = InMemorySettingsRepository(watchConfig);
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settings),
+            localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+            localFileWatchDebounceProvider.overrideWithValue(
+              const Duration(milliseconds: 30),
+            ),
+            clockProvider.overrideWithValue(() => currentTime),
+          ],
+        );
+        addTearDown(container.dispose);
+        container.listen(
+          localFileWatcherProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
+
+        final initialBoard = await container.read(taskNotifierProvider.future);
+        expect(
+          initialBoard.findLabel('wlbl000001')?.links.single.title,
+          equals('Spec'),
+        );
+        expect(initialBoard.findTask('depWatch02')?.isDuePassive, isTrue);
+        expect(
+          initialBoard.findTask('depWatch02')?.dueNote,
+          equals('Soft target'),
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        // 1. Complete blockerW01 at 12:00:30 (captures stripped depWatch02 dependency in undo stack):
+        currentTime = DateTime.utc(2026, 11, 11, 12, 0, 30);
+        final notifier = container.read(taskNotifierProvider.notifier);
+        await notifier.completeTask('blockerW01');
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        // 2. Advance clock to 12:03:00 (so suspWatch3's 12:02:00 suspended is expired!) and write an external
+        // update adding history to otherHist5: real Directory.watch cleans suspWatch3 AND keeps blockerW01 undo intact!
+        currentTime = DateTime.utc(2026, 11, 11, 12, 3);
+        final currentDisk = await tdfFile.readAsString();
+        await tdfFile.writeAsString(
+          currentDisk.replaceFirst(
+            'task otherHist5 {\n    name     "Other History Task"\n    created  2026-11-11 11:00\n    modified 2026-11-11 12:00\n}',
+            'task otherHist5 {\n    name     "Other History Task"\n    created  2026-11-11 11:00\n    modified 2026-11-11 12:02:30\n    history  2026-11-11 12:02:30 "External history log"\n}',
+          ),
+          flush: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+
+        final afterFirstWatch = container
+            .read(taskNotifierProvider)
+            .requireValue;
+        expect(
+          afterFirstWatch.findTask('otherHist5')?.history.single.text,
+          equals('External history log'),
+        );
+        expect(
+          afterFirstWatch.findTask('suspWatch3')?.suspendedAt,
+          isNull,
+          reason: 'External watch reconcile at 12:03:00 must strip expired 12:02:00 suspended deferral',
+        );
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isTrue,
+          reason: 'Automatic suspended cleanup on suspWatch3 during external watch reconcile must preserve blockerW01 undo entry',
+        );
+
+        // 3. Error -> Self-Write/Resume -> New External Input cycle:
+        currentTime = DateTime.utc(2026, 11, 11, 12, 4);
+        await tdfFile.writeAsString(
+          'tdf 0.7.0\ntask broken {{{{\n',
+          flush: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+        expect(
+          container.read(syncStateProvider).errorMessage,
+          isNotNull,
+          reason: 'Malformed external .tdf must surface SyncState error during Directory.watch reconcile',
+        );
+
+        // Self-Write / Resume: repair file externally or via local self-write after restoring valid base + local history mutation:
+        await tdfFile.writeAsString(
+          const TdfService().serialize(afterFirstWatch),
+          flush: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+        currentTime = DateTime.utc(2026, 11, 11, 12, 5);
+        await notifier.addTaskHistoryEntry(
+          'conflict04',
+          timestampUtc: DateTime.utc(2026, 11, 11, 12, 5),
+          text: 'Self-write resumed history',
+        );
+        expect(container.read(syncStateProvider).errorMessage, isNull);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        // New External Input after self-write: externally add a history entry to depWatch02 (which is in blockerW01's previouslyBlockedDependencies!):
+        currentTime = DateTime.utc(2026, 11, 11, 12, 6);
+        final postSelfWriteDisk = await tdfFile.readAsString();
+        final updatedDepBoard = const TdfService()
+            .parse(
+              postSelfWriteDisk,
+              evaluationTime: currentTime,
+              localEvaluationTime: currentTime,
+            )
+            .addTaskHistoryEntry(
+              'depWatch02',
+              timestampUtc: currentTime,
+              text: 'External edit on previously blocked dependent',
+              currentDate: currentTime,
+              localEvaluationTime: currentTime,
+            );
+        await tdfFile.writeAsString(
+          const TdfService().serialize(updatedDepBoard),
+          flush: true,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+
+        final finalBoard = container.read(taskNotifierProvider).requireValue;
+        expect(
+          finalBoard.findTask('depWatch02')?.history.single.text,
+          equals('External edit on previously blocked dependent'),
+          reason: 'Directory.watch must process new external input cleanly after Error -> Self-Write/Resume',
+        );
+        expect(
+          container.read(taskUndoStateProvider).canUndo,
+          isFalse,
+          reason: 'External history edit on depWatch02 (in blockerW01 previouslyBlockedDependencies) must invalidate and prune blockerW01 undo entry',
         );
       });
     },

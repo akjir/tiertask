@@ -23,6 +23,7 @@ import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_payload_comparison.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/workspace_sync_state.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -1049,6 +1050,628 @@ label 000001OkD2 {
       expect(clearedValidators.remoteEtag, isNull);
       expect(clearedValidators.remoteLastModified, isNull);
       expect(clearedValidators, equals(state));
+    });
+  });
+
+  group('TDF 0.7.0 Payload Comparison, Reconciliation, Stage Fairness & Bounds', () {
+    test('compares TdfLabel.links lexicographically and diverges v070 vs v060 TaskItem payload tie-breaks', () {
+      const labelEmpty = TdfLabel(id: 'lbl0000001', name: 'Hub');
+      const labelOneLink = TdfLabel(
+        id: 'lbl0000001',
+        name: 'Hub',
+        links: <TaskLink>[TaskLink(title: 'Alpha', uri: 'https://a.example')],
+      );
+      const labelOneLinkHigherUri = TdfLabel(
+        id: 'lbl0000001',
+        name: 'Hub',
+        links: <TaskLink>[TaskLink(title: 'Alpha', uri: 'https://b.example')],
+      );
+      const labelOneLinkHigherTitle = TdfLabel(
+        id: 'lbl0000001',
+        name: 'Hub',
+        links: <TaskLink>[TaskLink(title: 'Beta', uri: 'https://a.example')],
+      );
+      const labelTwoLinks = TdfLabel(
+        id: 'lbl0000001',
+        name: 'Hub',
+        links: <TaskLink>[
+          TaskLink(title: 'Alpha', uri: 'https://a.example'),
+          TaskLink(title: 'Beta', uri: 'https://b.example'),
+        ],
+      );
+
+      expect(
+        TdfPayloadComparison.compareLabelPayloads(labelEmpty, labelOneLink),
+        lessThan(0),
+      );
+      expect(
+        TdfPayloadComparison.compareLabelPayloads(
+          labelOneLink,
+          labelOneLinkHigherUri,
+        ),
+        lessThan(0),
+      );
+      expect(
+        TdfPayloadComparison.compareLabelPayloads(
+          labelOneLinkHigherUri,
+          labelOneLinkHigherTitle,
+        ),
+        lessThan(0),
+      );
+      expect(
+        TdfPayloadComparison.compareLabelPayloads(labelOneLink, labelTwoLinks),
+        lessThan(0),
+        reason: 'Shorter link list prefix must sort before longer list',
+      );
+
+      // v070 compares (name, note, created, ...) while v060 compares (created, name, note, ...):
+      final earlierCreatedZeta = TaskItem(
+        id: 'tie0000001',
+        title: 'Zeta',
+        createdAt: DateTime.utc(2026, 11, 1, 8, 0, 0),
+        modifiedAt: t(10),
+      );
+      final laterCreatedAlpha = TaskItem(
+        id: 'tie0000001',
+        title: 'Alpha',
+        createdAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+        modifiedAt: t(10),
+      );
+      expect(
+        TdfPayloadComparison.compareTaskPayloads(
+          earlierCreatedZeta,
+          laterCreatedAlpha,
+          schemaVersion: TdfSchemaVersion.v070,
+        ),
+        greaterThan(0),
+        reason: 'Under v070, name ("Zeta" > "Alpha") precedes createdAt',
+      );
+      expect(
+        TdfPayloadComparison.compareTaskPayloads(
+          earlierCreatedZeta,
+          laterCreatedAlpha,
+          schemaVersion: TdfSchemaVersion.v060,
+        ),
+        lessThan(0),
+        reason: 'Under v060, createdAt (08:00 < 09:00) precedes name',
+      );
+
+      // v070 compares (..., origin, link, history, condition, ...) while v060 compares (..., condition, origin, link, ...):
+      final withConditionOnly = TaskItem(
+        id: 'tie0000002',
+        title: 'Same',
+        createdAt: defaultCreated,
+        conditions: <TaskCondition>[
+          DayTaskCondition.fromWeekdays(const <int>[DateTime.monday]),
+        ],
+      );
+      final withLinkOnly = TaskItem(
+        id: 'tie0000002',
+        title: 'Same',
+        createdAt: defaultCreated,
+        links: const <TaskLink>[
+          TaskLink(title: 'Doc', uri: 'https://example.com'),
+        ],
+      );
+      expect(
+        TdfPayloadComparison.compareTaskPayloads(
+          withLinkOnly,
+          withConditionOnly,
+          schemaVersion: TdfSchemaVersion.v070,
+        ),
+        greaterThan(0),
+        reason: 'Under v070, link precedes condition',
+      );
+      expect(
+        TdfPayloadComparison.compareTaskPayloads(
+          withLinkOnly,
+          withConditionOnly,
+          schemaVersion: TdfSchemaVersion.v060,
+        ),
+        lessThan(0),
+        reason: 'Under v060, condition precedes link',
+      );
+    });
+
+    test('compares 0.7.0 Task state tuples (suspended, due, repeat, history) and taskPayloadsEqualModuloBlockCleanup', () {
+      final base = TaskItem(
+        id: 'tup0000001',
+        title: 'Tuple Task',
+        createdAt: defaultCreated,
+      );
+      final finNoNote = base.copyWith(suspendedAt: t(500));
+      final finNoteA = base.copyWith(
+        suspendedAt: t(500),
+        suspendedNote: 'Alpha',
+      );
+      final finNoteB = base.copyWith(
+        suspendedAt: t(500),
+        suspendedNote: 'Beta',
+      );
+      final foreverNoNote = base.copyWith(isSuspendedForever: true);
+      final foreverNoteA = base.copyWith(
+        isSuspendedForever: true,
+        suspendedNote: 'Alpha',
+      );
+      final foreverNoteB = base.copyWith(
+        isSuspendedForever: true,
+        suspendedNote: 'Beta',
+      );
+
+      final deferralChain = <TaskItem>[
+        base,
+        finNoNote,
+        finNoteA,
+        finNoteB,
+        foreverNoNote,
+        foreverNoteA,
+        foreverNoteB,
+      ];
+      for (var i = 0; i < deferralChain.length - 1; i++) {
+        expect(
+          TdfPayloadComparison.compareTaskStates(
+            deferralChain[i],
+            deferralChain[i + 1],
+          ),
+          lessThan(0),
+          reason: 'Deferral tuple order failed at index $i',
+        );
+      }
+
+      final dueActiveNoNote = base.copyWith(dueAt: t(600));
+      final dueActiveNote = base.copyWith(dueAt: t(600), dueNote: 'Cutoff');
+      final duePassiveNoNote = base.copyWith(dueAt: t(600), isDuePassive: true);
+      final duePassiveNote = base.copyWith(
+        dueAt: t(600),
+        isDuePassive: true,
+        dueNote: 'Cutoff',
+      );
+      final dueChain = <TaskItem>[
+        base,
+        dueActiveNoNote,
+        dueActiveNote,
+        duePassiveNoNote,
+        duePassiveNote,
+      ];
+      for (var i = 0; i < dueChain.length - 1; i++) {
+        expect(
+          TdfPayloadComparison.compareTaskStates(dueChain[i], dueChain[i + 1]),
+          lessThan(0),
+          reason: 'Due tuple order failed at index $i',
+        );
+      }
+
+      final repLead0 = base.copyWith(
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.weeks,
+          leadDays: 0,
+        ),
+      );
+      final repLead3 = base.copyWith(
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.weeks,
+          leadDays: 3,
+        ),
+      );
+      expect(
+        TdfPayloadComparison.compareTaskStates(repLead0, repLead3),
+        lessThan(0),
+        reason: 'repeat leadDays 0 < 3',
+      );
+
+      final hist1 = base.copyWith(
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: t(10), text: 'First'),
+        ],
+      );
+      final hist2 = base.copyWith(
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: t(10), text: 'First'),
+          TaskHistoryEntry(timestampUtc: t(20), text: 'Second'),
+        ],
+      );
+      expect(
+        TdfPayloadComparison.compareTaskPayloads(hist1, hist2),
+        lessThan(0),
+        reason: 'Shorter history prefix < longer history',
+      );
+      expect(TdfPayloadComparison.taskPayloadsEqual(hist1, hist1), isTrue);
+      expect(TdfPayloadComparison.taskPayloadsEqual(hist1, hist2), isFalse);
+
+      // taskPayloadsEqualModuloBlockCleanup:
+      final donePrereq = TaskItem(
+        id: 'pre0000001',
+        title: 'Done Prereq',
+        createdAt: defaultCreated,
+        completions: 1,
+        isCompleted: true,
+        completedAt: t(50),
+      );
+      final uncleanedOpen = base.copyWith(
+        suspendedAt: t(90),
+        suspendedNote: 'Expired',
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'pre0000001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'del0000001', requiredCompletion: 1),
+        ],
+      );
+      expect(
+        TdfPayloadComparison.taskPayloadsEqualModuloBlockCleanup(
+          left: uncleanedOpen,
+          right: base,
+          liveTasksById: <String, TaskItem>{
+            base.id: uncleanedOpen,
+            donePrereq.id: donePrereq,
+          },
+          deletedTaskIds: const <String>{'del0000001'},
+          nowUtc: t(100),
+        ),
+        isTrue,
+      );
+    });
+
+    test('defers bystander post-merge block cleanup in Stage 1 (applyPostMergeBlockCleanup: false) and cleans in Stage 2 without revision inflation', () {
+      const bystanderId = 'bys0000001';
+      const activeId = 'act0000001';
+      final tBase = DateTime.utc(2026, 11, 11, 9, 0, 0);
+      final tRemoteEdit = DateTime.utc(2026, 11, 11, 11, 0, 0);
+      final tExpired = DateTime.utc(2026, 11, 11, 12, 0, 0);
+      final tSyncNow = DateTime.utc(2026, 11, 11, 12, 5, 0);
+
+      final bystanderBase = TaskItem(
+        id: bystanderId,
+        title: 'Original Bystander',
+        createdAt: tBase,
+        modifiedAt: tBase,
+        suspendedAt: tExpired,
+        suspendedNote: 'Wait until noon',
+      );
+      final activeBase = TaskItem(
+        id: activeId,
+        title: 'Active Local Task',
+        createdAt: tBase,
+        modifiedAt: tBase,
+      );
+
+      final localBaseline = TaskBoard.evaluate(
+        tasks: <TaskItem>[bystanderBase, activeBase],
+        evaluationTime: tBase,
+      );
+      final localDisk = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          bystanderBase,
+          activeBase.copyWith(
+            title: 'Local Disk Edit',
+            modifiedAt: DateTime.utc(2026, 11, 11, 10, 0, 0),
+          ),
+        ],
+        evaluationTime: tSyncNow,
+      );
+      final remoteBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          bystanderBase.copyWith(
+            title: 'Remote Bystander Title',
+            modifiedAt: tRemoteEdit,
+          ),
+          activeBase,
+        ],
+        evaluationTime: tSyncNow,
+      );
+
+      // Stage 1: local sync with applyPostMergeBlockCleanup: false
+      final stage1Board = TaskBoardSync.merge(
+        primary: localBaseline,
+        secondary: localDisk,
+        baseline: localBaseline,
+        evaluationTime: tSyncNow,
+        applyPostMergeBlockCleanup: false,
+      );
+      final stage1Bystander = stage1Board.findTask(bystanderId)!;
+      expect(
+        stage1Bystander.modifiedAt,
+        equals(tBase),
+        reason:
+            'Stage 1 must not inflate bystander modifiedAt ahead of Stage 2',
+      );
+      expect(stage1Bystander.suspendedAt, equals(tExpired));
+      expect(stage1Bystander.suspendedNote, equals('Wait until noon'));
+
+      // Stage 2: remote sync with applyPostMergeBlockCleanup: true
+      final stage2Board = TaskBoardSync.merge(
+        primary: stage1Board,
+        secondary: remoteBoard,
+        baseline: localBaseline,
+        evaluationTime: tSyncNow,
+        applyPostMergeBlockCleanup: true,
+      );
+      final stage2Bystander = stage2Board.findTask(bystanderId)!;
+      expect(
+        stage2Bystander.title,
+        equals('Remote Bystander Title'),
+        reason: 'Remote title edit must win because Stage 1 preserved tBase',
+      );
+      expect(stage2Bystander.suspendedAt, isNull);
+      expect(stage2Bystander.suspendedNote, isNull);
+      expect(stage2Bystander.modifiedAt, equals(tSyncNow));
+
+      // stampAndNormalize respects applyPostMergeBlockCleanup: false vs true
+      final normalizedDeferred = TaskBoardSync.stampAndNormalize(
+        localBaseline,
+        evaluationTime: tSyncNow,
+        applyPostMergeBlockCleanup: false,
+      );
+      expect(
+        normalizedDeferred.findTask(bystanderId)!.suspendedAt,
+        equals(tExpired),
+      );
+      final normalizedCleaned = TaskBoardSync.stampAndNormalize(
+        localBaseline,
+        evaluationTime: tSyncNow,
+        applyPostMergeBlockCleanup: true,
+      );
+      expect(normalizedCleaned.findTask(bystanderId)!.suspendedAt, isNull);
+      expect(
+        normalizedCleaned.findTask(bystanderId)!.modifiedAt,
+        equals(tSyncNow),
+      );
+    });
+
+    test('applies Section 6.8.4 baseline hygiene on generation advance and strips discardedTaskIds in recoverAmbiguousEntities', () {
+      const cleanLocalOnlyId = 'cln0000001';
+      const editedLocalOnlyId = 'edt0000001';
+      const discardedLocalId = 'dsc0000001';
+      const sharedOpenId = 'shr0000001';
+
+      final tBase = DateTime.utc(2026, 11, 14, 8, 0, 0);
+      final tExpired = DateTime.utc(2026, 11, 14, 12, 0, 0);
+      final tNow = DateTime.utc(2026, 11, 14, 12, 5, 0);
+
+      // 1. Local-only task whose ONLY diff vs baseline is expired suspended cleanup -> discarded cleanly without RecoveryRequired!
+      final cleanTaskBase = TaskItem(
+        id: cleanLocalOnlyId,
+        title: 'Clean Local Task',
+        createdAt: tBase,
+        modifiedAt: tBase,
+        suspendedAt: tExpired,
+        suspendedNote: 'Noon callback',
+      );
+      final cleanTaskLocal = cleanTaskBase.copyWith(
+        clearSuspendedAt: true,
+        clearSuspendedNote: true,
+        modifiedAt: DateTime.utc(2026, 11, 14, 12, 0, 1),
+      );
+      final baselineClean = TaskBoard.evaluate(
+        tasks: <TaskItem>[cleanTaskBase],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: tBase,
+      );
+      final localClean = TaskBoard.evaluate(
+        tasks: <TaskItem>[cleanTaskLocal],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: tNow,
+      );
+      final remoteGenAdvanced = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(generation: 2),
+        evaluationTime: tNow,
+      );
+
+      final silentlyDiscarded = TaskBoardSync.merge(
+        primary: localClean,
+        secondary: remoteGenAdvanced,
+        baseline: baselineClean,
+        acknowledgedGeneration: 1,
+        evaluationTime: tNow,
+      );
+      expect(
+        silentlyDiscarded.findTask(cleanLocalOnlyId),
+        isNull,
+        reason: 'Block-cleanup-only local task must discard silently on remote generation advance',
+      );
+
+      // 2. Local-only task with history / leadDays edit vs remote generation advance -> RecoveryRequired, and recoverAmbiguousEntities strips discardedTaskIds from surviving open tasks!
+      final editedBase = TaskItem(
+        id: editedLocalOnlyId,
+        title: 'Edited Ambiguous',
+        createdAt: tBase,
+        modifiedAt: tBase,
+      );
+      final discardedBase = TaskItem(
+        id: discardedLocalId,
+        title: 'Discarded Ambiguous',
+        createdAt: tBase,
+        modifiedAt: tBase,
+      );
+      final sharedTask = TaskItem(
+        id: sharedOpenId,
+        title: 'Shared Open Dependent',
+        createdAt: tBase,
+        modifiedAt: tBase,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: editedLocalOnlyId, requiredCompletion: 1),
+          TdfTaskDependency(taskId: discardedLocalId, requiredCompletion: 1),
+        ],
+      );
+      final baselineAmbig = TaskBoard.evaluate(
+        tasks: <TaskItem>[editedBase, discardedBase, sharedTask],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: tBase,
+      );
+      final localAmbig = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          editedBase.copyWith(
+            history: <TaskHistoryEntry>[
+              TaskHistoryEntry(
+                timestampUtc: DateTime.utc(2026, 11, 14, 10, 0, 0),
+                text: 'Local progress',
+              ),
+            ],
+            dependencies: const <TdfTaskDependency>[
+              TdfTaskDependency(
+                taskId: discardedLocalId,
+                requiredCompletion: 1,
+              ),
+            ],
+            modifiedAt: DateTime.utc(2026, 11, 14, 10, 0, 0),
+          ),
+          discardedBase.copyWith(
+            dueAt: DateTime.utc(2026, 11, 20, 17, 0, 0),
+            dueNote: 'Edited due note',
+            modifiedAt: DateTime.utc(2026, 11, 14, 10, 5, 0),
+          ),
+          sharedTask,
+        ],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: tNow,
+      );
+      final remoteAmbig = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          sharedTask.copyWith(dependencies: const <TdfTaskDependency>[]),
+        ],
+        deletedBlock: TdfDeletedBlock(generation: 2),
+        evaluationTime: tNow,
+      );
+
+      expect(
+        () => TaskBoardSync.merge(
+          primary: localAmbig,
+          secondary: remoteAmbig,
+          baseline: baselineAmbig,
+          acknowledgedGeneration: 1,
+          evaluationTime: tNow,
+        ),
+        throwsSyncOutcome(
+          TdfSyncOutcomeKind.recoveryRequired,
+          ambiguousTasks: containsAll(<String>[
+            editedLocalOnlyId,
+            discardedLocalId,
+          ]),
+        ),
+      );
+
+      // Recover ONLY editedLocalOnlyId and discard discardedLocalId:
+      final recovered = TaskBoardSync.recoverAmbiguousEntities(
+        localBoard: localAmbig,
+        sharedBoard: remoteAmbig,
+        baseline: baselineAmbig,
+        recoverTaskIds: const <String>{editedLocalOnlyId},
+        recoverLabelIds: const <String>{},
+        evaluationTime: tNow,
+      );
+      expect(recovered.findTask(discardedLocalId), isNull);
+      final newRecoveredTask = recovered.allTasks.singleWhere(
+        (task) => task.id != sharedOpenId,
+      );
+      expect(
+        newRecoveredTask.dependencies,
+        isEmpty,
+        reason: 'Recovered open task must strip blocked reference to discardedTaskIds',
+      );
+      expect(
+        recovered.findTask(sharedOpenId)!.dependencies,
+        equals(<TdfTaskDependency>[
+          TdfTaskDependency(taskId: newRecoveredTask.id, requiredCompletion: 1),
+        ]),
+        reason: 'Shared open task must rewrite recovered prerequisite and strip discardedTaskIds',
+      );
+    });
+
+    test('enforces 0.7.0 vs 0.6.0 resource bounds in validateMergedGraphAndBounds', () {
+      // 1. Label links: 20 accepted, 21 rejected
+      final twentyLinks = <TaskLink>[
+        for (var i = 0; i < maxTdfLinksPerLabel; i++)
+          TaskLink(title: 'Link $i', uri: 'https://example.com/$i'),
+      ];
+      TaskBoardSync.validateMergedGraphAndBounds(const <TaskItem>[], <TdfLabel>[
+        TdfLabel(id: 'lblLinks20', name: 'Valid 20', links: twentyLinks),
+      ]);
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds(
+          const <TaskItem>[],
+          <TdfLabel>[
+            TdfLabel(
+              id: 'lblLinks21',
+              name: 'Invalid 21',
+              links: <TaskLink>[
+                ...twentyLinks,
+                const TaskLink(
+                  title: 'Overflow',
+                  uri: 'https://example.com/21',
+                ),
+              ],
+            ),
+          ],
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+
+      // 2. Task links: 21 rejected
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds(<TaskItem>[
+          makeTask('tskLinks21', 'Invalid 21').copyWith(
+            links: <TaskLink>[
+              ...twentyLinks,
+              const TaskLink(title: 'Overflow', uri: 'https://example.com/21'),
+            ],
+          ),
+        ], const <TdfLabel>[]),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+
+      // 3. Task with 500 history + 20 links (> 512 direct statements): accepted in v070, rejected in v060!
+      final maxHistory = <TaskHistoryEntry>[
+        for (var i = 0; i < maxTdfHistoryPerTask; i++)
+          TaskHistoryEntry(
+            timestampUtc: defaultCreated.add(Duration(seconds: i)),
+            text: 'Entry $i',
+          ),
+      ];
+      final fullV070Task = makeTask(
+        'tskFull070',
+        'Full 070',
+      ).copyWith(links: twentyLinks, history: maxHistory);
+      expect(fullV070Task.canonicalDirectChildStatementCount, greaterThan(512));
+      expect(
+        fullV070Task.canonicalDirectChildStatementCount,
+        lessThanOrEqualTo(maxTdfStmtsPerBlock),
+      );
+      TaskBoardSync.validateMergedGraphAndBounds(
+        <TaskItem>[fullV070Task],
+        const <TdfLabel>[],
+        const <TdfLocation>[],
+        TdfSchemaVersion.v070,
+      );
+      expect(
+        () => TaskBoardSync.validateMergedGraphAndBounds(
+          <TaskItem>[fullV070Task],
+          const <TdfLabel>[],
+          const <TdfLocation>[],
+          TdfSchemaVersion.v060,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason:
+            '523+ direct statements must fail under legacy v060 512-stmt limit',
+      );
     });
   });
 }

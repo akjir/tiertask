@@ -1252,11 +1252,6 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String taskInfoSuspendedElapsed(String timestamp) {
-    return 'Abgelaufen ($timestamp)';
-  }
-
-  @override
   String get taskInfoDueLabel => 'Fällig';
 
   @override

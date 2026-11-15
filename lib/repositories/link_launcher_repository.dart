@@ -15,7 +15,7 @@
 
 import 'package:flutter/services.dart';
 
-import '../models/task_item.dart';
+import '../models/tdf_metadata.dart';
 import '../services/app_logger.dart';
 
 /// In-memory [LinkLauncherRepository] implementation for deterministic unit and widget tests.

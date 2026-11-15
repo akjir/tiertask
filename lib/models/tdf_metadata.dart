@@ -41,6 +41,15 @@ enum ConditionGroup {
   location,
 }
 
+/// Supported canonical TDF schema versions for serialization and validation.
+enum TdfSchemaVersion {
+  /// Legacy TDF `0.6.0` schema (`tdf 0.6.0`, `512` statements per block).
+  v060,
+
+  /// Current TDF `0.7.0` schema (`tdf 0.7.0`, `1,024` statements per block).
+  v070,
+}
+
 /// Represents a dynamic activation condition (`condition` directive) on a TDF `label` or `task` block.
 @immutable
 sealed class TaskCondition {
@@ -644,7 +653,138 @@ class TdfColor {
   }
 }
 
-/// Immutable representation of a TDF `label` root block (`spec/TDF_SPEC_0.6.0.md` Section 4.2).
+/// Immutable representation of a TDF `link "<title>" "<uri>"` directive belonging to a task or [TdfLabel].
+@immutable
+class TaskLink {
+  /// Creates a [TaskLink] with [title] and [uri].
+  const TaskLink({required this.title, required this.uri});
+
+  /// Maximum number of `link` directives permitted on a single task (`20`).
+  static const int maxLinksPerTask = 20;
+
+  /// Maximum character length of a link `<uri>` (`2048`).
+  static const int maxUriLength = 2048;
+
+  /// Human-readable display title (`<title>`).
+  final String title;
+
+  /// Target resource URI (`<uri>`).
+  final String uri;
+
+  /// Returns a copy of this link with updated fields.
+  TaskLink copyWith({String? title, String? uri}) {
+    return TaskLink(title: title ?? this.title, uri: uri ?? this.uri);
+  }
+
+  /// Validates that [rawUri] is non-empty, within [maxUriLength], free of ASCII control characters,
+  /// and begins with a valid URI scheme matching `[a-zA-Z][a-zA-Z0-9+.-]*:`.
+  static bool isValidUri(String rawUri) {
+    if (rawUri.isEmpty) {
+      return false;
+    }
+    final scalarCount = _countUnicodeScalars(rawUri);
+    if (scalarCount == null || scalarCount > maxUriLength) {
+      return false;
+    }
+    var colonIndex = -1;
+    var hasNonWhitespace = false;
+    for (var i = 0; i < rawUri.length; i++) {
+      final unit = rawUri.codeUnitAt(i);
+      if (unit <= 0x1F || unit == 0x7F) {
+        return false;
+      }
+      if (unit != 0x20) {
+        hasNonWhitespace = true;
+      }
+      if (colonIndex == -1 && unit == 0x3A) {
+        colonIndex = i;
+      }
+    }
+    if (!hasNonWhitespace || colonIndex <= 0) {
+      return false;
+    }
+    if (!_isAlphaChar(rawUri.codeUnitAt(0))) {
+      return false;
+    }
+    for (var i = 1; i < colonIndex; i++) {
+      if (!_isSchemeContinueChar(rawUri.codeUnitAt(i))) {
+        return false;
+      }
+    }
+    final scheme = rawUri.substring(0, colonIndex).toLowerCase();
+    if (scheme == 'javascript' || scheme == 'vbscript' || scheme == 'data') {
+      return false;
+    }
+    return true;
+  }
+
+  /// Trims and validates [rawTitle] and [rawUri], returning a [TaskLink] or `null` if invalid.
+  static TaskLink? tryParse({
+    required String rawTitle,
+    required String rawUri,
+    int maxTextLength = 500,
+  }) {
+    final trimmedTitle = rawTitle.trim();
+    final trimmedUri = rawUri.trim();
+    if (trimmedTitle.isEmpty || trimmedTitle.length > maxTextLength) {
+      return null;
+    }
+    if (!isValidUri(trimmedUri)) {
+      return null;
+    }
+    return TaskLink(title: trimmedTitle, uri: trimmedUri);
+  }
+
+  /// Counts decoded Unicode scalar values in [value], returning `null` if an unpaired UTF-16 surrogate is present.
+  static int? _countUnicodeScalars(String value) {
+    var count = 0;
+    var i = 0;
+    while (i < value.length) {
+      final unit = value.codeUnitAt(i);
+      if (unit >= 0xD800 && unit <= 0xDBFF) {
+        if (i + 1 >= value.length) return null;
+        final low = value.codeUnitAt(i + 1);
+        if (low < 0xDC00 || low > 0xDFFF) return null;
+        count++;
+        i += 2;
+      } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+        return null;
+      } else {
+        count++;
+        i++;
+      }
+    }
+    return count;
+  }
+
+  /// Checks whether [unit] is an ASCII letter (`[a-zA-Z]`).
+  static bool _isAlphaChar(int unit) {
+    return (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A);
+  }
+
+  /// Checks whether [unit] is a valid URI scheme continuation character (`[a-zA-Z0-9+.-]`).
+  static bool _isSchemeContinueChar(int unit) {
+    return _isAlphaChar(unit) ||
+        (unit >= 0x30 && unit <= 0x39) ||
+        unit == 0x2B ||
+        unit == 0x2D ||
+        unit == 0x2E;
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskLink && other.title == title && other.uri == uri;
+  }
+
+  @override
+  int get hashCode => Object.hash(title, uri);
+
+  @override
+  String toString() => 'link "$title" "$uri"';
+}
+
+/// Immutable representation of a TDF `label` root block (`TDF_SPEC.md` Section 4.2).
 @immutable
 class TdfLabel {
   /// Creates a [TdfLabel] definition.
@@ -655,7 +795,8 @@ class TdfLabel {
     this.color,
     this.note,
     this.modifiedAt,
-    this.conditions = const [],
+    this.links = const <TaskLink>[],
+    this.conditions = const <TaskCondition>[],
   });
 
   /// Fallback UTC modification timestamp (`1970-01-01 00:00:00` UTC) when a `label` block omits `modified` (`TDF_SPEC.md` Section 6.7.2).
@@ -673,6 +814,9 @@ class TdfLabel {
   /// Whether the label carries the `scoped` header flag (`label <id> scoped {`).
   final bool isScoped;
 
+  /// Reference links (`link "<title>" "<uri>"`, `0..20`) attached to this label.
+  final List<TaskLink> links;
+
   /// Optional UTC modification timestamp (`modified` directive).
   final DateTime? modifiedAt;
 
@@ -681,6 +825,22 @@ class TdfLabel {
 
   /// Optional extended description (`1..2000` characters).
   final String? note;
+
+  /// Number of direct child statements emitted inside this `label` block in canonical `0.7.0` form.
+  int get canonicalDirectChildStatementCount {
+    var count = 1;
+    if (color != null) count++;
+    if (note case final currentNote? when currentNote.isNotEmpty) {
+      count++;
+    }
+    if (modifiedAt case final currentModified?
+        when currentModified.toUtc() != defaultModifiedAt) {
+      count++;
+    }
+    count += links.length;
+    if (conditions.isNotEmpty) count++;
+    return count;
+  }
 
   /// Effective UTC modification timestamp (`modifiedAt ?? defaultModifiedAt`).
   DateTime get effectiveModifiedAt => modifiedAt ?? defaultModifiedAt;
@@ -696,7 +856,8 @@ class TdfLabel {
     bool clearNote = false,
     DateTime? modifiedAt,
     bool clearModifiedAt = false,
-    List<TaskCondition>? conditions,
+    Iterable<TaskLink>? links,
+    Iterable<TaskCondition>? conditions,
   }) {
     return TdfLabel(
       id: id ?? this.id,
@@ -705,8 +866,15 @@ class TdfLabel {
       color: clearColor ? null : (color ?? this.color),
       note: clearNote ? null : (note ?? this.note),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
+      links: links != null
+          ? (links.isEmpty
+                ? const <TaskLink>[]
+                : List<TaskLink>.unmodifiable(links))
+          : this.links,
       conditions: conditions != null
-          ? List<TaskCondition>.unmodifiable(conditions)
+          ? (conditions.isEmpty
+                ? const <TaskCondition>[]
+                : List<TaskCondition>.unmodifiable(conditions))
           : this.conditions,
     );
   }
@@ -721,6 +889,7 @@ class TdfLabel {
         other.color == color &&
         other.note == note &&
         other.modifiedAt == modifiedAt &&
+        listEquals(other.links, links) &&
         listEquals(other.conditions, conditions);
   }
 
@@ -732,6 +901,7 @@ class TdfLabel {
     color,
     note,
     modifiedAt,
+    Object.hashAll(links),
     Object.hashAll(conditions),
   );
 

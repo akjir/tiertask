@@ -16,7 +16,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../models/task_item.dart';
+import '../../models/tdf_metadata.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';

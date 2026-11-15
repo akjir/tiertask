@@ -1,0 +1,119 @@
+# Non-canonical ordering and formatting input for TDF 0.7.0
+tdf 0.7.0
+
+task 9zFull16Ok priority {
+    subtasks auto-finish {
+        step true  "Verify serial console output"
+        step false "Archive configuration snapshot"
+    }
+    condition {
+        location 7pQr9mOkD2
+        time 09:00 18:00
+        location 5473OnNDhL 7pQr9mOkD2
+    }
+    history     2026-10-29 16:40:05 "𐐀 supplementary scalar tie-break"
+    history     2026-10-29 16:40:05 "Ａ BMP fullwidth tie-break"
+    history     2026-10-29 "Date-only archive entry"
+    history     2026-10-29 16:40:05 '𐐀 supplementary scalar tie-break'
+    link        'Runbook' 'https://wiki.example.com/runbook'
+    origin      "https://jira.example.com" "OPS-16"
+    due         2026-10-30 17:00:00 passive 'Completed passive cutoff'
+    suspended   2026-10-25 08:00:00 "Historical deferral before completion"
+    blocked     3nQp7ROkB8:2 8jKaCdOkD2:1
+    labels      9kLm2P0aBc 4x9p2mOkD2
+    repeat      1 months 09:00 lead 5 days
+    completions 2
+    modified    2026-10-29 16:45:12
+    finished    2026-10-29 16:45
+    created     2026-10-20 14:00
+    note        "Exercises all 16 canonical task directive and sub-block positions"
+    name        "Complete quarterly homelab audit"
+}
+
+location 7pQr9mOkD2 {
+    radius      150.00
+    coordinates 50.978700 11.032800
+    modified    2026-11-01 08:00
+    source      "Erfurt, Germany"
+    note        "Main residence driveway and garden"
+    name        "Home"
+}
+
+location 5473OnNDhL {
+    name        "Warehouse"
+    coordinates -0.000000 13.405000
+    radius      75.50
+}
+
+label 9kLm2P0aBc scoped {
+    condition {
+        time 08:00 18:00
+        day  mon tue wed thu fri
+    }
+    link     "Proxmox Dashboard" "https://pve.lan.example.com:8006"
+    link     'Ansible Playbooks' 'file:///home/stefan/infra/ansible'
+    modified 2026-11-09 18:00
+    note     "Primary homelab and backup infrastructure"
+    color    "#2196F3"
+    name     "IT & Servers"
+}
+
+label 4x9p2mOkD2 {
+    name     "Home & Garden"
+    modified 2026-11-01 08:00
+    condition location 7pQr9mOkD2
+}
+
+task 8jKaCdOkD2 priority {
+    modified  2026-11-10 19:30
+    created   2026-11-01 19:30
+    name      "Mow the lawn"
+    note      "Check fuel level before starting"
+    repeat    2 weeks lead 3 days
+    due       2026-11-14 16:00:00 "Before weekend frost"
+    suspended forever 'Paused until dry weather'
+    origin    "https://jira.example.com" "HOME-99"
+    blocked   3nQp7ROkB8:1
+    labels    4x9p2mOkD2
+    history   2026-11-10 08:05:30 "Full clock check"
+    history   2026-11-10 08:05 "Short clock check"
+    history   2026-11-10 "Date only check"
+    history   2026-11-10 08:05:00 'Short clock check'
+    history   2026-11-10 09:00:00 "Escaped \"quote\" and \\ slash"
+    history   2026-11-10 09:00:00 'Escaped "quote" and \ slash'
+    condition {
+        location 7pQr9mOkD2
+        time 09:00 18:00
+        location 5473OnNDhL 7pQr9mOkD2
+    }
+    subtasks auto-finish {
+        step false "Get lawnmower from the shed"
+        step true  "Empty grass catcher bag"
+    }
+}
+
+task 3nQp7ROkB8 {
+    name      "Order replacement lawnmower blades online"
+    created   2026-11-01 18:00
+    modified  2026-11-10 14:20
+    labels    4x9p2mOkD2
+    due       2026-11-12 17:00 "Dealer shipping cutoff"
+    origin    "https://jira.example.com" "HOME-42"
+    link      "Portal Login" "https://example.com/portal#login"
+    history   2026-11-10 14:20:00 "Confirmed OEM stock with dealer"
+    history   2026-11-09 08:05:00 "Checked blade part number against mower manual"
+    condition any
+}
+
+queue {
+    modified 2026-11-10 19:30:00
+    task 8jKaCdOkD2
+    task 3nQp7ROkB8
+}
+
+deleted {
+    location 8tYp4M0eF3 2026-11-02 10:15:00
+    label 1rQv7S0cD2 2026-11-02 09:00:00
+    task 6uCk8N0aB1 2026-11-01 12:00:00 3
+    generation 4
+}

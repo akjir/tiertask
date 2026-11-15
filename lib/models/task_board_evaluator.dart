@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart';
 
 import '../services/app_logger.dart';
 import 'task_item.dart';
+import 'tdf_error.dart';
 import 'tdf_location.dart';
 import 'tdf_metadata.dart';
 import 'tdf_sync_metadata.dart';
@@ -101,6 +102,9 @@ class TaskBoardEvaluator {
   /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC.md` Section 6.8.
   static const int completedRetentionSeconds = 2592000;
 
+  /// Default dynamic due-date lead window (`24` hours) for automatic queue priority promotion.
+  static const Duration defaultDueLeadWindow = Duration(hours: 24);
+
   /// Soft WIP limit for Tier 1 (`Focus`).
   static const int focusSoftLimit = 3;
 
@@ -128,6 +132,7 @@ class TaskBoardEvaluator {
   static NormalizedTierSlices cleanupExpiredDeletions(
     NormalizedTierSlices board, {
     DateTime? currentDate,
+    Duration? dueLeadWindow = defaultDueLeadWindow,
   }) {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
@@ -189,16 +194,79 @@ class TaskBoardEvaluator {
       tasks: updatedTasks,
       deletedBlock: nextDeletedBlock,
       now: now,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     );
   }
 
-  /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC_0.6.0.md` Section 5.
+  /// Strips expired finite `suspended` directives (`<= nowUtc`) and resolved non-recurring-to-recurring or tombstoned `blocked`
+  /// entries across open tasks in [tasks], advancing `modifiedAt` once per newly cleaned bystander task (`TDF_SPEC.md` Section 5.4).
+  static ({
+    List<TaskItem> tasks,
+    int cleanedSuspendedCount,
+    int cleanedBlockedCount,
+  })
+  cleanupResolvedTaskBlocks({
+    required Iterable<TaskItem> tasks,
+    required TdfDeletedBlock deleted,
+    required DateTime nowUtc,
+    Set<String> alreadyStampedTaskIds = const <String>{},
+  }) {
+    final normalizedNow = TaskItem.normalizeTimestamp(nowUtc);
+    if (!TdfCalendar.isWithinTimestampBounds(normalizedNow)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Block cleanup timestamp is outside 0001..9999 UTC.',
+      );
+    }
+    final taskList = List<TaskItem>.from(tasks);
+    final liveTasksById = <String, TaskItem>{
+      for (final task in taskList) task.id: task,
+    };
+    final deletedTaskIds = <String>{
+      for (final record in deleted.tasks) record.taskId,
+    };
+    final cleanedTasks = <TaskItem>[];
+    var cleanedSuspendedCount = 0;
+    var cleanedBlockedCount = 0;
+    for (final task in taskList) {
+      final step = _cleanupSingleTaskBlocks(
+        task: task,
+        liveTasksById: liveTasksById,
+        deletedTaskIds: deletedTaskIds,
+        normalizedNow: normalizedNow,
+        alreadyStampedTaskIds: alreadyStampedTaskIds,
+      );
+      cleanedTasks.add(step.task);
+      if (step.cleanedSuspended) cleanedSuspendedCount++;
+      cleanedBlockedCount += step.removedBlockedCount;
+    }
+    if (cleanedSuspendedCount > 0 || cleanedBlockedCount > 0) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.domain,
+        'eval.block_cleanup',
+        fields: <String, Object?>{
+          'cleanedSuspended': cleanedSuspendedCount,
+          'cleanedBlocked': cleanedBlockedCount,
+        },
+      );
+    }
+    return (
+      tasks: cleanedTasks,
+      cleanedSuspendedCount: cleanedSuspendedCount,
+      cleanedBlockedCount: cleanedBlockedCount,
+    );
+  }
+
+  /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC.md` Section 5.
   static NormalizedTierSlices evaluate({
     required Iterable<TaskItem> tasks,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = defaultDueLeadWindow,
     List<TdfLabel> labels = const [],
     List<TdfLocation> locations = const [],
     TdfDeletedBlock? deletedBlock,
@@ -286,6 +354,8 @@ class TaskBoardEvaluator {
     final orderedEligible = _orderEligibleByQueue(
       eligibleById,
       resolvedQueueBlock.taskIds,
+      nowUtc: now,
+      dueLeadWindow: dueLeadWindow,
     );
     const readyEnd = focusSoftLimit + readySoftLimit;
 
@@ -377,6 +447,43 @@ class TaskBoardEvaluator {
       if (!label.isScoped) return false;
     }
     return hasDeclaredLabel;
+  }
+
+  /// Purely strips expired finite `suspended` (`<= nowUtc`, including `suspendedNote`) and resolved `blocked` entries on an open [task]
+  /// without advancing `modifiedAt`, for dirty-write comparison and block-cleanup helpers.
+  static TaskItem normalizeOpenTaskForBlockCleanupComparison({
+    required TaskItem task,
+    required Map<String, TaskItem> liveTasksById,
+    required Set<String> deletedTaskIds,
+    required DateTime nowUtc,
+  }) {
+    if (task.isCompleted || task.completedAt != null) {
+      return task;
+    }
+    final normalizedNow = TaskItem.normalizeTimestamp(nowUtc);
+    var clearExpiredSuspended = false;
+    if (!task.isSuspendedForever) {
+      if (task.suspendedAt case final suspended?
+          when !suspended.isAfter(normalizedNow)) {
+        clearExpiredSuspended = true;
+      }
+    }
+    final retainedDependencies = _filterUnresolvedDependencies(
+      task,
+      liveTasksById,
+      deletedTaskIds,
+    );
+    if (!clearExpiredSuspended && retainedDependencies == null) {
+      return task;
+    }
+    return task.copyWith(
+      clearSuspendedAt: clearExpiredSuspended,
+      clearSuspendedNote: clearExpiredSuspended,
+      blockedByTaskIds: retainedDependencies != null
+          ? <String>[for (final dep in retainedDependencies) dep.taskId]
+          : null,
+      dependencies: retainedDependencies,
+    );
   }
 
   /// Normalizes all 6 tier slices so their TDF directives match their tier placement.
@@ -535,12 +642,14 @@ class TaskBoardEvaluator {
     required DateTime now,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = defaultDueLeadWindow,
     bool pruneExpiredCompleted = true,
   }) => evaluate(
     tasks: tasks ?? board.allTasks,
     evaluationTime: now,
     localEvaluationTime: resolveLocalEvaluationTime(now, localEvaluationTime),
     timeZone: timeZone,
+    dueLeadWindow: dueLeadWindow,
     labels: labels ?? board.labels,
     locations: locations ?? board.locations,
     deletedBlock: deletedBlock ?? board.deletedBlock,
@@ -654,6 +763,46 @@ class TaskBoardEvaluator {
       }
     }
     return false;
+  }
+
+  /// Cleans expired finite `suspended` and resolved `blocked` directives on a single [task] at [normalizedNow].
+  static ({TaskItem task, bool cleanedSuspended, int removedBlockedCount})
+  _cleanupSingleTaskBlocks({
+    required TaskItem task,
+    required Map<String, TaskItem> liveTasksById,
+    required Set<String> deletedTaskIds,
+    required DateTime normalizedNow,
+    required Set<String> alreadyStampedTaskIds,
+  }) {
+    final normalizedTask = normalizeOpenTaskForBlockCleanupComparison(
+      task: task,
+      liveTasksById: liveTasksById,
+      deletedTaskIds: deletedTaskIds,
+      nowUtc: normalizedNow,
+    );
+    if (identical(normalizedTask, task)) {
+      return (task: task, cleanedSuspended: false, removedBlockedCount: 0);
+    }
+    final cleanedSuspended =
+        task.suspendedAt != null && normalizedTask.suspendedAt == null;
+    final removedBlockedCount =
+        task.dependencies.length - normalizedTask.dependencies.length;
+    if (alreadyStampedTaskIds.contains(task.id)) {
+      return (
+        task: normalizedTask,
+        cleanedSuspended: cleanedSuspended,
+        removedBlockedCount: removedBlockedCount,
+      );
+    }
+    final nextModified = _nextBlockCleanupModifiedAt(
+      normalizedNow,
+      task.effectiveModifiedAt,
+    );
+    return (
+      task: normalizedTask.copyWith(modifiedAt: nextModified),
+      cleanedSuspended: cleanedSuspended,
+      removedBlockedCount: removedBlockedCount,
+    );
   }
 
   /// Collects all location IDs referenced by [LocationTaskCondition] rules inside [rules].
@@ -793,9 +942,33 @@ class TaskBoardEvaluator {
     return true;
   }
 
+  /// Filters out resolved or tombstoned dependencies from [task], returning `null` if no entry was removed.
+  static List<TdfTaskDependency>? _filterUnresolvedDependencies(
+    TaskItem task,
+    Map<String, TaskItem> liveTasksById,
+    Set<String> deletedTaskIds,
+  ) {
+    if (task.dependencies.isEmpty) return null;
+    var removedAny = false;
+    final retained = <TdfTaskDependency>[];
+    for (final dependency in task.dependencies) {
+      if (_shouldStripDependencyOnCleanup(
+        task: task,
+        dependency: dependency,
+        liveTasksById: liveTasksById,
+        deletedTaskIds: deletedTaskIds,
+      )) {
+        removedAny = true;
+      } else {
+        retained.add(dependency);
+      }
+    }
+    return removedAny ? retained : null;
+  }
+
   /// Checks whether [task] has an active deferral (`suspended forever` or `suspendedAt > nowUtc`).
   static bool _hasActiveDeferral(TaskItem task, DateTime nowUtc) =>
-      task.isSuspendedForever || (task.suspendedAt?.isAfter(nowUtc) ?? false);
+      task.hasActiveSuspendedAt(nowUtc);
 
   /// Increments [counts] for each label ID in [labelIds].
   static void _incrementLabelCountsForTask(
@@ -945,6 +1118,9 @@ class TaskBoardEvaluator {
       'blockTask' => 'task.block',
       'moveTaskInQueue' => 'task.move_queue',
       'toggleSubtask' => 'task.toggle_subtask',
+      'addTaskHistoryEntry' => 'task.history_add',
+      'updateTaskHistoryEntry' => 'task.history_update',
+      'removeTaskHistoryEntry' => 'task.history_remove',
       'addLabel' => 'label.add',
       'updateLabel' => 'label.update',
       'deleteLabel' => 'label.delete',
@@ -955,6 +1131,26 @@ class TaskBoardEvaluator {
     };
   }
 
+  /// Advances `modifiedAt` once for block cleanup at [normalizedNow], throwing [TdfException] on `9999` overflow.
+  static DateTime _nextBlockCleanupModifiedAt(
+    DateTime normalizedNow,
+    DateTime previousEffectiveModifiedAt,
+  ) {
+    try {
+      return TaskItem.nextModifiedTimestamp(
+        normalizedNow,
+        previousEffectiveModifiedAt,
+      );
+    } on FormatException {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message:
+            'Block cleanup modified timestamp exceeds 9999-12-31 23:59:59 UTC.',
+      );
+    }
+  }
+
   /// Normalizes open tasks in [slice] so `isCompleted` and `completedAt` are cleared.
   static List<TaskItem> _normalizeOpenSlice(List<TaskItem> slice) => [
     for (final task in slice)
@@ -963,26 +1159,54 @@ class TaskBoardEvaluator {
           : task,
   ];
 
-  /// Orders eligible tasks by traversing [queueTaskIds] in saved order and grouping `priority` before regular per `TDF_SPEC.md` Section 5.5.
+  /// Orders eligible tasks by traversing [queueTaskIds] in saved order and grouping effective priority (`priority` or non-passive `due` within [dueLeadWindow]) before regular tasks per `TDF_SPEC.md` Section 5.6.
   static List<TaskItem> _orderEligibleByQueue(
     Map<String, TaskItem> eligibleById,
-    List<String> queueTaskIds,
-  ) {
+    List<String> queueTaskIds, {
+    required DateTime nowUtc,
+    required Duration? dueLeadWindow,
+  }) {
     if (eligibleById.isEmpty) return const <TaskItem>[];
     final priorityGroup = <TaskItem>[];
     final regularGroup = <TaskItem>[];
     final visited = <String>{};
     for (final taskId in queueTaskIds) {
       if (eligibleById[taskId] case final task? when visited.add(taskId)) {
-        (task.isPriority ? priorityGroup : regularGroup).add(task);
+        final isUrgent =
+            task.isPriority ||
+            task.isWithinDueLeadWindow(nowUtc, dueLeadWindow);
+        (isUrgent ? priorityGroup : regularGroup).add(task);
       }
     }
     for (final task in eligibleById.values) {
       if (visited.add(task.id)) {
-        (task.isPriority ? priorityGroup : regularGroup).add(task);
+        final isUrgent =
+            task.isPriority ||
+            task.isWithinDueLeadWindow(nowUtc, dueLeadWindow);
+        (isUrgent ? priorityGroup : regularGroup).add(task);
       }
     }
     return <TaskItem>[...priorityGroup, ...regularGroup];
+  }
+
+  /// Returns whether [dependency] on open [task] should be stripped during Section 5.4 block cleanup.
+  static bool _shouldStripDependencyOnCleanup({
+    required TaskItem task,
+    required TdfTaskDependency dependency,
+    required Map<String, TaskItem> liveTasksById,
+    required Set<String> deletedTaskIds,
+  }) {
+    if (deletedTaskIds.contains(dependency.taskId)) {
+      return true;
+    }
+    final liveTarget = liveTasksById[dependency.taskId];
+    if (liveTarget == null) {
+      return false;
+    }
+    if (liveTarget.completions < dependency.requiredCompletion) {
+      return false;
+    }
+    return task.repeatRule == null || liveTarget.repeatRule == null;
   }
 
   /// Strips prerequisite dependencies in [task] targeting any ID in [expiredTaskIds] and advances `modifiedAt` when changed per Section 6.8.3.

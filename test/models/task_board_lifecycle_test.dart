@@ -17,6 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_service.dart';
@@ -640,6 +642,7 @@ task manualOkD2 {
           count: 1,
           unit: RepeatUnit.weeks,
           clock: TdfRepeatClock(hour: 9, minute: 0),
+          leadDays: 2,
         ),
       );
 
@@ -698,6 +701,180 @@ task manualOkD2 {
         rescheduled.suspendedAt,
         equals(DateTime.utc(2026, 4, 2, 7, 0)),
         reason: 'Section 6.4 & 6.10.3: Mode 2 must preserve 2-day local calendar lead window to 2026-04-02 09:00 CEST (07:00 UTC)',
+      );
+    });
+  });
+
+  group('TDF 0.7.0 Lifecycle Rules: Completion, Mode 2 Lead Omission, Restore & Dependent Cleanup', () {
+    test('completes standard and Mode 2 recurring tasks with leadDays, omits already-elapsed newSuspendedUtc, cleans open dependents, and clears due/suspended notes on restore', () {
+      final now = DateTime.utc(2026, 11, 5, 14, 0, 0);
+      final prereq = TaskItem(
+        id: 'stdPrereq1',
+        title: 'Standard Prereq With Passive Due And History',
+        createdAt: now.subtract(const Duration(days: 2)),
+        modifiedAt: now.subtract(const Duration(days: 1)),
+        dueAt: now.add(const Duration(hours: 4)),
+        isDuePassive: true,
+        dueNote: 'Regulatory filing deadline',
+        origin: const TaskOrigin(namespace: 'ext', externalKey: '42'),
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: now.subtract(const Duration(days: 1)),
+            text: 'Draft prepared',
+          ),
+        ],
+      );
+      final openDependent = TaskItem(
+        id: 'openDep001',
+        title: 'Open Dependent Unblocked When Prereq Completes',
+        createdAt: now.subtract(const Duration(days: 2)),
+        modifiedAt: now.subtract(const Duration(days: 1)),
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'stdPrereq1', requiredCompletion: 1),
+        ],
+      );
+      // Mode 2 recurring task whose next due is tomorrow 18:00 UTC, with leadDays: 2 -> newSuspendedUtc is yesterday 09:00 UTC <= now!
+      final mode2ActiveImmediately = TaskItem(
+        id: 'recImmed01',
+        title: 'Mode 2 Recurring Task Entering Active Lead Window Immediately',
+        createdAt: now.subtract(const Duration(days: 10)),
+        modifiedAt: now.subtract(const Duration(days: 1)),
+        suspendedAt: now.subtract(const Duration(days: 2)),
+        suspendedNote: 'One-off deferral note cleared on cycle',
+        dueAt: DateTime.utc(2026, 11, 5, 18, 0, 0),
+        isDuePassive: true,
+        dueNote: 'Recurring SLA note preserved across cycle',
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.days,
+          clock: TdfRepeatClock(hour: 9, minute: 0),
+          leadDays: 2,
+        ),
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: now.subtract(const Duration(days: 3)),
+            text: 'Previous cycle note',
+          ),
+        ],
+      );
+
+      var board = TaskBoard.evaluate(
+        tasks: <TaskItem>[prereq, openDependent, mode2ActiveImmediately],
+        evaluationTime: now,
+        timeZone: TdfTimeZoneContext.utc,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now.subtract(const Duration(days: 1)),
+          taskIds: const <String>['stdPrereq1', 'openDep001', 'recImmed01'],
+        ),
+      );
+      expect(board.blocked.map((t) => t.id), contains('openDep001'));
+
+      // Complete standard prerequisite -> openDep001 has its satisfied non-recurring blocked directive stripped immediately!
+      board = board.completeTask(
+        'stdPrereq1',
+        currentDate: now,
+        timeZone: TdfTimeZoneContext.utc,
+      );
+      final donePrereq = board.findTask('stdPrereq1')!;
+      expect(donePrereq.isCompleted, isTrue);
+      expect(donePrereq.dueAt, equals(prereq.dueAt));
+      expect(donePrereq.isDuePassive, isTrue);
+      expect(donePrereq.dueNote, equals('Regulatory filing deadline'));
+      expect(donePrereq.history.length, equals(1));
+      expect(
+        board.findTask('openDep001')!.dependencies,
+        isEmpty,
+        reason: 'Completing a non-recurring prerequisite must immediately strip resolved blocked directives on open dependents',
+      );
+      expect(board.focus.map((t) => t.id), contains('openDep001'));
+
+      // Complete Mode 2 task -> newDue is 2026-11-06 18:00 UTC, newSuspended is 2026-11-04 09:00 UTC <= now, so suspendedAt is omitted (null)!
+      board = board.completeTask(
+        'recImmed01',
+        currentDate: now,
+        timeZone: TdfTimeZoneContext.utc,
+      );
+      final cycled = board.findTask('recImmed01')!;
+      expect(cycled.isCompleted, isFalse);
+      expect(cycled.completions, equals(1));
+      expect(cycled.dueAt, equals(DateTime.utc(2026, 11, 6, 18, 0, 0)));
+      expect(
+        cycled.suspendedAt,
+        isNull,
+        reason: 'Section 6.4 Mode 2: when newSuspendedUtc <= now, suspended must be omitted so the task enters active tiers immediately',
+      );
+      expect(cycled.suspendedNote, isNull);
+      expect(
+        cycled.isDuePassive,
+        isFalse,
+        reason: 'Section 6.4 Mode 2: advancing to a new cycle due date must reset isDuePassive to false',
+      );
+      expect(
+        cycled.dueNote,
+        equals('Recurring SLA note preserved across cycle'),
+      );
+      expect(cycled.history.length, equals(1));
+      expect(board.focus.map((t) => t.id), contains('recImmed01'));
+
+      // Restore completed task -> clears finished, dueAt, isDuePassive, dueNote, suspended, suspendedNote while preserving history & origin:
+      board = board.restoreTask(
+        'stdPrereq1',
+        targetTier: TaskTier.planned,
+        currentDate: now.add(const Duration(minutes: 5)),
+      );
+      final restored = board.findTask('stdPrereq1')!;
+      expect(restored.isCompleted, isFalse);
+      expect(restored.completedAt, isNull);
+      expect(restored.dueAt, isNull);
+      expect(restored.isDuePassive, isFalse);
+      expect(restored.dueNote, isNull);
+      expect(restored.suspendedAt, isNull);
+      expect(restored.suspendedNote, isNull);
+      expect(restored.origin, equals(prereq.origin));
+      expect(restored.history.length, equals(1));
+
+      // Full-capacity canonical task (500 history + 20 links + all scalars + condition + subtasks) completes cleanly under 1024 limit:
+      final maxTask = TaskItem(
+        id: 'maxCapOpen',
+        title: 'Full Capacity Open Task',
+        note: 'Body note',
+        createdAt: now,
+        modifiedAt: now,
+        completions: 1,
+        labelIds: const <String>['lblWork001'],
+        suspendedAt: now.add(const Duration(hours: 1)),
+        suspendedNote: 'Susp note',
+        dueAt: now.add(const Duration(hours: 5)),
+        isDuePassive: true,
+        dueNote: 'Due note',
+        origin: const TaskOrigin(namespace: 'ns', externalKey: 'k'),
+        links: <TaskLink>[
+          for (var i = 0; i < TaskLink.maxLinksPerTask; i++)
+            TaskLink(title: 'L$i', uri: 'https://example.com/$i'),
+        ],
+        history: <TaskHistoryEntry>[
+          for (var i = 0; i < maxTdfHistoryPerTask; i++)
+            TaskHistoryEntry(
+              timestampUtc: now.add(Duration(seconds: i)),
+              text: 'H$i',
+            ),
+        ],
+        conditions: const <TaskCondition>[GlobalResetTaskCondition()],
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Step')],
+      );
+      final maxBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[maxTask],
+        labels: const <TdfLabel>[TdfLabel(id: 'lblWork001', name: 'Work')],
+        evaluationTime: now,
+      );
+      final completedMaxBoard = maxBoard.completeTask(
+        'maxCapOpen',
+        currentDate: now.add(const Duration(minutes: 10)),
+      );
+      expect(completedMaxBoard.findTask('maxCapOpen')!.isCompleted, isTrue);
+      expect(
+        completedMaxBoard.findTask('maxCapOpen')!.history.length,
+        equals(500),
       );
     });
   });

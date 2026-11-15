@@ -30,6 +30,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/app_theme.dart';
 
 /// Fake [LocalFileRepository] returning an in-memory `.tdf` document for widget tests.
@@ -159,7 +160,7 @@ class FakeWebDavRepository extends WebDavRepository {
           }
         }
       }
-      store[path] = 'tdf 0.6.0\n';
+      store[path] = 'tdf ${TdfService.supportedVersion}\n';
     }
   }
 }
@@ -196,8 +197,10 @@ Future<ProviderContainer> pumpLeafWidget(
         InMemorySettingsRepository(config),
       ),
       localFileRepositoryProvider.overrideWith(
-        (ref) =>
-            FakeLocalFileRepository(config: config, initialTdf: 'tdf 0.6.0\n'),
+        (ref) => FakeLocalFileRepository(
+          config: config,
+          initialTdf: 'tdf ${TdfService.supportedVersion}\n',
+        ),
       ),
       webDavRepositoryProvider.overrideWith(
         (ref) => FakeWebDavRepository(config: config, shouldFail: () => false),

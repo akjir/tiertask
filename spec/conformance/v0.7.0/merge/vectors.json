@@ -1,0 +1,742 @@
+{
+  "version": "0.7.0",
+  "invariant": "merge(B, L, R) == merge(B, R, L) for all vectors",
+  "vectors": [
+    {
+      "id": "merge_01_history_occurrence_independent_set_merge",
+      "section": "6.7.5 & 6.9.5",
+      "description": "Reconciles task history as an occurrence-independent (timestampUtc, text) set across both Case 1 (diverging completions) and Case 2 (same-occurrence edits) symmetrically.",
+      "now": "2026-11-14T12:00:00Z",
+      "case1_diverging_completions": {
+        "baseline": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-10T09:00:00Z",
+          "completions": 1,
+          "finished": null,
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": "09:00",
+            "leadDays": 0
+          },
+          "suspended": null,
+          "history": [
+            {
+              "timestamp": "2026-11-08T10:00:00Z",
+              "text": "Cycle 1 reading: 14100 kWh"
+            },
+            {
+              "timestamp": "2026-11-09T11:00:00Z",
+              "text": "Typo entry"
+            }
+          ]
+        },
+        "left": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:00:00Z",
+          "completions": 2,
+          "finished": null,
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": "09:00",
+            "leadDays": 0
+          },
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-21T08:00:00Z",
+            "note": null
+          },
+          "history": [
+            {
+              "timestamp": "2026-11-08T10:00:00Z",
+              "text": "Cycle 1 reading: 14100 kWh"
+            },
+            {
+              "timestamp": "2026-11-09T11:00:00Z",
+              "text": "Typo entry"
+            },
+            {
+              "timestamp": "2026-11-14T09:59:00Z",
+              "text": "Cycle 2 reading: 14280 kWh"
+            }
+          ]
+        },
+        "right": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:05:00Z",
+          "completions": 1,
+          "finished": null,
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": "09:00",
+            "leadDays": 0
+          },
+          "suspended": null,
+          "history": [
+            {
+              "timestamp": "2026-11-08T10:00:00Z",
+              "text": "Cycle 1 reading: 14100 kWh"
+            },
+            {
+              "timestamp": "2026-11-09T11:00:00Z",
+              "text": "Corrected entry"
+            },
+            {
+              "timestamp": "2026-11-14T10:05:00Z",
+              "text": "Called technician"
+            }
+          ]
+        },
+        "expected": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:05:01Z",
+          "completions": 2,
+          "finished": null,
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": "09:00",
+            "leadDays": 0
+          },
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-21T08:00:00Z",
+            "note": null
+          },
+          "history": [
+            {
+              "timestamp": "2026-11-08T10:00:00Z",
+              "text": "Cycle 1 reading: 14100 kWh"
+            },
+            {
+              "timestamp": "2026-11-09T11:00:00Z",
+              "text": "Corrected entry"
+            },
+            {
+              "timestamp": "2026-11-14T09:59:00Z",
+              "text": "Cycle 2 reading: 14280 kWh"
+            },
+            {
+              "timestamp": "2026-11-14T10:05:00Z",
+              "text": "Called technician"
+            }
+          ]
+        }
+      },
+      "case2_same_occurrence": {
+        "baseline": {
+          "id": "3nQp7ROkB8",
+          "modified": "2026-11-14T08:00:00Z",
+          "completions": 0,
+          "priority": false,
+          "history": [
+            {
+              "timestamp": "2026-11-10T08:00:00Z",
+              "text": "Opened ticket"
+            },
+            {
+              "timestamp": "2026-11-11T09:00:00Z",
+              "text": "Draft note"
+            }
+          ]
+        },
+        "left": {
+          "id": "3nQp7ROkB8",
+          "modified": "2026-11-14T09:00:00Z",
+          "completions": 0,
+          "priority": true,
+          "history": [
+            {
+              "timestamp": "2026-11-10T08:00:00Z",
+              "text": "Opened ticket"
+            },
+            {
+              "timestamp": "2026-11-14T09:00:00Z",
+              "text": "Sent logs"
+            }
+          ]
+        },
+        "right": {
+          "id": "3nQp7ROkB8",
+          "modified": "2026-11-14T09:10:00Z",
+          "completions": 0,
+          "priority": false,
+          "history": [
+            {
+              "timestamp": "2026-11-10T08:00:00Z",
+              "text": "Opened ticket"
+            },
+            {
+              "timestamp": "2026-11-11T09:00:00Z",
+              "text": "Draft note"
+            },
+            {
+              "timestamp": "2026-11-14T09:10:00Z",
+              "text": "Vendor acknowledged"
+            }
+          ]
+        },
+        "expected": {
+          "id": "3nQp7ROkB8",
+          "modified": "2026-11-14T09:10:01Z",
+          "completions": 0,
+          "priority": true,
+          "history": [
+            {
+              "timestamp": "2026-11-10T08:00:00Z",
+              "text": "Opened ticket"
+            },
+            {
+              "timestamp": "2026-11-14T09:00:00Z",
+              "text": "Sent logs"
+            },
+            {
+              "timestamp": "2026-11-14T09:10:00Z",
+              "text": "Vendor acknowledged"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "merge_02_history_baseline_free_two_way_union",
+      "section": "6.7.5 & 6.7.6",
+      "description": "When task T is absent from baseline B and present in both L and R, reconciles T_M.history via canonicalSort(T_L.history U T_R.history) and advances modified when T_M differs from winner W.",
+      "now": "2026-11-14T12:00:00Z",
+      "baseline": null,
+      "left": {
+        "id": "3nQp7ROkB8",
+        "modified": "2026-11-14T10:00:00Z",
+        "history": [
+          {
+            "timestamp": "2026-11-14T09:00:00Z",
+            "text": "Shared entry"
+          },
+          {
+            "timestamp": "2026-11-14T10:00:00Z",
+            "text": "Left-only entry"
+          }
+        ]
+      },
+      "right": {
+        "id": "3nQp7ROkB8",
+        "modified": "2026-11-14T10:05:00Z",
+        "history": [
+          {
+            "timestamp": "2026-11-14T09:00:00Z",
+            "text": "Shared entry"
+          },
+          {
+            "timestamp": "2026-11-14T10:05:00Z",
+            "text": "Right-only entry"
+          }
+        ]
+      },
+      "expected": {
+        "id": "3nQp7ROkB8",
+        "modified": "2026-11-14T10:05:01Z",
+        "history": [
+          {
+            "timestamp": "2026-11-14T09:00:00Z",
+            "text": "Shared entry"
+          },
+          {
+            "timestamp": "2026-11-14T10:00:00Z",
+            "text": "Left-only entry"
+          },
+          {
+            "timestamp": "2026-11-14T10:05:00Z",
+            "text": "Right-only entry"
+          }
+        ]
+      }
+    },
+    {
+      "id": "merge_03_history_post_merge_limit_exceeded",
+      "section": "6.7.7 & 7",
+      "description": "Post-merge validation rejects |T_M.history| = 501 (> MAX_HISTORY_PER_TASK = 500) with LimitExceeded without silent truncation.",
+      "now": "2026-11-14T12:00:00Z",
+      "taskId": "3nQp7ROkB8",
+      "baselineHistoryCount": 0,
+      "leftAddedDistinctCount": 251,
+      "leftTimestampPrefix": "2026-11-01",
+      "rightAddedDistinctCount": 250,
+      "rightTimestampPrefix": "2026-11-02",
+      "mergedHistoryCount": 501,
+      "expectedError": "LimitExceeded"
+    },
+    {
+      "id": "merge_04_deletion_conflict_history_edit_vs_block_cleanup_hygiene",
+      "section": "6.8.2",
+      "description": "Editing history against an opposing task deletion triggers DeletionConflict, whereas automatic cleanup of expired suspended <= now and resolved blocked prerequisites does not trigger a false DeletionConflict.",
+      "now": "2026-11-14T12:00:01Z",
+      "cases": [
+        {
+          "name": "history_edit_vs_opposing_deletion_triggers_conflict",
+          "taskId": "3nQp7ROkB8",
+          "baseline": {
+            "modified": "2026-11-14T08:00:00Z",
+            "history": []
+          },
+          "left": {
+            "modified": "2026-11-14T10:00:00Z",
+            "history": [
+              {
+                "timestamp": "2026-11-14T10:00:00Z",
+                "text": "Added status update"
+              }
+            ]
+          },
+          "rightDeletedAt": "2026-11-14T10:05:00Z",
+          "expectedOutcome": "DeletionConflict",
+          "conflictTaskIds": [
+            "3nQp7ROkB8"
+          ]
+        },
+        {
+          "name": "automatic_block_cleanup_only_vs_opposing_deletion_succeeds_cleanly",
+          "prerequisiteTask": {
+            "id": "5vWx9ZOk91",
+            "repeat": null,
+            "baselineCompletions": 0,
+            "leftCompletions": 1,
+            "leftFinished": "2026-11-14T11:50:00Z"
+          },
+          "taskId": "3nQp7ROkB8",
+          "baseline": {
+            "modified": "2026-11-14T08:00:00Z",
+            "suspended": {
+              "forever": false,
+              "timestamp": "2026-11-14T12:00:00Z",
+              "note": "Wait until noon"
+            },
+            "blocked": {
+              "5vWx9ZOk91": 1
+            },
+            "history": []
+          },
+          "left": {
+            "modified": "2026-11-14T12:00:01Z",
+            "suspended": null,
+            "blocked": {},
+            "history": []
+          },
+          "rightDeletedAt": "2026-11-14T11:55:00Z",
+          "expectedOutcome": "CleanDeletion",
+          "deletedTaskIds": [
+            "3nQp7ROkB8"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "merge_05_label_links_atomic_list_merge",
+      "section": "6.7.3 & 6.7.5",
+      "description": "Merges a label's complete ordered link list as a single atomic unit alongside independent label scalar fields.",
+      "now": "2026-11-10T12:00:00Z",
+      "baseline": {
+        "id": "9kLm2P0aBc",
+        "scoped": true,
+        "name": "IT & Servers",
+        "color": "#2196F3",
+        "modified": "2026-11-10T08:00:00Z",
+        "links": [
+          {
+            "title": "Legacy Wiki",
+            "uri": "https://wiki.example.com"
+          }
+        ]
+      },
+      "left": {
+        "id": "9kLm2P0aBc",
+        "scoped": true,
+        "name": "IT & Servers",
+        "color": "#4CAF50",
+        "modified": "2026-11-10T08:05:00Z",
+        "links": [
+          {
+            "title": "Legacy Wiki",
+            "uri": "https://wiki.example.com"
+          }
+        ]
+      },
+      "right": {
+        "id": "9kLm2P0aBc",
+        "scoped": true,
+        "name": "IT & Servers",
+        "color": "#2196F3",
+        "modified": "2026-11-10T08:08:00Z",
+        "links": [
+          {
+            "title": "Proxmox",
+            "uri": "https://pve.lan.example.com:8006"
+          },
+          {
+            "title": "Playbooks",
+            "uri": "file:///srv/ansible"
+          }
+        ]
+      },
+      "expected": {
+        "id": "9kLm2P0aBc",
+        "scoped": true,
+        "name": "IT & Servers",
+        "color": "#4CAF50",
+        "modified": "2026-11-10T08:08:01Z",
+        "links": [
+          {
+            "title": "Proxmox",
+            "uri": "https://pve.lan.example.com:8006"
+          },
+          {
+            "title": "Playbooks",
+            "uri": "file:///srv/ansible"
+          }
+        ]
+      }
+    },
+    {
+      "id": "merge_06_case2_suspended_expiry_prenormalization_and_coupled_tuples",
+      "section": "6.7.5 & 6.7.6",
+      "description": "Pre-normalizes finite V.suspended <= now to absent across B, L, and R in Case 2 so an offline expiry cleanup on L never overwrites a concurrent future deferral extension on R, and merges (dueAt, isDuePassive, dueNote) atomically without resurrecting expired deferrals.",
+      "now": "2026-11-11T12:05:00Z",
+      "subcaseA_expired_cleanup_vs_future_extension": {
+        "baseline": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T09:00:00Z",
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-11T12:00:00Z",
+            "note": "Wait for noon callback"
+          }
+        },
+        "left": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:00:01Z",
+          "suspended": null
+        },
+        "right": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T11:30:00Z",
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-12T09:00:00Z",
+            "note": "Rescheduled to Thursday morning"
+          }
+        },
+        "expected": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:05:00Z",
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-12T09:00:00Z",
+            "note": "Rescheduled to Thursday morning"
+          }
+        }
+      },
+      "subcaseB_expired_cleanup_vs_atomic_due_edit_no_resurrection": {
+        "baseline": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T09:00:00Z",
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-11T12:00:00Z",
+            "note": "Wait for noon callback"
+          },
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": false,
+            "note": "Initial cutoff"
+          }
+        },
+        "left": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:00:01Z",
+          "suspended": null,
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": false,
+            "note": "Initial cutoff"
+          }
+        },
+        "right": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:02:00Z",
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-11T12:00:00Z",
+            "note": "Wait for noon callback"
+          },
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": true,
+            "note": "Soft cutoff"
+          }
+        },
+        "expected": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:02:01Z",
+          "suspended": null,
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": true,
+            "note": "Soft cutoff"
+          }
+        }
+      },
+      "subcaseC_both_sides_carry_expired_suspended_cleaned_at_now": {
+        "baseline": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T09:00:00Z",
+          "priority": false,
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-11T12:00:00Z",
+            "note": "Wait for noon callback"
+          },
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": false,
+            "note": "Initial cutoff"
+          }
+        },
+        "left": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T11:50:00Z",
+          "priority": true,
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-11T12:00:00Z",
+            "note": "Wait for noon callback"
+          },
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": false,
+            "note": "Initial cutoff"
+          }
+        },
+        "right": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:02:00Z",
+          "priority": false,
+          "suspended": {
+            "forever": false,
+            "timestamp": "2026-11-11T12:00:30Z",
+            "note": "Briefly snoozed before expiry"
+          },
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": true,
+            "note": "Soft cutoff"
+          }
+        },
+        "expected": {
+          "id": "2pQr8vLmN4",
+          "modified": "2026-11-11T12:05:00Z",
+          "priority": true,
+          "suspended": null,
+          "due": {
+            "timestamp": "2026-11-13T17:00:00Z",
+            "passive": true,
+            "note": "Soft cutoff"
+          }
+        }
+      }
+    },
+    {
+      "id": "merge_07_case2_v_repeat_aware_blocked_prenormalization",
+      "section": "6.7.5 & 6.7.8",
+      "description": "Pre-normalizes Case 2 blocked maps using each variant's V.repeat against (mergedTasksById, mergedDeletedTasks) before per-target three-way reconciliation, then applies post-merge cleanup using merged D_M.repeat.",
+      "now": "2026-11-14T12:10:00Z",
+      "subcase1_concurrent_threshold_raise_preserved": {
+        "prerequisite": {
+          "id": "3nQp7ROkB8",
+          "repeat": null,
+          "baselineCompletions": 0,
+          "leftCompletions": 1,
+          "leftFinished": "2026-11-14T12:05:00Z",
+          "rightCompletions": 0
+        },
+        "dependentBaseline": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:00:00Z",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "blocked": {
+            "3nQp7ROkB8": 1
+          }
+        },
+        "dependentLeft": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T12:05:00Z",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "blocked": {}
+        },
+        "dependentRight": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T11:00:00Z",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "blocked": {
+            "3nQp7ROkB8": 2
+          }
+        },
+        "expectedDependent": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T12:10:00Z",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "blocked": {
+            "3nQp7ROkB8": 2
+          }
+        }
+      },
+      "subcase2_newly_added_dependent_repeat_pipeline_preserved": {
+        "prerequisite": {
+          "id": "3nQp7ROkB8",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "baselineCompletions": 0,
+          "leftCompletions": 1,
+          "leftModified": "2026-11-14T12:05:00Z",
+          "rightCompletions": 0
+        },
+        "dependentBaseline": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:00:00Z",
+          "repeat": null,
+          "blocked": {
+            "3nQp7ROkB8": 1
+          }
+        },
+        "dependentLeft": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T12:05:00Z",
+          "repeat": null,
+          "blocked": {}
+        },
+        "dependentRight": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T11:30:00Z",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "blocked": {
+            "3nQp7ROkB8": 1
+          }
+        },
+        "expectedDependent": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T12:10:00Z",
+          "repeat": {
+            "count": 1,
+            "unit": "weeks",
+            "at": null,
+            "leadDays": 0
+          },
+          "blocked": {
+            "3nQp7ROkB8": 1
+          }
+        }
+      },
+      "subcase3_post_merge_cleanup_when_non_recurring": {
+        "prerequisite": {
+          "id": "3nQp7ROkB8",
+          "repeat": null,
+          "baselineCompletions": 0,
+          "leftCompletions": 1,
+          "leftFinished": "2026-11-14T12:05:00Z",
+          "rightCompletions": 0
+        },
+        "dependentBaseline": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:00:00Z",
+          "repeat": null,
+          "blocked": {}
+        },
+        "dependentLeft": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T10:00:00Z",
+          "repeat": null,
+          "blocked": {}
+        },
+        "dependentRight": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T12:02:00Z",
+          "repeat": null,
+          "blocked": {
+            "3nQp7ROkB8": 1
+          }
+        },
+        "expectedDependent": {
+          "id": "8jKaCdOkD2",
+          "modified": "2026-11-14T12:10:00Z",
+          "repeat": null,
+          "blocked": {}
+        }
+      }
+    },
+    {
+      "id": "merge_08_history_lifecycle_retention_and_noop_protection",
+      "section": "6.4, 6.5 & 6.6",
+      "description": "Task history entries are preserved unchanged across standard completion, Mode 1 and Mode 2 repeat completions, and restoreTask, and duplicate add or missing remove mutations are pure no-ops.",
+      "initialHistory": [
+        {
+          "timestamp": "2026-11-01T09:00:00Z",
+          "text": "Initial meter reading: 14100 kWh"
+        },
+        {
+          "timestamp": "2026-11-08T09:00:00Z",
+          "text": "Follow-up reading: 14280 kWh"
+        }
+      ],
+      "expectedAfterStandardComplete": {
+        "finishedPresent": true,
+        "suspended": null,
+        "blocked": [],
+        "duePreserved": true,
+        "historyPreservedUnchanged": true
+      },
+      "expectedAfterRepeatComplete": {
+        "completionsIncremented": true,
+        "suspendedNote": null,
+        "dueNotePreserved": true,
+        "isDuePassive": false,
+        "historyPreservedUnchanged": true
+      },
+      "expectedAfterRestoreTask": {
+        "finished": null,
+        "suspended": null,
+        "due": null,
+        "historyPreservedUnchanged": true
+      },
+      "noOpMutationsAdvanceModified": false
+    }
+  ]
+}

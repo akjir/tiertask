@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../models/task_board.dart';
+import '../models/task_board_evaluator.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_metadata.dart';
@@ -29,7 +30,7 @@ import 'tdf_historical_serializer.dart';
 import 'tdf_parser.dart';
 import 'tdf_serializer.dart';
 
-/// Immutable result of an explicit `TDF_SPEC.md` Section 10 version import operation.
+/// Immutable result of an explicit `spec/TDF_SPEC_0.7.0.md` Section 10 version import operation.
 @immutable
 class TdfImportResult {
   /// Creates a [TdfImportResult].
@@ -40,27 +41,27 @@ class TdfImportResult {
     required this.board,
   }) : executedSteps = List<String>.unmodifiable(executedSteps);
 
-  /// Evaluated target `0.6.0` [TaskBoard].
+  /// Evaluated target `0.7.0` [TaskBoard].
   final TaskBoard board;
 
-  /// Ordered sequence of schema versions traversed during import (for example `['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1', '0.6.0']`).
+  /// Ordered sequence of schema versions traversed during import (for example `['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0']`).
   final List<String> executedSteps;
 
-  /// Canonical `tdf 0.6.0` document string produced by the migration chain.
+  /// Canonical `tdf 0.7.0` document string produced by the migration chain.
   final String migratedTdfContent;
 
-  /// Declared version of the input document (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.5.1`, or `0.6.0`).
+  /// Declared version of the input document (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, `0.5.1`, `0.6.0`, or `0.7.0`).
   final String sourceVersion;
 }
 
-/// Stateless service implementing the explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`
-/// version import and adjacent migration chain defined in `spec/TDF_SPEC_0.6.0.md` Section 10.
+/// Stateless service implementing the explicit `0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0 -> 0.7.0`
+/// version import and adjacent migration chain defined in `spec/TDF_SPEC_0.7.0.md` Section 10.
 @immutable
 class TdfImporter {
   /// Prevents instantiation of this stateless service.
   const TdfImporter._();
 
-  /// Ordered list of all pinned historical TDF schema snapshot references (`0.2.0` through `0.5.1`).
+  /// Ordered list of all pinned historical TDF schema snapshot references (`0.2.0` through `0.6.0`).
   static const List<({String version, String commit, String blob})>
   historicalSchemaReferences = <({String version, String commit, String blob})>[
     schemaRef020,
@@ -68,50 +69,59 @@ class TdfImporter {
     schemaRef040,
     schemaRef050,
     schemaRef051,
+    schemaRef060,
   ];
 
-  /// Historical schema snapshot reference for `0.2.0` (`TDF_SPEC.md` Section 10.1.1).
+  /// Historical schema snapshot reference for `0.2.0` (`spec/TDF_SPEC_0.7.0.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef020 = (
     version: '0.2.0',
     commit: 'e6e6f804608fb00466d265533130c407f114b53e',
     blob: 'e66b5917be314cebbea02d4163987f13018d1f5a',
   );
 
-  /// Historical schema snapshot reference for `0.3.0` (`TDF_SPEC.md` Section 10.1.1).
+  /// Historical schema snapshot reference for `0.3.0` (`spec/TDF_SPEC_0.7.0.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef030 = (
     version: '0.3.0',
     commit: 'ad4634a090a136b840a232f1830ef3fac3e8b6d4',
     blob: '562df38feb93009c15df998491536d8d44104e9d',
   );
 
-  /// Historical schema snapshot reference for `0.4.0` (`TDF_SPEC.md` Section 10.1.1).
+  /// Historical schema snapshot reference for `0.4.0` (`spec/TDF_SPEC_0.7.0.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef040 = (
     version: '0.4.0',
     commit: '73bc56a9cd6fb09828df7bb97353b71eee81ddcd',
     blob: '0fdc2ce15a72ba6288fcd59ef4e23ab419d749fb',
   );
 
-  /// Historical schema snapshot reference for `0.5.0` (`TDF_SPEC.md` Section 10.1.1).
+  /// Historical schema snapshot reference for `0.5.0` (`spec/TDF_SPEC_0.7.0.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef050 = (
     version: '0.5.0',
     commit: 'e64e6a554bdbc2f6d5d76eacb900ae36d8c9b25b',
     blob: '8b492e7dfedea819ddeb9a2f0663d28fa8b08dfc',
   );
 
-  /// Historical schema snapshot reference for `0.5.1` (`spec/TDF_SPEC_0.6.0.md` Section 10.1.1).
+  /// Historical schema snapshot reference for `0.5.1` (`spec/TDF_SPEC_0.7.0.md` Section 10.1.1).
   static const ({String version, String commit, String blob}) schemaRef051 = (
     version: '0.5.1',
     commit: 'f22a3d4b1b15e9d8f5dcbba86da4f7dbd6135b11',
     blob: '1504ddff1ad9bd40930e4f90de8302336524f4dc',
   );
 
-  /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`).
+  /// Historical schema snapshot reference for `0.6.0` (`spec/TDF_SPEC_0.7.0.md` Section 10.1.1).
+  static const ({String version, String commit, String blob}) schemaRef060 = (
+    version: '0.6.0',
+    commit: '439d3fea7797520e69f67936bed93bc5f5064577',
+    blob: 'b53140b959d2ee1b1dfdab8f0edbb4a046858b5d',
+  );
+
+  /// Validates and migrates [sourceContent] through the adjacent migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0 -> 0.7.0`).
   static TdfImportResult importDocument(
     String sourceContent, {
     TdfTimeZoneContext? sourceTimeZone,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? evaluationTimeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -141,12 +151,17 @@ class TdfImporter {
       currentDoc = migrate051To060(currentDoc);
       executedSteps.add('0.6.0');
     }
+    if (executedSteps.last == '0.6.0') {
+      currentDoc = migrate060To070(currentDoc, sourceTimeZone: sourceTimeZone);
+      executedSteps.add('0.7.0');
+    }
 
     final board = TdfBlockParser.parseDocument(
       currentDoc,
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       timeZone: evaluationTimeZone,
+      dueLeadWindow: dueLeadWindow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
@@ -303,11 +318,12 @@ class TdfImporter {
       serialized050,
       pruneExpiredCompleted: false,
       convertLegacyLocationsTo060: false,
+      targetSchema: TdfSchemaVersion.v060,
     );
     return serialized050;
   }
 
-  /// Executes the adjacent `0.5.0 -> 0.5.1` file conversion defined in `spec/TDF_SPEC_0.6.0.md` Section 10.6.
+  /// Executes the adjacent `0.5.0 -> 0.5.1` file conversion defined in `spec/TDF_SPEC_0.7.0.md` Section 10.6.
   static String migrate050To051(String source050) {
     final version = _detectDeclaredVersion(source050);
     if (version != '0.5.0') {
@@ -325,12 +341,14 @@ class TdfImporter {
         source050,
         pruneExpiredCompleted: false,
         convertLegacyLocationsTo060: false,
+        targetSchema: TdfSchemaVersion.v060,
       );
       final serialized051 = TdfHistoricalSerializer.serializeDocument051(board);
       TdfBlockParser.parseDocument(
         serialized051,
         pruneExpiredCompleted: false,
         convertLegacyLocationsTo060: false,
+        targetSchema: TdfSchemaVersion.v060,
       );
       return serialized051;
     } on TdfException catch (error) {
@@ -344,7 +362,7 @@ class TdfImporter {
     }
   }
 
-  /// Executes the adjacent `0.5.1 -> 0.6.0` file conversion defined in `spec/TDF_SPEC_0.6.0.md` Section 10.7.
+  /// Executes the adjacent `0.5.1 -> 0.6.0` file conversion defined in `spec/TDF_SPEC_0.7.0.md` Section 10.7.
   static String migrate051To060(String source051) {
     final version = _detectDeclaredVersion(source051);
     if (version != '0.5.1') {
@@ -362,9 +380,14 @@ class TdfImporter {
         source051,
         pruneExpiredCompleted: false,
         convertLegacyLocationsTo060: true,
+        targetSchema: TdfSchemaVersion.v060,
       );
-      final serialized060 = TdfSerializer.serialize(board);
-      TdfBlockParser.parseDocument(serialized060, pruneExpiredCompleted: false);
+      final serialized060 = TdfHistoricalSerializer.serializeDocument060(board);
+      TdfBlockParser.parseDocument(
+        serialized060,
+        pruneExpiredCompleted: false,
+        targetSchema: TdfSchemaVersion.v060,
+      );
       return serialized060;
     } on TdfException catch (error) {
       throw TdfException(
@@ -372,6 +395,45 @@ class TdfImporter {
         line: error.line,
         sourceVersion: '0.5.1',
         targetVersion: '0.6.0',
+        message: error.message,
+      );
+    }
+  }
+
+  /// Executes the adjacent `0.6.0 -> 0.7.0` file conversion defined in `spec/TDF_SPEC_0.7.0.md` Section 10.8.
+  static String migrate060To070(
+    String source060, {
+    TdfTimeZoneContext? sourceTimeZone,
+  }) {
+    final version = _detectDeclaredVersion(source060);
+    if (version != '0.6.0') {
+      throw TdfException(
+        kind: TdfErrorKind.unsupportedVersion,
+        line: 1,
+        sourceVersion: '0.6.0',
+        targetVersion: '0.7.0',
+        message:
+            'Expected source version "0.6.0" for 0.6.0 -> 0.7.0 migration, found "$version".',
+      );
+    }
+    try {
+      final board = TdfBlockParser.parseDocumentFor060To070Migration(
+        source060,
+        sourceTimeZone: sourceTimeZone,
+      );
+      final serialized070 = TdfSerializer.serialize(board);
+      TdfBlockParser.parseDocument(
+        serialized070,
+        pruneExpiredCompleted: false,
+        targetSchema: TdfSchemaVersion.v070,
+      );
+      return serialized070;
+    } on TdfException catch (error) {
+      throw TdfException(
+        kind: error.kind,
+        line: error.line,
+        sourceVersion: '0.6.0',
+        targetVersion: '0.7.0',
         message: error.message,
       );
     }
@@ -537,7 +599,7 @@ class TdfImporter {
     return converted;
   }
 
-  /// Scans the first statement of [source] and returns its declared version (`0.2.0`..`0.5.1`).
+  /// Scans the first statement of [source] and returns its declared version (`0.2.0`..`0.7.0`).
   static String _detectDeclaredVersion(String source) {
     if (source.length > maxTdfFileBytes ||
         utf8.encode(source).length > maxTdfFileBytes) {
@@ -583,7 +645,8 @@ class TdfImporter {
         version != '0.4.0' &&
         version != '0.5.0' &&
         version != '0.5.1' &&
-        version != '0.6.0') {
+        version != '0.6.0' &&
+        version != '0.7.0') {
       throw TdfException(
         kind: TdfErrorKind.unsupportedVersion,
         line: firstStatement.line,

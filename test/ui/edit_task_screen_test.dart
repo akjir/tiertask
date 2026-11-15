@@ -18,6 +18,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -981,6 +983,279 @@ task 000002OkD2 {
         isNotNull,
         reason:
             'Tapping German Rückgängig action must restore the deleted task',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen unchecks expired suspended on open, clears dead deferral on save, and preserves 0.7.0 fields',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task expSusp001
+  task actSusp002
+  task forSusp003
+}
+
+task expSusp001 {
+  name "Expired Deferral Task"
+  created 2026-11-01 08:00
+  repeat 2 weeks 09:30 lead 3 days
+  suspended 2026-11-01 11:00:00 "Morning freeze"
+  due 2026-11-10 15:30:00 passive "Soft customer target"
+  history 2026-10-25 08:15:00 "Initial triage note"
+  history 2026-10-28 14:00:00 "Escalated to SRE"
+}
+
+task actSusp002 {
+  name "Active Deferral Task"
+  created 2026-11-01 08:05
+  suspended 2026-11-05 09:00:00 "Waiting on vendor"
+  due 2026-11-12 18:00:00 passive "Board review target"
+}
+
+task forSusp003 {
+  name "Forever Deferral Task"
+  created 2026-11-01 08:06
+  suspended forever "Wait on budget"
+}
+''';
+      var currentClock = DateTime.utc(2026, 11, 1, 10, 0);
+      const config = WebDavConfig(language: AppLanguage.english);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) =>
+                FakeLocalFileRepository(config: config, initialTdf: seededTdf),
+          ),
+          clockProvider.overrideWith(
+            (ref) =>
+                () => currentClock,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('expSusp001')
+            ?.suspendedAt,
+        equals(DateTime.utc(2026, 11, 1, 11, 0)),
+        reason: 'At 10:00 UTC load, 11:00 UTC deferral remains present on task',
+      );
+
+      currentClock = DateTime.utc(2026, 11, 1, 12, 0);
+      container.invalidate(clockProvider);
+      await tester.pumpAndSettle();
+
+      await _tapKey(tester, 'tier_indicator_item_blocked');
+      if (find
+          .byKey(const ValueKey('edit_task_button_expSusp001'))
+          .evaluate()
+          .isEmpty) {
+        await _tapKey(tester, 'tier_indicator_item_focus');
+      }
+      await _tapKey(tester, 'edit_task_button_expSusp001');
+
+      final suspendedChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      expect(
+        suspendedChip.selected,
+        isFalse,
+        reason: 'Expired finite suspendedAt <= nowUtc must initialize Suspended unchecked',
+      );
+      expect(
+        find.byKey(const ValueKey('task_editor_suspended_input')),
+        findsNothing,
+        reason:
+            'Suspended input must be hidden when expired deferral is unchecked',
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_repeat_count_input')),
+        '3',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      var board = container.read(taskNotifierProvider).requireValue;
+      var expTask = board.findTask('expSusp001')!;
+      expect(
+        expTask.suspendedAt,
+        isNull,
+        reason:
+            'Saving must not re-persist an already-expired suspended timestamp',
+      );
+      expect(expTask.isSuspendedForever, isFalse);
+      expect(
+        expTask.suspendedNote,
+        isNull,
+        reason:
+            'Expired deferral note must be cleared when Suspended is unchecked',
+      );
+      expect(
+        expTask.history,
+        equals([
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 10, 25, 8, 15),
+            text: 'Initial triage note',
+          ),
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 10, 28, 14, 0),
+            text: 'Escalated to SRE',
+          ),
+        ]),
+        reason:
+            'Editing a task must preserve existing history entries untouched',
+      );
+      expect(
+        expTask.repeatRule,
+        equals(
+          const TaskRepeatRule(
+            count: 3,
+            unit: RepeatUnit.weeks,
+            clock: TdfRepeatClock(hour: 9, minute: 30),
+            leadDays: 3,
+          ),
+        ),
+        reason: 'Editing repeat interval must preserve existing leadDays and repeat clock',
+      );
+      expect(expTask.dueAt, equals(DateTime.utc(2026, 11, 10, 15, 30)));
+      expect(
+        expTask.isDuePassive,
+        isTrue,
+        reason: 'Keeping the same due timestamp must preserve isDuePassive',
+      );
+      expect(
+        expTask.dueNote,
+        equals('Soft customer target'),
+        reason: 'Keeping due enabled must preserve dueNote',
+      );
+
+      await _tapKey(tester, 'edit_task_button_expSusp001');
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-11-11 16:00',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      expTask = board.findTask('expSusp001')!;
+      expect(expTask.dueAt, equals(DateTime.utc(2026, 11, 11, 16, 0)));
+      expect(
+        expTask.isDuePassive,
+        isFalse,
+        reason: 'Changing due to a different timestamp must reset isDuePassive to false',
+      );
+      expect(
+        expTask.dueNote,
+        equals('Soft customer target'),
+        reason: 'Changing due while keeping due enabled must preserve dueNote',
+      );
+
+      await _tapKey(tester, 'edit_task_button_expSusp001');
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      expTask = board.findTask('expSusp001')!;
+      expect(expTask.dueAt, isNull);
+      expect(expTask.isDuePassive, isFalse);
+      expect(
+        expTask.dueNote,
+        isNull,
+        reason: 'Disabling due must clear dueNote',
+      );
+
+      await _tapKey(tester, 'tier_indicator_item_blocked');
+      await _tapKey(tester, 'edit_task_button_actSusp002');
+
+      final activeSuspendedChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      expect(
+        activeSuspendedChip.selected,
+        isTrue,
+        reason: 'Future suspendedAt > nowUtc must initialize Suspended checked',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Updated context note',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      var actTask = board.findTask('actSusp002')!;
+      expect(actTask.suspendedAt, equals(DateTime.utc(2026, 11, 5, 9, 0)));
+      expect(
+        actTask.suspendedNote,
+        equals('Waiting on vendor'),
+        reason:
+            'Keeping Suspended enabled must preserve existing suspendedNote',
+      );
+
+      await _tapKey(tester, 'edit_task_button_actSusp002');
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      actTask = board.findTask('actSusp002')!;
+      expect(actTask.suspendedAt, isNull);
+      expect(
+        actTask.suspendedNote,
+        isNull,
+        reason: 'Disabling Suspended must clear suspendedNote',
+      );
+
+      await _tapKey(tester, 'edit_task_button_forSusp003');
+      final foreverSuspendedChip = tester.widget<FilterChip>(
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      expect(
+        foreverSuspendedChip.selected,
+        isTrue,
+        reason: 'suspended forever must initialize Suspended checked',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Budget review Q1',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      board = container.read(taskNotifierProvider).requireValue;
+      final foreverTask = board.findTask('forSusp003')!;
+      expect(foreverTask.isSuspendedForever, isTrue);
+      expect(foreverTask.suspendedAt, isNull);
+      expect(
+        foreverTask.suspendedNote,
+        equals('Wait on budget'),
+        reason:
+            'Keeping indefinite suspension enabled must preserve suspendedNote',
       );
     },
   );

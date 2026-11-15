@@ -164,6 +164,7 @@ void main() {
           secondary: second,
           baseline: baseBoard,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         ).findTask(expectedTask.id)!;
         expect(
           merged.origin,
@@ -231,6 +232,7 @@ void main() {
           secondary: second,
           baseline: baseBoard,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         ).findTask(expectedTask.id)!;
         expect(
           merged.isPriority,
@@ -307,6 +309,7 @@ void main() {
           secondary: second,
           baseline: baseBoard,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         ).findLocation(expectedLoc.id)!;
         expect(
           merged.source,
@@ -411,6 +414,7 @@ void main() {
           secondary: second,
           baseline: baseA,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         ).findTask(taskId)!;
         expect(
           mergedA.conditions,
@@ -463,6 +467,7 @@ void main() {
           secondary: second,
           baseline: baseB,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         ).findTask(taskId)!;
         expect(mergedB.conditions, isEmpty);
       }
@@ -492,6 +497,7 @@ void main() {
           secondary: second,
           baseline: baseA,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         ).findTask(taskId)!;
         expect(
           mergedC.conditions,
@@ -565,6 +571,7 @@ void main() {
           secondary: second,
           baseline: baseBoard,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         );
         final mergedTask = merged.findTask(taskId)!;
         expect(mergedTask.isPriority, isFalse);
@@ -642,6 +649,7 @@ void main() {
           secondary: second,
           baseline: baseUnscheduled,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         );
         final mergedTask = merged.findTask(taskId)!;
         expect(
@@ -723,6 +731,7 @@ void main() {
           secondary: second,
           baseline: baseWithQueue,
           evaluationTime: evalTime,
+          schemaVersion: TdfSchemaVersion.v060,
         );
         final mergedTask = merged.findTask(taskId)!;
         expect(
@@ -786,6 +795,7 @@ void main() {
         secondary: board,
         baseline: board,
         evaluationTime: now,
+        schemaVersion: TdfSchemaVersion.v060,
       );
       expect(merged.deletedBlock.generation, equals(5));
       expect(
@@ -860,6 +870,7 @@ void main() {
             secondary: second,
             baseline: base1,
             evaluationTime: evalTime,
+            schemaVersion: TdfSchemaVersion.v060,
           ),
           throwsA(
             isA<TdfSyncOutcomeException>()
@@ -917,6 +928,7 @@ void main() {
             secondary: second,
             baseline: base2,
             evaluationTime: evalTime,
+            schemaVersion: TdfSchemaVersion.v060,
           ),
           throwsA(
             isA<TdfSyncOutcomeException>()

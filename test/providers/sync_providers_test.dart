@@ -19,6 +19,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_board_evaluator.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
@@ -46,10 +47,12 @@ class _CountingTdfService extends TdfService {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
     onParse();
     return super.parse(
@@ -57,10 +60,12 @@ class _CountingTdfService extends TdfService {
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
+      targetSchema: targetSchema,
     );
   }
 }
@@ -278,7 +283,7 @@ void main() {
     );
     expect(mergedBoard.findLabel('work00OkD2')?.name, equals('Enterprise'));
     expect(localTdf, equals(remoteTdf));
-    expect(localTdf, contains('tdf 0.6.0'));
+    expect(localTdf, contains('tdf 0.7.0'));
   });
 
   test('Offline WebDAV save failure preserves local file sync and merges per-entity when connection returns', () async {
@@ -397,14 +402,14 @@ void main() {
 
     expect(localSaveCount, greaterThanOrEqualTo(1));
     expect(remoteSaveCount, greaterThanOrEqualTo(1));
-    expect(localTdf, startsWith('tdf 0.6.0\n'));
+    expect(localTdf, startsWith('tdf 0.7.0\n'));
     expect(remoteTdf, equals(localTdf));
   });
 
   test('Unsupported TDF version on remote, local, or both stops retrying, never overwrites unreadable files, and surfaces localized update recommendations', () async {
     const service = TdfService();
     expect(
-      () => service.parse('tdf 0.7.0\n'),
+      () => service.parse('tdf 0.8.0\n'),
       throwsA(
         isA<TdfException>()
             .having(
@@ -412,15 +417,15 @@ void main() {
               'kind',
               equals(TdfErrorKind.unsupportedVersion),
             )
-            .having((error) => error.sourceVersion, 'sourceVersion', '0.7.0')
-            .having((error) => error.targetVersion, 'targetVersion', '0.6.0'),
+            .having((error) => error.sourceVersion, 'sourceVersion', '0.8.0')
+            .having((error) => error.targetVersion, 'targetVersion', '0.7.0'),
       ),
     );
 
     final currentTime = DateTime.utc(2026, 11, 1, 12);
     var remoteFetchCount = 0;
     var remoteSaveCount = 0;
-    var remoteTdf = 'tdf 0.7.0\n';
+    var remoteTdf = 'tdf 0.8.0\n';
     const webDavDeConfig = WebDavConfig(
       storageMode: StorageMode.webdav,
       language: AppLanguage.german,
@@ -460,7 +465,7 @@ void main() {
     expect(
       caughtRemoteError.toString(),
       equals(
-        'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.7.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+        'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.8.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
       ),
     );
 
@@ -478,9 +483,9 @@ void main() {
       config: bothEnConfig,
       settingsRepository: InMemorySettingsRepository(bothEnConfig),
       clock: () => currentTime,
-      getLocal: () => 'tdf 0.7.0\n',
+      getLocal: () => 'tdf 0.8.0\n',
       setLocal: (_) => localFailSaveCount++,
-      getRemote: () => 'tdf 0.6.0\n',
+      getRemote: () => 'tdf 0.7.0\n',
       setRemote: (_) {},
       isOnline: () => true,
     );
@@ -496,7 +501,7 @@ void main() {
     expect(
       caughtLocalError.toString(),
       equals(
-        'The local file uses unsupported file version 0.7.0. Please update TierTask to a newer version.',
+        'The local file uses unsupported file version 0.8.0. Please update TierTask to a newer version.',
       ),
     );
 
@@ -514,11 +519,11 @@ void main() {
       config: bothDeConfig,
       settingsRepository: InMemorySettingsRepository(bothDeConfig),
       clock: () => currentTime,
-      getLocal: () => 'tdf 0.7.0\n',
+      getLocal: () => 'tdf 0.8.0\n',
       setLocal: (_) {},
       getRemote: () {
         bothFailRemoteFetchCount++;
-        return 'tdf 0.8.0\n';
+        return 'tdf 0.9.0\n';
       },
       setRemote: (_) {},
       isOnline: () => true,
@@ -535,7 +540,7 @@ void main() {
     expect(
       caughtBothFailError.toString(),
       equals(
-        'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion 0.7.0 / 0.8.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+        'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion 0.8.0 / 0.9.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
       ),
     );
   });
@@ -771,7 +776,7 @@ void main() {
     addTearDown(() => server.close(force: true));
 
     const canonicalInitial =
-        'tdf 0.6.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name     "Initial Task"\n    created  2026-11-01 08:00\n    modified 2026-11-01 08:00\n}\n';
+        'tdf 0.7.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name     "Initial Task"\n    created  2026-11-01 08:00\n    modified 2026-11-01 08:00\n}\n';
     var remoteTdf = canonicalInitial;
     var remoteEtag = '"etag-v1"';
     var remoteLastModified = 'Mon, 09 Nov 2026 22:00:00 GMT';
@@ -814,7 +819,7 @@ void main() {
         final ifMatch = request.headers.value(HttpHeaders.ifMatchHeader);
         if (injectConcurrentRemoteEditOnNextPut) {
           injectConcurrentRemoteEditOnNextPut = false;
-          remoteTdf = 'tdf 0.6.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name     "Initial Task"\n    created  2026-11-01 08:00\n    modified 2026-11-01 08:00\n}\n\ntask 000002OkD2 {\n    name     "Concurrent Server Task"\n    created  2026-11-01 09:30\n    modified 2026-11-01 09:30\n}\n';
+          remoteTdf = 'tdf 0.7.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name     "Initial Task"\n    created  2026-11-01 08:00\n    modified 2026-11-01 08:00\n}\n\ntask 000002OkD2 {\n    name     "Concurrent Server Task"\n    created  2026-11-01 09:30\n    modified 2026-11-01 09:30\n}\n';
           remoteEtag = '"etag-concurrent"';
         }
         if (ifMatch != null && ifMatch != remoteEtag) {
@@ -1273,4 +1278,871 @@ void main() {
       reason: 'Queued mutation originating at generation 0 must converge cleanly after external generation 0 -> 1 bump without syncGenerationRollback or recoveryRequired',
     );
   });
+
+  test('Refreshing at 2026-11-11 12:00:01 cleans expired suspended across local disk and loopback WebDAV (200 OK and 304 Not Modified) and performs zero writes on second refresh at 12:00:05', () async {
+    HttpOverrides.global = null;
+    const tdfService = TdfService();
+    final initialSeedBoard = tdfService.parse(
+      'tdf 0.7.0\n\n'
+      'queue {\n'
+      '    modified 2026-11-11 10:00:00\n'
+      '    task suspCln001\n'
+      '}\n\n'
+      'task suspCln001 {\n'
+      '    name      "Deferred Cleanup Task"\n'
+      '    created   2026-11-11 10:00:00\n'
+      '    modified  2026-11-11 10:00:00\n'
+      '    suspended 2026-11-11 12:00:00 "Wait"\n'
+      '}\n',
+      evaluationTime: DateTime.utc(2026, 11, 11, 11, 59),
+      localEvaluationTime: DateTime.utc(2026, 11, 11, 11, 59),
+    );
+    final canonicalDeferredTdf = tdfService.serialize(initialSeedBoard);
+
+    // 1. StorageMode.local: refresh at 12:00:01 cleans & writes once; refresh at 12:00:05 skips write.
+    final localDir = await Directory.systemTemp.createTemp(
+      'tiertask_sync_susp_local_',
+    );
+    addTearDown(() => localDir.delete(recursive: true));
+    final localFile = File('${localDir.path}/tasks.tdf');
+    await localFile.writeAsString(canonicalDeferredTdf, flush: true);
+
+    var localClock = DateTime.utc(2026, 11, 11, 11, 59);
+    var localSaveCalls = 0;
+    const localOnlyConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      localFilePath: 'tasks.tdf',
+    );
+    final localSettings = InMemorySettingsRepository(localOnlyConfig);
+    final localContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(localSettings),
+        clockProvider.overrideWithValue(() => localClock),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _CountingSaveLocalRepository(
+            config: localOnlyConfig,
+            baseDirectoryPath: localDir.path,
+            onSave: () => localSaveCalls++,
+          ),
+        ),
+      ],
+    );
+    addTearDown(localContainer.dispose);
+
+    final loadedBeforeExpiry = await localContainer.read(
+      taskNotifierProvider.future,
+    );
+    expect(
+      loadedBeforeExpiry.findTask('suspCln001')?.suspendedNote,
+      equals('Wait'),
+      reason:
+          'Before 12:00:00 expiry, suspended and suspendedNote remain intact',
+    );
+    expect(
+      localSaveCalls,
+      equals(0),
+      reason: 'Canonical file before expiry must not rewrite disk on load',
+    );
+
+    localClock = DateTime.utc(2026, 11, 11, 12, 0, 1);
+    await localContainer.read(taskNotifierProvider.notifier).syncFromRemote();
+    final cleanedLocalBoard = localContainer
+        .read(taskNotifierProvider)
+        .requireValue;
+    final cleanedLocalTask = cleanedLocalBoard.findTask('suspCln001');
+    expect(cleanedLocalTask?.suspendedAt, isNull);
+    expect(cleanedLocalTask?.suspendedNote, isNull);
+    expect(
+      cleanedLocalTask?.modifiedAt,
+      equals(DateTime.utc(2026, 11, 11, 12, 0, 1)),
+    );
+    expect(
+      localSaveCalls,
+      equals(1),
+      reason:
+          'Refresh at 12:00:01 must persist cleaned TDF 0.7.0 to local disk',
+    );
+    expect(await localFile.readAsString(), isNot(contains('suspended')));
+
+    localClock = DateTime.utc(2026, 11, 11, 12, 0, 5);
+    await localContainer.read(taskNotifierProvider.notifier).syncFromRemote();
+    expect(
+      localSaveCalls,
+      equals(1),
+      reason: 'Second refresh at 12:00:05 must perform zero local disk writes',
+    );
+
+    // 2. StorageMode.webdav via loopback HttpServer: 200 OK cleanup + 304 Not Modified cleanup + zero writes at 12:00:05.
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    var remoteTdf = canonicalDeferredTdf;
+    var remoteEtag = '"etag-initial"';
+    var get200Count = 0;
+    var get304Count = 0;
+    var putCount = 0;
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          get304Count++;
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        get200Count++;
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        putCount++;
+        remoteTdf = await utf8.decoder.bind(request).join();
+        remoteEtag = '"etag-put-$putCount"';
+        request.response.statusCode = HttpStatus.noContent;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        await request.response.close();
+      }
+    });
+
+    final webdavConfig = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      serverUrl: 'http://127.0.0.1:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+
+    // 2a. Initial 200 OK at 12:00:01 cleans and PUTs; second refresh at 12:00:05 (304) performs zero PUTs.
+    var webdavClock = DateTime.utc(2026, 11, 11, 12, 0, 1);
+    final webdavSettings200 = InMemorySettingsRepository(webdavConfig);
+    final webdavContainer200 = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(webdavSettings200),
+        clockProvider.overrideWithValue(() => webdavClock),
+      ],
+    );
+    addTearDown(webdavContainer200.dispose);
+
+    final cleaned200Board = await webdavContainer200.read(
+      taskNotifierProvider.future,
+    );
+    expect(cleaned200Board.findTask('suspCln001')?.suspendedAt, isNull);
+    expect(get200Count, equals(1));
+    expect(
+      putCount,
+      equals(1),
+      reason: '200 OK refresh at 12:00:01 must PUT cleaned TDF 0.7.0 to WebDAV',
+    );
+    expect(remoteTdf, isNot(contains('suspended')));
+
+    webdavClock = DateTime.utc(2026, 11, 11, 12, 0, 5);
+    await webdavContainer200
+        .read(taskNotifierProvider.notifier)
+        .syncFromRemote();
+    expect(get304Count, equals(1));
+    expect(
+      putCount,
+      equals(1),
+      reason: 'Second WebDAV refresh at 12:00:05 must perform zero PUTs',
+    );
+
+    // 2b. StorageMode.both: sync at 11:59:00 (no PUT), then 304 Not Modified at 12:00:01 cleans & writes both, then 12:00:05 performs zero writes.
+    remoteTdf = canonicalDeferredTdf;
+    remoteEtag = '"etag-both-v1"';
+    get200Count = 0;
+    get304Count = 0;
+    putCount = 0;
+
+    final bothDir = await Directory.systemTemp.createTemp(
+      'tiertask_sync_susp_both_',
+    );
+    addTearDown(() => bothDir.delete(recursive: true));
+    await File('${bothDir.path}/tasks.tdf')
+        .writeAsString(canonicalDeferredTdf, flush: true);
+    var bothLocalSaves = 0;
+    var bothClock = DateTime.utc(2026, 11, 11, 11, 59);
+    final bothLoopbackConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'http://127.0.0.1:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final bothSettings = InMemorySettingsRepository(bothLoopbackConfig);
+    final bothContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(bothSettings),
+        clockProvider.overrideWithValue(() => bothClock),
+        localFileRepositoryProvider.overrideWith(
+          (ref) => _CountingSaveLocalRepository(
+            config: bothLoopbackConfig,
+            baseDirectoryPath: bothDir.path,
+            onSave: () => bothLocalSaves++,
+          ),
+        ),
+      ],
+    );
+    addTearDown(bothContainer.dispose);
+
+    await bothContainer.read(taskNotifierProvider.future);
+    expect(putCount, equals(0));
+    expect(bothLocalSaves, equals(0));
+
+    bothClock = DateTime.utc(2026, 11, 11, 12, 0, 1);
+    await bothContainer.read(taskNotifierProvider.notifier).syncFromRemote();
+    expect(
+      get304Count,
+      equals(1),
+      reason:
+          'Refresh at 12:00:01 receives 304 Not Modified from loopback WebDAV',
+    );
+    expect(
+      putCount,
+      equals(1),
+      reason: '304 Not Modified with newly expired suspended must PUT cleaned TDF 0.7.0',
+    );
+    expect(
+      bothLocalSaves,
+      equals(1),
+      reason: 'Stage 2 cleanup must converge cleaned TDF 0.7.0 to local disk',
+    );
+    expect(remoteTdf, isNot(contains('suspended')));
+    expect(
+      await File('${bothDir.path}/tasks.tdf').readAsString(),
+      equals(remoteTdf),
+    );
+
+    final bothWorkspace = await bothContainer.read(
+      activeWorkspaceProvider.future,
+    );
+    final syncedState = await bothSettings.loadWorkspaceSyncState(
+      bothWorkspace.id,
+    );
+    expect(syncedState.remoteEtag, equals('"etag-put-1"'));
+    expect(syncedState.lastSyncedRemoteTdf, equals(remoteTdf));
+    expect(syncedState.lastSyncedLocalTdf, equals(remoteTdf));
+    expect(syncedState.localSourceDigest, isNotNull);
+
+    bothClock = DateTime.utc(2026, 11, 11, 12, 0, 5);
+    await bothContainer.read(taskNotifierProvider.notifier).syncFromRemote();
+    expect(
+      putCount,
+      equals(1),
+      reason: 'Subsequent refresh at 12:00:05 must perform zero WebDAV PUTs',
+    );
+    expect(
+      bothLocalSaves,
+      equals(1),
+      reason:
+          'Subsequent refresh at 12:00:05 must perform zero local disk writes',
+    );
+  });
+
+  test('Opening and syncing an existing 0.6.0 workspace with open repeat + due + finite suspended < due preserves leadDays and non-midnight repeat-time in tdf 0.7.0', () async {
+    const legacy060Tdf =
+        'tdf 0.6.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '    task repMig0001\n'
+        '}\n\n'
+        'task repMig0001 {\n'
+        '    name      "Monthly Rent"\n'
+        '    created   2026-11-01 08:00:00\n'
+        '    modified  2026-11-11 10:00:00\n'
+        '    suspended 2026-11-11 12:00:00\n'
+        '    due       2026-11-20 14:30:00\n'
+        '    repeat    1 months\n'
+        '}\n';
+
+    var localTdf = legacy060Tdf;
+    var remoteTdf = legacy060Tdf;
+    // Sync at 12:00:01 UTC in manual +02:00 timezone:
+    // suspended local = 2026-11-11 14:00:00, due local = 2026-11-20 16:30:00 -> lead 9 days, repeat-time 16:30!
+    // Wait: in 0.6.0 -> 0.7.0 extraction, <repeat-time> comes from due's local wall-clock (16:30) or suspended? Let's verify both leadDays and non-midnight clock!
+    final syncTime = DateTime.utc(2026, 11, 11, 12, 0, 1);
+    const manualTzConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+      timeZoneMode: AppTimeZoneMode.manual,
+      manualTimeZoneOffsetMinutes: 120,
+    );
+    final container = createSyncContainer(
+      config: manualTzConfig,
+      settingsRepository: InMemorySettingsRepository(manualTzConfig),
+      clock: () => syncTime,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => remoteTdf,
+      setRemote: (value) => remoteTdf = value,
+      isOnline: () => true,
+    );
+    addTearDown(container.dispose);
+
+    final board = await container.read(taskNotifierProvider.future);
+    final migratedTask = board.findTask('repMig0001');
+    expect(migratedTask, isNotNull);
+    expect(
+      migratedTask?.repeatRule?.leadDays,
+      equals(9),
+      reason: '0.6.0 -> 0.7.0 upgrade must extract 9-day local lead window using workspace TdfTimeZoneContext without throwing ImportContextRequired',
+    );
+    expect(
+      migratedTask?.repeatRule?.clock.isMidnight,
+      isFalse,
+      reason: '0.6.0 -> 0.7.0 upgrade must preserve non-midnight local repeat clock',
+    );
+    expect(
+      migratedTask?.suspendedAt,
+      isNull,
+      reason: 'Expired 12:00:00 suspended deferral is simultaneously cleaned at 12:00:01 after extracting leadDays',
+    );
+    expect(localTdf, startsWith('tdf 0.7.0\n'));
+    expect(localTdf, contains('lead 9 days'));
+    expect(remoteTdf, equals(localTdf));
+
+    // Also verify AppTimeZoneMode.system succeeds deterministically without ImportContextRequired.
+    var autoLocalTdf = legacy060Tdf;
+    const systemTzConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      localFilePath: 'tasks.tdf',
+      timeZoneMode: AppTimeZoneMode.automatic,
+    );
+    final autoContainer = createSyncContainer(
+      config: systemTzConfig,
+      settingsRepository: InMemorySettingsRepository(systemTzConfig),
+      clock: () => syncTime,
+      getLocal: () => autoLocalTdf,
+      setLocal: (value) => autoLocalTdf = value,
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(autoContainer.dispose);
+    final autoBoard = await autoContainer.read(taskNotifierProvider.future);
+    expect(
+      autoBoard.findTask('repMig0001')?.repeatRule?.leadDays,
+      greaterThan(0),
+    );
+    expect(autoLocalTdf, startsWith('tdf 0.7.0\n'));
+  });
+
+  test('StorageMode.both stage-fair sync defers Stage 1 block cleanup so expired local suspended never inflates modified ahead of remote 11:30:00 note edit at 12:05:00', () async {
+    // Subcase 1: Cold/2-way and 3-way sync at 12:05:00 where local task has older note (10:00:00) + expired suspended (12:00:00)
+    // and remote edited task note at 11:30:00.
+    var localTdf =
+        'tdf 0.7.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '    task fair000001\n'
+        '    task other00002\n'
+        '}\n\n'
+        'task fair000001 {\n'
+        '    name      "Stage Fair Task"\n'
+        '    note      "Stale Local Note"\n'
+        '    created   2026-11-11 09:00:00\n'
+        '    modified  2026-11-11 10:00:00\n'
+        '    suspended 2026-11-11 12:00:00 "Wait"\n'
+        '}\n\n'
+        'task other00002 {\n'
+        '    name     "Other Task"\n'
+        '    created  2026-11-11 09:00:00\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '}\n';
+    var remoteTdf =
+        'tdf 0.7.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '    task fair000001\n'
+        '    task other00002\n'
+        '}\n\n'
+        'task fair000001 {\n'
+        '    name      "Stage Fair Task"\n'
+        '    note      "Remote Newer Note At 11:30"\n'
+        '    created   2026-11-11 09:00:00\n'
+        '    modified  2026-11-11 11:30:00\n'
+        '    suspended 2026-11-11 12:00:00 "Wait"\n'
+        '}\n\n'
+        'task other00002 {\n'
+        '    name     "Other Task"\n'
+        '    created  2026-11-11 09:00:00\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '}\n';
+
+    var currentTime = DateTime.utc(2026, 11, 11, 12, 5);
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
+    final container = createSyncContainer(
+      config: bothConfig,
+      settingsRepository: settingsRepository,
+      clock: () => currentTime,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => remoteTdf,
+      setRemote: (value) => remoteTdf = value,
+      isOnline: () => true,
+    );
+    addTearDown(container.dispose);
+
+    final mergedBoard = await container.read(taskNotifierProvider.future);
+    final mergedFair = mergedBoard.findTask('fair000001');
+    expect(
+      mergedFair?.note,
+      equals('Remote Newer Note At 11:30'),
+      reason: 'Stage 1 must defer block cleanup so local modified (10:00:00) is not inflated to 12:05:00 ahead of remote 11:30:00 note edit',
+    );
+    expect(
+      mergedFair?.suspendedAt,
+      isNull,
+      reason: 'Stage 2 must strip the expired 12:00:00 suspended deferral after selecting remote winner',
+    );
+    expect(localTdf, equals(remoteTdf));
+    expect(localTdf, contains('Remote Newer Note At 11:30'));
+    expect(localTdf, isNot(contains('suspended')));
+
+    // Subcase 2: Optimistic mutation to other00002 at 12:25:00 while bystander fair000001 has a newly expired suspended (12:20:00)
+    // and remote edited fair000001's note at 12:15:00.
+    currentTime = DateTime.utc(2026, 11, 11, 12, 10);
+    await container
+        .read(taskNotifierProvider.notifier)
+        .updateTask(
+          'fair000001',
+          title: 'Stage Fair Task',
+          note: 'Baseline Note 12:10',
+          suspendedAt: DateTime.utc(2026, 11, 11, 12, 20),
+        );
+
+    // Remote edits fair000001's note at 12:15:00 (still carrying suspended 12:20:00).
+    remoteTdf = remoteTdf
+        .replaceFirst('Baseline Note 12:10', 'Remote Bystander Edit 12:15')
+        .replaceFirst(
+          'modified  2026-11-11 12:10',
+          'modified  2026-11-11 12:15',
+        );
+
+    // At 12:25:00, user mutates other00002 locally (which runs TaskBoardMutator block cleanup on bystander fair000001 in candidateBoard!).
+    currentTime = DateTime.utc(2026, 11, 11, 12, 25);
+    await container
+        .read(taskNotifierProvider.notifier)
+        .updateTask('other00002', title: 'Updated Other At 12:25');
+
+    final afterBystanderSync = container
+        .read(taskNotifierProvider)
+        .requireValue;
+    expect(
+      afterBystanderSync.findTask('other00002')?.title,
+      equals('Updated Other At 12:25'),
+    );
+    expect(
+      afterBystanderSync.findTask('fair000001')?.note,
+      equals('Remote Bystander Edit 12:15'),
+      reason: 'Optimistic mutation to other00002 must not inflate untouched bystander fair000001 modifiedAt ahead of remote 12:15 edit',
+    );
+    expect(afterBystanderSync.findTask('fair000001')?.suspendedAt, isNull);
+  });
+
+  test('Concurrent local repeat completion and remote history set edits merge without data loss', () async {
+    var currentTime = DateTime.utc(2026, 11, 11, 8, 0);
+    var isOnline = true;
+    var localTdf =
+        'tdf 0.7.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 08:00:00\n'
+        '    task repHist001\n'
+        '}\n\n'
+        'task repHist001 {\n'
+        '    name     "Daily Standup"\n'
+        '    created  2026-11-11 08:00:00\n'
+        '    modified 2026-11-11 08:00:00\n'
+        '    due      2026-11-11 09:00:00\n'
+        '    repeat   1 days 09:00\n'
+        '    history  2026-11-11 08:00:00 "Initial log"\n'
+        '}\n';
+    var remoteTdf = localTdf;
+    final settingsRepository = InMemorySettingsRepository(bothConfig);
+
+    final container1 = createSyncContainer(
+      config: bothConfig,
+      settingsRepository: settingsRepository,
+      clock: () => currentTime,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => remoteTdf,
+      setRemote: (value) => remoteTdf = value,
+      isOnline: () => isOnline,
+    );
+    await container1.read(taskNotifierProvider.future);
+
+    // Go offline and complete the recurring task locally at 10:00:00.
+    isOnline = false;
+    currentTime = DateTime.utc(2026, 11, 11, 10, 0);
+    await container1
+        .read(taskNotifierProvider.notifier)
+        .completeTask('repHist001');
+    container1.dispose();
+
+    // Meanwhile on remote, a collaborator adds two history entries at 09:30:00.
+    remoteTdf =
+        'tdf 0.7.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 08:00:00\n'
+        '    task repHist001\n'
+        '}\n\n'
+        'task repHist001 {\n'
+        '    name     "Daily Standup"\n'
+        '    created  2026-11-11 08:00:00\n'
+        '    modified 2026-11-11 09:30:00\n'
+        '    due      2026-11-11 09:00:00\n'
+        '    repeat   1 days 09:00\n'
+        '    history  2026-11-11 08:00:00 "Initial log"\n'
+        '    history  2026-11-11 09:15:00 "Remote note A"\n'
+        '    history  2026-11-11 09:30:00 "Remote note B"\n'
+        '}\n';
+
+    // Reconnect at 10:05:00 and sync.
+    isOnline = true;
+    currentTime = DateTime.utc(2026, 11, 11, 10, 5);
+    final container2 = createSyncContainer(
+      config: bothConfig,
+      settingsRepository: settingsRepository,
+      clock: () => currentTime,
+      getLocal: () => localTdf,
+      setLocal: (value) => localTdf = value,
+      getRemote: () => remoteTdf,
+      setRemote: (value) => remoteTdf = value,
+      isOnline: () => isOnline,
+    );
+    addTearDown(container2.dispose);
+
+    final converged = await container2.read(taskNotifierProvider.future);
+    final mergedTask = converged.findTask('repHist001');
+    expect(mergedTask?.completions, equals(1));
+    expect(mergedTask?.isCompleted, isFalse);
+    expect(
+      mergedTask?.history.map((entry) => entry.text).toList(),
+      equals(<String>['Initial log', 'Remote note A', 'Remote note B']),
+      reason: 'Concurrent local repeat completion and remote history additions must merge without data loss',
+    );
+    expect(localTdf, equals(remoteTdf));
+  });
+
+  test('Queued optimistic mutations across deleted.generation advancement ignore automatic block cleanup on retired entities, strip retired blocked references on surviving candidate tasks, and flag real edits on retired tasks as recoveryRequired', () async {
+    const tdfService = TdfService();
+    final t10 = DateTime.utc(2026, 11, 11, 10, 0);
+    final t12 = DateTime.utc(2026, 11, 11, 12, 0);
+
+    // Build generation 0 origin board at 10:00 where:
+    // - retBlkr001 is ALREADY completed at 09:00 (so retTask002's blocked reference is resolved if cleanup runs),
+    // - retTask002 has suspended 11:00 (so at 12:00 its suspended is expired!), references retLbl0001 and retLoc0001,
+    // - survDep003 is blocked on retTask002.
+    const gen0Raw =
+        'tdf 0.7.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '    task retTask002\n'
+        '    task survDep003\n'
+        '}\n\n'
+        'label retLbl0001 {\n'
+        '    name     "Retired Label"\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '}\n\n'
+        'location retLoc0001 {\n'
+        '    name        "Retired Office"\n'
+        '    coordinates 48.137154 11.576124\n'
+        '    radius      150\n'
+        '    modified    2026-11-11 10:00:00\n'
+        '}\n\n'
+        'task retBlkr001 {\n'
+        '    name        "Completed Blocker"\n'
+        '    created     2026-11-11 08:00:00\n'
+        '    modified    2026-11-11 09:00:00\n'
+        '    finished    2026-11-11 09:00:00\n'
+        '    completions 1\n'
+        '}\n\n'
+        'task retTask002 {\n'
+        '    name      "Retired Bystander With Expired Deferral"\n'
+        '    created   2026-11-11 08:00:00\n'
+        '    modified  2026-11-11 10:00:00\n'
+        '    suspended 2026-11-11 11:00:00 "Hold until 11"\n'
+        '    labels    retLbl0001\n'
+        '    blocked   retBlkr001\n'
+        '    condition location retLoc0001\n'
+        '}\n\n'
+        'task survDep003 {\n'
+        '    name     "Surviving Dependent"\n'
+        '    created  2026-11-11 08:00:00\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '    blocked  retTask002:1\n'
+        '}\n';
+
+    var diskTdf = gen0Raw;
+    var clockTime = t10;
+    const localConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      localFilePath: 'tasks.tdf',
+    );
+    final settingsRepository = InMemorySettingsRepository(localConfig);
+    final container = createSyncContainer(
+      config: localConfig,
+      settingsRepository: settingsRepository,
+      clock: () => clockTime,
+      getLocal: () => diskTdf,
+      setLocal: (value) => diskTdf = value,
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(container.dispose);
+
+    final originBoard = tdfService.parse(
+      gen0Raw,
+      evaluationTime: t10,
+      localEvaluationTime: t10,
+    );
+    // Establish baseline at generation 0.
+    await container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              localConfig,
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+            ),
+      ),
+    )();
+
+    // Step 1 (ackGen 0 -> 1): at 12:00, user edits survDep003 on originBoard while disk advanced deleted.generation 0 -> 1.
+    // Note: TaskBoardMutator.updateTask runs cleanupResolvedTaskBlocks at 12:00, which automatically
+    // strips retTask002's expired suspended (11:00) and resolved blocked retBlkr001, bumping retTask002.modifiedAt to 12:00!
+    clockTime = t12;
+    final candidateWithBystanderCleanup = originBoard.updateTask(
+      'survDep003',
+      title: 'Edited Before Gen Ack',
+      currentDate: t12,
+      localEvaluationTime: t12,
+    );
+    expect(
+      candidateWithBystanderCleanup.findTask('retTask002')?.modifiedAt,
+      equals(t12),
+      reason: 'Precondition: TaskBoardMutator cleaned bystander retTask002 at 12:00',
+    );
+
+    // External disk advanced deleted.generation from 0 -> 1 and pruned tombstones for retBlkr001, retTask002, retLbl0001, retLoc0001!
+    const gen1DiskRaw =
+        'tdf 0.7.0\n\n'
+        'deleted {\n'
+        '    generation 1\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-11 11:30:00\n'
+        '    task survDep003\n'
+        '}\n\n'
+        'task survDep003 {\n'
+        '    name     "Surviving Dependent"\n'
+        '    created  2026-11-11 08:00:00\n'
+        '    modified 2026-11-11 10:00:00\n'
+        '}\n';
+    diskTdf = gen1DiskRaw;
+
+    final convergedGen1 = await container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              localConfig,
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: candidateWithBystanderCleanup,
+              candidateOriginBoard: originBoard,
+            ),
+      ),
+    )();
+    expect(convergedGen1.deletedBlock.generation, equals(1));
+    expect(
+      convergedGen1.findTask('retTask002'),
+      isNull,
+      reason: 'Untouched retired task whose only change was automatic block cleanup must retire cleanly without false RecoveryRequired',
+    );
+    expect(convergedGen1.findLabel('retLbl0001'), isNull);
+    expect(convergedGen1.findLocation('retLoc0001'), isNull);
+    expect(
+      convergedGen1.findTask('survDep003')?.title,
+      equals('Edited Before Gen Ack'),
+    );
+    final survivingDep = convergedGen1.findTask('survDep003');
+    expect(
+      survivingDep?.dependencies,
+      isEmpty,
+      reason: 'Resolved retired dependency retTask002:1 must be stripped after generation 0 -> 1 merge',
+    );
+
+    // Step 2 (originGen == 0 < storedGen == 1 <= storedAckGen == 1): a queued optimistic mutation built on
+    // originBoard (generation 0) adding userAdd004 AND editing survDep003 (which still carries blocked retTask002:1 in originBoard)
+    // must rebase onto storedBaseline (generation 1), keeping userAdd004 and stripping retTask002:1 without false RecoveryRequired!
+    final t1205 = DateTime.utc(2026, 11, 11, 12, 5);
+    clockTime = t1205;
+    final queuedOnStaleGen0 = originBoard
+        .addTask(
+          'Queued User Task',
+          id: 'userAdd004',
+          targetTier: TaskTier.someday,
+          currentDate: t1205,
+          localEvaluationTime: t1205,
+        )
+        .updateTask(
+          'survDep003',
+          title: 'Queued Edit On Surviving Dependent',
+          currentDate: t1205,
+          localEvaluationTime: t1205,
+        );
+    expect(
+      queuedOnStaleGen0
+          .findTask('survDep003')
+          ?.dependencies
+          .map((dep) => dep.taskId),
+      contains('retTask002'),
+      reason: 'Precondition: stale generation-0 candidate still holds blocked retTask002:1 before rebase',
+    );
+    final rebasedGen1 = await container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              localConfig,
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+              candidateBoard: queuedOnStaleGen0,
+              candidateOriginBoard: originBoard,
+            ),
+      ),
+    )();
+    expect(
+      rebasedGen1.findTask('userAdd004')?.title,
+      equals('Queued User Task'),
+    );
+    expect(
+      rebasedGen1.findTask('survDep003')?.title,
+      equals('Queued Edit On Surviving Dependent'),
+    );
+    expect(
+      rebasedGen1.findTask('survDep003')?.dependencies,
+      isEmpty,
+      reason: '_rebaseCandidateToGeneration must strip blocked retTask002:1 when rebasing stale generation-0 candidate onto generation-1 baseline',
+    );
+
+    // Also verify real user edit on retTask002 in queued Path 2 (originGen == 0 < storedGen == 1 <= storedAckGen == 1) triggers RecoveryRequired:
+    final t1206 = DateTime.utc(2026, 11, 11, 12, 6);
+    clockTime = t1206;
+    final queuedRealEditOnRetired = originBoard.addTaskHistoryEntry(
+      'retTask002',
+      timestampUtc: t1206,
+      text: 'Queued edit on retired task',
+      currentDate: t1206,
+      localEvaluationTime: t1206,
+    );
+    await expectLater(
+      () => container.read(
+        Provider<Future<TaskBoard> Function()>(
+          (ref) =>
+              () => TaskSyncPipeline.synchronize(
+                ref,
+                localConfig,
+                pendingDeletedLabelTimestamps: <String, DateTime>{},
+                candidateBoard: queuedRealEditOnRetired,
+                candidateOriginBoard: originBoard,
+              ),
+        ),
+      )(),
+      throwsA(
+        isA<TdfSyncOutcomeException>().having(
+          (error) => error.kind,
+          'kind',
+          TdfSyncOutcomeKind.recoveryRequired,
+        ),
+      ),
+      reason: 'Queued real edit on retired task across generation rebase must trigger RecoveryRequired',
+    );
+
+    // Conversely, an actual user history edit on retTask002 across generation 0 -> 1 MUST trigger RecoveryRequired!
+    diskTdf = gen0Raw;
+    clockTime = t10;
+    final container2 = createSyncContainer(
+      config: localConfig,
+      settingsRepository: InMemorySettingsRepository(localConfig),
+      clock: () => clockTime,
+      getLocal: () => diskTdf,
+      setLocal: (value) => diskTdf = value,
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(container2.dispose);
+    await container2.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.synchronize(
+              ref,
+              localConfig,
+              pendingDeletedLabelTimestamps: <String, DateTime>{},
+            ),
+      ),
+    )();
+
+    clockTime = t12;
+    final candidateWithRealEditOnRetired = originBoard.addTaskHistoryEntry(
+      'retTask002',
+      timestampUtc: t12,
+      text: 'User edited retired task history',
+      currentDate: t12,
+      localEvaluationTime: t12,
+    );
+    diskTdf = gen1DiskRaw;
+
+    await expectLater(
+      () => container2.read(
+        Provider<Future<TaskBoard> Function()>(
+          (ref) =>
+              () => TaskSyncPipeline.synchronize(
+                ref,
+                localConfig,
+                pendingDeletedLabelTimestamps: <String, DateTime>{},
+                candidateBoard: candidateWithRealEditOnRetired,
+                candidateOriginBoard: originBoard,
+              ),
+        ),
+      )(),
+      throwsA(
+        isA<TdfSyncOutcomeException>().having(
+          (error) => error.kind,
+          'kind',
+          TdfSyncOutcomeKind.recoveryRequired,
+        ),
+      ),
+      reason: 'Real user edit to a retired task across deleted.generation advancement must trigger RecoveryRequired',
+    );
+  });
+}
+
+class _CountingSaveLocalRepository extends LocalFileRepository {
+  _CountingSaveLocalRepository({
+    required super.config,
+    super.baseDirectoryPath,
+    required this.onSave,
+  });
+
+  final void Function() onSave;
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    onSave();
+    await super.saveTdf(tdfContent);
+  }
 }

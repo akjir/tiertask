@@ -1,0 +1,7 @@
+tdf 0.7.0
+
+task 8jKaCdOkD2 {
+    name    "Task"
+    created 2026-11-01 08:00
+    repeat  1 months lead 0 days
+}

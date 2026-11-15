@@ -14,8 +14,10 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import '../models/task_board.dart';
+import '../models/task_board_evaluator.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
+import '../models/tdf_metadata.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import 'app_logger.dart';
@@ -23,7 +25,7 @@ import 'tdf_importer.dart';
 import 'tdf_parser.dart';
 import 'tdf_serializer.dart';
 
-/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.6.0` documents
+/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.7.0` documents
 /// in a single $O(N)$ linear pass without regular expressions.
 class TdfService {
   /// Creates a const [TdfService].
@@ -36,6 +38,10 @@ class TdfService {
   /// Legacy TDF specification version string (`tdf 0.5.1`) converted in memory at load time per Section 10.7.
   static const String legacySupportedVersion051 =
       TdfBlockParser.legacyLoadableVersion051;
+
+  /// Legacy TDF specification version string (`tdf 0.6.0`) converted in memory at load time per Section 10.8.
+  static const String legacySupportedVersion060 =
+      TdfBlockParser.legacyLoadableVersion060;
 
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = maxTdfArgsPerStmt;
@@ -55,8 +61,14 @@ class TdfService {
   /// Maximum input or serialized output size in UTF-8 bytes (`MAX_FILE_BYTES`, 1 MiB).
   static const int maxFileBytes = maxTdfFileBytes;
 
+  /// Maximum `history` directives per `task` block before deduplication (`MAX_HISTORY_PER_TASK`).
+  static const int maxHistoryPerTask = maxTdfHistoryPerTask;
+
   /// Maximum logical lines per `.tdf` document (`MAX_LINE_COUNT`).
   static const int maxLineCount = maxTdfLineCount;
+
+  /// Maximum `link` directives per `label` block (`MAX_LINKS_PER_LABEL`).
+  static const int maxLinksPerLabel = maxTdfLinksPerLabel;
 
   /// Maximum `link` directives per `task` block (`MAX_LINKS_PER_TASK`).
   static const int maxLinksPerTask = TaskLink.maxLinksPerTask;
@@ -91,23 +103,24 @@ class TdfService {
   /// Maximum deletion history generation (`MAX_SYNC_GENERATION`).
   static const int maxSyncGeneration = TdfDeletedBlock.maxGeneration;
 
-  /// Maximum decoded Unicode scalar values in a `name`, `step`, or link `<title>` (`MAX_TEXT_LENGTH`).
+  /// Maximum decoded Unicode scalar values in a `name`, `step`, `history`, or link `<title>` (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = maxTdfTextLength;
 
   /// Maximum decoded Unicode scalar values in a `link` `<uri>` (`MAX_URI_LENGTH`).
   static const int maxUriLength = TaskLink.maxUriLength;
 
-  /// Canonical TDF specification version string (`tdf 0.6.0`).
+  /// Canonical TDF specification version string (`tdf 0.7.0`).
   static const String supportedVersion = TdfBlockParser.supportedVersion;
 
-  /// Explicitly imports and migrates [sourceContent] (`0.2.0`, `0.3.0`, `0.4.0`, `0.5.0`, or `0.5.1`)
-  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0`) into a [TaskBoard].
+  /// Explicitly imports and migrates [sourceContent] (`0.2.0` through `0.7.0`)
+  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0 -> 0.7.0`) into a [TaskBoard].
   TaskBoard importDocument(
     String sourceContent, {
     TdfTimeZoneContext? sourceTimeZone,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? evaluationTimeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -117,21 +130,24 @@ class TdfService {
     evaluationTime: evaluationTime,
     localEvaluationTime: localEvaluationTime,
     evaluationTimeZone: evaluationTimeZone,
+    dueLeadWindow: dueLeadWindow,
     activeLabelId: activeLabelId,
     currentLatitude: currentLatitude,
     currentLongitude: currentLongitude,
   );
 
-  /// Scans and parses a `tdf 0.6.0` (or legacy `tdf 0.5.0` / `tdf 0.5.1`) [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
+  /// Scans and parses a `tdf 0.7.0` (or legacy `tdf 0.6.0` / `tdf 0.5.1` / `tdf 0.5.0`) [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
     final stopwatch = Stopwatch()..start();
     try {
@@ -140,17 +156,21 @@ class TdfService {
         evaluationTime: evaluationTime,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
         activeLabelId: activeLabelId,
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
         pruneExpiredCompleted: pruneExpiredCompleted,
+        targetSchema: targetSchema,
       );
       AppLogger.event(
         LogLevel.info,
         LogTag.tdf,
         'tdf.parse',
         fields: <String, Object?>{
-          'version': supportedVersion,
+          'version': targetSchema == TdfSchemaVersion.v060
+              ? legacySupportedVersion060
+              : supportedVersion,
           'tasks': board.allTasks.length,
           'labels': board.labels.length,
           'locations': board.locations.length,
@@ -173,9 +193,12 @@ class TdfService {
     }
   }
 
-  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.6.0` document string
+  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.7.0` (or `tdf 0.6.0` for [targetSchema]) document string
   /// and validates canonical output against Section 7.1 bounds.
-  String serialize(TaskBoard board) => _serializeInternal(board);
+  String serialize(
+    TaskBoard board, {
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
+  }) => _serializeInternal(board, targetSchema: targetSchema);
 
   /// Executes the adjacent Section 10 migration chain via [TdfImporter.importDocument].
   TaskBoard _importInternal(
@@ -184,6 +207,7 @@ class TdfService {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? evaluationTimeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -196,6 +220,7 @@ class TdfService {
         evaluationTime: evaluationTime,
         localEvaluationTime: localEvaluationTime,
         evaluationTimeZone: evaluationTimeZone,
+        dueLeadWindow: dueLeadWindow,
         activeLabelId: activeLabelId,
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
@@ -228,39 +253,48 @@ class TdfService {
     }
   }
 
-  /// Delegates single-pass TDF 0.6.0 (and legacy 0.5.0 / 0.5.1) scanning and parsing to [TdfBlockParser.parseDocument].
+  /// Delegates single-pass TDF 0.7.0 (and legacy 0.6.0 / 0.5.1 / 0.5.0) scanning and parsing to [TdfBlockParser.parseDocument].
   TaskBoard _parseInternal(
     String tdfContent, {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
     return TdfBlockParser.parseDocument(
       tdfContent,
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
+      targetSchema: targetSchema,
     );
   }
 
-  /// Delegates canonical TDF 0.6.0 serialization and bounds validation to [TdfSerializer.serialize].
-  String _serializeInternal(TaskBoard board) {
+  /// Delegates canonical TDF 0.7.0 (or 0.6.0) serialization and bounds validation to [TdfSerializer.serialize].
+  String _serializeInternal(
+    TaskBoard board, {
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
+  }) {
     final stopwatch = Stopwatch()..start();
-    final output = TdfSerializer.serialize(board);
+    final output = TdfSerializer.serialize(board, targetSchema: targetSchema);
     AppLogger.event(
       LogLevel.info,
       LogTag.tdf,
       'tdf.serialize',
       fields: <String, Object?>{
-        'version': supportedVersion,
+        'version': targetSchema == TdfSchemaVersion.v060
+            ? legacySupportedVersion060
+            : supportedVersion,
         'tasks': board.allTasks.length,
         'labels': board.labels.length,
         'locations': board.locations.length,

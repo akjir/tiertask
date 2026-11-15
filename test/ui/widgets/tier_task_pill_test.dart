@@ -806,7 +806,13 @@ task c20000OkD2 {
           SubtaskItem(title: 'Step 2', isCompleted: false),
         ],
       );
+      final activePrerequisite = TaskItem(
+        id: 'prereq0001',
+        title: 'Active Prerequisite Task',
+        createdAt: now,
+      );
       final board = TaskBoard(
+        focus: [activePrerequisite],
         blocked: [threeIndicatorsTask, fourIndicatorsTask],
       );
 
@@ -996,6 +1002,151 @@ task c20000OkD2 {
         step0Finder,
         findsOneWidget,
         reason: 'Tapping an indicator while subtasks are expanded must not collapse subtasks',
+      );
+    },
+  );
+
+  testWidgets(
+    'TierTaskPill hides expired suspended indicator and hides blocked_by indicator when all dependencies target deleted, unknown, or satisfied tasks',
+    (WidgetTester tester) async {
+      final now = DateTime.utc(2026, 11, 1, 12, 0);
+      final completedTwicePrereq = TaskItem(
+        id: 'prereqDone',
+        title: 'Completed Twice Prereq',
+        createdAt: now,
+        completions: 2,
+      );
+      final expiredSuspendedTask = TaskItem(
+        id: 'expSuspPil',
+        title: 'Expired Suspended Pill',
+        createdAt: now,
+        isPriority: true,
+        suspendedAt: DateTime.utc(2026, 11, 1, 12, 0),
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+        subtasks: const [SubtaskItem(title: 'Check logs')],
+      );
+      final deletedDepTask = TaskItem(
+        id: 'delDepPill',
+        title: 'Deleted Target Dependency Pill',
+        createdAt: now,
+        dependencies: const [
+          TdfTaskDependency(taskId: 'delTarget1', requiredCompletion: 1),
+        ],
+      );
+      final unknownDepTask = TaskItem(
+        id: 'unkDepPill',
+        title: 'Unknown Target Dependency Pill',
+        createdAt: now,
+        dependencies: const [
+          TdfTaskDependency(taskId: 'unkTarget2', requiredCompletion: 1),
+        ],
+      );
+      final satisfiedDepTask = TaskItem(
+        id: 'satDepPill',
+        title: 'Satisfied Target Dependency Pill',
+        createdAt: now,
+        dependencies: const [
+          TdfTaskDependency(taskId: 'prereqDone', requiredCompletion: 2),
+        ],
+      );
+      final activeBlockedDepTask = TaskItem(
+        id: 'actDepPill',
+        title: 'Unsatisfied Target Dependency Pill',
+        createdAt: now,
+        dependencies: const [
+          TdfTaskDependency(taskId: 'prereqDone', requiredCompletion: 3),
+        ],
+      );
+      final board = TaskBoard(
+        focus: [
+          completedTwicePrereq,
+          expiredSuspendedTask,
+          deletedDepTask,
+          unknownDepTask,
+          satisfiedDepTask,
+        ],
+        blocked: [activeBlockedDepTask],
+        deletedBlock: TdfDeletedBlock(
+          generation: 1,
+          tasks: [
+            TdfDeletedTaskRecord(
+              taskId: 'delTarget1',
+              deletedAt: DateTime.utc(2026, 10, 30, 9, 0),
+            ),
+          ],
+        ),
+      );
+
+      await pumpLeafWidget(
+        tester,
+        SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final item in [
+                expiredSuspendedTask,
+                deletedDepTask,
+                unknownDepTask,
+                satisfiedDepTask,
+                activeBlockedDepTask,
+              ])
+                TierTaskPill(
+                  task: item,
+                  canDowngrade: false,
+                  isCompleted: false,
+                ),
+            ],
+          ),
+        ),
+        board: board,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('suspended_task_indicator_expSuspPil')),
+        findsNothing,
+        reason:
+            'Finite suspendedAt <= nowUtc must hide suspended_task_indicator',
+      );
+      expect(
+        find.byKey(const ValueKey('summary_task_indicator_expSuspPil')),
+        findsNothing,
+        reason: 'Hiding expired suspended must leave only 3 active indicators instead of collapsing into summary',
+      );
+      expect(
+        find.byKey(const ValueKey('priority_task_indicator_expSuspPil')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('repeat_task_indicator_expSuspPil')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('subtasks_task_indicator_expSuspPil')),
+        findsOneWidget,
+      );
+
+      expect(
+        find.byKey(const ValueKey('blocked_by_task_indicator_delDepPill')),
+        findsNothing,
+        reason:
+            'Tombstoned dependency target must hide blocked_by_task_indicator',
+      );
+      expect(
+        find.byKey(const ValueKey('blocked_by_task_indicator_unkDepPill')),
+        findsNothing,
+        reason: 'Unknown forward-reference dependency target must hide blocked_by_task_indicator',
+      );
+      expect(
+        find.byKey(const ValueKey('blocked_by_task_indicator_satDepPill')),
+        findsNothing,
+        reason: 'Dependency with liveTarget.completions >= requiredCompletion must hide blocked_by_task_indicator',
+      );
+      expect(
+        find.byKey(const ValueKey('blocked_by_task_indicator_actDepPill')),
+        findsOneWidget,
+        reason: 'Dependency with liveTarget.completions < requiredCompletion must render blocked_by_task_indicator',
       );
     },
   );

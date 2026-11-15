@@ -1,0 +1,91 @@
+tdf 0.7.0
+
+queue {
+    modified 2026-11-10 11:00:00
+    task 1aBcDeFgH1
+    task 2bCdEfGhI2
+    task 3cDeFgHiJ3
+    task 4dEfGhIjK4
+    task 5eFgHiJkL5
+    task 6fGhIjKlM6
+    task 7gHiJkLmN7
+}
+
+label 4x9p2mOkD2 {
+    name     "General"
+    modified 2026-11-09 10:00
+    link     "Knowledge Base" "https://kb.example.com"
+}
+
+label 9kLm2P0aBc scoped {
+    name     "Tax Return 2026"
+    color    "#FF9800"
+    note     "Scoped workspace with reference links"
+    modified 2026-11-09 10:00
+    link     "ELSTER Portal" "https://www.elster.de"
+    link     "Receipts Folder" "file:///home/stefan/documents/tax2026"
+}
+
+task 1aBcDeFgH1 {
+    name     "Outside 24h lead window by one second"
+    created  2026-11-01 08:00
+    modified 2026-11-10 08:00
+    labels   4x9p2mOkD2
+    due      2026-11-11 12:00:01
+}
+
+task 2bCdEfGhI2 {
+    name     "Passive deadline inside 24h window opts out of promotion"
+    created  2026-11-01 08:05
+    modified 2026-11-10 08:05
+    labels   4x9p2mOkD2
+    due      2026-11-11 10:00:00 passive "Soft reminder\twith tab"
+}
+
+task 3cDeFgHiJ3 {
+    name     "Regular queued task without due"
+    created  2026-11-01 08:10
+    modified 2026-11-10 08:10
+    labels   4x9p2mOkD2
+}
+
+task 4dEfGhIjK4 {
+    name     "Exact 24h boundary task promoted into Focus"
+    created  2026-11-01 08:15
+    modified 2026-11-10 08:15
+    labels   4x9p2mOkD2
+    due      2026-11-11 12:00:00 "Statutory filing cutoff\nBring TAN generator"
+}
+
+task 5eFgHiJkL5 {
+    name     "Overdue task promoted into Focus"
+    created  2026-11-01 08:20
+    modified 2026-11-10 08:20
+    labels   4x9p2mOkD2
+    due      2026-11-10 09:00:00 "Already overdue cutoff"
+}
+
+task 6fGhIjKlM6 {
+    name     "Scoped urgent task excluded from global view"
+    created  2026-11-01 08:25
+    modified 2026-11-10 08:25
+    labels   9kLm2P0aBc
+    due      2026-11-10 18:00:00 "Scoped tax deadline"
+}
+
+task 7gHiJkLmN7 {
+    name      "Overdue but actively suspended task stays Blocked"
+    created   2026-11-01 08:30
+    modified  2026-11-10 08:30
+    labels    4x9p2mOkD2
+    suspended 2026-11-12 08:00:00 "Waiting for accountant\n\tCallback Thursday"
+    due       2026-11-10 08:00:00 "Original target date"
+}
+
+task 8hIjKlMnO8 {
+    name     "Unqueued overdue task stays in Someday"
+    created  2026-11-01 08:35
+    modified 2026-11-10 08:35
+    labels   4x9p2mOkD2
+    due      2026-11-10 06:00:00
+}

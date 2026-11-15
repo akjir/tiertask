@@ -1,0 +1,125 @@
+{
+  "version": "0.7.0",
+  "cases": [
+    {
+      "file": "01_history_500_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Task block with exactly MAX_HISTORY_PER_TASK = 500 raw history directives is valid."
+    },
+    {
+      "file": "02_history_501_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Task block with 501 distinct raw history directives exceeds MAX_HISTORY_PER_TASK = 500."
+    },
+    {
+      "file": "03_history_501_duplicates_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Task block with 501 identical duplicate history directives exceeds MAX_HISTORY_PER_TASK = 500 before deduplication."
+    },
+    {
+      "file": "04_task_full_canonical_534_stmts_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Full-capacity canonical task block (12 scalars + 20 link + 500 history + condition + subtasks = 534 direct child statements <= 1024) is valid."
+    },
+    {
+      "file": "05_stmts_per_block_1024_v070_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "TDF 0.7.0 task block with exactly MAX_STMTS_PER_BLOCK = 1024 direct child statements (name + created + 500 history + 10 link + 512 inline condition) is valid."
+    },
+    {
+      "file": "06_stmts_per_block_1025_v070_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "TDF 0.7.0 task block with 1025 direct child statements (name + created + 500 history + 11 link + 512 inline condition) exceeds MAX_STMTS_PER_BLOCK = 1024."
+    },
+    {
+      "file": "07_stmts_per_block_512_v060_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "TDF 0.6.0 task block with exactly 512 direct child statements (name + created + 510 inline condition) is valid under < 0.7.0 MAX_STMTS_PER_BLOCK = 512."
+    },
+    {
+      "file": "08_stmts_per_block_513_v060_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "TDF 0.6.0 task block with 513 direct child statements (name + created + 511 inline condition) exceeds < 0.7.0 MAX_STMTS_PER_BLOCK = 512."
+    },
+    {
+      "file": "09_history_text_500_supplementary_scalars_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "History text with exactly 500 supplementary Unicode scalar values (U+10400, 1000 UTF-16 code units) is valid."
+    },
+    {
+      "file": "10_history_text_501_supplementary_scalars_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "History text with 501 supplementary Unicode scalar values (U+10400) exceeds MAX_TEXT_LENGTH = 500."
+    },
+    {
+      "file": "11_history_text_250_decomposed_combining_pairs_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "History text with 250 decomposed U+0065 U+0301 pairs (500 scalar values) is valid."
+    },
+    {
+      "file": "12_label_links_20_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Label block with exactly MAX_LINKS_PER_LABEL = 20 link directives is valid."
+    },
+    {
+      "file": "13_label_links_21_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Label block with 21 link directives exceeds MAX_LINKS_PER_LABEL = 20."
+    },
+    {
+      "file": "14_repeat_lead_3650_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Repeat lead count at exact MAX_REPEAT_COUNT = 3650 days is valid."
+    },
+    {
+      "file": "15_repeat_lead_3651_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Repeat lead count 3651 exceeds MAX_REPEAT_COUNT = 3650."
+    },
+    {
+      "file": "16_repeat_lead_25_digits_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Repeat lead count with 25 ASCII digits exceeds MAX_NUMBER_LENGTH = 24."
+    },
+    {
+      "file": "17_suspended_note_2000_scalars_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Suspended note with exactly MAX_NOTE_LENGTH = 2000 supplementary Unicode scalar values (U+10400) is valid."
+    },
+    {
+      "file": "18_suspended_note_2001_scalars_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Suspended note with 2001 supplementary Unicode scalar values (U+10400) exceeds MAX_NOTE_LENGTH = 2000."
+    },
+    {
+      "file": "19_due_note_2000_scalars_valid.tdf",
+      "valid": true,
+      "expectedError": null,
+      "description": "Due note with exactly MAX_NOTE_LENGTH = 2000 supplementary Unicode scalar values (U+10400) is valid."
+    },
+    {
+      "file": "20_due_note_2001_scalars_invalid.tdf",
+      "valid": false,
+      "expectedError": "LimitExceeded",
+      "description": "Due note with 2001 supplementary Unicode scalar values (U+10400) exceeds MAX_NOTE_LENGTH = 2000."
+    }
+  ]
+}

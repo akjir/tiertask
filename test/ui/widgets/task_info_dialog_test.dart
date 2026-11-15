@@ -27,7 +27,7 @@ import '../test_helpers.dart';
 
 void main() {
   testWidgets(
-    'TaskInfoDialog formats indefinite, multi-day, multi-hour, minute-only, and elapsed suspension durations',
+    'TaskInfoDialog formats indefinite, multi-day, multi-hour, and minute-only suspension durations and hides expired suspension',
     (WidgetTester tester) async {
       final now = DateTime.utc(2026, 11, 1, 12, 0);
       const config = WebDavConfig(
@@ -145,9 +145,41 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Elapsed (2026-10-31 10:00)'),
-        findsOneWidget,
-        reason: 'Past suspension timestamp must display Elapsed status',
+        find.byKey(
+          const ValueKey('task_info_section_suspended_task_indicator'),
+        ),
+        findsNothing,
+        reason:
+            'Past suspension timestamp <= nowUtc must hide Suspended section',
+      );
+      expect(
+        find.text('Suspended'),
+        findsNothing,
+        reason: 'Past suspension timestamp must not render Suspended header',
+      );
+
+      final exactBoundaryTask = TaskItem(
+        id: 'suspBnd006',
+        title: 'Boundary Suspended Task',
+        createdAt: now,
+        suspendedAt: now,
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: exactBoundaryTask),
+        board: TaskBoard(focus: [exactBoundaryTask]),
+        config: config,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(
+          const ValueKey('task_info_section_suspended_task_indicator'),
+        ),
+        findsNothing,
+        reason:
+            'Exact suspendedAt == nowUtc boundary must hide Suspended section',
       );
     },
   );
@@ -296,6 +328,76 @@ void main() {
         find.byKey(const ValueKey('task_info_dialog_close_button')),
         findsOneWidget,
       );
+
+      final unblockedOneShotTask = TaskItem(
+        id: 'unblkShot1',
+        title: 'Satisfied Dependency Task',
+        note: 'Already unblocked',
+        createdAt: now,
+        dependencies: const [
+          TdfTaskDependency(taskId: 'preDone001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'delPrereq9', requiredCompletion: 1),
+        ],
+      );
+      final boardWithTombstone = TaskBoard(
+        focus: [unblockedOneShotTask, openPrereq],
+        completed: [donePrereq],
+        deletedBlock: TdfDeletedBlock(
+          generation: 1,
+          tasks: [
+            TdfDeletedTaskRecord(
+              taskId: 'delPrereq9',
+              deletedAt: DateTime.utc(2026, 10, 30, 8, 0),
+            ),
+          ],
+        ),
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: unblockedOneShotTask),
+        board: boardWithTombstone,
+        config: config,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(
+          const ValueKey('task_info_section_blocked_by_task_indicator'),
+        ),
+        findsNothing,
+        reason: 'TaskInfoDialog must hide Blocked By section when all dependencies are satisfied or tombstoned',
+      );
+
+      final mixedDeletedAndOpenTask = TaskItem(
+        id: 'mixDelOpn2',
+        title: 'Blocked With Deleted Sibling Prereq',
+        createdAt: now,
+        dependencies: const [
+          TdfTaskDependency(taskId: 'delPrereq9', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'preOpen002', requiredCompletion: 1),
+        ],
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: mixedDeletedAndOpenTask),
+        board: boardWithTombstone.copyWith(blocked: [mixedDeletedAndOpenTask]),
+        config: config,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('0 of 1 satisfied'),
+        findsOneWidget,
+        reason: 'Tombstoned prerequisite must be excluded from Blocked By progress count',
+      );
+      expect(
+        find.textContaining('delPrereq9'),
+        findsNothing,
+        reason: 'Tombstoned prerequisite raw ID must not render in Blocked By details',
+      );
+      expect(find.textContaining('Approve Firewall Rule'), findsOneWidget);
     },
   );
 }

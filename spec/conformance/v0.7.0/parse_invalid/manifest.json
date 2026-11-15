@@ -1,0 +1,281 @@
+{
+  "version": "0.7.0",
+  "cases": [
+    {
+      "file": "01_history_zero_args.tdf",
+      "expectedError": "MissingDirectiveArgument",
+      "expectedLine": 6,
+      "description": "Standalone history directive with zero arguments inside task block."
+    },
+    {
+      "file": "02_history_block_brace.tdf",
+      "expectedError": "UnknownBlockType",
+      "expectedLine": 6,
+      "description": "Opening brace following history inside task block."
+    },
+    {
+      "file": "03_history_in_label.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 5,
+      "description": "Forbidden history directive inside label block."
+    },
+    {
+      "file": "04_history_in_location.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 7,
+      "description": "Forbidden history directive inside location block."
+    },
+    {
+      "file": "05_history_in_deleted.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 5,
+      "description": "Forbidden history directive inside deleted block."
+    },
+    {
+      "file": "06_history_in_queue.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 5,
+      "description": "Forbidden history directive inside queue block."
+    },
+    {
+      "file": "07_history_in_subtasks.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 8,
+      "description": "Forbidden history directive inside subtasks sub-block."
+    },
+    {
+      "file": "08_history_in_condition.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 8,
+      "description": "Forbidden history directive inside condition sub-block."
+    },
+    {
+      "file": "09_history_in_v060_task.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 6,
+      "description": "Version-gated history directive rejected inside a tdf 0.6.0 task block."
+    },
+    {
+      "file": "10_history_one_arg.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "History directive with only 1 argument."
+    },
+    {
+      "file": "11_history_four_args.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "History directive with 4 arguments."
+    },
+    {
+      "file": "12_history_quoted_clock.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "History directive with 3 arguments where clock token is quoted."
+    },
+    {
+      "file": "13_history_unquoted_text.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "History directive with unquoted bare-word trailing text."
+    },
+    {
+      "file": "14_history_escaped_newline_only_whitespace.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Decoded \\n and \\t escapes in history text fail with UnexpectedToken before EmptyText even when surrounded only by spaces."
+    },
+    {
+      "file": "15_history_escaped_tab.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Decoded \\t escape sequence inside single-line history text."
+    },
+    {
+      "file": "16_history_invalid_escape.tdf",
+      "expectedError": "InvalidEscapeSequence",
+      "expectedLine": 6,
+      "description": "Unknown backslash escape \\x inside double-quoted history text."
+    },
+    {
+      "file": "17_history_unterminated_string.tdf",
+      "expectedError": "UnterminatedString",
+      "expectedLine": 6,
+      "description": "Unclosed double quote in history text."
+    },
+    {
+      "file": "18_history_quoted_date.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Quoted leading date token in history directive."
+    },
+    {
+      "file": "19_history_invalid_calendar_date.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Non-leap calendar date 2026-02-29 in history timestamp."
+    },
+    {
+      "file": "20_history_empty_text.tdf",
+      "expectedError": "EmptyText",
+      "expectedLine": 6,
+      "description": "Empty string literal in history text."
+    },
+    {
+      "file": "21_history_spaces_only_text.tdf",
+      "expectedError": "EmptyText",
+      "expectedLine": 6,
+      "description": "ASCII-space-only string literal in history text."
+    },
+    {
+      "file": "22_label_link_javascript_uri.tdf",
+      "expectedError": "InvalidUri",
+      "expectedLine": 5,
+      "description": "Forbidden executable javascript: URI scheme in label link directive."
+    },
+    {
+      "file": "23_label_link_missing_scheme.tdf",
+      "expectedError": "InvalidUri",
+      "expectedLine": 5,
+      "description": "Missing URI scheme prefix in label link directive."
+    },
+    {
+      "file": "24_label_link_title_newline_precedence.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "Decoded \\n in label link title fails with UnexpectedToken before EmptyText."
+    },
+    {
+      "file": "25_label_link_zero_args.tdf",
+      "expectedError": "MissingDirectiveArgument",
+      "expectedLine": 5,
+      "description": "Standalone link directive with zero arguments inside label block."
+    },
+    {
+      "file": "26_label_link_one_arg.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "Label link directive with only 1 argument."
+    },
+    {
+      "file": "27_label_link_unquoted_arg.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 5,
+      "description": "Unquoted bare-word title argument in label link directive."
+    },
+    {
+      "file": "28_label_link_in_v060.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 5,
+      "description": "Version-gated link directive rejected inside a tdf 0.6.0 label block."
+    },
+    {
+      "file": "29_repeat_lead_missing_count.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Incomplete repeat lead clause missing <lead-count> and days."
+    },
+    {
+      "file": "30_repeat_lead_zero_days.tdf",
+      "expectedError": "InvalidNumber",
+      "expectedLine": 6,
+      "description": "Zero <lead-count> in repeat lead 0 days (must be >= 1)."
+    },
+    {
+      "file": "31_repeat_lead_invalid_unit.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Non-days unit (weeks) in repeat lead clause."
+    },
+    {
+      "file": "32_repeat_lead_bare_in_v060.tdf",
+      "expectedError": "InvalidTime",
+      "expectedLine": 6,
+      "description": "Three-token repeat 1 months lead in tdf 0.6.0 fails at token 3 as InvalidTime."
+    },
+    {
+      "file": "33_repeat_lead_full_in_v060.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Five-token repeat 1 months lead 5 days in tdf 0.6.0 fails with UnexpectedToken."
+    },
+    {
+      "file": "34_due_misordered_note_before_passive.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Misordered due directive placing quoted note before passive modifier."
+    },
+    {
+      "file": "35_due_duplicate_passive.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Duplicate passive modifier on due directive."
+    },
+    {
+      "file": "36_due_quoted_first_token.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Quoted date token as first argument of due directive."
+    },
+    {
+      "file": "37_suspended_quoted_forever.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Quoted forever token as first argument of suspended directive."
+    },
+    {
+      "file": "38_suspended_whitespace_only_note.tdf",
+      "expectedError": "EmptyText",
+      "expectedLine": 6,
+      "description": "Whitespace-only (spaces, newline, tab) note on suspended forever."
+    },
+    {
+      "file": "39_due_in_v051.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 6,
+      "description": "Historical version gate rejects due directive inside a tdf 0.5.1 task block."
+    },
+    {
+      "file": "40_due_passive_two_tokens_in_v060.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Two-token due 2026-11-11 passive in tdf 0.6.0 fails with InvalidTimestamp."
+    },
+    {
+      "file": "41_due_passive_three_tokens_in_v060.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Three-token due 2026-11-11 23:59:00 passive in tdf 0.6.0 fails with UnexpectedToken."
+    },
+    {
+      "file": "42_suspended_note_in_v060.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Two-token suspended 2026-11-11 \"note\" in tdf 0.6.0 fails with InvalidTimestamp."
+    },
+    {
+      "file": "43_origin_in_v051.tdf",
+      "expectedError": "UnknownDirective",
+      "expectedLine": 6,
+      "description": "Historical version gate rejects origin directive inside a tdf 0.5.1 task block."
+    },
+    {
+      "file": "44_due_note_two_tokens_in_v060.tdf",
+      "expectedError": "InvalidTimestamp",
+      "expectedLine": 6,
+      "description": "Two-token due 2026-11-11 \"note\" in tdf 0.6.0 fails with InvalidTimestamp."
+    },
+    {
+      "file": "45_suspended_note_three_tokens_in_v060.tdf",
+      "expectedError": "UnexpectedToken",
+      "expectedLine": 6,
+      "description": "Three-token suspended 2026-11-11 12:00:00 \"note\" in tdf 0.6.0 fails with UnexpectedToken."
+    },
+    {
+      "file": "46_history_args_with_block_brace.tdf",
+      "expectedError": "UnknownBlockType",
+      "expectedLine": 6,
+      "description": "Opening brace following history with arguments inside task block fails with UnknownBlockType."
+    }
+  ]
+}

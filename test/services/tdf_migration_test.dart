@@ -109,6 +109,19 @@ task home priority {
         reason: 'Missing prerequisite gone must map to 5OhMnA4x2F without creating a task block',
       );
 
+      final step050 = TdfImporter.migrate040To050(
+        step040,
+        sourceTimeZone: TdfTimeZoneContext.europeBerlin,
+      );
+      final step060 = TdfImporter.migrate051To060(
+        TdfImporter.migrate050To051(step050),
+      );
+      expect(
+        step060,
+        contains('    blocked     5OhMnA4x2F OaPtpMHEy3\n'),
+        reason: 'Intermediate 0.6.0 step preserves blocked on completed task before 0.6.0 -> 0.7.0 cleanup',
+      );
+
       final result = TdfImporter.importDocument(
         doc020,
         sourceTimeZone: TdfTimeZoneContext.europeBerlin,
@@ -116,14 +129,14 @@ task home priority {
       );
       expect(
         result.executedSteps,
-        equals(['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1', '0.6.0']),
-        reason: 'Chained 0.2.0 import must execute every intermediate version step through 0.6.0',
+        equals(['0.2.0', '0.3.0', '0.4.0', '0.5.0', '0.5.1', '0.6.0', '0.7.0']),
+        reason: 'Chained 0.2.0 import must execute every intermediate version step through 0.7.0',
       );
-      expect(result.migratedTdfContent, startsWith('tdf 0.6.0\n'));
+      expect(result.migratedTdfContent, startsWith('tdf 0.7.0\n'));
       expect(
         result.migratedTdfContent.contains('    queued '),
         isFalse,
-        reason: 'Final 0.6.0 output must strip all queued directives',
+        reason: 'Final 0.7.0 output must strip all queued directives',
       );
       final migratedTask = result.board.findTask('OaPtpMHEy3')!;
       expect(
@@ -143,7 +156,8 @@ task home priority {
       expect(finishedTask.completions, equals(1));
       expect(
         finishedTask.blockedByTaskIds,
-        equals(['5OhMnA4x2F', 'OaPtpMHEy3']),
+        isEmpty,
+        reason: 'Section 10.8 explicit 0.6.0 -> 0.7.0 migration clears legacy blocked directives on Completed tasks',
       );
     });
 
@@ -304,7 +318,7 @@ task 8jKaCdOkD2 {
       );
     });
 
-    test('executes adjacent 0.5.0 -> 0.5.1 -> 0.6.0 migration per Sections 10.6 and 10.7 and verifies pinned schemaRef050 and schemaRef051', () {
+    test('executes adjacent 0.5.0 -> 0.5.1 -> 0.6.0 -> 0.7.0 migration per Sections 10.6, 10.7, and 10.8 and verifies pinned schemaRef050, schemaRef051, and schemaRef060', () {
       expect(TdfImporter.schemaRef050.version, equals('0.5.0'));
       expect(
         TdfImporter.schemaRef050.commit,
@@ -323,7 +337,16 @@ task 8jKaCdOkD2 {
         TdfImporter.schemaRef051.blob,
         equals('1504ddff1ad9bd40930e4f90de8302336524f4dc'),
       );
-      expect(TdfImporter.historicalSchemaReferences.length, equals(5));
+      expect(TdfImporter.schemaRef060.version, equals('0.6.0'));
+      expect(
+        TdfImporter.schemaRef060.commit,
+        equals('439d3fea7797520e69f67936bed93bc5f5064577'),
+      );
+      expect(
+        TdfImporter.schemaRef060.blob,
+        equals('b53140b959d2ee1b1dfdab8f0edbb4a046858b5d'),
+      );
+      expect(TdfImporter.historicalSchemaReferences.length, equals(6));
 
       const doc050 = '''
 tdf 0.5.0
@@ -378,6 +401,90 @@ task 333333OkD2 {
           '}',
         ),
         reason: 'When finished (10:00) > queued (07:30), 0.5.1 fallback max(created, finished) already equals 10:00 so modified stays omitted',
+      );
+
+      final migrated060 = TdfImporter.migrate051To060(migrated051);
+      expect(migrated060, startsWith('tdf 0.6.0\n'));
+      final migrated070 = TdfImporter.migrate060To070(migrated060);
+      expect(migrated070, startsWith('tdf 0.7.0\n'));
+    });
+
+    test('migrates explicit 0.6.0 document to 0.7.0 extracting repeat leadDays and clock and stripping resolved blocked entries', () {
+      const doc060 = '''
+tdf 0.6.0
+
+deleted {
+    generation 1
+    task 6uCk8N0aB1 2026-11-01 12:00:00 1
+}
+
+task 111111OkD2 {
+    name        "Done One-Shot"
+    created     2026-11-01 08:00
+    finished    2026-11-01 09:00
+    modified    2026-11-01 09:00
+    completions 1
+    blocked     999999OkD2
+    suspended   2026-11-05 08:00:00
+}
+
+task 222222OkD2 {
+    name      "Monthly Report"
+    created   2026-11-01 08:00
+    modified  2026-11-01 10:00
+    repeat    1 months
+    blocked   111111OkD2 6uCk8N0aB1 999999OkD2
+    suspended 2026-11-10 08:00:00
+    due       2026-11-15 17:00:00
+}
+''';
+
+      expect(
+        () => TdfImporter.migrate060To070(doc060),
+        throwsA(
+          isA<TdfContextException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfContextOutcomeKind.importContextRequired,
+          ),
+        ),
+      );
+
+      final imported = TdfImporter.importDocument(
+        doc060,
+        sourceTimeZone: TdfTimeZoneContext.europeBerlin,
+        evaluationTime: fixedDate,
+      );
+      expect(imported.sourceVersion, equals('0.6.0'));
+      expect(imported.executedSteps, equals(['0.6.0', '0.7.0']));
+      expect(imported.migratedTdfContent, startsWith('tdf 0.7.0\n'));
+
+      final doneOneShot = imported.board.findTask('111111OkD2')!;
+      expect(doneOneShot.suspendedAt, isNull);
+      expect(doneOneShot.blockedByTaskIds, isEmpty);
+      expect(doneOneShot.modifiedAt, equals(DateTime.utc(2026, 11, 1, 9, 0)));
+
+      final report = imported.board.findTask('222222OkD2')!;
+      expect(
+        report.repeatRule,
+        equals(
+          const TaskRepeatRule(
+            count: 1,
+            unit: RepeatUnit.months,
+            clock: TdfRepeatClock(hour: 9, minute: 0),
+            leadDays: 5,
+          ),
+        ),
+      );
+      expect(
+        report.blockedByTaskIds,
+        equals(['999999OkD2']),
+        reason: 'Completed one-shot 111111OkD2 and tombstoned 6uCk8N0aB1 must be stripped while forward reference 999999OkD2 is preserved',
+      );
+      expect(
+        report.modifiedAt,
+        equals(DateTime.utc(2026, 11, 1, 10, 0)),
+        reason: 'Wall-clock-free 0.6.0 -> 0.7.0 migration must preserve task.modified untouched',
       );
     });
   });

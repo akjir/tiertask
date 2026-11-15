@@ -1,0 +1,9 @@
+tdf 0.6.0
+
+task 8jKaCdOkD2 {
+    name      "Open recurring task with due and finite suspended < due"
+    created   2026-11-01 08:00
+    repeat    1 months
+    suspended 2026-11-10 07:00:00
+    due       2026-11-15 17:00:00
+}

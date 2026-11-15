@@ -436,6 +436,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
           note: trimmedNote.isEmpty ? null : trimmedNote,
           clearNote: trimmedNote.isEmpty,
           isScoped: _isScoped,
+          links: widget.label.links,
           conditions: _conditionController.buildConditions(),
         );
     if (!mounted) {

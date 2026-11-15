@@ -33,6 +33,7 @@ import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 
 class _ControllableLocalRepository extends LocalFileRepository {
   _ControllableLocalRepository({
@@ -68,7 +69,7 @@ class _ControllableLocalRepository extends LocalFileRepository {
     if (shouldFailSave()) {
       throw const LocalFileException('Simulated wipe failure');
     }
-    setStore('tdf 0.6.0\n');
+    setStore('tdf 0.7.0\n');
   }
 }
 
@@ -120,7 +121,7 @@ class _ControllableWebDavRepository extends WebDavRepository {
         }
       }
     }
-    remoteFiles[path] = 'tdf 0.6.0\n';
+    remoteFiles[path] = 'tdf 0.7.0\n';
   }
 }
 
@@ -442,13 +443,13 @@ void main() {
 
       await notifier.wipeRemoteFile(webdavConfig, createBackup: true);
       expect(remoteFiles['$remotePath.bak'], contains('Task before wipe'));
-      expect(remoteFiles[remotePath], equals('tdf 0.6.0\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.7.0\n'));
 
       await notifier.wipeLocalFile(webdavConfig, createBackup: true);
       final localWipeFile = File('${tempDir.path}/local_wipe.tdf');
       final localWipeBak = File('${tempDir.path}/local_wipe.tdf.bak');
       expect(await localWipeBak.exists(), isTrue);
-      expect(await localWipeFile.readAsString(), equals('tdf 0.6.0\n'));
+      expect(await localWipeFile.readAsString(), equals('tdf 0.7.0\n'));
       expect(container.read(taskNotifierProvider).value?.allTasks, isEmpty);
 
       await expectLater(
@@ -1739,6 +1740,469 @@ void main() {
         reason: 'importLegacyTdf must clear SyncState.hasOpenConflict',
       );
       expect(container.read(syncStateProvider).errorMessage, isNull);
+    });
+
+    test('executes TDF 0.7.0 label links, task suspendedNote, passive due, dueNote, and history CRUD with no-op guards and AppLogger privacy redaction', () async {
+      var storedTdf = '';
+      var saveCount = 0;
+      var currentTime = DateTime.utc(2026, 11, 11, 10, 0);
+      AppLogger.resetForTesting(clock: () => currentTime);
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        diagnosticsEnabled: true,
+        logLevel: LogLevel.debug,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _ControllableLocalRepository(
+              config: config,
+              getStore: () => storedTdf,
+              setStore: (value) {
+                saveCount++;
+                storedTdf = value;
+              },
+              shouldFailSave: () => false,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      await notifier.addLabel(
+        'Docs',
+        id: 'docs000001',
+        links: const <TaskLink>[
+          TaskLink(
+            uri: 'https://secret-wiki.internal/spec',
+            title: 'TopSecretLabelTitle',
+          ),
+        ],
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findLabel('docs000001')
+            ?.links
+            .single
+            .title,
+        equals('TopSecretLabelTitle'),
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 10, 5);
+      await notifier.updateLabel(
+        'docs000001',
+        name: 'Docs v2',
+        links: const <TaskLink>[
+          TaskLink(
+            uri: 'https://secret-wiki.internal/v2',
+            title: 'UpdatedSecretLabelTitle',
+          ),
+        ],
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findLabel('docs000001')
+            ?.links
+            .single
+            .uri,
+        equals('https://secret-wiki.internal/v2'),
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 10, 10);
+      await notifier.addTask(
+        'Release Prep',
+        id: 'relPrep001',
+        dueAt: DateTime.utc(2026, 11, 20, 15, 0),
+        isDuePassive: true,
+        dueNote: 'ConfidentialDueNote',
+        suspendedAt: DateTime.utc(2026, 11, 15, 9, 0),
+        suspendedNote: 'ConfidentialSuspendedNote',
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 11, 9, 0),
+            text: 'InitialSecretHistoryEntry',
+          ),
+        ],
+      );
+      final addedTask = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('relPrep001');
+      expect(addedTask?.isDuePassive, isTrue);
+      expect(addedTask?.dueNote, equals('ConfidentialDueNote'));
+      expect(addedTask?.suspendedNote, equals('ConfidentialSuspendedNote'));
+      expect(addedTask?.history.length, equals(1));
+
+      currentTime = DateTime.utc(2026, 11, 11, 10, 15);
+      await notifier.updateTask(
+        'relPrep001',
+        dueNote: 'UpdatedConfidentialDueNote',
+        suspendedNote: 'UpdatedConfidentialSuspendedNote',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('relPrep001')
+            ?.dueNote,
+        equals('UpdatedConfidentialDueNote'),
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('relPrep001')
+            ?.suspendedNote,
+        equals('UpdatedConfidentialSuspendedNote'),
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 10, 16);
+      await notifier.updateTask(
+        'relPrep001',
+        isDuePassive: false,
+        clearDueNote: true,
+        clearSuspendedNote: true,
+      );
+      final clearedNotesTask = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('relPrep001');
+      expect(clearedNotesTask?.isDuePassive, isFalse);
+      expect(clearedNotesTask?.dueNote, isNull);
+      expect(clearedNotesTask?.suspendedNote, isNull);
+
+      // History CRUD + strict no-op guards:
+      currentTime = DateTime.utc(2026, 11, 11, 10, 20);
+      final savesBeforeAddHistory = saveCount;
+      await notifier.addTaskHistoryEntry(
+        'relPrep001',
+        timestampUtc: DateTime.utc(2026, 11, 11, 10, 20),
+        text: 'SecondSecretHistoryEntry',
+      );
+      expect(saveCount, equals(savesBeforeAddHistory + 1));
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('relPrep001')
+            ?.history
+            .length,
+        equals(2),
+      );
+
+      // Duplicate addTaskHistoryEntry is a pure no-op (zero storage writes):
+      currentTime = DateTime.utc(2026, 11, 11, 10, 21);
+      await notifier.addTaskHistoryEntry(
+        'relPrep001',
+        timestampUtc: DateTime.utc(2026, 11, 11, 10, 20),
+        text: 'SecondSecretHistoryEntry',
+      );
+      expect(
+        saveCount,
+        equals(savesBeforeAddHistory + 1),
+        reason: 'Duplicate addTaskHistoryEntry must skip _commitMutation and perform zero storage writes',
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 10, 25);
+      await notifier.updateTaskHistoryEntry(
+        'relPrep001',
+        oldTimestampUtc: DateTime.utc(2026, 11, 11, 10, 20),
+        oldText: 'SecondSecretHistoryEntry',
+        newTimestampUtc: DateTime.utc(2026, 11, 11, 10, 22),
+        newText: 'EditedSecretHistoryEntry',
+      );
+      expect(saveCount, equals(savesBeforeAddHistory + 2));
+
+      // Identical updateTaskHistoryEntry is a pure no-op:
+      currentTime = DateTime.utc(2026, 11, 11, 10, 26);
+      await notifier.updateTaskHistoryEntry(
+        'relPrep001',
+        oldTimestampUtc: DateTime.utc(2026, 11, 11, 10, 22),
+        oldText: 'EditedSecretHistoryEntry',
+        newTimestampUtc: DateTime.utc(2026, 11, 11, 10, 22),
+        newText: 'EditedSecretHistoryEntry',
+      );
+      expect(
+        saveCount,
+        equals(savesBeforeAddHistory + 2),
+        reason: 'No-op updateTaskHistoryEntry must perform zero storage writes',
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 10, 30);
+      await notifier.removeTaskHistoryEntry(
+        'relPrep001',
+        timestampUtc: DateTime.utc(2026, 11, 11, 10, 22),
+        text: 'EditedSecretHistoryEntry',
+      );
+      expect(saveCount, equals(savesBeforeAddHistory + 3));
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('relPrep001')
+            ?.history
+            .length,
+        equals(1),
+      );
+
+      // Removing a missing entry is a pure no-op:
+      currentTime = DateTime.utc(2026, 11, 11, 10, 31);
+      await notifier.removeTaskHistoryEntry(
+        'relPrep001',
+        timestampUtc: DateTime.utc(2026, 11, 11, 10, 22),
+        text: 'EditedSecretHistoryEntry',
+      );
+      expect(
+        saveCount,
+        equals(savesBeforeAddHistory + 3),
+        reason: 'No-op removeTaskHistoryEntry must perform zero storage writes',
+      );
+
+      // Verify AppLogger privacy redaction: taskId and historyCount logged, zero sensitive text/URIs!
+      final logText = AppLogger.fullLogText;
+      expect(logText, contains('relPrep001'));
+      expect(logText, contains('historyCount='));
+      for (final forbidden in <String>[
+        'TopSecretLabelTitle',
+        'UpdatedSecretLabelTitle',
+        'secret-wiki.internal',
+        'ConfidentialDueNote',
+        'UpdatedConfidentialDueNote',
+        'ConfidentialSuspendedNote',
+        'UpdatedConfidentialSuspendedNote',
+        'InitialSecretHistoryEntry',
+        'SecondSecretHistoryEntry',
+        'EditedSecretHistoryEntry',
+      ]) {
+        expect(
+          logText,
+          isNot(contains(forbidden)),
+          reason:
+              'AppLogger must never record sensitive TDF 0.7.0 note, link, or history text ($forbidden)',
+        );
+      }
+    });
+
+    test('captures stripped previouslyBlockedDependencies on completeTask, auto-finish toggleSubtask, and deleteTask, and preserves undo across pure block-cleanup syncs while pruning when previouslyBlockedDependencies tasks change', () async {
+      var storedTdf = '';
+      var currentTime = DateTime.utc(2026, 11, 11, 12, 0);
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _ControllableLocalRepository(
+              config: config,
+              getStore: () => storedTdf,
+              setStore: (value) => storedTdf = value,
+              shouldFailSave: () => false,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      await notifier.addTask('Blocker One', id: 'blkrUndo01');
+      await notifier.addTask(
+        'Auto Finish Blocker',
+        id: 'autoUndo02',
+        subtasksAutoFinish: true,
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Only Step')],
+      );
+      await notifier.addTask('Delete Target Blocker', id: 'delUndo004');
+      await notifier.addTask(
+        'Dependent On Complete',
+        id: 'depComp001',
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'blkrUndo01', requiredCompletion: 1),
+        ],
+      );
+      await notifier.addTask(
+        'Dependent On AutoFinish',
+        id: 'depAuto002',
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'autoUndo02', requiredCompletion: 1),
+        ],
+      );
+      await notifier.addTask(
+        'Dependent On Delete',
+        id: 'depDel0003',
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'delUndo004', requiredCompletion: 2),
+        ],
+      );
+      await notifier.addTask(
+        'Bystander Expiring Deferral',
+        id: 'bystSusp05',
+        suspendedAt: DateTime.utc(2026, 11, 11, 12, 5),
+        suspendedNote: 'Expiring soon',
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 12, 1);
+      await notifier.completeTask('blkrUndo01');
+      currentTime = DateTime.utc(2026, 11, 11, 12, 2);
+      await notifier.toggleSubtask('autoUndo02', 0);
+      currentTime = DateTime.utc(2026, 11, 11, 12, 3);
+      await notifier.deleteTask('delUndo004');
+
+      final afterMutations = container.read(taskNotifierProvider).requireValue;
+      expect(afterMutations.findTask('depComp001')?.dependencies, isEmpty);
+      expect(afterMutations.findTask('depAuto002')?.dependencies, isEmpty);
+      expect(afterMutations.findTask('depDel0003')?.dependencies, isEmpty);
+      expect(container.read(taskUndoStateProvider).stackDepth, equals(3));
+
+      // Advance clock past 12:05 so syncFromRemote() performs automatic suspended <= now cleanup on bystSusp05
+      // AND simulate an external pre-cleanup blocked entry on depComp001 that gets automatically stripped on sync:
+      storedTdf = storedTdf.replaceFirst(
+        'name     "Dependent On Complete"\n',
+        'name     "Dependent On Complete"\n    blocked  blkrUndo01\n',
+      );
+      currentTime = DateTime.utc(2026, 11, 11, 12, 10);
+      await notifier.syncFromRemote();
+
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('bystSusp05')
+            ?.suspendedAt,
+        isNull,
+      );
+      expect(
+        container.read(taskUndoStateProvider).stackDepth,
+        equals(3),
+        reason: 'Pure automatic suspended/blocked cleanup during sync must not prune undo stack entries',
+      );
+
+      // Undo all 3 actions and verify stripped dependencies (including requiredCompletion!) are restored:
+      currentTime = DateTime.utc(2026, 11, 11, 12, 11);
+      expect(await notifier.undoLastAction(), isTrue);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('depDel0003')
+            ?.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'delUndo004', requiredCompletion: 2),
+        ]),
+        reason:
+            'Undoing deleteTask must restore stripped dependency on depDel0003',
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 12, 12);
+      expect(await notifier.undoLastAction(), isTrue);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('depAuto002')
+            ?.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'autoUndo02', requiredCompletion: 2),
+        ]),
+        reason: 'Undoing auto-finish toggleSubtask must restore and monotonically re-arm stripped dependency on depAuto002',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTierOfTask('depAuto002'),
+        equals(TaskTier.blocked),
+      );
+
+      currentTime = DateTime.utc(2026, 11, 11, 12, 13);
+      expect(await notifier.undoLastAction(), isTrue);
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('depComp001')
+            ?.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'blkrUndo01', requiredCompletion: 2),
+        ]),
+        reason: 'Undoing completeTask must restore and monotonically re-arm stripped dependency on depComp001',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTierOfTask('depComp001'),
+        equals(TaskTier.blocked),
+      );
+
+      // Now verify undo invalidation when a task in previouslyBlockedDependencies is externally edited or deleted:
+      currentTime = DateTime.utc(2026, 11, 11, 12, 20);
+      await notifier.completeTask('blkrUndo01');
+      currentTime = DateTime.utc(2026, 11, 11, 12, 21);
+      await notifier.deleteTask('delUndo004');
+      expect(container.read(taskUndoStateProvider).stackDepth, equals(2));
+
+      // Externally edit depComp001's title at 12:22:00:
+      final boardAfterSecondBatch = container
+          .read(taskNotifierProvider)
+          .requireValue;
+      final editedDepBoard = boardAfterSecondBatch.updateTask(
+        'depComp001',
+        title: 'Externally Renamed Dependent',
+        currentDate: DateTime.utc(2026, 11, 11, 12, 22),
+        localEvaluationTime: DateTime(2026, 11, 11, 12, 22),
+      );
+      storedTdf = container.read(tdfServiceProvider).serialize(editedDepBoard);
+      currentTime = DateTime.utc(2026, 11, 11, 12, 23);
+      await notifier.syncFromRemote();
+      expect(
+        container.read(taskUndoStateProvider).stackDepth,
+        equals(1),
+        reason: 'External non-cleanup payload edit on depComp001 (in previouslyBlockedDependencies) must prune blkrUndo01 complete undo entry',
+      );
+
+      // Externally delete depDel0003 at 12:24:00:
+      final boardAfterDepEdit = container
+          .read(taskNotifierProvider)
+          .requireValue;
+      final deletedDepBoard = boardAfterDepEdit.deleteTask(
+        'depDel0003',
+        currentDate: DateTime.utc(2026, 11, 11, 12, 24),
+        localEvaluationTime: DateTime(2026, 11, 11, 12, 24),
+      );
+      storedTdf = container.read(tdfServiceProvider).serialize(deletedDepBoard);
+      currentTime = DateTime.utc(2026, 11, 11, 12, 25);
+      await notifier.syncFromRemote();
+      expect(
+        container.read(taskUndoStateProvider).stackDepth,
+        equals(0),
+        reason: 'External deletion of depDel0003 (in previouslyBlockedDependencies) must prune delUndo004 delete undo entry',
+      );
     });
   });
 }

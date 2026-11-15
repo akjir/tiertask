@@ -16,6 +16,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
@@ -28,6 +29,43 @@ import 'package:tiertask/ui/edit_labels_screen.dart';
 import 'package:tiertask/ui/widgets/task_editor_sections.dart';
 
 import 'test_helpers.dart';
+
+/// [FakeTaskNotifier] test double capturing the `links` argument forwarded to [updateLabel].
+class _RecordingLabelTaskNotifier extends FakeTaskNotifier {
+  /// Creates a [_RecordingLabelTaskNotifier].
+  _RecordingLabelTaskNotifier([super.initialBoard]);
+
+  /// Links passed to the most recent [updateLabel] invocation.
+  List<TaskLink>? lastUpdatedLinks;
+
+  @override
+  Future<void> updateLabel(
+    String labelId, {
+    String? name,
+    String? color,
+    bool clearColor = false,
+    String? note,
+    bool clearNote = false,
+    bool? isScoped,
+    Iterable<TaskLink>? links,
+    List<TaskCondition>? conditions,
+    DateTime? currentDate,
+  }) {
+    lastUpdatedLinks = links?.toList();
+    return super.updateLabel(
+      labelId,
+      name: name,
+      color: color,
+      clearColor: clearColor,
+      note: note,
+      clearNote: clearNote,
+      isScoped: isScoped,
+      links: links,
+      conditions: conditions,
+      currentDate: currentDate,
+    );
+  }
+}
 
 void main() {
   testWidgets(
@@ -830,6 +868,92 @@ task 000002OkD2 {
             ?.name,
         equals('Home'),
         reason: 'Cancelling EditLabelScreen must not persist unsaved changes',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditLabelScreen preserves existing TdfLabel.links across edits and saves',
+    (WidgetTester tester) async {
+      const existingLinks = <TaskLink>[
+        TaskLink(title: 'Architecture Doc', uri: 'https://example.com/arch'),
+        TaskLink(title: 'Oncall Runbook', uri: 'https://example.com/runbook'),
+      ];
+      const initialLabel = TdfLabel(
+        id: 'plat00OkD2',
+        name: 'Platform',
+        color: '#2196F3',
+        note: 'Initial platform note',
+        links: existingLinks,
+      );
+      final recordingNotifier = _RecordingLabelTaskNotifier(
+        TaskBoard.empty().copyWith(labels: const [initialLabel]),
+      );
+      const config = WebDavConfig(language: AppLanguage.english);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: config,
+              initialTdf: 'tdf 0.7.0\n',
+            ),
+          ),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 1, 12, 0),
+          ),
+          taskNotifierProvider.overrideWith(() => recordingNotifier),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(taskNotifierProvider.future);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: EditLabelScreen(label: initialLabel),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Platform Core',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Updated platform note',
+      );
+      await tester.pump();
+
+      final saveButtonFinder = find.byKey(
+        const ValueKey('task_editor_save_button'),
+      );
+      await tester.ensureVisible(saveButtonFinder);
+      await tester.tap(saveButtonFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        recordingNotifier.lastUpdatedLinks,
+        equals(existingLinks),
+        reason: 'EditLabelScreen must explicitly pass existing TdfLabel.links to updateLabel',
+      );
+      final updatedLabel = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findLabel('plat00OkD2');
+      expect(updatedLabel?.name, equals('Platform Core'));
+      expect(updatedLabel?.note, equals('Updated platform note'));
+      expect(
+        updatedLabel?.links,
+        equals(existingLinks),
+        reason: 'Saving an edited TdfLabel must preserve its existing links without dropping or resetting them',
       );
     },
   );

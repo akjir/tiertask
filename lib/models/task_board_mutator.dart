@@ -74,7 +74,7 @@ class TaskBoardMutator {
   /// Private constructor for static task and label mutation helpers.
   const TaskBoardMutator._();
 
-  /// Adds a new TDF `label` block to [board] with a unique identifier and optional `#RRGGBB` [color].
+  /// Adds a new TDF `label` block to [board] with a unique identifier, optional `#RRGGBB` [color], and validated [links].
   static NormalizedTierSlices addLabel(
     NormalizedTierSlices board,
     String name, {
@@ -83,9 +83,14 @@ class TaskBoardMutator {
     String? note,
     bool isScoped = false,
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? modifiedAt,
+    Iterable<TaskLink> links = const <TaskLink>[],
     List<TaskCondition> conditions = const [],
   }) {
+    final validatedLinks = _validateLabelLinks(links);
     final trimmed = name.trim();
     if (trimmed.isEmpty) return board;
     final rawTime = modifiedAt ?? currentDate;
@@ -104,14 +109,41 @@ class TaskBoardMutator {
       color: TdfColor.normalizeHex(color),
       note: _trimOrNull(note),
       modifiedAt: stamp,
+      links: validatedLinks,
       conditions: _sanitizeLabelRules(conditions) ?? const [],
     );
-    return board
-        .copyWithSlices(labels: [...board.labels, newLabel])
-        .logDomainMutation('addLabel id=$labelId name="$trimmed"');
+    if (newLabel.canonicalDirectChildStatementCount > maxTdfStmtsPerBlock) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Label block exceeds maximum of $maxTdfStmtsPerBlock statements.',
+      );
+    }
+    final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks,
+      deleted: board.deletedBlock,
+      nowUtc: cleanupNow,
+    );
+    final nextLabels = <TdfLabel>[...board.labels, newLabel];
+    final nextBoard =
+        (cleaned.cleanedSuspendedCount > 0 || cleaned.cleanedBlockedCount > 0)
+        ? TaskBoardEvaluator.reevaluateBoard(
+            board,
+            tasks: cleaned.tasks,
+            labels: nextLabels,
+            now: cleanupNow,
+            localEvaluationTime: localEvaluationTime,
+            timeZone: timeZone,
+            dueLeadWindow: dueLeadWindow,
+            pruneExpiredCompleted: false,
+          )
+        : board.copyWithSlices(labels: nextLabels);
+    return nextBoard.logDomainMutation('addLabel id=$labelId name="$trimmed"');
   }
 
-  /// Adds a new TDF `location` block to [board] with a unique identifier per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.1.
+  /// Adds a new TDF `location` block to [board] with a unique identifier per `TDF_SPEC.md` Section 4.3 and 6.1.
   static NormalizedTierSlices addLocation(
     NormalizedTierSlices board,
     String name, {
@@ -122,6 +154,9 @@ class TaskBoardMutator {
     String? note,
     String? source,
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? modifiedAt,
   }) {
     final trimmedName = name.trim();
@@ -158,9 +193,27 @@ class TaskBoardMutator {
       source: _trimOrNull(source),
       modifiedAt: stamp,
     );
-    return board
-        .copyWithSlices(locations: [...board.locations, newLocation])
-        .logDomainMutation('addLocation id=$locationId');
+    final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks,
+      deleted: board.deletedBlock,
+      nowUtc: cleanupNow,
+    );
+    final nextLocations = <TdfLocation>[...board.locations, newLocation];
+    final nextBoard =
+        (cleaned.cleanedSuspendedCount > 0 || cleaned.cleanedBlockedCount > 0)
+        ? TaskBoardEvaluator.reevaluateBoard(
+            board,
+            tasks: cleaned.tasks,
+            locations: nextLocations,
+            now: cleanupNow,
+            localEvaluationTime: localEvaluationTime,
+            timeZone: timeZone,
+            dueLeadWindow: dueLeadWindow,
+            pruneExpiredCompleted: false,
+          )
+        : board.copyWithSlices(locations: nextLocations);
+    return nextBoard.logDomainMutation('addLocation id=$locationId');
   }
 
   /// Validates [title], allocates a task ID when [id] is `null`, and runs [mutate].
@@ -178,6 +231,60 @@ class TaskBoardMutator {
     return mutate(id ?? generateTaskId(timestamp: now, existingIds: used), now);
   }
 
+  /// Appends and canonically deduplicates a single [TaskHistoryEntry] on [taskId] (`TDF_SPEC.md` Section 4.1.2 & 6.6).
+  static NormalizedTierSlices addTaskHistoryEntry(
+    NormalizedTierSlices board,
+    String taskId, {
+    required DateTime timestampUtc,
+    required String text,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
+    final validatedEntry = _validateHistoryEntry(timestampUtc, text);
+    final prior = board.findTask(taskId);
+    if (prior == null) return board;
+    final nextHistory = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+      ...prior.history,
+      validatedEntry,
+    ]);
+    if (listEquals(nextHistory, prior.history)) {
+      return board;
+    }
+    if (nextHistory.length > maxTdfHistoryPerTask) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task exceeds maximum of $maxTdfHistoryPerTask history entries.',
+      );
+    }
+    final now = _resolveNow(currentDate);
+    final stamp = _nextMutationModifiedAt(now, prior.effectiveModifiedAt);
+    final updatedTask = prior.copyWith(history: nextHistory, modifiedAt: stamp);
+    _ensureTaskStatementBound(updatedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks.map(
+        (item) => item.id == taskId ? updatedTask : item,
+      ),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
+    return TaskBoardEvaluator.reevaluateBoard(
+      board,
+      tasks: cleaned.tasks,
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      pruneExpiredCompleted: false,
+    ).logDomainMutation(
+      'addTaskHistoryEntry id=$taskId historyCount=${nextHistory.length}',
+    );
+  }
+
   /// Marks an active task on [board] as done per `TDF_SPEC.md` Sections 6.4 and 6.9.4.
   static NormalizedTierSlices completeTask(
     NormalizedTierSlices board,
@@ -185,6 +292,7 @@ class TaskBoardMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     int? expectedCompletions,
   }) {
     final now = _resolveNow(currentDate);
@@ -199,36 +307,48 @@ class TaskBoardMutator {
     }
     final zone = _zone(now, localEvaluationTime, timeZone);
     final next = _reschedule(board, task, now, zone);
+    final completedTask = next ?? task.toCompleted(now);
+    _ensureTaskStatementBound(completedTask);
     final nextQueue = TaskBoardQueueMutator.updateQueueForEditedTask(
       board.queueBlock,
       task,
-      next ?? task,
+      completedTask,
       next != null,
       now,
     );
     final nextTasks = next != null
         ? board.allTasks.map((item) => item.id == taskId ? next : item)
-        : [
-            task.toCompleted(now),
+        : <TaskItem>[
+            completedTask,
             ...board.allTasks.where((item) => item.id != taskId),
           ];
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: nextTasks,
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
     final suffix = next != null ? ' (recurring)' : '';
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: nextTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueue,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('completeTask$suffix id=$taskId');
   }
 
   /// Deletes the label with [labelId] from [board], removes its reference from all tasks (applying `scoped` global-view flood protection per Section 6.8.1), and records the deletion.
   static NormalizedTierSlices deleteLabel(
     NormalizedTierSlices board,
-    String labelId, [
+    String labelId, {
     DateTime? currentDate,
-  ]) {
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
     final prior = board.findLabel(labelId);
     if (prior == null) return board;
     final now = _resolveNow(currentDate);
@@ -241,12 +361,14 @@ class TaskBoardMutator {
       for (final label in board.labels) label.id: label,
     };
     final evictedQueueIds = <String>{};
+    final stampedTaskIds = <String>{};
     final updatedTasks = <TaskItem>[];
     for (final task in board.allTasks) {
       if (!task.labelIds.contains(labelId)) {
         updatedTasks.add(task);
         continue;
       }
+      stampedTaskIds.add(task.id);
       final wasRestricted = TaskBoardEvaluator.isRestrictedFromGlobalView(
         task,
         labelMap,
@@ -277,16 +399,26 @@ class TaskBoardMutator {
         now,
       );
     }
+    final nextDeletedBlock = TaskBoardEvaluator.recordLabelDeletion(
+      board.deletedBlock,
+      record,
+    );
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: updatedTasks,
+      deleted: nextDeletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: stampedTaskIds,
+    );
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       labels: board.labels.where((item) => item.id != labelId).toList(),
-      deletedBlock: TaskBoardEvaluator.recordLabelDeletion(
-        board.deletedBlock,
-        record,
-      ),
+      deletedBlock: nextDeletedBlock,
       queueBlock: nextQueueBlock,
       now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     ).logDomainMutation('deleteLabel id=$labelId');
   }
@@ -298,6 +430,7 @@ class TaskBoardMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final prior = board.findLocation(locationId);
     if (prior == null) return board;
@@ -318,41 +451,55 @@ class TaskBoardMutator {
       for (final label in updatedLabels)
         if (_hasLocationConditionRule(label.conditions)) label.id,
     };
-    final updatedTasks = <TaskItem>[
-      for (final task in board.allTasks)
-        _cascadeLocationDeletionOnTask(
-          task,
-          locationId,
-          postCascadeLabelsWithLocation,
-          now,
-        ),
-    ];
+    final stampedTaskIds = <String>{};
+    final updatedTasks = <TaskItem>[];
+    for (final task in board.allTasks) {
+      final cascaded = _cascadeLocationDeletionOnTask(
+        task,
+        locationId,
+        postCascadeLabelsWithLocation,
+        now,
+      );
+      if (!identical(cascaded, task)) {
+        stampedTaskIds.add(task.id);
+      }
+      updatedTasks.add(cascaded);
+    }
     final remainingLocations = board.locations
         .where((item) => item.id != locationId)
         .toList();
+    final nextDeletedBlock = TaskBoardEvaluator.recordLocationDeletion(
+      board.deletedBlock,
+      record,
+    );
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: updatedTasks,
+      deleted: nextDeletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: stampedTaskIds,
+    );
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       labels: updatedLabels,
       locations: remainingLocations,
-      deletedBlock: TaskBoardEvaluator.recordLocationDeletion(
-        board.deletedBlock,
-        record,
-      ),
+      deletedBlock: nextDeletedBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     ).logDomainMutation('deleteLocation id=$locationId');
   }
 
-  /// Deletes the task with [taskId] from [board], removes its `queue` entry, and records the deletion in `deletedBlock`.
+  /// Deletes the task with [taskId] from [board], removes its `queue` entry, records the deletion in `deletedBlock`, and strips `blocked` references targeting [taskId] on open dependents.
   static NormalizedTierSlices deleteTask(
     NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final prior = board.findTask(taskId);
     if (prior == null) return board;
@@ -366,13 +513,19 @@ class TaskBoardMutator {
       deletedAt: stamp,
       completionsCheckpoint: prior.completions,
     );
+    final nextDeletedBlock = TaskBoardEvaluator.recordTaskDeletion(
+      board.deletedBlock,
+      record,
+    );
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks.where((item) => item.id != taskId),
+      deleted: nextDeletedBlock,
+      nowUtc: now,
+    );
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: board.allTasks.where((item) => item.id != taskId),
-      deletedBlock: TaskBoardEvaluator.recordTaskDeletion(
-        board.deletedBlock,
-        record,
-      ),
+      tasks: cleaned.tasks,
+      deletedBlock: nextDeletedBlock,
       queueBlock: TaskBoardQueueMutator.removeTaskFromQueue(
         board.queueBlock,
         taskId,
@@ -381,7 +534,53 @@ class TaskBoardMutator {
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('deleteTask id=$taskId');
+  }
+
+  /// Removes a single [TaskHistoryEntry] from [taskId] on [board] when present (`TDF_SPEC.md` Section 4.1.2 & 6.6).
+  static NormalizedTierSlices removeTaskHistoryEntry(
+    NormalizedTierSlices board,
+    String taskId, {
+    required TaskHistoryEntry entry,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
+    final prior = board.findTask(taskId);
+    if (prior == null || !prior.history.contains(entry)) {
+      return board;
+    }
+    final nextHistory = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+      for (final existing in prior.history)
+        if (existing != entry) existing,
+    ]);
+    if (listEquals(nextHistory, prior.history)) {
+      return board;
+    }
+    final now = _resolveNow(currentDate);
+    final stamp = _nextMutationModifiedAt(now, prior.effectiveModifiedAt);
+    final updatedTask = prior.copyWith(history: nextHistory, modifiedAt: stamp);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks.map(
+        (item) => item.id == taskId ? updatedTask : item,
+      ),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
+    return TaskBoardEvaluator.reevaluateBoard(
+      board,
+      tasks: cleaned.tasks,
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      pruneExpiredCompleted: false,
+    ).logDomainMutation(
+      'removeTaskHistoryEntry id=$taskId historyCount=${nextHistory.length}',
+    );
   }
 
   /// Toggles the subtask step at [stepIndex] on [taskId] in [board], auto-completing the task when `subtasks auto-finish` is enabled.
@@ -392,6 +591,7 @@ class TaskBoardMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final now = _resolveNow(currentDate);
     final tier = board.findTierOfTask(taskId);
@@ -415,17 +615,38 @@ class TaskBoardMutator {
       (item) => item.id == taskId ? updated : item,
     );
     final logMessage = 'toggleSubtask id=$taskId step=$stepIndex';
-    if (!willAutoComplete) return replaced.logDomainMutation(logMessage);
+    if (!willAutoComplete) {
+      final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+        tasks: replaced.allTasks,
+        deleted: replaced.deletedBlock,
+        nowUtc: now,
+        alreadyStampedTaskIds: <String>{taskId},
+      );
+      final nextBoard =
+          (cleaned.cleanedSuspendedCount > 0 || cleaned.cleanedBlockedCount > 0)
+          ? TaskBoardEvaluator.reevaluateBoard(
+              replaced,
+              tasks: cleaned.tasks,
+              now: now,
+              localEvaluationTime: localEvaluationTime,
+              timeZone: timeZone,
+              dueLeadWindow: dueLeadWindow,
+              pruneExpiredCompleted: false,
+            )
+          : replaced;
+      return nextBoard.logDomainMutation(logMessage);
+    }
     return completeTask(
       replaced,
       taskId,
       currentDate: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('$logMessage (auto-completed)');
   }
 
-  /// Updates an existing label with [labelId] on [board], re-evaluates the 6-tier pipeline, and ignores empty/duplicate names.
+  /// Updates an existing label with [labelId] on [board], re-evaluates the 6-tier pipeline, and ignores empty/duplicate names or pure no-op updates.
   static NormalizedTierSlices updateLabel(
     NormalizedTierSlices board,
     String labelId, {
@@ -435,11 +656,14 @@ class TaskBoardMutator {
     bool clearColor = false,
     String? note,
     bool clearNote = false,
+    Iterable<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
+    final validatedLinks = links != null ? _validateLabelLinks(links) : null;
     final prior = board.findLabel(labelId);
     if (prior == null) return board;
     final trimmedName = (name ?? prior.name).trim();
@@ -447,38 +671,57 @@ class TaskBoardMutator {
         board.hasDuplicateLabelName(trimmedName, excludingLabelId: labelId)) {
       return board;
     }
-    final now = _resolveNow(currentDate);
     final normalizedColor = TdfColor.normalizeHex(color);
     final cleanNote = _trimOrNull(note);
-    final stamp = TaskItem.nextModifiedTimestamp(
-      now,
-      prior.effectiveModifiedAt,
-    );
-    final updatedLabel = prior.copyWith(
+    final candidateWithoutStamp = prior.copyWith(
       name: trimmedName,
       isScoped: isScoped,
       color: normalizedColor,
       clearColor: clearColor || (color != null && normalizedColor == null),
       note: cleanNote,
       clearNote: clearNote || (note != null && cleanNote == null),
+      links: validatedLinks,
       conditions: _sanitizeLabelRules(conditions),
-      modifiedAt: stamp,
+    );
+    if (candidateWithoutStamp == prior) {
+      return board;
+    }
+    final now = _resolveNow(currentDate);
+    final stamp = TaskItem.nextModifiedTimestamp(
+      now,
+      prior.effectiveModifiedAt,
+    );
+    final updatedLabel = candidateWithoutStamp.copyWith(modifiedAt: stamp);
+    if (updatedLabel.canonicalDirectChildStatementCount > maxTdfStmtsPerBlock) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Label block exceeds maximum of $maxTdfStmtsPerBlock statements.',
+      );
+    }
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks,
+      deleted: board.deletedBlock,
+      nowUtc: now,
     );
     final logMessage =
         'updateLabel/renameLabel id=$labelId name="$trimmedName"';
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      labels: [
+      tasks: cleaned.tasks,
+      labels: <TdfLabel>[
         for (final item in board.labels)
           item.id == labelId ? updatedLabel : item,
       ],
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation(logMessage);
   }
 
-  /// Updates an existing location with [locationId] on [board] per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.6.
+  /// Updates an existing location with [locationId] on [board] per `TDF_SPEC.md` Section 4.3 and 6.6.
   static NormalizedTierSlices updateLocation(
     NormalizedTierSlices board,
     String locationId, {
@@ -493,6 +736,7 @@ class TaskBoardMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final prior = board.findLocation(locationId);
     if (prior == null) return board;
@@ -512,14 +756,9 @@ class TaskBoardMutator {
         nextRadius > maxTdfLocationRadius) {
       return board;
     }
-    final now = _resolveNow(currentDate);
     final cleanNote = _trimOrNull(note);
     final cleanSource = _trimOrNull(source);
-    final stamp = TaskItem.nextModifiedTimestamp(
-      now,
-      prior.effectiveModifiedAt,
-    );
-    final updatedLocation = prior.copyWith(
+    final candidateWithoutStamp = prior.copyWith(
       name: trimmedName,
       latitude: nextLatitude,
       longitude: nextLongitude,
@@ -528,17 +767,32 @@ class TaskBoardMutator {
       clearNote: clearNote || (note != null && cleanNote == null),
       source: cleanSource,
       clearSource: clearSource || (source != null && cleanSource == null),
-      modifiedAt: stamp,
+    );
+    if (candidateWithoutStamp == prior) {
+      return board;
+    }
+    final now = _resolveNow(currentDate);
+    final stamp = TaskItem.nextModifiedTimestamp(
+      now,
+      prior.effectiveModifiedAt,
+    );
+    final updatedLocation = candidateWithoutStamp.copyWith(modifiedAt: stamp);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks,
+      deleted: board.deletedBlock,
+      nowUtc: now,
     );
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      locations: [
+      tasks: cleaned.tasks,
+      locations: <TdfLocation>[
         for (final item in board.locations)
           item.id == locationId ? updatedLocation : item,
       ],
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('updateLocation id=$locationId');
   }
 
@@ -555,9 +809,14 @@ class TaskBoardMutator {
     List<String>? labelIds,
     DateTime? suspendedAt,
     bool? isSuspendedForever,
+    String? suspendedNote,
     bool clearSuspendedAt = false,
+    bool clearSuspendedNote = false,
     DateTime? dueAt,
+    bool? isDuePassive,
+    String? dueNote,
     bool clearDueAt = false,
+    bool clearDueNote = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
@@ -565,13 +824,28 @@ class TaskBoardMutator {
     TaskOrigin? origin,
     bool clearOrigin = false,
     List<TaskLink>? links,
+    Iterable<TaskHistoryEntry>? history,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? modifiedAt,
     bool isNewTask = false,
   }) {
+    final validatedSuspendedNote =
+        (!clearSuspendedNote && suspendedNote != null)
+        ? _validateScheduleNote(suspendedNote, 'suspendedNote')
+        : null;
+    final validatedDueNote = (!clearDueNote && dueNote != null)
+        ? _validateScheduleNote(dueNote, 'dueNote')
+        : null;
+    final validatedHistory = history != null
+        ? _validateHistoryEntries(history)
+        : null;
+    if (!clearRepeatRule && repeatRule != null) {
+      _validateRepeatRule(repeatRule);
+    }
     final prior = isNewTask ? null : board.findTask(taskId);
     if (!isNewTask && prior == null) return board;
     final trimmed = (title ?? prior?.title ?? '').trim();
@@ -588,6 +862,7 @@ class TaskBoardMutator {
         ? _cleanSubtasks(subtasks)
         : (prior?.subtasks ?? const <SubtaskItem>[]);
     final repeat = clearRepeatRule ? null : (repeatRule ?? prior?.repeatRule);
+    _validateRepeatRule(repeat);
     final autoDone = !isRestoring && _allStepsDone(autoFinish, steps);
     final isRecurringAuto = autoDone && !isTargetDone && repeat != null;
     final keepDone = targetTier == null && wasDone;
@@ -608,6 +883,9 @@ class TaskBoardMutator {
     final isForever = !clearDefer && (isSuspendedForever ?? autoForever);
     final rawSuspended = suspendedAt ?? prior?.suspendedAt;
     final nextSuspended = (clearDefer || isForever) ? null : rawSuspended;
+    final nextSuspendedNote = (clearDefer || clearSuspendedNote)
+        ? null
+        : (validatedSuspendedNote ?? prior?.suspendedNote);
     final isDeferred = isForever || (nextSuspended?.isAfter(now) ?? false);
     final wasQueued =
         prior == null || board.queueBlock.taskIds.contains(taskId);
@@ -623,16 +901,27 @@ class TaskBoardMutator {
         ? TaskItem.nextModifiedTimestamp(now, prior.effectiveModifiedAt)
         : TaskItem.normalizeTimestamp(modifiedAt ?? now);
     final prevCount = prior?.completions ?? 0;
-    final armed = _armDeps(
-      board,
-      taskId,
-      blockedByTaskIds,
-      dependencies,
-      prior,
-    );
+    final armed = isDone
+        ? const <TdfTaskDependency>[]
+        : _armDeps(board, taskId, blockedByTaskIds, dependencies, prior);
     final nextDueAt = (clearDueAt || (isRestoring && dueAt == null))
         ? null
         : (dueAt ?? prior?.dueAt);
+    final normalizedNextDueAt = nextDueAt != null
+        ? TaskItem.normalizeTimestamp(nextDueAt)
+        : null;
+    final normalizedPriorDueAt = switch (prior?.dueAt) {
+      final priorDue? => TaskItem.normalizeTimestamp(priorDue),
+      null => null,
+    };
+    final nextIsDuePassive = normalizedNextDueAt == null
+        ? false
+        : (prior != null && normalizedNextDueAt == normalizedPriorDueAt
+              ? (isDuePassive ?? prior.isDuePassive)
+              : (isDuePassive ?? false));
+    final nextDueNote = (normalizedNextDueAt == null || clearDueNote)
+        ? null
+        : (validatedDueNote ?? prior?.dueNote);
     final nextOrigin = clearOrigin ? null : (origin ?? prior?.origin);
     final baseTask = TaskItem(
       id: taskId,
@@ -646,7 +935,10 @@ class TaskBoardMutator {
       modifiedAt: stamp,
       suspendedAt: nextSuspended,
       isSuspendedForever: isForever,
+      suspendedNote: nextSuspendedNote,
       dueAt: nextDueAt,
+      isDuePassive: nextIsDuePassive,
+      dueNote: nextDueNote,
       repeatRule: repeat,
       dependencies: isRestoring
           ? TaskBoardQueueMutator.rearmDependencies(board, armed)
@@ -654,6 +946,7 @@ class TaskBoardMutator {
       labelIds: labelIds ?? prior?.labelIds ?? const [],
       origin: nextOrigin,
       links: links != null ? _cleanLinks(links) : (prior?.links ?? const []),
+      history: validatedHistory ?? prior?.history ?? const <TaskHistoryEntry>[],
       conditions: _sanitizeTaskRules(conditions, prior?.conditions ?? const []),
       subtasksAutoFinish: autoFinish,
       subtasks: (isRestoring || isDone)
@@ -664,6 +957,7 @@ class TaskBoardMutator {
     final finalTask = isRecurringAuto
         ? (_reschedule(board, baseTask, now, zone, stamp) ?? baseTask)
         : baseTask;
+    _ensureTaskStatementBound(finalTask);
     final nextQueue = TaskBoardQueueMutator.updateQueueForEditedTask(
       board.queueBlock,
       prior,
@@ -671,21 +965,96 @@ class TaskBoardMutator {
       isRecurringAuto || (!isDone && !isSomeday),
       now,
     );
+    if (prior != null && !isNewTask) {
+      final finalWithoutStamp = finalTask.copyWith(
+        modifiedAt: prior.modifiedAt,
+        clearModifiedAt: prior.modifiedAt == null,
+      );
+      if (finalWithoutStamp == prior &&
+          identical(nextQueue, board.queueBlock) &&
+          (targetTier == null || board.findTierOfTask(taskId) == targetTier)) {
+        return board;
+      }
+    }
     final added = isDone
-        ? [finalTask, ...board.allTasks]
-        : [...board.allTasks, finalTask];
+        ? <TaskItem>[finalTask, ...board.allTasks]
+        : <TaskItem>[...board.allTasks, finalTask];
     final nextTasks = prior != null
         ? board.allTasks.map((item) => item.id == taskId ? finalTask : item)
         : added;
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: nextTasks,
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
     final action = isNewTask ? 'addTask' : 'updateTask';
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: nextTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueue,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('$action id=$taskId title="$trimmed"');
+  }
+
+  /// Replaces [oldEntry] on [taskId] with a validated `(newTimestampUtc, newText)` history entry (`TDF_SPEC.md` Section 4.1.2 & 6.6).
+  static NormalizedTierSlices updateTaskHistoryEntry(
+    NormalizedTierSlices board,
+    String taskId, {
+    required TaskHistoryEntry oldEntry,
+    required DateTime newTimestampUtc,
+    required String newText,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
+    final replacement = _validateHistoryEntry(newTimestampUtc, newText);
+    final prior = board.findTask(taskId);
+    if (prior == null || !prior.history.contains(oldEntry)) {
+      return board;
+    }
+    final nextHistory = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+      for (final existing in prior.history)
+        existing == oldEntry ? replacement : existing,
+    ]);
+    if (listEquals(nextHistory, prior.history)) {
+      return board;
+    }
+    if (nextHistory.length > maxTdfHistoryPerTask) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task exceeds maximum of $maxTdfHistoryPerTask history entries.',
+      );
+    }
+    final now = _resolveNow(currentDate);
+    final stamp = _nextMutationModifiedAt(now, prior.effectiveModifiedAt);
+    final updatedTask = prior.copyWith(history: nextHistory, modifiedAt: stamp);
+    _ensureTaskStatementBound(updatedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks.map(
+        (item) => item.id == taskId ? updatedTask : item,
+      ),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
+    return TaskBoardEvaluator.reevaluateBoard(
+      board,
+      tasks: cleaned.tasks,
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      pruneExpiredCompleted: false,
+    ).logDomainMutation(
+      'updateTaskHistoryEntry id=$taskId historyCount=${nextHistory.length}',
+    );
   }
 
   /// Returns whether [autoFinish] is enabled and [steps] is non-empty with all steps completed.
@@ -832,7 +1201,7 @@ class TaskBoardMutator {
     return <LocationTaskCondition>[LocationTaskCondition.fromIds(ids)];
   }
 
-  /// Collects all task IDs, label IDs, location IDs, and retained deletion record IDs on [board] (`TDF_SPEC_0.6.0.md` Section 2.9).
+  /// Collects all task IDs, label IDs, location IDs, and retained deletion record IDs on [board] (`TDF_SPEC.md` Section 2.9).
   static Set<String> _collectAllUsedEntityIds(NormalizedTierSlices board) =>
       <String>{
         for (final task in board.allTasks) task.id,
@@ -844,6 +1213,18 @@ class TaskBoardMutator {
         for (final record in board.deletedBlock.labels) record.labelId,
         for (final record in board.deletedBlock.locations) record.locationId,
       };
+
+  /// Verifies that [task] does not exceed [maxTdfStmtsPerBlock] direct child statements.
+  static void _ensureTaskStatementBound(TaskItem task) {
+    if (task.canonicalDirectChildStatementCount > maxTdfStmtsPerBlock) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task block exceeds maximum of $maxTdfStmtsPerBlock statements.',
+      );
+    }
+  }
 
   /// Filters and orders task condition rules of type [T] for [group], or returns a single [GroupResetTaskCondition] when reset.
   static Iterable<TaskCondition> _groupRules<T extends TaskCondition>(
@@ -871,6 +1252,17 @@ class TaskBoardMutator {
             (rule.locationIds.isNotEmpty || rule.radiusMeters > 0),
       );
 
+  /// Returns whether [value] is empty or consists solely of ASCII `<note>` whitespace (`0x20`, `\t`, `\n`, `\r`).
+  static bool _isAsciiNoteWhitespaceOnly(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit != 0x20 && unit != 0x09 && unit != 0x0A && unit != 0x0D) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Applies [transform] to every task across all slices of [board].
   static NormalizedTierSlices _mapBoardTasks(
     NormalizedTierSlices board,
@@ -892,6 +1284,22 @@ class TaskBoardMutator {
     explicitQueueBlock: board.queueBlock,
   );
 
+  /// Advances `modifiedAt` once for a task mutation, throwing [TdfException] on `9999` overflow.
+  static DateTime _nextMutationModifiedAt(
+    DateTime now,
+    DateTime previousEffectiveModifiedAt,
+  ) {
+    try {
+      return TaskItem.nextModifiedTimestamp(now, previousEffectiveModifiedAt);
+    } on FormatException {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Task modified timestamp exceeds supported 9999-12-31 23:59:59 UTC.',
+      );
+    }
+  }
+
   /// Returns whether any [LocationTaskCondition] in [conditions] references [locationId].
   static bool _referencesLocationId(
     List<TaskCondition> conditions,
@@ -901,7 +1309,7 @@ class TaskBoardMutator {
         rule is LocationTaskCondition && rule.locationIds.contains(locationId),
   );
 
-  /// Reschedules a completed recurring [task] on [board] for its next cycle per `TDF_SPEC_0.6.0.md` Sections 6.4, 6.9.3, and 6.10.3.
+  /// Reschedules a completed recurring [task] on [board] for its next cycle per `TDF_SPEC.md` Sections 6.4, 6.9.3, and 6.10.3.
   static TaskItem? _reschedule(
     NormalizedTierSlices board,
     TaskItem task,
@@ -929,10 +1337,9 @@ class TaskBoardMutator {
       final scheduleNext = repeatRule.nextScheduleAnchoredOccurrence(
         completedAtUtc: now,
         oldDueUtc: currentDueUtc,
-        oldSuspendedUtc: task.isSuspendedForever ? null : task.suspendedAt,
-        isSuspendedForever: task.isSuspendedForever,
         timeZone: zone,
       );
+      final shouldDefer = scheduleNext.newSuspendedUtc.isAfter(now);
       AppLogger.info(
         LogTag.domain,
         'Rescheduled recurring task id=${task.id} repeat -> nextDueUtc=${scheduleNext.newDueUtc.toIso8601String()}',
@@ -942,9 +1349,12 @@ class TaskBoardMutator {
         clearCompletedAt: true,
         completions: task.completions + 1,
         isPriority: true,
-        suspendedAt: scheduleNext.newSuspendedUtc,
+        suspendedAt: shouldDefer ? scheduleNext.newSuspendedUtc : null,
+        clearSuspendedAt: !shouldDefer,
+        clearSuspendedNote: true,
         isSuspendedForever: false,
         dueAt: scheduleNext.newDueUtc,
+        isDuePassive: false,
         repeatRule: repeatRule,
         dependencies: rearmedDependencies,
         subtasks: resetSubtasks,
@@ -962,6 +1372,7 @@ class TaskBoardMutator {
       completions: task.completions + 1,
       isPriority: true,
       suspendedAt: nextDue,
+      clearSuspendedNote: true,
       isSuspendedForever: false,
       repeatRule: repeatRule,
       dependencies: rearmedDependencies,
@@ -1006,6 +1417,215 @@ class TaskBoardMutator {
   static String? _trimOrNull(String? value) {
     final trimmed = value?.trim() ?? '';
     return trimmed.isNotEmpty ? trimmed : null;
+  }
+
+  /// Validates and normalizes an iterable of [TaskHistoryEntry] items against `0.7.0` limits.
+  static List<TaskHistoryEntry> _validateHistoryEntries(
+    Iterable<TaskHistoryEntry> entries,
+  ) {
+    final validated = <TaskHistoryEntry>[];
+    for (final entry in entries) {
+      validated.add(_validateHistoryEntry(entry.timestampUtc, entry.text));
+    }
+    final normalized = TaskHistoryEntry.normalizeList(validated);
+    if (normalized.length > maxTdfHistoryPerTask) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task exceeds maximum of $maxTdfHistoryPerTask history entries.',
+      );
+    }
+    return normalized;
+  }
+
+  /// Validates a single `(timestampUtc, text)` history entry under `TDF_SPEC.md` Section 4.1.2 & Section 8.
+  static TaskHistoryEntry _validateHistoryEntry(
+    DateTime timestampUtc,
+    String text,
+  ) {
+    final normalizedTs = TaskItem.normalizeTimestamp(timestampUtc);
+    if (!TdfCalendar.isWithinTimestampBounds(normalizedTs)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Task history timestamp is outside 0001..9999 UTC.',
+      );
+    }
+    final validatedText = _validateSingleLineText(text, 'history text');
+    return TaskHistoryEntry(timestampUtc: normalizedTs, text: validatedText);
+  }
+
+  /// Validates all [links] for a `label` block against [maxTdfLinksPerLabel], single-line `<title>`, and `<uri>` rules.
+  static List<TaskLink> _validateLabelLinks(Iterable<TaskLink> links) {
+    final list = List<TaskLink>.from(links);
+    if (list.length > maxTdfLinksPerLabel) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Label exceeds maximum of $maxTdfLinksPerLabel links.',
+      );
+    }
+    if (list.isEmpty) return const <TaskLink>[];
+    final validated = <TaskLink>[];
+    for (final link in list) {
+      final title = _validateSingleLineText(link.title, 'link title');
+      final uri = _validateStrictUri(link.uri);
+      validated.add(TaskLink(title: title, uri: uri));
+    }
+    return List<TaskLink>.unmodifiable(validated);
+  }
+
+  /// Validates [repeat] count (`1..3650`) and `leadDays` (`0..3650`) bounds.
+  static void _validateRepeatRule(TaskRepeatRule? repeat) {
+    if (repeat == null) return;
+    if (repeat.count < 1 || repeat.leadDays < 0) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidNumber,
+        line: 1,
+        message: 'Repeat count must be >= 1 and leadDays must be >= 0.',
+      );
+    }
+    if (repeat.count > TaskRepeatRule.maxRepeatCount ||
+        repeat.leadDays > TaskRepeatRule.maxRepeatCount) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Repeat count and leadDays must not exceed ${TaskRepeatRule.maxRepeatCount}.',
+      );
+    }
+  }
+
+  /// Validates an optional multi-line schedule [rawNote] (`suspendedNote` or `dueNote`) under `<note>` grammar rules.
+  static String _validateScheduleNote(String rawNote, String fieldName) {
+    final scalarCount = TdfCalendar.countUnicodeScalars(rawNote);
+    if (scalarCount == null) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: 1,
+        message: '$fieldName contains an unpaired UTF-16 surrogate.',
+      );
+    }
+    for (var i = 0; i < rawNote.length; i++) {
+      final unit = rawNote.codeUnitAt(i);
+      final isIllegalControl =
+          (unit <= 0x1F && unit != 0x09 && unit != 0x0A && unit != 0x0D) ||
+          unit == 0x7F;
+      if (isIllegalControl) {
+        throw TdfException(
+          kind: TdfErrorKind.unexpectedToken,
+          line: 1,
+          message: '$fieldName contains an illegal control character.',
+        );
+      }
+    }
+    if (_isAsciiNoteWhitespaceOnly(rawNote)) {
+      throw TdfException(
+        kind: TdfErrorKind.emptyText,
+        line: 1,
+        message:
+            '$fieldName must contain at least one non-whitespace graphic character.',
+      );
+    }
+    if (scalarCount > maxTdfNoteLength) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: '$fieldName exceeds maximum of $maxTdfNoteLength characters.',
+      );
+    }
+    return rawNote;
+  }
+
+  /// Validates a single-line `<text>` value (`1..500` Unicode scalars, rejecting control characters before checking emptiness).
+  static String _validateSingleLineText(String rawText, String fieldName) {
+    final scalarCount = TdfCalendar.countUnicodeScalars(rawText);
+    if (scalarCount == null) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: 1,
+        message: '$fieldName contains an unpaired UTF-16 surrogate.',
+      );
+    }
+    var hasGraphicChar = false;
+    for (var i = 0; i < rawText.length; i++) {
+      final unit = rawText.codeUnitAt(i);
+      if (unit <= 0x1F || unit == 0x7F) {
+        throw TdfException(
+          kind: TdfErrorKind.unexpectedToken,
+          line: 1,
+          message: '$fieldName must be single-line without control characters.',
+        );
+      }
+      if (unit != 0x20) {
+        hasGraphicChar = true;
+      }
+    }
+    if (!hasGraphicChar) {
+      throw TdfException(
+        kind: TdfErrorKind.emptyText,
+        line: 1,
+        message: '$fieldName must not be empty or whitespace-only.',
+      );
+    }
+    if (scalarCount > maxTdfTextLength) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: '$fieldName exceeds maximum of $maxTdfTextLength characters.',
+      );
+    }
+    return rawText;
+  }
+
+  /// Validates [rawUri] against `<uri>` bounds, non-emptiness, and allowed URI scheme rules.
+  static String _validateStrictUri(String rawUri) {
+    final scalarCount = TdfCalendar.countUnicodeScalars(rawUri);
+    if (scalarCount == null) {
+      throw const TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: 1,
+        message: 'Link URI contains an unpaired UTF-16 surrogate.',
+      );
+    }
+    var hasNonSpace = false;
+    for (var i = 0; i < rawUri.length; i++) {
+      final unit = rawUri.codeUnitAt(i);
+      if (unit <= 0x1F || unit == 0x7F) {
+        throw const TdfException(
+          kind: TdfErrorKind.invalidUri,
+          line: 1,
+          message: 'Link URI contains an ASCII control character.',
+        );
+      }
+      if (unit != 0x20) {
+        hasNonSpace = true;
+      }
+    }
+    if (!hasNonSpace) {
+      throw const TdfException(
+        kind: TdfErrorKind.emptyText,
+        line: 1,
+        message: 'Link URI must not be empty or whitespace-only.',
+      );
+    }
+    if (scalarCount > TaskLink.maxUriLength) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Link URI exceeds maximum of ${TaskLink.maxUriLength} characters.',
+      );
+    }
+    if (!TaskLink.isValidUri(rawUri)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidUri,
+        line: 1,
+        message: 'Link URI does not have a valid permitted scheme.',
+      );
+    }
+    return rawUri;
   }
 
   /// Resolves the effective [TdfTimeZoneContext] for [now], [localTime], and [timeZone].

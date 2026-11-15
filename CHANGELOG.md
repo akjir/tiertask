@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added support for TierTask Data Format (TDF) 0.7.0 with automatic migration from version 0.6.0.
+- Added TDF 0.7.0 support for label reference links, deferral and deadline notes, recurring preparation lead days, and task history logs.
 - Added a subtle task ID header with a copy button at the top of expanded task cards, allowing every task card to expand on tap.
 - Added automatic synchronization for external edits to the local TDF file, with a per-workspace toggle in Settings.
 - Added in-memory undo via a notification bar action and the Ctrl+Z desktop shortcut for task completion, downgrade, and deletion.
@@ -18,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Changed queued tasks with deadlines within 24 hours to automatically advance toward Focus unless marked as passive.
+- Changed synchronization and task updates to automatically clear expired suspension locks and completed one-time task dependencies.
 - Changed WebDAV synchronization to cache server entity tags and modification timestamps, skipping unchanged downloads, parser passes, and redundant uploads while automatically merging concurrent remote edits when a write precondition fails.
 - Changed task cards to collapse more than three status indicator icons into a single summary indicator icon.
 - Changed task creation to pre-select the currently active label filter.

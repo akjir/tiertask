@@ -3,14 +3,14 @@
 > [!IMPORTANT]
 > `TierTask` is a private, personal project developed for individual use. It is provided without warranty, official support, or maintenance guarantees.
 
-`TierTask` is a task manager for Linux, Android, and Windows that derives six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single `.tdf` file in the TierTask Data Format ([`spec/TDF_SPEC_0.6.0.md`](spec/TDF_SPEC_0.6.0.md)).
+`TierTask` is a task manager for Linux, Android, and Windows that derives six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single `.tdf` file in the TierTask Data Format ([`spec/TDF_SPEC_0.7.0.md`](spec/TDF_SPEC_0.7.0.md)).
 
 ## Overview
 
 Tasks and metadata are stored as plain text in a `.tdf` document, while operational tiers are computed at runtime.
 
-- **Deterministic Pull System:** Separates `Completed`, `Someday`, and `Blocked` tasks first, then slices active `queue` tasks into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned`, pruning completed tasks and deletion tombstones after `30` days (UTC).
-- **Scoped Queues & Conditions:** Supports global and label-scoped queues (`scoped`), prerequisite task dependencies, temporal deferral (`suspended`), recurrence (`repeat`), deadlines (`due`), and `day`, `time`, and geofence (`location`) conditions.
+- **Deterministic Pull System:** Separates `Completed`, `Someday`, and `Blocked` tasks first, slices active `queue` tasks into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned` with 24-hour deadline (`due`) auto-promotion, clears expired `suspended` locks and resolved one-shot `blocked` prerequisites on sync, and prunes completed tasks and tombstones after `30` days (UTC).
+- **Scoped Queues & Conditions:** Supports global and label-scoped queues (`scoped`), label and task reference `link` entries, prerequisite dependencies, deferral (`suspended`) and deadline (`due`) notes, recurrence with preparation lead days (`repeat ... lead`), persistent task progress logs (`history`), and `day`, `time`, and geofence (`location`) conditions.
 - **Three-Way Synchronization:** Reconciles in-memory state, watched local `.tdf` file edits, and a WebDAV server at entity and field granularity using 10-character Base62 IDs, UTC modification timestamps, and `deleted` tombstones.
 - **Workspaces & Local Security:** Isolates independent task boards and storage credentials into switchable workspaces persisted via `flutter_secure_storage`.
 - **Diagnostic Logging:** Writes opt-in, redacted runtime logs per workspace to local storage or WebDAV with an in-app filterable viewer.
@@ -27,31 +27,20 @@ Tasks and metadata are stored as plain text in a `.tdf` document, while operatio
 
 ## Installation & Build
 
-Clone the repository and generate localization bindings:
+Clone the repository, generate localization bindings, and run a desktop debug build:
 
 ```bash
 git clone https://github.com/ststark/tiertask.git
 cd tiertask
 flutter pub get
 flutter gen-l10n
-```
-
-Run a debug build on desktop:
-
-```bash
 flutter run -d linux
-flutter run -d windows
 ```
 
-Build and install the Linux desktop release into `$HOME/.local` (or remove with `./install.sh uninstall`):
+Build and install the Linux desktop release into `$HOME/.local` (or remove with `./install.sh uninstall`), or build obfuscated release artifacts manually:
 
 ```bash
 ./install.sh
-```
-
-Build obfuscated release artifacts manually:
-
-```bash
 flutter build linux --release --obfuscate --split-debug-info=build/symbols
 flutter build apk --release --obfuscate --split-debug-info=build/symbols
 flutter build windows --release --obfuscate --split-debug-info=build/symbols
@@ -78,7 +67,7 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 Example `tasks.tdf`:
 
 ```text
-tdf 0.6.0
+tdf 0.7.0
 
 queue {
     modified 2026-11-01 09:15:00
@@ -86,31 +75,27 @@ queue {
     task 3nR8vWOkD8
 }
 
-location 9vP2mKOkD2 {
-    name        "Home"
-    coordinates 52.52 13.405
-    radius      150
-    modified    2026-11-01 08:30
-}
-
 label 4x9p2mOkD2 {
-    name     "Home"
+    name     "Infrastructure"
     color    "#4CAF50"
-    modified 2026-11-01 08:30
+    modified 2026-11-01 08:30:00
+    link     "Runbook" "https://docs.example.com/backups"
 }
 
 task 8jKaCdOkD2 priority {
     name     "Verify server backup"
-    created  2026-11-01 08:30
-    modified 2026-11-01 08:30
-    due      2026-11-15
+    created  2026-11-01 08:30:00
+    modified 2026-11-01 08:30:00
+    repeat   1 months lead 3 days
     labels   4x9p2mOkD2
+    due      2026-11-15 00:00:00 "Before monthly maintenance window"
+    history  2026-11-01 08:30:00 "Verified offsite snapshot checksums"
 }
 
 task 3nR8vWOkD8 {
     name     "Clean up study"
-    created  2026-11-01 09:00
-    modified 2026-11-01 09:15
+    created  2026-11-01 09:00:00
+    modified 2026-11-01 09:15:00
     subtasks auto-finish {
         step true  "Wipe desk"
         step false "Organize cables"
@@ -119,7 +104,7 @@ task 3nR8vWOkD8 {
 ```
 
 Repository documentation:
-- [`spec/TDF_SPEC_0.6.0.md`](spec/TDF_SPEC_0.6.0.md) — TDF `0.6.0` grammar, tier derivation rules, and three-way merge specification.
+- [`spec/TDF_SPEC_0.7.0.md`](spec/TDF_SPEC_0.7.0.md) — TDF `0.7.0` grammar, tier derivation rules, and three-way merge specification.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — Layer architecture, directory layout, file responsibilities, and execution flow.
 - [`AGENTS.md`](AGENTS.md) — Engineering standards, TDD rules, and verification workflow.
 - [`CHANGELOG.md`](CHANGELOG.md) — Release history.

@@ -527,7 +527,7 @@ void main() {
         }
 
         const rule = TaskRepeatRule(count: 1, unit: RepeatUnit.months);
-        final nextOccurrence = rule.nextScheduleAnchoredOccurrence(
+        final nextOccurrence = rule.nextLegacy060ScheduleAnchoredOccurrence(
           completedAtUtc: completionUtc,
           oldDueUtc: prevDueUtc,
           oldSuspendedUtc: prevSuspUtc,
@@ -581,6 +581,343 @@ void main() {
       final reEnabled = disabled.copyWith(localWatchEnabled: true);
       expect(reEnabled, equals(defaultConfig));
       expect(reEnabled.hashCode, equals(defaultConfig.hashCode));
+    });
+  });
+
+  group('TDF 0.7.0 Primitives, Bounds, TdfLabel Links, TaskHistoryEntry & TaskItem Ownership', () {
+    test(
+      'exposes TDF 0.7.0 structural resource bounds and TdfSchemaVersion enum',
+      () {
+        expect(maxTdfStmtsPerBlock, equals(1024));
+        expect(maxTdfLegacy060StmtsPerBlock, equals(512));
+        expect(maxTdfLinksPerLabel, equals(20));
+        expect(maxTdfHistoryPerTask, equals(500));
+        expect(
+          TdfSchemaVersion.values,
+          equals(const <TdfSchemaVersion>[
+            TdfSchemaVersion.v060,
+            TdfSchemaVersion.v070,
+          ]),
+        );
+      },
+    );
+
+    test('supports TdfLabel.links unmodifiable copyWith, equality, hashCode, and canonicalDirectChildStatementCount', () {
+      const baseLabel = TdfLabel(id: 'lblWork001', name: 'Work');
+      expect(baseLabel.links, isEmpty);
+      expect(baseLabel.canonicalDirectChildStatementCount, equals(1));
+
+      final mutableLinks = <TaskLink>[
+        const TaskLink(title: 'Portal', uri: 'https://example.com/portal'),
+        const TaskLink(title: 'Docs', uri: 'https://example.com/docs'),
+      ];
+      final updated = baseLabel.copyWith(
+        color: '#112233',
+        note: 'Engineering context',
+        isScoped: true,
+        modifiedAt: DateTime.utc(2026, 11, 1, 10, 0),
+        links: mutableLinks,
+        conditions: <TaskCondition>[
+          DayTaskCondition.fromWeekdays(const <int>[1, 2, 3, 4, 5]),
+        ],
+      );
+      mutableLinks.clear();
+      expect(
+        updated.links.length,
+        equals(2),
+        reason: 'TdfLabel.copyWith must wrap links in an unmodifiable list',
+      );
+      expect(
+        () => updated.links.add(
+          const TaskLink(title: 'Extra', uri: 'https://example.com/extra'),
+        ),
+        throwsUnsupportedError,
+      );
+      expect(
+        updated.canonicalDirectChildStatementCount,
+        equals(7),
+        reason: 'name (1) + color (1) + note (1) + modified (1) + 2 links (2) + condition (1) = 7 direct child statements (scoped is a header flag)',
+      );
+
+      final identicalCopy = updated.copyWith();
+      expect(identicalCopy, equals(updated));
+      expect(identicalCopy.hashCode, equals(updated.hashCode));
+      expect(
+        updated.copyWith(links: const <TaskLink>[]),
+        isNot(equals(updated)),
+      );
+    });
+
+    test('sorts and deduplicates TaskHistoryEntry by UTC epoch and unsigned UTF-8 byte order', () {
+      final t1 = DateTime.utc(2026, 11, 1, 9, 0, 5, 999);
+      final t2 = DateTime.utc(2026, 11, 1, 9, 0, 6);
+      // U+FFFD encodes to UTF-8 [0xEF, 0xBF, 0xBD]; U+1F600 encodes to [0xF0, 0x9F, 0x98, 0x80].
+      // In UTF-16 code units, U+1F600 starts with 0xD83D < 0xFFFD, whereas unsigned UTF-8 sorts 0xEF < 0xF0!
+      const bmpReplacement = '\uFFFD';
+      final astralChar = String.fromCharCode(0x1F600);
+
+      final entryAstral = TaskHistoryEntry(timestampUtc: t1, text: astralChar);
+      final entryBmp = TaskHistoryEntry(timestampUtc: t1, text: bmpReplacement);
+      final entryDuplicate = TaskHistoryEntry(
+        timestampUtc: DateTime.utc(2026, 11, 1, 9, 0, 5),
+        text: bmpReplacement,
+      );
+      final entryLater = TaskHistoryEntry(timestampUtc: t2, text: 'Alpha');
+
+      expect(
+        entryAstral.timestampUtc,
+        equals(DateTime.utc(2026, 11, 1, 9, 0, 5)),
+        reason: 'TaskHistoryEntry must truncate sub-second precision to UTC seconds',
+      );
+      expect(
+        TaskHistoryEntry.compareCanonical(entryBmp, entryAstral),
+        lessThan(0),
+        reason: 'Unsigned UTF-8 byte comparison must order 0xEF (U+FFFD) before 0xF0 (U+1F600)',
+      );
+      expect(entryBmp, equals(entryDuplicate));
+      expect(entryBmp.hashCode, equals(entryDuplicate.hashCode));
+      expect(
+        entryLater.toString(),
+        isNot(contains('Alpha')),
+        reason:
+            'TaskHistoryEntry.toString must redact user-authored history text',
+      );
+
+      final normalized = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+        entryLater,
+        entryAstral,
+        entryBmp,
+        entryDuplicate,
+      ]);
+      expect(
+        normalized,
+        equals(<TaskHistoryEntry>[entryBmp, entryAstral, entryLater]),
+      );
+      expect(() => normalized.add(entryLater), throwsUnsupportedError);
+      expect(
+        TaskHistoryEntry.normalizeList(const <TaskHistoryEntry>[]),
+        isEmpty,
+      );
+    });
+
+    test('computes TDF 0.7.0 TaskRepeatRule.nextScheduleAnchoredOccurrence using leadDays and clamps out-of-range dates', () {
+      const ruleNoLead = TaskRepeatRule(count: 1, unit: RepeatUnit.weeks);
+      expect(ruleNoLead.leadDays, equals(0));
+      expect(ruleNoLead.toTdfDirectiveArgs(), equals('1 weeks'));
+
+      const ruleWithLeadAndClock = TaskRepeatRule(
+        count: 1,
+        unit: RepeatUnit.months,
+        clock: TdfRepeatClock(hour: 9, minute: 30),
+        leadDays: 5,
+      );
+      expect(
+        ruleWithLeadAndClock.toTdfDirectiveArgs(),
+        equals('1 months 09:30 lead 5 days'),
+      );
+      expect(ruleWithLeadAndClock.copyWith(leadDays: 0).leadDays, equals(0));
+      expect(
+        ruleWithLeadAndClock.copyWith(leadDays: 2),
+        isNot(equals(ruleWithLeadAndClock)),
+      );
+
+      // Month-end clamping: 2026-01-31 18:00 CET -> 2026-02-28 18:00 CET, minus 5 lead days -> 2026-02-23 09:30 CET.
+      const berlin = TdfTimeZoneContext.europeBerlin;
+      final oldDueUtc = berlin.resolveLocalToUtc(2026, 1, 31, 18, 0, 0);
+      final completedUtc = berlin.resolveLocalToUtc(2026, 1, 30, 12, 0, 0);
+      final febOccurrence = ruleWithLeadAndClock.nextScheduleAnchoredOccurrence(
+        completedAtUtc: completedUtc,
+        oldDueUtc: oldDueUtc,
+        timeZone: berlin,
+      );
+      expect(febOccurrence.stepsK, equals(1));
+      expect(
+        febOccurrence.newDueUtc,
+        equals(berlin.resolveLocalToUtc(2026, 2, 28, 18, 0, 0)),
+      );
+      expect(
+        febOccurrence.newSuspendedUtc,
+        equals(berlin.resolveLocalToUtc(2026, 2, 23, 9, 30, 0)),
+      );
+
+      // Clamping when leadDays == 0 and repeat clock (20:00) is later on the same day than due (10:00):
+      const lateClockRule = TaskRepeatRule(
+        count: 1,
+        unit: RepeatUnit.days,
+        clock: TdfRepeatClock(hour: 20, minute: 0),
+        leadDays: 0,
+      );
+      final morningDue = DateTime.utc(2026, 11, 1, 10, 0);
+      final clamped = lateClockRule.nextScheduleAnchoredOccurrence(
+        completedAtUtc: DateTime.utc(2026, 11, 1, 8, 0),
+        oldDueUtc: morningDue,
+        timeZone: TdfTimeZoneContext.utc,
+      );
+      expect(clamped.newDueUtc, equals(DateTime.utc(2026, 11, 2, 10, 0)));
+      expect(
+        clamped.newSuspendedUtc,
+        equals(DateTime.utc(2026, 11, 2, 10, 0)),
+        reason: 'candidateSuspended > newDue must clamp newSuspendedUtc to newDueUtc',
+      );
+
+      // Subtracting leadDays before year 0001 must throw TdfException(invalidTimestamp):
+      const hugeLeadRule = TaskRepeatRule(
+        count: 1,
+        unit: RepeatUnit.days,
+        leadDays: 10,
+      );
+      expect(
+        () => hugeLeadRule.nextScheduleAnchoredOccurrence(
+          completedAtUtc: DateTime.utc(1, 1, 1, 0, 0),
+          oldDueUtc: DateTime.utc(1, 1, 2, 12, 0),
+          timeZone: TdfTimeZoneContext.utc,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidTimestamp,
+          ),
+        ),
+      );
+    });
+
+    test('enforces TaskItem ownership normalization, dueLeadWindow checks, toCompleted rules, and canonicalDirectChildStatementCount', () {
+      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+
+      // Orphaned isDuePassive, dueNote, and suspendedNote are normalized away on construction:
+      final orphanNormalized = TaskItem(
+        id: 'tOrphan001',
+        title: 'Orphan Check',
+        createdAt: now,
+        isDuePassive: true,
+        dueNote: 'Should drop without dueAt',
+        suspendedNote: 'Should drop without suspended',
+      );
+      expect(orphanNormalized.isDuePassive, isFalse);
+      expect(orphanNormalized.dueNote, isNull);
+      expect(orphanNormalized.suspendedNote, isNull);
+
+      final scheduled = TaskItem(
+        id: 'tSched0001',
+        title: 'Scheduled Task',
+        createdAt: now,
+        suspendedAt: now.add(const Duration(hours: 2)),
+        suspendedNote: 'Waiting on deploy window',
+        dueAt: now.add(const Duration(hours: 24)),
+        isDuePassive: false,
+        dueNote: 'Contract SLA',
+        origin: const TaskOrigin(namespace: 'jira', externalKey: 'OPS-1'),
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: now, text: 'Created ticket'),
+        ],
+      );
+      expect(scheduled.hasActiveSuspendedAt(now), isTrue);
+      expect(
+        scheduled.hasActiveSuspendedAt(now.add(const Duration(hours: 2))),
+        isFalse,
+        reason: 'suspendedAt == now is expired (active requires strict > now)',
+      );
+      expect(
+        scheduled.isWithinDueLeadWindow(now, const Duration(hours: 24)),
+        isTrue,
+        reason: 'Exact +24h boundary is inclusive (<= now + dueLeadWindow)',
+      );
+      expect(
+        scheduled.isWithinDueLeadWindow(
+          now,
+          const Duration(hours: 23, minutes: 59, seconds: 59),
+        ),
+        isFalse,
+      );
+      expect(scheduled.isWithinDueLeadWindow(now, null), isFalse);
+
+      final passiveCopy = scheduled.copyWith(isDuePassive: true);
+      expect(
+        passiveCopy.isWithinDueLeadWindow(now, const Duration(hours: 48)),
+        isFalse,
+        reason: 'isDuePassive suppresses dueLeadWindow urgency',
+      );
+
+      final clearedSchedule = passiveCopy.copyWith(
+        clearSuspendedAt: true,
+        clearDueAt: true,
+      );
+      expect(clearedSchedule.suspendedNote, isNull);
+      expect(clearedSchedule.dueNote, isNull);
+      expect(clearedSchedule.isDuePassive, isFalse);
+
+      final completed = passiveCopy
+          .copyWith(
+            isPriority: true,
+            dependencies: const <TdfTaskDependency>[
+              TdfTaskDependency(taskId: 'dep0000001', requiredCompletion: 1),
+            ],
+          )
+          .toCompleted(now.add(const Duration(hours: 3)));
+      expect(completed.isCompleted, isTrue);
+      expect(completed.isPriority, isFalse);
+      expect(completed.isSuspendedForever, isFalse);
+      expect(completed.suspendedAt, isNull);
+      expect(completed.suspendedNote, isNull);
+      expect(completed.dependencies, isEmpty);
+      expect(completed.dueAt, equals(scheduled.dueAt));
+      expect(completed.isDuePassive, isTrue);
+      expect(completed.dueNote, equals('Contract SLA'));
+      expect(completed.origin, equals(scheduled.origin));
+      expect(completed.history, equals(scheduled.history));
+
+      // Full-capacity canonical open/completed task statement count:
+      final fullHistory = <TaskHistoryEntry>[
+        for (var i = 0; i < maxTdfHistoryPerTask; i++)
+          TaskHistoryEntry(
+            timestampUtc: now.add(Duration(seconds: i)),
+            text: 'Event $i',
+          ),
+      ];
+      final fullLinks = <TaskLink>[
+        for (var i = 0; i < TaskLink.maxLinksPerTask; i++)
+          TaskLink(title: 'Link $i', uri: 'https://example.com/$i'),
+      ];
+      final fullCapacityTask = TaskItem(
+        id: 'tMaxCap001',
+        title: 'Full Capacity',
+        note: 'Detailed body',
+        createdAt: now,
+        isCompleted: true,
+        completedAt: now,
+        modifiedAt: now,
+        completions: 3,
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.days,
+          leadDays: 1,
+        ),
+        labelIds: const <String>['lblWork001'],
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'dep0000001', requiredCompletion: 1),
+        ],
+        suspendedAt: now.add(const Duration(days: 1)),
+        suspendedNote: 'Suspended note',
+        dueAt: now.add(const Duration(days: 2)),
+        isDuePassive: true,
+        dueNote: 'Due note',
+        origin: const TaskOrigin(namespace: 'ns', externalKey: 'k'),
+        links: fullLinks,
+        history: fullHistory,
+        conditions: const <TaskCondition>[GlobalResetTaskCondition()],
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Step 1')],
+      );
+      expect(
+        fullCapacityTask.canonicalDirectChildStatementCount,
+        equals(534),
+        reason: '12 scalar directives + 20 links + 500 history + 1 condition + 1 subtasks = 534 <= 1024',
+      );
+      expect(
+        fullCapacityTask.canonicalDirectChildStatementCount <=
+            maxTdfStmtsPerBlock,
+        isTrue,
+      );
     });
   });
 }

@@ -14,8 +14,10 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:convert';
+import 'dart:math' as math;
 
 import '../models/task_board.dart';
+import '../models/task_board_evaluator.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_location.dart';
@@ -95,7 +97,10 @@ final class TdfLocationBuilder extends TdfBlockBuilder {
 /// Mutable document-wide state accumulated by [TdfBlockParser].
 class TdfParserState {
   /// Creates a [TdfParserState].
-  TdfParserState({this.convertLegacyLocationsTo060 = true});
+  TdfParserState({
+    this.convertLegacyLocationsTo060 = true,
+    this.targetSchema = TdfSchemaVersion.v070,
+  });
 
   /// Active nesting stack of open `{ ... }` blocks.
   final List<TdfBlockBuilder> blockStack = <TdfBlockBuilder>[];
@@ -121,7 +126,7 @@ class TdfParserState {
   /// Whether a `queue` block has already been seen.
   bool hasQueueBlock = false;
 
-  /// Whether the initial `tdf 0.6.0` (or `0.5.1` / `0.5.0`) version header has been seen.
+  /// Whether the initial `tdf 0.7.0` (or `0.6.0` / `0.5.1` / `0.5.0`) version header has been seen.
   bool hasSeenVersionHeader = false;
 
   /// Whether the input document is a `tdf 0.5.0` file undergoing Section 10.6 load-time in-memory conversion.
@@ -129,6 +134,9 @@ class TdfParserState {
 
   /// Whether the input document is a `tdf 0.5.1` file undergoing Section 10.7 load-time in-memory conversion.
   bool isLegacy051 = false;
+
+  /// Whether the input document is a `tdf 0.6.0` file undergoing Section 10.8 load-time in-memory conversion.
+  bool isLegacy060 = false;
 
   /// Live `<label-id>` values declared in the document.
   final Set<String> labelIds = <String>{};
@@ -161,12 +169,21 @@ class TdfParserState {
   final List<({String taskId, int line})> queueEntries =
       <({String taskId, int line})>[];
 
+  /// Target schema mode enforced by the parser.
+  final TdfSchemaVersion targetSchema;
+
   /// Live `<task-id>` values declared in the document.
   final Set<String> taskIds = <String>{};
 
   /// Parsed tasks together with their declaration line numbers and legacy `0.5.0` `queued` timestamps.
   final List<
-    ({TaskItem task, int headerLine, int blockedLine, DateTime? legacyQueuedAt})
+    ({
+      TaskItem task,
+      int headerLine,
+      int blockedLine,
+      int suspendedLine,
+      DateTime? legacyQueuedAt,
+    })
   >
   tasksWithMeta =
       <
@@ -174,6 +191,7 @@ class TdfParserState {
           TaskItem task,
           int headerLine,
           int blockedLine,
+          int suspendedLine,
           DateTime? legacyQueuedAt,
         })
       >[];
@@ -183,6 +201,15 @@ class TdfParserState {
 
   /// Whether the document is a `0.5.0` or `0.5.1` file undergoing load-time conversion.
   bool get isLegacy05x => isLegacy050 || isLegacy051;
+
+  /// Whether the document declared a `< 0.7.0` schema version (`0.5.0`, `0.5.1`, or `0.6.0`).
+  bool get isPre070 => isLegacy050 || isLegacy051 || isLegacy060;
+
+  /// Effective direct child statement limit per block (`512` for `< 0.7.0` or `v060` target, `1024` for `0.7.0`).
+  int get maxStmtsPerBlock =>
+      (isPre070 || targetSchema == TdfSchemaVersion.v060)
+      ? maxTdfLegacy060StmtsPerBlock
+      : maxTdfStmtsPerBlock;
 }
 
 /// Active root-level `queue { ... }` block builder.
@@ -236,7 +263,7 @@ final class TdfTaskBuilder extends TdfBlockBuilder {
   final List<SubtaskItem> subtasks = <SubtaskItem>[];
 }
 
-/// Structural and cross-entity parser for TDF 0.6.0 (`spec/TDF_SPEC_0.6.0.md` Sections 3, 4, 5, 7, 8, 10.6, and 10.7).
+/// Structural and cross-entity parser for TDF 0.7.0 (`spec/TDF_SPEC_0.7.0.md` Sections 3, 4, 5, 7, 8, and 10.6–10.8).
 abstract final class TdfBlockParser {
   /// Legacy TDF version (`0.5.0`) accepted during normal loading and converted in memory per Section 10.6.
   static const String legacyLoadableVersion = '0.5.0';
@@ -244,11 +271,14 @@ abstract final class TdfBlockParser {
   /// Legacy TDF version (`0.5.1`) accepted during normal loading and converted in memory per Section 10.7.
   static const String legacyLoadableVersion051 = '0.5.1';
 
+  /// Legacy TDF version (`0.6.0`) accepted during normal loading and converted in memory per Section 10.8.
+  static const String legacyLoadableVersion060 = '0.6.0';
+
   /// Legacy TDF version alias (`0.5.0`).
   static const String legacySupportedVersion = legacyLoadableVersion;
 
-  /// Supported TDF specification version (`0.6.0`).
-  static const String supportedVersion = '0.6.0';
+  /// Supported TDF specification version (`0.7.0`).
+  static const String supportedVersion = '0.7.0';
 
   /// Closes the innermost open block on [state.blockStack] at [line].
   static void closeCurrentBlock(TdfParserState state, int line) {
@@ -341,6 +371,7 @@ abstract final class TdfBlockParser {
             color: current.fields.color,
             note: current.fields.note,
             modifiedAt: current.fields.modifiedAt,
+            links: current.fields.links,
             conditions: state.convertLegacyLocationsTo060
                 ? TdfDirectiveParser.coalesceLocationConditions(
                     current.fields.conditions,
@@ -442,12 +473,16 @@ abstract final class TdfBlockParser {
             completions: effectiveCompletions,
             suspendedAt: current.fields.suspendedAt,
             isSuspendedForever: current.fields.isSuspendedForever,
+            suspendedNote: current.fields.suspendedNote,
             dueAt: current.fields.dueAt,
+            isDuePassive: current.fields.isDuePassive,
+            dueNote: current.fields.dueNote,
             origin: current.fields.origin,
             repeatRule: current.fields.repeatRule,
             labelIds: sortedLabelIds,
             dependencies: sortedDeps,
             links: current.fields.links,
+            history: current.fields.history,
             conditions: state.convertLegacyLocationsTo060
                 ? TdfDirectiveParser.coalesceLocationConditions(
                     current.fields.conditions,
@@ -458,6 +493,7 @@ abstract final class TdfBlockParser {
           ),
           headerLine: current.headerLine,
           blockedLine: current.fields.blockedLine ?? current.headerLine,
+          suspendedLine: current.fields.suspendedLine ?? current.headerLine,
           legacyQueuedAt: legacyQueuedAt,
         ));
       case TdfSubtasksBuilder():
@@ -486,7 +522,7 @@ abstract final class TdfBlockParser {
     }
   }
 
-  /// Parses a complete TDF 0.6.0 (or `0.5.1` / `0.5.0`) document [content] and evaluates all 6 tiers at [evaluationTime].
+  /// Parses a complete TDF 0.7.0 (or `0.6.0` / `0.5.1` / `0.5.0`) document [content] and evaluates all 6 tiers at [evaluationTime].
   static TaskBoard parseDocument(
     String content, {
     DateTime? evaluationTime,
@@ -497,64 +533,17 @@ abstract final class TdfBlockParser {
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
     bool convertLegacyLocationsTo060 = true,
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
-    if (content.length > maxTdfFileBytes ||
-        utf8.encode(content).length > maxTdfFileBytes) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.limitExceeded,
-        1,
-        'Document exceeds maximum of $maxTdfFileBytes bytes.',
-      );
-    }
-    final state = TdfParserState(
+    final state = _scanAndValidateState(
+      content,
       convertLegacyLocationsTo060: convertLegacyLocationsTo060,
+      targetSchema: targetSchema,
     );
-    var offset = 0;
-    var lineNumber = 1;
-    while (offset < content.length) {
-      if (lineNumber > maxTdfLineCount) {
-        TdfDirectiveParser.fail(
-          TdfErrorKind.limitExceeded,
-          lineNumber,
-          'Document exceeds maximum of $maxTdfLineCount lines.',
-        );
-      }
-      final span = TdfScanner.findLineSpan(content, offset, lineNumber);
-      final tokens = TdfScanner.scanLineTokens(
-        content,
-        span.lineStart,
-        span.lineEnd,
-        lineNumber,
-      );
-      if (tokens.isNotEmpty) {
-        processLineTokens(state, lineNumber, tokens);
-      }
-      offset = span.nextOffset;
-      lineNumber++;
+    if (targetSchema == TdfSchemaVersion.v070 && state.isPre070) {
+      _convertPre070RepeatLeadAndClock(state, timeZone);
     }
-    if (!state.hasSeenVersionHeader) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.missingVersionHeader,
-        1,
-        'Document contains no statements; missing "tdf 0.6.0" header.',
-      );
-    }
-    if (state.blockStack.isNotEmpty) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.unclosedBlock,
-        1,
-        'Unclosed block at end of file.',
-      );
-    }
-    if (state.isLegacy05x && state.convertLegacyLocationsTo060) {
-      _convertLegacyInlineLocations05xTo060(state);
-    }
-    _validateLabelReferences(state);
-    if (state.convertLegacyLocationsTo060) {
-      _validateLocationReferences(state);
-    }
-    _validateDependencies(state);
-    _validateQueueMembership(state);
 
     final tasks = [for (final item in state.tasksWithMeta) item.task];
     return TaskBoard.evaluate(
@@ -566,10 +555,35 @@ abstract final class TdfBlockParser {
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: targetSchema == TdfSchemaVersion.v060
+          ? null
+          : dueLeadWindow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
+    );
+  }
+
+  /// Parses a strict `tdf 0.6.0` document, extracts `repeat` lead days and clock via [sourceTimeZone], and strips resolved `blocked` entries for `0.6.0 -> 0.7.0` migration.
+  static TaskBoard parseDocumentFor060To070Migration(
+    String source060, {
+    TdfTimeZoneContext? sourceTimeZone,
+  }) {
+    final state = _scanAndValidateState(
+      source060,
+      convertLegacyLocationsTo060: true,
+      targetSchema: TdfSchemaVersion.v060,
+    );
+    _convertPre070RepeatLeadAndClock(state, sourceTimeZone);
+    _stripResolvedBlockedEntriesForMigration(state);
+    final tasks = [for (final item in state.tasksWithMeta) item.task];
+    return TaskBoard.evaluate(
+      tasks: tasks,
+      labels: state.labels,
+      locations: state.locations,
+      deletedBlock: state.deletedBlock,
+      queueBlock: state.queueBlock,
     );
   }
 
@@ -640,11 +654,12 @@ abstract final class TdfBlockParser {
       if (parent is! TdfDeletedBuilder &&
           parent is! TdfQueueBuilder &&
           parent is! TdfConditionBuilder) {
-        if (parent.statementCount >= maxTdfStmtsPerBlock) {
+        final maxAllowed = state.maxStmtsPerBlock;
+        if (parent.statementCount >= maxAllowed) {
           TdfDirectiveParser.fail(
             TdfErrorKind.limitExceeded,
             line,
-            'Block exceeds maximum of $maxTdfStmtsPerBlock direct child statements.',
+            'Block exceeds maximum of $maxAllowed direct child statements.',
           );
         }
         parent.statementCount++;
@@ -701,6 +716,7 @@ abstract final class TdfBlockParser {
           args,
           line,
           isLegacy05x: state.isLegacy05x,
+          isPre070: state.isPre070,
         );
       case TdfLocationBuilder():
         TdfDirectiveParser.applyLocationDirective(
@@ -717,6 +733,7 @@ abstract final class TdfBlockParser {
           line,
           allowLegacyQueued: state.isLegacy050,
           isLegacy05x: state.isLegacy05x,
+          isPre070: state.isPre070,
         );
       case TdfSubtasksBuilder():
         if (directive != 'step') {
@@ -835,18 +852,115 @@ abstract final class TdfBlockParser {
           task: entry.task.copyWith(conditions: rewritten),
           headerLine: entry.headerLine,
           blockedLine: entry.blockedLine,
+          suspendedLine: entry.suspendedLine,
           legacyQueuedAt: entry.legacyQueuedAt,
         );
       }
     }
   }
 
-  /// Validates the mandatory initial `tdf 0.6.0` (or load-convertible `tdf 0.5.1` / `tdf 0.5.0`) header on the first non-empty line.
+  /// Extracts `leadDays` and `<repeat-time>` across all open `< 0.7.0` recurring tasks with `suspended < due` (`spec/TDF_SPEC_0.7.0.md` Section 10.8).
+  static void _convertPre070RepeatLeadAndClock(
+    TdfParserState state,
+    TdfTimeZoneContext? timeZone,
+  ) {
+    for (var i = 0; i < state.tasksWithMeta.length; i++) {
+      final entry = state.tasksWithMeta[i];
+      final updated = _convertSinglePre070TaskRepeat(
+        entry.task,
+        entry.suspendedLine,
+        timeZone,
+      );
+      if (!identical(updated, entry.task)) {
+        state.tasksWithMeta[i] = (
+          task: updated,
+          headerLine: entry.headerLine,
+          blockedLine: entry.blockedLine,
+          suspendedLine: entry.suspendedLine,
+          legacyQueuedAt: entry.legacyQueuedAt,
+        );
+      }
+    }
+  }
+
+  /// Extracts `leadDays` and `<repeat-time>` from `suspended < due` on an open `< 0.7.0` recurring task (`spec/TDF_SPEC_0.7.0.md` Section 10.8).
+  static TaskItem _convertSinglePre070TaskRepeat(
+    TaskItem task,
+    int suspendedLine,
+    TdfTimeZoneContext? timeZone,
+  ) {
+    if (task.isCompleted || task.completedAt != null) {
+      return task;
+    }
+    final repeatRule = task.repeatRule;
+    final dueAt = task.dueAt;
+    final suspendedAt = task.suspendedAt;
+    if (repeatRule == null ||
+        dueAt == null ||
+        task.isSuspendedForever ||
+        suspendedAt == null ||
+        !suspendedAt.isBefore(dueAt)) {
+      return task;
+    }
+    if (timeZone == null || !timeZone.isAvailable) {
+      throw TdfContextException(
+        kind: TdfContextOutcomeKind.importContextRequired,
+        message:
+            'Converting pre-0.7.0 task "${task.id}" with repeat, due, and finite suspended < due requires a valid time zone context.',
+        entityId: task.id,
+        line: suspendedLine,
+      );
+    }
+    final suspendedLocal = timeZone.toLocalWallClock(suspendedAt);
+    final dueLocal = timeZone.toLocalWallClock(dueAt);
+    final dueDateUtc = DateTime.utc(
+      dueLocal.year,
+      dueLocal.month,
+      dueLocal.day,
+    );
+    final suspendedDateUtc = DateTime.utc(
+      suspendedLocal.year,
+      suspendedLocal.month,
+      suspendedLocal.day,
+    );
+    final diffDays = dueDateUtc.difference(suspendedDateUtc).inDays;
+    final nextLeadDays = diffDays >= 1
+        ? math.min(diffDays, TaskRepeatRule.maxRepeatCount)
+        : 0;
+    var nextClock = repeatRule.clock;
+    if (diffDays >= 0 &&
+        repeatRule.clock.isMidnight &&
+        (suspendedLocal.hour != 0 ||
+            suspendedLocal.minute != 0 ||
+            suspendedLocal.second != 0)) {
+      nextClock = TdfRepeatClock(
+        hour: suspendedLocal.hour,
+        minute: suspendedLocal.minute,
+        second: suspendedLocal.second,
+      );
+    }
+    if (nextLeadDays == repeatRule.leadDays && nextClock == repeatRule.clock) {
+      return task;
+    }
+    return task.copyWith(
+      repeatRule: TaskRepeatRule(
+        count: repeatRule.count,
+        unit: repeatRule.unit,
+        clock: nextClock,
+        leadDays: nextLeadDays,
+      ),
+    );
+  }
+
+  /// Validates the mandatory initial `tdf 0.7.0` (or load-convertible `0.6.0` / `0.5.1` / `0.5.0`) header on the first non-empty line.
   static void _handleVersionHeader(
     TdfParserState state,
     int line,
     List<TdfScannedToken> tokens,
   ) {
+    final expectedTarget = state.targetSchema == TdfSchemaVersion.v060
+        ? legacyLoadableVersion060
+        : supportedVersion;
     if (tokens.isEmpty ||
         tokens[0].kind != TdfTokenKind.bareWord ||
         tokens[0].value != 'tdf' ||
@@ -859,7 +973,7 @@ abstract final class TdfBlockParser {
       TdfDirectiveParser.fail(
         TdfErrorKind.missingVersionHeader,
         line,
-        'First statement must be "tdf $supportedVersion".',
+        'First statement must be "tdf $expectedTarget".',
       );
     }
     if (tokens.length != 2 || tokens[1].kind != TdfTokenKind.bareWord) {
@@ -874,17 +988,40 @@ abstract final class TdfBlockParser {
       state.isLegacy050 = true;
     } else if (version == legacyLoadableVersion051) {
       state.isLegacy051 = true;
-    } else if (version != supportedVersion) {
+    } else if (version == legacyLoadableVersion060) {
+      state.isLegacy060 = true;
+    } else if (!(state.targetSchema == TdfSchemaVersion.v070 &&
+        version == supportedVersion)) {
       throw TdfException(
         kind: TdfErrorKind.unsupportedVersion,
         line: line,
         message:
-            'Unsupported TDF version "$version" (expected $supportedVersion).',
+            'Unsupported TDF version "$version" (expected $expectedTarget).',
         sourceVersion: version,
-        targetVersion: supportedVersion,
+        targetVersion: expectedTarget,
       );
     }
     state.hasSeenVersionHeader = true;
+  }
+
+  /// Returns whether [dependency] on an open [dependent] task is permanently resolved during `0.6.0 -> 0.7.0` migration.
+  static bool _isMigrationDependencyResolved(
+    TaskItem dependent,
+    TdfTaskDependency dependency,
+    Set<String> deletedTaskIds,
+    Map<String, TaskItem> liveTasksById,
+  ) {
+    if (deletedTaskIds.contains(dependency.taskId)) {
+      return true;
+    }
+    final target = liveTasksById[dependency.taskId];
+    if (target == null) {
+      return false;
+    }
+    if (target.completions < dependency.requiredCompletion) {
+      return false;
+    }
+    return dependent.repeatRule == null || target.repeatRule == null;
   }
 
   /// Opens a new `{ ... }` block on [state.blockStack] at [line].
@@ -1219,6 +1356,141 @@ abstract final class TdfBlockParser {
     return changed
         ? TdfDirectiveParser.coalesceLocationConditions(mapped)
         : conditions;
+  }
+
+  /// Scans [content] into a validated [TdfParserState] under [targetSchema].
+  static TdfParserState _scanAndValidateState(
+    String content, {
+    required bool convertLegacyLocationsTo060,
+    required TdfSchemaVersion targetSchema,
+  }) {
+    if (content.length > maxTdfFileBytes ||
+        utf8.encode(content).length > maxTdfFileBytes) {
+      TdfDirectiveParser.fail(
+        TdfErrorKind.limitExceeded,
+        1,
+        'Document exceeds maximum of $maxTdfFileBytes bytes.',
+      );
+    }
+    final state = TdfParserState(
+      convertLegacyLocationsTo060: convertLegacyLocationsTo060,
+      targetSchema: targetSchema,
+    );
+    var offset = 0;
+    var lineNumber = 1;
+    while (offset < content.length) {
+      if (lineNumber > maxTdfLineCount) {
+        TdfDirectiveParser.fail(
+          TdfErrorKind.limitExceeded,
+          lineNumber,
+          'Document exceeds maximum of $maxTdfLineCount lines.',
+        );
+      }
+      final span = TdfScanner.findLineSpan(content, offset, lineNumber);
+      final tokens = TdfScanner.scanLineTokens(
+        content,
+        span.lineStart,
+        span.lineEnd,
+        lineNumber,
+      );
+      if (tokens.isNotEmpty) {
+        processLineTokens(state, lineNumber, tokens);
+      }
+      offset = span.nextOffset;
+      lineNumber++;
+    }
+    if (!state.hasSeenVersionHeader) {
+      final expectedTarget = targetSchema == TdfSchemaVersion.v060
+          ? legacyLoadableVersion060
+          : supportedVersion;
+      TdfDirectiveParser.fail(
+        TdfErrorKind.missingVersionHeader,
+        1,
+        'Document contains no statements; missing "tdf $expectedTarget" header.',
+      );
+    }
+    if (state.blockStack.isNotEmpty) {
+      TdfDirectiveParser.fail(
+        TdfErrorKind.unclosedBlock,
+        1,
+        'Unclosed block at end of file.',
+      );
+    }
+    if (state.isLegacy05x && state.convertLegacyLocationsTo060) {
+      _convertLegacyInlineLocations05xTo060(state);
+    }
+    _validateLabelReferences(state);
+    if (state.convertLegacyLocationsTo060) {
+      _validateLocationReferences(state);
+    }
+    _validateDependencies(state);
+    _validateQueueMembership(state);
+    return state;
+  }
+
+  /// Strips permanently resolved `blocked` prerequisite entries across all open tasks in [state] (`spec/TDF_SPEC_0.7.0.md` Section 10.8).
+  static void _stripResolvedBlockedEntriesForMigration(TdfParserState state) {
+    final liveTasksById = <String, TaskItem>{
+      for (final entry in state.tasksWithMeta) entry.task.id: entry.task,
+    };
+    for (var i = 0; i < state.tasksWithMeta.length; i++) {
+      final entry = state.tasksWithMeta[i];
+      final updated = _stripResolvedTaskDependencies(
+        entry.task,
+        state.deletedTaskIds,
+        liveTasksById,
+      );
+      if (!identical(updated, entry.task)) {
+        state.tasksWithMeta[i] = (
+          task: updated,
+          headerLine: entry.headerLine,
+          blockedLine: entry.blockedLine,
+          suspendedLine: entry.suspendedLine,
+          legacyQueuedAt: entry.legacyQueuedAt,
+        );
+      }
+    }
+  }
+
+  /// Removes legacy `suspended`/`blocked` directives from `Completed` tasks and deterministically resolved `blocked` entries from open tasks during `0.6.0 -> 0.7.0` migration.
+  static TaskItem _stripResolvedTaskDependencies(
+    TaskItem dependent,
+    Set<String> deletedTaskIds,
+    Map<String, TaskItem> liveTasksById,
+  ) {
+    if (dependent.isCompleted) {
+      if (dependent.dependencies.isEmpty &&
+          dependent.suspendedAt == null &&
+          !dependent.isSuspendedForever) {
+        return dependent;
+      }
+      return dependent.copyWith(
+        dependencies: const <TdfTaskDependency>[],
+        clearSuspendedAt: true,
+        isSuspendedForever: false,
+      );
+    }
+    if (dependent.dependencies.isEmpty) {
+      return dependent;
+    }
+    final kept = <TdfTaskDependency>[];
+    var removedAny = false;
+    for (final dep in dependent.dependencies) {
+      if (_isMigrationDependencyResolved(
+        dependent,
+        dep,
+        deletedTaskIds,
+        liveTasksById,
+      )) {
+        removedAny = true;
+      } else {
+        kept.add(dep);
+      }
+    }
+    if (!removedAny) {
+      return dependent;
+    }
+    return dependent.copyWith(dependencies: kept);
   }
 
   /// Detects self-dependencies and multi-hop circular dependency cycles across all tasks (`CircularDependency`).

@@ -15,8 +15,10 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_board_evaluator.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
@@ -780,6 +782,375 @@ task suslocOkD2 {
         scopedView.focus.map((task) => task.id),
         equals(['tScopedOnl', 'tMixedLbls']),
         reason: 'When activeLabelId selects a scoped label, both tScopedOnl and tMixedLbls are included and satisfied on Sunday',
+      );
+    });
+  });
+
+  group('TDF 0.7.0 Due-Date Lead Window Promotion, Passive Suppression & Block Cleanup', () {
+    test('promotes queued tasks within dueLeadWindow alongside priority tasks without mutating stored fields or overriding Someday/Blocked/Completed/scoped rules', () {
+      expect(
+        TaskBoardEvaluator.defaultDueLeadWindow,
+        equals(const Duration(hours: 24)),
+      );
+      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      const scopedLabel = TdfLabel(
+        id: 'lblScoped1',
+        name: 'Private',
+        isScoped: true,
+      );
+
+      final regular1 = TaskItem(
+        id: 'reg0000001',
+        title: 'Regular 1',
+        createdAt: now,
+        modifiedAt: now,
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: now, text: 'Regular history'),
+        ],
+      );
+      final duePassive = TaskItem(
+        id: 'pasDue0001',
+        title: 'Due Passive (No Promotion)',
+        createdAt: now,
+        modifiedAt: now,
+        dueAt: now.add(const Duration(hours: 2)),
+        isDuePassive: true,
+        dueNote: 'Passive deadline',
+      );
+      final dueBoundary = TaskItem(
+        id: 'due24h0001',
+        title: 'Due At Exact +24h Boundary',
+        createdAt: now,
+        modifiedAt: now,
+        dueAt: now.add(const Duration(seconds: 86400)),
+        dueNote: 'Exact boundary',
+      );
+      final dueOutside = TaskItem(
+        id: 'due24h0002',
+        title: 'Due At +86401s Outside Window',
+        createdAt: now,
+        modifiedAt: now,
+        dueAt: now.add(const Duration(seconds: 86401)),
+      );
+      final prioTask = TaskItem(
+        id: 'prio000001',
+        title: 'Explicit Priority After Due Task In Queue',
+        createdAt: now,
+        modifiedAt: now,
+        isPriority: true,
+      );
+      final overdueQueued = TaskItem(
+        id: 'ovdDue0001',
+        title: 'Overdue Queued Task',
+        createdAt: now,
+        modifiedAt: now,
+        dueAt: now.subtract(const Duration(hours: 3)),
+      );
+      final somedayDue = TaskItem(
+        id: 'someDue001',
+        title: 'Unqueued Someday Task With Urgent Due',
+        createdAt: now,
+        modifiedAt: now,
+        dueAt: now.add(const Duration(hours: 1)),
+      );
+      final blockedDue = TaskItem(
+        id: 'blkDue0001',
+        title: 'Blocked Task With Urgent Due',
+        createdAt: now,
+        modifiedAt: now,
+        suspendedAt: now.add(const Duration(hours: 1)),
+        suspendedNote: 'Deferred 1h',
+        dueAt: now.add(const Duration(hours: 2)),
+      );
+      final completedDue = TaskItem(
+        id: 'cmpDue0001',
+        title: 'Completed Task With Urgent Due',
+        createdAt: now,
+        isCompleted: true,
+        completedAt: now,
+        modifiedAt: now,
+        dueAt: now.add(const Duration(hours: 1)),
+      );
+      final scopedDue = TaskItem(
+        id: 'scpDue0001',
+        title: 'Scoped Urgent Task',
+        createdAt: now,
+        modifiedAt: now,
+        labelIds: const <String>['lblScoped1'],
+        dueAt: now.add(const Duration(hours: 1)),
+      );
+
+      final allTasks = <TaskItem>[
+        regular1,
+        duePassive,
+        dueBoundary,
+        dueOutside,
+        prioTask,
+        overdueQueued,
+        somedayDue,
+        blockedDue,
+        completedDue,
+        scopedDue,
+      ];
+      final queueBlock = TdfQueueBlock(
+        modifiedAt: now,
+        taskIds: const <String>[
+          'reg0000001',
+          'pasDue0001',
+          'due24h0001',
+          'due24h0002',
+          'prio000001',
+          'ovdDue0001',
+          'blkDue0001',
+          'scpDue0001',
+        ],
+      );
+
+      // Default 24h window: urgent bucket is [due24h0001, prio000001, ovdDue0001], regular bucket is [reg0000001, pasDue0001, due24h0002]
+      final defaultBoard = TaskBoard.evaluate(
+        tasks: allTasks,
+        labels: const <TdfLabel>[scopedLabel],
+        evaluationTime: now,
+        queueBlock: queueBlock,
+      );
+      expect(
+        defaultBoard.focus.map((task) => task.id),
+        equals(const <String>['due24h0001', 'prio000001', 'ovdDue0001']),
+        reason: 'Stable two-bucket partition must place due-urgent and priority tasks in Focus in queue order',
+      );
+      expect(
+        defaultBoard.ready.map((task) => task.id),
+        equals(const <String>['reg0000001', 'pasDue0001', 'due24h0002']),
+      );
+      expect(
+        defaultBoard.someday.map((task) => task.id),
+        equals(const <String>['someDue001']),
+      );
+      expect(
+        defaultBoard.blocked.map((task) => task.id),
+        equals(const <String>['blkDue0001']),
+      );
+      expect(
+        defaultBoard.completed.map((task) => task.id),
+        equals(const <String>['cmpDue0001']),
+      );
+      expect(defaultBoard.findTierOfTask('scpDue0001'), isNull);
+      expect(defaultBoard.findTask('scpDue0001'), isNotNull);
+      expect(
+        defaultBoard.findTask('due24h0001')!.isPriority,
+        isFalse,
+        reason: 'Read-only evaluation must never write priority=true onto due-promoted tasks',
+      );
+      expect(defaultBoard.queueModifiedAt, equals(now));
+
+      // Off (dueLeadWindow: null): only explicit priority promotes
+      final offBoard = defaultBoard.evaluateForContext(
+        evaluationTime: now,
+        dueLeadWindow: null,
+      );
+      expect(
+        offBoard.focus.map((task) => task.id),
+        equals(const <String>['prio000001', 'reg0000001', 'pasDue0001']),
+      );
+
+      // Zero window (0s): promotes overdue (<= now) + explicit priority, not +24h
+      final zeroWindowBoard = defaultBoard.evaluateForContext(
+        evaluationTime: now,
+        dueLeadWindow: Duration.zero,
+      );
+      expect(
+        zeroWindowBoard.focus.map((task) => task.id),
+        equals(const <String>['prio000001', 'ovdDue0001', 'reg0000001']),
+      );
+
+      // 48h window: promotes due24h0002 (+86401s) as well, spilling 4th urgent task into Ready[0]
+      final wideWindowBoard = defaultBoard.evaluateForContext(
+        evaluationTime: now,
+        dueLeadWindow: const Duration(hours: 48),
+      );
+      expect(
+        wideWindowBoard.focus.map((task) => task.id),
+        equals(const <String>['due24h0001', 'due24h0002', 'prio000001']),
+      );
+      expect(wideWindowBoard.ready.first.id, equals('ovdDue0001'));
+    });
+
+    test('cleans expired suspended and resolved non-recurring-to-recurring blocked directives in cleanupResolvedTaskBlocks while preserving recurring pipelines and conditions', () {
+      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      final doneNonRec = TaskItem(
+        id: 'preNonRec1',
+        title: 'Completed Non-Recurring Prereq',
+        createdAt: now.subtract(const Duration(hours: 2)),
+        isCompleted: true,
+        completedAt: now.subtract(const Duration(hours: 1)),
+        completions: 1,
+      );
+      final liveRecPrereq = TaskItem(
+        id: 'preRec0001',
+        title: 'Recurring Prereq With 1 Completion',
+        createdAt: now.subtract(const Duration(hours: 2)),
+        completions: 1,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+      );
+      final openNonRecCleaned = TaskItem(
+        id: 'depNonRec1',
+        title: 'Open Task With Expired Suspended And Resolved Deps',
+        createdAt: now.subtract(const Duration(hours: 2)),
+        modifiedAt: now,
+        suspendedAt: now,
+        suspendedNote: 'Expired at exact now',
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'preNonRec1', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'preRec0001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'delPrereq1', requiredCompletion: 5),
+          TdfTaskDependency(taskId: 'fwdUnknown', requiredCompletion: 1),
+        ],
+        conditions: <TaskCondition>[
+          DayTaskCondition.fromWeekdays(const <int>[1]),
+        ],
+      );
+      final openRecPipeline = TaskItem(
+        id: 'depRec0001',
+        title: 'Recurring Dependent On Recurring Prereq',
+        createdAt: now.subtract(const Duration(hours: 2)),
+        modifiedAt: now.subtract(const Duration(minutes: 10)),
+        suspendedAt: now.subtract(const Duration(seconds: 1)),
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'preRec0001', requiredCompletion: 1),
+        ],
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+      );
+      final futureAndForever = TaskItem(
+        id: 'susFuture1',
+        title: 'Future Suspended Open Task',
+        createdAt: now.subtract(const Duration(hours: 1)),
+        modifiedAt: now.subtract(const Duration(hours: 1)),
+        suspendedAt: now.add(const Duration(seconds: 1)),
+        suspendedNote: 'Still active at +1s',
+      );
+      final foreverSuspended = TaskItem(
+        id: 'susForevr1',
+        title: 'Forever Suspended Open Task',
+        createdAt: now.subtract(const Duration(hours: 1)),
+        modifiedAt: now.subtract(const Duration(hours: 1)),
+        isSuspendedForever: true,
+        suspendedNote: 'Indefinite hold',
+      );
+
+      final deleted = TdfDeletedBlock(
+        generation: 1,
+        tasks: <TdfDeletedTaskRecord>[
+          TdfDeletedTaskRecord(
+            taskId: 'delPrereq1',
+            deletedAt: now.subtract(const Duration(minutes: 5)),
+            completionsCheckpoint: 0,
+          ),
+        ],
+      );
+
+      final pureNormalized =
+          TaskBoardEvaluator.normalizeOpenTaskForBlockCleanupComparison(
+            task: openNonRecCleaned,
+            liveTasksById: <String, TaskItem>{
+              doneNonRec.id: doneNonRec,
+              liveRecPrereq.id: liveRecPrereq,
+            },
+            deletedTaskIds: const <String>{'delPrereq1'},
+            nowUtc: now,
+          );
+      expect(pureNormalized.suspendedAt, isNull);
+      expect(pureNormalized.suspendedNote, isNull);
+      expect(
+        pureNormalized.modifiedAt,
+        equals(now),
+        reason: 'normalizeOpenTaskForBlockCleanupComparison must not advance modifiedAt',
+      );
+
+      final result = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+        tasks: <TaskItem>[
+          doneNonRec,
+          liveRecPrereq,
+          openNonRecCleaned,
+          openRecPipeline,
+          futureAndForever,
+          foreverSuspended,
+        ],
+        deleted: deleted,
+        nowUtc: now,
+      );
+      expect(result.cleanedSuspendedCount, equals(2));
+      expect(result.cleanedBlockedCount, equals(3));
+
+      final byId = <String, TaskItem>{
+        for (final task in result.tasks) task.id: task,
+      };
+      final cleanedDep = byId['depNonRec1']!;
+      expect(cleanedDep.suspendedAt, isNull);
+      expect(cleanedDep.suspendedNote, isNull);
+      expect(
+        cleanedDep.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'fwdUnknown', requiredCompletion: 1),
+        ]),
+        reason: 'Must strip satisfied non-rec, satisfied rec->non-rec, and tombstoned deps while keeping unknown forward ref',
+      );
+      expect(
+        cleanedDep.conditions,
+        isNotEmpty,
+        reason: 'Section 5.4: condition rules are persistent constraints and must not be stripped',
+      );
+      expect(
+        cleanedDep.modifiedAt,
+        equals(now.add(const Duration(seconds: 1))),
+        reason: 'When both suspended and blocked are cleaned on the same task with modified==now, modifiedAt advances once to now+1s',
+      );
+
+      final cleanedRecDep = byId['depRec0001']!;
+      expect(cleanedRecDep.suspendedAt, isNull);
+      expect(
+        cleanedRecDep.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'preRec0001', requiredCompletion: 1),
+        ]),
+        reason: 'Recurring-to-recurring dependency must be preserved across cleanup',
+      );
+      expect(cleanedRecDep.modifiedAt, equals(now));
+
+      expect(
+        byId['susFuture1']!.suspendedAt,
+        equals(now.add(const Duration(seconds: 1))),
+      );
+      expect(byId['susFuture1']!.suspendedNote, equals('Still active at +1s'));
+      expect(
+        byId['susFuture1']!.modifiedAt,
+        equals(now.subtract(const Duration(hours: 1))),
+      );
+      expect(byId['susForevr1']!.isSuspendedForever, isTrue);
+      expect(byId['susForevr1']!.suspendedNote, equals('Indefinite hold'));
+
+      // Overflow at 9999-12-31 23:59:59 UTC throws TdfException(invalidTimestamp):
+      final maxTime = DateTime.utc(9999, 12, 31, 23, 59, 59);
+      expect(
+        () => TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+          tasks: <TaskItem>[
+            TaskItem(
+              id: 'tOverflow1',
+              title: 'Max Timestamp Task',
+              createdAt: maxTime,
+              modifiedAt: maxTime,
+              suspendedAt: maxTime,
+            ),
+          ],
+          deleted: TdfDeletedBlock.empty,
+          nowUtc: maxTime,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidTimestamp,
+          ),
+        ),
       );
     });
   });

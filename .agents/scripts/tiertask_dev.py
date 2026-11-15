@@ -625,15 +625,18 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/models/task_board_sync.dart": [
         "test/models/task_board_sync_test.dart",
         "test/models/tdf_v060_merge_conformance_test.dart",
+        "test/models/tdf_v070_merge_conformance_test.dart",
     ],
     "lib/models/task_board_reconciler.dart": [
         "test/models/task_board_sync_test.dart",
         "test/models/tdf_v060_merge_conformance_test.dart",
+        "test/models/tdf_v070_merge_conformance_test.dart",
     ],
     "lib/models/workspace_sync_state.dart": ["test/models/task_board_sync_test.dart"],
     "lib/models/tdf_payload_comparison.dart": [
         "test/models/task_board_v050_rules_test.dart",
         "test/models/task_board_sync_test.dart",
+        "test/models/tdf_v070_merge_conformance_test.dart",
     ],
     "lib/models/tdf_sync_metadata.dart": [
         "test/models/task_board_v050_rules_test.dart",
@@ -650,6 +653,7 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_scanner.dart": [
         "test/services/tdf_service_parser_test.dart",
@@ -659,32 +663,39 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_directive_parser.dart": [
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_serializer.dart": [
         "test/services/tdf_service_parser_test.dart",
         "test/services/tdf_service_bounds_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_importer.dart": [
         "test/services/tdf_migration_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_historical_parser.dart": [
         "test/services/tdf_migration_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_historical_serializer.dart": [
         "test/services/tdf_migration_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/services/tdf_id_migration.dart": [
         "test/services/tdf_migration_test.dart",
         "test/services/tdf_v060_conformance_test.dart",
+        "test/services/tdf_v070_conformance_test.dart",
     ],
     "lib/repositories/local_file_operations.dart": ["test/repositories/local_file_repository_test.dart"],
     "lib/providers/location_providers.dart": [

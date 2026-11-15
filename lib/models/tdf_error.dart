@@ -27,8 +27,17 @@ const int maxTdfConditionRulesPerEntity = 512;
 /// Maximum input or serialized output size in UTF-8 bytes (`MAX_FILE_BYTES` = `1,048,576`, 1 MiB).
 const int maxTdfFileBytes = 1048576;
 
+/// Maximum `history` entries per `task` block (`MAX_HISTORY_PER_TASK` = `500`).
+const int maxTdfHistoryPerTask = 500;
+
+/// Legacy `< 0.7.0` maximum direct child statements per ordinary block (`512`).
+const int maxTdfLegacy060StmtsPerBlock = 512;
+
 /// Maximum logical lines per `.tdf` document (`MAX_LINE_COUNT` = `16,384`).
 const int maxTdfLineCount = 16384;
+
+/// Maximum `link` entries per `label` block (`MAX_LINKS_PER_LABEL` = `20`).
+const int maxTdfLinksPerLabel = 20;
 
 /// Maximum `radius` in meters (`100 km`) for a `location` block (`MAX_LOCATION_RADIUS` = `100,000`).
 const int maxTdfLocationRadius = 100000;
@@ -48,8 +57,8 @@ const int maxTdfNoteLength = 2000;
 /// Maximum raw ASCII characters in a `<number>` token (`MAX_NUMBER_LENGTH` = `24`).
 const int maxTdfNumberLength = 24;
 
-/// Maximum direct child statements per ordinary block (`MAX_STMTS_PER_BLOCK` = `512`).
-const int maxTdfStmtsPerBlock = 512;
+/// Maximum direct child statements per ordinary block (`MAX_STMTS_PER_BLOCK` = `1,024`).
+const int maxTdfStmtsPerBlock = 1024;
 
 /// Maximum decoded Unicode scalar values in a `name`, `step`, or link `<title>` (`MAX_TEXT_LENGTH` = `500`).
 const int maxTdfTextLength = 500;

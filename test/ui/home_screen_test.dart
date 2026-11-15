@@ -508,7 +508,7 @@ void main() {
         filePath: 'tasks.tdf',
       );
       final remoteStore = <String, String>{
-        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.7.0\n',
+        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.8.0\n',
       };
 
       await tester.pumpWidget(
@@ -536,7 +536,7 @@ void main() {
       expect(remoteFetchCount, equals(1));
       expect(
         find.text(
-          'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.7.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+          'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.8.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
         ),
         findsOneWidget,
       );
@@ -796,6 +796,124 @@ task 000002OkD2 priority {
         MaterialLocalizations.of(leafDeContext).cancelButtonLabel,
         equals('Abbrechen'),
         reason: 'German pumpLeafWidget must register material_ui GlobalMaterialLocalizations',
+      );
+    },
+  );
+
+  testWidgets(
+    'HomeScreen evaluates unfiltered global view against live clockProvider for 24h due lead-window auto-promotion and expired suspended unblocking',
+    (WidgetTester tester) async {
+      const seededTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 08:00:00
+  task wakeUp0001
+  task focus00001
+  task focus00002
+  task focus00003
+  task ready00001
+  task ready00002
+  task ready00003
+  task ready00004
+  task ready00005
+  task dueSoon001
+}
+
+task wakeUp0001 priority {
+  name "Deferred Priority Wakeup"
+  created 2026-11-01 08:00
+  suspended 2026-11-01 11:30:00
+}
+task focus00001 {
+  name "Focus Task 1"
+  created 2026-11-01 08:01
+}
+task focus00002 {
+  name "Focus Task 2"
+  created 2026-11-01 08:02
+}
+task focus00003 {
+  name "Focus Task 3"
+  created 2026-11-01 08:03
+}
+task ready00001 {
+  name "Ready Task 1"
+  created 2026-11-01 08:04
+}
+task ready00002 {
+  name "Ready Task 2"
+  created 2026-11-01 08:05
+}
+task ready00003 {
+  name "Ready Task 3"
+  created 2026-11-01 08:06
+}
+task ready00004 {
+  name "Ready Task 4"
+  created 2026-11-01 08:07
+}
+task ready00005 {
+  name "Ready Task 5"
+  created 2026-11-01 08:08
+}
+task dueSoon001 {
+  name "Urgent Deadline Task"
+  created 2026-11-01 08:09
+  due 2026-11-02 11:30:00
+}
+''';
+      var currentClock = DateTime.utc(2026, 11, 1, 10, 0);
+      const config = WebDavConfig(language: AppLanguage.english);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) =>
+                FakeLocalFileRepository(config: config, initialTdf: seededTdf),
+          ),
+          clockProvider.overrideWith(
+            (ref) =>
+                () => currentClock,
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_dueSoon001')),
+        findsNothing,
+        reason: 'At 10:00 UTC (25h30m before due), dueSoon001 must remain outside Focus',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_wakeUp0001')),
+        findsNothing,
+        reason: 'At 10:00 UTC (before 11:30 suspended), wakeUp0001 must remain Blocked',
+      );
+
+      currentClock = DateTime.utc(2026, 11, 1, 12, 0);
+      container.invalidate(clockProvider);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_dueSoon001')),
+        findsOneWidget,
+        reason: 'Unfiltered global view must evaluate against live clockProvider so due <= now + 24h auto-promotes to Focus',
+      );
+      expect(
+        find.byKey(const ValueKey('tier_pill_focus_wakeUp0001')),
+        findsOneWidget,
+        reason: 'Unfiltered global view must evaluate against live clockProvider so suspended <= now unblocks into Focus',
       );
     },
   );

@@ -66,7 +66,7 @@ After completing Section 2.1, initialize `iteration = 1`, `previous_defect_count
 ### Step 3.3: Decisive Resolution & Ledger Lock
 - For each verified defect, make a single, definitive engineering decision using this deterministic precedence order:
   1. Explicit user instructions and `LOCKED` entries in the `Decision Ledger`,
-  2. Applicable project/architectural invariants (`AGENTS.md`, `ARCHITECTURE.md`, `spec/TDF_SPEC_0.6.0.md` where relevant to the document),
+  2. Applicable project/architectural invariants (`AGENTS.md`, `ARCHITECTURE.md`, `spec/TDF_SPEC_0.7.0.md` where relevant to the document),
   3. The target Spec/TEP's own stated goals and primary design intent,
   4. Simplest deterministic solution that closes the gap or contradiction.
 - Do NOT leave open questions, `TBD` placeholders, or multiple competing options in the document.

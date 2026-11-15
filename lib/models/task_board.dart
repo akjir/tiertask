@@ -82,12 +82,13 @@ class TaskBoard {
   /// Creates an empty [TaskBoard] across all 6 tiers.
   factory TaskBoard.empty() => TaskBoard();
 
-  /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC_0.6.0.md` Section 5.
+  /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC.md` Section 5.
   factory TaskBoard.evaluate({
     required Iterable<TaskItem> tasks,
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     List<TdfLabel> labels = const [],
     List<TdfLocation> locations = const [],
     TdfDeletedBlock? deletedBlock,
@@ -102,6 +103,7 @@ class TaskBoard {
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       labels: labels,
       locations: locations,
       deletedBlock: deletedBlock,
@@ -117,9 +119,13 @@ class TaskBoard {
   static const int completedRetentionDays =
       TaskBoardEvaluator.completedRetentionDays;
 
-  /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC_0.6.0.md` Section 6.8.
+  /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC.md` Section 6.8.
   static const int completedRetentionSeconds =
       TaskBoardEvaluator.completedRetentionSeconds;
+
+  /// Normative default `due` lead-window duration (`24 hours` / `86,400` seconds) per `TDF_SPEC.md` Section 5.5.
+  static const Duration defaultDueLeadWindow =
+      TaskBoardEvaluator.defaultDueLeadWindow;
 
   /// Soft WIP limit for Tier 1 (`Focus`).
   static const int focusSoftLimit = TaskBoardEvaluator.focusSoftLimit;
@@ -197,7 +203,7 @@ class TaskBoard {
     queueBlock: queueBlock,
   );
 
-  /// Adds a new TDF `label` block with a unique identifier and optional `#RRGGBB` [color].
+  /// Adds a new TDF `label` block with a unique identifier, optional `#RRGGBB` [color], and validated [links].
   TaskBoard addLabel(
     String name, {
     String? color,
@@ -205,7 +211,11 @@ class TaskBoard {
     String? note,
     bool isScoped = false,
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? modifiedAt,
+    Iterable<TaskLink> links = const <TaskLink>[],
     List<TaskCondition> conditions = const [],
   }) => _mutate(
     (slices) => TaskBoardMutator.addLabel(
@@ -216,12 +226,16 @@ class TaskBoard {
       note: note,
       isScoped: isScoped,
       currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       modifiedAt: modifiedAt,
+      links: links,
       conditions: conditions,
     ),
   );
 
-  /// Adds a new TDF `location` block with a unique identifier per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.1.
+  /// Adds a new TDF `location` block with a unique identifier per `TDF_SPEC.md` Section 4.3 and 6.1.
   TaskBoard addLocation(
     String name, {
     required double latitude,
@@ -231,6 +245,9 @@ class TaskBoard {
     String? note,
     String? source,
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? modifiedAt,
   }) => _mutate(
     (slices) => TaskBoardMutator.addLocation(
@@ -243,11 +260,14 @@ class TaskBoard {
       note: note,
       source: source,
       currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       modifiedAt: modifiedAt,
     ),
   );
 
-  /// Adds a new task per `TDF_SPEC_0.6.0.md` Section 6.1, prunes expired completed tasks, and evaluates tiers.
+  /// Adds a new task per `TDF_SPEC.md` Section 6.1, prunes expired completed tasks, and evaluates tiers.
   TaskBoard addTask(
     String title, {
     TaskTier targetTier = TaskTier.planned,
@@ -257,18 +277,23 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? modifiedAt,
     String? id,
     String? note,
     List<String> labelIds = const [],
     DateTime? suspendedAt,
     bool? isSuspendedForever,
+    String? suspendedNote,
     DateTime? dueAt,
+    bool isDuePassive = false,
+    String? dueNote,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
     List<TdfTaskDependency>? dependencies,
     TaskOrigin? origin,
     List<TaskLink> links = const [],
+    Iterable<TaskHistoryEntry> history = const <TaskHistoryEntry>[],
     List<TaskCondition> conditions = const [],
   }) => _mutate(
     (slices) => TaskBoardMutator.addTask(
@@ -288,19 +313,46 @@ class TaskBoard {
         labelIds: labelIds,
         suspendedAt: suspendedAt,
         isSuspendedForever: isSuspendedForever,
+        suspendedNote: suspendedNote,
         dueAt: dueAt,
+        isDuePassive: isDuePassive,
+        dueNote: dueNote,
         repeatRule: repeatRule,
         blockedByTaskIds: blockedByTaskIds,
         dependencies: dependencies,
         origin: origin,
         links: links,
+        history: history,
         conditions: conditions,
         currentDate: now,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
         modifiedAt: modifiedAt,
         isNewTask: true,
       ),
+    ),
+  );
+
+  /// Appends and canonically deduplicates a single [TaskHistoryEntry] on [taskId] (`TDF_SPEC.md` Section 4.1.2 & 6.6).
+  TaskBoard addTaskHistoryEntry(
+    String taskId, {
+    required DateTime timestampUtc,
+    required String text,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.addTaskHistoryEntry(
+      slices,
+      taskId,
+      timestampUtc: timestampUtc,
+      text: text,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -309,12 +361,14 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardEvaluator.reevaluateBoard(
       slices,
       now: TaskItem.normalizeTimestamp(currentDate ?? DateTime.now().toUtc()),
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     ),
   );
@@ -325,6 +379,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? suspendedUntil,
   }) => _mutate(
     (slices) => TaskBoardQueueMutator.blockTask(
@@ -333,15 +388,20 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       suspendedUntil: suspendedUntil,
     ),
   );
 
   /// Removes expired deletion records (`now - deletedAt > 2,592,000` seconds) and increments `deletedBlock.generation`.
-  TaskBoard cleanupExpiredDeletions({DateTime? currentDate}) => _mutate(
+  TaskBoard cleanupExpiredDeletions({
+    DateTime? currentDate,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) => _mutate(
     (slices) => TaskBoardEvaluator.cleanupExpiredDeletions(
       slices,
       currentDate: currentDate,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -351,6 +411,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     int? expectedCompletions,
   }) => _mutate(
     (slices) => TaskBoardMutator.completeTask(
@@ -359,6 +420,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       expectedCompletions: expectedCompletions,
     ),
   );
@@ -410,8 +472,21 @@ class TaskBoard {
   }
 
   /// Deletes the label with [labelId], removes its reference from all tasks, and records the deletion in [deletedBlock].
-  TaskBoard deleteLabel(String labelId, {DateTime? currentDate}) => _mutate(
-    (slices) => TaskBoardMutator.deleteLabel(slices, labelId, currentDate),
+  TaskBoard deleteLabel(
+    String labelId, {
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.deleteLabel(
+      slices,
+      labelId,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    ),
   );
 
   /// Deletes the location with [locationId], cascades its removal across labels and tasks per Section 6.8.1, and records the deletion in [deletedBlock].
@@ -420,6 +495,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardMutator.deleteLocation(
       slices,
@@ -427,6 +503,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -436,6 +513,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardMutator.deleteTask(
       slices,
@@ -443,15 +521,17 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
-  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC_0.6.0.md` Section 6.3.
+  /// Downgrades a task in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
   TaskBoard downgradeTask(
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -462,6 +542,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
@@ -476,12 +557,14 @@ class TaskBoard {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) =>
       TaskBoard.evaluate(
         tasks: allTasks,
         evaluationTime: evaluationTime,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
         labels: labels,
         locations: locations,
         deletedBlock: deletedBlock,
@@ -520,7 +603,7 @@ class TaskBoard {
     return this;
   }
 
-  /// Moves [taskId] within [queueBlock] before [beforeTaskId], after [afterTaskId], or to the end per `TDF_SPEC_0.6.0.md` Section 6.11.1.
+  /// Moves [taskId] within [queueBlock] before [beforeTaskId], after [afterTaskId], or to the end per `TDF_SPEC.md` Section 6.11.1.
   TaskBoard moveTaskInQueue(
     String taskId, {
     String? beforeTaskId,
@@ -528,6 +611,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardQueueMutator.moveTaskInQueue(
       slices,
@@ -537,6 +621,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -556,6 +641,26 @@ class TaskBoard {
     ),
   );
 
+  /// Removes a single [TaskHistoryEntry] from [taskId] when present (`TDF_SPEC.md` Section 4.1.2 & 6.6).
+  TaskBoard removeTaskHistoryEntry(
+    String taskId, {
+    required TaskHistoryEntry entry,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.removeTaskHistoryEntry(
+      slices,
+      taskId,
+      entry: entry,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    ),
+  );
+
   /// Restores a completed task back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
   TaskBoard restoreTask(
     String taskId, {
@@ -563,6 +668,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardQueueMutator.restoreTask(
       slices,
@@ -571,6 +677,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -580,6 +687,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     bool isPriority = false,
   }) => _mutate(
     (slices) => TaskBoardQueueMutator.scheduleTask(
@@ -588,6 +696,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       isPriority: isPriority,
     ),
   );
@@ -602,6 +711,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardMutator.toggleSubtask(
       slices,
@@ -610,6 +720,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -622,10 +733,12 @@ class TaskBoard {
     bool clearColor = false,
     String? note,
     bool clearNote = false,
+    Iterable<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardMutator.updateLabel(
       slices,
@@ -636,14 +749,16 @@ class TaskBoard {
       clearColor: clearColor,
       note: note,
       clearNote: clearNote,
+      links: links,
       conditions: conditions,
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
-  /// Updates an existing location with [locationId] per `TDF_SPEC_0.6.0.md` Section 4.3 and 6.6.
+  /// Updates an existing location with [locationId] per `TDF_SPEC.md` Section 4.3 and 6.6.
   TaskBoard updateLocation(
     String locationId, {
     String? name,
@@ -657,6 +772,7 @@ class TaskBoard {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardMutator.updateLocation(
       slices,
@@ -672,6 +788,7 @@ class TaskBoard {
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 
@@ -687,9 +804,14 @@ class TaskBoard {
     List<String>? labelIds,
     DateTime? suspendedAt,
     bool? isSuspendedForever,
+    String? suspendedNote,
     bool clearSuspendedAt = false,
+    bool clearSuspendedNote = false,
     DateTime? dueAt,
+    bool? isDuePassive,
+    String? dueNote,
     bool clearDueAt = false,
+    bool clearDueNote = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
@@ -697,10 +819,12 @@ class TaskBoard {
     TaskOrigin? origin,
     bool clearOrigin = false,
     List<TaskLink>? links,
+    Iterable<TaskHistoryEntry>? history,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) => _mutate(
     (slices) => TaskBoardMutator.updateTask(
       slices,
@@ -714,9 +838,14 @@ class TaskBoard {
       labelIds: labelIds,
       suspendedAt: suspendedAt,
       isSuspendedForever: isSuspendedForever,
+      suspendedNote: suspendedNote,
       clearSuspendedAt: clearSuspendedAt,
+      clearSuspendedNote: clearSuspendedNote,
       dueAt: dueAt,
+      isDuePassive: isDuePassive,
+      dueNote: dueNote,
       clearDueAt: clearDueAt,
+      clearDueNote: clearDueNote,
       repeatRule: repeatRule,
       clearRepeatRule: clearRepeatRule,
       blockedByTaskIds: blockedByTaskIds,
@@ -724,10 +853,36 @@ class TaskBoard {
       origin: origin,
       clearOrigin: clearOrigin,
       links: links,
+      history: history,
       conditions: conditions,
       currentDate: currentDate,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    ),
+  );
+
+  /// Replaces [oldEntry] on [taskId] with a validated `(newTimestampUtc, newText)` history entry (`TDF_SPEC.md` Section 4.1.2 & 6.6).
+  TaskBoard updateTaskHistoryEntry(
+    String taskId, {
+    required TaskHistoryEntry oldEntry,
+    required DateTime newTimestampUtc,
+    required String newText,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.updateTaskHistoryEntry(
+      slices,
+      taskId,
+      oldEntry: oldEntry,
+      newTimestampUtc: newTimestampUtc,
+      newText: newText,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ),
   );
 

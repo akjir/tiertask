@@ -17,6 +17,7 @@ import 'dart:convert' show utf8;
 
 import 'package:flutter/foundation.dart';
 
+import 'task_board_evaluator.dart';
 import 'task_item.dart';
 import 'tdf_error.dart';
 import 'tdf_location.dart';
@@ -25,7 +26,7 @@ import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
 
 /// Stateless decoded payload tuple comparator and three-way unit merge engine
-/// per `TDF_SPEC_0.6.0.md` Sections 6.7.3–6.7.6 and 6.11.2.
+/// per `TDF_SPEC_0.7.0.md` Sections 6.7.3–6.7.6, 6.9.5, and 6.11.2.
 @immutable
 class TdfPayloadComparison {
   /// Prevents instantiation of this stateless helper class.
@@ -41,7 +42,7 @@ class TdfPayloadComparison {
     return _compareNormalizedConditionModels(normLeft, normRight);
   }
 
-  /// Compares two [TdfLabel] decoded payloads `(scoped, name, note, color, condition)` per Section 6.7.3.
+  /// Compares two [TdfLabel] decoded payloads `(scoped, name, note, color, link, condition)` per Section 6.7.3.
   static int compareLabelPayloads(TdfLabel left, TdfLabel right) {
     final scopedCmp = _compareBool(left.isScoped, right.isScoped);
     if (scopedCmp != 0) {
@@ -62,6 +63,10 @@ class TdfPayloadComparison {
     );
     if (colorCmp != 0) {
       return colorCmp;
+    }
+    final linkCmp = compareLinkLists(left.links, right.links);
+    if (linkCmp != 0) {
+      return linkCmp;
     }
     return compareConditionModels(left.conditions, right.conditions);
   }
@@ -127,49 +132,24 @@ class TdfPayloadComparison {
     return _compareList(left.taskIds, right.taskIds, compareUtf8Strings);
   }
 
-  /// Compares two [TaskItem] decoded payloads `(created, name, note, labels, condition, origin, link, taskState)` per Section 6.7.3.
-  static int compareTaskPayloads(TaskItem left, TaskItem right) {
-    final createdCmp = left.createdAt.compareTo(right.createdAt);
-    if (createdCmp != 0) {
-      return createdCmp;
-    }
-    final nameCmp = compareUtf8Strings(left.title, right.title);
-    if (nameCmp != 0) {
-      return nameCmp;
-    }
-    final noteCmp = _compareNullable(left.note, right.note, compareUtf8Strings);
-    if (noteCmp != 0) {
-      return noteCmp;
-    }
-    final labelsCmp = _compareList(
-      _normalizedLabelSet(left.labelIds),
-      _normalizedLabelSet(right.labelIds),
-      compareUtf8Strings,
-    );
-    if (labelsCmp != 0) {
-      return labelsCmp;
-    }
-    final condCmp = compareConditionModels(left.conditions, right.conditions);
-    if (condCmp != 0) {
-      return condCmp;
-    }
-    final originCmp = _compareNullable(
-      left.origin,
-      right.origin,
-      _compareOrigin,
-    );
-    if (originCmp != 0) {
-      return originCmp;
-    }
-    final linkCmp = compareLinkLists(left.links, right.links);
-    if (linkCmp != 0) {
-      return linkCmp;
-    }
-    return compareTaskStates(left, right);
+  /// Compares two [TaskItem] decoded payloads under [schemaVersion] per Section 6.7.3.
+  static int compareTaskPayloads(
+    TaskItem left,
+    TaskItem right, {
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+  }) {
+    return switch (schemaVersion) {
+      TdfSchemaVersion.v060 => _compareTaskPayloadsV060(left, right),
+      TdfSchemaVersion.v070 => _compareTaskPayloadsV070(left, right),
+    };
   }
 
   /// Compares two [TaskItem] occurrence states `(completions, priority, finished, suspended, due, repeat, blocked, subtasks)` per Section 6.7.3.
-  static int compareTaskStates(TaskItem left, TaskItem right) {
+  static int compareTaskStates(
+    TaskItem left,
+    TaskItem right, {
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+  }) {
     final compCmp = left.completions.compareTo(right.completions);
     if (compCmp != 0) {
       return compCmp;
@@ -186,22 +166,18 @@ class TdfPayloadComparison {
     if (finCmp != 0) {
       return finCmp;
     }
-    final suspCmp = _compareDeferral(left, right);
+    final suspCmp = _compareDeferral(left, right, schemaVersion);
     if (suspCmp != 0) {
       return suspCmp;
     }
-    final dueCmp = _compareNullable(
-      left.dueAt,
-      right.dueAt,
-      (a, b) => a.compareTo(b),
-    );
+    final dueCmp = _compareDue(left, right, schemaVersion);
     if (dueCmp != 0) {
       return dueCmp;
     }
     final repCmp = _compareNullable(
       left.repeatRule,
       right.repeatRule,
-      _compareRepeatRule,
+      (a, b) => _compareRepeatRule(a, b, schemaVersion),
     );
     if (repCmp != 0) {
       return repCmp;
@@ -218,7 +194,11 @@ class TdfPayloadComparison {
   }
 
   /// Compares two [TaskItem] versions for the complete entity winner per Section 6.7.4.
-  static int compareTaskVersions(TaskItem left, TaskItem right) {
+  static int compareTaskVersions(
+    TaskItem left,
+    TaskItem right, {
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+  }) {
     final compCmp = left.completions.compareTo(right.completions);
     if (compCmp != 0) {
       return compCmp;
@@ -229,7 +209,11 @@ class TdfPayloadComparison {
     if (modCmp != 0) {
       return modCmp;
     }
-    final payloadCmp = compareTaskPayloads(left, right);
+    final payloadCmp = compareTaskPayloads(
+      left,
+      right,
+      schemaVersion: schemaVersion,
+    );
     if (payloadCmp != 0) {
       return payloadCmp;
     }
@@ -296,6 +280,13 @@ class TdfPayloadComparison {
       winner: winner.color,
       equalsFn: (a, b) => a?.toUpperCase() == b?.toUpperCase(),
     );
+    final mergedLinks = _mergeScalar(
+      local: local.links,
+      incoming: incoming.links,
+      baseline: baseline.links,
+      winner: winner.links,
+      equalsFn: (a, b) => compareLinkLists(a, b) == 0,
+    );
     final mergedConditions = _mergeConditionsGroupWise(
       local: local.conditions,
       incoming: incoming.conditions,
@@ -313,6 +304,7 @@ class TdfPayloadComparison {
       name: mergedName,
       note: mergedNote,
       color: mergedColor,
+      links: mergedLinks,
       conditions: mergedConditions,
     );
 
@@ -398,26 +390,36 @@ class TdfPayloadComparison {
     return candidate.copyWith(modifiedAt: nextRevision);
   }
 
-  /// Merges [local] and [incoming] [TaskItem] versions using [baseline] per Sections 6.7.5 and 6.7.6.
-  static TaskItem mergeTaskWithBaseline({
+  /// Computes both `cleaned` (with Case 2 pre-normalization) and `uncleaned` (raw Case 2) merged [TaskItem] candidates per Sections 6.7.5 and 6.7.6.
+  static ({TaskItem cleaned, TaskItem uncleaned})
+  mergeTaskCandidatesWithBaseline({
     required TaskItem local,
     required TaskItem incoming,
     required TaskItem? baseline,
+    DateTime? evaluationTime,
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+    bool applyPostMergeBlockCleanup = true,
+    Map<String, TaskItem> mergedLiveTasksById = const <String, TaskItem>{},
+    Set<String> mergedDeletedTaskIds = const <String>{},
     Set<String> tombstonedLocationIds = const <String>{},
     Set<String> tombstonedLabelIds = const <String>{},
     Set<String>? validLabelIds,
     Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
   }) {
-    final localWins = compareTaskVersions(local, incoming) >= 0;
+    final localWins =
+        compareTaskVersions(local, incoming, schemaVersion: schemaVersion) >= 0;
     final winner = localWins ? local : incoming;
     final loser = localWins ? incoming : local;
     if (baseline == null) {
-      return _preserveTombstonedLabelsWithoutBaseline(
-        winner,
-        loser,
-        tombstonedLabelIds,
+      final baseFree = _mergeTaskWithoutBaseline(
+        winner: winner,
+        loser: loser,
+        tombstonedLabelIds: tombstonedLabelIds,
+        schemaVersion: schemaVersion,
       );
+      return (cleaned: baseFree, uncleaned: baseFree);
     }
+
     final mergedName = _mergeScalar(
       local: local.title,
       incoming: incoming.title,
@@ -467,8 +469,15 @@ class TdfPayloadComparison {
       winner: winner.links,
       equalsFn: (a, b) => compareLinkLists(a, b) == 0,
     );
+    final mergedHistory = schemaVersion == TdfSchemaVersion.v070
+        ? _mergeHistorySets(
+            local: local.history,
+            incoming: incoming.history,
+            baseline: baseline.history,
+          )
+        : const <TaskHistoryEntry>[];
 
-    final candidate = _buildMergedTaskCandidate(
+    final uncleaned = _buildMergedTaskCandidate(
       local: local,
       incoming: incoming,
       baseline: baseline,
@@ -479,18 +488,215 @@ class TdfPayloadComparison {
       mergedConditions: mergedConditions,
       mergedOrigin: mergedOrigin,
       mergedLinks: mergedLinks,
+      mergedHistory: mergedHistory,
+      schemaVersion: schemaVersion,
+      preNormalizeBlocks: false,
+      applyPostMergeBlockCleanup: false,
+      evaluationTime: evaluationTime,
+      mergedLiveTasksById: const <String, TaskItem>{},
+      mergedDeletedTaskIds: const <String>{},
     );
-
-    final greatestExisting = _greatestTaskVersion(baseline, local, incoming);
-    if (compareTaskPayloads(greatestExisting, candidate) == 0) {
-      return greatestExisting;
+    if (schemaVersion == TdfSchemaVersion.v060) {
+      return (cleaned: uncleaned, uncleaned: uncleaned);
     }
-    final nextRevision = _nextMergedRevision(
-      baseline.effectiveModifiedAt,
+    final cleaned = _buildMergedTaskCandidate(
+      local: local,
+      incoming: incoming,
+      baseline: baseline,
+      winner: winner,
+      mergedName: mergedName,
+      mergedNote: mergedNote,
+      mergedLabels: mergedLabels,
+      mergedConditions: mergedConditions,
+      mergedOrigin: mergedOrigin,
+      mergedLinks: mergedLinks,
+      mergedHistory: mergedHistory,
+      schemaVersion: schemaVersion,
+      preNormalizeBlocks: true,
+      applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
+      evaluationTime: evaluationTime,
+      mergedLiveTasksById: mergedLiveTasksById,
+      mergedDeletedTaskIds: mergedDeletedTaskIds,
+    );
+    return (cleaned: cleaned, uncleaned: uncleaned);
+  }
+
+  /// Merges [local] and [incoming] [TaskItem] versions using [baseline] per Sections 6.7.5 and 6.7.6.
+  static TaskItem mergeTaskWithBaseline({
+    required TaskItem local,
+    required TaskItem incoming,
+    required TaskItem? baseline,
+    DateTime? evaluationTime,
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+    bool applyPostMergeBlockCleanup = true,
+    Map<String, TaskItem> mergedLiveTasksById = const <String, TaskItem>{},
+    Set<String> mergedDeletedTaskIds = const <String>{},
+    Set<String> tombstonedLocationIds = const <String>{},
+    Set<String> tombstonedLabelIds = const <String>{},
+    Set<String>? validLabelIds,
+    Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
+  }) {
+    final normalizedNow = evaluationTime != null
+        ? TaskItem.normalizeTimestamp(evaluationTime)
+        : null;
+    final candidates = mergeTaskCandidatesWithBaseline(
+      local: local,
+      incoming: incoming,
+      baseline: baseline,
+      evaluationTime: normalizedNow,
+      schemaVersion: schemaVersion,
+      applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
+      mergedLiveTasksById: mergedLiveTasksById,
+      mergedDeletedTaskIds: mergedDeletedTaskIds,
+      tombstonedLocationIds: tombstonedLocationIds,
+      tombstonedLabelIds: tombstonedLabelIds,
+      validLabelIds: validLabelIds,
+      postCascadeLabelsById: postCascadeLabelsById,
+    );
+    final localWins =
+        compareTaskVersions(local, incoming, schemaVersion: schemaVersion) >= 0;
+    final winner = localWins ? local : incoming;
+    final referenceExisting = baseline != null
+        ? _greatestTaskVersion(baseline, local, incoming, schemaVersion)
+        : winner;
+    if (referenceExisting.completions == candidates.cleaned.completions &&
+        compareTaskPayloads(
+              referenceExisting,
+              candidates.cleaned,
+              schemaVersion: schemaVersion,
+            ) ==
+            0) {
+      return candidates.cleaned.copyWith(
+        modifiedAt: referenceExisting.modifiedAt,
+        clearModifiedAt: referenceExisting.modifiedAt == null,
+      );
+    }
+    final bumped = _nextMergedTaskRevision(
       local.effectiveModifiedAt,
       incoming.effectiveModifiedAt,
+      baseline?.effectiveModifiedAt,
     );
-    return candidate.copyWith(modifiedAt: nextRevision);
+    if (normalizedNow == null ||
+        compareTaskPayloads(
+              candidates.cleaned,
+              candidates.uncleaned,
+              schemaVersion: schemaVersion,
+            ) ==
+            0) {
+      return candidates.cleaned.copyWith(modifiedAt: bumped);
+    }
+    final withNow = normalizedNow.isAfter(bumped) ? normalizedNow : bumped;
+    if (!TdfCalendar.isWithinTimestampBounds(withNow)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Merged revision exceeds maximum supported timestamp.',
+      );
+    }
+    return candidates.cleaned.copyWith(modifiedAt: withNow);
+  }
+
+  /// Computes the merged `(completions, isCompleted, completedAt, repeatRule)` header of [local] and [incoming] for prerequisite pre-normalization.
+  static TaskItem previewMergedTaskPrerequisiteHeader({
+    required TaskItem local,
+    required TaskItem incoming,
+    required TaskItem? baseline,
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+  }) {
+    final winner =
+        compareTaskVersions(local, incoming, schemaVersion: schemaVersion) >= 0
+        ? local
+        : incoming;
+    if (baseline == null) {
+      return winner;
+    }
+    final sameOccurrenceOpen =
+        baseline.completions == local.completions &&
+        baseline.completions == incoming.completions &&
+        baseline.completedAt == null &&
+        local.completedAt == null &&
+        incoming.completedAt == null &&
+        !baseline.isCompleted &&
+        !local.isCompleted &&
+        !incoming.isCompleted;
+    if (!sameOccurrenceOpen) {
+      return _mergeScalar(
+        local: local,
+        incoming: incoming,
+        baseline: baseline,
+        winner: winner,
+        equalsFn: (a, b) =>
+            compareTaskStates(a, b, schemaVersion: schemaVersion) == 0,
+      );
+    }
+    final mergedRepeat = _mergeScalar(
+      local: local.repeatRule,
+      incoming: incoming.repeatRule,
+      baseline: baseline.repeatRule,
+      winner: winner.repeatRule,
+      equalsFn: (a, b) =>
+          _compareNullable(
+            a,
+            b,
+            (left, right) => _compareRepeatRule(left, right, schemaVersion),
+          ) ==
+          0,
+    );
+    return winner.copyWith(
+      repeatRule: mergedRepeat,
+      clearRepeatRule: mergedRepeat == null,
+    );
+  }
+
+  /// Returns whether [left] and [right] have identical decoded task payloads under [schemaVersion].
+  static bool taskPayloadsEqual(
+    TaskItem left,
+    TaskItem right, {
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+  }) => compareTaskPayloads(left, right, schemaVersion: schemaVersion) == 0;
+
+  /// Returns whether open snapshots [left] and [right] have identical decoded payloads after stripping expired finite `suspended <= nowUtc` and resolved `blocked` entries.
+  static bool taskPayloadsEqualModuloBlockCleanup({
+    required TaskItem left,
+    required TaskItem right,
+    required Map<String, TaskItem> liveTasksById,
+    required Set<String> deletedTaskIds,
+    required DateTime nowUtc,
+    TdfSchemaVersion schemaVersion = TdfSchemaVersion.v070,
+  }) {
+    final normalizedLeft =
+        TaskBoardEvaluator.normalizeOpenTaskForBlockCleanupComparison(
+          task: left,
+          liveTasksById: liveTasksById,
+          deletedTaskIds: deletedTaskIds,
+          nowUtc: nowUtc,
+        );
+    final normalizedRight =
+        TaskBoardEvaluator.normalizeOpenTaskForBlockCleanupComparison(
+          task: right,
+          liveTasksById: liveTasksById,
+          deletedTaskIds: deletedTaskIds,
+          nowUtc: nowUtc,
+        );
+    return compareTaskPayloads(
+          normalizedLeft,
+          normalizedRight,
+          schemaVersion: schemaVersion,
+        ) ==
+        0;
+  }
+
+  /// Appends unseen `<target-id>` keys from [dependencies] into [orderedIds].
+  static void _appendUniqueDependencyIds(
+    List<TdfTaskDependency> dependencies,
+    Set<String> seenIds,
+    List<String> orderedIds,
+  ) {
+    for (final dependency in dependencies) {
+      if (seenIds.add(dependency.taskId)) {
+        orderedIds.add(dependency.taskId);
+      }
+    }
   }
 
   /// Constructs the merged [TaskItem] candidate by applying either Same-Occurrence Unbundling (Case 2) or Cross-Occurrence Atomic State (Case 1) per Section 6.7.5.
@@ -505,6 +711,13 @@ class TdfPayloadComparison {
     required List<TaskCondition> mergedConditions,
     required TaskOrigin? mergedOrigin,
     required List<TaskLink> mergedLinks,
+    required List<TaskHistoryEntry> mergedHistory,
+    required TdfSchemaVersion schemaVersion,
+    required bool preNormalizeBlocks,
+    required bool applyPostMergeBlockCleanup,
+    required DateTime? evaluationTime,
+    required Map<String, TaskItem> mergedLiveTasksById,
+    required Set<String> mergedDeletedTaskIds,
   }) {
     final sameOccurrenceOpen =
         baseline.completions == local.completions &&
@@ -522,7 +735,8 @@ class TdfPayloadComparison {
         incoming: incoming,
         baseline: baseline,
         winner: winner,
-        equalsFn: (a, b) => compareTaskStates(a, b) == 0,
+        equalsFn: (a, b) =>
+            compareTaskStates(a, b, schemaVersion: schemaVersion) == 0,
       );
       return TaskItem(
         id: winner.id,
@@ -535,12 +749,16 @@ class TdfPayloadComparison {
         isPriority: stateSource.isPriority,
         suspendedAt: stateSource.suspendedAt,
         isSuspendedForever: stateSource.isSuspendedForever,
+        suspendedNote: stateSource.suspendedNote,
         dueAt: stateSource.dueAt,
+        isDuePassive: stateSource.isDuePassive,
+        dueNote: stateSource.dueNote,
         repeatRule: stateSource.repeatRule,
         origin: mergedOrigin,
         labelIds: mergedLabels,
         dependencies: stateSource.dependencies,
         links: mergedLinks,
+        history: mergedHistory,
         conditions: mergedConditions,
         subtasksAutoFinish: stateSource.subtasksAutoFinish,
         subtasks: stateSource.subtasks,
@@ -554,33 +772,52 @@ class TdfPayloadComparison {
       winner: winner.isPriority,
       equalsFn: (a, b) => a == b,
     );
-    final deferralSource = _mergeScalar(
+    final deferralSource = _mergeCase2Deferral(
       local: local,
       incoming: incoming,
       baseline: baseline,
       winner: winner,
-      equalsFn: (a, b) => _compareDeferral(a, b) == 0,
+      schemaVersion: schemaVersion,
+      preNormalizeBlocks: preNormalizeBlocks,
+      applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
+      evaluationTime: evaluationTime,
     );
-    final mergedDue = _mergeScalar(
-      local: local.dueAt,
-      incoming: incoming.dueAt,
-      baseline: baseline.dueAt,
-      winner: winner.dueAt,
-      equalsFn: (a, b) => a == b,
+    final dueSource = _mergeScalar(
+      local: local,
+      incoming: incoming,
+      baseline: baseline,
+      winner: winner,
+      equalsFn: (a, b) => _compareDue(a, b, schemaVersion) == 0,
     );
     final mergedRepeat = _mergeScalar(
       local: local.repeatRule,
       incoming: incoming.repeatRule,
       baseline: baseline.repeatRule,
       winner: winner.repeatRule,
-      equalsFn: (a, b) => _compareNullable(a, b, _compareRepeatRule) == 0,
+      equalsFn: (a, b) =>
+          _compareNullable(
+            a,
+            b,
+            (left, right) => _compareRepeatRule(left, right, schemaVersion),
+          ) ==
+          0,
     );
-    final mergedDependencies = _mergeDependencyMaps(
-      local: local.dependencies,
-      incoming: incoming.dependencies,
-      baseline: baseline.dependencies,
-      winner: winner.dependencies,
-    );
+    final mergedDependencies = preNormalizeBlocks
+        ? _mergePreNormalizedDependencyMaps(
+            local: local,
+            incoming: incoming,
+            baseline: baseline,
+            winner: winner,
+            applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
+            mergedLiveTasksById: mergedLiveTasksById,
+            mergedDeletedTaskIds: mergedDeletedTaskIds,
+          )
+        : _mergeDependencyMaps(
+            local: local.dependencies,
+            incoming: incoming.dependencies,
+            baseline: baseline.dependencies,
+            winner: winner.dependencies,
+          );
     final mergedSubtasks = _mergeSubtasksUnbundled(
       local: local,
       incoming: incoming,
@@ -597,16 +834,32 @@ class TdfPayloadComparison {
       isPriority: mergedPriority,
       suspendedAt: deferralSource.suspendedAt,
       isSuspendedForever: deferralSource.isSuspendedForever,
-      dueAt: mergedDue,
+      suspendedNote: deferralSource.suspendedNote,
+      dueAt: dueSource.dueAt,
+      isDuePassive: dueSource.isDuePassive,
+      dueNote: dueSource.dueNote,
       repeatRule: mergedRepeat,
       origin: mergedOrigin,
       labelIds: mergedLabels,
       dependencies: mergedDependencies,
       links: mergedLinks,
+      history: mergedHistory,
       conditions: mergedConditions,
       subtasksAutoFinish: mergedSubtasks.autoFinish,
       subtasks: mergedSubtasks.steps,
     );
+  }
+
+  /// Collects unique ordered `<target-id>` keys from [lists].
+  static List<String> _collectOrderedDependencyIds(
+    List<List<TdfTaskDependency>> lists,
+  ) {
+    final orderedIds = <String>[];
+    final seenIds = <String>{};
+    for (final list in lists) {
+      _appendUniqueDependencyIds(list, seenIds, orderedIds);
+    }
+    return orderedIds;
   }
 
   /// Compares two boolean values (`false < true`).
@@ -625,8 +878,24 @@ class TdfPayloadComparison {
     return _compareList(left.dayTokens, right.dayTokens, compareUtf8Strings);
   }
 
-  /// Compares two deferral states (`absent < (false, utcComponents) < (true, [])`).
-  static int _compareDeferral(TaskItem left, TaskItem right) {
+  /// Compares the `day` condition group of two [_NormalizedConditionModel] instances.
+  static int _compareDayGroup(
+    _NormalizedConditionModel left,
+    _NormalizedConditionModel right,
+  ) {
+    final resetCmp = _compareBool(left.dayResetAny, right.dayResetAny);
+    if (resetCmp != 0) {
+      return resetCmp;
+    }
+    return _compareList(left.dayRules, right.dayRules, _compareDayCondition);
+  }
+
+  /// Compares two deferral states (`absent < (false, utcComponents, note) < (true, [], note)`).
+  static int _compareDeferral(
+    TaskItem left,
+    TaskItem right,
+    TdfSchemaVersion schemaVersion,
+  ) {
     final leftPresent = left.isSuspendedForever || left.suspendedAt != null;
     final rightPresent = right.isSuspendedForever || right.suspendedAt != null;
     final presenceCmp = _compareBool(leftPresent, rightPresent);
@@ -637,11 +906,28 @@ class TdfPayloadComparison {
       left.isSuspendedForever,
       right.isSuspendedForever,
     );
-    if (foreverCmp != 0 || left.isSuspendedForever) {
+    if (foreverCmp != 0) {
       return foreverCmp;
     }
-    return (left.suspendedAt ?? DateTime.utc(1970)).compareTo(
+    if (left.isSuspendedForever) {
+      return schemaVersion == TdfSchemaVersion.v070
+          ? _compareNullable(
+              left.suspendedNote,
+              right.suspendedNote,
+              compareUtf8Strings,
+            )
+          : 0;
+    }
+    final timeCmp = (left.suspendedAt ?? DateTime.utc(1970)).compareTo(
       right.suspendedAt ?? DateTime.utc(1970),
+    );
+    if (timeCmp != 0 || schemaVersion == TdfSchemaVersion.v060) {
+      return timeCmp;
+    }
+    return _compareNullable(
+      left.suspendedNote,
+      right.suspendedNote,
+      compareUtf8Strings,
     );
   }
 
@@ -655,6 +941,34 @@ class TdfPayloadComparison {
       return idCmp;
     }
     return left.requiredCompletion.compareTo(right.requiredCompletion);
+  }
+
+  /// Compares two `due` tuples (`absent < (utcComponents, isDuePassive, dueNote)`).
+  static int _compareDue(
+    TaskItem left,
+    TaskItem right,
+    TdfSchemaVersion schemaVersion,
+  ) {
+    final leftDue = left.dueAt;
+    final rightDue = right.dueAt;
+    if (leftDue == null && rightDue == null) {
+      return 0;
+    }
+    if (leftDue == null) {
+      return -1;
+    }
+    if (rightDue == null) {
+      return 1;
+    }
+    final timeCmp = leftDue.compareTo(rightDue);
+    if (timeCmp != 0 || schemaVersion == TdfSchemaVersion.v060) {
+      return timeCmp;
+    }
+    final passiveCmp = _compareBool(left.isDuePassive, right.isDuePassive);
+    if (passiveCmp != 0) {
+      return passiveCmp;
+    }
+    return _compareNullable(left.dueNote, right.dueNote, compareUtf8Strings);
   }
 
   /// Compares two lists lexicographically using [elementCompare].
@@ -713,38 +1027,6 @@ class TdfPayloadComparison {
     return _compareNullable(left.source, right.source, compareUtf8Strings);
   }
 
-  /// Compares two [_NormalizedConditionModel] instances.
-  static int _compareNormalizedConditionModels(
-    _NormalizedConditionModel normLeft,
-    _NormalizedConditionModel normRight,
-  ) {
-    final globalCmp = _compareBool(normLeft.globalAny, normRight.globalAny);
-    if (globalCmp != 0) {
-      return globalCmp;
-    }
-    final dayGroupCmp = _compareDayGroup(normLeft, normRight);
-    if (dayGroupCmp != 0) {
-      return dayGroupCmp;
-    }
-    final timeGroupCmp = _compareTimeGroup(normLeft, normRight);
-    if (timeGroupCmp != 0) {
-      return timeGroupCmp;
-    }
-    return _compareLocationGroup(normLeft, normRight);
-  }
-
-  /// Compares the `day` condition group of two [_NormalizedConditionModel] instances.
-  static int _compareDayGroup(
-    _NormalizedConditionModel left,
-    _NormalizedConditionModel right,
-  ) {
-    final resetCmp = _compareBool(left.dayResetAny, right.dayResetAny);
-    if (resetCmp != 0) {
-      return resetCmp;
-    }
-    return _compareList(left.dayRules, right.dayRules, _compareDayCondition);
-  }
-
   /// Compares the `location` condition group of two [_NormalizedConditionModel] instances.
   static int _compareLocationGroup(
     _NormalizedConditionModel left,
@@ -770,6 +1052,26 @@ class TdfPayloadComparison {
       right.legacyLocationRules,
       _compareLocationCondition,
     );
+  }
+
+  /// Compares two [_NormalizedConditionModel] instances.
+  static int _compareNormalizedConditionModels(
+    _NormalizedConditionModel normLeft,
+    _NormalizedConditionModel normRight,
+  ) {
+    final globalCmp = _compareBool(normLeft.globalAny, normRight.globalAny);
+    if (globalCmp != 0) {
+      return globalCmp;
+    }
+    final dayGroupCmp = _compareDayGroup(normLeft, normRight);
+    if (dayGroupCmp != 0) {
+      return dayGroupCmp;
+    }
+    final timeGroupCmp = _compareTimeGroup(normLeft, normRight);
+    if (timeGroupCmp != 0) {
+      return timeGroupCmp;
+    }
+    return _compareLocationGroup(normLeft, normRight);
   }
 
   /// Compares two nullable values (`null < non-null`).
@@ -799,8 +1101,12 @@ class TdfPayloadComparison {
     return compareUtf8Strings(left.externalKey, right.externalKey);
   }
 
-  /// Compares two [TaskRepeatRule] values `(count, unit, (hour, minute, second))`.
-  static int _compareRepeatRule(TaskRepeatRule left, TaskRepeatRule right) {
+  /// Compares two [TaskRepeatRule] values `(count, unit, (hour, minute, second), leadDays)`.
+  static int _compareRepeatRule(
+    TaskRepeatRule left,
+    TaskRepeatRule right,
+    TdfSchemaVersion schemaVersion,
+  ) {
     final countCmp = left.count.compareTo(right.count);
     if (countCmp != 0) {
       return countCmp;
@@ -817,7 +1123,11 @@ class TdfPayloadComparison {
     if (minCmp != 0) {
       return minCmp;
     }
-    return left.clock.second.compareTo(right.clock.second);
+    final secCmp = left.clock.second.compareTo(right.clock.second);
+    if (secCmp != 0 || schemaVersion == TdfSchemaVersion.v060) {
+      return secCmp;
+    }
+    return left.leadDays.compareTo(right.leadDays);
   }
 
   /// Compares two [TaskLink] values `(title, uri)`.
@@ -854,6 +1164,96 @@ class TdfPayloadComparison {
       return autoCmp;
     }
     return _compareList(left.subtasks, right.subtasks, _compareSingleSubtask);
+  }
+
+  /// Compares two [TaskItem] payloads under legacy `0.6.0` order `(created, name, note, labels, condition, origin, link, taskState)`.
+  static int _compareTaskPayloadsV060(TaskItem left, TaskItem right) {
+    final createdCmp = left.createdAt.compareTo(right.createdAt);
+    if (createdCmp != 0) {
+      return createdCmp;
+    }
+    final nameCmp = compareUtf8Strings(left.title, right.title);
+    if (nameCmp != 0) {
+      return nameCmp;
+    }
+    final noteCmp = _compareNullable(left.note, right.note, compareUtf8Strings);
+    if (noteCmp != 0) {
+      return noteCmp;
+    }
+    final labelsCmp = _compareList(
+      _normalizedLabelSet(left.labelIds),
+      _normalizedLabelSet(right.labelIds),
+      compareUtf8Strings,
+    );
+    if (labelsCmp != 0) {
+      return labelsCmp;
+    }
+    final condCmp = compareConditionModels(left.conditions, right.conditions);
+    if (condCmp != 0) {
+      return condCmp;
+    }
+    final originCmp = _compareNullable(
+      left.origin,
+      right.origin,
+      _compareOrigin,
+    );
+    if (originCmp != 0) {
+      return originCmp;
+    }
+    final linkCmp = compareLinkLists(left.links, right.links);
+    if (linkCmp != 0) {
+      return linkCmp;
+    }
+    return compareTaskStates(left, right, schemaVersion: TdfSchemaVersion.v060);
+  }
+
+  /// Compares two [TaskItem] payloads under `0.7.0` canonical order `(name, note, created, labels, origin, link, history, condition, taskState)`.
+  static int _compareTaskPayloadsV070(TaskItem left, TaskItem right) {
+    final nameCmp = compareUtf8Strings(left.title, right.title);
+    if (nameCmp != 0) {
+      return nameCmp;
+    }
+    final noteCmp = _compareNullable(left.note, right.note, compareUtf8Strings);
+    if (noteCmp != 0) {
+      return noteCmp;
+    }
+    final createdCmp = left.createdAt.compareTo(right.createdAt);
+    if (createdCmp != 0) {
+      return createdCmp;
+    }
+    final labelsCmp = _compareList(
+      _normalizedLabelSet(left.labelIds),
+      _normalizedLabelSet(right.labelIds),
+      compareUtf8Strings,
+    );
+    if (labelsCmp != 0) {
+      return labelsCmp;
+    }
+    final originCmp = _compareNullable(
+      left.origin,
+      right.origin,
+      _compareOrigin,
+    );
+    if (originCmp != 0) {
+      return originCmp;
+    }
+    final linkCmp = compareLinkLists(left.links, right.links);
+    if (linkCmp != 0) {
+      return linkCmp;
+    }
+    final historyCmp = _compareList(
+      left.history,
+      right.history,
+      TaskHistoryEntry.compareCanonical,
+    );
+    if (historyCmp != 0) {
+      return historyCmp;
+    }
+    final condCmp = compareConditionModels(left.conditions, right.conditions);
+    if (condCmp != 0) {
+      return condCmp;
+    }
+    return compareTaskStates(left, right, schemaVersion: TdfSchemaVersion.v070);
   }
 
   /// Compares two [TimeWindowTaskCondition] rules `(startMinutes, endMinutes)`.
@@ -911,9 +1311,13 @@ class TdfPayloadComparison {
     TaskItem baseline,
     TaskItem local,
     TaskItem incoming,
+    TdfSchemaVersion schemaVersion,
   ) {
-    var best = compareTaskVersions(local, incoming) >= 0 ? local : incoming;
-    if (compareTaskVersions(baseline, best) > 0) {
+    var best =
+        compareTaskVersions(local, incoming, schemaVersion: schemaVersion) >= 0
+        ? local
+        : incoming;
+    if (compareTaskVersions(baseline, best, schemaVersion: schemaVersion) > 0) {
       best = baseline;
     }
     return best;
@@ -937,6 +1341,21 @@ class TdfPayloadComparison {
     return false;
   }
 
+  /// Returns whether [baseSteps], [localSteps], and [incomingSteps] have identical ordered step titles.
+  static bool _haveIdenticalStepTitles(
+    List<SubtaskItem> baseSteps,
+    List<SubtaskItem> localSteps,
+    List<SubtaskItem> incomingSteps,
+  ) {
+    for (var i = 0; i < baseSteps.length; i++) {
+      final title = baseSteps[i].title;
+      if (localSteps[i].title != title || incomingSteps[i].title != title) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Returns whether [label] contains at least one `LocationTaskCondition` with non-empty `locationIds`.
   static bool _labelHasLocationRule(TdfLabel label) {
     for (final rule in label.conditions) {
@@ -945,6 +1364,43 @@ class TdfPayloadComparison {
       }
     }
     return false;
+  }
+
+  /// Merges the `suspended` deferral unit in Case 2 with optional expiry pre-normalization at [evaluationTime].
+  static TaskItem _mergeCase2Deferral({
+    required TaskItem local,
+    required TaskItem incoming,
+    required TaskItem baseline,
+    required TaskItem winner,
+    required TdfSchemaVersion schemaVersion,
+    required bool preNormalizeBlocks,
+    required bool applyPostMergeBlockCleanup,
+    required DateTime? evaluationTime,
+  }) {
+    if (!preNormalizeBlocks || evaluationTime == null) {
+      return _mergeScalar(
+        local: local,
+        incoming: incoming,
+        baseline: baseline,
+        winner: winner,
+        equalsFn: (a, b) => _compareDeferral(a, b, schemaVersion) == 0,
+      );
+    }
+    if (!applyPostMergeBlockCleanup &&
+        _compareDeferral(local, incoming, schemaVersion) == 0) {
+      return local;
+    }
+    final normLocal = _stripExpiredDeferral(local, evaluationTime);
+    final normIncoming = _stripExpiredDeferral(incoming, evaluationTime);
+    final normBaseline = _stripExpiredDeferral(baseline, evaluationTime);
+    final normWinner = _stripExpiredDeferral(winner, evaluationTime);
+    return _mergeScalar(
+      local: normLocal,
+      incoming: normIncoming,
+      baseline: normBaseline,
+      winner: normWinner,
+      equalsFn: (a, b) => _compareDeferral(a, b, schemaVersion) == 0,
+    );
   }
 
   /// Applies pre-merge tombstone stripping and the commutative group-wise `condition` merge per Section 6.7.5 Point 2.
@@ -1065,30 +1521,24 @@ class TdfPayloadComparison {
     required List<TdfTaskDependency> winner,
   }) {
     final bMap = <String, int>{
-      for (final dep in baseline) dep.taskId: dep.requiredCompletion,
+      for (final dependency in baseline)
+        dependency.taskId: dependency.requiredCompletion,
     };
     final lMap = <String, int>{
-      for (final dep in local) dep.taskId: dep.requiredCompletion,
+      for (final dependency in local)
+        dependency.taskId: dependency.requiredCompletion,
     };
     final rMap = <String, int>{
-      for (final dep in incoming) dep.taskId: dep.requiredCompletion,
+      for (final dependency in incoming)
+        dependency.taskId: dependency.requiredCompletion,
     };
     final wMap = <String, int>{
-      for (final dep in winner) dep.taskId: dep.requiredCompletion,
+      for (final dependency in winner)
+        dependency.taskId: dependency.requiredCompletion,
     };
-
-    final orderedTargetIds = <String>[];
-    final seenIds = <String>{};
-    for (final dep in <TdfTaskDependency>[
-      ...winner,
-      ...local,
-      ...incoming,
-      ...baseline,
-    ]) {
-      if (seenIds.add(dep.taskId)) {
-        orderedTargetIds.add(dep.taskId);
-      }
-    }
+    final orderedTargetIds = _collectOrderedDependencyIds(
+      <List<TdfTaskDependency>>[winner, local, incoming, baseline],
+    );
 
     final merged = <TdfTaskDependency>[];
     for (final targetId in orderedTargetIds) {
@@ -1106,6 +1556,31 @@ class TdfPayloadComparison {
       }
     }
     return merged;
+  }
+
+  /// Merges occurrence-independent `history` sets `((B \ removed) U added)` per Section 6.7.5 Point 3.
+  static List<TaskHistoryEntry> _mergeHistorySets({
+    required List<TaskHistoryEntry> local,
+    required List<TaskHistoryEntry> incoming,
+    required List<TaskHistoryEntry> baseline,
+  }) {
+    if (local.isEmpty && incoming.isEmpty && baseline.isEmpty) {
+      return const <TaskHistoryEntry>[];
+    }
+    final baselineSet = <TaskHistoryEntry>{...baseline};
+    final localSet = <TaskHistoryEntry>{...local};
+    final incomingSet = <TaskHistoryEntry>{...incoming};
+    final added = <TaskHistoryEntry>{
+      ...localSet.difference(baselineSet),
+      ...incomingSet.difference(baselineSet),
+    };
+    final removed = <TaskHistoryEntry>{
+      ...baselineSet.difference(localSet),
+      ...baselineSet.difference(incomingSet),
+    };
+    return TaskHistoryEntry.normalizeList(
+      baselineSet.difference(removed).union(added),
+    );
   }
 
   /// Merges label reference sets `(B \ removed) U added` in ascending ASCII order per Section 6.7.5, excluding [tombstonedLabelIds] from `removed` per Section 6.7.8.
@@ -1173,6 +1648,66 @@ class TdfPayloadComparison {
     return winner.withLocationGroup(resetAny: false, locationIds: mergedIds);
   }
 
+  /// Merges Case 2 `blocked` maps after `V.repeat`-aware pre-normalization against [mergedLiveTasksById] and [mergedDeletedTaskIds] per Section 6.7.5 Point 5.
+  static List<TdfTaskDependency> _mergePreNormalizedDependencyMaps({
+    required TaskItem local,
+    required TaskItem incoming,
+    required TaskItem baseline,
+    required TaskItem winner,
+    required bool applyPostMergeBlockCleanup,
+    required Map<String, TaskItem> mergedLiveTasksById,
+    required Set<String> mergedDeletedTaskIds,
+  }) {
+    final bMap = <String, int>{
+      for (final dependency in baseline.dependencies)
+        dependency.taskId: dependency.requiredCompletion,
+    };
+    final lMap = <String, int>{
+      for (final dependency in local.dependencies)
+        dependency.taskId: dependency.requiredCompletion,
+    };
+    final rMap = <String, int>{
+      for (final dependency in incoming.dependencies)
+        dependency.taskId: dependency.requiredCompletion,
+    };
+    final wMap = <String, int>{
+      for (final dependency in winner.dependencies)
+        dependency.taskId: dependency.requiredCompletion,
+    };
+    final orderedTargetIds = _collectOrderedDependencyIds(
+      <List<TdfTaskDependency>>[
+        winner.dependencies,
+        local.dependencies,
+        incoming.dependencies,
+        baseline.dependencies,
+      ],
+    );
+
+    final merged = <TdfTaskDependency>[];
+    for (final targetId in orderedTargetIds) {
+      final mergedReq = _mergeSinglePreNormalizedDependency(
+        targetId: targetId,
+        rawLocal: lMap[targetId],
+        rawIncoming: rMap[targetId],
+        rawBaseline: bMap[targetId],
+        rawWinner: wMap[targetId],
+        localRepeat: local.repeatRule,
+        incomingRepeat: incoming.repeatRule,
+        baselineRepeat: baseline.repeatRule,
+        winnerRepeat: winner.repeatRule,
+        applyPostMergeBlockCleanup: applyPostMergeBlockCleanup,
+        mergedLiveTasksById: mergedLiveTasksById,
+        mergedDeletedTaskIds: mergedDeletedTaskIds,
+      );
+      if (mergedReq != null) {
+        merged.add(
+          TdfTaskDependency(taskId: targetId, requiredCompletion: mergedReq),
+        );
+      }
+    }
+    return merged;
+  }
+
   /// Applies the 4-step three-way scalar merge rule from Section 6.7.5.
   static T _mergeScalar<T>({
     required T local,
@@ -1191,6 +1726,61 @@ class TdfPayloadComparison {
       return local;
     }
     return winner;
+  }
+
+  /// Reconciles a single `<target-id>` dependency threshold across `(B', L', R')` under each variant's `repeatRule`.
+  static int? _mergeSinglePreNormalizedDependency({
+    required String targetId,
+    required int? rawLocal,
+    required int? rawIncoming,
+    required int? rawBaseline,
+    required int? rawWinner,
+    required TaskRepeatRule? localRepeat,
+    required TaskRepeatRule? incomingRepeat,
+    required TaskRepeatRule? baselineRepeat,
+    required TaskRepeatRule? winnerRepeat,
+    required bool applyPostMergeBlockCleanup,
+    required Map<String, TaskItem> mergedLiveTasksById,
+    required Set<String> mergedDeletedTaskIds,
+  }) {
+    if (!applyPostMergeBlockCleanup && rawLocal == rawIncoming) {
+      return rawLocal;
+    }
+    final normLocal = _preNormalizeSingleDependency(
+      requiredCompletion: rawLocal,
+      variantRepeat: localRepeat,
+      targetId: targetId,
+      mergedLiveTasksById: mergedLiveTasksById,
+      mergedDeletedTaskIds: mergedDeletedTaskIds,
+    );
+    final normIncoming = _preNormalizeSingleDependency(
+      requiredCompletion: rawIncoming,
+      variantRepeat: incomingRepeat,
+      targetId: targetId,
+      mergedLiveTasksById: mergedLiveTasksById,
+      mergedDeletedTaskIds: mergedDeletedTaskIds,
+    );
+    final normBaseline = _preNormalizeSingleDependency(
+      requiredCompletion: rawBaseline,
+      variantRepeat: baselineRepeat,
+      targetId: targetId,
+      mergedLiveTasksById: mergedLiveTasksById,
+      mergedDeletedTaskIds: mergedDeletedTaskIds,
+    );
+    final normWinner = _preNormalizeSingleDependency(
+      requiredCompletion: rawWinner,
+      variantRepeat: winnerRepeat,
+      targetId: targetId,
+      mergedLiveTasksById: mergedLiveTasksById,
+      mergedDeletedTaskIds: mergedDeletedTaskIds,
+    );
+    return _mergeScalar<int?>(
+      local: normLocal,
+      incoming: normIncoming,
+      baseline: normBaseline,
+      winner: normWinner,
+      equalsFn: (a, b) => a == b,
+    );
   }
 
   /// Merges `subtasks` per-step when ordered step titles match across [baseline], [local], and [incoming], or atomically otherwise.
@@ -1247,19 +1837,27 @@ class TdfPayloadComparison {
     return (autoFinish: mergedAutoFinish, steps: mergedSteps);
   }
 
-  /// Returns whether [baseSteps], [localSteps], and [incomingSteps] have identical ordered step titles.
-  static bool _haveIdenticalStepTitles(
-    List<SubtaskItem> baseSteps,
-    List<SubtaskItem> localSteps,
-    List<SubtaskItem> incomingSteps,
-  ) {
-    for (var i = 0; i < baseSteps.length; i++) {
-      final title = baseSteps[i].title;
-      if (localSteps[i].title != title || incomingSteps[i].title != title) {
-        return false;
-      }
+  /// Merges [winner] and [loser] when `baseline` is `null`, preserving tombstoned labels and unioning `0.7.0` `history`.
+  static TaskItem _mergeTaskWithoutBaseline({
+    required TaskItem winner,
+    required TaskItem loser,
+    required Set<String> tombstonedLabelIds,
+    required TdfSchemaVersion schemaVersion,
+  }) {
+    final withLabels = _preserveTombstonedLabelsWithoutBaseline(
+      winner,
+      loser,
+      tombstonedLabelIds,
+    );
+    if (schemaVersion == TdfSchemaVersion.v060 ||
+        (winner.history.isEmpty && loser.history.isEmpty)) {
+      return withLabels;
     }
-    return true;
+    final unionHistory = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+      ...winner.history,
+      ...loser.history,
+    ]);
+    return withLabels.copyWith(history: unionHistory);
   }
 
   /// Computes `max(bMod, lMod, rMod) + 1 second` and validates calendar bounds per Section 6.7.6.
@@ -1267,10 +1865,17 @@ class TdfPayloadComparison {
     DateTime bMod,
     DateTime lMod,
     DateTime rMod,
+  ) => _nextMergedTaskRevision(lMod, rMod, bMod);
+
+  /// Computes `max(lMod, rMod, bMod) + 1 second` and validates calendar bounds per Section 6.7.6.
+  static DateTime _nextMergedTaskRevision(
+    DateTime lMod,
+    DateTime rMod,
+    DateTime? bMod,
   ) {
-    var maxMod = bMod.isAfter(lMod) ? bMod : lMod;
-    if (rMod.isAfter(maxMod)) {
-      maxMod = rMod;
+    var maxMod = lMod.isAfter(rMod) ? lMod : rMod;
+    if (bMod != null && bMod.isAfter(maxMod)) {
+      maxMod = bMod;
     }
     final next = maxMod.add(const Duration(seconds: 1));
     if (!TdfCalendar.isWithinTimestampBounds(next)) {
@@ -1292,6 +1897,31 @@ class TdfPayloadComparison {
     return sorted;
   }
 
+  /// Pre-normalizes a single [requiredCompletion] threshold under [variantRepeat] per Section 6.7.5 Point 5.
+  static int? _preNormalizeSingleDependency({
+    required int? requiredCompletion,
+    required TaskRepeatRule? variantRepeat,
+    required String targetId,
+    required Map<String, TaskItem> mergedLiveTasksById,
+    required Set<String> mergedDeletedTaskIds,
+  }) {
+    if (requiredCompletion == null) {
+      return null;
+    }
+    if (mergedDeletedTaskIds.contains(targetId)) {
+      return null;
+    }
+    final target = mergedLiveTasksById[targetId];
+    if (target == null) {
+      return requiredCompletion;
+    }
+    if (target.completions >= requiredCompletion &&
+        (variantRepeat == null || target.repeatRule == null)) {
+      return null;
+    }
+    return requiredCompletion;
+  }
+
   /// Preserves any [tombstonedLabelIds] from [loser] on [winner] when merging without a baseline so $L_{\text{before}}(T)$ includes tombstoned labels.
   static TaskItem _preserveTombstonedLabelsWithoutBaseline(
     TaskItem winner,
@@ -1311,6 +1941,18 @@ class TdfPayloadComparison {
     }
     final combined = <String>[...winner.labelIds, ...missingTombstoned]..sort();
     return winner.copyWith(labelIds: combined);
+  }
+
+  /// Strips an expired finite `suspendedAt <= nowUtc` (together with `suspendedNote`) from [task] for Case 2 pre-normalization.
+  static TaskItem _stripExpiredDeferral(TaskItem task, DateTime nowUtc) {
+    if (task.isSuspendedForever) {
+      return task;
+    }
+    if (task.suspendedAt case final suspendedTime?
+        when !suspendedTime.isAfter(nowUtc)) {
+      return task.copyWith(clearSuspendedAt: true, clearSuspendedNote: true);
+    }
+    return task;
   }
 
   /// Strips [tombstonedLocationIds] from [model] and converts an emptied task location group into its cascade target state per Section 6.7.5 Point 2.
@@ -1418,26 +2060,28 @@ class _NormalizedConditionModel {
     );
   }
 
-  /// Appends unique `<location-id>` tokens from [source] into [target].
-  static void _appendUniqueLocationIds(
-    List<String> source,
-    Set<String> seen,
-    List<String> target,
-  ) {
-    for (final id in source) {
-      if (seen.add(id)) {
-        target.add(id);
-      }
-    }
-  }
-
+  /// Whether the `day` condition group was reset via `condition day any`.
   final bool dayResetAny;
+
+  /// Active weekday condition rules.
   final List<DayTaskCondition> dayRules;
+
+  /// Whether all condition groups were reset via `condition any`.
   final bool globalAny;
+
+  /// Legacy inline coordinate location rules without `<location-id>` references.
   final List<LocationTaskCondition> legacyLocationRules;
+
+  /// Referenced `<location-id>` tokens in canonical appearance order.
   final List<String> locationIds;
+
+  /// Whether the `location` condition group was reset via `condition location any`.
   final bool locationResetAny;
+
+  /// Whether the `time` condition group was reset via `condition time any`.
   final bool timeResetAny;
+
+  /// Active daily time-window condition rules.
   final List<TimeWindowTaskCondition> timeRules;
 
   /// Converts this normalized condition model back into a canonical [List<TaskCondition>].
@@ -1479,5 +2123,18 @@ class _NormalizedConditionModel {
       locationIds: locationIds,
       legacyLocationRules: const <LocationTaskCondition>[],
     );
+  }
+
+  /// Appends unique `<location-id>` tokens from [source] into [target].
+  static void _appendUniqueLocationIds(
+    List<String> source,
+    Set<String> seen,
+    List<String> target,
+  ) {
+    for (final id in source) {
+      if (seen.add(id)) {
+        target.add(id);
+      }
+    }
   }
 }

@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/services/tdf_parser.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -437,9 +438,14 @@ void main() {
           document: 'tdf 0.5.1\n$blocks4100\n',
         ),
         (
-          description: 'maxStmtsPerBlock (512)',
+          description: 'legacy < 0.7.0 maxStmtsPerBlock (512)',
           document:
               'tdf 0.5.1\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$steps513\n  }\n}\n',
+        ),
+        (
+          description: '0.7.0 maxStmtsPerBlock (1024)',
+          document:
+              'tdf 0.7.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n${List.filled(1025, '    step false "Step"').join('\n')}\n  }\n}\n',
         ),
         (
           description: 'maxArgsPerStmt (64)',
@@ -447,6 +453,23 @@ void main() {
               'tdf 0.5.1\nlabel 000001OkD2 {\n  name "L"\n  condition {\n    day $days65\n  }\n}\n',
         ),
       ];
+
+      final validSteps1024 = List.filled(
+        1024,
+        '    step false "Step"',
+      ).join('\n');
+      final valid1024Doc =
+          'tdf 0.7.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$validSteps1024\n  }\n}\n';
+      expect(
+        tdfService
+            .parse(valid1024Doc, evaluationTime: fixedDate)
+            .someday
+            .single
+            .subtasks
+            .length,
+        equals(1024),
+        reason: 'tdf 0.7.0 must accept 1024 statements inside a block',
+      );
 
       for (final testCase in limitCases) {
         expect(
@@ -614,6 +637,84 @@ task 000001OkD2 {
           ),
         ),
         reason: 'Canonical output exceeding MAX_LINE_COUNT (16384) must fail with LimitExceeded per Section 7.1',
+      );
+
+      // Unpaired UTF-16 surrogates must fail with UnexpectedToken before EmptyText:
+      final loneHighSurrogate = String.fromCharCode(0xD800);
+      expect(
+        () => tdfService.parse(
+          'tdf 0.7.0\ntask 000001OkD2 {\n  name "$loneHighSurrogate"\n  created 2026-11-01\n}\n',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.unexpectedToken,
+          ),
+        ),
+        reason:
+            'Unpaired UTF-16 surrogate in <text> must report UnexpectedToken',
+      );
+      expect(
+        () => tdfService.parse(
+          'tdf 0.7.0\ntask 000001OkD2 {\n  name "Ok"\n  created 2026-11-01\n  suspended forever "$loneHighSurrogate"\n}\n',
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.unexpectedToken,
+          ),
+        ),
+        reason:
+            'Unpaired UTF-16 surrogate in <note> must report UnexpectedToken',
+      );
+
+      // Serializer pre-flight bounds for label.links (> 20) and task.history (> 500):
+      final overLimitLabel = TdfLabel(
+        id: '4x9p2mOkD2',
+        name: 'Too Many Links',
+        links: List.generate(
+          21,
+          (index) =>
+              TaskLink(title: 'Link $index', uri: 'https://example.com/$index'),
+        ),
+      );
+      expect(
+        () => tdfService.serialize(TaskBoard(labels: [overLimitLabel])),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason:
+            'Serializer must reject label with > 20 links with LimitExceeded',
+      );
+
+      final overLimitHistoryTask = TaskItem(
+        id: '000001OkD2',
+        title: 'Too Much History',
+        createdAt: fixedDate,
+        history: List.generate(
+          501,
+          (index) => TaskHistoryEntry(
+            timestampUtc: fixedDate.add(Duration(seconds: index)),
+            text: 'Entry $index',
+          ),
+        ),
+      );
+      expect(
+        () => tdfService.serialize(TaskBoard(someday: [overLimitHistoryTask])),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Serializer must reject task with > 500 history entries with LimitExceeded',
       );
     });
   });

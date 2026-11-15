@@ -18,6 +18,7 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_undo.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
@@ -771,6 +772,414 @@ void main() {
         TaskBoardUndo.apply(fullBlockBoard, deleteEntryA, utcNow: t2),
         isNull,
         reason: 'delete undo must return null when serialized { ... } block count would exceed maxTdfBlocksPerDoc (4096)',
+      );
+    });
+  });
+
+  group('TDF 0.7.0 Undo Reversibility, Metadata Restoration & Atomic Guards', () {
+    test('captures stripped dependencies accurately via TaskUndoEntry.captureStrippedDependencies and includes previouslyBlockedDependencies in equality/hashCode', () {
+      final prereq = TaskItem(
+        id: 'pre001OkD2',
+        title: 'One-Shot Prereq',
+        createdAt: t0,
+        completions: 1,
+      );
+      final depSatisfied = TaskItem(
+        id: 'depSatOkD2',
+        title: 'Satisfied at 1',
+        createdAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'pre001OkD2', requiredCompletion: 1),
+        ],
+      );
+      final depResolvedNow = TaskItem(
+        id: 'depResOkD2',
+        title: 'Resolved at 2',
+        createdAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'pre001OkD2', requiredCompletion: 2),
+        ],
+      );
+      final depStillWaiting = TaskItem(
+        id: 'depHi5OkD2',
+        title: 'Still waiting for 5',
+        createdAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'pre001OkD2', requiredCompletion: 5),
+        ],
+      );
+
+      final before = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          prereq,
+          depSatisfied,
+          depResolvedNow,
+          depStillWaiting,
+        ],
+        evaluationTime: t0,
+      );
+      final after = before.completeTask('pre001OkD2', currentDate: t1);
+
+      final stripped = TaskUndoEntry.captureStrippedDependencies(
+        boardBefore: before,
+        boardAfter: after,
+        targetTaskId: 'pre001OkD2',
+      );
+      expect(
+        stripped,
+        equals(const <String, TdfTaskDependency>{
+          'depSatOkD2': TdfTaskDependency(
+            taskId: 'pre001OkD2',
+            requiredCompletion: 1,
+          ),
+          'depResOkD2': TdfTaskDependency(
+            taskId: 'pre001OkD2',
+            requiredCompletion: 2,
+          ),
+        }),
+        reason: 'Higher unsatisfied threshold :5 must remain untouched and excluded from stripped map',
+      );
+
+      final entry1 = TaskBoardUndo.capture(
+        sequence: 1,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: before,
+        boardAfter: after,
+        taskBefore: prereq,
+      );
+      final entry2 = TaskUndoEntry(
+        sequence: 1,
+        kind: TaskUndoActionKind.complete,
+        snapshotTask: prereq,
+        wasQueued: false,
+        queueOrderSnapshot: const <String>[],
+        hadOnlyScopedLabels: false,
+        previouslyBlockedDependentIds: const <String>{
+          'depResOkD2',
+          'depHi5OkD2',
+        },
+        previouslyBlockedDependencies: stripped,
+      );
+      final entryDifferentMap = TaskUndoEntry(
+        sequence: 1,
+        kind: TaskUndoActionKind.complete,
+        snapshotTask: prereq,
+        wasQueued: false,
+        queueOrderSnapshot: const <String>[],
+        hadOnlyScopedLabels: false,
+        previouslyBlockedDependentIds: const <String>{
+          'depResOkD2',
+          'depHi5OkD2',
+        },
+      );
+      expect(entry1, equals(entry2));
+      expect(entry1.hashCode, equals(entry2.hashCode));
+      expect(entry1, isNot(equals(entryDifferentMap)));
+    });
+
+    test('restores suspendedNote (stripping expired <= now), dueNote, isDuePassive, and history across complete, delete, and urgent-due downgrade undo', () {
+      final hist = <TaskHistoryEntry>[
+        TaskHistoryEntry(timestampUtc: t0, text: 'Started work'),
+      ];
+
+      // 1. Urgent-due Focus -> Ready downgrade (only isDuePassive changed from false -> true!)
+      final dueBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(id: 'reg001OkD2', title: 'Regular 1', createdAt: t0),
+          TaskItem(id: 'reg002OkD2', title: 'Regular 2', createdAt: t0),
+          TaskItem(id: 'reg003OkD2', title: 'Regular 3', createdAt: t0),
+          TaskItem(
+            id: 'urgDueOkD2',
+            title: 'Urgent Due Task',
+            createdAt: t0,
+            dueAt: t0.add(const Duration(hours: 6)),
+            dueNote: 'Submit before 15:00',
+            history: hist,
+          ),
+        ],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>[
+            'reg001OkD2',
+            'reg002OkD2',
+            'reg003OkD2',
+            'urgDueOkD2',
+          ],
+        ),
+        evaluationTime: t0,
+      );
+      expect(dueBoard.findTierOfTask('urgDueOkD2'), equals(TaskTier.focus));
+
+      final urgentBefore = dueBoard.findTask('urgDueOkD2')!;
+      expect(urgentBefore.isPriority, isFalse);
+      expect(urgentBefore.isDuePassive, isFalse);
+
+      final downgradedBoard = dueBoard.downgradeTask(
+        'urgDueOkD2',
+        currentDate: t1,
+      );
+      expect(
+        downgradedBoard.findTask('urgDueOkD2')!.isDuePassive,
+        isTrue,
+        reason:
+            'Downgrading deadline-promoted Focus task sets isDuePassive = true',
+      );
+      expect(
+        downgradedBoard.findTierOfTask('urgDueOkD2'),
+        isNot(TaskTier.focus),
+      );
+
+      final downgradeEntry = TaskBoardUndo.capture(
+        sequence: 1,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: dueBoard,
+        boardAfter: downgradedBoard,
+        taskBefore: urgentBefore,
+      );
+      final undoneDowngrade = TaskBoardUndo.apply(
+        downgradedBoard,
+        downgradeEntry,
+        utcNow: t2,
+      );
+      expect(undoneDowngrade, isNotNull);
+      final restoredUrgent = undoneDowngrade!.board.findTask('urgDueOkD2')!;
+      expect(restoredUrgent.isDuePassive, isFalse);
+      expect(restoredUrgent.dueNote, equals('Submit before 15:00'));
+      expect(restoredUrgent.history, equals(hist));
+      expect(
+        undoneDowngrade.board.findTierOfTask('urgDueOkD2'),
+        equals(TaskTier.focus),
+      );
+
+      // 2. Complete & Delete undo with future vs expired suspendedAt + suspendedNote + dependent re-insertion:
+      final futureDeferral = DateTime.utc(2026, 11, 2, 9, 0);
+      final expiredDeferral = DateTime.utc(2026, 11, 1, 11, 30);
+      final targetFuture = TaskItem(
+        id: 'delFutOkD2',
+        title: 'Future Deferred Target',
+        createdAt: t0,
+        modifiedAt: t0,
+        suspendedAt: futureDeferral,
+        suspendedNote: 'Keep future note',
+        dueAt: DateTime.utc(2026, 11, 5, 17, 0),
+        isDuePassive: true,
+        dueNote: 'Passive cutoff note',
+        history: hist,
+      );
+      final targetExpired = TaskItem(
+        id: 'cmpExpOkD2',
+        title: 'Expired Deferred Target',
+        createdAt: t0,
+        modifiedAt: t0,
+        suspendedAt: expiredDeferral,
+        suspendedNote: 'Must strip with expired deferral',
+        dueAt: DateTime.utc(2026, 11, 5, 17, 0),
+        dueNote: 'Active cutoff note',
+        history: hist,
+      );
+      final openDep = TaskItem(
+        id: 'opnDepOkD2',
+        title: 'Surviving Open Dependent',
+        createdAt: t0,
+        modifiedAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'delFutOkD2', requiredCompletion: 2),
+        ],
+      );
+
+      final delBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[targetFuture, openDep],
+        evaluationTime: t0,
+      );
+      final delAfter = delBefore.deleteTask('delFutOkD2', currentDate: t1);
+      expect(delAfter.findTask('opnDepOkD2')!.dependencies, isEmpty);
+
+      final delEntry = TaskBoardUndo.capture(
+        sequence: 2,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: delBefore,
+        boardAfter: delAfter,
+        taskBefore: targetFuture,
+      );
+      final undoneDelete = TaskBoardUndo.apply(delAfter, delEntry, utcNow: t3)!;
+      final restoredDel = undoneDelete.board.findTask('delFutOkD2')!;
+      expect(restoredDel.suspendedAt, equals(futureDeferral));
+      expect(restoredDel.suspendedNote, equals('Keep future note'));
+      expect(restoredDel.isDuePassive, isTrue);
+      expect(restoredDel.dueNote, equals('Passive cutoff note'));
+      expect(restoredDel.history, equals(hist));
+      expect(
+        undoneDelete.board.findTask('opnDepOkD2')!.dependencies,
+        equals(const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'delFutOkD2', requiredCompletion: 2),
+        ]),
+        reason: 'Delete undo must re-insert stripped dependency verbatim on surviving open dependent',
+      );
+      expect(undoneDelete.board.findTask('opnDepOkD2')!.modifiedAt, equals(t3));
+
+      // Complete undo at t3 (12:00) when snapshot suspendedAt was 11:30 (<= t3):
+      final cmpBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[targetExpired],
+        evaluationTime: t0,
+      );
+      final cmpAfter = cmpBefore.completeTask('cmpExpOkD2', currentDate: t1);
+      final cmpEntry = TaskBoardUndo.capture(
+        sequence: 3,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: cmpBefore,
+        boardAfter: cmpAfter,
+        taskBefore: targetExpired,
+      );
+      final undoneComplete = TaskBoardUndo.apply(
+        cmpAfter,
+        cmpEntry,
+        utcNow: t3,
+      )!;
+      final restoredCmp = undoneComplete.board.findTask('cmpExpOkD2')!;
+      expect(
+        restoredCmp.suspendedAt,
+        isNull,
+        reason: 'Expired snapshot suspendedAt <= now must be stripped on undo',
+      );
+      expect(
+        restoredCmp.suspendedNote,
+        isNull,
+        reason:
+            'Coupled suspendedNote must be stripped with expired suspendedAt',
+      );
+      expect(restoredCmp.dueNote, equals('Active cutoff note'));
+      expect(restoredCmp.history, equals(hist));
+    });
+
+    test('aborts entire undo atomically (returning null) on dependency_limit_exceeded, completions_limit_exceeded, timestamp_out_of_bounds, and statement_limit_exceeded', () {
+      // 1. dependency_limit_exceeded (dependent already has 64 dependencies when re-inserting stripped dependency):
+      final target = TaskItem(
+        id: 'trgLimOkD2',
+        title: 'Target',
+        createdAt: t0,
+        modifiedAt: t0,
+      );
+      final depInitial = TaskItem(
+        id: 'depLimOkD2',
+        title: 'Dependent',
+        createdAt: t0,
+        modifiedAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'trgLimOkD2', requiredCompletion: 1),
+        ],
+      );
+      final beforeDepLim = TaskBoard.evaluate(
+        tasks: <TaskItem>[target, depInitial],
+        evaluationTime: t0,
+      );
+      final afterDepLim = beforeDepLim.deleteTask(
+        'trgLimOkD2',
+        currentDate: t1,
+      );
+      final depLimEntry = TaskBoardUndo.capture(
+        sequence: 1,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: beforeDepLim,
+        boardAfter: afterDepLim,
+        taskBefore: target,
+      );
+      final full64Deps = <TdfTaskDependency>[
+        for (var i = 0; i < maxTdfArgsPerStmt; i++)
+          TdfTaskDependency(taskId: 'ot${i.toString().padLeft(4, '0')}OkD2'),
+      ];
+      final boardAt64Deps = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          afterDepLim
+              .findTask('depLimOkD2')!
+              .copyWith(dependencies: full64Deps),
+        ],
+        deletedBlock: afterDepLim.deletedBlock,
+        evaluationTime: t1,
+      );
+      expect(
+        TaskBoardUndo.apply(boardAt64Deps, depLimEntry, utcNow: t2),
+        isNull,
+        reason:
+            'Re-inserting a 65th dependency must abort entire undo atomically',
+      );
+
+      // 2. completions_limit_exceeded (restoredCompletions == 999999999 when re-arming is required):
+      final maxCompTarget = target.copyWith(
+        completions: TdfTaskDependency.maxCompletions - 1,
+      );
+      final maxCompDep = depInitial.copyWith(
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(
+            taskId: 'trgLimOkD2',
+            requiredCompletion: TdfTaskDependency.maxCompletions,
+          ),
+        ],
+      );
+      final beforeMaxComp = TaskBoard.evaluate(
+        tasks: <TaskItem>[maxCompTarget, maxCompDep],
+        evaluationTime: t0,
+      );
+      final afterMaxComp = beforeMaxComp.completeTask(
+        'trgLimOkD2',
+        currentDate: t1,
+      );
+      final maxCompEntry = TaskBoardUndo.capture(
+        sequence: 2,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: beforeMaxComp,
+        boardAfter: afterMaxComp,
+        taskBefore: maxCompTarget,
+      );
+      expect(
+        TaskBoardUndo.apply(afterMaxComp, maxCompEntry, utcNow: t2),
+        isNull,
+        reason: 'Re-arming past 999,999,999 completions must abort entire undo atomically',
+      );
+
+      // 3. timestamp_out_of_bounds (modifiedAt at 9999-12-31 23:59:59Z needing +1s):
+      final maxTs = DateTime.utc(9999, 12, 31, 23, 59, 59);
+      final atMaxTsBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          afterMaxComp
+              .findTask('trgLimOkD2')!
+              .copyWith(completions: 1, modifiedAt: maxTs),
+        ],
+        evaluationTime: maxTs,
+      );
+      final simpleCompleteEntry = TaskUndoEntry(
+        sequence: 3,
+        kind: TaskUndoActionKind.complete,
+        snapshotTask: target,
+        wasQueued: false,
+        queueOrderSnapshot: const <String>[],
+        hadOnlyScopedLabels: false,
+      );
+      expect(
+        TaskBoardUndo.apply(atMaxTsBoard, simpleCompleteEntry, utcNow: maxTs),
+        isNull,
+        reason: 'Advancing past 9999-12-31 23:59:59Z must abort undo with null',
+      );
+
+      // 4. statement_limit_exceeded (subtasks block > maxTdfStmtsPerBlock = 1024):
+      final oversizedSnapshot = target.copyWith(
+        subtasks: <SubtaskItem>[
+          for (var i = 0; i <= maxTdfStmtsPerBlock; i++)
+            SubtaskItem(title: 'Step $i'),
+        ],
+      );
+      final stmtLimitEntry = TaskUndoEntry(
+        sequence: 4,
+        kind: TaskUndoActionKind.delete,
+        snapshotTask: oversizedSnapshot,
+        wasQueued: false,
+        queueOrderSnapshot: const <String>[],
+        hadOnlyScopedLabels: false,
+      );
+      expect(
+        TaskBoardUndo.apply(afterDepLim, stmtLimitEntry, utcNow: t2),
+        isNull,
+        reason:
+            'Exceeding maxTdfStmtsPerBlock (1024) must abort undo with null',
       );
     });
   });

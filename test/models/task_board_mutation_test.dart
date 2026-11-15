@@ -21,6 +21,7 @@ import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -763,6 +764,353 @@ label officeOkD2 {
         board.findTask('tOvrAnnex1')!.conditions,
         isEmpty,
         reason: 'Section 6.8.1: Because label-before-task order removes locOffOkD2 from lblWork001 first, tOvrAnnex1 has no assigned label with a remaining location rule so its emptied location rule is removed completely',
+      );
+    });
+  });
+
+  group('TDF 0.7.0 Label Links, Schedule Notes, History Mutations, Validation & Log Redaction', () {
+    tearDown(() {
+      AppLogger.resetForTesting();
+    });
+
+    test('validates TdfLabel links (max 20, title/URI grammar, pure no-op guard) in addLabel and updateLabel', () {
+      var board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'bysExp0001',
+            title: 'Bystander With Expired Suspension',
+            createdAt: fixedDate.subtract(const Duration(hours: 2)),
+            modifiedAt: fixedDate.subtract(const Duration(hours: 2)),
+            suspendedAt: fixedDate.subtract(const Duration(hours: 1)),
+            suspendedNote: 'Expired',
+          ),
+        ],
+        evaluationTime: fixedDate.subtract(const Duration(hours: 2)),
+      );
+
+      final twentyLinks = <TaskLink>[
+        for (var i = 0; i < maxTdfLinksPerLabel; i++)
+          TaskLink(title: 'Link $i', uri: 'https://example.com/label/$i'),
+      ];
+      board = board.addLabel(
+        'Engineering',
+        links: twentyLinks,
+        currentDate: fixedDate,
+      );
+      final createdLabel = board.labels.single;
+      expect(createdLabel.links.length, equals(20));
+      expect(
+        board.findTask('bysExp0001')!.suspendedAt,
+        isNull,
+        reason: 'Committed addLabel mutation must clean expired task blocks',
+      );
+
+      // Pure no-op updateLabel must preserve modifiedAt and not advance revision:
+      final unchangedBoard = board.updateLabel(
+        createdLabel.id,
+        name: 'Engineering',
+        links: twentyLinks,
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(
+        unchangedBoard.findLabel(createdLabel.id)!.modifiedAt,
+        equals(fixedDate),
+      );
+
+      // 21 links must throw LimitExceeded:
+      expect(
+        () => board.updateLabel(
+          createdLabel.id,
+          links: <TaskLink>[
+            ...twentyLinks,
+            const TaskLink(title: 'Overflow', uri: 'https://example.com/21'),
+          ],
+          currentDate: fixedDate.add(const Duration(minutes: 6)),
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+
+      // Delimiter/control injection in label link title (\n before empty check -> UnexpectedToken) & dangerous URI scheme -> InvalidUri:
+      expect(
+        () => board.addLabel(
+          'Bad Title',
+          links: const <TaskLink>[
+            TaskLink(title: 'Line1\nLine2', uri: 'https://example.com'),
+          ],
+          currentDate: fixedDate,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.unexpectedToken,
+          ),
+        ),
+      );
+      expect(
+        () => board.addLabel(
+          'Bad Scheme',
+          links: const <TaskLink>[
+            TaskLink(title: 'XSS', uri: 'javascript:alert(1)'),
+          ],
+          currentDate: fixedDate,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidUri,
+          ),
+        ),
+      );
+      expect(
+        () => board.addLabel(
+          'Empty Title',
+          links: const <TaskLink>[
+            TaskLink(title: '   ', uri: 'https://example.com'),
+          ],
+          currentDate: fixedDate,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.emptyText,
+          ),
+        ),
+      );
+    });
+
+    test('manages due/suspended notes, automatic isDuePassive reset on dueAt change, deleteTask dependent cleanup, and task history CRUD with strict redaction', () {
+      AppLogger.resetForTesting(clock: () => fixedDate);
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
+
+      var board = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        evaluationTime: fixedDate,
+      );
+
+      board = board.addTask(
+        'Deploy Release',
+        targetTier: TaskTier.planned,
+        suspendedAt: fixedDate.add(const Duration(hours: 4)),
+        suspendedNote: 'Secret freeze note\tline 2',
+        dueAt: fixedDate.add(const Duration(hours: 12)),
+        isDuePassive: true,
+        dueNote: 'Confidential customer deadline\ndetails',
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.weeks,
+          leadDays: 3,
+        ),
+        currentDate: fixedDate,
+      );
+      final taskId = board.allTasks.single.id;
+      final added = board.findTask(taskId)!;
+      expect(added.suspendedNote, equals('Secret freeze note\tline 2'));
+      expect(added.dueNote, equals('Confidential customer deadline\ndetails'));
+      expect(added.isDuePassive, isTrue);
+      expect(added.repeatRule?.leadDays, equals(3));
+
+      // Changing dueAt to a new timestamp without specifying isDuePassive resets isDuePassive to false:
+      final t1 = fixedDate.add(const Duration(minutes: 1));
+      board = board.updateTask(
+        taskId,
+        dueAt: fixedDate.add(const Duration(hours: 18)),
+        currentDate: t1,
+      );
+      expect(
+        board.findTask(taskId)!.isDuePassive,
+        isFalse,
+        reason: 'Updating dueAt to a different timestamp must reset prior isDuePassive=true to false unless explicitly set',
+      );
+      expect(
+        board.findTask(taskId)!.dueNote,
+        equals('Confidential customer deadline\ndetails'),
+      );
+
+      // History CRUD + strict no-op revision protection:
+      final histTime = DateTime.utc(2026, 11, 1, 9, 30, 0);
+      final t2 = fixedDate.add(const Duration(minutes: 2));
+      board = board.addTaskHistoryEntry(
+        taskId,
+        timestampUtc: histTime,
+        text: 'Private incident postmortem\u00A0entry',
+        currentDate: t2,
+      );
+      expect(board.findTask(taskId)!.history.length, equals(1));
+      expect(board.findTask(taskId)!.modifiedAt, equals(t2));
+      final queueModBeforeNoOp = board.queueModifiedAt;
+
+      // Duplicate addTaskHistoryEntry is a strict no-op:
+      final afterDupAdd = board.addTaskHistoryEntry(
+        taskId,
+        timestampUtc: histTime,
+        text: 'Private incident postmortem\u00A0entry',
+        currentDate: fixedDate.add(const Duration(minutes: 3)),
+      );
+      expect(afterDupAdd.findTask(taskId)!.modifiedAt, equals(t2));
+      expect(afterDupAdd.queueModifiedAt, equals(queueModBeforeNoOp));
+
+      // Update history entry:
+      final t3 = fixedDate.add(const Duration(minutes: 4));
+      board = board.updateTaskHistoryEntry(
+        taskId,
+        oldEntry: TaskHistoryEntry(
+          timestampUtc: histTime,
+          text: 'Private incident postmortem\u00A0entry',
+        ),
+        newTimestampUtc: histTime.add(const Duration(minutes: 5)),
+        newText: 'Updated confidential timeline note',
+        currentDate: t3,
+      );
+      expect(
+        board.findTask(taskId)!.history.single.text,
+        equals('Updated confidential timeline note'),
+      );
+      expect(board.findTask(taskId)!.modifiedAt, equals(t3));
+
+      // Remove non-existent entry is a strict no-op:
+      final afterMissingRemove = board.removeTaskHistoryEntry(
+        taskId,
+        entry: TaskHistoryEntry(timestampUtc: histTime, text: 'Does not exist'),
+        currentDate: fixedDate.add(const Duration(minutes: 5)),
+      );
+      expect(afterMissingRemove.findTask(taskId)!.modifiedAt, equals(t3));
+
+      // Remove existing entry advances task.modified once:
+      final t4 = fixedDate.add(const Duration(minutes: 6));
+      board = board.removeTaskHistoryEntry(
+        taskId,
+        entry: board.findTask(taskId)!.history.single,
+        currentDate: t4,
+      );
+      expect(board.findTask(taskId)!.history, isEmpty);
+      expect(board.findTask(taskId)!.modifiedAt, equals(t4));
+
+      // Assert AppLogger NEVER logged raw suspendedNote, dueNote, or history text!
+      final logOutput = AppLogger.fullLogText;
+      expect(logOutput, isNot(contains('Secret freeze note')));
+      expect(logOutput, isNot(contains('Confidential customer deadline')));
+      expect(logOutput, isNot(contains('Private incident postmortem')));
+      expect(logOutput, isNot(contains('Updated confidential timeline note')));
+      expect(logOutput, contains('task.history_add'));
+      expect(logOutput, contains('historyCount=1'));
+
+      // Validation errors on schedule notes, leadDays, and history entries:
+      expect(
+        () => board.updateTask(taskId, dueNote: ' \t\r\n ', currentDate: t4),
+        throwsA(
+          isA<TdfException>().having(
+            (e) => e.kind,
+            'kind',
+            TdfErrorKind.emptyText,
+          ),
+        ),
+      );
+      expect(
+        () => board.updateTask(taskId, dueNote: 'a' * 2001, currentDate: t4),
+        throwsA(
+          isA<TdfException>().having(
+            (e) => e.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+      expect(
+        () => board.updateTask(
+          taskId,
+          repeatRule: const TaskRepeatRule(
+            count: 1,
+            unit: RepeatUnit.days,
+            leadDays: 3651,
+          ),
+          currentDate: t4,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (e) => e.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+      expect(
+        () => board.addTaskHistoryEntry(
+          taskId,
+          timestampUtc: histTime,
+          text: '\t',
+          currentDate: t4,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (e) => e.kind,
+            'kind',
+            TdfErrorKind.unexpectedToken,
+          ),
+        ),
+        reason: 'Control character \\t must fail with UnexpectedToken before EmptyText',
+      );
+      expect(
+        () => board.addTaskHistoryEntry(
+          taskId,
+          timestampUtc: histTime,
+          text: '   ',
+          currentDate: t4,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (e) => e.kind,
+            'kind',
+            TdfErrorKind.emptyText,
+          ),
+        ),
+      );
+      expect(
+        () => board.addTaskHistoryEntry(
+          taskId,
+          timestampUtc: histTime,
+          text: 'x' * 501,
+          currentDate: t4,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (e) => e.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+
+      // Deleting a prerequisite task immediately strips blocked references to it from open dependents:
+      board = board.addTask(
+        'Dependent Waiting On Deploy',
+        targetTier: TaskTier.focus,
+        blockedByTaskIds: <String>[taskId],
+        currentDate: t4.add(const Duration(minutes: 1)),
+      );
+      final depId = board.allTasks.firstWhere((t) => t.id != taskId).id;
+      expect(board.findTask(depId)!.blockedByTaskIds, equals(<String>[taskId]));
+
+      board = board.deleteTask(
+        taskId,
+        currentDate: t4.add(const Duration(minutes: 2)),
+      );
+      expect(
+        board.findTask(depId)!.dependencies,
+        isEmpty,
+        reason: 'Deleting a task must immediately strip blocked references targeting its newly tombstoned ID',
       );
     });
   });

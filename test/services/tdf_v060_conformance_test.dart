@@ -22,6 +22,7 @@ import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
+import 'package:tiertask/services/tdf_historical_serializer.dart';
 import 'package:tiertask/services/tdf_id_migration.dart';
 import 'package:tiertask/services/tdf_importer.dart';
 import 'package:tiertask/services/tdf_service.dart';
@@ -56,8 +57,12 @@ void main() {
           File('$baseDir/$normalizedFile').readAsStringSync(),
         ) as Map<String, Object?>;
 
-        final board = tdfService.parse(inputTdf, evaluationTime: fixedDate);
-        final serialized = tdfService.serialize(board);
+        final board = tdfService.parse(
+          inputTdf,
+          evaluationTime: fixedDate,
+          targetSchema: TdfSchemaVersion.v060,
+        );
+        final serialized = TdfHistoricalSerializer.serializeDocument060(board);
         expect(
           serialized,
           equals(expectedCanonical),
@@ -256,7 +261,7 @@ void main() {
           );
           final evalMap =
               normalizedJson['globalViewEvaluation'] as Map<String, Object?>;
-          final labelsById = {
+          final labelsById = <String, TdfLabel>{
             for (final label in board.labels) label.id: label,
           };
           for (final entry in evalMap.entries) {
@@ -288,7 +293,11 @@ void main() {
         final inputTdf = File('$baseDir/$file').readAsStringSync();
 
         expect(
-          () => tdfService.parse(inputTdf, evaluationTime: fixedDate),
+          () => tdfService.parse(
+            inputTdf,
+            evaluationTime: fixedDate,
+            targetSchema: TdfSchemaVersion.v060,
+          ),
           throwsA(
             isA<TdfException>()
                 .having(
@@ -302,6 +311,23 @@ void main() {
               'Fixture $file must fail with $expectedError at line $expectedLine',
         );
       }
+
+      expect(
+        () => tdfService.parse(
+          'tdf 0.7.0\n',
+          evaluationTime: fixedDate,
+          targetSchema: TdfSchemaVersion.v060,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.unsupportedVersion,
+          ),
+        ),
+        reason:
+            'targetSchema v060 must reject tdf 0.7.0 with UnsupportedVersion',
+      );
     });
 
     test('passes all 13 bounds fixtures', () {
@@ -321,13 +347,21 @@ void main() {
 
         if (isValid) {
           expect(
-            () => tdfService.parse(inputTdf, evaluationTime: fixedDate),
+            () => tdfService.parse(
+              inputTdf,
+              evaluationTime: fixedDate,
+              targetSchema: TdfSchemaVersion.v060,
+            ),
             returnsNormally,
             reason: 'Valid bounds fixture $file must be accepted',
           );
         } else {
           expect(
-            () => tdfService.parse(inputTdf, evaluationTime: fixedDate),
+            () => tdfService.parse(
+              inputTdf,
+              evaluationTime: fixedDate,
+              targetSchema: TdfSchemaVersion.v060,
+            ),
             throwsA(
               isA<TdfException>().having(
                 (error) => _specErrorName(error.kind),
@@ -384,22 +418,26 @@ void main() {
           final parsedViaLoad = tdfService.parse(
             inputTdf,
             evaluationTime: fixedDate,
+            targetSchema: TdfSchemaVersion.v060,
           );
-          final serializedFromLoad = tdfService.serialize(parsedViaLoad);
+          final serializedFromLoad =
+              TdfHistoricalSerializer.serializeDocument060(parsedViaLoad);
           expect(
             serializedFromLoad,
             equals(expectedTdf),
             reason: 'Load-time conversion mismatch for $id',
           );
 
-          final imported = TdfImporter.importDocument(
-            inputTdf,
-            evaluationTime: fixedDate,
-          );
+          final migrated060 = inputTdf.trimLeft().startsWith('tdf 0.5.0')
+              ? TdfImporter.migrate051To060(
+                  TdfImporter.migrate050To051(inputTdf),
+                )
+              : TdfImporter.migrate051To060(inputTdf);
           expect(
-            imported.migratedTdfContent,
+            migrated060,
             equals(expectedTdf),
-            reason: 'Explicit TdfImporter migration mismatch for $id',
+            reason:
+                'Explicit TdfImporter 0.6.0 step migration mismatch for $id',
           );
         } else {
           final expectedError = testCase['expectedError'] as String;
@@ -412,7 +450,11 @@ void main() {
               )
               .having((error) => error.line, 'line', expectedLine);
           expect(
-            () => tdfService.parse(inputTdf, evaluationTime: fixedDate),
+            () => tdfService.parse(
+              inputTdf,
+              evaluationTime: fixedDate,
+              targetSchema: TdfSchemaVersion.v060,
+            ),
             throwsA(expectedMatcher),
             reason:
                 'Invalid migration fixture $id must fail with $expectedError at line $expectedLine on parse',
@@ -512,7 +554,7 @@ void main() {
             unit: RepeatUnit.months,
             clock: TdfRepeatClock.midnight,
           );
-          final result = rule.nextScheduleAnchoredOccurrence(
+          final result = rule.nextLegacy060ScheduleAnchoredOccurrence(
             completedAtUtc: completionUtc,
             oldDueUtc: prevDueUtc,
             oldSuspendedUtc: prevSuspendedUtc,

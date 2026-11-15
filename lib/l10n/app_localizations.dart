@@ -2276,12 +2276,6 @@ abstract class AppLocalizations {
   /// **'Until {timestamp} ({duration})'**
   String taskInfoSuspendedUntil(String timestamp, String duration);
 
-  /// Value text shown when a task's suspension timestamp is in the past.
-  ///
-  /// In en, this message translates to:
-  /// **'Elapsed ({timestamp})'**
-  String taskInfoSuspendedElapsed(String timestamp);
-
   /// Section label for the due deadline in the task information dialog.
   ///
   /// In en, this message translates to:

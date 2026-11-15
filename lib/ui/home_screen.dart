@@ -645,7 +645,7 @@ class _LandingContentSwitcher extends ConsumerWidget {
     );
   }
 
-  /// Evaluates [board] against [activeLabel] and [activeFix] when active.
+  /// Evaluates [board] against the live clock, [activeLabel], and [activeFix].
   TaskBoard _evaluateBoard(
     WidgetRef ref,
     TaskBoard board,
@@ -654,11 +654,6 @@ class _LandingContentSwitcher extends ConsumerWidget {
     final configuration =
         ref.watch(webDavConfigProvider).asData?.value ?? const WebDavConfig();
     final evaluationTime = ref.watch(clockProvider)().toUtc();
-    final hasCoordinates =
-        activeFix?.latitude != null && activeFix?.longitude != null;
-    if (activeLabel == null && !hasCoordinates) {
-      return board;
-    }
     return board.evaluateForContext(
       activeLabelId: activeLabel?.id,
       currentLatitude: activeFix?.latitude,

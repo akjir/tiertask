@@ -40,8 +40,8 @@ enum TaskUndoActionKind {
 }
 
 /// Stateless helper capturing and reversing single-task mutations on [TaskBoard]
-/// while preserving `spec/TDF_SPEC_0.6.0.md` monotonic completion, revision,
-/// queue, and deletion-generation invariants.
+/// while preserving TDF `0.7.0` monotonic completion, revision, queue, metadata
+/// ownership, and deletion-generation invariants.
 @immutable
 class TaskBoardUndo {
   const TaskBoardUndo._();
@@ -57,6 +57,7 @@ class TaskBoardUndo {
     required DateTime utcNow,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final now = TaskItem.normalizeTimestamp(utcNow);
     if (!TdfCalendar.isWithinTimestampBounds(now)) {
@@ -70,6 +71,7 @@ class TaskBoardUndo {
         now,
         localEvaluationTime,
         timeZone,
+        dueLeadWindow,
       ),
       TaskUndoActionKind.downgrade => _applyDowngrade(
         currentBoard,
@@ -77,6 +79,7 @@ class TaskBoardUndo {
         now,
         localEvaluationTime,
         timeZone,
+        dueLeadWindow,
       ),
       TaskUndoActionKind.delete => _applyDelete(
         currentBoard,
@@ -84,16 +87,20 @@ class TaskBoardUndo {
         now,
         localEvaluationTime,
         timeZone,
+        dueLeadWindow,
       ),
     };
   }
 
-  /// Captures a pre-mutation [TaskUndoEntry] from [boardBefore] and [taskBefore].
+  /// Captures a pre-mutation [TaskUndoEntry] from [boardBefore], [taskBefore],
+  /// and optional [boardAfter] or explicit [previouslyBlockedDependencies].
   static TaskUndoEntry capture({
     required int sequence,
     required TaskUndoActionKind kind,
     required TaskBoard boardBefore,
     required TaskItem taskBefore,
+    TaskBoard? boardAfter,
+    Map<String, TdfTaskDependency>? previouslyBlockedDependencies,
   }) {
     final labelMap = <String, TdfLabel>{
       for (final label in boardBefore.labels) label.id: label,
@@ -101,6 +108,15 @@ class TaskBoardUndo {
     final blockedDependents = kind == TaskUndoActionKind.complete
         ? _collectPreviouslyBlockedDependents(boardBefore, taskBefore)
         : const <String>{};
+    final strippedDependencies =
+        previouslyBlockedDependencies ??
+        (boardAfter != null
+            ? TaskUndoEntry.captureStrippedDependencies(
+                boardBefore: boardBefore,
+                boardAfter: boardAfter,
+                targetTaskId: taskBefore.id,
+              )
+            : _predictStrippedDependencies(kind, boardBefore, taskBefore));
     return TaskUndoEntry(
       sequence: sequence,
       kind: kind,
@@ -112,6 +128,7 @@ class TaskBoardUndo {
         labelMap,
       ),
       previouslyBlockedDependentIds: blockedDependents,
+      previouslyBlockedDependencies: strippedDependencies,
     );
   }
 
@@ -122,6 +139,7 @@ class TaskBoardUndo {
     DateTime now,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow,
   ) {
     final snapshotTask = entry.snapshotTask;
     final currentTask = currentBoard.findTask(snapshotTask.id);
@@ -135,6 +153,9 @@ class TaskBoardUndo {
     };
     final validLocationIds = <String>{
       for (final location in currentBoard.locations) location.id,
+    };
+    final deletedTaskIds = <String>{
+      for (final record in currentBoard.deletedBlock.tasks) record.taskId,
     };
     final labelsWithLocation = _collectLabelsWithLocationRules(
       currentBoard.labels,
@@ -167,6 +188,11 @@ class TaskBoardUndo {
       snapshotTask.completions,
       currentTask.completions,
     );
+    final deferral = _resolveRestoredDeferral(
+      snapshotTask,
+      now,
+      stripAll: false,
+    );
     final restoredTask = currentTask.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
@@ -174,14 +200,23 @@ class TaskBoardUndo {
       isPriority: evictedByScopedDeletion ? false : snapshotTask.isPriority,
       labelIds: retainedLabels,
       conditions: sanitizedConditions,
-      suspendedAt: snapshotTask.suspendedAt,
-      clearSuspendedAt: snapshotTask.suspendedAt == null,
-      isSuspendedForever: snapshotTask.isSuspendedForever,
+      suspendedAt: deferral.suspendedAt,
+      clearSuspendedAt: deferral.suspendedAt == null,
+      isSuspendedForever: deferral.isSuspendedForever,
+      suspendedNote: deferral.suspendedNote,
+      clearSuspendedNote: deferral.suspendedNote == null,
       dueAt: snapshotTask.dueAt,
       clearDueAt: snapshotTask.dueAt == null,
+      isDuePassive: snapshotTask.isDuePassive,
+      dueNote: snapshotTask.dueNote,
+      clearDueNote: snapshotTask.dueNote == null,
       repeatRule: snapshotTask.repeatRule,
       clearRepeatRule: snapshotTask.repeatRule == null,
-      dependencies: snapshotTask.dependencies,
+      dependencies: _filterDeletedDependencies(
+        snapshotTask.dependencies,
+        deletedTaskIds,
+      ),
+      history: snapshotTask.history,
       subtasksAutoFinish: snapshotTask.subtasksAutoFinish,
       subtasks: snapshotTask.subtasks,
       modifiedAt: nextModified,
@@ -191,15 +226,17 @@ class TaskBoardUndo {
       for (final item in currentBoard.allTasks)
         item.id == snapshotTask.id ? restoredTask : item,
     ];
-    final rearmedTasks = _rearmDependents(
+    final rearmedTasks = _restoreAndRearmDependents(
       replacedTasks,
-      entry.previouslyBlockedDependentIds,
-      snapshotTask.id,
-      restoredCompletions,
-      now,
+      entry,
+      restoredTargetIsOpen: true,
+      restoredCompletions: restoredCompletions,
+      now: now,
     );
     if (rearmedTasks == null) {
-      _logSkipped(entry, 'timestamp_out_of_bounds');
+      return null;
+    }
+    if (!_checkTaskAndLabelBounds(entry, rearmedTasks, currentBoard.labels)) {
       return null;
     }
     if (_hasDependencyCycle(rearmedTasks)) {
@@ -214,7 +251,6 @@ class TaskBoardUndo {
       now: now,
     );
     if (nextQueue == null) {
-      _logSkipped(entry, 'queue_limit_exceeded');
       return null;
     }
     if (_exceedsBlockLimit(
@@ -233,6 +269,7 @@ class TaskBoardUndo {
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       labels: currentBoard.labels,
       locations: currentBoard.locations,
       deletedBlock: currentBoard.deletedBlock,
@@ -249,6 +286,7 @@ class TaskBoardUndo {
     DateTime now,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow,
   ) {
     final snapshotTask = entry.snapshotTask;
     final taskId = snapshotTask.id;
@@ -269,6 +307,18 @@ class TaskBoardUndo {
     };
     final validLocationIds = <String>{
       for (final location in currentBoard.locations) location.id,
+    };
+    final nextDeletedBlock = deletedRecord == null
+        ? currentBoard.deletedBlock
+        : currentBoard.deletedBlock.copyWith(
+            generation: currentBoard.deletedBlock.generation + 1,
+            tasks: <TdfDeletedTaskRecord>[
+              for (final record in currentBoard.deletedBlock.tasks)
+                if (record.taskId != taskId) record,
+            ],
+          );
+    final deletedTaskIds = <String>{
+      for (final record in nextDeletedBlock.tasks) record.taskId,
     };
     final labelsWithLocation = _collectLabelsWithLocationRules(
       currentBoard.labels,
@@ -303,6 +353,11 @@ class TaskBoardUndo {
     );
     final wasCompleted =
         snapshotTask.isCompleted || snapshotTask.completedAt != null;
+    final deferral = _resolveRestoredDeferral(
+      snapshotTask,
+      now,
+      stripAll: wasCompleted,
+    );
     final restoredTask = snapshotTask.copyWith(
       completions: restoredCompletions,
       isPriority: wasCompleted || evictedByScopedDeletion
@@ -310,11 +365,52 @@ class TaskBoardUndo {
           : snapshotTask.isPriority,
       labelIds: retainedLabels,
       conditions: sanitizedConditions,
+      suspendedAt: deferral.suspendedAt,
+      clearSuspendedAt: deferral.suspendedAt == null,
+      isSuspendedForever: deferral.isSuspendedForever,
+      suspendedNote: deferral.suspendedNote,
+      clearSuspendedNote: deferral.suspendedNote == null,
+      dueAt: snapshotTask.dueAt,
+      clearDueAt: snapshotTask.dueAt == null,
+      isDuePassive: wasCompleted ? false : snapshotTask.isDuePassive,
+      dueNote: snapshotTask.dueNote,
+      clearDueNote: snapshotTask.dueNote == null,
+      dependencies: wasCompleted
+          ? const <TdfTaskDependency>[]
+          : _filterDeletedDependencies(
+              snapshotTask.dependencies,
+              deletedTaskIds,
+            ),
+      history: snapshotTask.history,
       modifiedAt: decisionRevision,
     );
 
+    final candidateTasks = <TaskItem>[...currentBoard.allTasks, restoredTask];
+    final nextTasks = _restoreAndRearmDependents(
+      candidateTasks,
+      entry,
+      restoredTargetIsOpen: !wasCompleted,
+      restoredCompletions: restoredCompletions,
+      now: now,
+    );
+    if (nextTasks == null) {
+      return null;
+    }
+    if (!_checkTaskAndLabelBounds(entry, nextTasks, currentBoard.labels)) {
+      return null;
+    }
+    if (_hasDependencyCycle(nextTasks)) {
+      _logSkipped(entry, 'dependency_cycle');
+      return null;
+    }
+
     final nextQueue = wasCompleted
-        ? _removeTaskFromQueueIfPresent(currentBoard.queueBlock, taskId, now)
+        ? _removeTaskFromQueueIfPresent(
+            currentBoard.queueBlock,
+            taskId,
+            now,
+            entry,
+          )
         : _restoreQueueMembership(
             currentBoard.queueBlock,
             entry,
@@ -322,21 +418,9 @@ class TaskBoardUndo {
             now: now,
           );
     if (nextQueue == null) {
-      _logSkipped(entry, 'queue_limit_exceeded');
       return null;
     }
 
-    final nextDeletedBlock = deletedRecord == null
-        ? currentBoard.deletedBlock
-        : currentBoard.deletedBlock.copyWith(
-            generation: currentBoard.deletedBlock.generation + 1,
-            tasks: <TdfDeletedTaskRecord>[
-              for (final record in currentBoard.deletedBlock.tasks)
-                if (record.taskId != taskId) record,
-            ],
-          );
-
-    final nextTasks = <TaskItem>[...currentBoard.allTasks, restoredTask];
     if (_exceedsBlockLimit(
       tasks: nextTasks,
       labels: currentBoard.labels,
@@ -347,16 +431,13 @@ class TaskBoardUndo {
       _logSkipped(entry, 'block_limit_exceeded');
       return null;
     }
-    if (_hasDependencyCycle(nextTasks)) {
-      _logSkipped(entry, 'dependency_cycle');
-      return null;
-    }
 
     final evaluated = TaskBoard.evaluate(
       tasks: nextTasks,
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       labels: currentBoard.labels,
       locations: currentBoard.locations,
       deletedBlock: nextDeletedBlock,
@@ -378,6 +459,7 @@ class TaskBoardUndo {
     DateTime now,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow,
   ) {
     final snapshotTask = entry.snapshotTask;
     final currentTask = currentBoard.findTask(snapshotTask.id);
@@ -413,6 +495,11 @@ class TaskBoardUndo {
     final targetPriority = evictedByScopedDeletion
         ? false
         : snapshotTask.isPriority;
+    final deferral = _resolveRestoredDeferral(
+      snapshotTask,
+      now,
+      stripAll: false,
+    );
 
     final nextQueue = _restoreQueueMembership(
       currentBoard.queueBlock,
@@ -421,14 +508,18 @@ class TaskBoardUndo {
       now: now,
     );
     if (nextQueue == null) {
-      _logSkipped(entry, 'queue_limit_exceeded');
       return null;
     }
 
     final taskChanged =
         currentTask.isPriority != targetPriority ||
-        currentTask.suspendedAt != snapshotTask.suspendedAt ||
-        currentTask.isSuspendedForever != snapshotTask.isSuspendedForever ||
+        currentTask.suspendedAt != deferral.suspendedAt ||
+        currentTask.isSuspendedForever != deferral.isSuspendedForever ||
+        currentTask.suspendedNote != deferral.suspendedNote ||
+        currentTask.dueAt != snapshotTask.dueAt ||
+        currentTask.isDuePassive != snapshotTask.isDuePassive ||
+        currentTask.dueNote != snapshotTask.dueNote ||
+        !listEquals(currentTask.history, snapshotTask.history) ||
         !listEquals(currentTask.labelIds, retainedLabels) ||
         !listEquals(currentTask.conditions, sanitizedConditions);
     final queueChanged = !listEquals(
@@ -454,9 +545,17 @@ class TaskBoardUndo {
         isPriority: targetPriority,
         labelIds: retainedLabels,
         conditions: sanitizedConditions,
-        suspendedAt: snapshotTask.suspendedAt,
-        clearSuspendedAt: snapshotTask.suspendedAt == null,
-        isSuspendedForever: snapshotTask.isSuspendedForever,
+        suspendedAt: deferral.suspendedAt,
+        clearSuspendedAt: deferral.suspendedAt == null,
+        isSuspendedForever: deferral.isSuspendedForever,
+        suspendedNote: deferral.suspendedNote,
+        clearSuspendedNote: deferral.suspendedNote == null,
+        dueAt: snapshotTask.dueAt,
+        clearDueAt: snapshotTask.dueAt == null,
+        isDuePassive: snapshotTask.isDuePassive,
+        dueNote: snapshotTask.dueNote,
+        clearDueNote: snapshotTask.dueNote == null,
+        history: snapshotTask.history,
         modifiedAt: nextModified,
       );
     }
@@ -467,11 +566,26 @@ class TaskBoardUndo {
               item.id == currentTask.id ? replacementTask : item,
           ]
         : currentBoard.allTasks;
+    if (!_checkTaskAndLabelBounds(entry, nextTasks, currentBoard.labels)) {
+      return null;
+    }
+    if (_exceedsBlockLimit(
+      tasks: nextTasks,
+      labels: currentBoard.labels,
+      locations: currentBoard.locations,
+      deletedBlock: currentBoard.deletedBlock,
+      queueBlock: nextQueue,
+    )) {
+      _logSkipped(entry, 'block_limit_exceeded');
+      return null;
+    }
+
     final evaluated = TaskBoard.evaluate(
       tasks: nextTasks,
       evaluationTime: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       labels: currentBoard.labels,
       locations: currentBoard.locations,
       deletedBlock: currentBoard.deletedBlock,
@@ -479,6 +593,36 @@ class TaskBoardUndo {
       pruneExpiredCompleted: false,
     );
     return TaskUndoOutcome(board: evaluated);
+  }
+
+  /// Validates per-argument dependency bounds (`64`) and per-block statement bounds (`1,024`).
+  static bool _checkTaskAndLabelBounds(
+    TaskUndoEntry entry,
+    List<TaskItem> tasks,
+    List<TdfLabel> labels,
+  ) {
+    for (final label in labels) {
+      if (label.canonicalDirectChildStatementCount > maxTdfStmtsPerBlock ||
+          _countSerializedConditionRules(label.conditions) >
+              maxTdfStmtsPerBlock) {
+        _logSkipped(entry, 'statement_limit_exceeded');
+        return false;
+      }
+    }
+    for (final task in tasks) {
+      if (task.dependencies.length > maxTdfArgsPerStmt) {
+        _logSkipped(entry, 'dependency_limit_exceeded');
+        return false;
+      }
+      if (task.canonicalDirectChildStatementCount > maxTdfStmtsPerBlock ||
+          task.subtasks.length > maxTdfStmtsPerBlock ||
+          _countSerializedConditionRules(task.conditions) >
+              maxTdfStmtsPerBlock) {
+        _logSkipped(entry, 'statement_limit_exceeded');
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Collects the IDs of live [labels] that retain at least one live location rule in [validLocationIds].
@@ -593,6 +737,34 @@ class TaskBoardUndo {
     return totalBlocks > maxTdfBlocksPerDoc;
   }
 
+  /// Removes dependencies referencing tombstoned task IDs in [deletedTaskIds].
+  static List<TdfTaskDependency> _filterDeletedDependencies(
+    List<TdfTaskDependency> dependencies,
+    Set<String> deletedTaskIds,
+  ) {
+    if (dependencies.isEmpty || deletedTaskIds.isEmpty) {
+      return dependencies;
+    }
+    final filtered = <TdfTaskDependency>[
+      for (final dependency in dependencies)
+        if (!deletedTaskIds.contains(dependency.taskId)) dependency,
+    ];
+    return filtered.length == dependencies.length ? dependencies : filtered;
+  }
+
+  /// Returns the normalized [TdfTaskDependency] on [task] targeting [targetTaskId], if present.
+  static TdfTaskDependency? _findDependencyTargeting(
+    TaskItem task,
+    String targetTaskId,
+  ) {
+    for (final dependency in task.dependencies) {
+      if (dependency.taskId == targetTaskId) {
+        return dependency;
+      }
+    }
+    return null;
+  }
+
   /// Computes the target insertion index in [withoutTask] from [queueOrderSnapshot] in $O(N)$ time.
   static int _findInsertionIndex(
     List<String> withoutTask,
@@ -679,66 +851,131 @@ class TaskBoardUndo {
   static DateTime _maxDateTime(DateTime left, DateTime? right) =>
       right != null && right.isAfter(left) ? right : left;
 
-  /// Re-arms [candidate]'s dependency on [blockerId] to `restoredCompletions + 1` when previously blocked.
-  static TaskItem? _rearmDependentIfNeeded(
+  /// Predicts whether [candidate]'s dependency on [taskBefore] is stripped by [kind].
+  static TdfTaskDependency? _predictSingleStrippedDependency(
+    TaskUndoActionKind kind,
     TaskItem candidate,
-    String blockerId,
+    TaskItem taskBefore,
+  ) {
+    if (candidate.id == taskBefore.id ||
+        candidate.isCompleted ||
+        candidate.completedAt != null) {
+      return null;
+    }
+    final dependency = _findDependencyTargeting(candidate, taskBefore.id);
+    if (dependency == null) return null;
+    if (kind == TaskUndoActionKind.delete) {
+      return dependency;
+    }
+    final nextCompletions = taskBefore.completions + 1;
+    final nonRecurringPair =
+        candidate.repeatRule == null || taskBefore.repeatRule == null;
+    if (nonRecurringPair && nextCompletions >= dependency.requiredCompletion) {
+      return dependency;
+    }
+    return null;
+  }
+
+  /// Predicts dependencies stripped from open dependents when `boardAfter` is omitted at capture time.
+  static Map<String, TdfTaskDependency> _predictStrippedDependencies(
+    TaskUndoActionKind kind,
+    TaskBoard boardBefore,
+    TaskItem taskBefore,
+  ) {
+    if (kind == TaskUndoActionKind.downgrade) {
+      return const <String, TdfTaskDependency>{};
+    }
+    final captured = <String, TdfTaskDependency>{};
+    for (final candidate in boardBefore.allTasks) {
+      final dependency = _predictSingleStrippedDependency(
+        kind,
+        candidate,
+        taskBefore,
+      );
+      if (dependency != null) {
+        captured[candidate.id] = dependency;
+      }
+    }
+    return captured.isEmpty
+        ? const <String, TdfTaskDependency>{}
+        : Map<String, TdfTaskDependency>.unmodifiable(captured);
+  }
+
+  /// Re-arms an existing live dependency on [candidate] targeting `entry.snapshotTask.id` to `restoredCompletions + 1`.
+  static TaskItem? _rearmExistingDependent(
+    TaskItem candidate,
+    TdfTaskDependency existingDependency,
+    TaskUndoEntry entry,
     int restoredCompletions,
     DateTime now,
   ) {
-    if (restoredCompletions >= TdfTaskDependency.maxCompletions) {
+    if (existingDependency.requiredCompletion > restoredCompletions) {
       return candidate;
     }
-    var changed = false;
-    final updatedDependencies = <TdfTaskDependency>[];
-    for (final dependency in candidate.dependencies) {
-      if (dependency.taskId == blockerId &&
-          dependency.requiredCompletion <= restoredCompletions) {
-        updatedDependencies.add(
-          TdfTaskDependency(
-            taskId: blockerId,
-            requiredCompletion: restoredCompletions + 1,
-          ),
-        );
-        changed = true;
-      } else {
-        updatedDependencies.add(dependency);
-      }
+    if (restoredCompletions >= TdfTaskDependency.maxCompletions) {
+      _logSkipped(entry, 'completions_limit_exceeded');
+      return null;
     }
-    if (!changed) return candidate;
     final nextModified = _tryNextTimestamp(now, candidate.effectiveModifiedAt);
-    if (nextModified == null) return null;
+    if (nextModified == null) {
+      _logSkipped(entry, 'timestamp_out_of_bounds');
+      return null;
+    }
+    final updatedDependencies = <TdfTaskDependency>[
+      for (final dependency in candidate.dependencies)
+        dependency.taskId == entry.snapshotTask.id
+            ? TdfTaskDependency(
+                taskId: entry.snapshotTask.id,
+                requiredCompletion: restoredCompletions + 1,
+              )
+            : dependency,
+    ];
     return candidate.copyWith(
       dependencies: updatedDependencies,
       modifiedAt: nextModified,
     );
   }
 
-  /// Re-arms every live task in [previouslyBlockedIds] whose dependency on [blockerId] was satisfied by completion.
-  static List<TaskItem>? _rearmDependents(
-    List<TaskItem> tasks,
-    Set<String> previouslyBlockedIds,
-    String blockerId,
-    int restoredCompletions,
-    DateTime now,
-  ) {
-    if (previouslyBlockedIds.isEmpty) return tasks;
-    final updated = <TaskItem>[];
-    for (final task in tasks) {
-      if (!previouslyBlockedIds.contains(task.id) || task.id == blockerId) {
-        updated.add(task);
-        continue;
-      }
-      final rearmed = _rearmDependentIfNeeded(
-        task,
-        blockerId,
-        restoredCompletions,
-        now,
-      );
-      if (rearmed == null) return null;
-      updated.add(rearmed);
+  /// Re-inserts [capturedDependency] onto open [candidate], re-arming when previously unsatisfied.
+  static TaskItem? _reinsertStrippedDependency(
+    TaskItem candidate,
+    TdfTaskDependency capturedDependency,
+    TaskUndoEntry entry, {
+    required bool restoredTargetIsOpen,
+    required int restoredCompletions,
+    required DateTime now,
+  }) {
+    if (candidate.dependencies.length >= maxTdfArgsPerStmt) {
+      _logSkipped(entry, 'dependency_limit_exceeded');
+      return null;
     }
-    return updated;
+    final needsRearm =
+        restoredTargetIsOpen &&
+        entry.snapshotTask.completions <
+            capturedDependency.requiredCompletion &&
+        capturedDependency.requiredCompletion <= restoredCompletions;
+    if (needsRearm && restoredCompletions >= TdfTaskDependency.maxCompletions) {
+      _logSkipped(entry, 'completions_limit_exceeded');
+      return null;
+    }
+    final nextModified = _tryNextTimestamp(now, candidate.effectiveModifiedAt);
+    if (nextModified == null) {
+      _logSkipped(entry, 'timestamp_out_of_bounds');
+      return null;
+    }
+    final restoredDependency = needsRearm
+        ? TdfTaskDependency(
+            taskId: entry.snapshotTask.id,
+            requiredCompletion: restoredCompletions + 1,
+          )
+        : capturedDependency;
+    return candidate.copyWith(
+      dependencies: TdfTaskDependency.normalizeList(<TdfTaskDependency>[
+        ...candidate.dependencies,
+        restoredDependency,
+      ]),
+      modifiedAt: nextModified,
+    );
   }
 
   /// Removes [taskId] from [currentQueue] if present, advancing `modifiedAt` when removed.
@@ -746,10 +983,14 @@ class TaskBoardUndo {
     TdfQueueBlock currentQueue,
     String taskId,
     DateTime now,
+    TaskUndoEntry entry,
   ) {
     if (!currentQueue.taskIds.contains(taskId)) return currentQueue;
     final nextModified = _tryNextTimestamp(now, currentQueue.modifiedAt);
-    if (nextModified == null) return null;
+    if (nextModified == null) {
+      _logSkipped(entry, 'timestamp_out_of_bounds');
+      return null;
+    }
     return TdfQueueBlock(
       modifiedAt: nextModified,
       taskIds: <String>[
@@ -757,6 +998,105 @@ class TaskBoardUndo {
           if (id != taskId) id,
       ],
     );
+  }
+
+  /// Resolves the restored deferral tuple for [snapshotTask] at [now], stripping expired finite deferrals with their note.
+  static _RestoredDeferral _resolveRestoredDeferral(
+    TaskItem snapshotTask,
+    DateTime now, {
+    required bool stripAll,
+  }) {
+    if (stripAll) {
+      return (
+        isSuspendedForever: false,
+        suspendedAt: null,
+        suspendedNote: null,
+      );
+    }
+    if (snapshotTask.isSuspendedForever) {
+      return (
+        isSuspendedForever: true,
+        suspendedAt: null,
+        suspendedNote: snapshotTask.suspendedNote,
+      );
+    }
+    if (snapshotTask.suspendedAt case final suspendedAt?
+        when suspendedAt.isAfter(now)) {
+      return (
+        isSuspendedForever: false,
+        suspendedAt: suspendedAt,
+        suspendedNote: snapshotTask.suspendedNote,
+      );
+    }
+    return (isSuspendedForever: false, suspendedAt: null, suspendedNote: null);
+  }
+
+  /// Restores stripped dependencies and re-arms unsatisfied open dependents across [tasks], aborting atomically on any bound violation.
+  static List<TaskItem>? _restoreAndRearmDependents(
+    List<TaskItem> tasks,
+    TaskUndoEntry entry, {
+    required bool restoredTargetIsOpen,
+    required int restoredCompletions,
+    required DateTime now,
+  }) {
+    if (entry.previouslyBlockedDependencies.isEmpty &&
+        entry.previouslyBlockedDependentIds.isEmpty) {
+      return tasks;
+    }
+    final updated = <TaskItem>[];
+    for (final candidate in tasks) {
+      final nextTask = _restoreAndRearmSingleDependent(
+        candidate,
+        entry,
+        restoredTargetIsOpen: restoredTargetIsOpen,
+        restoredCompletions: restoredCompletions,
+        now: now,
+      );
+      if (nextTask == null) return null;
+      updated.add(nextTask);
+    }
+    return updated;
+  }
+
+  /// Restores or re-arms a single surviving open [candidate] dependent, or returns `null` when a bound guard fails.
+  static TaskItem? _restoreAndRearmSingleDependent(
+    TaskItem candidate,
+    TaskUndoEntry entry, {
+    required bool restoredTargetIsOpen,
+    required int restoredCompletions,
+    required DateTime now,
+  }) {
+    final targetId = entry.snapshotTask.id;
+    if (candidate.id == targetId ||
+        candidate.isCompleted ||
+        candidate.completedAt != null) {
+      return candidate;
+    }
+    final existingDependency = _findDependencyTargeting(candidate, targetId);
+    if (existingDependency == null) {
+      final captured = entry.previouslyBlockedDependencies[candidate.id];
+      if (captured == null) return candidate;
+      return _reinsertStrippedDependency(
+        candidate,
+        captured,
+        entry,
+        restoredTargetIsOpen: restoredTargetIsOpen,
+        restoredCompletions: restoredCompletions,
+        now: now,
+      );
+    }
+    if (entry.kind == TaskUndoActionKind.complete &&
+        restoredTargetIsOpen &&
+        entry.previouslyBlockedDependentIds.contains(candidate.id)) {
+      return _rearmExistingDependent(
+        candidate,
+        existingDependency,
+        entry,
+        restoredCompletions,
+        now,
+      );
+    }
+    return candidate;
   }
 
   /// Reconstructs [entry]'s relative membership and position in [currentQueue], or returns `null` if limits are exceeded.
@@ -768,7 +1108,7 @@ class TaskBoardUndo {
   }) {
     final taskId = entry.snapshotTask.id;
     if (!entry.wasQueued || evictedByScopedDeletion) {
-      return _removeTaskFromQueueIfPresent(currentQueue, taskId, now);
+      return _removeTaskFromQueueIfPresent(currentQueue, taskId, now, entry);
     }
 
     final withoutTask = <String>[
@@ -776,6 +1116,7 @@ class TaskBoardUndo {
         if (id != taskId) id,
     ];
     if (withoutTask.length >= TdfQueueBlock.maxQueueEntries) {
+      _logSkipped(entry, 'queue_limit_exceeded');
       return null;
     }
     final snapshotIndex = entry.queueOrderSnapshot.indexOf(taskId);
@@ -791,7 +1132,10 @@ class TaskBoardUndo {
     ];
     if (listEquals(nextIds, currentQueue.taskIds)) return currentQueue;
     final nextModified = _tryNextTimestamp(now, currentQueue.modifiedAt);
-    if (nextModified == null) return null;
+    if (nextModified == null) {
+      _logSkipped(entry, 'timestamp_out_of_bounds');
+      return null;
+    }
     return TdfQueueBlock(modifiedAt: nextModified, taskIds: nextIds);
   }
 
@@ -881,22 +1225,34 @@ class TaskBoardUndo {
 /// Immutable snapshot of a single undoable task mutation.
 @immutable
 class TaskUndoEntry {
-  /// Creates a [TaskUndoEntry].
-  const TaskUndoEntry({
+  /// Creates a [TaskUndoEntry] with unmodifiable collection snapshots.
+  TaskUndoEntry({
     required this.sequence,
     required this.kind,
     required this.snapshotTask,
     required this.wasQueued,
-    required this.queueOrderSnapshot,
+    required List<String> queueOrderSnapshot,
     required this.hadOnlyScopedLabels,
-    this.previouslyBlockedDependentIds = const <String>{},
-  });
+    Set<String> previouslyBlockedDependentIds = const <String>{},
+    Map<String, TdfTaskDependency> previouslyBlockedDependencies =
+        const <String, TdfTaskDependency>{},
+  }) : queueOrderSnapshot = List<String>.unmodifiable(queueOrderSnapshot),
+       previouslyBlockedDependentIds = Set<String>.unmodifiable(
+         previouslyBlockedDependentIds,
+       ),
+       previouslyBlockedDependencies =
+           Map<String, TdfTaskDependency>.unmodifiable(
+             previouslyBlockedDependencies,
+           );
 
   /// Whether [snapshotTask] was restricted from the global view by scoped-only labels before the mutation.
   final bool hadOnlyScopedLabels;
 
   /// Action category recorded by this entry.
   final TaskUndoActionKind kind;
+
+  /// Unmodifiable map of open dependent task IDs to their exact [TdfTaskDependency] on `snapshotTask.id` stripped during the action.
+  final Map<String, TdfTaskDependency> previouslyBlockedDependencies;
 
   /// Task IDs whose dependency on `snapshotTask.id` was unsatisfied immediately before completion.
   final Set<String> previouslyBlockedDependentIds;
@@ -913,6 +1269,49 @@ class TaskUndoEntry {
   /// Whether `snapshotTask.id` was present in `queueBlock.taskIds` before the mutation.
   final bool wasQueued;
 
+  /// Captures exact [TdfTaskDependency] entries on open tasks in [boardBefore] targeting [targetTaskId] that were stripped on open tasks in [boardAfter].
+  static Map<String, TdfTaskDependency> captureStrippedDependencies({
+    required TaskBoard boardBefore,
+    required TaskBoard boardAfter,
+    required String targetTaskId,
+  }) {
+    final stripped = <String, TdfTaskDependency>{};
+    for (final beforeTask in boardBefore.allTasks) {
+      if (beforeTask.id == targetTaskId ||
+          beforeTask.isCompleted ||
+          beforeTask.completedAt != null) {
+        continue;
+      }
+      final beforeDependency = _findTargetDependency(beforeTask, targetTaskId);
+      if (beforeDependency == null) continue;
+      final afterTask = boardAfter.findTask(beforeTask.id);
+      if (afterTask == null ||
+          afterTask.isCompleted ||
+          afterTask.completedAt != null) {
+        continue;
+      }
+      if (_findTargetDependency(afterTask, targetTaskId) == null) {
+        stripped[beforeTask.id] = beforeDependency;
+      }
+    }
+    return stripped.isEmpty
+        ? const <String, TdfTaskDependency>{}
+        : Map<String, TdfTaskDependency>.unmodifiable(stripped);
+  }
+
+  /// Finds the normalized [TdfTaskDependency] on [task] targeting [targetTaskId], if present.
+  static TdfTaskDependency? _findTargetDependency(
+    TaskItem task,
+    String targetTaskId,
+  ) {
+    for (final dependency in task.dependencies) {
+      if (dependency.taskId == targetTaskId) {
+        return dependency;
+      }
+    }
+    return null;
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -926,6 +1325,10 @@ class TaskUndoEntry {
         setEquals(
           other.previouslyBlockedDependentIds,
           previouslyBlockedDependentIds,
+        ) &&
+        mapEquals(
+          other.previouslyBlockedDependencies,
+          previouslyBlockedDependencies,
         );
   }
 
@@ -938,6 +1341,11 @@ class TaskUndoEntry {
     hadOnlyScopedLabels,
     Object.hashAll(queueOrderSnapshot),
     Object.hashAllUnordered(previouslyBlockedDependentIds),
+    Object.hashAllUnordered(
+      previouslyBlockedDependencies.entries.map(
+        (entry) => Object.hash(entry.key, entry.value),
+      ),
+    ),
   );
 }
 
@@ -974,3 +1382,10 @@ class TaskUndoOutcome {
     ),
   );
 }
+
+/// Normalized deferral tuple restored onto a task snapshot during undo.
+typedef _RestoredDeferral = ({
+  bool isSuspendedForever,
+  DateTime? suspendedAt,
+  String? suspendedNote,
+});

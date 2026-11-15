@@ -90,6 +90,7 @@ class TaskBoardQueueMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     DateTime? suspendedUntil,
   }) {
     final now = TaskItem.normalizeTimestamp(
@@ -110,6 +111,7 @@ class TaskBoardQueueMutator {
       isPriority: false,
       suspendedAt: useForever ? null : suspendedUntil,
       clearSuspendedAt: useForever,
+      clearSuspendedNote: true,
       isSuspendedForever: useForever,
       subtasks: wasCompleted
           ? setAllSubtasksCompleted(task.subtasks, false)
@@ -117,15 +119,21 @@ class TaskBoardQueueMutator {
       modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
     );
     final nextQueueBlock = appendTaskToQueue(board.queueBlock, taskId, now);
-    final updatedTasks = _replaceTaskInList(board.allTasks, blockedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: _replaceTaskInList(board.allTasks, blockedTask),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
 
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueueBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('blockTask id=$taskId');
   }
 
@@ -141,13 +149,14 @@ class TaskBoardQueueMutator {
     return target.completions + 1;
   }
 
-  /// Downgrades a task on [board] in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC_0.6.0.md` Section 6.3.
+  /// Downgrades a task on [board] in `Focus` (to `Ready`), `Ready` (to `Planned`), or `Planned` (to `Someday`) per `TDF_SPEC.md` Section 6.3.
   static NormalizedTierSlices downgradeTask(
     NormalizedTierSlices board,
     String taskId, {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     String? activeLabelId,
     double? currentLatitude,
     double? currentLongitude,
@@ -157,55 +166,63 @@ class TaskBoardQueueMutator {
     );
     final task = board.findTask(taskId);
     if (task == null) return board;
-    final hasActiveContext =
-        (activeLabelId != null && activeLabelId.isNotEmpty) ||
-        (currentLatitude != null && currentLongitude != null);
-    final contextBoard = hasActiveContext
-        ? TaskBoardEvaluator.evaluate(
-            tasks: board.allTasks,
-            evaluationTime: now,
-            localEvaluationTime: localEvaluationTime,
-            timeZone: timeZone,
-            labels: board.labels,
-            locations: board.locations,
-            deletedBlock: board.deletedBlock,
-            queueBlock: board.queueBlock,
-            activeLabelId: activeLabelId,
-            currentLatitude: currentLatitude,
-            currentLongitude: currentLongitude,
-            pruneExpiredCompleted: false,
-          )
-        : board;
+    final contextBoard = TaskBoardEvaluator.evaluate(
+      tasks: board.allTasks,
+      evaluationTime: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      labels: board.labels,
+      locations: board.locations,
+      deletedBlock: board.deletedBlock,
+      queueBlock: board.queueBlock,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: false,
+    );
     final sourceTier = contextBoard.findTierOfTask(taskId);
     if (sourceTier == null) return board;
 
     if (sourceTier == TaskTier.focus) {
-      return _downgradeFromFocus(
+      final result = _downgradeFromFocus(
         board,
         contextBoard,
         task,
         now,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
-      ).logDomainMutation('downgradeTask id=$taskId from=Focus');
+        dueLeadWindow: dueLeadWindow,
+      );
+      return identical(result, board)
+          ? board
+          : result.logDomainMutation('downgradeTask id=$taskId from=Focus');
     }
     if (sourceTier == TaskTier.ready) {
-      return _downgradeToQueueTail(
+      final result = _downgradeToQueueTail(
         board,
         task,
         now,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
-      ).logDomainMutation('downgradeTask id=$taskId from=Ready');
+        dueLeadWindow: dueLeadWindow,
+      );
+      return identical(result, board)
+          ? board
+          : result.logDomainMutation('downgradeTask id=$taskId from=Ready');
     }
     if (sourceTier == TaskTier.planned) {
-      return _downgradeToSomeday(
+      final result = _downgradeToSomeday(
         board,
         task,
         now,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
-      ).logDomainMutation('downgradeTask id=$taskId from=Planned');
+        dueLeadWindow: dueLeadWindow,
+      );
+      return identical(result, board)
+          ? board
+          : result.logDomainMutation('downgradeTask id=$taskId from=Planned');
     }
     return board;
   }
@@ -219,6 +236,7 @@ class TaskBoardQueueMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final currentIds = board.queueBlock.taskIds;
     if (!currentIds.contains(taskId)) return board;
@@ -252,12 +270,19 @@ class TaskBoardQueueMutator {
       ),
       taskIds: nextIds,
     );
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks,
+      deleted: board.deletedBlock,
+      nowUtc: now,
+    );
     return TaskBoardEvaluator.reevaluateBoard(
       board,
+      tasks: cleaned.tasks,
       queueBlock: nextQueue,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     ).logDomainMutation('moveTaskInQueue id=$taskId');
   }
@@ -341,6 +366,7 @@ class TaskBoardQueueMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     if (targetTier == TaskTier.completed) return board;
     final now = TaskItem.normalizeTimestamp(
@@ -357,8 +383,11 @@ class TaskBoardQueueMutator {
       isCompleted: false,
       clearCompletedAt: true,
       clearSuspendedAt: true,
+      clearSuspendedNote: true,
       isSuspendedForever: false,
       clearDueAt: true,
+      clearDueNote: true,
+      isDuePassive: false,
       isPriority: targetTier == TaskTier.focus,
       dependencies: rearmDependencies(board, existing.dependencies),
       subtasks: setAllSubtasksCompleted(existing.subtasks, false),
@@ -367,18 +396,24 @@ class TaskBoardQueueMutator {
         existing.effectiveModifiedAt,
       ),
     );
-    final updatedTasks = _replaceTaskInList(board.allTasks, restored);
     final nextQueueBlock = isSomeday
         ? removeTaskFromQueue(board.queueBlock, taskId, now)
         : appendTaskToQueue(board.queueBlock, taskId, now);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: _replaceTaskInList(board.allTasks, restored),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
 
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueueBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('restoreTask id=$taskId targetTier=${targetTier.name}');
   }
 
@@ -389,6 +424,7 @@ class TaskBoardQueueMutator {
     DateTime? currentDate,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
     bool isPriority = false,
   }) {
     final now = TaskItem.normalizeTimestamp(
@@ -401,11 +437,17 @@ class TaskBoardQueueMutator {
     final effectivePriority = isPriority || existing.isPriority;
     final taskAttributesChanged =
         wasCompleted || effectivePriority != existing.isPriority;
+    final nextQueueBlock = appendTaskToQueue(board.queueBlock, taskId, now);
+    if (!taskAttributesChanged && identical(nextQueueBlock, board.queueBlock)) {
+      return board;
+    }
+
     final scheduled = taskAttributesChanged
         ? existing.copyWith(
             isCompleted: false,
             clearCompletedAt: true,
             clearSuspendedAt: wasCompleted,
+            clearSuspendedNote: wasCompleted,
             isSuspendedForever: wasCompleted
                 ? false
                 : existing.isSuspendedForever,
@@ -422,16 +464,23 @@ class TaskBoardQueueMutator {
             ),
           )
         : existing;
-    final updatedTasks = _replaceTaskInList(board.allTasks, scheduled);
-    final nextQueueBlock = appendTaskToQueue(board.queueBlock, taskId, now);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: _replaceTaskInList(board.allTasks, scheduled),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: taskAttributesChanged
+          ? <String>{taskId}
+          : const <String>{},
+    );
 
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueueBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     ).logDomainMutation('scheduleTask id=$taskId');
   }
 
@@ -466,7 +515,7 @@ class TaskBoardQueueMutator {
     return appendTaskToQueue(baseQueue, updatedTask.id, now);
   }
 
-  /// Downgrades [task] on [board] from Tier 1 (`Focus`) to Tier 2 (`Ready`) using the active-filter-relative anchor $E_{\text{ctx}}$ in [contextBoard] per `TDF_SPEC_0.6.0.md` Section 6.3.
+  /// Downgrades [task] on [board] from Tier 1 (`Focus`) to Tier 2 (`Ready`) using the active-filter-relative anchor $E_{\text{ctx}}$ in [contextBoard] per `TDF_SPEC.md` Section 6.3.
   static NormalizedTierSlices _downgradeFromFocus(
     NormalizedTierSlices board,
     NormalizedTierSlices contextBoard,
@@ -474,6 +523,7 @@ class TaskBoardQueueMutator {
     DateTime now, {
     required DateTime? localEvaluationTime,
     required TdfTimeZoneContext? timeZone,
+    required Duration? dueLeadWindow,
   }) {
     final eligibleWithoutTask = <TaskItem>[
       for (final candidate in <TaskItem>[
@@ -487,47 +537,53 @@ class TaskBoardQueueMutator {
         TaskBoardEvaluator.focusSoftLimit +
         TaskBoardEvaluator.readySoftLimit -
         1;
+    final isTargetDueUrgent = task.isWithinDueLeadWindow(now, dueLeadWindow);
+    final seventhHasEffectivePriority =
+        eligibleWithoutTask.length >= readyEndAfterExcludingTarget &&
+        _hasEffectivePriority(
+          eligibleWithoutTask[readyEndAfterExcludingTarget - 1],
+          now,
+          dueLeadWindow,
+        );
+
     final TaskItem? anchorTask;
     final bool alignedPriority;
-    if (eligibleWithoutTask.isEmpty) {
-      anchorTask = null;
-      alignedPriority = false;
-    } else if (eligibleWithoutTask.length < readyEndAfterExcludingTarget) {
-      anchorTask = eligibleWithoutTask.last;
-      alignedPriority = false;
-    } else {
+    final bool alignedDuePassive;
+    if (seventhHasEffectivePriority) {
       anchorTask = eligibleWithoutTask[readyEndAfterExcludingTarget - 1];
-      alignedPriority = anchorTask.isPriority;
+      alignedPriority = isTargetDueUrgent ? task.isPriority : true;
+      alignedDuePassive = task.isDuePassive;
+    } else {
+      anchorTask = eligibleWithoutTask.isEmpty
+          ? null
+          : (eligibleWithoutTask.length < readyEndAfterExcludingTarget
+                ? eligibleWithoutTask.last
+                : eligibleWithoutTask[readyEndAfterExcludingTarget - 1]);
+      alignedPriority = false;
+      alignedDuePassive = isTargetDueUrgent ? true : task.isDuePassive;
     }
 
-    final priorityChanged = task.isPriority != alignedPriority;
-    final updatedTask = priorityChanged
+    final taskChanged =
+        task.isPriority != alignedPriority ||
+        task.isDuePassive != alignedDuePassive;
+    final nextQueueIds = _reorderAfterAnchor(
+      currentIds: board.queueBlock.taskIds,
+      taskId: task.id,
+      anchorTaskId: anchorTask?.id,
+    );
+    final queueChanged = !listEquals(nextQueueIds, board.queueBlock.taskIds);
+    if (!taskChanged && !queueChanged) return board;
+
+    final updatedTask = taskChanged
         ? task.copyWith(
             isPriority: alignedPriority,
+            isDuePassive: alignedDuePassive,
             modifiedAt: TaskItem.nextModifiedTimestamp(
               now,
               task.effectiveModifiedAt,
             ),
           )
         : task;
-
-    final List<String> nextQueueIds;
-    if (anchorTask == null) {
-      nextQueueIds = board.queueBlock.taskIds;
-    } else {
-      final reordered = <String>[];
-      for (final id in board.queueBlock.taskIds) {
-        if (id == task.id) continue;
-        reordered.add(id);
-        if (id == anchorTask.id) reordered.add(task.id);
-      }
-      if (!reordered.contains(task.id)) reordered.add(task.id);
-      nextQueueIds = reordered;
-    }
-
-    final queueChanged = !listEquals(nextQueueIds, board.queueBlock.taskIds);
-    if (!priorityChanged && !queueChanged) return board;
-
     final nextQueueBlock = queueChanged
         ? TdfQueueBlock(
             modifiedAt: TaskItem.nextModifiedTimestamp(
@@ -537,38 +593,48 @@ class TaskBoardQueueMutator {
             taskIds: nextQueueIds,
           )
         : board.queueBlock;
-    final updatedTasks = _replaceTaskInList(board.allTasks, updatedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: _replaceTaskInList(board.allTasks, updatedTask),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: taskChanged ? <String>{task.id} : const <String>{},
+    );
 
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueueBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
   }
 
-  /// Removes `priority` from [task] on [board] and moves its queue entry to the end of `queue` (`TDF_SPEC.md` Section 6.3).
+  /// Removes `priority` (and suppresses due-window urgency via `isDuePassive`) on [task] and moves its queue entry to the end of `queue` (`TDF_SPEC.md` Section 6.3).
   static NormalizedTierSlices _downgradeToQueueTail(
     NormalizedTierSlices board,
     TaskItem task,
     DateTime now, {
     required DateTime? localEvaluationTime,
     required TdfTimeZoneContext? timeZone,
+    required Duration? dueLeadWindow,
   }) {
-    final priorityChanged = task.isPriority;
+    final isTargetDueUrgent = task.isWithinDueLeadWindow(now, dueLeadWindow);
+    final nextDuePassive = isTargetDueUrgent ? true : task.isDuePassive;
+    final taskChanged = task.isPriority || task.isDuePassive != nextDuePassive;
     final nextQueueIds = <String>[
       for (final id in board.queueBlock.taskIds)
         if (id != task.id) id,
       task.id,
     ];
     final queueChanged = !listEquals(nextQueueIds, board.queueBlock.taskIds);
-    if (!priorityChanged && !queueChanged) return board;
+    if (!taskChanged && !queueChanged) return board;
 
-    final updatedTask = priorityChanged
+    final updatedTask = taskChanged
         ? task.copyWith(
             isPriority: false,
+            isDuePassive: nextDuePassive,
             modifiedAt: TaskItem.nextModifiedTimestamp(
               now,
               task.effectiveModifiedAt,
@@ -584,53 +650,84 @@ class TaskBoardQueueMutator {
             taskIds: nextQueueIds,
           )
         : board.queueBlock;
-    final updatedTasks = _replaceTaskInList(board.allTasks, updatedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: _replaceTaskInList(board.allTasks, updatedTask),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: taskChanged ? <String>{task.id} : const <String>{},
+    );
 
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueueBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
   }
 
-  /// Downgrades [task] on [board] from Tier 3 (`Planned`) to Tier 5 (`Someday`) per `TDF_SPEC.md` Section 6.3.
+  /// Downgrades [task] on [board] from Tier 3 (`Planned`) to Tier 5 (`Someday`), stripping `priority` and `suspended` while preserving `due` and `history` (`TDF_SPEC.md` Section 6.3).
   static NormalizedTierSlices _downgradeToSomeday(
     NormalizedTierSlices board,
     TaskItem task,
     DateTime now, {
     required DateTime? localEvaluationTime,
     required TdfTimeZoneContext? timeZone,
+    required Duration? dueLeadWindow,
   }) {
     final taskAttributesChanged =
         task.isPriority ||
         task.suspendedAt != null ||
         task.isSuspendedForever ||
+        task.suspendedNote != null ||
         task.isCompleted ||
         task.completedAt != null;
+    final nextQueueBlock = removeTaskFromQueue(board.queueBlock, task.id, now);
+    final queueChanged = !identical(nextQueueBlock, board.queueBlock);
+    if (!taskAttributesChanged && !queueChanged) return board;
+
     final downgradedTask = taskAttributesChanged
-        ? task.toActive(
+        ? task.copyWith(
+            isCompleted: false,
+            clearCompletedAt: true,
             isPriority: false,
+            clearSuspendedAt: true,
+            clearSuspendedNote: true,
+            isSuspendedForever: false,
             modifiedAt: TaskItem.nextModifiedTimestamp(
               now,
               task.effectiveModifiedAt,
             ),
           )
         : task;
-    final nextQueueBlock = removeTaskFromQueue(board.queueBlock, task.id, now);
-    final updatedTasks = _replaceTaskInList(board.allTasks, downgradedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: _replaceTaskInList(board.allTasks, downgradedTask),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: taskAttributesChanged
+          ? <String>{task.id}
+          : const <String>{},
+    );
 
     return TaskBoardEvaluator.reevaluateBoard(
       board,
-      tasks: updatedTasks,
+      tasks: cleaned.tasks,
       queueBlock: nextQueueBlock,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
   }
+
+  /// Returns whether [task] has effective queue priority at [now] under [dueLeadWindow].
+  static bool _hasEffectivePriority(
+    TaskItem task,
+    DateTime now,
+    Duration? dueLeadWindow,
+  ) => task.isPriority || task.isWithinDueLeadWindow(now, dueLeadWindow);
 
   /// Inserts [taskId] into [withoutTask] before [beforeTaskId], after [afterTaskId], or at the end.
   static List<String> _insertMovedQueueId({
@@ -656,6 +753,23 @@ class TaskBoardQueueMutator {
       return nextIds;
     }
     return <String>[...withoutTask, taskId];
+  }
+
+  /// Moves [taskId] immediately after [anchorTaskId] inside [currentIds], or returns [currentIds] when [anchorTaskId] is `null`.
+  static List<String> _reorderAfterAnchor({
+    required List<String> currentIds,
+    required String taskId,
+    required String? anchorTaskId,
+  }) {
+    if (anchorTaskId == null) return currentIds;
+    final reordered = <String>[];
+    for (final id in currentIds) {
+      if (id == taskId) continue;
+      reordered.add(id);
+      if (id == anchorTaskId) reordered.add(taskId);
+    }
+    if (!reordered.contains(taskId)) reordered.add(taskId);
+    return reordered;
   }
 
   /// Replaces the task matching `replacement.id` inside [tasks].

@@ -1667,15 +1667,6 @@
       }
     }
   },
-  "taskInfoSuspendedElapsed": "Elapsed ({timestamp})",
-  "@taskInfoSuspendedElapsed": {
-    "description": "Value text shown when a task's suspension timestamp is in the past.",
-    "placeholders": {
-      "timestamp": {
-        "type": "String"
-      }
-    }
-  },
   "taskInfoDueLabel": "Due",
   "@taskInfoDueLabel": {
     "description": "Section label for the due deadline in the task information dialog."

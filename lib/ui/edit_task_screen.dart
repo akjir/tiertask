@@ -20,6 +20,7 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
+import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
@@ -268,6 +269,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final TextEditingController _dueController;
   String? _dueErrorMessage;
   String? _errorMessage;
+  late final bool _hadActiveInitialSuspension;
   late bool _hasDue;
   bool _hasSubtaskText = false;
   late bool _isRepeating;
@@ -324,9 +326,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _subtasks = List.of(task?.subtasks ?? const []);
     _links = List.of(task?.links ?? const []);
     _blockedByIds = Set.of(task?.blockedByTaskIds ?? const []);
-    _isSuspended = task?.suspendedAt != null;
+    final nowUtc = ref.read(clockProvider)().toUtc();
+    final hasActiveSuspension = task?.hasActiveSuspendedAt(nowUtc) ?? false;
+    _hadActiveInitialSuspension = hasActiveSuspension;
+    _isSuspended = hasActiveSuspension;
     _suspendedController = TextEditingController(
-      text: TaskEditorSuspendedField.formatInitialText(task?.suspendedAt),
+      text: hasActiveSuspension
+          ? TaskEditorSuspendedField.formatInitialText(task?.suspendedAt)
+          : '',
     )..addListener(_handleSuspendedChanged);
     _hasDue = task?.dueAt != null;
     _dueController = TextEditingController(
@@ -519,6 +526,18 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     }
   }
 
+  /// Returns whether [resolvedDueAt] and [initialDueAt] represent the same normalized UTC instant.
+  static bool _isSameDueTimestamp(
+    DateTime? resolvedDueAt,
+    DateTime? initialDueAt,
+  ) {
+    if (resolvedDueAt == null || initialDueAt == null) {
+      return false;
+    }
+    return TaskItem.normalizeTimestamp(resolvedDueAt) ==
+        TaskItem.normalizeTimestamp(initialDueAt);
+  }
+
   /// Opens [uri] via [linkLauncherRepositoryProvider] and displays a SnackBar if launching fails.
   Future<void> _openLink(String uri) async {
     try {
@@ -537,6 +556,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final note = _noteController.text.trim();
     final notifier = ref.read(taskNotifierProvider.notifier);
     if (widget.initialTask case final existingTask?) {
+      final isSameDueAt = _isSameDueTimestamp(draft.dueAt, existingTask.dueAt);
+      final keepSuspendedNote = _isSuspended && _hadActiveInitialSuspension;
       return notifier.updateTask(
         existingTask.id,
         title: _titleController.text.trim(),
@@ -547,14 +568,20 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         subtasks: draft.subtasks,
         labelIds: draft.labelIds,
         dueAt: draft.dueAt,
+        isDuePassive: isSameDueAt ? existingTask.isDuePassive : false,
+        dueNote: _hasDue ? existingTask.dueNote : null,
         clearDueAt: !_hasDue,
+        clearDueNote: !_hasDue,
         origin: existingTask.origin,
         suspendedAt: draft.suspendedAt,
+        suspendedNote: keepSuspendedNote ? existingTask.suspendedNote : null,
         clearSuspendedAt: !_isSuspended,
+        clearSuspendedNote: !keepSuspendedNote,
         repeatRule: draft.repeatRule,
         clearRepeatRule: !_isRepeating,
         blockedByTaskIds: draft.blockedByIds,
         links: draft.links,
+        history: existingTask.history,
         conditions: _conditionController.buildConditions(),
       );
     }
@@ -657,10 +684,15 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final dueAt = _hasDue
         ? TaskItem.tryParseTdfTimestampInput(_dueController.text.trim())
         : null;
-    final repeatRule = TaskEditorRepeatField.parseRepeatRule(
+    final parsedRepeatRule = TaskEditorRepeatField.parseRepeatRule(
       isRepeating: _isRepeating,
       rawCount: _repeatCountController.text,
       unit: _repeatUnit,
+    );
+    final existingRepeat = widget.initialTask?.repeatRule;
+    final repeatRule = parsedRepeatRule?.copyWith(
+      clock: existingRepeat?.clock,
+      leadDays: existingRepeat?.leadDays ?? 0,
     );
     if (titleError != null ||
         (_isSuspended && suspendedAt == null) ||

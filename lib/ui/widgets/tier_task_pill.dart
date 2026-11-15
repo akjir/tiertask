@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/task_board.dart';
 import '../../models/task_item.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/config_providers.dart';
@@ -191,7 +192,7 @@ sealed class _TaskExitAction {
 }
 
 /// Interactive right-side status indicator icons that open [TaskInfoDialog] when clicked or tapped.
-class _TierTaskIndicators extends StatelessWidget {
+class _TierTaskIndicators extends ConsumerWidget {
   /// Creates a [_TierTaskIndicators] row.
   const _TierTaskIndicators({required this.task});
 
@@ -199,9 +200,9 @@ class _TierTaskIndicators extends StatelessWidget {
   final TaskItem task;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final specs = resolveTaskIndicatorSpecs(task, localizations);
+    final specs = _resolveActiveSpecs(ref, localizations);
     final dueAt = task.dueAt;
     if (specs.isEmpty && dueAt == null) {
       return const SizedBox.shrink();
@@ -282,6 +283,53 @@ class _TierTaskIndicators extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Returns whether [task] is actively blocked by at least one live prerequisite on [board].
+  static bool _hasActiveDependencyBlock(TaskItem task, TaskBoard board) {
+    if (task.isCompleted || task.completedAt != null) {
+      return task.dependencies.isNotEmpty;
+    }
+    for (final dependency in task.dependencies) {
+      final target = board.findTask(dependency.taskId);
+      if (target != null &&
+          target.completions < dependency.requiredCompletion) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Filters [resolveTaskIndicatorSpecs] to hide expired `suspended` and satisfied open-task `blocked` indicators.
+  List<({IconData icon, String keyPrefix, String tooltip})> _resolveActiveSpecs(
+    WidgetRef ref,
+    AppLocalizations localizations,
+  ) {
+    final rawSpecs = resolveTaskIndicatorSpecs(task, localizations);
+    if (rawSpecs.isEmpty) {
+      return rawSpecs;
+    }
+    final hasActiveSuspension =
+        (task.isSuspendedForever || task.suspendedAt != null) &&
+        task.hasActiveSuspendedAt(ref.watch(clockProvider)().toUtc());
+    final hasActiveBlockedBy =
+        task.dependencies.isNotEmpty &&
+        ref.watch(
+          taskNotifierProvider.select(
+            (asyncBoard) => _hasActiveDependencyBlock(
+              task,
+              asyncBoard.asData?.value ?? TaskBoard.empty(),
+            ),
+          ),
+        );
+    return [
+      for (final spec in rawSpecs)
+        if ((spec.keyPrefix != 'suspended_task_indicator' ||
+                hasActiveSuspension) &&
+            (spec.keyPrefix != 'blocked_by_task_indicator' ||
+                hasActiveBlockedBy))
+          spec,
+    ];
   }
 
   /// Collapses [specs] into a single summary indicator when more than [maxVisibleTaskIndicators] are active.

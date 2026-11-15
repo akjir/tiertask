@@ -1,0 +1,293 @@
+{
+  "version": "0.7.0",
+  "timeZone": "Europe/Berlin",
+  "mode2RepeatLeadVectors": [
+    {
+      "id": "tz_v070_rec_01_october_dst_lead_5_days",
+      "section": "6.10.3",
+      "description": "Monthly Mode 2 task with repeat 1 months 08:00 lead 5 days completed across the October CEST -> CET transition advances due to Nov 15 18:00 local (17:00 UTC), sets suspended to Nov 15 - 5 days = Nov 10 at 08:00 local (07:00 UTC), resets isDuePassive to false, preserves dueNote, and clears suspendedNote.",
+      "repeat": {
+        "count": 1,
+        "unit": "months",
+        "clock": "08:00",
+        "leadDays": 5,
+        "canonical": "repeat 1 months 08:00 lead 5 days"
+      },
+      "completionInstantUtc": "2026-10-17 10:00:00",
+      "previousDueLocal": "2026-10-15 18:00:00",
+      "previousDueUtc": "2026-10-15 16:00:00",
+      "previousDuePassive": true,
+      "previousDueNote": "Submit monthly VAT report",
+      "previousSuspendedUtc": "2026-10-12 06:00:00",
+      "previousSuspendedNote": "Temporary October snooze",
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-11-15 18:00:00",
+      "expectedNewDueUtc": "2026-11-15 17:00:00",
+      "computedNewSuspendedLocal": "2026-11-10 08:00:00",
+      "computedNewSuspendedUtc": "2026-11-10 07:00:00",
+      "expectedTaskSuspendedUtc": "2026-11-10 07:00:00",
+      "expectedDuePassive": false,
+      "expectedDueNote": "Submit monthly VAT report",
+      "expectedSuspendedNote": null
+    },
+    {
+      "id": "tz_v070_rec_02_month_end_jan31_to_feb28_lead_3_days",
+      "section": "6.10.3",
+      "description": "Monthly Mode 2 task with due on Jan 31 18:00 local and repeat 1 months 09:00 lead 3 days clamps newDue to Feb 28 18:00 local and subtracts 3 calendar days to Feb 25 09:00 local (08:00 UTC).",
+      "repeat": {
+        "count": 1,
+        "unit": "months",
+        "clock": "09:00",
+        "leadDays": 3,
+        "canonical": "repeat 1 months 09:00 lead 3 days"
+      },
+      "completionInstantUtc": "2026-01-31 12:00:00",
+      "previousDueLocal": "2026-01-31 18:00:00",
+      "previousDueUtc": "2026-01-31 17:00:00",
+      "previousDuePassive": false,
+      "previousDueNote": "Month-end close",
+      "previousSuspendedUtc": null,
+      "previousSuspendedNote": null,
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-02-28 18:00:00",
+      "expectedNewDueUtc": "2026-02-28 17:00:00",
+      "computedNewSuspendedLocal": "2026-02-25 09:00:00",
+      "computedNewSuspendedUtc": "2026-02-25 08:00:00",
+      "expectedTaskSuspendedUtc": "2026-02-25 08:00:00",
+      "expectedDuePassive": false,
+      "expectedDueNote": "Month-end close",
+      "expectedSuspendedNote": null
+    },
+    {
+      "id": "tz_v070_rec_03_spring_forward_gap_on_subtracted_lead_date",
+      "section": "6.10.3",
+      "description": "Monthly Mode 2 task advancing due from Mar 3 to Apr 3 18:00 CEST with lead 5 days and clock 02:30 lands on Mar 29 02:30 local (spring-forward gap), resolving with pre-gap CET UTC+1 offset to 01:30:00 UTC.",
+      "repeat": {
+        "count": 1,
+        "unit": "months",
+        "clock": "02:30",
+        "leadDays": 5,
+        "canonical": "repeat 1 months 02:30 lead 5 days"
+      },
+      "completionInstantUtc": "2026-03-03 10:00:00",
+      "previousDueLocal": "2026-03-03 18:00:00",
+      "previousDueUtc": "2026-03-03 17:00:00",
+      "previousDuePassive": false,
+      "previousDueNote": null,
+      "previousSuspendedUtc": null,
+      "previousSuspendedNote": null,
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-04-03 18:00:00",
+      "expectedNewDueUtc": "2026-04-03 16:00:00",
+      "computedNewSuspendedLocal": "2026-03-29 02:30:00",
+      "computedNewSuspendedUtc": "2026-03-29 01:30:00",
+      "expectedTaskSuspendedUtc": "2026-03-29 01:30:00",
+      "expectedDuePassive": false,
+      "expectedDueNote": null,
+      "expectedSuspendedNote": null
+    },
+    {
+      "id": "tz_v070_rec_04_immediate_omission_when_new_suspended_lte_now",
+      "section": "6.10.3",
+      "description": "Completing the October occurrence on Nov 12 10:00 UTC (after Nov 15's 5-day preparation window opened on Nov 10 08:00 UTC) advances due to Nov 15 17:00 UTC and omits suspended immediately because computedNewSuspendedUtc <= completionInstantUtc.",
+      "repeat": {
+        "count": 1,
+        "unit": "months",
+        "clock": "09:00",
+        "leadDays": 5,
+        "canonical": "repeat 1 months 09:00 lead 5 days"
+      },
+      "completionInstantUtc": "2026-11-12 10:00:00",
+      "previousDueLocal": "2026-10-15 18:00:00",
+      "previousDueUtc": "2026-10-15 16:00:00",
+      "previousDuePassive": true,
+      "previousDueNote": "Statutory cutoff",
+      "previousSuspendedUtc": "2026-10-10 07:00:00",
+      "previousSuspendedNote": "Old snooze",
+      "advancementStepsK": 1,
+      "expectedNewDueLocal": "2026-11-15 18:00:00",
+      "expectedNewDueUtc": "2026-11-15 17:00:00",
+      "computedNewSuspendedLocal": "2026-11-10 09:00:00",
+      "computedNewSuspendedUtc": "2026-11-10 08:00:00",
+      "expectedTaskSuspendedUtc": null,
+      "expectedDuePassive": false,
+      "expectedDueNote": "Statutory cutoff",
+      "expectedSuspendedNote": null
+    }
+  ],
+  "dueLeadEvaluationVectors": [
+    {
+      "id": "due_eval_01_exact_24h_boundary_inclusive",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 86400,
+      "dueUtc": "2026-11-11 12:00:00",
+      "isDuePassive": false,
+      "isPriority": false,
+      "expectedIsDueUrgent": true,
+      "expectedHasEffectivePriority": true
+    },
+    {
+      "id": "due_eval_02_one_second_outside_24h_boundary",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 86400,
+      "dueUtc": "2026-11-11 12:00:01",
+      "isDuePassive": false,
+      "isPriority": false,
+      "expectedIsDueUrgent": false,
+      "expectedHasEffectivePriority": false
+    },
+    {
+      "id": "due_eval_03_overdue_with_at_due_zero_window",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 0,
+      "dueUtc": "2026-11-10 12:00:00",
+      "isDuePassive": false,
+      "isPriority": false,
+      "expectedIsDueUrgent": true,
+      "expectedHasEffectivePriority": true
+    },
+    {
+      "id": "due_eval_04_window_off_disables_auto_promotion",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": null,
+      "dueUtc": "2026-11-10 08:00:00",
+      "isDuePassive": false,
+      "isPriority": false,
+      "expectedIsDueUrgent": false,
+      "expectedHasEffectivePriority": false
+    },
+    {
+      "id": "due_eval_05_passive_due_suppresses_urgency_unless_explicit_priority",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 86400,
+      "dueUtc": "2026-11-10 08:00:00",
+      "isDuePassive": true,
+      "isPriority": false,
+      "expectedIsDueUrgent": false,
+      "expectedHasEffectivePriority": false
+    }
+  ],
+  "downgradeTaskVectors": [
+    {
+      "id": "downgrade_01_focus_to_ready_sets_passive_when_slot8_not_effective_priority",
+      "section": "6.3",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 86400,
+      "targetTaskId": "1aUrgentOk",
+      "queueBefore": [
+        "1aUrgentOk",
+        "2bRegulrOk",
+        "3cRegulrOk",
+        "4dRegulrOk"
+      ],
+      "targetBefore": {
+        "priority": false,
+        "dueUtc": "2026-11-11 08:00:00",
+        "isDuePassive": false,
+        "dueNote": "Hard cutoff"
+      },
+      "otherTasksEffectivePriority": false,
+      "expectedQueueAfter": [
+        "2bRegulrOk",
+        "3cRegulrOk",
+        "4dRegulrOk",
+        "1aUrgentOk"
+      ],
+      "expectedTargetAfter": {
+        "priority": false,
+        "dueUtc": "2026-11-11 08:00:00",
+        "isDuePassive": true,
+        "dueNote": "Hard cutoff",
+        "derivedTier": "Ready",
+        "modifiedAdvanced": true
+      }
+    },
+    {
+      "id": "downgrade_02_focus_to_ready_preserves_explicit_priority_when_slot8_effective_priority",
+      "section": "6.3",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 86400,
+      "targetTaskId": "1aBothPrOk",
+      "queueBefore": [
+        "1aBothPrOk",
+        "2bUrgent01",
+        "3cUrgent02",
+        "4dUrgent03",
+        "5eUrgent04",
+        "6fUrgent05",
+        "7gUrgent06",
+        "8hUrgent07",
+        "9iRegulr01"
+      ],
+      "targetBefore": {
+        "priority": true,
+        "dueUtc": "2026-11-11 08:00:00",
+        "isDuePassive": false,
+        "dueNote": "Keep note"
+      },
+      "slot8AnchorHasEffectivePriority": true,
+      "expectedQueueAfter": [
+        "2bUrgent01",
+        "3cUrgent02",
+        "4dUrgent03",
+        "5eUrgent04",
+        "6fUrgent05",
+        "7gUrgent06",
+        "8hUrgent07",
+        "1aBothPrOk",
+        "9iRegulr01"
+      ],
+      "expectedTargetAfter": {
+        "priority": true,
+        "dueUtc": "2026-11-11 08:00:00",
+        "isDuePassive": false,
+        "dueNote": "Keep note",
+        "derivedTier": "Ready",
+        "modifiedAdvanced": false
+      }
+    },
+    {
+      "id": "downgrade_03_ready_to_planned_strips_priority_sets_passive_and_moves_to_tail",
+      "section": "6.3",
+      "nowUtc": "2026-11-10 12:00:00",
+      "dueLeadWindowSeconds": 86400,
+      "targetTaskId": "1aBothPrOk",
+      "queueBefore": [
+        "2bUrgent01",
+        "3cUrgent02",
+        "4dUrgent03",
+        "5eUrgent04",
+        "6fUrgent05",
+        "7gUrgent06",
+        "8hUrgent07",
+        "1aBothPrOk",
+        "9iRegulr01"
+      ],
+      "targetBefore": {
+        "priority": true,
+        "dueUtc": "2026-11-11 08:00:00",
+        "isDuePassive": false,
+        "dueNote": "Keep note"
+      },
+      "expectedQueueAfter": [
+        "2bUrgent01",
+        "3cUrgent02",
+        "4dUrgent03",
+        "5eUrgent04",
+        "6fUrgent05",
+        "7gUrgent06",
+        "8hUrgent07",
+        "9iRegulr01",
+        "1aBothPrOk"
+      ],
+      "expectedTargetAfter": {
+        "priority": false,
+        "dueUtc": "2026-11-11 08:00:00",
+        "isDuePassive": true,
+        "dueNote": "Keep note",
+        "derivedTier": "Planned",
+        "modifiedAdvanced": true
+      }
+    }
+  ]
+}

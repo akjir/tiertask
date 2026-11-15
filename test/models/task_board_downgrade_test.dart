@@ -573,4 +573,234 @@ void main() {
       );
     });
   });
+
+  group('TDF 0.7.0 Due-Promoted Downgrade Transitions, duePassive Setting & Pure No-Op Cleanup Guard', () {
+    test('downgrades due-promoted Focus and Ready tasks using isDuePassive without bounce-back, preserves urgent Focus->Ready when >=7 urgent peers exist, and skips block cleanup on pure no-op', () {
+      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      final laterNow = now.add(const Duration(hours: 2));
+
+      // 1. Focus -> Ready with < 7 other eligible tasks: due-promoted task (due at +25h from now, so +23h <= 24h at laterNow)
+      // plus a bystander task whose suspendedAt expired by laterNow.
+      final dueFocus = TaskItem(
+        id: 'dueFoc0001',
+        title: 'Due Promoted Into Focus At laterNow',
+        createdAt: now,
+        modifiedAt: now,
+        dueAt: now.add(const Duration(hours: 25)),
+        dueNote: 'Keep this due note',
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: now, text: 'Scheduled'),
+        ],
+      );
+      final regular1 = TaskItem(
+        id: 'reg0000001',
+        title: 'Reg 1',
+        createdAt: now,
+        modifiedAt: now,
+      );
+      final regular2 = TaskItem(
+        id: 'reg0000002',
+        title: 'Reg 2',
+        createdAt: now,
+        modifiedAt: now,
+      );
+      final regular3 = TaskItem(
+        id: 'reg0000003',
+        title: 'Reg 3',
+        createdAt: now,
+        modifiedAt: now,
+      );
+      final bystanderExpired = TaskItem(
+        id: 'bysExp0001',
+        title: 'Bystander Whose Suspension Expires Before laterNow',
+        createdAt: now,
+        modifiedAt: now,
+        suspendedAt: now.add(const Duration(hours: 1)),
+        suspendedNote: 'Expired by laterNow',
+      );
+
+      // Evaluate initially at `now` (dueAt is +26h > 24h, so dueFoc0001 starts in Ready at index 3!):
+      final staleSnapshotBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          regular1,
+          regular2,
+          regular3,
+          dueFocus,
+          bystanderExpired,
+        ],
+        evaluationTime: now,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: const <String>[
+            'reg0000001',
+            'reg0000002',
+            'reg0000003',
+            'dueFoc0001',
+            'bysExp0001',
+          ],
+        ),
+      );
+      expect(staleSnapshotBoard.ready.map((t) => t.id), contains('dueFoc0001'));
+
+      // At laterNow (+2h), dueFoc0001 is due in +6h (Focus in live global view!), and bysExp0001 is unblocked!
+      // Downgrading dueFoc0001 at laterNow must see it in Focus -> move it to Ready with isDuePassive=true!
+      final afterFocusDowngrade = staleSnapshotBoard.downgradeTask(
+        'dueFoc0001',
+        currentDate: laterNow,
+      );
+      final passiveTask = afterFocusDowngrade.findTask('dueFoc0001')!;
+      expect(
+        afterFocusDowngrade.ready.map((t) => t.id),
+        contains('dueFoc0001'),
+        reason: 'downgradeTask must evaluate live global context at laterNow (Focus -> Ready) and prevent bounce-back via isDuePassive',
+      );
+      expect(passiveTask.isDuePassive, isTrue);
+      expect(passiveTask.isPriority, isFalse);
+      expect(passiveTask.dueNote, equals('Keep this due note'));
+      expect(passiveTask.history.length, equals(1));
+      expect(
+        afterFocusDowngrade.findTask('bysExp0001')!.suspendedAt,
+        isNull,
+        reason: 'Committed downgrade mutation must run board-wide block cleanup at laterNow',
+      );
+
+      // 2. Focus -> Ready when >= 7 other eligible tasks and otherEligible[6] has effective priority:
+      final eightUrgent = <TaskItem>[
+        TaskItem(
+          id: 'urgTarget1',
+          title: 'Urgent Due Target (No Priority Flag)',
+          createdAt: now,
+          modifiedAt: now,
+          dueAt: now.add(const Duration(hours: 4)),
+          dueNote: 'Urgent note',
+        ),
+        for (var i = 1; i <= 7; i++)
+          TaskItem(
+            id: 'urgPeer00$i',
+            title: 'Urgent Peer $i',
+            createdAt: now,
+            modifiedAt: now,
+            dueAt: now.add(Duration(hours: i)),
+          ),
+      ];
+      final crowdedUrgentBoard = TaskBoard.evaluate(
+        tasks: eightUrgent,
+        evaluationTime: now,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: eightUrgent.map((t) => t.id).toList(),
+        ),
+      );
+      final downgradedInCrowdedUrgent = crowdedUrgentBoard.downgradeTask(
+        'urgTarget1',
+        currentDate: laterNow,
+      );
+      final crowdedTarget = downgradedInCrowdedUrgent.findTask('urgTarget1')!;
+      expect(crowdedTarget.isDuePassive, isFalse);
+      expect(
+        crowdedTarget.isPriority,
+        isFalse,
+        reason: 'When target is already due-urgent and >=7 other urgent tasks exist, priority stays false and task.modified stays unchanged',
+      );
+      expect(crowdedTarget.modifiedAt, equals(now));
+      expect(
+        downgradedInCrowdedUrgent.ready.map((t) => t.id),
+        contains('urgTarget1'),
+      );
+
+      // 3. Pure no-op guard: solo non-priority, non-urgent Focus task + bystander with expired suspendedAt.
+      // Because downgrading solo00OkD2 is a pure no-op, bystander's expired suspendedAt MUST NOT be mutated!
+      final noOpBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'solo00OkD2',
+            title: 'Solo Regular',
+            createdAt: now,
+            modifiedAt: now,
+          ),
+          TaskItem(
+            id: 'bysUnclnd1',
+            title: 'Unqueued Bystander With Future Suspension',
+            createdAt: now,
+            modifiedAt: now,
+            suspendedAt: now.add(const Duration(minutes: 10)),
+            suspendedNote: 'Must survive pure no-op',
+          ),
+        ],
+        evaluationTime: now,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: const <String>['solo00OkD2'],
+        ),
+      );
+      final afterNoOp = noOpBoard.downgradeTask(
+        'solo00OkD2',
+        currentDate: laterNow,
+      );
+      expect(afterNoOp.findTask('bysUnclnd1')!.suspendedAt, isNotNull);
+      expect(
+        afterNoOp.findTask('bysUnclnd1')!.suspendedNote,
+        equals('Must survive pure no-op'),
+      );
+
+      // 4. Ready -> Planned -> Someday preserves dueAt, isDuePassive, dueNote, and history while stripping suspended/suspendedNote:
+      final nineTasks = <TaskItem>[
+        for (var i = 1; i <= 3; i++)
+          TaskItem(
+            id: 'foc000000$i',
+            title: 'Focus $i',
+            isPriority: true,
+            createdAt: now,
+            modifiedAt: now,
+          ),
+        TaskItem(
+          id: 'rdyUrgent1',
+          title: 'Ready Urgent Target',
+          isPriority: true,
+          createdAt: now,
+          modifiedAt: now,
+          dueAt: now.add(const Duration(hours: 3)),
+          dueNote: 'Deadline note',
+          history: <TaskHistoryEntry>[
+            TaskHistoryEntry(timestampUtc: now, text: 'Entered ready'),
+          ],
+        ),
+        for (var i = 1; i <= 5; i++)
+          TaskItem(
+            id: 'fil000000$i',
+            title: 'Filler $i',
+            createdAt: now,
+            modifiedAt: now,
+          ),
+      ];
+      final readyBoard = TaskBoard.evaluate(
+        tasks: nineTasks,
+        evaluationTime: now,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: nineTasks.map((t) => t.id).toList(),
+        ),
+      );
+      final inPlanned = readyBoard.downgradeTask(
+        'rdyUrgent1',
+        currentDate: now.add(const Duration(minutes: 5)),
+      );
+      final plannedTarget = inPlanned.findTask('rdyUrgent1')!;
+      expect(inPlanned.planned.map((t) => t.id), contains('rdyUrgent1'));
+      expect(plannedTarget.isPriority, isFalse);
+      expect(plannedTarget.isDuePassive, isTrue);
+      expect(plannedTarget.dueNote, equals('Deadline note'));
+
+      final inSomeday = inPlanned.downgradeTask(
+        'rdyUrgent1',
+        currentDate: now.add(const Duration(minutes: 10)),
+      );
+      final somedayTarget = inSomeday.findTask('rdyUrgent1')!;
+      expect(inSomeday.someday.map((t) => t.id), contains('rdyUrgent1'));
+      expect(somedayTarget.dueAt, equals(now.add(const Duration(hours: 3))));
+      expect(somedayTarget.isDuePassive, isTrue);
+      expect(somedayTarget.dueNote, equals('Deadline note'));
+      expect(somedayTarget.history.length, equals(1));
+    });
+  });
 }

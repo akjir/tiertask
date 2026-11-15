@@ -72,7 +72,7 @@ class TaskInfoDialog extends ConsumerWidget {
     );
   }
 
-  /// Builds the prerequisite tasks section when [task] depends on other tasks.
+  /// Builds the prerequisite tasks section when [task] is actively blocked by prerequisites on [board].
   static _TaskInfoSectionData? _buildBlockedBySection(
     TaskItem task,
     TaskBoard board,
@@ -82,15 +82,24 @@ class TaskInfoDialog extends ConsumerWidget {
       return null;
     }
     var satisfiedCount = 0;
+    var hasUnsatisfied = false;
     final details = <String>[];
     for (final dependency in task.dependencies) {
+      if (board.deletedBlock.findTaskRecord(dependency.taskId) != null) {
+        continue;
+      }
       final target = board.findTask(dependency.taskId);
       final isSatisfied =
           target == null || target.completions >= dependency.requiredCompletion;
       if (isSatisfied) {
         satisfiedCount++;
+      } else {
+        hasUnsatisfied = true;
       }
       details.add(target?.title ?? dependency.taskId);
+    }
+    if (!hasUnsatisfied) {
+      return null;
     }
     return _TaskInfoSectionData(
       details: details,
@@ -99,7 +108,7 @@ class TaskInfoDialog extends ConsumerWidget {
       title: localizations.taskBlockedBySectionTitle,
       value: localizations.taskInfoBlockedByProgress(
         satisfiedCount.toString(),
-        task.dependencies.length.toString(),
+        details.length.toString(),
       ),
     );
   }
@@ -350,17 +359,17 @@ class TaskInfoDialog extends ConsumerWidget {
     );
   }
 
-  /// Builds the suspension section when [task] is suspended.
+  /// Builds the suspension section when [task] has an active deferral at [nowUtc].
   static _TaskInfoSectionData? _buildSuspendedSection(
     TaskItem task,
     WebDavConfig configuration,
     AppLocalizations localizations,
     DateTime nowUtc,
   ) {
-    final suspendedAt = task.suspendedAt;
-    if (!task.isSuspendedForever && suspendedAt == null) {
+    if (!task.hasActiveSuspendedAt(nowUtc)) {
       return null;
     }
+    final suspendedAt = task.suspendedAt;
     if (task.isSuspendedForever ||
         suspendedAt == null ||
         suspendedAt == TaskItem.defaultSuspendedAt) {
@@ -373,15 +382,13 @@ class TaskInfoDialog extends ConsumerWidget {
     }
     final localSuspended = configuration.toLocalWallClock(suspendedAt);
     final timestamp = TaskItem.formatTdfTimestamp(localSuspended);
-    final valueText = suspendedAt.isAfter(nowUtc)
-        ? localizations.taskInfoSuspendedUntil(
-            timestamp,
-            _formatRemainingDuration(
-              suspendedAt.difference(nowUtc),
-              localizations,
-            ),
-          )
-        : localizations.taskInfoSuspendedElapsed(timestamp);
+    final valueText = localizations.taskInfoSuspendedUntil(
+      timestamp,
+      _formatRemainingDuration(
+        suspendedAt.difference(TaskItem.normalizeTimestamp(nowUtc)),
+        localizations,
+      ),
+    );
     return _TaskInfoSectionData(
       icon: Icons.pause_circle_outline_rounded,
       keyPrefix: 'suspended_task_indicator',

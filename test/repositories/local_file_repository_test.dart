@@ -350,12 +350,12 @@ void main() {
       final backup002File = File('${tempDirectory.path}/wipe_test.tdf.bak.002');
 
       await repository.wipeTdf(createBackup: true);
-      expect(await mainFile.readAsString(), equals('tdf 0.6.0\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.7.0\n'));
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content 1', flush: true);
       await repository.wipeTdf(createBackup: false);
-      expect(await mainFile.readAsString(), equals('tdf 0.6.0\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.7.0\n'));
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content A', flush: true);

@@ -25,6 +25,7 @@ import '../models/task_board_undo.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
+import '../models/tdf_payload_comparison.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
@@ -118,17 +119,18 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Adds a new TDF `label` block with [name] and optional `#RRGGBB` [color] and persists to storage.
+  /// Adds a new TDF `label` block with [name], optional `#RRGGBB` [color], and validated [links] and persists to storage.
   Future<void> addLabel(
     String name, {
     String? color,
     String? id,
     String? note,
     bool isScoped = false,
+    Iterable<TaskLink>? links,
     List<TaskCondition> conditions = const [],
     DateTime? currentDate,
   }) async {
-    final (utcNow, _) = _resolveTimestamps(currentDate);
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     await _commitMutation(
       _currentBoard.addLabel(
         name,
@@ -136,8 +138,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         id: id,
         note: note,
         isScoped: isScoped,
+        links: links ?? const <TaskLink>[],
         conditions: conditions,
         currentDate: utcNow,
+        localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -153,7 +158,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String? note,
     DateTime? currentDate,
   }) async {
-    final (utcNow, _) = _resolveTimestamps(currentDate);
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     await _commitMutation(
       _currentBoard.addLocation(
         name,
@@ -164,6 +169,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         id: id,
         note: note,
         currentDate: utcNow,
+        localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -179,13 +186,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<SubtaskItem> subtasks = const [],
     List<String> labelIds = const [],
     DateTime? dueAt,
+    bool isDuePassive = false,
+    String? dueNote,
     TaskOrigin? origin,
     DateTime? suspendedAt,
     bool isSuspendedForever = false,
+    String? suspendedNote,
     TaskRepeatRule? repeatRule,
     List<String> blockedByTaskIds = const [],
     List<TdfTaskDependency>? dependencies,
     List<TaskLink> links = const [],
+    Iterable<TaskHistoryEntry>? history,
     List<TaskCondition> conditions = const [],
     DateTime? currentDate,
     String? id,
@@ -201,19 +212,47 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         subtasks: subtasks,
         labelIds: labelIds,
         dueAt: dueAt,
+        isDuePassive: isDuePassive,
+        dueNote: dueNote,
         origin: origin,
         suspendedAt: suspendedAt,
         isSuspendedForever: isSuspendedForever,
+        suspendedNote: suspendedNote,
         repeatRule: repeatRule,
         blockedByTaskIds: blockedByTaskIds,
         dependencies: dependencies,
         links: links,
+        history: history ?? const <TaskHistoryEntry>[],
         conditions: conditions,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
         id: id,
       ),
     );
+  }
+
+  /// Appends and canonically deduplicates a single [TaskHistoryEntry] on [taskId] and persists to storage when changed.
+  Future<void> addTaskHistoryEntry(
+    String taskId, {
+    required DateTime timestampUtc,
+    required String text,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final boardBefore = _currentBoard;
+    final updatedBoard = boardBefore.addTaskHistoryEntry(
+      taskId,
+      timestampUtc: timestampUtc,
+      text: text,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
+    );
+    if (updatedBoard == boardBefore) {
+      return;
+    }
+    await _commitMutation(updatedBoard);
   }
 
   /// Moves an active task immediately to Tier 4 ([TaskTier.blocked]) and persists to storage.
@@ -229,6 +268,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         suspendedUntil: suspendedUntil,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -248,6 +288,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       expectedCompletions: expectedCompletions,
       currentDate: utcNow,
       localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
     );
     final updatedTask = updatedBoard.findTask(taskId);
     final undoEntry =
@@ -259,6 +300,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             kind: TaskUndoActionKind.complete,
             boardBefore: boardBefore,
             taskBefore: taskBefore,
+            boardAfter: updatedBoard,
           )
         : null;
     await _commitMutation(updatedBoard, undoEntry: undoEntry);
@@ -266,7 +308,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
   Future<void> deleteLabel(String labelId, {DateTime? currentDate}) async {
-    final (utcNow, _) = _resolveTimestamps(currentDate);
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final existingLabel = _currentBoard.findLabel(labelId);
     final deleteTimestamp = TaskItem.nextModifiedTimestamp(
       utcNow,
@@ -279,7 +321,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       deleteTimestamp,
     );
     await _commitMutation(
-      _currentBoard.deleteLabel(labelId, currentDate: utcNow),
+      _currentBoard.deleteLabel(
+        labelId,
+        currentDate: utcNow,
+        localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
+      ),
     );
   }
 
@@ -305,6 +352,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         locationId,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -318,6 +366,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       taskId,
       currentDate: utcNow,
       localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
     );
     final undoEntry =
         taskBefore != null && updatedBoard.findTask(taskId) == null
@@ -326,6 +375,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             kind: TaskUndoActionKind.delete,
             boardBefore: boardBefore,
             taskBefore: taskBefore,
+            boardAfter: updatedBoard,
           )
         : null;
     await _commitMutation(updatedBoard, undoEntry: undoEntry);
@@ -348,6 +398,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       currentLongitude: locationFix?.longitude,
       currentDate: utcNow,
       localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
     );
     final updatedTask = updatedBoard.findTask(taskId);
     final didDowngradeMutate =
@@ -369,8 +420,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updatedBoard, undoEntry: undoEntry);
   }
 
-  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.5.1`) or `0.6.0` [rawTdf]
-  /// document into `tdf 0.6.0`, invalidates any earlier synchronization baseline per
+  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.6.0`) or `0.7.0` [rawTdf]
+  /// document into `tdf 0.7.0`, invalidates any earlier synchronization baseline per
   /// `TDF_SPEC.md` Section 10.1, and persists the migrated document to active storage.
   Future<TdfImportResult> importLegacyTdf(
     String rawTdf, {
@@ -408,6 +459,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         afterTaskId: afterTaskId,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -474,6 +526,28 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
+  /// Removes a single [TaskHistoryEntry] from [taskId] when present and persists to storage when changed.
+  Future<void> removeTaskHistoryEntry(
+    String taskId, {
+    required DateTime timestampUtc,
+    required String text,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final boardBefore = _currentBoard;
+    final updatedBoard = boardBefore.removeTaskHistoryEntry(
+      taskId,
+      entry: TaskHistoryEntry(timestampUtc: timestampUtc, text: text),
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
+    );
+    if (updatedBoard == boardBefore) {
+      return;
+    }
+    await _commitMutation(updatedBoard);
+  }
+
   /// Restores a completed task to [targetTier] (defaulting to [TaskTier.planned]) per
   /// `TDF_SPEC.md` Section 6.5 and persists to storage.
   Future<void> restoreTask(
@@ -488,6 +562,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         targetTier: targetTier,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -505,6 +580,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         isPriority: isPriority,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -614,6 +690,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       stepIndex,
       currentDate: utcNow,
       localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
     );
     final updatedTask = updatedBoard.findTask(taskId);
     final didAutoFinishComplete =
@@ -628,6 +705,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             kind: TaskUndoActionKind.complete,
             boardBefore: boardBefore,
             taskBefore: taskBefore,
+            boardAfter: updatedBoard,
           )
         : null;
     await _commitMutation(updatedBoard, undoEntry: undoEntry);
@@ -655,6 +733,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       entry,
       utcNow: utcNow,
       localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
     );
     if (outcome == null) {
       return false;
@@ -710,6 +789,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String? note,
     bool clearNote = false,
     bool? isScoped,
+    Iterable<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) async {
@@ -723,9 +803,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         note: note,
         clearNote: clearNote,
         isScoped: isScoped,
+        links: links,
         conditions: conditions,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -757,6 +839,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         clearNote: clearNote,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
   }
@@ -764,7 +847,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Updates an existing task with [taskId] and persists the updated board to storage.
   Future<void> updateTask(
     String taskId, {
-    required String title,
+    String? title,
     String? note,
     TaskTier? targetTier,
     bool? isPriority,
@@ -772,17 +855,23 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
     DateTime? dueAt,
+    bool? isDuePassive,
+    String? dueNote,
     bool clearDueAt = false,
+    bool clearDueNote = false,
     TaskOrigin? origin,
     bool clearOrigin = false,
     DateTime? suspendedAt,
     bool? isSuspendedForever,
+    String? suspendedNote,
     bool clearSuspendedAt = false,
+    bool clearSuspendedNote = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
     List<String>? blockedByTaskIds,
     List<TdfTaskDependency>? dependencies,
     List<TaskLink>? links,
+    Iterable<TaskHistoryEntry>? history,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
   }) async {
@@ -798,22 +887,55 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         subtasks: subtasks,
         labelIds: labelIds,
         dueAt: dueAt,
+        isDuePassive: isDuePassive,
+        dueNote: dueNote,
         clearDueAt: clearDueAt,
+        clearDueNote: clearDueNote,
         origin: origin,
         clearOrigin: clearOrigin,
         suspendedAt: suspendedAt,
         isSuspendedForever: isSuspendedForever,
+        suspendedNote: suspendedNote,
         clearSuspendedAt: clearSuspendedAt,
+        clearSuspendedNote: clearSuspendedNote,
         repeatRule: repeatRule,
         clearRepeatRule: clearRepeatRule,
         blockedByTaskIds: blockedByTaskIds,
         dependencies: dependencies,
         links: links,
+        history: history,
         conditions: conditions,
         currentDate: utcNow,
         localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
       ),
     );
+  }
+
+  /// Replaces an existing `(oldTimestampUtc, oldText)` history entry on [taskId] and persists to storage when changed.
+  Future<void> updateTaskHistoryEntry(
+    String taskId, {
+    required DateTime oldTimestampUtc,
+    required String oldText,
+    required DateTime newTimestampUtc,
+    required String newText,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final boardBefore = _currentBoard;
+    final updatedBoard = boardBefore.updateTaskHistoryEntry(
+      taskId,
+      oldEntry: TaskHistoryEntry(timestampUtc: oldTimestampUtc, text: oldText),
+      newTimestampUtc: newTimestampUtc,
+      newText: newText,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: _resolveTimeZone(utcNow),
+    );
+    if (updatedBoard == boardBefore) {
+      return;
+    }
+    await _commitMutation(updatedBoard);
   }
 
   /// Wipes and re-initializes the local `.tdf` file for [config], optionally creating a `.bak` backup first, and resets synchronization baselines.
@@ -960,19 +1082,60 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return !rolledBack;
   }
 
-  /// Returns `true` when any dependent task in [dependentIds] changed between [previousBoard] and [nextBoard].
+  /// Returns `true` when any dependent task in [dependentIds] had a non-cleanup change between [previousBoard] and [nextBoard].
   bool _didAnyDependentChange(
-    Set<String> dependentIds,
+    Iterable<String> dependentIds,
     TaskBoard previousBoard,
-    TaskBoard nextBoard,
-  ) {
+    TaskBoard nextBoard, {
+    required Map<String, TaskItem> nextLiveTasksById,
+    required Set<String> nextDeletedTaskIds,
+    required DateTime nowUtc,
+  }) {
     for (final dependentId in dependentIds) {
-      if (previousBoard.findTask(dependentId) !=
-          nextBoard.findTask(dependentId)) {
+      if (_didTaskChangeModuloBlockCleanup(
+        dependentId,
+        previousBoard,
+        nextBoard,
+        nextLiveTasksById: nextLiveTasksById,
+        nextDeletedTaskIds: nextDeletedTaskIds,
+        nowUtc: nowUtc,
+      )) {
         return true;
       }
     }
     return false;
+  }
+
+  /// Returns `true` when [taskId] was added, deleted, completed, or had a non-cleanup payload edit between [previousBoard] and [nextBoard].
+  bool _didTaskChangeModuloBlockCleanup(
+    String taskId,
+    TaskBoard previousBoard,
+    TaskBoard nextBoard, {
+    required Map<String, TaskItem> nextLiveTasksById,
+    required Set<String> nextDeletedTaskIds,
+    required DateTime nowUtc,
+  }) {
+    final previousTask = previousBoard.findTask(taskId);
+    final nextTask = nextBoard.findTask(taskId);
+    if (previousTask == nextTask) {
+      return false;
+    }
+    if (previousTask == null || nextTask == null) {
+      return true;
+    }
+    if (previousTask.isCompleted ||
+        previousTask.completedAt != null ||
+        nextTask.isCompleted ||
+        nextTask.completedAt != null) {
+      return true;
+    }
+    return !TdfPayloadComparison.taskPayloadsEqualModuloBlockCleanup(
+      left: previousTask,
+      right: nextTask,
+      liveTasksById: nextLiveTasksById,
+      deletedTaskIds: nextDeletedTaskIds,
+      nowUtc: nowUtc,
+    );
   }
 
   /// Returns `true` when [taskId]'s queue membership or relative order among shared queued tasks changed between [previousQueue] and [nextQueue].
@@ -1180,6 +1343,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           config,
           candidateBoard: existingBoard,
         );
+        if (existingBoard != null && board != existingBoard) {
+          _pruneInvalidatedUndoEntries(existingBoard, board);
+        }
         _conflictWatchDigest = null;
         _lastFailedWatchDigest = null;
         return board;
@@ -1207,6 +1373,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         candidateBoard: existingBoard,
         requireTargets: true,
       );
+      if (existingBoard != null && board != existingBoard) {
+        _pruneInvalidatedUndoEntries(existingBoard, board);
+      }
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
       state = AsyncData(board);
@@ -1301,10 +1470,20 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   bool _isUndoEntryInvalidated(
     TaskUndoEntry entry,
     TaskBoard previousBoard,
-    TaskBoard nextBoard,
-  ) {
+    TaskBoard nextBoard, {
+    required Map<String, TaskItem> nextLiveTasksById,
+    required Set<String> nextDeletedTaskIds,
+    required DateTime nowUtc,
+  }) {
     final taskId = entry.snapshotTask.id;
-    if (previousBoard.findTask(taskId) != nextBoard.findTask(taskId)) {
+    if (_didTaskChangeModuloBlockCleanup(
+      taskId,
+      previousBoard,
+      nextBoard,
+      nextLiveTasksById: nextLiveTasksById,
+      nextDeletedTaskIds: nextDeletedTaskIds,
+      nowUtc: nowUtc,
+    )) {
       return true;
     }
     if (previousBoard.deletedBlock.findTaskRecord(taskId) !=
@@ -1319,10 +1498,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         )) {
       return true;
     }
+    final trackedDependents = <String>{
+      ...entry.previouslyBlockedDependentIds,
+      ...entry.previouslyBlockedDependencies.keys,
+    };
     return _didAnyDependentChange(
-      entry.previouslyBlockedDependentIds,
+      trackedDependents,
       previousBoard,
       nextBoard,
+      nextLiveTasksById: nextLiveTasksById,
+      nextDeletedTaskIds: nextDeletedTaskIds,
+      nowUtc: nowUtc,
     );
   }
 
@@ -1427,12 +1613,26 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     if (_undoStack.isEmpty) {
       return;
     }
+    final (nowUtc, _) = _resolveTimestamps(null);
+    final nextLiveTasksById = <String, TaskItem>{
+      for (final task in nextBoard.allTasks) task.id: task,
+    };
+    final nextDeletedTaskIds = <String>{
+      for (final record in nextBoard.deletedBlock.tasks) record.taskId,
+    };
     final currentNotice = ref.read(taskUndoStateProvider).latestNotice;
     var noticePruned = false;
     final retained = <TaskUndoEntry>[];
     var prunedCount = 0;
     for (final entry in _undoStack) {
-      if (_isUndoEntryInvalidated(entry, previousBoard, nextBoard)) {
+      if (_isUndoEntryInvalidated(
+        entry,
+        previousBoard,
+        nextBoard,
+        nextLiveTasksById: nextLiveTasksById,
+        nextDeletedTaskIds: nextDeletedTaskIds,
+        nowUtc: nowUtc,
+      )) {
         prunedCount++;
         if (currentNotice?.sequence == entry.sequence) {
           noticePruned = true;
@@ -1551,6 +1751,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         );
     return evicted;
   }
+
+  /// Resolves the active workspace [TdfTimeZoneContext] at [utcNow].
+  TdfTimeZoneContext _resolveTimeZone(DateTime utcNow) =>
+      TaskSyncPipeline.resolveWorkspaceTimeZone(readCurrentConfig(ref), utcNow);
 
   /// Resolves the normalized UTC timestamp and configured local wall-clock timestamp.
   (DateTime utcNow, DateTime localNow) _resolveTimestamps(

@@ -24,12 +24,17 @@ import '../models/tdf_sync_metadata.dart';
 import 'tdf_directive_parser.dart';
 import 'tdf_parser.dart';
 
-/// Canonical TDF 0.6.0 serializer (`spec/TDF_SPEC_0.6.0.md` Sections 4 and 7.1).
+/// Canonical TDF 0.7.0 (and optional `0.6.0`) serializer (`spec/TDF_SPEC_0.7.0.md` Sections 4 and 7.1).
 abstract final class TdfSerializer {
-  /// Serializes [board] into canonical TDF 0.6.0 text, validating all output bounds before returning.
-  static String serialize(TaskBoard board) {
-    final buffer = StringBuffer()
-      ..writeln('tdf ${TdfBlockParser.supportedVersion}');
+  /// Serializes [board] into canonical TDF text under [targetSchema], validating all output bounds before returning.
+  static String serialize(
+    TaskBoard board, {
+    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
+  }) {
+    final versionHeader = targetSchema == TdfSchemaVersion.v060
+        ? TdfBlockParser.legacyLoadableVersion060
+        : TdfBlockParser.supportedVersion;
+    final buffer = StringBuffer()..writeln('tdf $versionHeader');
 
     _serializeDeletedBlock(buffer, board.deletedBlock);
     _serializeQueueBlock(buffer, board.queueBlock);
@@ -38,7 +43,7 @@ abstract final class TdfSerializer {
       ..sort((a, b) => a.id.compareTo(b.id));
     for (final label in sortedLabels) {
       buffer.writeln();
-      _serializeLabel(buffer, label);
+      _serializeLabel(buffer, label, targetSchema);
     }
 
     if (board.locations.length > maxTdfLocations) {
@@ -60,7 +65,7 @@ abstract final class TdfSerializer {
       ..sort((a, b) => a.id.compareTo(b.id));
     for (final task in sortedTasks) {
       buffer.writeln();
-      _serializeTask(buffer, task);
+      _serializeTask(buffer, task, targetSchema);
     }
 
     final output = buffer.toString();
@@ -115,7 +120,25 @@ abstract final class TdfSerializer {
     ),
   };
 
-  /// Formats a UTC [timestamp] with explicit seconds (`YYYY-MM-DD HH:MM:SS`) for `deleted`, `queue.modified`, `suspended`, and `due`.
+  /// Formats a `due` directive argument string under [targetSchema].
+  static String _formatDueValue(
+    DateTime due,
+    TdfSchemaVersion targetSchema, {
+    required bool isPassive,
+    required String? note,
+  }) {
+    final base = _formatExplicitSecondsUtcTimestamp(due);
+    if (targetSchema == TdfSchemaVersion.v060) {
+      return base;
+    }
+    final passiveSuffix = isPassive ? ' passive' : '';
+    final noteSuffix = (note != null && note.isNotEmpty)
+        ? ' ${_escapeQuoted(note)}'
+        : '';
+    return '$base$passiveSuffix$noteSuffix';
+  }
+
+  /// Formats a UTC [timestamp] with explicit seconds (`YYYY-MM-DD HH:MM:SS`) for `deleted`, `queue.modified`, `suspended`, `due`, and `history`.
   static String _formatExplicitSecondsUtcTimestamp(DateTime timestamp) {
     final utc = timestamp.toUtc();
     final year = utc.year.toString().padLeft(4, '0');
@@ -127,13 +150,34 @@ abstract final class TdfSerializer {
     return '$year-$month-$day $hour:$minute:$second';
   }
 
-  /// Formats a `repeat` rule in canonical form (omitting `00:00:00` midnight clock).
-  static String _formatRepeatRule(TaskRepeatRule rule) {
+  /// Formats a `repeat` rule without `0.7.0` `lead` arguments for `tdf 0.6.0` serialization.
+  static String _formatLegacy060RepeatRule(TaskRepeatRule rule) {
     final clockStr = rule.clock.formatCanonical();
     if (clockStr.isEmpty) {
       return '${rule.count} ${rule.unit.tdfToken}';
     }
     return '${rule.count} ${rule.unit.tdfToken} $clockStr';
+  }
+
+  /// Formats a `suspended` directive argument string for [task] under [targetSchema], or returns `null` when omitted.
+  static String? _formatSuspendedValue(
+    TaskItem task,
+    TdfSchemaVersion targetSchema,
+  ) {
+    String? base;
+    if (task.isSuspendedForever) {
+      base = 'forever';
+    } else if (task.suspendedAt case final suspended?) {
+      base = _formatExplicitSecondsUtcTimestamp(suspended);
+    }
+    if (base == null || targetSchema == TdfSchemaVersion.v060) {
+      return base;
+    }
+    final note = task.suspendedNote;
+    if (note != null && note.isNotEmpty) {
+      return '$base ${_escapeQuoted(note)}';
+    }
+    return base;
   }
 
   /// Formats a UTC [timestamp] as `YYYY-MM-DD HH:MM` when `second == 0`, else `YYYY-MM-DD HH:MM:SS`.
@@ -259,21 +303,20 @@ abstract final class TdfSerializer {
     buffer.writeln('}');
   }
 
-  /// Emits a `label <id> [scoped] { ... }` block in the 5-position canonical order (`spec/TDF_SPEC_0.6.0.md` Section 4.2 & 7.1).
-  static void _serializeLabel(StringBuffer buffer, TdfLabel label) {
-    final scopedSuffix = label.isScoped ? ' scoped' : '';
-    buffer.writeln('label ${label.id}$scopedSuffix {');
-
-    final scalarLines = <({String key, String value})>[
-      (key: 'name', value: _escapeQuoted(label.name)),
-      if (label.color case final color?)
-        (key: 'color', value: _escapeQuoted(color)),
-      if (label.note case final note? when note.isNotEmpty)
-        (key: 'note', value: _escapeQuoted(note)),
-      if (label.modifiedAt case final modified?
-          when modified.toUtc() != TdfLabel.defaultModifiedAt)
-        (key: 'modified', value: _formatUtcTimestamp(modified)),
-    ];
+  /// Emits a `label <id> [scoped] { ... }` block in the 6-position canonical order (`spec/TDF_SPEC_0.7.0.md` Section 4.2 & 7.1).
+  static void _serializeLabel(
+    StringBuffer buffer,
+    TdfLabel label,
+    TdfSchemaVersion targetSchema,
+  ) {
+    final isV070 = targetSchema == TdfSchemaVersion.v070;
+    if (isV070 && label.links.length > maxTdfLinksPerLabel) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Label exceeds maximum of $maxTdfLinksPerLabel links.',
+      );
+    }
 
     final orderedConditions = _orderConditionsCanonically(label.conditions);
     if (orderedConditions.length > maxTdfConditionRulesPerEntity) {
@@ -284,6 +327,41 @@ abstract final class TdfSerializer {
             'Condition block exceeds maximum of $maxTdfConditionRulesPerEntity rules.',
       );
     }
+
+    final scalarLines = <({String key, String value})>[
+      (key: 'name', value: _escapeQuoted(label.name)),
+      if (label.color case final color?)
+        (key: 'color', value: _escapeQuoted(color)),
+      if (label.note case final note? when note.isNotEmpty)
+        (key: 'note', value: _escapeQuoted(note)),
+      if (label.modifiedAt case final modified?
+          when modified.toUtc() != TdfLabel.defaultModifiedAt)
+        (key: 'modified', value: _formatUtcTimestamp(modified)),
+      if (isV070)
+        for (final link in label.links)
+          (
+            key: 'link',
+            value: '${_escapeQuoted(link.title)} ${_escapeQuoted(link.uri)}',
+          ),
+    ];
+
+    final maxAllowedStmts = isV070
+        ? maxTdfStmtsPerBlock
+        : maxTdfLegacy060StmtsPerBlock;
+    final directStmtCount = isV070
+        ? label.canonicalDirectChildStatementCount
+        : scalarLines.length + (orderedConditions.isNotEmpty ? 1 : 0);
+    if (directStmtCount > maxAllowedStmts) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Label block exceeds maximum of $maxAllowedStmts direct child statements.',
+      );
+    }
+
+    final scopedSuffix = label.isScoped ? ' scoped' : '';
+    buffer.writeln('label ${label.id}$scopedSuffix {');
 
     String? inlineConditionValue;
     if (orderedConditions.length == 1) {
@@ -372,11 +450,40 @@ abstract final class TdfSerializer {
     buffer.writeln('}');
   }
 
-  /// Emits a `task <id> [priority] { ... }` block in the 15-position canonical order (`spec/TDF_SPEC_0.6.0.md` Section 4.1.2 & 7.1).
-  static void _serializeTask(StringBuffer buffer, TaskItem task) {
-    final prioritySuffix = task.isPriority ? ' priority' : '';
-    buffer.writeln('task ${task.id}$prioritySuffix {');
+  /// Emits a `task <id> [priority] { ... }` block in the 16-position canonical order (`spec/TDF_SPEC_0.7.0.md` Section 4.1.2 & 7.1).
+  static void _serializeTask(
+    StringBuffer buffer,
+    TaskItem task,
+    TdfSchemaVersion targetSchema,
+  ) {
+    final isV070 = targetSchema == TdfSchemaVersion.v070;
+    if (task.links.length > TaskLink.maxLinksPerTask) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Task exceeds maximum of ${TaskLink.maxLinksPerTask} links.',
+      );
+    }
+    if (isV070 && task.history.length > maxTdfHistoryPerTask) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task exceeds maximum of $maxTdfHistoryPerTask history entries.',
+      );
+    }
 
+    final orderedConditions = _orderConditionsCanonically(task.conditions);
+    if (orderedConditions.length > maxTdfConditionRulesPerEntity) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Condition block exceeds maximum of $maxTdfConditionRulesPerEntity rules.',
+      );
+    }
+
+    final suspendedValue = _formatSuspendedValue(task, targetSchema);
     final lines = <({String key, String value})>[
       (key: 'name', value: _escapeQuoted(task.title)),
       if (task.note case final note? when note.isNotEmpty)
@@ -389,7 +496,12 @@ abstract final class TdfSerializer {
       if (task.completions > 0)
         (key: 'completions', value: '${task.completions}'),
       if (task.repeatRule case final repeat?)
-        (key: 'repeat', value: _formatRepeatRule(repeat)),
+        (
+          key: 'repeat',
+          value: isV070
+              ? repeat.toTdfDirectiveArgs()
+              : _formatLegacy060RepeatRule(repeat),
+        ),
       if (task.labelIds.isNotEmpty)
         (
           key: 'labels',
@@ -405,15 +517,17 @@ abstract final class TdfSerializer {
               dep.formatCanonical(),
           ].join(' '),
         ),
-      if (task.isSuspendedForever)
-        (key: 'suspended', value: 'forever')
-      else if (task.suspendedAt case final suspended?)
-        (
-          key: 'suspended',
-          value: _formatExplicitSecondsUtcTimestamp(suspended),
-        ),
+      if (suspendedValue != null) (key: 'suspended', value: suspendedValue),
       if (task.dueAt case final due?)
-        (key: 'due', value: _formatExplicitSecondsUtcTimestamp(due)),
+        (
+          key: 'due',
+          value: _formatDueValue(
+            due,
+            targetSchema,
+            isPassive: task.isDuePassive,
+            note: task.dueNote,
+          ),
+        ),
       if (task.origin case final origin?)
         (
           key: 'origin',
@@ -425,17 +539,15 @@ abstract final class TdfSerializer {
           key: 'link',
           value: '${_escapeQuoted(link.title)} ${_escapeQuoted(link.uri)}',
         ),
+      if (isV070)
+        for (final entry in task.history)
+          (
+            key: 'history',
+            value:
+                '${_formatExplicitSecondsUtcTimestamp(entry.timestampUtc)} ${_escapeQuoted(entry.text)}',
+          ),
     ];
 
-    final orderedConditions = _orderConditionsCanonically(task.conditions);
-    if (orderedConditions.length > maxTdfConditionRulesPerEntity) {
-      throw const TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: 1,
-        message:
-            'Condition block exceeds maximum of $maxTdfConditionRulesPerEntity rules.',
-      );
-    }
     if (orderedConditions.length == 1) {
       final part = _formatConditionRuleParts(orderedConditions.single);
       final inlineValue = part.args.isEmpty
@@ -443,6 +555,33 @@ abstract final class TdfSerializer {
           : '${part.key} ${part.args}';
       lines.add((key: 'condition', value: inlineValue));
     }
+
+    final maxAllowedStmts = isV070
+        ? maxTdfStmtsPerBlock
+        : maxTdfLegacy060StmtsPerBlock;
+    final directStmtCount = isV070
+        ? task.canonicalDirectChildStatementCount
+        : lines.length +
+              (orderedConditions.length > 1 ? 1 : 0) +
+              (task.subtasks.isNotEmpty ? 1 : 0);
+    if (directStmtCount > maxAllowedStmts) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task block exceeds maximum of $maxAllowedStmts direct child statements.',
+      );
+    }
+    if (task.subtasks.isNotEmpty && task.subtasks.length > maxAllowedStmts) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Subtasks block exceeds maximum of $maxAllowedStmts steps.',
+      );
+    }
+
+    final prioritySuffix = task.isPriority ? ' priority' : '';
+    buffer.writeln('task ${task.id}$prioritySuffix {');
 
     var maxKeyLen = 0;
     for (final line in lines) {
@@ -459,14 +598,6 @@ abstract final class TdfSerializer {
     }
 
     if (task.subtasks.isNotEmpty) {
-      if (task.subtasks.length > maxTdfStmtsPerBlock) {
-        throw const TdfException(
-          kind: TdfErrorKind.limitExceeded,
-          line: 1,
-          message:
-              'Subtasks block exceeds maximum of $maxTdfStmtsPerBlock steps.',
-        );
-      }
       final autoFinishSuffix = task.subtasksAutoFinish ? ' auto-finish' : '';
       final hasFalseStep = task.subtasks.any((step) => !step.isCompleted);
       final boolPadWidth = hasFalseStep ? 5 : 4;

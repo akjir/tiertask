@@ -23,6 +23,7 @@ import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import 'tdf_historical_parser.dart';
 import 'tdf_id_migration.dart';
+import 'tdf_serializer.dart';
 
 /// Stateless serializer, bounds validator, and ID rewriter for historical TDF schemas.
 @immutable
@@ -147,6 +148,10 @@ class TdfHistoricalSerializer {
     final output = buffer.toString();
     return output == 'tdf 0.5.1\n\n' ? 'tdf 0.5.1\n' : output;
   }
+
+  /// Serializes an intermediate `0.6.0` [board] in canonical `0.6.0` order (`spec/TDF_SPEC_0.7.0.md` Section 10.7).
+  static String serializeDocument060(TaskBoard board) =>
+      TdfSerializer.serialize(board, targetSchema: TdfSchemaVersion.v060);
 
   /// Serializes an intermediate `0.3.0` or `0.4.0` document in declaration order.
   static String serializeHistoricalDocument({

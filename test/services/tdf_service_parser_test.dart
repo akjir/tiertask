@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_service.dart';
@@ -154,7 +155,7 @@ task 7mPr4T09xY {
       expect(board.completed.single.completions, equals(1));
 
       final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.6.0\n\ndeleted {\n'));
+      expect(serialized, startsWith('tdf 0.7.0\n\ndeleted {\n'));
       expect(serialized.contains('    queued '), isFalse);
       expect(
         serialized,
@@ -373,22 +374,26 @@ task 333333OkD2 {
       expect(reparsed.labels.single.conditions.length, equals(3));
     });
 
-    test('accepts tdf 0.6.0, tdf 0.5.1, and tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
+    test('accepts tdf 0.7.0, tdf 0.6.0, tdf 0.5.1, and tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
       expect(
         TdfService.supportedVersion,
-        equals('0.6.0'),
-        reason: 'Supported TDF version must be 0.6.0',
+        equals('0.7.0'),
+        reason: 'Supported TDF version must be 0.7.0',
       );
+      expect(TdfService.maxLinksPerLabel, equals(20));
+      expect(TdfService.maxHistoryPerTask, equals(500));
+      expect(TdfService.maxStmtsPerBlock, equals(1024));
+      expect(tdfService.parse('tdf 0.7.0\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.6.0\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.5.1\n').focus, isEmpty);
       expect(tdfService.parse('tdf 0.5.0\n').focus, isEmpty);
       expect(
         tdfService
-            .parse('   \t  \n# only comment\r\ntdf 0.6.0  # version\n')
+            .parse('   \t  \n# only comment\r\ntdf 0.7.0  # version\n')
             .focus,
         isEmpty,
       );
-      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.6.0\n'));
+      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.7.0\n'));
 
       for (final legacyVersion in ['0.4.0', '0.3.0', '0.2.0', '0.1.0']) {
         expect(
@@ -497,11 +502,11 @@ task somdayOkD2 {
       expect(board.someday.map((task) => task.id), equals(['somdayOkD2']));
 
       final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.6.0\n'));
+      expect(serialized, startsWith('tdf 0.7.0\n'));
       expect(
         serialized.contains('\n    queued '),
         isFalse,
-        reason: 'Serializing a converted 0.5.0 document must emit tdf 0.6.0 with zero queued directives',
+        reason: 'Serializing a converted 0.5.0 document must emit tdf 0.7.0 with zero queued directives',
       );
     });
 
@@ -574,6 +579,74 @@ task link02OkD2 {
         ),
         reason: 'Section 2.8 requires EmptyText -> LimitExceeded (> 2048 scalars) -> InvalidUri (control char / scheme)',
       );
+    });
+
+    test('parses and serializes TDF 0.7.0 label links, repeat lead days, suspended/due notes, passive due, and history entries', () {
+      const doc070 = '''
+tdf 0.7.0
+
+label 4x9p2mOkD2 scoped {
+    name     "Context Hub"
+    modified 2026-11-01 08:00
+    link     "Repo" "https://github.com/example/repo"
+}
+
+task 8jKaCdOkD2 {
+    name      "Prepare release"
+    created   2026-11-01 08:00
+    modified  2026-11-01 09:00
+    repeat    1 months 08:30 lead 4 days
+    labels    4x9p2mOkD2
+    suspended 2026-11-10 08:30 "Wait until Monday\\nCheck CI"
+    due       2026-11-14 17:00 passive "Soft cutoff"
+    history   2026-11-01 09:00 "Drafted checklist"
+    history   2026-11-01 08:30 "Created branch"
+    history   2026-11-01 09:00 "Drafted checklist"
+}
+''';
+
+      final board = tdfService.parse(doc070, evaluationTime: fixedDate);
+      final label = board.findLabel('4x9p2mOkD2')!;
+      expect(
+        label.links,
+        equals(const [
+          TaskLink(title: 'Repo', uri: 'https://github.com/example/repo'),
+        ]),
+      );
+      final task = board.findTask('8jKaCdOkD2')!;
+      expect(
+        task.repeatRule,
+        equals(
+          const TaskRepeatRule(
+            count: 1,
+            unit: RepeatUnit.months,
+            clock: TdfRepeatClock(hour: 8, minute: 30),
+            leadDays: 4,
+          ),
+        ),
+      );
+      expect(task.suspendedNote, equals('Wait until Monday\nCheck CI'));
+      expect(task.isDuePassive, isTrue);
+      expect(task.dueNote, equals('Soft cutoff'));
+      expect(
+        task.history,
+        equals([
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 1, 8, 30),
+            text: 'Created branch',
+          ),
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 1, 9, 0),
+            text: 'Drafted checklist',
+          ),
+        ]),
+        reason: 'History entries must be canonically sorted and deduplicated',
+      );
+
+      final serialized = tdfService.serialize(board);
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(reparsed.findLabel('4x9p2mOkD2'), equals(label));
+      expect(reparsed.findTask('8jKaCdOkD2'), equals(task));
     });
   });
 }
