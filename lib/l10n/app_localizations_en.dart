@@ -1467,4 +1467,59 @@ class AppLocalizationsEn extends AppLocalizations {
   String taskInfoRepeatLeadDays(String days) {
     return 'Preparation window opens $days day(s) before due date';
   }
+
+  @override
+  String get historySectionTitle => 'History';
+
+  @override
+  String get tooltipIndicatorHistory => 'Has history entries';
+
+  @override
+  String get historyEmptyHint => 'No history entries recorded yet.';
+
+  @override
+  String get historyEntryTextLabel => 'History entry';
+
+  @override
+  String get historyEntryTextHint => 'Add progress update or note';
+
+  @override
+  String get historyTimestampLabel => 'Timestamp (optional, defaults to now)';
+
+  @override
+  String get historyTimestampHint => 'YYYY-MM-DD HH:MM';
+
+  @override
+  String get tooltipAddHistoryEntry => 'Add history entry';
+
+  @override
+  String get tooltipEditHistoryEntry => 'Edit history entry';
+
+  @override
+  String get tooltipSaveHistoryEntry => 'Update history entry';
+
+  @override
+  String get tooltipCancelEditHistoryEntry => 'Cancel history edit';
+
+  @override
+  String get tooltipDeleteHistoryEntry => 'Delete history entry';
+
+  @override
+  String get historyErrorTextEmpty => 'Enter a history text.';
+
+  @override
+  String get historyErrorTextTooLong =>
+      'History entry must not exceed 500 characters.';
+
+  @override
+  String get historyErrorTextInvalid =>
+      'History entry contains unsupported control characters.';
+
+  @override
+  String get historyErrorTimestampInvalid =>
+      'Enter a valid date (YYYY-MM-DD) and optional time (HH:MM).';
+
+  @override
+  String get historyErrorMaxExceeded =>
+      'Maximum of 500 history entries per task reached.';
 }

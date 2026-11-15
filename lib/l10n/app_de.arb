@@ -426,5 +426,22 @@
   "repeatLeadDaysLabel": "Vorbereitungszeit (Tage, optional)",
   "repeatLeadDaysHint": "0 (sofort nach Wiederholung aktivieren)",
   "repeatLeadDaysErrorInvalid": "Ganze Zahl zwischen 0 und 3650 Tagen eingeben.",
-  "taskInfoRepeatLeadDays": "Vorbereitungsfenster öffnet {days} Tag(e) vor Fälligkeit"
+  "taskInfoRepeatLeadDays": "Vorbereitungsfenster öffnet {days} Tag(e) vor Fälligkeit",
+  "historySectionTitle": "Verlauf",
+  "tooltipIndicatorHistory": "Enthält Verlaufseinträge",
+  "historyEmptyHint": "Noch keine Verlaufseinträge vorhanden.",
+  "historyEntryTextLabel": "Verlaufseintrag",
+  "historyEntryTextHint": "Fortschritt oder Notiz erfassen",
+  "historyTimestampLabel": "Zeitstempel (optional, Standard: jetzt)",
+  "historyTimestampHint": "JJJJ-MM-TT Std:Min",
+  "tooltipAddHistoryEntry": "Verlaufseintrag hinzufügen",
+  "tooltipEditHistoryEntry": "Verlaufseintrag bearbeiten",
+  "tooltipSaveHistoryEntry": "Verlaufseintrag aktualisieren",
+  "tooltipCancelEditHistoryEntry": "Bearbeitung abbrechen",
+  "tooltipDeleteHistoryEntry": "Verlaufseintrag löschen",
+  "historyErrorTextEmpty": "Bitte einen Verlaufstext eingeben.",
+  "historyErrorTextTooLong": "Verlaufseintrag darf maximal 500 Zeichen lang sein.",
+  "historyErrorTextInvalid": "Verlaufseintrag enthält nicht unterstützte Steuerzeichen.",
+  "historyErrorTimestampInvalid": "Gültiges Datum (JJJJ-MM-TT) und optionale Uhrzeit (Std:Min) eingeben.",
+  "historyErrorMaxExceeded": "Maximal 500 Verlaufseinträge pro Aufgabe erreicht."
 }

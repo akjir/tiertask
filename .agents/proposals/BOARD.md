@@ -11,11 +11,6 @@ This directory serves as the collaborative feature roadmap and specification hub
 
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
-| TEP-006 | TDF Specification 0.7.0 and Core Runtime Implementation | spec | review | [`tep-006-tdf-spec-0-7-0.md`](tep-006-tdf-spec-0-7-0.md) |
-| TEP-008 | Automatic Local TDF Directory Watching, Digest-Gated Reconciliation, and Per-Workspace Settings Toggle | feature | review | [`tep-008-local-file-directory-watch-sync.md`](tep-008-local-file-directory-watch-sync.md) |
-| TEP-010 | Configurable Deadline Lead-Window Preferences, Live Boundary Timer, and Urgency Indicators | feature | review | [`tep-010-deadline-lead-window-settings-and-urgency-ui.md`](tep-010-deadline-lead-window-settings-and-urgency-ui.md) |
-| TEP-011 | Deferral and Deadline Notes and Recurring Preparation Lead Editor UI | feature | review | [`tep-011-scheduling-notes-and-repeat-lead-ui.md`](tep-011-scheduling-notes-and-repeat-lead-ui.md) |
-| TEP-012 | Interactive Task History Journal in Task Info Dialog and Task Editor | feature | planned | [`tep-012-task-history-journal-ui.md`](tep-012-task-history-journal-ui.md) |
 
 ### Completed Proposals
 
@@ -26,8 +21,13 @@ This directory serves as the collaborative feature roadmap and specification hub
 | TEP-003 | TDF Specification 0.6.0 Exploratory Design and Conformance Roadmap | spec | completed | [`tep-003-tdf-spec-0-6-0.md`](tep-003-tdf-spec-0-6-0.md) |
 | TEP-004 | TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation | feature | completed | [`tep-004-tdf-0-6-0-implementation.md`](tep-004-tdf-0-6-0-implementation.md) |
 | TEP-005 | Selectable Location Source Resolution, Offline Open Location Code Decoding, and Forward Geocoding Disambiguation | feature | completed | [`tep-005-location-source-resolution.md`](tep-005-location-source-resolution.md) |
+| TEP-006 | TDF Specification 0.7.0 and Core Runtime Implementation | spec | completed | [`tep-006-tdf-spec-0-7-0.md`](tep-006-tdf-spec-0-7-0.md) |
 | TEP-007 | In-Memory Undo Stack with SnackBar and Desktop Shortcut Recovery | feature | completed | [`tep-007-undo-stack-snackbar-recovery.md`](tep-007-undo-stack-snackbar-recovery.md) |
+| TEP-008 | Automatic Local TDF Directory Watching, Digest-Gated Reconciliation, and Per-Workspace Settings Toggle | feature | completed | [`tep-008-local-file-directory-watch-sync.md`](tep-008-local-file-directory-watch-sync.md) |
 | TEP-009 | Label Context Hub and Label Reference Link Management | feature | completed | [`tep-009-label-context-hub-and-links.md`](tep-009-label-context-hub-and-links.md) |
+| TEP-010 | Configurable Deadline Lead-Window Preferences, Live Boundary Timer, and Urgency Indicators | feature | completed | [`tep-010-deadline-lead-window-settings-and-urgency-ui.md`](tep-010-deadline-lead-window-settings-and-urgency-ui.md) |
+| TEP-011 | Deferral and Deadline Notes and Recurring Preparation Lead Editor UI | feature | completed | [`tep-011-scheduling-notes-and-repeat-lead-ui.md`](tep-011-scheduling-notes-and-repeat-lead-ui.md) |
+| TEP-012 | Interactive Task History Journal in Task Info Dialog and Task Editor | feature | completed | [`tep-012-task-history-journal-ui.md`](tep-012-task-history-journal-ui.md) |
 
 ## Status Lifecycle
 

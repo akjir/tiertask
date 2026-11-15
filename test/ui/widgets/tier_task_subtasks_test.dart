@@ -20,8 +20,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -30,6 +32,7 @@ import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/ui/widgets/tier_task_pill.dart';
+import 'package:tiertask/ui/widgets/tier_task_subtasks_section.dart';
 
 import '../test_helpers.dart';
 
@@ -1126,6 +1129,49 @@ task ful001OkD2 {
       );
     },
   );
+
+  test('resolveTaskIndicatorSpecs omits history_task_indicator when empty and inserts it between links_task_indicator and subtasks_task_indicator in English and German', () async {
+    final enL10n = await AppLocalizations.delegate.load(const Locale('en'));
+    final deL10n = await AppLocalizations.delegate.load(const Locale('de'));
+    final now = DateTime.utc(2026, 11, 15, 12, 0);
+
+    final withoutHistory = TaskItem(
+      id: 'indOrd0001',
+      title: 'Without History',
+      createdAt: now,
+      links: const <TaskLink>[
+        TaskLink(title: 'Docs', uri: 'https://example.com/docs'),
+      ],
+      subtasks: const <SubtaskItem>[SubtaskItem(title: 'Step 1')],
+    );
+    final emptySpecs = resolveTaskIndicatorSpecs(withoutHistory, enL10n);
+    expect(
+      emptySpecs.map((spec) => spec.keyPrefix).toList(),
+      equals(const <String>['links_task_indicator', 'subtasks_task_indicator']),
+      reason: 'Tasks with empty history must not emit history_task_indicator',
+    );
+
+    final withHistory = withoutHistory.copyWith(
+      history: <TaskHistoryEntry>[
+        TaskHistoryEntry(timestampUtc: now, text: 'Recorded check'),
+      ],
+    );
+    final enSpecs = resolveTaskIndicatorSpecs(withHistory, enL10n);
+    expect(
+      enSpecs.map((spec) => spec.keyPrefix).toList(),
+      equals(const <String>[
+        'links_task_indicator',
+        'history_task_indicator',
+        'subtasks_task_indicator',
+      ]),
+      reason: 'history_task_indicator must sit directly after links_task_indicator and before subtasks_task_indicator',
+    );
+    expect(enSpecs[1].icon, equals(Icons.history_rounded));
+    expect(enSpecs[1].tooltip, equals('Has history entries'));
+
+    final deSpecs = resolveTaskIndicatorSpecs(withHistory, deL10n);
+    expect(deSpecs[1].tooltip, equals('Enthält Verlaufseinträge'));
+  });
 }
 
 /// Finds a widget by its string [ValueKey].

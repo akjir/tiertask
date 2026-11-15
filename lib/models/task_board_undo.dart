@@ -216,7 +216,6 @@ class TaskBoardUndo {
         snapshotTask.dependencies,
         deletedTaskIds,
       ),
-      history: snapshotTask.history,
       subtasksAutoFinish: snapshotTask.subtasksAutoFinish,
       subtasks: snapshotTask.subtasks,
       modifiedAt: nextModified,
@@ -519,7 +518,6 @@ class TaskBoardUndo {
         currentTask.dueAt != snapshotTask.dueAt ||
         currentTask.isDuePassive != snapshotTask.isDuePassive ||
         currentTask.dueNote != snapshotTask.dueNote ||
-        !listEquals(currentTask.history, snapshotTask.history) ||
         !listEquals(currentTask.labelIds, retainedLabels) ||
         !listEquals(currentTask.conditions, sanitizedConditions);
     final queueChanged = !listEquals(
@@ -555,7 +553,6 @@ class TaskBoardUndo {
         isDuePassive: snapshotTask.isDuePassive,
         dueNote: snapshotTask.dueNote,
         clearDueNote: snapshotTask.dueNote == null,
-        history: snapshotTask.history,
         modifiedAt: nextModified,
       );
     }

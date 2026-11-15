@@ -1,10 +1,10 @@
 ---
 id: TEP-011
 title: Deferral and Deadline Notes and Recurring Preparation Lead Editor UI
-status: review
+status: completed
 type: feature
 created: 2026-11-14
-updated: 2026-11-15
+updated: 2026-11-16
 ---
 
 # TEP-011: Deferral and Deadline Notes and Recurring Preparation Lead Editor UI
@@ -332,12 +332,14 @@ All tests are written first (`P-TDD-FIRST`) in `test/ui/edit_task_screen_test.da
 - [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`dart format --output=none --set-exit-if-changed lib test`, `flutter analyze --fatal-infos --fatal-warnings`, static `AGENTS.md` / `P-ACYCLIC-DAG` / `audit_l10n` checks, and `flutter test`).
 - [x] Follow **`changelog-updater`** to add a concise user-facing `CHANGELOG.md` entry under `## [Unreleased]`.
 - [x] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-14:** Drafted initial `TEP-011` feature concept proposing `suspendedNote`, `dueNote`, and `repeat ... lead <N> days` authoring in `EditTaskScreen` / `TaskEditorSchedulingCard` and inspection in `TaskInfoDialog` on top of `TEP-006` (`TDF 0.7.0`).
 * **2026-11-15:** Elaborated `TEP-011` to `status: planned` against the implemented `TEP-006` and `TEP-010` codebase (`TaskItem.hasActiveSuspendedAt`, `maxTdfNoteLength`, `maxTdfNumberLength`, `TaskRepeatRule.maxRepeatCount`, `TdfCalendar.countUnicodeScalars`, `TdfRepeatClock`, `_TaskEditorDueAutoPrioritizeRow`), added separate `schedulingNoteErrorInvalid` and `parseRepeatCount`/`parseLeadDays` validation, untouched-note `\r` preservation, `TdfException` submit guard, live `board.findTask(task.id) ?? task` lookup in `TaskInfoDialog`, `< 40`-line widget decompositions (`P-FLATTEN-BUILD`), and removal of obsolete `_hadActiveInitialSuspension` (`P-NO-DEAD-CODE`).
 * **2026-11-15:** Implemented `TEP-011` end-to-end via Red-Green-Refactor TDD across `lib/l10n/`, `lib/ui/widgets/task_editor_scheduling_card.dart`, `lib/ui/edit_task_screen.dart`, and `lib/ui/widgets/task_info_dialog.dart`. Added `_initialEditorMode` tracking in `EditTaskScreen` so saving an open task without switching its Priority/Someday mode passes `targetTier: null` to `TaskBoardMutator.updateTask`, preserving `task.modifiedAt` on no-op saves of tasks currently evaluated into `Focus`, `Ready`, or `Blocked`. Extracted `_TaskEditorRepeatSection` alongside `_TaskEditorSuspendedSection` and `_TaskEditorDueSection` so `TaskEditorSchedulingCard.build` remains `< 40` lines (`P-FLATTEN-BUILD`). Synchronized `ARCHITECTURE.md` and `CHANGELOG.md`, verified full workspace gates, and advanced `TEP-011` to `status: review`.
+* **2026-11-16:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+* **Localization & UI (`lib/l10n/`, `lib/ui/`):** [`lib/l10n/app_en.arb`](../../lib/l10n/app_en.arb), [`lib/l10n/app_de.arb`](../../lib/l10n/app_de.arb), [`lib/ui/edit_task_screen.dart`](../../lib/ui/edit_task_screen.dart), [`lib/ui/widgets/task_editor_scheduling_card.dart`](../../lib/ui/widgets/task_editor_scheduling_card.dart), [`lib/ui/widgets/task_info_dialog.dart`](../../lib/ui/widgets/task_info_dialog.dart).
+* **Tests & Documentation:** [`test/ui/edit_task_screen_test.dart`](../../test/ui/edit_task_screen_test.dart), [`test/ui/widgets/task_info_dialog_test.dart`](../../test/ui/widgets/task_info_dialog_test.dart), [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`CHANGELOG.md`](../../CHANGELOG.md).

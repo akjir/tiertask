@@ -1491,4 +1491,59 @@ class AppLocalizationsDe extends AppLocalizations {
   String taskInfoRepeatLeadDays(String days) {
     return 'Vorbereitungsfenster öffnet $days Tag(e) vor Fälligkeit';
   }
+
+  @override
+  String get historySectionTitle => 'Verlauf';
+
+  @override
+  String get tooltipIndicatorHistory => 'Enthält Verlaufseinträge';
+
+  @override
+  String get historyEmptyHint => 'Noch keine Verlaufseinträge vorhanden.';
+
+  @override
+  String get historyEntryTextLabel => 'Verlaufseintrag';
+
+  @override
+  String get historyEntryTextHint => 'Fortschritt oder Notiz erfassen';
+
+  @override
+  String get historyTimestampLabel => 'Zeitstempel (optional, Standard: jetzt)';
+
+  @override
+  String get historyTimestampHint => 'JJJJ-MM-TT Std:Min';
+
+  @override
+  String get tooltipAddHistoryEntry => 'Verlaufseintrag hinzufügen';
+
+  @override
+  String get tooltipEditHistoryEntry => 'Verlaufseintrag bearbeiten';
+
+  @override
+  String get tooltipSaveHistoryEntry => 'Verlaufseintrag aktualisieren';
+
+  @override
+  String get tooltipCancelEditHistoryEntry => 'Bearbeitung abbrechen';
+
+  @override
+  String get tooltipDeleteHistoryEntry => 'Verlaufseintrag löschen';
+
+  @override
+  String get historyErrorTextEmpty => 'Bitte einen Verlaufstext eingeben.';
+
+  @override
+  String get historyErrorTextTooLong =>
+      'Verlaufseintrag darf maximal 500 Zeichen lang sein.';
+
+  @override
+  String get historyErrorTextInvalid =>
+      'Verlaufseintrag enthält nicht unterstützte Steuerzeichen.';
+
+  @override
+  String get historyErrorTimestampInvalid =>
+      'Gültiges Datum (JJJJ-MM-TT) und optionale Uhrzeit (Std:Min) eingeben.';
+
+  @override
+  String get historyErrorMaxExceeded =>
+      'Maximal 500 Verlaufseinträge pro Aufgabe erreicht.';
 }

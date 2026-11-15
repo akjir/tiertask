@@ -1182,6 +1182,210 @@ void main() {
             'Exceeding maxTdfStmtsPerBlock (1024) must abort undo with null',
       );
     });
+
+    test('preserves live currentTask.history across one-off complete, repeat rollover complete, and downgrade undo while restoring snapshotTask.history on delete undo', () {
+      final h0 = TaskHistoryEntry(timestampUtc: t0, text: 'Initial log');
+      final h1 = TaskHistoryEntry(timestampUtc: t1, text: 'Follow-up log');
+      final h2 = TaskHistoryEntry(timestampUtc: t2, text: 'Post-action log');
+
+      // 1. One-off completeTask -> add/update/remove history -> Undo complete
+      final oneOffBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'oneOffHst1',
+            title: 'One-off Task',
+            isPriority: true,
+            createdAt: t0,
+            modifiedAt: t0,
+            history: <TaskHistoryEntry>[h0, h1],
+          ),
+        ],
+        evaluationTime: t0,
+      );
+      final oneOffTaskBefore = oneOffBefore.findTask('oneOffHst1')!;
+      final oneOffCompleted = oneOffBefore.completeTask(
+        'oneOffHst1',
+        currentDate: t1,
+      );
+      final oneOffUndoEntry = TaskBoardUndo.capture(
+        sequence: 10,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: oneOffBefore,
+        boardAfter: oneOffCompleted,
+        taskBefore: oneOffTaskBefore,
+      );
+      final oneOffInterim = oneOffCompleted
+          .addTaskHistoryEntry(
+            'oneOffHst1',
+            timestampUtc: t2,
+            text: 'Temp post-complete log',
+            currentDate: t2,
+          )
+          .updateTaskHistoryEntry(
+            'oneOffHst1',
+            oldEntry: TaskHistoryEntry(
+              timestampUtc: t2,
+              text: 'Temp post-complete log',
+            ),
+            newTimestampUtc: t2,
+            newText: h2.text,
+            currentDate: t2,
+          )
+          .removeTaskHistoryEntry('oneOffHst1', entry: h0, currentDate: t2);
+      final oneOffUndone = TaskBoardUndo.apply(
+        oneOffInterim,
+        oneOffUndoEntry,
+        utcNow: t3,
+      );
+      expect(oneOffUndone, isNotNull);
+      final restoredOneOff = oneOffUndone!.board.findTask('oneOffHst1')!;
+      expect(restoredOneOff.isCompleted, isFalse);
+      expect(
+        restoredOneOff.history,
+        equals(<TaskHistoryEntry>[h1, h2]),
+        reason:
+            'Undoing one-off completion must preserve interim history edits',
+      );
+
+      // 2. Repeat rollover completeTask -> add/update/remove history -> Undo complete
+      final repeatBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'repHst0001',
+            title: 'Meter Reading',
+            isPriority: true,
+            createdAt: t0,
+            modifiedAt: t0,
+            repeatRule: const TaskRepeatRule(count: 7, unit: RepeatUnit.days),
+            history: <TaskHistoryEntry>[h0, h1],
+          ),
+        ],
+        evaluationTime: t0,
+      );
+      final repeatTaskBefore = repeatBefore.findTask('repHst0001')!;
+      final repeatRolled = repeatBefore.completeTask(
+        'repHst0001',
+        currentDate: t1,
+      );
+      final repeatUndoEntry = TaskBoardUndo.capture(
+        sequence: 11,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: repeatBefore,
+        boardAfter: repeatRolled,
+        taskBefore: repeatTaskBefore,
+      );
+      final repeatInterim = repeatRolled
+          .addTaskHistoryEntry(
+            'repHst0001',
+            timestampUtc: t2,
+            text: 'Draft reading',
+            currentDate: t2,
+          )
+          .updateTaskHistoryEntry(
+            'repHst0001',
+            oldEntry: TaskHistoryEntry(timestampUtc: t2, text: 'Draft reading'),
+            newTimestampUtc: t2,
+            newText: h2.text,
+            currentDate: t2,
+          )
+          .removeTaskHistoryEntry('repHst0001', entry: h0, currentDate: t2);
+      final repeatUndone = TaskBoardUndo.apply(
+        repeatInterim,
+        repeatUndoEntry,
+        utcNow: t3,
+      );
+      expect(repeatUndone, isNotNull);
+      final restoredRepeat = repeatUndone!.board.findTask('repHst0001')!;
+      expect(restoredRepeat.completions, equals(1));
+      expect(restoredRepeat.suspendedAt, isNull);
+      expect(
+        restoredRepeat.history,
+        equals(<TaskHistoryEntry>[h1, h2]),
+        reason: 'Undoing repeat rollover completion must preserve interim history edits',
+      );
+
+      // 3. Downgrade -> add/update/remove history -> Undo downgrade (+ already-restored no-op guard)
+      final downBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'dwnHst0001',
+            title: 'Downgrade Target',
+            isPriority: true,
+            createdAt: t0,
+            modifiedAt: t0,
+            history: <TaskHistoryEntry>[h0, h1],
+          ),
+        ],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['dwnHst0001'],
+        ),
+        evaluationTime: t0,
+      );
+      final downTaskBefore = downBefore.findTask('dwnHst0001')!;
+      final downAfter = downBefore.downgradeTask('dwnHst0001', currentDate: t1);
+      final downUndoEntry = TaskBoardUndo.capture(
+        sequence: 12,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: downBefore,
+        boardAfter: downAfter,
+        taskBefore: downTaskBefore,
+      );
+      final downInterim = downAfter
+          .addTaskHistoryEntry(
+            'dwnHst0001',
+            timestampUtc: t2,
+            text: 'Interim note',
+            currentDate: t2,
+          )
+          .updateTaskHistoryEntry(
+            'dwnHst0001',
+            oldEntry: TaskHistoryEntry(timestampUtc: t2, text: 'Interim note'),
+            newTimestampUtc: t2,
+            newText: h2.text,
+            currentDate: t2,
+          )
+          .removeTaskHistoryEntry('dwnHst0001', entry: h0, currentDate: t2);
+      final downUndone = TaskBoardUndo.apply(
+        downInterim,
+        downUndoEntry,
+        utcNow: t3,
+      );
+      expect(downUndone, isNotNull);
+      final restoredDown = downUndone!.board.findTask('dwnHst0001')!;
+      expect(restoredDown.isPriority, isTrue);
+      expect(
+        restoredDown.history,
+        equals(<TaskHistoryEntry>[h1, h2]),
+        reason: 'Undoing downgrade must preserve interim history edits',
+      );
+      expect(
+        TaskBoardUndo.apply(downUndone.board, downUndoEntry, utcNow: t3),
+        isNull,
+        reason: 'Already-restored downgrade target whose only difference from snapshot is history must skip as already_at_target_state',
+      );
+
+      // 4. Delete -> Undo delete still restores snapshotTask.history
+      final deletedBoard = downBefore.deleteTask('dwnHst0001', currentDate: t1);
+      final deleteUndoEntry = TaskBoardUndo.capture(
+        sequence: 13,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: downBefore,
+        boardAfter: deletedBoard,
+        taskBefore: downTaskBefore,
+      );
+      final deleteUndone = TaskBoardUndo.apply(
+        deletedBoard,
+        deleteUndoEntry,
+        utcNow: t3,
+      );
+      expect(deleteUndone, isNotNull);
+      expect(
+        deleteUndone!.board.findTask('dwnHst0001')!.history,
+        equals(<TaskHistoryEntry>[h0, h1]),
+        reason: 'Undoing task deletion must restore snapshotTask.history',
+      );
+    });
   });
 }
 

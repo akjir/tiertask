@@ -1,10 +1,10 @@
 ---
 id: TEP-012
 title: Interactive Task History Journal in Task Info Dialog and Task Editor
-status: planned
+status: completed
 type: feature
 created: 2026-11-14
-updated: 2026-11-15
+updated: 2026-11-16
 ---
 
 # TEP-012: Interactive Task History Journal in Task Info Dialog and Task Editor
@@ -175,7 +175,7 @@ Every key in `lib/l10n/app_en.arb` includes a matching `@<key>` metadata block w
 * Keep `history: snapshotTask.history,` in `TaskBoardUndo._applyDelete` (`lib/models/task_board_undo.dart:384`).
 
 #### 2.3.2 Task Pill Indicator (`lib/ui/widgets/tier_task_subtasks_section.dart`)
-* In `resolveTaskIndicatorSpecs(TaskItem task, AppLocalizations localizations, DateTime nowUtc)` (`lib/ui/widgets/tier_task_subtasks_section.dart:610-665`), insert directly after `if (task.links.isNotEmpty) ...` and before `if (task.subtasks.isNotEmpty) ...`:
+* In `resolveTaskIndicatorSpecs(TaskItem task, AppLocalizations localizations)` (`lib/ui/widgets/tier_task_subtasks_section.dart:610-665`), insert directly after `if (task.links.isNotEmpty) ...` and before `if (task.subtasks.isNotEmpty) ...`:
   ```dart
   if (task.history.isNotEmpty)
     (
@@ -350,22 +350,27 @@ All changes follow strict Red-Green-Refactor TDD (`P-TDD-FIRST`):
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline on top of `TEP-006`.
-- [ ] Add the 17 English and German ARB keys (with `@key` descriptions) to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`, run `flutter gen-l10n`, and register `"lib/ui/widgets/task_editor_history_section.dart"` in `.agents/scripts/tiertask_dev.py` `_SUBSYSTEM_TEST_MAP`.
-- [ ] Write failing unit and widget tests first in `test/models/task_board_undo_test.dart`, `test/providers/task_providers_test.dart`, `test/ui/widgets/tier_task_subtasks_test.dart`, `test/ui/widgets/tier_task_pill_test.dart`, `test/ui/widgets/task_info_dialog_test.dart`, `test/ui/widgets/task_editor_history_section_test.dart`, and `test/ui/edit_task_screen_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
-- [ ] Update `lib/models/task_board_undo.dart` (`_applyComplete` and `_applyDowngrade`) to preserve live `currentTask.history` (TDD Green Phase).
-- [ ] Add `history_task_indicator` in `lib/ui/widgets/tier_task_subtasks_section.dart` and implement `lib/ui/widgets/task_editor_history_section.dart` (`TaskHistoryInputValidator` and `TaskEditorHistorySection`) (TDD Green Phase).
-- [ ] Upgrade `lib/ui/widgets/task_info_dialog.dart` to `ConsumerStatefulWidget` with tight `SizedBox(width: 420)`, `_TaskInfoHistoryCard`, value-tracked `_editingEntry`, and redacted `AppLogger` telemetry (TDD Green Phase).
-- [ ] Integrate `TaskEditorHistorySection` and pending-history validation/persistence into `lib/ui/edit_task_screen.dart` (TDD Green & Refactor Phase).
-- [ ] Update Parts 1 and 2 if implementation details evolve during TDD.
-- [ ] Follow **`update-documentation`** and **`changelog-updater`** to update `ARCHITECTURE.md` (`tiertask_dev.py arch --sync-tree`) and `CHANGELOG.md` under `## [Unreleased]`.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`0` analyzer infos/warnings, `100%` tests passing).
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline on top of `TEP-006`.
+- [x] Add the 17 English and German ARB keys (with `@key` descriptions) to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`, run `flutter gen-l10n`, and register `"lib/ui/widgets/task_editor_history_section.dart"` in `.agents/scripts/tiertask_dev.py` `_SUBSYSTEM_TEST_MAP`.
+- [x] Write failing unit and widget tests first in `test/models/task_board_undo_test.dart`, `test/providers/task_providers_test.dart`, `test/ui/widgets/tier_task_subtasks_test.dart`, `test/ui/widgets/tier_task_pill_test.dart`, `test/ui/widgets/task_info_dialog_test.dart`, `test/ui/widgets/task_editor_history_section_test.dart`, and `test/ui/edit_task_screen_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
+- [x] Update `lib/models/task_board_undo.dart` (`_applyComplete` and `_applyDowngrade`) to preserve live `currentTask.history` (TDD Green Phase).
+- [x] Add `history_task_indicator` in `lib/ui/widgets/tier_task_subtasks_section.dart` and implement `lib/ui/widgets/task_editor_history_section.dart` (`TaskHistoryInputValidator` and `TaskEditorHistorySection`) (TDD Green Phase).
+- [x] Upgrade `lib/ui/widgets/task_info_dialog.dart` to `ConsumerStatefulWidget` with tight `SizedBox(width: 420)`, `_TaskInfoHistoryCard`, value-tracked `_editingEntry`, and redacted `AppLogger` telemetry (TDD Green Phase).
+- [x] Integrate `TaskEditorHistorySection` and pending-history validation/persistence into `lib/ui/edit_task_screen.dart` (TDD Green & Refactor Phase).
+- [x] Update Parts 1 and 2 if implementation details evolve during TDD.
+- [x] Follow **`update-documentation`** and **`changelog-updater`** to update `ARCHITECTURE.md` (`tiertask_dev.py arch --sync-tree`) and `CHANGELOG.md` under `## [Unreleased]`.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`0` analyzer infos/warnings, `100%` tests passing).
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-14:** Drafted initial `TEP-012` feature concept specifying interactive `TaskHistoryEntry` journaling in `TaskInfoDialog`, `history_task_indicator` on `TierTaskPill`, and batch timestamp/text editing via `TaskEditorHistorySection` in `EditTaskScreen` on top of `TEP-006` (`TDF 0.7.0`).
 * **2026-11-15:** Elaborated `TEP-012` to `planned`: aligned all domain and provider signatures with `TEP-006` (`TaskHistoryEntry.normalizeList`, `maxTdfHistoryPerTask`, `maxTdfTextLength`, `TdfCalendar.countUnicodeScalars`, `TdfCalendar.isWithinTimestampBounds`, and existing `TaskNotifier.*TaskHistoryEntry` methods), added `TaskBoardUndo` live-history preservation on completion/downgrade undo, specified tight `SizedBox` layout bounds for `ListView.builder` inside `AlertDialog`, switched `TaskInfoDialog` inline edit tracking to immutable `TaskHistoryEntry` values for external sync safety, added `historyErrorTextInvalid` with full ARB `@key` metadata, and detailed `M-*` TDD test suites.
+* **2026-11-15:** Implemented `TEP-012` via Red-Green-Refactor TDD across `TaskBoardUndo`, `resolveTaskIndicatorSpecs`, `TaskEditorHistorySection` / `TaskHistoryInputValidator`, `TaskInfoDialog`, `EditTaskScreen`, `en`/`de` ARB bundles, `ARCHITECTURE.md`, and `CHANGELOG.md`; aligned `resolveTaskIndicatorSpecs` signature in Section 2.3.2, verified full test and analyzer suites (`verify --full --fix`), and advanced `TEP-012` to `review`.
+* **2026-11-16:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+* **Domain Models (`lib/models/`):** [`lib/models/task_board_undo.dart`](../../lib/models/task_board_undo.dart).
+* **Localization & UI (`lib/l10n/`, `lib/ui/`):** [`lib/l10n/app_en.arb`](../../lib/l10n/app_en.arb), [`lib/l10n/app_de.arb`](../../lib/l10n/app_de.arb), [`lib/ui/edit_task_screen.dart`](../../lib/ui/edit_task_screen.dart), [`lib/ui/widgets/task_editor_history_section.dart`](../../lib/ui/widgets/task_editor_history_section.dart), [`lib/ui/widgets/task_info_dialog.dart`](../../lib/ui/widgets/task_info_dialog.dart), [`lib/ui/widgets/tier_task_subtasks_section.dart`](../../lib/ui/widgets/tier_task_subtasks_section.dart).
+* **Tests & Tooling (`test/`, `.agents/scripts/`):** [`test/models/task_board_undo_test.dart`](../../test/models/task_board_undo_test.dart), [`test/providers/task_providers_test.dart`](../../test/providers/task_providers_test.dart), [`test/ui/edit_task_screen_test.dart`](../../test/ui/edit_task_screen_test.dart), [`test/ui/widgets/task_editor_history_section_test.dart`](../../test/ui/widgets/task_editor_history_section_test.dart), [`test/ui/widgets/task_info_dialog_test.dart`](../../test/ui/widgets/task_info_dialog_test.dart), [`test/ui/widgets/tier_task_pill_test.dart`](../../test/ui/widgets/tier_task_pill_test.dart), [`test/ui/widgets/tier_task_subtasks_test.dart`](../../test/ui/widgets/tier_task_subtasks_test.dart), [`.agents/scripts/tiertask_dev.py`](../scripts/tiertask_dev.py).
+* **Documentation:** [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`CHANGELOG.md`](../../CHANGELOG.md).

@@ -2522,6 +2522,224 @@ void main() {
         reason: 'Archive workspace with DueLeadWindow.off must keep 5-day task out of Focus',
       );
     });
+
+    test('persists history CRUD over Local + loopback WebDAV HttpServer, skips no-op writes, and preserves interim history entries across completeTask and downgradeTask undoLastAction', () async {
+      var remoteTdf = 'tdf ${TdfService.supportedVersion}\n';
+      var putCount = 0;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((HttpRequest request) async {
+        if (request.method == 'GET') {
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..write(remoteTdf);
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'PUT') {
+          final body = await utf8.decoder.bind(request).join();
+          putCount++;
+          remoteTdf = body;
+          request.response.statusCode = HttpStatus.noContent;
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      });
+
+      final tempDir = await Directory.systemTemp.createTemp(
+        'tiertask_hist_undo_',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      var localStore = 'tdf ${TdfService.supportedVersion}\n';
+      var localSaves = 0;
+      var nowUtc = DateTime.utc(2026, 11, 15, 9, 0);
+      final config = WebDavConfig(
+        storageMode: StorageMode.both,
+        serverUrl: 'http://127.0.0.1:${server.port}',
+        filePath: '/tasks.tdf',
+        username: 'example-user',
+        password: 'example-password',
+        diagnosticsEnabled: true,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _ControllableLocalRepository(
+              config: ref.read(webDavConfigProvider).asData?.value ?? config,
+              getStore: () => localStore,
+              setStore: (value) {
+                localSaves++;
+                localStore = value;
+              },
+              shouldFailSave: () => false,
+            ),
+          ),
+          clockProvider.overrideWithValue(() => nowUtc),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      final tsInitial = DateTime.utc(2026, 11, 15, 8, 30);
+      for (var i = 1; i <= 3; i++) {
+        await notifier.addTask(
+          'Focus Filler $i',
+          id: 'focFil000$i',
+          targetTier: TaskTier.focus,
+          isPriority: true,
+        );
+      }
+      await notifier.addTask(
+        'Support Escalation',
+        id: 'supEscOk01',
+        targetTier: TaskTier.focus,
+        isPriority: true,
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: tsInitial, text: 'Opened ticket'),
+        ],
+      );
+      final savesAfterCreate = localSaves;
+      final putsAfterCreate = putCount;
+      final modAfterCreate = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('supEscOk01')!
+          .effectiveModifiedAt;
+
+      // Exact duplicate addTaskHistoryEntry is a pure no-op (zero local writes or WebDAV PUTs):
+      nowUtc = DateTime.utc(2026, 11, 15, 9, 5);
+      await notifier.addTaskHistoryEntry(
+        'supEscOk01',
+        timestampUtc: tsInitial,
+        text: 'Opened ticket',
+      );
+      expect(
+        localSaves,
+        equals(savesAfterCreate),
+        reason: 'Duplicate history entry must perform zero local saves',
+      );
+      expect(
+        putCount,
+        equals(putsAfterCreate),
+        reason: 'Duplicate history entry must perform zero WebDAV PUTs',
+      );
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('supEscOk01')!
+            .effectiveModifiedAt,
+        equals(modAfterCreate),
+        reason: 'Duplicate history entry must not advance task.modified',
+      );
+
+      // Downgrade -> append history -> undoLastAction() preserves appended history in memory and .tdf:
+      nowUtc = DateTime.utc(2026, 11, 15, 9, 10);
+      await notifier.downgradeTask('supEscOk01');
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTierOfTask('supEscOk01'),
+        equals(TaskTier.ready),
+      );
+
+      final tsAfterDowngrade = DateTime.utc(2026, 11, 15, 9, 12);
+      nowUtc = tsAfterDowngrade;
+      await notifier.addTaskHistoryEntry(
+        'supEscOk01',
+        timestampUtc: tsAfterDowngrade,
+        text: 'Called support desk',
+      );
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isTrue,
+        reason: 'Non-undoable addTaskHistoryEntry must keep pending downgrade undo intact',
+      );
+
+      nowUtc = DateTime.utc(2026, 11, 15, 9, 15);
+      final downgradeUndone = await notifier.undoLastAction();
+      expect(downgradeUndone, isTrue);
+      final afterDowngradeUndo = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('supEscOk01')!;
+      expect(afterDowngradeUndo.isPriority, isTrue);
+      expect(
+        afterDowngradeUndo.history,
+        equals(<TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: tsInitial, text: 'Opened ticket'),
+          TaskHistoryEntry(
+            timestampUtc: tsAfterDowngrade,
+            text: 'Called support desk',
+          ),
+        ]),
+        reason: 'Undoing downgradeTask must retain history appended after downgrade',
+      );
+
+      // Complete -> append history -> undoLastAction() preserves appended history in memory and .tdf:
+      nowUtc = DateTime.utc(2026, 11, 15, 9, 20);
+      await notifier.completeTask('supEscOk01');
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('supEscOk01')!
+            .isCompleted,
+        isTrue,
+      );
+
+      final tsAfterComplete = DateTime.utc(2026, 11, 15, 9, 22);
+      nowUtc = tsAfterComplete;
+      await notifier.addTaskHistoryEntry(
+        'supEscOk01',
+        timestampUtc: tsAfterComplete,
+        text: 'Reopened after customer reply',
+      );
+      nowUtc = DateTime.utc(2026, 11, 15, 9, 25);
+      final completeUndone = await notifier.undoLastAction();
+      expect(completeUndone, isTrue);
+
+      final finalTask = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('supEscOk01')!;
+      expect(finalTask.isCompleted, isFalse);
+      final expectedHistory = <TaskHistoryEntry>[
+        TaskHistoryEntry(timestampUtc: tsInitial, text: 'Opened ticket'),
+        TaskHistoryEntry(
+          timestampUtc: tsAfterDowngrade,
+          text: 'Called support desk',
+        ),
+        TaskHistoryEntry(
+          timestampUtc: tsAfterComplete,
+          text: 'Reopened after customer reply',
+        ),
+      ];
+      expect(
+        finalTask.history,
+        equals(expectedHistory),
+        reason: 'Undoing completeTask must retain history appended after completion',
+      );
+      expect(
+        const TdfService().parse(localStore).findTask('supEscOk01')!.history,
+        equals(expectedHistory),
+        reason: 'Local .tdf must persist preserved history after undo',
+      );
+      expect(
+        const TdfService().parse(remoteTdf).findTask('supEscOk01')!.history,
+        equals(expectedHistory),
+        reason: 'Remote WebDAV .tdf must persist preserved history after undo',
+      );
+    });
   });
 }
 

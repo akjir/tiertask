@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,6 +22,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
@@ -29,7 +31,10 @@ import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/local_file_watch_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
+import 'package:tiertask/repositories/link_launcher_repository.dart';
+import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/widgets/task_info_dialog.dart';
 
@@ -1318,4 +1323,815 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'TaskInfoDialog renders interactive History Journal in English and German, enforces 500-scalar/500-entry/overflow bounds inside AlertDialog, keeps URIs passive, and redacts AppLogger telemetry',
+    (WidgetTester tester) async {
+      AppLogger.resetForTesting();
+      AppLogger.setEnabled(
+        true,
+        persistToDisk: false,
+        minimumLevel: LogLevel.debug,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      final fakeLauncher = FakeLinkLauncherRepository();
+      var currentTime = DateTime.utc(2026, 11, 15, 10, 30, 45, 900);
+      const plusTwoConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+        diagnosticsEnabled: true,
+      );
+
+      final emptyTask = TaskItem(
+        id: 'hstInfo001',
+        title: 'Vendor Follow-Up',
+        createdAt: DateTime.utc(2026, 11, 15, 8, 0),
+      );
+      final container = await pumpLeafWidget(
+        tester,
+        Builder(
+          builder: (context) => ElevatedButton(
+            key: const ValueKey('open_info_modal_btn'),
+            onPressed: () => showTaskInfoDialog(
+              context,
+              task: emptyTask,
+              initialIndicatorKeyPrefix: 'history_task_indicator',
+            ),
+            child: const Text('Open Modal'),
+          ),
+        ),
+        board: TaskBoard(focus: <TaskItem>[emptyTask]),
+        config: plusTwoConfig,
+        clock: () => currentTime,
+        linkLauncherRepository: fakeLauncher,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_info_modal_btn')));
+      await tester.pumpAndSettle();
+
+      final historyCard = tester.widget<Container>(
+        find.byKey(const ValueKey('task_info_section_history_task_indicator')),
+      );
+      expect(historyCard.decoration, isA<BoxDecoration>());
+      expect(find.text('History'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('task_info_history_empty_hint')),
+        findsOneWidget,
+      );
+      expect(find.text('No history entries recorded yet.'), findsOneWidget);
+
+      // Validation errors on blank, control char, and > 500 scalars:
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_add_button')),
+      );
+      await tester.pump();
+      expect(find.text('Enter a history text.'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        'Bad\x07SecretLog',
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('task_info_history_error_text')),
+        findsNothing,
+        reason: 'Typing into history input must clear stale validation error',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_add_button')),
+      );
+      await tester.pump();
+      expect(
+        find.text('History entry contains unsupported control characters.'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        'x' * 501,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_add_button')),
+      );
+      await tester.pump();
+      expect(
+        find.text('History entry must not exceed 500 characters.'),
+        findsOneWidget,
+      );
+
+      // Append via + button (stamps normalized clockProvider UTC -> formatted in UTC+02:00 as 12:30:45):
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        '  ConfidentialCallAlpha\r\nhttps://example.com  ',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_add_button')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('task_info_history_empty_hint')),
+        findsNothing,
+      );
+      expect(find.text('2026-11-15 12:30:45'), findsOneWidget);
+      expect(
+        tester
+            .widget<SelectableText>(
+              find.byKey(const ValueKey('task_info_history_text_0')),
+            )
+            .data,
+        equals('ConfidentialCallAlpha https://example.com'),
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_info_history_input')),
+            )
+            .controller!
+            .text,
+        isEmpty,
+      );
+
+      // Passive plain-text guarantee: tapping rendered SelectableText never invokes LinkLauncherRepository:
+      await tester.tap(find.byKey(const ValueKey('task_info_history_text_0')));
+      await tester.pump();
+      expect(fakeLauncher.launchedUris, isEmpty);
+
+      // Duplicate (timestampUtc, text) append at identical clock second is a pure no-op:
+      final modBeforeDup = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('hstInfo001')!
+          .effectiveModifiedAt;
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        'ConfidentialCallAlpha https://example.com',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('hstInfo001')!
+            .effectiveModifiedAt,
+        equals(modBeforeDup),
+      );
+
+      // Inline edit: cancel, untouched no-op save, and modified text save preserving timestampUtc:
+      await tester.tap(find.byKey(const ValueKey('task_info_history_edit_0')));
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_edit_cancel_0')),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        findsNothing,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('task_info_history_edit_0')));
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_edit_save_0')),
+      );
+      await tester.pump();
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('hstInfo001')!
+            .effectiveModifiedAt,
+        equals(modBeforeDup),
+        reason: 'Saving untouched inline edit must exit without mutating board',
+      );
+
+      currentTime = DateTime.utc(2026, 11, 15, 10, 35);
+      await tester.tap(find.byKey(const ValueKey('task_info_history_edit_0')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        'ConfidentialCallBeta javascript:alert(1)',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_edit_save_0')),
+      );
+      await tester.pumpAndSettle();
+
+      final updatedEntry = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('hstInfo001')!
+          .history
+          .single;
+      expect(
+        updatedEntry.timestampUtc,
+        equals(DateTime.utc(2026, 11, 15, 10, 30, 45)),
+        reason: 'Inline text edit must preserve entry.timestampUtc verbatim',
+      );
+      expect(
+        updatedEntry.text,
+        equals('ConfidentialCallBeta javascript:alert(1)'),
+      );
+
+      // Delete row:
+      currentTime = DateTime.utc(2026, 11, 15, 10, 36);
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_delete_0')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('hstInfo001')!
+            .history,
+        isEmpty,
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_history_empty_hint')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pumpAndSettle();
+
+      // 500-entry AlertDialog virtualization + 501st cap + German locale + 9999 overflow guard:
+      final fiveHundredHistory = <TaskHistoryEntry>[
+        for (var i = 0; i < maxTdfHistoryPerTask; i++)
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 15).add(Duration(seconds: i)),
+            text: 'Row #$i',
+          ),
+      ];
+      final fullTask = TaskItem(
+        id: 'hstMax0500',
+        title: 'Max History Task',
+        createdAt: DateTime.utc(2026, 11, 15),
+        modifiedAt: DateTime.utc(9999, 12, 31, 23, 59, 59),
+        history: fiveHundredHistory,
+      );
+      await pumpLeafWidget(
+        tester,
+        Builder(
+          builder: (context) => ElevatedButton(
+            key: const ValueKey('open_de_max_btn'),
+            onPressed: () => showTaskInfoDialog(context, task: fullTask),
+            child: const Text('Open Max DE'),
+          ),
+        ),
+        board: TaskBoard(focus: <TaskItem>[fullTask]),
+        config: const WebDavConfig(
+          language: AppLanguage.german,
+          timeZoneMode: AppTimeZoneMode.manual,
+          manualTimeZoneOffsetMinutes: -180,
+          diagnosticsEnabled: true,
+        ),
+        locale: const Locale('de'),
+        clock: () => DateTime.utc(9999, 12, 31, 23, 59, 59),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_de_max_btn')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Verlauf'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('task_info_history_list')),
+        findsOneWidget,
+        reason:
+            '500 entries inside AlertDialog must render via ListView.builder',
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey('task_info_history_add_button')),
+            )
+            .onPressed,
+        isNull,
+        reason: 'Add button must disable at maxTdfHistoryPerTask (500)',
+      );
+
+      // Submitting a 501st distinct entry via Enter surfaces historyErrorMaxExceeded in German:
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        'Eintrag 501',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(
+        find.text('Maximal 500 Verlaufseinträge pro Aufgabe erreicht.'),
+        findsOneWidget,
+      );
+
+      // Editing row 0 on a 9999-12-31 23:59:59 modifiedAt task catches TdfException without crashing:
+      await tester.tap(find.byKey(const ValueKey('task_info_history_edit_0')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        'OverflowUpdateSecret',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_edit_save_0')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('task_info_history_error_text')),
+        findsOneWidget,
+        reason: '9999-12-31 23:59:59 modifiedAt overflow must surface inline error without closing dialog',
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pumpAndSettle();
+
+      // Standalone un-managed task disables mutation controls, and didUpdateWidget resets edit/input state:
+      final standaloneTaskA = TaskItem(
+        id: 'stdAloneA1',
+        title: 'Standalone A',
+        createdAt: DateTime.utc(2026, 11, 15, 8, 0),
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 15, 8, 5),
+            text: 'Read-only entry',
+          ),
+        ],
+      );
+      final managedTaskB = standaloneTaskA.copyWith(
+        id: 'mgdTaskB02',
+        title: 'Managed B',
+      );
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: standaloneTaskA),
+        board: TaskBoard(focus: <TaskItem>[managedTaskB]),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey('task_info_history_edit_0')),
+            )
+            .onPressed,
+        isNull,
+        reason: 'Task absent from board must disable inline edit button',
+      );
+
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: managedTaskB),
+        board: TaskBoard(
+          focus: <TaskItem>[
+            managedTaskB,
+            standaloneTaskA.copyWith(id: 'mgdTaskC03', title: 'Managed C'),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('task_info_history_edit_0')));
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        'Unsaved draft',
+      );
+      await tester.pump();
+
+      // Re-pumping same element with a new task.id triggers didUpdateWidget state reset:
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: ProviderScope.containerOf(
+            tester.element(find.byType(TaskInfoDialog)),
+          ),
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: TaskInfoDialog(
+                task: standaloneTaskA.copyWith(
+                  id: 'mgdTaskC03',
+                  title: 'Managed C',
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        findsNothing,
+        reason:
+            'didUpdateWidget on task.id change must reset active inline edit',
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_info_history_input')),
+            )
+            .controller!
+            .text,
+        isEmpty,
+      );
+
+      // Verify AppLogger telemetry events & strict secret/text hygiene:
+      final logOutput = AppLogger.fullLogText;
+      expect(logOutput, contains('ui.task_info.history_added'));
+      expect(logOutput, contains('ui.task_info.history_updated'));
+      expect(logOutput, contains('ui.task_info.history_removed'));
+      expect(logOutput, contains('ui.task_info.history_validation_failed'));
+      expect(logOutput, contains('ui.task_info.history_persist_rejected'));
+      for (final secret in <String>[
+        'Bad\x07SecretLog',
+        'ConfidentialCallAlpha',
+        'ConfidentialCallBeta',
+        'OverflowUpdateSecret',
+      ]) {
+        expect(
+          logOutput,
+          isNot(contains(secret)),
+          reason: 'AppLogger must never contain history entry text ($secret)',
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'TaskInfoDialog guards mid-flight async history persistence, preserves input on rollback, disposes cleanly on mid-flight close, and shifts/cancels active inline edit across real Directory.watch syncs',
+    (WidgetTester tester) async {
+      // Part 1: Mid-flight Completer suspension, rollback preservation, and close-before-complete safety
+      var failSave = false;
+      Completer<void>? saveGate;
+      const localCfg = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+      );
+      var storeTdf =
+          'tdf 0.7.0\n\n'
+          'task midFlt0001 {\n'
+          '    name     "Mid-Flight Task"\n'
+          '    created  2026-11-15 08:00:00\n'
+          '    modified 2026-11-15 08:00:00\n'
+          '}\n';
+      final midContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(localCfg),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _SuspendingInfoLocalRepository(
+              config: localCfg,
+              getStore: () => storeTdf,
+              setStore: (val) => storeTdf = val,
+              onSave: () async {
+                if (saveGate case final gate?) {
+                  await gate.future;
+                }
+                if (failSave) {
+                  throw const LocalFileException('Simulated disk full');
+                }
+              },
+            ),
+          ),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 15, 11, 0),
+          ),
+        ],
+      );
+      addTearDown(midContainer.dispose);
+      final initialMidBoard = await midContainer.read(
+        taskNotifierProvider.future,
+      );
+      final midTask = initialMidBoard.findTask('midFlt0001')!;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: midContainer,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const ValueKey('open_mid_btn'),
+                  onPressed: () => showTaskInfoDialog(context, task: midTask),
+                  child: const Text('Open Mid'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_mid_btn')));
+      await tester.pumpAndSettle();
+
+      // Suspend save with Completer -> mid-flight frame disables input & add button:
+      failSave = true;
+      saveGate = Completer<void>();
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_input')),
+        'Typed during outage',
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_add_button')),
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey('task_info_history_add_button')),
+            )
+            .onPressed,
+        isNull,
+        reason:
+            'Mid-flight persistence must disable concurrent history mutations',
+      );
+
+      // Release gate with failure -> rollback preserves user-typed _appendController.text:
+      saveGate.complete();
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_info_history_input')),
+            )
+            .controller!
+            .text,
+        equals('Typed during outage'),
+        reason: 'Rolled-back persistence must preserve user-typed history text',
+      );
+
+      // Close dialog while valid save is still mid-flight -> zero post-unmount errors:
+      failSave = false;
+      saveGate = Completer<void>();
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_history_add_button')),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('task_info_dialog_close_button')),
+      );
+      await tester.pump();
+      saveGate.complete();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        midContainer
+            .read(taskNotifierProvider)
+            .requireValue
+            .findTask('midFlt0001')!
+            .history
+            .single
+            .text,
+        equals('Typed during outage'),
+      );
+
+      // Part 2: Real Directory.watch external .tdf sync while inline row edit is active
+      late Directory watchDir;
+      late File watchFile;
+      await tester.runAsync(() async {
+        watchDir = await Directory.systemTemp.createTemp(
+          'tiertask_info_hist_watch_',
+        );
+        watchFile = File('${watchDir.path}/tasks.tdf');
+        await watchFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 09:00:00\n'
+          '    task tskHistW01\n'
+          '}\n\n'
+          'task tskHistW01 {\n'
+          '    name     "Recurring Audit"\n'
+          '    created  2026-11-15 08:00:00\n'
+          '    modified 2026-11-15 09:00:00\n'
+          '    repeat   7 days\n'
+          '    history  2026-11-15 09:00:00 "Target entry"\n'
+          '}\n',
+          flush: true,
+        );
+      });
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          if (watchDir.existsSync()) {
+            await watchDir.delete(recursive: true);
+          }
+        });
+      });
+
+      var watchClock = DateTime.utc(2026, 11, 15, 10, 0);
+      const watchConfig = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        localWatchEnabled: true,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+      );
+      final watchContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(watchConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(watchDir.path),
+          localFileWatchDebounceProvider.overrideWithValue(
+            const Duration(milliseconds: 25),
+          ),
+          clockProvider.overrideWithValue(() => watchClock),
+        ],
+      );
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          watchContainer.dispose();
+        });
+      });
+
+      late TaskItem watchTaskSnapshot;
+      await tester.runAsync(() async {
+        watchContainer.listen(
+          localFileWatcherProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
+        final board = await watchContainer.read(taskNotifierProvider.future);
+        watchTaskSnapshot = board.findTask('tskHistW01')!;
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+      });
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: watchContainer,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const ValueKey('open_watch_hist_btn'),
+                  onPressed: () =>
+                      showTaskInfoDialog(context, task: watchTaskSnapshot),
+                  child: const Text('Open Watch Hist'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_watch_hist_btn')));
+      await tester.pumpAndSettle();
+
+      // Start inline editing row 0 and type draft text without saving yet:
+      await tester.tap(find.byKey(const ValueKey('task_info_history_edit_0')));
+      await tester.pump();
+      await tester.enterText(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        'In-progress local edit',
+      );
+      await tester.pump();
+
+      // External sync inserts an EARLIER entry at 08:30:00 and completes repeat occurrence 1:
+      watchClock = DateTime.utc(2026, 11, 15, 10, 5);
+      await tester.runAsync(() async {
+        await watchFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:05:00\n'
+          '}\n\n'
+          'task tskHistW01 {\n'
+          '    name        "Recurring Audit"\n'
+          '    completions 1\n'
+          '    created     2026-11-15 08:00:00\n'
+          '    modified    2026-11-15 10:05:00\n'
+          '    suspended   2026-11-22 00:00:00\n'
+          '    repeat      7 days\n'
+          '    history     2026-11-15 08:30:00 "Earlier external entry"\n'
+          '    history     2026-11-15 09:00:00 "Target entry"\n'
+          '}\n',
+          flush: true,
+        );
+        for (var attempt = 0; attempt < 25; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          final updated = watchContainer
+              .read(taskNotifierProvider)
+              .asData
+              ?.value
+              .findTask('tskHistW01');
+          if ((updated?.history.length ?? 0) == 2) {
+            break;
+          }
+        }
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        findsNothing,
+        reason: 'Inserted earlier entry must shift inline editor off index 0',
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_1')),
+        findsOneWidget,
+        reason:
+            'Value-tracked _editingEntry must follow Target entry to index 1',
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_info_history_edit_input_1')),
+            )
+            .controller!
+            .text,
+        equals('In-progress local edit'),
+        reason: 'Shifted inline editor must preserve unsaved draft text',
+      );
+
+      // External sync removes Target entry -> cancels active inline edit cleanly:
+      watchClock = DateTime.utc(2026, 11, 15, 10, 10);
+      await tester.runAsync(() async {
+        await watchFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:10:00\n'
+          '}\n\n'
+          'task tskHistW01 {\n'
+          '    name        "Recurring Audit"\n'
+          '    completions 1\n'
+          '    created     2026-11-15 08:00:00\n'
+          '    modified    2026-11-15 10:10:00\n'
+          '    suspended   2026-11-22 00:00:00\n'
+          '    repeat      7 days\n'
+          '    history     2026-11-15 08:30:00 "Earlier external entry"\n'
+          '}\n',
+          flush: true,
+        );
+        for (var attempt = 0; attempt < 25; attempt++) {
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+          final updated = watchContainer
+              .read(taskNotifierProvider)
+              .asData
+              ?.value
+              .findTask('tskHistW01');
+          if ((updated?.history.length ?? 0) == 1) {
+            break;
+          }
+        }
+      });
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_0')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_history_edit_input_1')),
+        findsNothing,
+        reason:
+            'External removal of _editingEntry must cancel active inline edit',
+      );
+    },
+  );
+}
+
+class _SuspendingInfoLocalRepository extends LocalFileRepository {
+  _SuspendingInfoLocalRepository({
+    required super.config,
+    required this.getStore,
+    required this.setStore,
+    required this.onSave,
+  });
+
+  final String Function() getStore;
+  final Future<void> Function() onSave;
+  final void Function(String value) setStore;
+
+  @override
+  bool get canWatchDirectory => false;
+
+  @override
+  bool directoryExists() => true;
+
+  @override
+  bool fileExists() => getStore().isNotEmpty;
+
+  @override
+  Future<String> loadTdf() async => getStore();
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    await onSave();
+    setStore(tdfContent);
+  }
+
+  @override
+  Stream<void> watchTdfChanges() => const Stream<void>.empty();
 }

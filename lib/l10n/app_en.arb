@@ -2025,5 +2025,73 @@
         "type": "String"
       }
     }
+  },
+  "historySectionTitle": "History",
+  "@historySectionTitle": {
+    "description": "Section title for the task history journal card in TaskInfoDialog and EditTaskScreen."
+  },
+  "tooltipIndicatorHistory": "Has history entries",
+  "@tooltipIndicatorHistory": {
+    "description": "Tooltip shown on the history indicator icon on a task pill."
+  },
+  "historyEmptyHint": "No history entries recorded yet.",
+  "@historyEmptyHint": {
+    "description": "Empty-state hint shown inside the history section of TaskInfoDialog when no history entries exist."
+  },
+  "historyEntryTextLabel": "History entry",
+  "@historyEntryTextLabel": {
+    "description": "Input label for the single-line history entry text field."
+  },
+  "historyEntryTextHint": "Add progress update or note",
+  "@historyEntryTextHint": {
+    "description": "Placeholder hint for the single-line history entry text field."
+  },
+  "historyTimestampLabel": "Timestamp (optional, defaults to now)",
+  "@historyTimestampLabel": {
+    "description": "Input label for the optional local wall-clock history timestamp field in EditTaskScreen."
+  },
+  "historyTimestampHint": "YYYY-MM-DD HH:MM",
+  "@historyTimestampHint": {
+    "description": "Placeholder hint for the optional local wall-clock history timestamp field."
+  },
+  "tooltipAddHistoryEntry": "Add history entry",
+  "@tooltipAddHistoryEntry": {
+    "description": "Tooltip for the button that appends a history entry."
+  },
+  "tooltipEditHistoryEntry": "Edit history entry",
+  "@tooltipEditHistoryEntry": {
+    "description": "Tooltip for starting an edit of an existing history entry row."
+  },
+  "tooltipSaveHistoryEntry": "Update history entry",
+  "@tooltipSaveHistoryEntry": {
+    "description": "Tooltip for confirming an edit to an existing history entry."
+  },
+  "tooltipCancelEditHistoryEntry": "Cancel history edit",
+  "@tooltipCancelEditHistoryEntry": {
+    "description": "Tooltip for canceling an active edit of a history entry."
+  },
+  "tooltipDeleteHistoryEntry": "Delete history entry",
+  "@tooltipDeleteHistoryEntry": {
+    "description": "Tooltip for deleting a history entry row."
+  },
+  "historyErrorTextEmpty": "Enter a history text.",
+  "@historyErrorTextEmpty": {
+    "description": "Validation error shown when a history entry text is empty or spaces-only."
+  },
+  "historyErrorTextTooLong": "History entry must not exceed 500 characters.",
+  "@historyErrorTextTooLong": {
+    "description": "Validation error shown when a history entry exceeds 500 Unicode scalar values."
+  },
+  "historyErrorTextInvalid": "History entry contains unsupported control characters.",
+  "@historyErrorTextInvalid": {
+    "description": "Validation error shown when a history entry contains disallowed control characters or unpaired UTF-16 surrogates."
+  },
+  "historyErrorTimestampInvalid": "Enter a valid date (YYYY-MM-DD) and optional time (HH:MM).",
+  "@historyErrorTimestampInvalid": {
+    "description": "Validation error shown when a history timestamp is malformed or outside 0001..9999 UTC."
+  },
+  "historyErrorMaxExceeded": "Maximum of 500 history entries per task reached.",
+  "@historyErrorMaxExceeded": {
+    "description": "Validation error shown when adding a distinct entry would exceed 500 history entries on a task."
   }
 }

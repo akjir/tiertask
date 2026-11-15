@@ -1330,6 +1330,86 @@ task c20000OkD2 {
       await tester.pumpAndSettle();
     },
   );
+
+  testWidgets(
+    'TierTaskPill renders history_task_indicator up to 3 active indicators, collapses at 4, and opens TaskInfoDialog targeting history_task_indicator',
+    (WidgetTester tester) async {
+      final now = DateTime.utc(2026, 11, 15, 12, 0);
+      final threeIndTask = TaskItem(
+        id: 'hstPill003',
+        title: 'Three Indicator History Task',
+        isPriority: true,
+        createdAt: now,
+        links: const <TaskLink>[
+          TaskLink(title: 'Portal', uri: 'https://example.com'),
+        ],
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: now, text: 'Logged reading 42'),
+        ],
+      );
+      final fourIndTask = threeIndTask.copyWith(
+        id: 'hstPill004',
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Verify invoice')],
+      );
+      final board = TaskBoard(focus: <TaskItem>[threeIndTask, fourIndTask]);
+
+      await pumpLeafWidget(
+        tester,
+        Column(
+          children: <Widget>[
+            TierTaskPill(
+              task: threeIndTask,
+              canDowngrade: false,
+              isCompleted: false,
+            ),
+            TierTaskPill(
+              task: fourIndTask,
+              canDowngrade: false,
+              isCompleted: false,
+            ),
+          ],
+        ),
+        board: board,
+        clock: () => now,
+      );
+      await tester.pumpAndSettle();
+
+      final historyIndFinder = find.byKey(
+        const ValueKey('history_task_indicator_hstPill003'),
+      );
+      expect(
+        historyIndFinder,
+        findsOneWidget,
+        reason:
+            '3 active indicators must render history_task_indicator directly',
+      );
+      expect(
+        find.byKey(const ValueKey('summary_task_indicator_hstPill003')),
+        findsNothing,
+      );
+
+      expect(
+        find.byKey(const ValueKey('history_task_indicator_hstPill004')),
+        findsNothing,
+        reason: '4 active indicators must collapse into summary_task_indicator',
+      );
+      expect(
+        find.byKey(const ValueKey('summary_task_indicator_hstPill004')),
+        findsOneWidget,
+      );
+
+      await tester.tap(historyIndFinder);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TaskInfoDialog), findsOneWidget);
+      final dialog = tester.widget<TaskInfoDialog>(find.byType(TaskInfoDialog));
+      expect(
+        dialog.initialIndicatorKeyPrefix,
+        equals('history_task_indicator'),
+        reason: 'Tapping history_task_indicator must pass history_task_indicator to TaskInfoDialog',
+      );
+    },
+  );
 }
 
 /// Pumps [TierTaskApp] seeded with [seededTdf] at `2026-11-01 12:00` UTC.

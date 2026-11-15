@@ -651,6 +651,12 @@ resolveTaskIndicatorSpecs(TaskItem task, AppLocalizations localizations) {
         keyPrefix: 'links_task_indicator',
         tooltip: localizations.tooltipIndicatorLinks,
       ),
+    if (task.history.isNotEmpty)
+      (
+        icon: Icons.history_rounded,
+        keyPrefix: 'history_task_indicator',
+        tooltip: localizations.tooltipIndicatorHistory,
+      ),
     if (task.subtasks.isNotEmpty)
       (
         icon: task.subtasksAutoFinish

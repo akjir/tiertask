@@ -1,10 +1,10 @@
 ---
 id: TEP-006
 title: TDF Specification 0.7.0 and Core Runtime Implementation
-status: review
+status: completed
 type: spec
 created: 2026-11-09
-updated: 2026-11-14
+updated: 2026-11-16
 ---
 
 # TEP-006: TDF Specification 0.7.0 and Core Runtime Implementation
@@ -683,7 +683,7 @@ While `note "<note>"` (`0..1`) holds the standing description of a task and Topi
 - [x] Implement production changes in `lib/` with `AppLogger` instrumentation (TDD Green & Refactor Phase).
 - [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
 - [x] Synchronize `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, `.agents/skills/`, `.agents/proposals/BOARD.md`, and `CHANGELOG.md`, and transition `TEP-006` to `status: review`.
-- [ ] Obtain user review approval and set `status: completed`.
+- [x] Obtain user review approval and set `status: completed`.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-09:** Created `TEP-006` (`status: concept`) as the exploratory idea collection for `TDF 0.7.0`, starting with Topic 1 (`link` directives on `label` blocks and Labels as Project / Context Hubs).
@@ -693,6 +693,7 @@ While `note "<note>"` (`0..1`) holds the standing description of a task and Topi
 * **2026-11-14:** Executed `spec-verification-loop` across Topics 1–5 while retaining `status: concept`: aligned unpaired UTF-16 surrogate `<note>` errors to `UnexpectedToken`, specified re-armed vs. verbatim `TaskBoardUndo` `previouslyBlockedDependencies` restoration and `downgrade` undo/invalidation rules, bumped `AppWorkspace` persistence to `TTW\x02` (`TTW\x01` backward-compatible), enforced `MAX_STMTS_PER_BLOCK` and `MAX_LINKS_PER_LABEL = 20` across mutations/merges/`TdfSerializer`, mandated live `(now, dueLeadWindow)` `contextBoard` evaluation in `downgradeTask`, hardened `Section 6.8.4` discarded-task `blocked` cleanup and queued optimistic `candidateOriginBoard` retirement checks, replaced legacy `TDF_SPEC.md` references with `spec/TDF_SPEC_0.7.0.md` (`Section 10.1.1` `0.6.0` commit/blob record + `tdf_v070_conformance_test.dart`), and added `M-REAL-MECHANICS-TESTS` to `Section 2.4`.
 * **2026-11-14:** Verified and resolved 7 deep-audit findings while retaining `status: concept`: (1) unified wall-clock-free `timeZone` / `sourceTimeZone` `leadDays` and `<repeat-time>` extraction across load-time `0.6.0 -> 0.7.0` workspace conversion (`TdfService.parse` + `TaskSyncPipeline._parseTdf`) and `TdfImporter.migrate060To070` before `stampAndNormalize`; (2) added $V.\text{repeat}$-aware `blocked` pre-normalization in `Section 6.7.5 Case 2` against `(mergedTasksById, mergedDeletedTasks)` so concurrent `blocked A:2` raises and newly added `repeat` pipelines survive opposing prerequisite completions; (3) raised `MAX_STMTS_PER_BLOCK` from `512` to `1_024` (`1024`) in `TDF 0.7.0` (`34 + 500 = 534 <= 1_024`, preserving `512` on `< 0.7.0` inputs); (4) documented `due ... passive` as occurrence-scoped and specified deterministic `_didUserToggleAutoPrioritizeDue` reset on `dueAt` changes in `EditTaskScreen` and `TaskBoardMutator.updateTask`; (5) separated `0.5.0`/`0.5.1` `UnknownDirective` gating on `due`/`origin` from `0.6.0` `InvalidTimestamp`/`UnexpectedToken`, aligned quoted leading `<date>` in `2..3`-token `history` to `InvalidTimestamp`, and placed `label.link` `<title>` `\n`/`\r`/`\t`/surrogate `UnexpectedToken` checks before `EmptyText`; (6) deferred Stage-1 post-merge block cleanup in `localAndWebDav` sync (plus bystander `candidateOriginBoard` revision preservation and `_isUndoEntryInvalidated` cleanup normalization) and mandated atomic `null`-return aborts on all `TaskBoardUndo` guards; and (7) specified `TdfSchemaVersion { v060, v070 }` (`TdfHistoricalSerializer.serializeDocument060`, `nextLegacy060ScheduleAnchoredOccurrence`, `tdf_v070_merge_conformance_test.dart`) for `v0.6.0` conformance coexistence plus `HomeScreen` live boundary timers at exact `dueAt`, background lifecycle cancellation, and sub-second early-wakeup guards.
 * **2026-11-14:** Implemented `TEP-006` via Red-Green-Refactor TDD after user scope confirmation: replaced `spec/TDF_SPEC_0.6.0.md` with ratified `spec/TDF_SPEC_0.7.0.md`, authored the 84-file `spec/conformance/v0.7.0/` suite and `test/{services/tdf_v070_conformance_test,models/tdf_v070_merge_conformance_test}.dart` runners (`100%` pass alongside `v0.6.0` conformance), implemented full `TDF 0.7.0` domain models, 24-hour default `due` lead-window evaluation, block-reason cleanup, single-pass $O(N)$ parser/serializer, `0.6.0 -> 0.7.0` load-time conversion and `migrate060To070`, stage-fair three-way sync, `TaskBoardUndo` dependency restoration, lossless UI editor preservation, and stale block indicator hiding, extracted standalone interactive UI features into `TEP-009`..`TEP-012` (`status: concept`), synchronized repository documentation and `CHANGELOG.md`, and transitioned `TEP-006` to `status: review`.
+* **2026-11-16:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
 * **Normative Specification & Conformance Suite:**
@@ -707,5 +708,5 @@ While `note "<note>"` (`0..1`) holds the standing description of a task and Topi
   * `test/models/{tdf_v070_merge_conformance,tdf_v060_merge_conformance,tdf_v050_primitives,task_board_evaluation,task_board_downgrade,task_board_lifecycle,task_board_mutation,task_board_v050_rules,task_board_sync,task_board_undo}_test.dart`.
   * `test/services/{tdf_v070_conformance,tdf_v060_conformance,tdf_service_parser,tdf_service_bounds,tdf_migration}_test.dart`.
   * `test/providers/{sync_providers,task_providers,local_file_watch_providers}_test.dart` and `test/ui/{edit_labels_screen,edit_task_screen,home_screen,widgets/tier_task_pill,widgets/task_info_dialog}_test.dart`.
-* **Follow-Up Feature Proposals (`status: concept`):**
+* **Follow-Up Feature Proposals (`TEP-009`..`TEP-012`):**
   * [`TEP-009`](tep-009-label-context-hub-and-links.md), [`TEP-010`](tep-010-deadline-lead-window-settings-and-urgency-ui.md), [`TEP-011`](tep-011-scheduling-notes-and-repeat-lead-ui.md), and [`TEP-012`](tep-012-task-history-journal-ui.md).

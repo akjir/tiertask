@@ -1,10 +1,10 @@
 ---
 id: TEP-010
 title: Configurable Deadline Lead-Window Preferences, Live Boundary Timer, and Urgency Indicators
-status: review
+status: completed
 type: feature
 created: 2026-11-14
-updated: 2026-11-15
+updated: 2026-11-16
 ---
 
 # TEP-010: Configurable Deadline Lead-Window Preferences, Live Boundary Timer, and Urgency Indicators
@@ -395,12 +395,16 @@ On `WebDavConfig`:
 - [x] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
 - [x] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
 - [x] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-14:** Drafted initial concept (`status: concept`) for configurable `DueLeadWindow` preferences (`TTW\x02`), deterministic `Auto-prioritize near deadline` editor toggle, `HomeScreen` live boundary timer, and deadline urgency indicators on top of `TEP-006` (`spec/TDF_SPEC_0.7.0.md` Topic 2).
 * **2026-11-15:** Elaborated complete technical design (`status: planned`): enforced `P-ACYCLIC-DAG` via `ref.listen` in `TaskNotifier` and `boundaryTickProvider` in `config_providers.dart`; specified full `TaskSyncPipeline` and `20`-method `TaskNotifier` `dueLeadWindow` forwarding; aligned explicit `priority` promotion `isDuePassive` resets with `spec/TDF_SPEC_0.7.0.md` Sections 6.2 and 6.6; specified `TTW\x02` `+ 5` pre-allocation `maxBinaryBytes` bound check; added `7-day` `Timer` chunk clamping for `<= 9999` timestamps; and defined the `6`-branch `TaskInfoDialog` status decision table and `M-*` TDD test matrix.
 * **2026-11-15:** Completed Red-Green-Refactor TDD implementation across localization (`app_en.arb`, `app_de.arb`), models (`DueLeadWindow`, `TTW\x02` binary workspace records with `TTW\x01` compatibility, and Sections 6.2/6.6 `isDuePassive` resets), acyclic providers (`boundaryTickProvider`, `updateDueLeadWindow`, `TaskSyncPipeline`, and `TaskNotifier` in-memory lead-window re-evaluation), and UI (`DueLeadWindowSelectionCard`, `task_editor_due_auto_prioritize_switch` with lossless `TaskItem.formatTdfTimestamp` initial formatting, `HomeScreenBoundaryTimer` single lifecycle-aware wall-clock timer, `TierTaskPill` local wall-clock urgency badge colors, and `TaskInfoDialog` 6-branch deadline status lines). Synchronized `ARCHITECTURE.md`, `README.md`, and `CHANGELOG.md`, verified `tiertask_dev.py verify --full --fix`, and transitioned proposal to `status: review`.
+* **2026-11-16:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
-*(Pending user approval — proposal is in `review` stage)*
+* **Domain Models (`lib/models/`):** [`lib/models/app_workspace.dart`](../../lib/models/app_workspace.dart), [`lib/models/task_board_mutator.dart`](../../lib/models/task_board_mutator.dart), [`lib/models/task_board_queue_mutator.dart`](../../lib/models/task_board_queue_mutator.dart), [`lib/models/webdav_config.dart`](../../lib/models/webdav_config.dart).
+* **State Providers (`lib/providers/`):** [`lib/providers/config_providers.dart`](../../lib/providers/config_providers.dart), [`lib/providers/sync_providers.dart`](../../lib/providers/sync_providers.dart), [`lib/providers/task_providers.dart`](../../lib/providers/task_providers.dart).
+* **Localization & UI (`lib/l10n/`, `lib/ui/`):** [`lib/l10n/app_en.arb`](../../lib/l10n/app_en.arb), [`lib/l10n/app_de.arb`](../../lib/l10n/app_de.arb), [`lib/ui/edit_task_screen.dart`](../../lib/ui/edit_task_screen.dart), [`lib/ui/home_screen.dart`](../../lib/ui/home_screen.dart), [`lib/ui/settings_screen.dart`](../../lib/ui/settings_screen.dart), [`lib/ui/widgets/settings_preference_cards.dart`](../../lib/ui/widgets/settings_preference_cards.dart), [`lib/ui/widgets/task_editor_scheduling_card.dart`](../../lib/ui/widgets/task_editor_scheduling_card.dart), [`lib/ui/widgets/task_info_dialog.dart`](../../lib/ui/widgets/task_info_dialog.dart), [`lib/ui/widgets/tier_task_pill.dart`](../../lib/ui/widgets/tier_task_pill.dart).
+* **Tests & Documentation:** [`test/models/app_workspace_test.dart`](../../test/models/app_workspace_test.dart), [`test/models/task_board_lifecycle_test.dart`](../../test/models/task_board_lifecycle_test.dart), [`test/models/task_board_mutation_test.dart`](../../test/models/task_board_mutation_test.dart), [`test/models/tdf_v050_primitives_test.dart`](../../test/models/tdf_v050_primitives_test.dart), [`test/providers/config_providers_test.dart`](../../test/providers/config_providers_test.dart), [`test/providers/task_providers_test.dart`](../../test/providers/task_providers_test.dart), [`test/ui/edit_task_screen_test.dart`](../../test/ui/edit_task_screen_test.dart), [`test/ui/home_screen_test.dart`](../../test/ui/home_screen_test.dart), [`test/ui/settings_screen_test.dart`](../../test/ui/settings_screen_test.dart), [`test/ui/widgets/task_info_dialog_test.dart`](../../test/ui/widgets/task_info_dialog_test.dart), [`test/ui/widgets/tier_task_pill_test.dart`](../../test/ui/widgets/tier_task_pill_test.dart), [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`README.md`](../../README.md), [`CHANGELOG.md`](../../CHANGELOG.md).

@@ -20,7 +20,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -2356,6 +2358,410 @@ task doneRest02 {
       expect(AppLogger.fullLogText, contains('ui.edit_task.persist_rejected'));
     },
   );
+
+  testWidgets(
+    'EditTaskScreen authors batch history on new tasks, normalizes and deduplicates draft entries, picks 24h local dates/times, and commits or rejects pending history atomically on Save',
+    (WidgetTester tester) async {
+      AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 15, 12, 0));
+      AppLogger.setEnabled(
+        true,
+        persistToDisk: false,
+        minimumLevel: LogLevel.debug,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      final fakeLauncher = FakeLinkLauncherRepository();
+      const plusTwoConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+        diagnosticsEnabled: true,
+      );
+      final clockNow = DateTime.utc(2026, 11, 15, 10, 45, 30, 800);
+
+      final container = await pumpLeafWidget(
+        tester,
+        Builder(
+          builder: (hostContext) => TextButton(
+            key: const ValueKey('open_editor_host'),
+            onPressed: () => openEditTaskScreen(hostContext),
+            child: const Text('Open'),
+          ),
+        ),
+        board: TaskBoard.empty(),
+        config: plusTwoConfig,
+        clock: () => clockNow,
+        linkLauncherRepository: fakeLauncher,
+      );
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open_editor_host');
+
+      expect(
+        find.byKey(const ValueKey('task_editor_history_card')),
+        findsOneWidget,
+      );
+
+      // Tapping + on blank history inputs surfaces historyErrorTextEmpty:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_add_history_button')),
+      );
+      expect(
+        find.byKey(const ValueKey('editor_history_error_text')),
+        findsOneWidget,
+      );
+      expect(find.text('Enter a history text.'), findsOneWidget);
+
+      // Simultaneous title + pending invalid history validation on Save:
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_timestamp_input')),
+        '2026-99-99',
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'SecretPendingInvalidTimestamp',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(
+        find.text('Enter a valid date (YYYY-MM-DD) and optional time (HH:MM).'),
+        findsOneWidget,
+      );
+      expect(
+        AppLogger.fullLogText,
+        contains('history=true'),
+        reason: 'validation_failed telemetry must include history=true',
+      );
+
+      // Clear timestamp -> blank timestamp defaults to clockProvider UTC (10:45:30Z):
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_history_timestamp_clear_button')),
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'SecretDefaultNowEntry https://example.com',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_add_history_button')),
+      );
+      expect(find.text('2026-11-15 12:45:30'), findsOneWidget);
+
+      // Duplicate (timestampUtc, text) collapses in normalized draft preview:
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'SecretDefaultNowEntry https://example.com',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_add_history_button')),
+      );
+      expect(
+        find.byKey(const ValueKey('editor_edit_history_1')),
+        findsNothing,
+        reason: 'Duplicate (timestampUtc, text) must deduplicate in draft list',
+      );
+
+      // Earlier backdated local timestamp (2026-11-10 09:30:15 local UTC+02:00 -> 07:30:15Z) sorts to index 0:
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_timestamp_input')),
+        '2026-11-10 09:30:15',
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'SecretBackdatedEntry\r\nLine2',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_add_history_button')),
+      );
+      expect(
+        find.byKey(const ValueKey('editor_edit_history_1')),
+        findsOneWidget,
+      );
+
+      // Date & 24-hour time pickers populate editor_history_timestamp_input:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_history_date_picker_button')),
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_history_time_picker_button')),
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('editor_history_timestamp_input')),
+            )
+            .controller!
+            .text,
+        equals('2026-11-15 12:45'),
+      );
+
+      // Leave this 3rd entry as pending input (without pressing +) and tap Save:
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'SecretPendingCommittedOnSave',
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'New Task With Batch History',
+      );
+
+      // Tapping rendered passive URI text before Save launches nothing:
+      await _tapVisible(
+        tester,
+        find.text('SecretDefaultNowEntry https://example.com'),
+      );
+      expect(fakeLauncher.launchedUris, isEmpty);
+
+      await _tapKey(tester, 'task_editor_save_button');
+
+      final created = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .allTasks
+          .singleWhere((item) => item.title == 'New Task With Batch History');
+      expect(
+        created.history,
+        equals(<TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 10, 7, 30, 15),
+            text: 'SecretBackdatedEntry Line2',
+          ),
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 15, 10, 45),
+            text: 'SecretPendingCommittedOnSave',
+          ),
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 11, 15, 10, 45, 30),
+            text: 'SecretDefaultNowEntry https://example.com',
+          ),
+        ]),
+        reason: 'addTask must persist canonically sorted batch + pending history entries',
+      );
+
+      final logOutput = AppLogger.fullLogText;
+      expect(logOutput, contains('history_count=3'));
+      for (final secret in <String>[
+        'SecretPendingInvalidTimestamp',
+        'SecretDefaultNowEntry',
+        'SecretBackdatedEntry',
+        'SecretPendingCommittedOnSave',
+      ]) {
+        expect(
+          logOutput,
+          isNot(contains(secret)),
+          reason: 'AppLogger must never log history text ($secret)',
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen preserves untouched 0001 UTC timestamps across negative offsets, maintains editingIndex coherence on cancel/remove, and enforces 500-entry and German error bounds',
+    (WidgetTester tester) async {
+      const minusTwoConfig = WebDavConfig(
+        language: AppLanguage.german,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: -120,
+      );
+      final tMin = DateTime.utc(1, 1, 1);
+      final tMid = DateTime.utc(2026, 11, 14, 10, 0);
+      final tLate = DateTime.utc(2026, 11, 15, 11, 0);
+      final existing = TaskItem(
+        id: 'edtHst0001',
+        title: 'Existing Journal Task',
+        createdAt: DateTime.utc(2026, 11, 10, 8, 0),
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: tMin, text: 'Boundary 0001'),
+          TaskHistoryEntry(timestampUtc: tMid, text: 'Middle row'),
+          TaskHistoryEntry(timestampUtc: tLate, text: 'Late row'),
+        ],
+      );
+      final fullTask = existing.copyWith(
+        id: 'edtHst0500',
+        title: 'Full Journal Task',
+        history: <TaskHistoryEntry>[
+          for (var i = 0; i < maxTdfHistoryPerTask; i++)
+            TaskHistoryEntry(
+              timestampUtc: DateTime.utc(2026, 11, 1).add(Duration(seconds: i)),
+              text: 'Eintrag #$i',
+            ),
+        ],
+      );
+
+      final container = await pumpLeafWidget(
+        tester,
+        Builder(
+          builder: (hostContext) => Column(
+            children: [
+              TextButton(
+                key: const ValueKey('open_existing_host'),
+                onPressed: () =>
+                    openEditTaskScreen(hostContext, initialTask: existing),
+                child: const Text('Existing'),
+              ),
+              TextButton(
+                key: const ValueKey('open_full_host'),
+                onPressed: () =>
+                    openEditTaskScreen(hostContext, initialTask: fullTask),
+                child: const Text('Full'),
+              ),
+            ],
+          ),
+        ),
+        board: TaskBoard(planned: <TaskItem>[existing, fullTask]),
+        config: minusTwoConfig,
+        locale: const Locale('de'),
+        clock: () => DateTime.utc(2026, 11, 15, 12, 0),
+      );
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open_existing_host');
+
+      // 1. Edit Row 0 (0001-01-01 00:00:00 UTC in UTC-02:00): keep timestamp untouched, change text only!
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_edit_history_0')),
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'Boundary 0001 edited',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_add_history_button')),
+      );
+      expect(
+        find.byKey(const ValueKey('editor_history_error_text')),
+        findsNothing,
+        reason: 'Untouched timestamp on 0001-01-01 00:00:00 UTC in UTC-02:00 must preserve original UTC instant',
+      );
+
+      // 2. Start editing Row 2 (Late row), then remove Row 1 (index < editingIndex) -> editingIndex shifts to 1:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_edit_history_2')),
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_remove_history_1')),
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'Late row updated after predecessor removal',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_add_history_button')),
+      );
+      expect(find.text('Boundary 0001 edited'), findsOneWidget);
+      expect(
+        find.text('Late row updated after predecessor removal'),
+        findsOneWidget,
+      );
+
+      // 3. Start editing Row 1, then remove Row 1 itself -> cancels active edit and clears inputs:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_edit_history_1')),
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_remove_history_1')),
+      );
+      expect(
+        find.byKey(const ValueKey('editor_cancel_edit_history_button')),
+        findsNothing,
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('editor_history_text_input')),
+            )
+            .controller!
+            .text,
+        isEmpty,
+      );
+
+      // 4. Start editing Row 0, enter invalid control char, then cancel edit -> clears error & controllers:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_edit_history_0')),
+      );
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'Bad\x00Text',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(
+        find.text('Verlaufseintrag enthält nicht unterstützte Steuerzeichen.'),
+        findsOneWidget,
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_cancel_edit_history_button')),
+      );
+      expect(
+        find.byKey(const ValueKey('editor_history_error_text')),
+        findsNothing,
+      );
+
+      await _tapKey(tester, 'task_editor_save_button');
+      final saved = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('edtHst0001')!;
+      expect(
+        saved.history,
+        equals(<TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: tMin, text: 'Boundary 0001 edited'),
+        ]),
+      );
+
+      // 5. 500 -> 501st entry rejection in German on both + and Save:
+      await _tapKey(tester, 'open_full_host');
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'Eintrag #501',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(
+        find.text('Maximal 500 Verlaufseinträge pro Aufgabe erreicht.'),
+        findsOneWidget,
+      );
+    },
+  );
+}
+
+/// Scrolls [finder] into view, enters [text], and settles animations.
+Future<void> _enterVisibleText(
+  WidgetTester tester,
+  Finder finder,
+  String text,
+) async {
+  await tester.pumpAndSettle();
+  await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
+  await tester.enterText(finder, text);
+  await tester.pumpAndSettle();
 }
 
 /// Asserts that the subtask toggle identified by [key] is checked and remains locked when tapped.
@@ -2435,7 +2841,9 @@ Future<void> _tapKey(
 
 /// Scrolls [finder] into view, taps it, and settles animations.
 Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
+  await tester.pumpAndSettle();
   await tester.ensureVisible(finder);
+  await tester.pumpAndSettle();
   await tester.tap(finder);
   await tester.pumpAndSettle();
 }

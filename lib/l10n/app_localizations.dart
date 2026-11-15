@@ -2659,6 +2659,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Preparation window opens {days} day(s) before due date'**
   String taskInfoRepeatLeadDays(String days);
+
+  /// Section title for the task history journal card in TaskInfoDialog and EditTaskScreen.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get historySectionTitle;
+
+  /// Tooltip shown on the history indicator icon on a task pill.
+  ///
+  /// In en, this message translates to:
+  /// **'Has history entries'**
+  String get tooltipIndicatorHistory;
+
+  /// Empty-state hint shown inside the history section of TaskInfoDialog when no history entries exist.
+  ///
+  /// In en, this message translates to:
+  /// **'No history entries recorded yet.'**
+  String get historyEmptyHint;
+
+  /// Input label for the single-line history entry text field.
+  ///
+  /// In en, this message translates to:
+  /// **'History entry'**
+  String get historyEntryTextLabel;
+
+  /// Placeholder hint for the single-line history entry text field.
+  ///
+  /// In en, this message translates to:
+  /// **'Add progress update or note'**
+  String get historyEntryTextHint;
+
+  /// Input label for the optional local wall-clock history timestamp field in EditTaskScreen.
+  ///
+  /// In en, this message translates to:
+  /// **'Timestamp (optional, defaults to now)'**
+  String get historyTimestampLabel;
+
+  /// Placeholder hint for the optional local wall-clock history timestamp field.
+  ///
+  /// In en, this message translates to:
+  /// **'YYYY-MM-DD HH:MM'**
+  String get historyTimestampHint;
+
+  /// Tooltip for the button that appends a history entry.
+  ///
+  /// In en, this message translates to:
+  /// **'Add history entry'**
+  String get tooltipAddHistoryEntry;
+
+  /// Tooltip for starting an edit of an existing history entry row.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit history entry'**
+  String get tooltipEditHistoryEntry;
+
+  /// Tooltip for confirming an edit to an existing history entry.
+  ///
+  /// In en, this message translates to:
+  /// **'Update history entry'**
+  String get tooltipSaveHistoryEntry;
+
+  /// Tooltip for canceling an active edit of a history entry.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel history edit'**
+  String get tooltipCancelEditHistoryEntry;
+
+  /// Tooltip for deleting a history entry row.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete history entry'**
+  String get tooltipDeleteHistoryEntry;
+
+  /// Validation error shown when a history entry text is empty or spaces-only.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a history text.'**
+  String get historyErrorTextEmpty;
+
+  /// Validation error shown when a history entry exceeds 500 Unicode scalar values.
+  ///
+  /// In en, this message translates to:
+  /// **'History entry must not exceed 500 characters.'**
+  String get historyErrorTextTooLong;
+
+  /// Validation error shown when a history entry contains disallowed control characters or unpaired UTF-16 surrogates.
+  ///
+  /// In en, this message translates to:
+  /// **'History entry contains unsupported control characters.'**
+  String get historyErrorTextInvalid;
+
+  /// Validation error shown when a history timestamp is malformed or outside 0001..9999 UTC.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a valid date (YYYY-MM-DD) and optional time (HH:MM).'**
+  String get historyErrorTimestampInvalid;
+
+  /// Validation error shown when adding a distinct entry would exceed 500 history entries on a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum of 500 history entries per task reached.'**
+  String get historyErrorMaxExceeded;
 }
 
 class _AppLocalizationsDelegate

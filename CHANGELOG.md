@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added an interactive task history journal in the task information dialog and task editor, with card history indicators.
 - Added multi-line deferral and deadline notes and recurring preparation lead days in the task editor and task information dialog.
 - Added a per-workspace deadline lead window setting in Settings to choose when upcoming deadlines automatically advance tasks toward Focus.
 - Added an explicit deadline auto-prioritization toggle in the task editor, urgency badge colors and status details for upcoming and overdue deadlines, and live wall-clock updates for deadlines and deferrals.

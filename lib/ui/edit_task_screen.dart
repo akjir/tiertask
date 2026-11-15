@@ -30,6 +30,7 @@ import '../repositories/link_launcher_repository.dart';
 import '../services/app_logger.dart';
 import 'widgets/condition_editor_controller.dart';
 import 'widgets/task_editor_conditions_section.dart';
+import 'widgets/task_editor_history_section.dart';
 import 'widgets/task_editor_links_section.dart';
 import 'widgets/task_editor_scheduling_card.dart';
 import 'widgets/task_editor_sections.dart';
@@ -148,10 +149,17 @@ class _EditTaskBlockedBySection extends StatelessWidget {
 /// Settings-style scrollable card column inside [EditTaskScreen].
 class _EditTaskFormColumn extends StatelessWidget {
   /// Creates an [_EditTaskFormColumn].
-  const _EditTaskFormColumn({required this.board, required this.state});
+  const _EditTaskFormColumn({
+    required this.board,
+    required this.configuration,
+    required this.state,
+  });
 
   /// Current [TaskBoard] snapshot.
   final TaskBoard board;
+
+  /// Active workspace configuration for local wall-clock timestamp formatting.
+  final WebDavConfig configuration;
 
   /// Owning [_EditTaskScreenState] coordinating form controllers and callbacks.
   final _EditTaskScreenState state;
@@ -171,6 +179,8 @@ class _EditTaskFormColumn extends StatelessWidget {
         _EditTaskSchedulingSection(state: state),
         const SizedBox(height: 10),
         _EditTaskSubtasksAndLinksSection(board: board, state: state),
+        const SizedBox(height: 10),
+        _EditTaskHistorySection(configuration: configuration, state: state),
         _EditTaskBlockedBySection(board: board, state: state),
         const SizedBox(height: 10),
         TaskEditorConditionsSection(
@@ -183,17 +193,55 @@ class _EditTaskFormColumn extends StatelessWidget {
   }
 }
 
+/// History journal section wired to [_EditTaskScreenState].
+class _EditTaskHistorySection extends StatelessWidget {
+  /// Creates an [_EditTaskHistorySection].
+  const _EditTaskHistorySection({
+    required this.configuration,
+    required this.state,
+  });
+
+  /// Active workspace configuration for local wall-clock timestamp formatting.
+  final WebDavConfig configuration;
+
+  /// Owning [_EditTaskScreenState].
+  final _EditTaskScreenState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return TaskEditorHistorySection(
+      configuration: configuration,
+      editingIndex: state._editingHistoryIndex,
+      entries: state._historyEntries,
+      errorMessage: state._historyErrorMessage,
+      onAddOrSaveEntry: state._addOrSaveHistoryEntry,
+      onCancelEdit: state._cancelEditHistoryEntry,
+      onClearTimestamp: state._clearHistoryTimestamp,
+      onEditEntry: state._editHistoryEntry,
+      onPickDate: state._pickHistoryDate,
+      onPickTime: state._pickHistoryTime,
+      onRemoveEntry: state._removeHistoryEntry,
+      textController: state._historyTextController,
+      timestampController: state._historyTimestampController,
+    );
+  }
+}
+
 /// Body layout inside [EditTaskScreen] separating scrollable form cards from bottom actions.
 class _EditTaskScaffoldBody extends StatelessWidget {
   /// Creates an [_EditTaskScaffoldBody].
   const _EditTaskScaffoldBody({
     required this.board,
+    required this.configuration,
     required this.isEditing,
     required this.state,
   });
 
   /// Current [TaskBoard] snapshot.
   final TaskBoard board;
+
+  /// Active workspace configuration for local wall-clock timestamp formatting.
+  final WebDavConfig configuration;
 
   /// Whether [EditTaskScreen] is editing an existing task.
   final bool isEditing;
@@ -210,7 +258,11 @@ class _EditTaskScaffoldBody extends StatelessWidget {
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: _EditTaskFormColumn(board: board, state: state),
+              child: _EditTaskFormColumn(
+                board: board,
+                configuration: configuration,
+                state: state,
+              ),
             ),
           ),
           Padding(
@@ -286,9 +338,17 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   String? _dueErrorMessage;
   late final TextEditingController _dueNoteController;
   String? _dueNoteErrorMessage;
+  int? _editingHistoryIndex;
+  String? _editingHistoryInitialTimestampText;
+  TaskHistoryEntry? _editingHistoryOriginalEntry;
   String? _errorMessage;
   late bool _hasDue;
   bool _hasSubtaskText = false;
+  late List<TaskHistoryEntry> _historyEntries;
+  String? _historyErrorMessage;
+  final TextEditingController _historyTextController = TextEditingController();
+  final TextEditingController _historyTimestampController =
+      TextEditingController();
   late final DateTime? _initialDueAt;
   late final String? _initialDueNote;
   late final String _initialDueText;
@@ -352,6 +412,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _autoFinish = task?.subtasksAutoFinish ?? false;
     _subtasks = List.of(task?.subtasks ?? const []);
     _links = List.of(task?.links ?? const []);
+    _historyEntries = List<TaskHistoryEntry>.of(
+      task?.history ?? const <TaskHistoryEntry>[],
+    );
     _blockedByIds = Set.of(task?.blockedByTaskIds ?? const []);
     final nowUtc = ref.read(clockProvider)().toUtc();
     final hasActiveSuspension = task?.hasActiveSuspendedAt(nowUtc) ?? false;
@@ -393,6 +456,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _subtaskController.addListener(_handleSubtaskInputChanged);
     _linkTitleController.addListener(_handleLinkInputChanged);
     _linkUriController.addListener(_handleLinkInputChanged);
+    _historyTextController.addListener(_handleHistoryInputChanged);
+    _historyTimestampController.addListener(_handleHistoryInputChanged);
   }
 
   @override
@@ -402,6 +467,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _subtaskController.dispose();
     _linkTitleController.dispose();
     _linkUriController.dispose();
+    _historyTextController.dispose();
+    _historyTimestampController.dispose();
     _suspendedController.dispose();
     _suspendedNoteController.dispose();
     _dueController.dispose();
@@ -420,6 +487,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         (asyncBoard) => asyncBoard.asData?.value ?? TaskBoard.empty(),
       ),
     );
+    final configuration = ref.watch(
+      webDavConfigProvider.select(
+        (asyncConfig) => asyncConfig.asData?.value ?? const WebDavConfig(),
+      ),
+    );
     final localizations = AppLocalizations.of(context);
     final isEditing = widget.initialTask != null;
     final title = isEditing
@@ -433,6 +505,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         appBar: AppBar(title: Text(title)),
         body: _EditTaskScaffoldBody(
           board: board,
+          configuration: configuration,
           isEditing: isEditing,
           state: this,
         ),
@@ -465,6 +538,31 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     return true;
   }
 
+  /// Validates and commits the current history timestamp and text into [_historyEntries].
+  void _addOrSaveHistoryEntry() {
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final localizations = AppLocalizations.of(context);
+    final resolution = _tryResolvePendingHistoryEntries(
+      configuration,
+      localizations,
+    );
+    if (!resolution.hasPending) {
+      setState(
+        () => _historyErrorMessage = localizations.historyErrorTextEmpty,
+      );
+      return;
+    }
+    if (resolution.error case final error?) {
+      setState(() => _historyErrorMessage = error);
+      return;
+    }
+    setState(() {
+      _historyEntries = List<TaskHistoryEntry>.of(resolution.entries);
+      _resetHistoryEditInputs();
+    });
+  }
+
   /// Appends the current non-empty subtask text to [_subtasks].
   void _addSubtask() {
     final text = _subtaskController.text.trim();
@@ -476,11 +574,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Validates any pending link input and assembles the [_ValidatedTaskDraft] for saving.
+  /// Validates any pending link input, commits resolved pending history, and assembles [_ValidatedTaskDraft].
   _ValidatedTaskDraft? _buildDraft({
     required TaskBoard board,
     required DateTime? dueAt,
     required String? dueNote,
+    required ({List<TaskHistoryEntry> entries, String? error, bool hasPending})
+    historyResolution,
     required TaskRepeatRule? repeatRule,
     required DateTime? suspendedAt,
     required String? suspendedNote,
@@ -489,6 +589,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         _linkTitleController.text.trim().isNotEmpty ||
         _linkUriController.text.trim().isNotEmpty;
     if (hasPendingLink && !_addLink()) return null;
+    if (historyResolution.hasPending) {
+      setState(() {
+        _historyEntries = List<TaskHistoryEntry>.of(historyResolution.entries);
+        _resetHistoryEditInputs();
+      });
+    }
     final pendingSubtask = _subtaskController.text.trim();
     return (
       blockedByIds: TaskEditorBoardHelper.collectOrderedBlockedByIds(
@@ -497,6 +603,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       ),
       dueAt: dueAt,
       dueNote: dueNote,
+      history: historyResolution.entries,
       labelIds: TaskEditorBoardHelper.collectOrderedLabelIds(board, _labelIds),
       links: _links,
       repeatRule: repeatRule,
@@ -508,6 +615,19 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       suspendedAt: suspendedAt,
       suspendedNote: suspendedNote,
     );
+  }
+
+  /// Cancels an active draft history row edit and clears the history input fields.
+  void _cancelEditHistoryEntry() {
+    setState(_resetHistoryEditInputs);
+  }
+
+  /// Clears the history timestamp input and resets [_historyErrorMessage].
+  void _clearHistoryTimestamp() {
+    setState(() {
+      _historyErrorMessage = null;
+      _historyTimestampController.clear();
+    });
   }
 
   /// Prompts for confirmation and deletes [EditTaskScreen.initialTask] when confirmed.
@@ -532,6 +652,25 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     Navigator.of(context).pop();
   }
 
+  /// Loads the draft history entry at [index] into the editor timestamp and text inputs.
+  void _editHistoryEntry(int index) {
+    if (index < 0 || index >= _historyEntries.length) return;
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final entry = _historyEntries[index];
+    final formattedTimestamp = TaskItem.formatTdfTimestamp(
+      configuration.toLocalWallClock(entry.timestampUtc),
+    );
+    setState(() {
+      _historyErrorMessage = null;
+      _editingHistoryIndex = index;
+      _editingHistoryOriginalEntry = entry;
+      _editingHistoryInitialTimestampText = formattedTimestamp;
+      _historyTimestampController.text = formattedTimestamp;
+      _historyTextController.text = entry.text;
+    });
+  }
+
   /// Clears any due validation error and auto-resets passive status when the due timestamp changes without manual switch interaction.
   void _handleDueChanged() {
     final candidateDueAt = _resolveCurrentEditorDueAt();
@@ -554,6 +693,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   void _handleDueNoteChanged() {
     if (_dueNoteErrorMessage != null) {
       setState(() => _dueNoteErrorMessage = null);
+    }
+  }
+
+  /// Clears any history validation error when the user edits the history timestamp or text inputs.
+  void _handleHistoryInputChanged() {
+    if (_historyErrorMessage != null) {
+      setState(() => _historyErrorMessage = null);
     }
   }
 
@@ -583,7 +729,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     }
     if (!mounted) return;
     setState(() {
-      if (kind == TdfErrorKind.invalidTimestamp && _isRepeating && _hasDue) {
+      if (kind == TdfErrorKind.limitExceeded &&
+          _historyEntries.length >= maxTdfHistoryPerTask) {
+        _historyErrorMessage = localizations.historyErrorMaxExceeded;
+      } else if (kind == TdfErrorKind.invalidTimestamp &&
+          _isRepeating &&
+          _hasDue) {
         _repeatLeadDaysErrorMessage = localizations.repeatLeadDaysErrorInvalid;
       } else if (kind == TdfErrorKind.invalidTimestamp && _isSuspended) {
         _suspendedErrorMessage = localizations.taskSuspendedErrorInvalid;
@@ -652,7 +803,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         TaskItem.normalizeTimestamp(initialDueAt);
   }
 
-  /// Emits redacted `AppLogger` telemetry after [draft] saves without logging raw note contents.
+  /// Emits redacted `AppLogger` telemetry after [draft] saves without logging raw note or history contents.
   void _logTaskSaved(_ValidatedTaskDraft draft) {
     if (!AppLogger.shouldLog(LogLevel.info)) return;
     AppLogger.event(
@@ -667,6 +818,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         'has_due_note': draft.dueNote != null,
         'is_repeating': _isRepeating,
         'lead_days': draft.repeatRule?.leadDays ?? 0,
+        'history_count': draft.history.length,
       },
     );
   }
@@ -675,6 +827,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   void _logValidationFailed({
     required bool hasDueError,
     required bool hasDueNoteError,
+    required bool hasHistoryError,
     required bool hasLeadDaysError,
     required bool hasRepeatError,
     required bool hasSuspendedError,
@@ -694,6 +847,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         'due_note': hasDueNoteError,
         'repeat': hasRepeatError,
         'lead_days': hasLeadDaysError,
+        'history': hasHistoryError,
       },
     );
   }
@@ -755,7 +909,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         clearRepeatRule: !_isRepeating,
         blockedByTaskIds: draft.blockedByIds,
         links: draft.links,
-        history: existingTask.history,
+        history: draft.history,
         conditions: _conditionController.buildConditions(),
       );
     }
@@ -776,6 +930,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       repeatRule: draft.repeatRule,
       blockedByTaskIds: draft.blockedByIds,
       links: draft.links,
+      history: draft.history,
       conditions: _conditionController.buildConditions(),
     );
   }
@@ -814,6 +969,40 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Opens the Material 3 date picker for [_historyTimestampController].
+  Future<void> _pickHistoryDate() =>
+      _pickHistoryTimestamp(TaskEditorHistorySection.pickHistoryDate);
+
+  /// Opens the 24-hour time picker for [_historyTimestampController].
+  Future<void> _pickHistoryTime() =>
+      _pickHistoryTimestamp(TaskEditorHistorySection.pickHistoryTime);
+
+  /// Opens [picker] and updates [_historyTimestampController] with the selected local date or time.
+  Future<void> _pickHistoryTimestamp(
+    Future<String?> Function({
+      required BuildContext context,
+      required String currentText,
+      required DateTime fallbackLocal,
+    })
+    picker,
+  ) async {
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final fallbackLocal = configuration.toLocalWallClock(
+      ref.read(clockProvider)().toUtc(),
+    );
+    final updated = await picker(
+      context: context,
+      currentText: _historyTimestampController.text,
+      fallbackLocal: fallbackLocal,
+    );
+    if (!mounted || updated == null) return;
+    setState(() {
+      _historyErrorMessage = null;
+      _historyTimestampController.text = updated;
+    });
+  }
+
   /// Opens the Material 3 date picker for [_suspendedController].
   Future<void> _pickSuspendedDate() =>
       _pickSuspendedTimestamp(TaskEditorSuspendedField.pickSuspendedDate);
@@ -848,6 +1037,21 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Removes the draft history entry at [index] while maintaining [_editingHistoryIndex] coherence.
+  void _removeHistoryEntry(int index) {
+    if (index < 0 || index >= _historyEntries.length) return;
+    setState(() {
+      _historyEntries.removeAt(index);
+      _historyErrorMessage = null;
+      final activeIndex = _editingHistoryIndex;
+      if (activeIndex == index) {
+        _resetHistoryEditInputs();
+      } else if (activeIndex != null && index < activeIndex) {
+        _editingHistoryIndex = activeIndex - 1;
+      }
+    });
+  }
+
   /// Removes the link at [index].
   void _removeLink(int index) {
     if (index < 0 || index >= _links.length) return;
@@ -864,6 +1068,16 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     setState(() => _subtasks.removeAt(index));
   }
 
+  /// Clears active draft history edit tracking and resets both history input controllers.
+  void _resetHistoryEditInputs() {
+    _historyErrorMessage = null;
+    _editingHistoryIndex = null;
+    _editingHistoryOriginalEntry = null;
+    _editingHistoryInitialTimestampText = null;
+    _historyTimestampController.clear();
+    _historyTextController.clear();
+  }
+
   /// Resolves the current `due` timestamp in the editor, preserving [_initialDueAt] when the text is unchanged.
   DateTime? _resolveCurrentEditorDueAt() {
     if (!_hasDue) {
@@ -874,6 +1088,54 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       return _initialDueAt;
     }
     return TaskItem.tryParseTdfTimestampInput(trimmed);
+  }
+
+  /// Validates the current pending history inputs into a single [TaskHistoryEntry] or localized error.
+  ({TaskHistoryEntry? candidate, String? error})
+  _resolvePendingHistoryCandidate(
+    WebDavConfig configuration,
+    AppLocalizations localizations,
+  ) {
+    final trimmedTimestamp = _historyTimestampController.text.trim();
+    final rawText = _historyTextController.text;
+    if (_editingHistoryIndex != null &&
+        _editingHistoryOriginalEntry != null &&
+        trimmedTimestamp == _editingHistoryInitialTimestampText &&
+        rawText == _editingHistoryOriginalEntry?.text) {
+      return (candidate: _editingHistoryOriginalEntry, error: null);
+    }
+    final nowUtc = ref.read(clockProvider)().toUtc();
+    final resolvedTimestampUtc =
+        TaskHistoryInputValidator.resolveEntryTimestampUtc(
+          configuration: configuration,
+          fallbackNowUtc: nowUtc,
+          preservedTimestampText: _editingHistoryInitialTimestampText,
+          preservedTimestampUtc: _editingHistoryOriginalEntry?.timestampUtc,
+          rawTimestamp: _historyTimestampController.text,
+        );
+    if (resolvedTimestampUtc == null) {
+      return (
+        candidate: null,
+        error: localizations.historyErrorTimestampInvalid,
+      );
+    }
+    final sanitizedText = TaskHistoryInputValidator.sanitizeSingleLineText(
+      rawText,
+    );
+    final textError = TaskHistoryInputValidator.validateText(
+      sanitizedText,
+      localizations,
+    );
+    if (textError != null) {
+      return (candidate: null, error: textError);
+    }
+    return (
+      candidate: TaskHistoryEntry(
+        timestampUtc: resolvedTimestampUtc,
+        text: sanitizedText,
+      ),
+      error: null,
+    );
   }
 
   /// Resolves an optional scheduling note, preserving [initialNote] verbatim when untouched.
@@ -1001,6 +1263,51 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Resolves any pending history inputs into a normalized entry list or localized validation error.
+  ({List<TaskHistoryEntry> entries, String? error, bool hasPending})
+  _tryResolvePendingHistoryEntries(
+    WebDavConfig configuration,
+    AppLocalizations localizations,
+  ) {
+    final hasPending =
+        _editingHistoryIndex != null ||
+        _historyTimestampController.text.trim().isNotEmpty ||
+        _historyTextController.text.isNotEmpty;
+    if (!hasPending) {
+      return (
+        entries: List<TaskHistoryEntry>.unmodifiable(_historyEntries),
+        error: null,
+        hasPending: false,
+      );
+    }
+    final candidateResult = _resolvePendingHistoryCandidate(
+      configuration,
+      localizations,
+    );
+    final candidate = candidateResult.candidate;
+    if (candidate == null) {
+      return (
+        entries: _historyEntries,
+        error: candidateResult.error,
+        hasPending: true,
+      );
+    }
+    final activeIndex = _editingHistoryIndex;
+    final nextEntries = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+      for (var i = 0; i < _historyEntries.length; i++)
+        if (i != activeIndex) _historyEntries[i],
+      candidate,
+    ]);
+    if (nextEntries.length > maxTdfHistoryPerTask) {
+      return (
+        entries: _historyEntries,
+        error: localizations.historyErrorMaxExceeded,
+        hasPending: true,
+      );
+    }
+    return (entries: nextEntries, error: null, hasPending: true);
+  }
+
   /// Applies [callback] inside [setState] to update form state.
   void _update(VoidCallback callback) => setState(callback);
 
@@ -1009,6 +1316,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     TaskBoard board,
     AppLocalizations localizations,
   ) {
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final historyResolution = _tryResolvePendingHistoryEntries(
+      configuration,
+      localizations,
+    );
     final titleError = TaskEditorBoardHelper.validateTitle(
       board: board,
       rawTitle: _titleController.text,
@@ -1052,13 +1365,15 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final hasDueError = _hasDue && dueAt == null;
     final hasRepeatError = _isRepeating && repeatCount == null;
     final hasLeadDaysError = _isRepeating && _hasDue && leadDays == null;
+    final hasHistoryError = historyResolution.error != null;
     if (titleError != null ||
         hasSuspendedError ||
         suspendedNoteError != null ||
         hasDueError ||
         dueNoteError != null ||
         hasRepeatError ||
-        hasLeadDaysError) {
+        hasLeadDaysError ||
+        hasHistoryError) {
       setState(() {
         _errorMessage = titleError;
         _suspendedErrorMessage = hasSuspendedError
@@ -1075,10 +1390,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         _repeatLeadDaysErrorMessage = hasLeadDaysError
             ? localizations.repeatLeadDaysErrorInvalid
             : null;
+        _historyErrorMessage = historyResolution.error;
       });
       _logValidationFailed(
         hasDueError: hasDueError,
         hasDueNoteError: dueNoteError != null,
+        hasHistoryError: hasHistoryError,
         hasLeadDaysError: hasLeadDaysError,
         hasRepeatError: hasRepeatError,
         hasSuspendedError: hasSuspendedError,
@@ -1100,6 +1417,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       board: board,
       dueAt: dueAt,
       dueNote: dueNote,
+      historyResolution: historyResolution,
       repeatRule: repeatRule,
       suspendedAt: suspendedAt,
       suspendedNote: suspendedNote,
@@ -1166,6 +1484,7 @@ typedef _ValidatedTaskDraft = ({
   List<String> blockedByIds,
   DateTime? dueAt,
   String? dueNote,
+  List<TaskHistoryEntry> history,
   List<String> labelIds,
   List<TaskLink> links,
   TaskRepeatRule? repeatRule,
