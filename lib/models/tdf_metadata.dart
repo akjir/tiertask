@@ -17,6 +17,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'tdf_error.dart';
 import 'tdf_location.dart';
 
 /// Canonical Base62 character alphabet (`0-9`, `A-Z`, `a-z`) defined in `TDF_SPEC.md` Section 2.9.
@@ -718,21 +719,40 @@ class TaskLink {
     return true;
   }
 
-  /// Trims and validates [rawTitle] and [rawUri], returning a [TaskLink] or `null` if invalid.
+  /// Trims surrounding ASCII spaces and validates [rawTitle] and [rawUri] against single-line `<text>` and `<uri>` rules, returning a [TaskLink] or `null` if invalid.
   static TaskLink? tryParse({
     required String rawTitle,
     required String rawUri,
-    int maxTextLength = 500,
+    int maxTextLength = maxTdfTextLength,
   }) {
+    if (_containsAsciiControlChar(rawTitle) ||
+        _containsAsciiControlChar(rawUri)) {
+      return null;
+    }
     final trimmedTitle = rawTitle.trim();
     final trimmedUri = rawUri.trim();
-    if (trimmedTitle.isEmpty || trimmedTitle.length > maxTextLength) {
+    final titleScalarCount = _countUnicodeScalars(trimmedTitle);
+    if (titleScalarCount == null ||
+        titleScalarCount == 0 ||
+        titleScalarCount > maxTextLength ||
+        !_hasGraphicChar(trimmedTitle)) {
       return null;
     }
     if (!isValidUri(trimmedUri)) {
       return null;
     }
     return TaskLink(title: trimmedTitle, uri: trimmedUri);
+  }
+
+  /// Checks whether [value] contains any ASCII control character (`0x00..0x1F` or `0x7F`).
+  static bool _containsAsciiControlChar(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit <= 0x1F || unit == 0x7F) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Counts decoded Unicode scalar values in [value], returning `null` if an unpaired UTF-16 surrogate is present.
@@ -755,6 +775,16 @@ class TaskLink {
       }
     }
     return count;
+  }
+
+  /// Checks whether [value] contains at least one non-space graphic code unit (`!= 0x20`).
+  static bool _hasGraphicChar(String value) {
+    for (var i = 0; i < value.length; i++) {
+      if (value.codeUnitAt(i) != 0x20) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Checks whether [unit] is an ASCII letter (`[a-zA-Z]`).
@@ -801,6 +831,9 @@ class TdfLabel {
 
   /// Fallback UTC modification timestamp (`1970-01-01 00:00:00` UTC) when a `label` block omits `modified` (`TDF_SPEC.md` Section 6.7.2).
   static final DateTime defaultModifiedAt = DateTime.utc(1970, 1, 1, 0, 0, 0);
+
+  /// Maximum number of `link` directives permitted on a single label (`20`).
+  static const int maxLinksPerLabel = maxTdfLinksPerLabel;
 
   /// Optional hexadecimal color code (`"#RRGGBB"`).
   final String? color;

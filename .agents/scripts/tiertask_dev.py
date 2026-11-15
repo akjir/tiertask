@@ -714,7 +714,10 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/ui/widgets/task_editor_sections.dart": ["test/ui/edit_task_screen_test.dart"],
     "lib/ui/widgets/task_editor_scheduling_card.dart": ["test/ui/edit_task_screen_test.dart"],
     "lib/ui/widgets/task_editor_subtasks_and_blockers.dart": ["test/ui/edit_task_screen_test.dart"],
-    "lib/ui/widgets/task_editor_links_section.dart": ["test/ui/edit_task_screen_test.dart"],
+    "lib/ui/widgets/task_editor_links_section.dart": [
+        "test/ui/edit_task_screen_test.dart",
+        "test/ui/edit_labels_screen_test.dart",
+    ],
     "lib/ui/widgets/condition_editor_controller.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
     "lib/ui/widgets/task_editor_conditions_section.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
     "lib/ui/widgets/workspace_row_card.dart": ["test/ui/widgets/workspace_dialog_test.dart"],

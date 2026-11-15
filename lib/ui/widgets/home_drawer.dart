@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -25,6 +27,7 @@ import '../../providers/config_providers.dart';
 import '../../repositories/app_version_repository.dart';
 import '../edit_locations_screen.dart';
 import 'app_logo.dart';
+import 'label_hub_dialog.dart';
 import 'log_viewer_dialog.dart';
 import 'workspace_dialog.dart';
 
@@ -225,6 +228,38 @@ class _DrawerHeader extends StatelessWidget {
   }
 }
 
+/// Compact info button opening [LabelHubDialog] for a drawer label row.
+class _DrawerLabelHubButton extends StatelessWidget {
+  /// Creates a [_DrawerLabelHubButton].
+  const _DrawerLabelHubButton({
+    required this.iconColor,
+    required this.labelId,
+    required this.tooltip,
+  });
+
+  /// Tinted foreground color for the info icon.
+  final Color iconColor;
+
+  /// Identifier of the label opened in [LabelHubDialog].
+  final String labelId;
+
+  /// Localized accessibility tooltip.
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      key: ValueKey('drawer_label_hub_button_$labelId'),
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      tooltip: tooltip,
+      icon: Icon(Icons.info_outline_rounded, size: 16, color: iconColor),
+      onPressed: () => _openDrawerLabelHub(context, labelId),
+    );
+  }
+}
+
 /// Google Keep style label row inside [HomeDrawer] with task count badge.
 class _DrawerLabelTile extends StatelessWidget {
   /// Creates a [_DrawerLabelTile].
@@ -258,7 +293,12 @@ class _DrawerLabelTile extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         visualDensity: const VisualDensity(vertical: -2),
         leading: Icon(Icons.label_outline_rounded, color: leadingColor),
-        title: Text(label.name, style: TextStyle(fontWeight: weight)),
+        title: Text(
+          label.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontWeight: weight),
+        ),
         trailing: _DrawerLabelTrailing(count: count, label: label),
         onTap: () {
           Navigator.of(context).pop();
@@ -276,7 +316,7 @@ class _DrawerLabelTile extends StatelessWidget {
       };
 }
 
-/// Trailing row inside [_DrawerLabelTile] displaying the optional scoped indicator and task count badge.
+/// Trailing row inside [_DrawerLabelTile] displaying the hub button, optional scoped indicator, and task count badge.
 class _DrawerLabelTrailing extends StatelessWidget {
   /// Creates a [_DrawerLabelTrailing].
   const _DrawerLabelTrailing({required this.count, required this.label});
@@ -289,29 +329,34 @@ class _DrawerLabelTrailing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badge = Badge.count(
-      key: ValueKey('drawer_label_badge_${label.id}'),
-      count: count,
-    );
-    if (!label.isScoped) {
-      return badge;
-    }
-    final color = Theme.of(context).colorScheme.onSurfaceVariant
-        .withValues(alpha: 0.55);
+    final localizations = AppLocalizations.of(context);
+    final mutedColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    final scopedColor = mutedColor.withValues(alpha: 0.55);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Tooltip(
-          message: AppLocalizations.of(context).labelScopedSwitchTitle,
-          child: Icon(
-            Icons.visibility_off_outlined,
-            key: ValueKey('drawer_label_scoped_indicator_${label.id}'),
-            size: 16,
-            color: color,
-          ),
+        _DrawerLabelHubButton(
+          iconColor: mutedColor.withValues(alpha: 0.75),
+          labelId: label.id,
+          tooltip: localizations.tooltipOpenLabelHub,
         ),
-        const SizedBox(width: 6),
-        badge,
+        const SizedBox(width: 4),
+        if (label.isScoped) ...[
+          Tooltip(
+            message: localizations.labelScopedSwitchTitle,
+            child: Icon(
+              Icons.visibility_off_outlined,
+              key: ValueKey('drawer_label_scoped_indicator_${label.id}'),
+              size: 16,
+              color: scopedColor,
+            ),
+          ),
+          const SizedBox(width: 6),
+        ],
+        Badge.count(
+          key: ValueKey('drawer_label_badge_${label.id}'),
+          count: count,
+        ),
       ],
     );
   }
@@ -602,4 +647,17 @@ Future<void> showTdfMarkdownDialog(
     context: context,
     builder: (_) => _TdfMarkdownDialog(board: board),
   );
+}
+
+/// Closes an open drawer on [context] without altering label filters and opens [LabelHubDialog].
+void _openDrawerLabelHub(BuildContext context, String labelId) {
+  final scaffoldState = Scaffold.maybeOf(context);
+  final navigator = Navigator.of(context);
+  final hostContext = scaffoldState?.context ?? navigator.context;
+  if (scaffoldState != null && scaffoldState.isDrawerOpen) {
+    scaffoldState.closeDrawer();
+  } else if (navigator.canPop()) {
+    navigator.pop();
+  }
+  unawaited(showLabelHubDialog(hostContext, labelId: labelId));
 }

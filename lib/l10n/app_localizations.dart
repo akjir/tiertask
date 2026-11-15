@@ -2425,6 +2425,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Task ID copied to clipboard.'**
   String get taskIdCopiedSnackBar;
+
+  /// Title of the Label Context Hub dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Label Context'**
+  String get labelHubDialogTitle;
+
+  /// Empty-state hint inside the Label Context Hub dialog when no metadata is set.
+  ///
+  /// In en, this message translates to:
+  /// **'No note, links, or activation conditions configured for this label.'**
+  String get labelHubEmptyHint;
+
+  /// Validation error when adding more than 20 links to a label.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum of 20 links per label reached.'**
+  String get labelLinkErrorMaxExceeded;
+
+  /// Tooltip for canceling an active inline link edit.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel link edit'**
+  String get tooltipCancelEditLink;
+
+  /// Tooltip for starting an inline edit of an existing link row.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit link'**
+  String get tooltipEditLink;
+
+  /// Tooltip for moving a link row down by one position.
+  ///
+  /// In en, this message translates to:
+  /// **'Move link down'**
+  String get tooltipMoveLinkDown;
+
+  /// Tooltip for moving a link row up by one position.
+  ///
+  /// In en, this message translates to:
+  /// **'Move link up'**
+  String get tooltipMoveLinkUp;
+
+  /// Tooltip for opening the Label Context Hub dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Show label details and links'**
+  String get tooltipOpenLabelHub;
+
+  /// Tooltip for confirming an inline link edit.
+  ///
+  /// In en, this message translates to:
+  /// **'Update link'**
+  String get tooltipSaveLink;
 }
 
 class _AppLocalizationsDelegate

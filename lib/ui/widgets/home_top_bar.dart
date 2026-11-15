@@ -16,6 +16,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import 'label_hub_dialog.dart';
 import 'location_status_dialog.dart';
 
 /// Top navigation bar displaying the menu button, optional active label name,
@@ -24,12 +25,16 @@ class HomeTopBar extends StatelessWidget {
   /// Creates a [HomeTopBar].
   const HomeTopBar({
     super.key,
+    this.activeLabelId,
     required this.activeLabelName,
     required this.isSearching,
     required this.searchController,
     required this.onSearchChanged,
     required this.onToggleSearch,
   });
+
+  /// Active label identifier when filtered, or `null` when unfiltered.
+  final String? activeLabelId;
 
   /// Active label display name when filtered, or `null` when unfiltered.
   final String? activeLabelName;
@@ -49,7 +54,6 @@ class HomeTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(
@@ -57,6 +61,7 @@ class HomeTopBar extends StatelessWidget {
           _TopBarMenuButton(tooltip: localizations.tooltipMenu),
           Expanded(
             child: _TopBarCenterArea(
+              activeLabelId: activeLabelId,
               activeLabelName: activeLabelName,
               isSearching: isSearching,
               searchController: searchController,
@@ -79,6 +84,7 @@ class HomeTopBar extends StatelessWidget {
 class _TopBarAnimatedSlots extends StatelessWidget {
   /// Creates [_TopBarAnimatedSlots].
   const _TopBarAnimatedSlots({
+    required this.activeLabelId,
     required this.activeLabelName,
     required this.isSearching,
     required this.onSearchChanged,
@@ -86,10 +92,22 @@ class _TopBarAnimatedSlots extends StatelessWidget {
     required this.searchProgress,
   });
 
+  /// Active label identifier when filtered, or `null`.
+  final String? activeLabelId;
+
+  /// Active label display name when filtered, or `null`.
   final String? activeLabelName;
+
+  /// Whether inline search is currently expanded.
   final bool isSearching;
+
+  /// Search input change callback.
   final ValueChanged<String> onSearchChanged;
+
+  /// Controller for the inline search field.
   final TextEditingController searchController;
+
+  /// Current `0.0..1.0` animation progress of search expansion.
   final double searchProgress;
 
   @override
@@ -104,6 +122,7 @@ class _TopBarAnimatedSlots extends StatelessWidget {
             id: _TopBarSlot.title,
             child: _TopBarTitle(
               key: const ValueKey('top_bar_title'),
+              activeLabelId: activeLabelId,
               title: labelName,
             ),
           ),
@@ -131,15 +150,26 @@ class _TopBarAnimatedSlots extends StatelessWidget {
 class _TopBarCenterArea extends StatelessWidget {
   /// Creates a [_TopBarCenterArea].
   const _TopBarCenterArea({
+    required this.activeLabelId,
     required this.activeLabelName,
     required this.isSearching,
     required this.searchController,
     required this.onSearchChanged,
   });
 
+  /// Active label identifier when filtered, or `null`.
+  final String? activeLabelId;
+
+  /// Active label display name when filtered, or `null`.
   final String? activeLabelName;
+
+  /// Whether inline search is currently expanded.
   final bool isSearching;
+
+  /// Search input change callback.
   final ValueChanged<String> onSearchChanged;
+
+  /// Controller for the inline search field.
   final TextEditingController searchController;
 
   @override
@@ -151,11 +181,48 @@ class _TopBarCenterArea extends StatelessWidget {
         duration: const Duration(milliseconds: 260),
         curve: Curves.easeInOutCubic,
         builder: (context, searchProgress, _) => _TopBarAnimatedSlots(
+          activeLabelId: activeLabelId,
           activeLabelName: activeLabelName,
           isSearching: isSearching,
           onSearchChanged: onSearchChanged,
           searchController: searchController,
           searchProgress: searchProgress,
+        ),
+      ),
+    );
+  }
+}
+
+/// Interactive wrapper around the active label title that opens [LabelHubDialog].
+class _TopBarInteractiveTitle extends StatelessWidget {
+  /// Creates a [_TopBarInteractiveTitle].
+  const _TopBarInteractiveTitle({
+    super.key,
+    required this.labelId,
+    required this.title,
+  });
+
+  /// Identifier of the active label.
+  final String labelId;
+
+  /// Display name of the active label.
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return Tooltip(
+      message: localizations.tooltipOpenLabelHub,
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: const ValueKey('top_bar_label_hub_trigger'),
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => showLabelHubDialog(context, labelId: labelId),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: _TopBarTitleRow(showInfoIcon: true, title: title),
+          ),
         ),
       ),
     );
@@ -168,6 +235,7 @@ class _TopBarLayoutDelegate extends MultiChildLayoutDelegate {
   /// Creates a [_TopBarLayoutDelegate].
   _TopBarLayoutDelegate({required this.searchProgress});
 
+  /// Current `0.0..1.0` animation progress of search expansion.
   final double searchProgress;
 
   @override
@@ -224,6 +292,7 @@ class _TopBarMenuButton extends StatelessWidget {
   /// Creates a [_TopBarMenuButton].
   const _TopBarMenuButton({required this.tooltip});
 
+  /// Localized tooltip text.
   final String tooltip;
 
   @override
@@ -245,7 +314,10 @@ class _TopBarSearchButton extends StatelessWidget {
     required this.onPressed,
   });
 
+  /// Whether inline search is currently expanded.
   final bool isSearching;
+
+  /// Callback invoked when the button is pressed.
   final VoidCallback onPressed;
 
   @override
@@ -278,7 +350,10 @@ class _TopBarSearchField extends StatelessWidget {
   /// Creates a [_TopBarSearchField].
   const _TopBarSearchField({required this.controller, required this.onChanged});
 
+  /// Controller for the inline search input.
   final TextEditingController controller;
+
+  /// Callback invoked when the search query changes.
   final ValueChanged<String> onChanged;
 
   @override
@@ -315,28 +390,86 @@ enum _TopBarSlot {
 /// Active label title displayed inside [HomeTopBar].
 class _TopBarTitle extends StatelessWidget {
   /// Creates a [_TopBarTitle].
-  const _TopBarTitle({super.key, required this.title});
+  const _TopBarTitle({super.key, this.activeLabelId, required this.title});
 
+  /// Optional active label identifier enabling one-tap [LabelHubDialog] access.
+  final String? activeLabelId;
+
+  /// Display name of the active label.
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final child = switch (activeLabelId) {
+      final labelId? => _TopBarInteractiveTitle(
+        key: ValueKey<String>(title),
+        labelId: labelId,
+        title: title,
+      ),
+      null => _TopBarTitleRow(
+        key: ValueKey<String>(title),
+        showInfoIcon: false,
+        title: title,
+      ),
+    };
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 200),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      child: child,
+    );
+  }
+}
+
+/// Ellipsized label title text with optional compact trailing info icon.
+class _TopBarTitleRow extends StatelessWidget {
+  /// Creates a [_TopBarTitleRow].
+  const _TopBarTitleRow({
+    super.key,
+    required this.showInfoIcon,
+    required this.title,
+  });
+
+  /// Whether a trailing `16px` info icon should be shown when width allows.
+  final bool showInfoIcon;
+
+  /// Display name of the active label.
   final String title;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 200),
-      switchInCurve: Curves.easeOutCubic,
-      switchOutCurve: Curves.easeInCubic,
-      child: Text(
-        title,
-        key: ValueKey<String>(title),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: colorScheme.onSurface,
-          fontSize: 20,
-          fontWeight: FontWeight.bold,
-        ),
+    final textWidget = Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: colorScheme.onSurface,
+        fontSize: 20,
+        fontWeight: FontWeight.bold,
       ),
+    );
+    if (!showInfoIcon) {
+      return textWidget;
+    }
+    return LayoutBuilder(
+      builder: (context, innerConstraints) {
+        if (innerConstraints.maxWidth < 28) {
+          return textWidget;
+        }
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: textWidget),
+            const SizedBox(width: 6),
+            Icon(
+              Icons.info_outline_rounded,
+              size: 16,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -26,6 +26,7 @@ import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
+import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -187,6 +188,7 @@ Future<ProviderContainer> pumpLeafWidget(
   ThemeMode themeMode = ThemeMode.light,
   DateTime Function()? clock,
   bool wrapInScaffold = true,
+  LinkLauncherRepository? linkLauncherRepository,
   LocationRepository? locationRepository,
 }) async {
   final effectiveThemeSet =
@@ -209,6 +211,10 @@ Future<ProviderContainer> pumpLeafWidget(
         clock ?? () => DateTime.utc(2026, 11, 1, 12, 0),
       ),
       taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+      if (linkLauncherRepository != null)
+        linkLauncherRepositoryProvider.overrideWithValue(
+          linkLauncherRepository,
+        ),
       if (locationRepository != null)
         locationRepositoryProvider.overrideWithValue(locationRepository),
     ],

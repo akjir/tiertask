@@ -917,6 +917,101 @@ task dueSoon001 {
       );
     },
   );
+
+  testWidgets(
+    'HomeTopBar hides label hub trigger in global view and opens LabelHubDialog on active label tap in tier and search views without overflow on 500-char names',
+    (WidgetTester tester) async {
+      final longLabelName = 'ContextHub' * 50; // 500 characters
+      final hubTdf =
+          '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 09:00:00
+  task tskHubOkD2
+}
+
+label lblHubOkD2 scoped {
+  name "$longLabelName"
+  note "Shared scoped workspace runbook"
+  link "Repo" "https://example.com/repo"
+}
+
+task tskHubOkD2 {
+  name "Scoped Hub Task"
+  created 2026-11-01 08:00:00
+  labels lblHubOkD2
+}
+''';
+      await _pumpHomeApp(tester, initialTdf: hubTdf);
+
+      expect(
+        find.byKey(const ValueKey('top_bar_title')),
+        findsNothing,
+        reason: 'Unfiltered global view must not render top_bar_title',
+      );
+      expect(
+        find.byKey(const ValueKey('top_bar_label_hub_trigger')),
+        findsNothing,
+        reason:
+            'Unfiltered global view must not render top_bar_label_hub_trigger',
+      );
+
+      // Select scoped label filter from HomeDrawer.
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('drawer_label_tile_lblHubOkD2')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      final triggerFinder = find.byKey(
+        const ValueKey('top_bar_label_hub_trigger'),
+      );
+      expect(
+        triggerFinder,
+        findsOneWidget,
+        reason: 'Active label filter must render top_bar_label_hub_trigger inside top_bar_title',
+      );
+
+      // Tap active label title in standard tier view -> opens LabelHubDialog.
+      await tester.tap(triggerFinder);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('label_hub_dialog')), findsOneWidget);
+      expect(find.text('Shared scoped workspace runbook'), findsOneWidget);
+      expect(find.text('Repo'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('label_hub_close_button')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('label_hub_dialog')), findsNothing);
+
+      // Expand inline search on a narrow 360px mobile viewport: verify zero overflow and LabelHubDialog opens on tap!
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('top_bar_search_button')));
+      await tester.pumpAndSettle();
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '500-char active label title alongside expanded search on 360px viewport must not overflow',
+      );
+
+      await tester.tap(triggerFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('label_hub_dialog')),
+        findsOneWidget,
+        reason: 'Tapping active label title while search is open must open LabelHubDialog',
+      );
+    },
+  );
 }
 
 /// Pumps [TierTaskApp] with optional [config] and [initialTdf] overrides.

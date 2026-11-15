@@ -17,11 +17,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/app_version_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/ui/widgets/home_drawer.dart';
 
 import 'test_helpers.dart';
 
@@ -580,6 +584,156 @@ task tskRegOkD2 {
         isTrue,
         reason: 'Scoped indicator must be positioned directly to the left of the task count badge',
       );
+    },
+  );
+
+  testWidgets(
+    'Navigation drawer renders label hub info button with exact horizontal order, opens LabelHubDialog without changing activeLabelId, and supports isolated leaf mounting',
+    (WidgetTester tester) async {
+      const drawerHubTdf = '''
+tdf 0.7.0
+
+queue {
+  modified 2026-11-01 08:10:00
+  task tskScpOkD2
+  task tskGenOkD2
+}
+
+label scp000OkD2 scoped {
+  name "Scoped Project"
+  note "Scoped project hub note"
+  link "Docs" "https://example.com/scoped-docs"
+}
+
+label reg000OkD2 {
+  name "General"
+}
+
+task tskScpOkD2 {
+  name "Scoped Hidden Task"
+  created 2026-11-01 08:00:00
+  labels scp000OkD2
+}
+
+task tskGenOkD2 {
+  name "Visible Global Task"
+  created 2026-11-01 08:05:00
+  labels reg000OkD2
+}
+''';
+      await _pumpDrawerApp(
+        tester,
+        initialTdf: drawerHubTdf,
+        clock: DateTime.utc(2026, 11, 1, 12, 0),
+      );
+
+      // Initially unfiltered: Visible Global Task is shown, Scoped Hidden Task is hidden.
+      expect(find.text('Visible Global Task'), findsOneWidget);
+      expect(find.text('Scoped Hidden Task'), findsNothing);
+
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+
+      final hubBtnFinder = find.byKey(
+        const ValueKey('drawer_label_hub_button_scp000OkD2'),
+      );
+      final scopedIndFinder = find.byKey(
+        const ValueKey('drawer_label_scoped_indicator_scp000OkD2'),
+      );
+      final badgeFinder = find.byKey(
+        const ValueKey('drawer_label_badge_scp000OkD2'),
+      );
+      expect(hubBtnFinder, findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('drawer_label_hub_button_reg000OkD2')),
+        findsOneWidget,
+      );
+
+      final titleRight = tester.getTopRight(find.text('Scoped Project')).dx;
+      final hubLeft = tester.getTopLeft(hubBtnFinder).dx;
+      final hubRight = tester.getTopRight(hubBtnFinder).dx;
+      final scopedLeft = tester.getTopLeft(scopedIndFinder).dx;
+      final scopedRight = tester.getTopRight(scopedIndFinder).dx;
+      final badgeLeft = tester.getTopLeft(badgeFinder).dx;
+
+      expect(
+        titleRight <= hubLeft &&
+            hubRight <= scopedLeft &&
+            scopedRight <= badgeLeft,
+        isTrue,
+        reason: 'Horizontal trailing order must be labelTitle <= hubButton <= scopedIndicator <= badge',
+      );
+
+      // Tap drawer_label_hub_button_scp000OkD2: closes drawer, opens LabelHubDialog, leaves activeLabelId unchanged!
+      await tester.tap(hubBtnFinder);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byType(Drawer),
+        findsNothing,
+        reason: 'Tapping drawer label hub button must close the drawer',
+      );
+      expect(find.byKey(const ValueKey('label_hub_dialog')), findsOneWidget);
+      expect(find.text('Scoped project hub note'), findsOneWidget);
+      expect(find.text('Docs'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('label_hub_close_button')));
+      await tester.pumpAndSettle();
+
+      // Verify board remained unfiltered (top_bar_title absent, Scoped Hidden Task still hidden).
+      expect(find.byKey(const ValueKey('top_bar_title')), findsNothing);
+      expect(find.text('Visible Global Task'), findsOneWidget);
+      expect(find.text('Scoped Hidden Task'), findsNothing);
+
+      // Whereas tapping drawer_label_tile_scp000OkD2 toggles the active label filter as before.
+      await tester.tap(find.byIcon(Icons.menu_rounded));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('drawer_label_tile_scp000OkD2')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('top_bar_title')), findsOneWidget);
+      expect(find.text('Scoped Hidden Task'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'HomeDrawer mounted in isolated pumpLeafWidget opens LabelHubDialog without popping root route or calling onSelectLabel',
+    (WidgetTester tester) async {
+      const leafLabel = TdfLabel(
+        id: 'leafLbOkD2',
+        name: 'Leaf Label',
+        note: 'Leaf note',
+      );
+      final leafBoard = TaskBoard.empty().copyWith(labels: const [leafLabel]);
+      var selectCalled = false;
+      await pumpLeafWidget(
+        tester,
+        HomeDrawer(
+          activeLabelId: null,
+          activeWorkspace: const AppWorkspace(
+            id: 'default',
+            name: 'Default',
+            config: WebDavConfig(),
+          ),
+          board: leafBoard,
+          onManageWorkspaces: () {},
+          onOpenEditLabels: (_) {},
+          onOpenSettings: () {},
+          onSelectLabel: (_) => selectCalled = true,
+          onSyncRemote: () {},
+        ),
+        board: leafBoard,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('drawer_label_hub_button_leafLbOkD2')),
+      );
+      await tester.pumpAndSettle();
+      expect(selectCalled, isFalse);
+      expect(find.byKey(const ValueKey('label_hub_dialog')), findsOneWidget);
+      expect(find.text('Leaf note'), findsOneWidget);
     },
   );
 }

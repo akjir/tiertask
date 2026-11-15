@@ -735,6 +735,7 @@ class _LandingScaffoldBody extends StatelessWidget {
       child: Column(
         children: [
           HomeTopBar(
+            activeLabelId: activeLabel?.id,
             activeLabelName: activeLabel?.name,
             isSearching: isSearching,
             searchController: searchController,

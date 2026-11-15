@@ -1336,4 +1336,33 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get taskIdCopiedSnackBar => 'Task ID copied to clipboard.';
+
+  @override
+  String get labelHubDialogTitle => 'Label Context';
+
+  @override
+  String get labelHubEmptyHint =>
+      'No note, links, or activation conditions configured for this label.';
+
+  @override
+  String get labelLinkErrorMaxExceeded =>
+      'Maximum of 20 links per label reached.';
+
+  @override
+  String get tooltipCancelEditLink => 'Cancel link edit';
+
+  @override
+  String get tooltipEditLink => 'Edit link';
+
+  @override
+  String get tooltipMoveLinkDown => 'Move link down';
+
+  @override
+  String get tooltipMoveLinkUp => 'Move link up';
+
+  @override
+  String get tooltipOpenLabelHub => 'Show label details and links';
+
+  @override
+  String get tooltipSaveLink => 'Update link';
 }

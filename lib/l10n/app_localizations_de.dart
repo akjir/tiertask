@@ -1358,4 +1358,33 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get taskIdCopiedSnackBar =>
       'Aufgaben-ID in die Zwischenablage kopiert.';
+
+  @override
+  String get labelHubDialogTitle => 'Label-Kontext';
+
+  @override
+  String get labelHubEmptyHint =>
+      'Für dieses Label sind keine Notiz, Links oder Aktivierungsbedingungen hinterlegt.';
+
+  @override
+  String get labelLinkErrorMaxExceeded =>
+      'Maximal 20 Links pro Label erreicht.';
+
+  @override
+  String get tooltipCancelEditLink => 'Link-Bearbeitung abbrechen';
+
+  @override
+  String get tooltipEditLink => 'Link bearbeiten';
+
+  @override
+  String get tooltipMoveLinkDown => 'Link nach unten verschieben';
+
+  @override
+  String get tooltipMoveLinkUp => 'Link nach oben verschieben';
+
+  @override
+  String get tooltipOpenLabelHub => 'Labeldetails und Links anzeigen';
+
+  @override
+  String get tooltipSaveLink => 'Link aktualisieren';
 }

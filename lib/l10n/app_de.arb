@@ -387,5 +387,14 @@
   "localWatchDescription": "Änderungen durch externe Editoren, Skripte oder Datei-Synchronisation automatisch zusammenführen.",
   "taskIdRowLabel": "ID: {id}",
   "tooltipCopyTaskId": "Aufgaben-ID kopieren",
-  "taskIdCopiedSnackBar": "Aufgaben-ID in die Zwischenablage kopiert."
+  "taskIdCopiedSnackBar": "Aufgaben-ID in die Zwischenablage kopiert.",
+  "labelHubDialogTitle": "Label-Kontext",
+  "labelHubEmptyHint": "Für dieses Label sind keine Notiz, Links oder Aktivierungsbedingungen hinterlegt.",
+  "labelLinkErrorMaxExceeded": "Maximal 20 Links pro Label erreicht.",
+  "tooltipCancelEditLink": "Link-Bearbeitung abbrechen",
+  "tooltipEditLink": "Link bearbeiten",
+  "tooltipMoveLinkDown": "Link nach unten verschieben",
+  "tooltipMoveLinkUp": "Link nach oben verschieben",
+  "tooltipOpenLabelHub": "Labeldetails und Links anzeigen",
+  "tooltipSaveLink": "Link aktualisieren"
 }

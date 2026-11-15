@@ -919,5 +919,178 @@ void main() {
         isTrue,
       );
     });
+
+    test('exposes TdfLabel.maxLinksPerLabel and enforces Unicode scalar and control-character parity in TaskLink.tryParse', () {
+      expect(
+        TdfLabel.maxLinksPerLabel,
+        equals(20),
+        reason:
+            'TdfLabel.maxLinksPerLabel must expose maxTdfLinksPerLabel (20)',
+      );
+
+      final astralTitle500 = '\u{10400}' * 500;
+      expect(
+        astralTitle500.length,
+        equals(1000),
+        reason: '500 supplementary-plane scalars occupy 1000 UTF-16 code units',
+      );
+      final parsedAstral500 = TaskLink.tryParse(
+        rawTitle: '  $astralTitle500  ',
+        rawUri: '  https://example.com/runbook?q=1&b=2#sec-3  ',
+      );
+      expect(
+        parsedAstral500,
+        equals(
+          TaskLink(
+            title: astralTitle500,
+            uri: 'https://example.com/runbook?q=1&b=2#sec-3',
+          ),
+        ),
+        reason: 'TaskLink.tryParse must accept 500 Unicode scalar values and trim ASCII spaces',
+      );
+
+      expect(
+        TaskLink.tryParse(
+          rawTitle: '\u{10400}' * 501,
+          rawUri: 'https://example.com',
+        ),
+        isNull,
+        reason: '501 astral Unicode scalar values must be rejected',
+      );
+      expect(
+        TaskLink.tryParse(rawTitle: 'a' * 501, rawUri: 'https://example.com'),
+        isNull,
+        reason: '501 ASCII characters must be rejected',
+      );
+
+      const uriPrefix = 'https://example.com/';
+      final uri2048 =
+          '$uriPrefix${'\u{1F600}' * (TaskLink.maxUriLength - uriPrefix.length)}';
+      expect(
+        TaskLink.tryParse(rawTitle: 'Docs', rawUri: uri2048),
+        equals(TaskLink(title: 'Docs', uri: uri2048)),
+        reason: '2048 Unicode scalar values in URI must succeed',
+      );
+      expect(
+        TaskLink.tryParse(rawTitle: 'Docs', rawUri: '$uri2048\u{1F600}'),
+        isNull,
+        reason: '2049 Unicode scalar values in URI must be rejected',
+      );
+
+      final controlSamples = <String>[
+        '\nDocs',
+        'Docs\n',
+        'Do\ncs',
+        '\rDocs',
+        'Docs\r',
+        '\tDocs',
+        'Docs\t',
+        'Do\tcs',
+        '\x00Docs',
+        'Docs\x00',
+        'Do\x00cs',
+        'Docs\x7F',
+        'Do\x1Fcs',
+      ];
+      for (final badTitle in controlSamples) {
+        expect(
+          TaskLink.tryParse(rawTitle: badTitle, rawUri: 'https://example.com'),
+          isNull,
+          reason:
+              'Control character in title (${badTitle.codeUnits}) must fail before trim',
+        );
+      }
+
+      final badUriControlSamples = <String>[
+        '\nhttps://example.com',
+        'https://example.com\n',
+        '\rhttps://example.com',
+        'https://example.com\t',
+        '\x00https://example.com',
+        'https://example.com\x00',
+        'https://example.com/a\x7Fb',
+      ];
+      for (final badUri in badUriControlSamples) {
+        expect(
+          TaskLink.tryParse(rawTitle: 'Docs', rawUri: badUri),
+          isNull,
+          reason:
+              'Control character in URI (${badUri.codeUnits}) must fail before trim',
+        );
+      }
+
+      final unpairedHigh = String.fromCharCodes(const <int>[
+        0x41,
+        0xD800,
+        0x42,
+      ]);
+      final unpairedLow = String.fromCharCodes(const <int>[0x41, 0xDC00, 0x42]);
+      expect(
+        TaskLink.tryParse(
+          rawTitle: unpairedHigh,
+          rawUri: 'https://example.com',
+        ),
+        isNull,
+        reason: 'Unpaired high surrogate in title must be rejected',
+      );
+      expect(
+        TaskLink.tryParse(rawTitle: unpairedLow, rawUri: 'https://example.com'),
+        isNull,
+        reason: 'Unpaired low surrogate in title must be rejected',
+      );
+      expect(
+        TaskLink.tryParse(
+          rawTitle: 'Docs',
+          rawUri: 'https://example.com/$unpairedHigh',
+        ),
+        isNull,
+        reason: 'Unpaired surrogate in URI must be rejected',
+      );
+
+      for (final emptyTitle in const <String>['', ' ', '   ']) {
+        expect(
+          TaskLink.tryParse(
+            rawTitle: emptyTitle,
+            rawUri: 'https://example.com',
+          ),
+          isNull,
+          reason: 'Empty or space-only title must be rejected',
+        );
+      }
+
+      for (final forbiddenOrMalformedUri in const <String>[
+        '',
+        '   ',
+        'example.com',
+        '/local/path',
+        '../secret',
+        ':noscheme',
+        'javascript:alert(1)',
+        'JaVaScRiPt:void(0)',
+        'vbscript:msgbox(1)',
+        'VBSCRIPT:run',
+        'data:text/html,<h1>x</h1>',
+        'DaTa:text/plain,abc',
+      ]) {
+        expect(
+          TaskLink.tryParse(rawTitle: 'Docs', rawUri: forbiddenOrMalformedUri),
+          isNull,
+          reason:
+              'Invalid or forbidden URI "$forbiddenOrMalformedUri" must be rejected',
+        );
+      }
+
+      for (final validUri in const <String>[
+        'mailto:ops@example.com?subject=Runbook',
+        'file:///C:/Project Docs/spec v1.pdf',
+        'file:///home/user/docs/../readme.md#overview',
+      ]) {
+        expect(
+          TaskLink.tryParse(rawTitle: 'Ref', rawUri: validUri),
+          equals(TaskLink(title: 'Ref', uri: validUri)),
+          reason: 'Permitted URI "$validUri" must succeed',
+        );
+      }
+    });
   });
 }

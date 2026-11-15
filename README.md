@@ -51,7 +51,7 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 1. Open **Settings** from the navigation drawer to configure language, theme, and time zone.
 2. Select a storage mode (`Local`, `WebDAV`, or `Both`) and set the local `.tdf` path (`tasks.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, remote path `tasks.tdf`).
 3. Add tasks via the bottom bar (`Priority`, `Someday`, `Labels`, or `Advanced` for subtasks, conditions, and recurrence).
-4. Switch between the global board and `scoped` label queues in the navigation drawer; changes persist and synchronize automatically.
+4. Switch between the global board and `scoped` label queues in the navigation drawer, or inspect a label's notes, reference links, and conditions in its context hub; changes persist and synchronize automatically.
 
 ## Tier System & Documentation
 

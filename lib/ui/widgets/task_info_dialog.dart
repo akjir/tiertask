@@ -27,6 +27,7 @@ import '../../models/webdav_config.dart';
 import '../../providers/config_providers.dart';
 import '../../providers/task_providers.dart';
 import '../../services/app_logger.dart';
+import 'label_hub_dialog.dart';
 import 'tier_task_subtasks_section.dart';
 
 /// Popup dialog displaying detailed status and indicator information for [task].
@@ -124,7 +125,7 @@ class TaskInfoDialog extends ConsumerWidget {
     }
     final formattedConditions = <String>[
       for (final condition in task.conditions)
-        _formatCondition(condition, board, localizations),
+        formatConditionSummary(condition, board.locations, localizations),
     ];
     return _TaskInfoSectionData(
       details: formattedConditions.skip(1).toList(),
@@ -397,64 +398,6 @@ class TaskInfoDialog extends ConsumerWidget {
     );
   }
 
-  /// Formats a single [TaskCondition] into a localized summary line.
-  static String _formatCondition(
-    TaskCondition condition,
-    TaskBoard board,
-    AppLocalizations localizations,
-  ) {
-    return switch (condition) {
-      DayTaskCondition() => _formatDayCondition(condition, localizations),
-      GlobalResetTaskCondition() => localizations.conditionGlobalAnyLabel,
-      GroupResetTaskCondition() => _formatGroupResetCondition(
-        condition.targetGroup,
-        localizations,
-      ),
-      LocationTaskCondition() => _formatLocationCondition(condition, board),
-      TimeWindowTaskCondition() =>
-        '${condition.startToken} - ${condition.endToken}',
-    };
-  }
-
-  /// Formats a [DayTaskCondition] as a comma-separated list of localized weekday names.
-  static String _formatDayCondition(
-    DayTaskCondition condition,
-    AppLocalizations localizations,
-  ) {
-    final names = <String>[
-      for (final weekday in condition.weekdays)
-        _formatWeekday(weekday, localizations),
-    ];
-    return names.join(', ');
-  }
-
-  /// Formats a [ConditionGroup] reset rule into its localized label.
-  static String _formatGroupResetCondition(
-    ConditionGroup group,
-    AppLocalizations localizations,
-  ) {
-    return switch (group) {
-      ConditionGroup.day => localizations.conditionDayAnyLabel,
-      ConditionGroup.time => localizations.conditionTimeAnyLabel,
-      ConditionGroup.location => localizations.conditionLocationAnyLabel,
-    };
-  }
-
-  /// Formats a [LocationTaskCondition] by resolving referenced location names from [board].
-  static String _formatLocationCondition(
-    LocationTaskCondition condition,
-    TaskBoard board,
-  ) {
-    if (condition.locationIds.isEmpty) {
-      return '${condition.latitudeText}, ${condition.longitudeText} (${condition.radiusText}m)';
-    }
-    final names = <String>[
-      for (final locationId in condition.locationIds)
-        board.findLocation(locationId)?.name ?? locationId,
-    ];
-    return names.join(', ');
-  }
-
   /// Formats a positive [difference] into days/hours, hours/minutes, or minutes remaining.
   static String _formatRemainingDuration(
     Duration difference,
@@ -489,18 +432,49 @@ class TaskInfoDialog extends ConsumerWidget {
       RepeatUnit.months => localizations.repeatUnitMonths,
     };
   }
+}
 
-  /// Resolves the localized short weekday name for an ISO-8601 [weekday] (`1..7`).
-  static String _formatWeekday(int weekday, AppLocalizations localizations) {
-    return switch (weekday) {
-      DateTime.monday => localizations.weekdayMon,
-      DateTime.tuesday => localizations.weekdayTue,
-      DateTime.wednesday => localizations.weekdayWed,
-      DateTime.thursday => localizations.weekdayThu,
-      DateTime.friday => localizations.weekdayFri,
-      DateTime.saturday => localizations.weekdaySat,
-      _ => localizations.weekdaySun,
-    };
+/// Interactive colored label [ActionChip] wrap inside [TaskInfoDialog].
+class _TaskInfoLabelChips extends StatelessWidget {
+  /// Creates [_TaskInfoLabelChips].
+  const _TaskInfoLabelChips({required this.labels});
+
+  /// Assigned labels to render.
+  final List<TdfLabel> labels;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final fallbackColor = Theme.of(context).colorScheme.primary;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: [
+        for (final label in labels)
+          ActionChip(
+            key: ValueKey('task_info_label_chip_${label.id}'),
+            tooltip: localizations.tooltipOpenLabelHub,
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            avatar: Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: _resolveLabelColor(label.color, fallbackColor),
+                shape: BoxShape.circle,
+              ),
+            ),
+            label: Text(label.name),
+            onPressed: () => showLabelHubDialog(context, labelId: label.id),
+          ),
+      ],
+    );
+  }
+
+  /// Resolves the `#RRGGBB` color of [rawHex] or returns [fallback].
+  static Color _resolveLabelColor(String? rawHex, Color fallback) {
+    final parsed = TdfColor.tryParseArgb(rawHex);
+    return parsed != null ? Color(parsed) : fallback;
   }
 }
 
@@ -517,22 +491,10 @@ class _TaskInfoSectionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final borderColor = isHighlighted
-        ? colorScheme.primary.withValues(alpha: 0.5)
-        : colorScheme.outlineVariant.withValues(alpha: 0.4);
-    final backgroundColor = isHighlighted
-        ? colorScheme.primaryContainer.withValues(alpha: 0.25)
-        : colorScheme.surfaceContainerHighest.withValues(alpha: 0.35);
-
     return Container(
       key: ValueKey('task_info_section_${data.keyPrefix}'),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor),
-      ),
+      decoration: _buildDecoration(Theme.of(context).colorScheme),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -547,7 +509,7 @@ class _TaskInfoSectionCard extends StatelessWidget {
           ],
           if (data.labels.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _buildLabelChips(context),
+            _TaskInfoLabelChips(labels: data.labels),
           ],
           if (data.details.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -555,6 +517,21 @@ class _TaskInfoSectionCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+
+  /// Builds the highlighted or neutral card decoration for [colorScheme].
+  BoxDecoration _buildDecoration(ColorScheme colorScheme) {
+    final borderColor = isHighlighted
+        ? colorScheme.primary.withValues(alpha: 0.5)
+        : colorScheme.outlineVariant.withValues(alpha: 0.4);
+    final backgroundColor = isHighlighted
+        ? colorScheme.primaryContainer.withValues(alpha: 0.25)
+        : colorScheme.surfaceContainerHighest.withValues(alpha: 0.35);
+    return BoxDecoration(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: borderColor),
     );
   }
 
@@ -602,39 +579,6 @@ class _TaskInfoSectionCard extends StatelessWidget {
         ),
       ],
     );
-  }
-
-  /// Builds colored label chips for the assigned labels section.
-  Widget _buildLabelChips(BuildContext context) {
-    final fallbackColor = Theme.of(context).colorScheme.primary;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 6,
-      children: [
-        for (final label in data.labels)
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: _resolveLabelColor(label.color, fallbackColor),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(label.name, style: Theme.of(context).textTheme.bodyMedium),
-            ],
-          ),
-      ],
-    );
-  }
-
-  /// Resolves the `#RRGGBB` color of [rawHex] or returns [fallback].
-  static Color _resolveLabelColor(String? rawHex, Color fallback) {
-    final parsed = TdfColor.tryParseArgb(rawHex);
-    return parsed != null ? Color(parsed) : fallback;
   }
 }
 

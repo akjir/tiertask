@@ -1859,5 +1859,41 @@
   "taskIdCopiedSnackBar": "Task ID copied to clipboard.",
   "@taskIdCopiedSnackBar": {
     "description": "SnackBar confirmation message shown after copying a task ID to the clipboard."
+  },
+  "labelHubDialogTitle": "Label Context",
+  "@labelHubDialogTitle": {
+    "description": "Title of the Label Context Hub dialog."
+  },
+  "labelHubEmptyHint": "No note, links, or activation conditions configured for this label.",
+  "@labelHubEmptyHint": {
+    "description": "Empty-state hint inside the Label Context Hub dialog when no metadata is set."
+  },
+  "labelLinkErrorMaxExceeded": "Maximum of 20 links per label reached.",
+  "@labelLinkErrorMaxExceeded": {
+    "description": "Validation error when adding more than 20 links to a label."
+  },
+  "tooltipCancelEditLink": "Cancel link edit",
+  "@tooltipCancelEditLink": {
+    "description": "Tooltip for canceling an active inline link edit."
+  },
+  "tooltipEditLink": "Edit link",
+  "@tooltipEditLink": {
+    "description": "Tooltip for starting an inline edit of an existing link row."
+  },
+  "tooltipMoveLinkDown": "Move link down",
+  "@tooltipMoveLinkDown": {
+    "description": "Tooltip for moving a link row down by one position."
+  },
+  "tooltipMoveLinkUp": "Move link up",
+  "@tooltipMoveLinkUp": {
+    "description": "Tooltip for moving a link row up by one position."
+  },
+  "tooltipOpenLabelHub": "Show label details and links",
+  "@tooltipOpenLabelHub": {
+    "description": "Tooltip for opening the Label Context Hub dialog."
+  },
+  "tooltipSaveLink": "Update link",
+  "@tooltipSaveLink": {
+    "description": "Tooltip for confirming an inline link edit."
   }
 }

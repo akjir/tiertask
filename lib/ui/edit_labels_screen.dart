@@ -20,15 +20,18 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
+import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
+import '../repositories/link_launcher_repository.dart';
 import '../services/app_logger.dart';
 import 'widgets/clearable_text_field.dart';
 import 'widgets/condition_editor_controller.dart';
 import 'widgets/label_color_picker_dialog.dart';
 import 'widgets/task_editor_conditions_section.dart';
+import 'widgets/task_editor_links_section.dart';
 import 'widgets/task_editor_sections.dart';
 
-/// Dedicated panel screen for editing all properties of an existing TDF `label` block (`name`, `color`, `note`, and `condition`).
+/// Dedicated panel screen for editing all properties of an existing TDF `label` block (`name`, `color`, `note`, `scoped`, `link`, and `condition`).
 class EditLabelScreen extends ConsumerStatefulWidget {
   /// Creates an [EditLabelScreen].
   const EditLabelScreen({super.key, required this.label});
@@ -191,52 +194,10 @@ class _CreateLabelTextField extends StatelessWidget {
 /// Scrollable card column inside [EditLabelScreen].
 class _EditLabelForm extends StatelessWidget {
   /// Creates an [_EditLabelForm].
-  const _EditLabelForm({
-    required this.colorController,
-    required this.colorErrorMessage,
-    required this.conditionController,
-    required this.isScoped,
-    required this.nameController,
-    required this.nameErrorMessage,
-    required this.noteController,
-    required this.onPickCustomColor,
-    required this.onScopedChanged,
-    required this.onSelectPresetColor,
-    required this.onSubmit,
-  });
+  const _EditLabelForm({required this.state});
 
-  /// Controller for the hex color input.
-  final TextEditingController colorController;
-
-  /// Validation error message for the color input, if any.
-  final String? colorErrorMessage;
-
-  /// Controller for the label conditions editor.
-  final ConditionEditorController conditionController;
-
-  /// Whether the `scoped` modifier is enabled on the label.
-  final bool isScoped;
-
-  /// Controller for the label name input.
-  final TextEditingController nameController;
-
-  /// Validation error message for the label name input, if any.
-  final String? nameErrorMessage;
-
-  /// Controller for the label note input.
-  final TextEditingController noteController;
-
-  /// Callback invoked to open the custom color wheel dialog.
-  final VoidCallback onPickCustomColor;
-
-  /// Callback invoked when the `scoped` switch changes.
-  final ValueChanged<bool> onScopedChanged;
-
-  /// Callback invoked when a preset color swatch is selected.
-  final ValueChanged<String> onSelectPresetColor;
-
-  /// Callback invoked when the form is submitted.
-  final VoidCallback onSubmit;
+  /// Parent [_EditLabelScreenState] holding controllers and callbacks.
+  final _EditLabelScreenState state;
 
   @override
   Widget build(BuildContext context) {
@@ -250,27 +211,58 @@ class _EditLabelForm extends StatelessWidget {
           TaskEditorDetailsCard(
             sectionTitle: localizations.labelDetailsSectionTitle,
             titleLabel: localizations.labelNameLabel,
-            titleController: nameController,
-            noteController: noteController,
-            errorMessage: nameErrorMessage,
-            onSubmit: onSubmit,
+            titleController: state._nameController,
+            noteController: state._noteController,
+            errorMessage: state._nameErrorMessage,
+            onSubmit: state._submit,
           ),
           const SizedBox(height: 10),
           ValueListenableBuilder<TextEditingValue>(
-            valueListenable: colorController,
+            valueListenable: state._colorController,
             builder: (context, _, _) => LabelEditorColorCard(
-              colorController: colorController,
-              errorMessage: colorErrorMessage,
-              onPickCustomColor: onPickCustomColor,
-              onSelectPreset: onSelectPresetColor,
+              colorController: state._colorController,
+              errorMessage: state._colorErrorMessage,
+              onPickCustomColor: state._pickCustomColor,
+              onSelectPreset: state._selectPresetColor,
             ),
           ),
           const SizedBox(height: 10),
-          _LabelScopedCard(isScoped: isScoped, onChanged: onScopedChanged),
+          _LabelScopedCard(
+            isScoped: state._isScoped,
+            onChanged: state._handleScopedChanged,
+          ),
           const SizedBox(height: 10),
-          _LabelConditionsSection(controller: conditionController),
+          _LabelLinksSection(state: state),
+          const SizedBox(height: 10),
+          _LabelConditionsSection(controller: state._conditionController),
         ],
       ),
+    );
+  }
+}
+
+/// Body layout inside [EditLabelScreen] combining [_EditLabelForm] and [TaskEditorActionsRow].
+class _EditLabelScaffoldBody extends StatelessWidget {
+  /// Creates an [_EditLabelScaffoldBody].
+  const _EditLabelScaffoldBody({required this.state});
+
+  /// Parent [_EditLabelScreenState] holding form state and actions.
+  final _EditLabelScreenState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: _EditLabelForm(state: state)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          child: TaskEditorActionsRow(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: state._submit,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -280,10 +272,25 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
   late final TextEditingController _colorController;
   String? _colorErrorMessage;
   late final ConditionEditorController _conditionController;
+  int? _editingLinkIndex;
   late bool _isScoped;
+  bool _lastCanSubmitLink = false;
+  String? _linkErrorMessage;
+  final TextEditingController _linkTitleController = TextEditingController();
+  final TextEditingController _linkUriController = TextEditingController();
+  late final List<TaskLink> _links;
   late final TextEditingController _nameController;
   String? _nameErrorMessage;
   late final TextEditingController _noteController;
+  final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+
+  /// Whether the link submit button should be enabled for the current draft or in-place edit.
+  bool get _canSubmitLink =>
+      (_editingLinkIndex != null ||
+          _links.length < TdfLabel.maxLinksPerLabel) &&
+      (_linkTitleController.text.trim().isNotEmpty ||
+          _linkUriController.text.trim().isNotEmpty);
 
   @override
   void initState() {
@@ -293,21 +300,28 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     _noteController = TextEditingController(text: label.note ?? '');
     _colorController = TextEditingController(text: label.color ?? '');
     _isScoped = label.isScoped;
+    _links = List<TaskLink>.of(label.links);
     _conditionController = ConditionEditorController(
       initialConditions: label.conditions,
       allowResets: false,
     );
     _nameController.addListener(_handleNameChanged);
     _colorController.addListener(_handleColorChanged);
+    _linkTitleController.addListener(_handleLinkInputChanged);
+    _linkUriController.addListener(_handleLinkInputChanged);
   }
 
   @override
   void dispose() {
     _nameController.removeListener(_handleNameChanged);
     _colorController.removeListener(_handleColorChanged);
+    _linkTitleController.removeListener(_handleLinkInputChanged);
+    _linkUriController.removeListener(_handleLinkInputChanged);
     _nameController.dispose();
     _noteController.dispose();
     _colorController.dispose();
+    _linkTitleController.dispose();
+    _linkUriController.dispose();
     _conditionController.dispose();
     super.dispose();
   }
@@ -316,40 +330,75 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final localizations = AppLocalizations.of(context);
-    return Scaffold(
-      key: const ValueKey('edit_label_screen'),
-      backgroundColor: theme.scaffoldBackgroundColor,
-      appBar: AppBar(title: Text(localizations.editLabelTitle)),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: _EditLabelForm(
-                colorController: _colorController,
-                colorErrorMessage: _colorErrorMessage,
-                conditionController: _conditionController,
-                isScoped: _isScoped,
-                nameController: _nameController,
-                nameErrorMessage: _nameErrorMessage,
-                noteController: _noteController,
-                onPickCustomColor: _pickCustomColor,
-                onScopedChanged: _handleScopedChanged,
-                onSelectPresetColor: _selectPresetColor,
-                onSubmit: _submit,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-              child: TaskEditorActionsRow(
-                onCancel: () => Navigator.of(context).pop(),
-                onSave: _submit,
-              ),
-            ),
-          ],
-        ),
+    return ScaffoldMessenger(
+      key: _scaffoldMessengerKey,
+      child: Scaffold(
+        key: const ValueKey('edit_label_screen'),
+        backgroundColor: theme.scaffoldBackgroundColor,
+        appBar: AppBar(title: Text(localizations.editLabelTitle)),
+        body: SafeArea(child: _EditLabelScaffoldBody(state: this)),
       ),
     );
+  }
+
+  /// Validates the entered link title and URI and appends or updates [_links].
+  bool _addOrUpdateLink() {
+    final localizations = AppLocalizations.of(context);
+    if (_editingLinkIndex == null &&
+        _links.length >= TdfLabel.maxLinksPerLabel) {
+      setState(
+        () => _linkErrorMessage = localizations.labelLinkErrorMaxExceeded,
+      );
+      return false;
+    }
+    final parsed = TaskLink.tryParse(
+      rawTitle: _linkTitleController.text,
+      rawUri: _linkUriController.text,
+    );
+    if (parsed == null) {
+      setState(() => _linkErrorMessage = localizations.linkErrorInvalid);
+      return false;
+    }
+    setState(() {
+      if (_editingLinkIndex case final editIndex?
+          when editIndex >= 0 && editIndex < _links.length) {
+        _links[editIndex] = parsed;
+      } else {
+        _links.add(parsed);
+      }
+      _editingLinkIndex = null;
+      _lastCanSubmitLink = false;
+      _linkErrorMessage = null;
+      _linkTitleController.clear();
+      _linkUriController.clear();
+    });
+    return true;
+  }
+
+  /// Populates the link input fields with [_links] at [index] for in-place editing.
+  void _beginEditLink(int index) {
+    if (index < 0 || index >= _links.length) {
+      return;
+    }
+    final link = _links[index];
+    setState(() {
+      _editingLinkIndex = index;
+      _linkErrorMessage = null;
+      _linkTitleController.text = link.title;
+      _linkUriController.text = link.uri;
+      _lastCanSubmitLink = _canSubmitLink;
+    });
+  }
+
+  /// Cancels active inline link editing and clears both link input fields.
+  void _cancelEditLink() {
+    setState(() {
+      _editingLinkIndex = null;
+      _linkErrorMessage = null;
+      _lastCanSubmitLink = false;
+      _linkTitleController.clear();
+      _linkUriController.clear();
+    });
   }
 
   /// Clears any color validation error when [_colorController] changes.
@@ -359,6 +408,18 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     }
     setState(() {
       _colorErrorMessage = null;
+    });
+  }
+
+  /// Updates submit button availability and clears any link validation error when link text changes.
+  void _handleLinkInputChanged() {
+    final canSubmit = _canSubmitLink;
+    if (_linkErrorMessage == null && canSubmit == _lastCanSubmitLink) {
+      return;
+    }
+    setState(() {
+      _lastCanSubmitLink = canSubmit;
+      _linkErrorMessage = null;
     });
   }
 
@@ -379,6 +440,43 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     });
   }
 
+  /// Moves the link at [index] by [delta] (`-1` or `1`) while tracking [_editingLinkIndex].
+  void _moveLink(int index, int delta) {
+    final targetIndex = index + delta;
+    if (index < 0 ||
+        index >= _links.length ||
+        targetIndex < 0 ||
+        targetIndex >= _links.length) {
+      return;
+    }
+    setState(() {
+      final moved = _links[index];
+      _links[index] = _links[targetIndex];
+      _links[targetIndex] = moved;
+      if (_editingLinkIndex == index) {
+        _editingLinkIndex = targetIndex;
+      } else if (_editingLinkIndex == targetIndex) {
+        _editingLinkIndex = index;
+      }
+      _linkErrorMessage = null;
+    });
+  }
+
+  /// Opens [uri] via [linkLauncherRepositoryProvider] and shows an error [SnackBar] on failure.
+  Future<void> _openLink(String uri) async {
+    try {
+      await ref.read(linkLauncherRepositoryProvider).openLink(uri);
+    } on LinkLaunchException {
+      if (!mounted) {
+        return;
+      }
+      final message = AppLocalizations.of(context).errorOpenLinkFailed;
+      _scaffoldMessengerKey.currentState?.showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+
   /// Opens [LabelColorPickerDialog] and populates [_colorController] with the selected `#RRGGBB` color.
   Future<void> _pickCustomColor() async {
     final selectedHex = await showLabelColorPickerDialog(
@@ -391,6 +489,26 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     setState(() {
       _colorController.text = selectedHex;
       _colorErrorMessage = null;
+    });
+  }
+
+  /// Removes the link at [index] and keeps [_editingLinkIndex] aligned with the remaining items.
+  void _removeLink(int index) {
+    if (index < 0 || index >= _links.length) {
+      return;
+    }
+    setState(() {
+      _links.removeAt(index);
+      if (_editingLinkIndex == index) {
+        _editingLinkIndex = null;
+        _linkTitleController.clear();
+        _linkUriController.clear();
+      } else if (_editingLinkIndex case final editIndex?
+          when index < editIndex) {
+        _editingLinkIndex = editIndex - 1;
+      }
+      _linkErrorMessage = null;
+      _lastCanSubmitLink = _canSubmitLink;
     });
   }
 
@@ -410,21 +528,33 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     final localizations = AppLocalizations.of(context);
     final nameError = _validateName(board, localizations);
     if (nameError != null) {
-      setState(() {
-        _nameErrorMessage = nameError;
-      });
+      setState(() => _nameErrorMessage = nameError);
       return;
     }
-
     final rawColor = _colorController.text.trim();
     final normalizedColor = TdfColor.normalizeHex(rawColor);
     if (rawColor.isNotEmpty && normalizedColor == null) {
-      setState(() {
-        _colorErrorMessage = localizations.labelColorErrorInvalid;
-      });
+      setState(() => _colorErrorMessage = localizations.labelColorErrorInvalid);
       return;
     }
-
+    final hasPendingLink =
+        _linkTitleController.text.trim().isNotEmpty ||
+        _linkUriController.text.trim().isNotEmpty;
+    if ((_editingLinkIndex != null || hasPendingLink) && !_addOrUpdateLink()) {
+      return;
+    }
+    if (AppLogger.shouldLog(LogLevel.info)) {
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.ui,
+        'ui.label_editor.save',
+        fields: <String, Object?>{
+          'id': widget.label.id,
+          'links': _links.length,
+          'scoped': _isScoped,
+        },
+      );
+    }
     final trimmedNote = _noteController.text.trim();
     await ref
         .read(taskNotifierProvider.notifier)
@@ -436,7 +566,7 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
           note: trimmedNote.isEmpty ? null : trimmedNote,
           clearNote: trimmedNote.isEmpty,
           isScoped: _isScoped,
-          links: widget.label.links,
+          links: List<TaskLink>.unmodifiable(_links),
           conditions: _conditionController.buildConditions(),
         );
     if (!mounted) {
@@ -695,6 +825,34 @@ class _LabelConditionsSection extends ConsumerWidget {
       controller: controller,
       availableLocations: availableLocations,
       descriptionOverride: localizations.labelConditionsSectionDescription,
+    );
+  }
+}
+
+/// Reference links editor section inside [EditLabelScreen].
+class _LabelLinksSection extends StatelessWidget {
+  /// Creates a [_LabelLinksSection].
+  const _LabelLinksSection({required this.state});
+
+  /// Parent [_EditLabelScreenState] holding link state and callbacks.
+  final _EditLabelScreenState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return TaskEditorLinksSection(
+      canAddLink: state._canSubmitLink,
+      editingIndex: state._editingLinkIndex,
+      errorMessage: state._linkErrorMessage,
+      links: state._links,
+      titleController: state._linkTitleController,
+      uriController: state._linkUriController,
+      onAddLink: state._addOrUpdateLink,
+      onCancelEdit: state._cancelEditLink,
+      onEditLink: state._beginEditLink,
+      onMoveLinkDown: (index) => state._moveLink(index, 1),
+      onMoveLinkUp: (index) => state._moveLink(index, -1),
+      onOpenLink: state._openLink,
+      onRemoveLink: state._removeLink,
     );
   }
 }

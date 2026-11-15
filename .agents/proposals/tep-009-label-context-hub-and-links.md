@@ -1,10 +1,10 @@
 ---
 id: TEP-009
 title: Label Context Hub and Label Reference Link Management
-status: planned
+status: completed
 type: feature
 created: 2026-11-14
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # TEP-009: Label Context Hub and Label Reference Link Management
@@ -238,21 +238,26 @@ New ARB keys to add via `tiertask_dev.py l10n --set`:
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline after `TEP-006`.
-- [ ] Add English and German localization keys (`labelHubDialogTitle`, `labelHubEmptyHint`, `labelLinkErrorMaxExceeded`, `tooltipCancelEditLink`, `tooltipEditLink`, `tooltipMoveLinkDown`, `tooltipMoveLinkUp`, `tooltipOpenLabelHub`, `tooltipSaveLink`) to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` via `tiertask_dev.py l10n --set` and run `flutter gen-l10n`.
-- [ ] Update `_SUBSYSTEM_TEST_MAP` in `.agents/scripts/tiertask_dev.py` for `lib/ui/widgets/task_editor_links_section.dart` and add optional `linkLauncherRepository` override support to `pumpLeafWidget` in `test/ui/test_helpers.dart`.
-- [ ] Write failing unit and widget tests first in `test/models/tdf_v050_primitives_test.dart`, `test/ui/edit_labels_screen_test.dart`, `test/ui/widgets/label_hub_dialog_test.dart`, `test/ui/home_screen_test.dart`, `test/ui/home_drawer_test.dart`, and `test/ui/widgets/task_info_dialog_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
-- [ ] Implement `TdfLabel.maxLinksPerLabel` and Unicode-scalar `TaskLink.tryParse` validation in `lib/models/tdf_metadata.dart`, inline edit/reorder controls in `lib/ui/widgets/task_editor_links_section.dart`, link management in `lib/ui/edit_labels_screen.dart`, `LabelHubDialog` and `formatConditionSummary` in `lib/ui/widgets/label_hub_dialog.dart`, and one-tap Context Hub entry points in `lib/ui/widgets/home_top_bar.dart`, `lib/ui/home_screen.dart`, `lib/ui/widgets/home_drawer.dart`, and `lib/ui/widgets/task_info_dialog.dart` with `AppLogger` instrumentation (TDD Green & Refactor Phase).
-- [ ] Update Parts 1 and 2 if implementation details evolve during coding.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree --set lib/ui/widgets/label_hub_dialog.dart "Modal Label Context Hub dialog and shared condition summary formatter displaying a label's color, scope, selectable note, clickable links, conditions, and edit action."` and synchronize `ARCHITECTURE.md` and `README.md` per **`update-documentation`**.
-- [ ] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline after `TEP-006`.
+- [x] Add English and German localization keys (`labelHubDialogTitle`, `labelHubEmptyHint`, `labelLinkErrorMaxExceeded`, `tooltipCancelEditLink`, `tooltipEditLink`, `tooltipMoveLinkDown`, `tooltipMoveLinkUp`, `tooltipOpenLabelHub`, `tooltipSaveLink`) to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb` via `tiertask_dev.py l10n --set` and run `flutter gen-l10n`.
+- [x] Update `_SUBSYSTEM_TEST_MAP` in `.agents/scripts/tiertask_dev.py` for `lib/ui/widgets/task_editor_links_section.dart` and add optional `linkLauncherRepository` override support to `pumpLeafWidget` in `test/ui/test_helpers.dart`.
+- [x] Write failing unit and widget tests first in `test/models/tdf_v050_primitives_test.dart`, `test/ui/edit_labels_screen_test.dart`, `test/ui/widgets/label_hub_dialog_test.dart`, `test/ui/home_screen_test.dart`, `test/ui/home_drawer_test.dart`, and `test/ui/widgets/task_info_dialog_test.dart` (TDD Red Phase — `P-TDD-FIRST`).
+- [x] Implement `TdfLabel.maxLinksPerLabel` and Unicode-scalar `TaskLink.tryParse` validation in `lib/models/tdf_metadata.dart`, inline edit/reorder controls in `lib/ui/widgets/task_editor_links_section.dart`, link management in `lib/ui/edit_labels_screen.dart`, `LabelHubDialog` and `formatConditionSummary` in `lib/ui/widgets/label_hub_dialog.dart`, and one-tap Context Hub entry points in `lib/ui/widgets/home_top_bar.dart`, `lib/ui/home_screen.dart`, `lib/ui/widgets/home_drawer.dart`, and `lib/ui/widgets/task_info_dialog.dart` with `AppLogger` instrumentation (TDD Green & Refactor Phase).
+- [x] Update Parts 1 and 2 if implementation details evolve during coding.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree --set lib/ui/widgets/label_hub_dialog.dart "Modal Label Context Hub dialog and shared condition summary formatter displaying a label's color, scope, selectable note, clickable links, conditions, and edit action."` and synchronize `ARCHITECTURE.md` and `README.md` per **`update-documentation`**.
+- [x] Update `CHANGELOG.md` under `## [Unreleased]` per **`changelog-updater`**.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-14:** Drafted initial concept (`status: concept`) for the Label Context Hub and `EditLabelScreen` reference link management workflows built on top of `TEP-006` (`spec/TDF_SPEC_0.7.0.md` Topic 1).
 * **2026-11-14:** Elaborated full technical specification (`status: planned`): aligned `TaskLink.tryParse` with `spec/TDF_SPEC_0.7.0.md` Section 2.8 Unicode scalar-value and control-character rules, added `TdfLabel.maxLinksPerLabel`, placed shared `formatConditionSummary` in `label_hub_dialog.dart` to preserve `0` SCCs (`P-ACYCLIC-DAG`), specified deterministic `_editingLinkIndex` tracking across move/remove/save, defined `ModalRoute`-aware auto-dismissal on external label deletion, and expanded `M-*` TDD test coverage.
+* **2026-11-15:** Implemented `TEP-009` via strict Red-Green-Refactor TDD (`status: review`): added `TdfLabel.maxLinksPerLabel` and Unicode-scalar `TaskLink.tryParse` validation in `lib/models/tdf_metadata.dart`; extended `TaskEditorLinksSection` with inline edit and up/down reorder controls while keeping all `build()` methods under 40 lines; integrated reference link management and redacted `ui.label_editor.save` logging into `EditLabelScreen`; created `LabelHubDialog`, `showLabelHubDialog`, and `formatConditionSummary` in `lib/ui/widgets/label_hub_dialog.dart` with 2-line ellipsized header protection for 500-character label names, immediate SnackBar replacement on link-launch errors, and `ModalRoute`-aware auto-dismissal; wired one-tap triggers in `HomeTopBar`, `HomeDrawer`, and `TaskInfoDialog`; synchronized `ARCHITECTURE.md`, `README.md`, and `CHANGELOG.md`; and passed `tiertask_dev.py verify --full --fix` (`349` test suites, `0` analyzer issues, `0` SCCs).
+* **2026-11-15:** Approved by user and marked `completed`.
 
 ### 3.3 Delivered Artifacts
-*(Pending — proposal is in `planned` stage)*
+* **Domain Models (`lib/models/`):** [`lib/models/tdf_metadata.dart`](../../lib/models/tdf_metadata.dart).
+* **Localization & UI (`lib/l10n/`, `lib/ui/`):** [`lib/l10n/app_en.arb`](../../lib/l10n/app_en.arb), [`lib/l10n/app_de.arb`](../../lib/l10n/app_de.arb), [`lib/ui/edit_labels_screen.dart`](../../lib/ui/edit_labels_screen.dart), [`lib/ui/home_screen.dart`](../../lib/ui/home_screen.dart), [`lib/ui/widgets/home_drawer.dart`](../../lib/ui/widgets/home_drawer.dart), [`lib/ui/widgets/home_top_bar.dart`](../../lib/ui/widgets/home_top_bar.dart), [`lib/ui/widgets/label_hub_dialog.dart`](../../lib/ui/widgets/label_hub_dialog.dart), [`lib/ui/widgets/task_editor_links_section.dart`](../../lib/ui/widgets/task_editor_links_section.dart), [`lib/ui/widgets/task_info_dialog.dart`](../../lib/ui/widgets/task_info_dialog.dart).
+* **Tests & Tooling (`test/`, `.agents/scripts/`):** [`test/models/tdf_v050_primitives_test.dart`](../../test/models/tdf_v050_primitives_test.dart), [`test/ui/edit_labels_screen_test.dart`](../../test/ui/edit_labels_screen_test.dart), [`test/ui/home_drawer_test.dart`](../../test/ui/home_drawer_test.dart), [`test/ui/home_screen_test.dart`](../../test/ui/home_screen_test.dart), [`test/ui/test_helpers.dart`](../../test/ui/test_helpers.dart), [`test/ui/widgets/label_hub_dialog_test.dart`](../../test/ui/widgets/label_hub_dialog_test.dart), [`test/ui/widgets/task_info_dialog_test.dart`](../../test/ui/widgets/task_info_dialog_test.dart), [`.agents/scripts/tiertask_dev.py`](../scripts/tiertask_dev.py).
+* **Documentation:** [`ARCHITECTURE.md`](../../ARCHITECTURE.md), [`README.md`](../../README.md), [`CHANGELOG.md`](../../CHANGELOG.md).

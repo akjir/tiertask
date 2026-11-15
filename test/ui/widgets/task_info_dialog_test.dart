@@ -13,14 +13,24 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:io';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/local_file_watch_providers.dart';
+import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/providers/workspace_providers.dart';
+import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/widgets/task_info_dialog.dart';
 
 import '../test_helpers.dart';
@@ -398,6 +408,260 @@ void main() {
         reason: 'Tombstoned prerequisite raw ID must not render in Blocked By details',
       );
       expect(find.textContaining('Approve Firewall Rule'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'TaskInfoDialog renders interactive label ActionChips stacking LabelHubDialog, reflects live edits and real Directory.watch external link updates/retirements, and preserves task undo entries across updateLabel',
+    (WidgetTester tester) async {
+      late Directory tempDir;
+      late File tdfFile;
+      await tester.runAsync(() async {
+        tempDir = await Directory.systemTemp.createTemp(
+          'tiertask_hub_watch_ui_',
+        );
+        tdfFile = File('${tempDir.path}/tasks.tdf');
+        await tdfFile.writeAsString(
+          'tdf 0.7.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    task tskUndoOk1\n'
+          '    task tskExecOk2\n'
+          '}\n\n'
+          'label lblOps0001 {\n'
+          '    name     "Ops Runbook"\n'
+          '    color    "#FF9800"\n'
+          '    note     "Initial ops note"\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    link     "Dashboard" "https://ops.example.com/dash"\n'
+          '}\n\n'
+          'task tskUndoOk1 {\n'
+          '    name     "Undoable Sibling Task"\n'
+          '    created  2026-11-11 11:00:00\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '}\n\n'
+          'task tskExecOk2 {\n'
+          '    name     "Deploy Service"\n'
+          '    created  2026-11-11 11:05:00\n'
+          '    modified 2026-11-11 12:00:00\n'
+          '    labels   lblOps0001\n'
+          '}\n',
+          flush: true,
+        );
+      });
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          if (tempDir.existsSync()) {
+            await tempDir.delete(recursive: true);
+          }
+        });
+      });
+
+      var currentTime = DateTime.utc(2026, 11, 11, 12, 0);
+      const watchConfig = WebDavConfig(
+        language: AppLanguage.english,
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        localWatchEnabled: true,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(watchConfig),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          localFileWatchDebounceProvider.overrideWithValue(
+            const Duration(milliseconds: 25),
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+        ],
+      );
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          container.dispose();
+        });
+      });
+      late TaskItem deployTask;
+      await tester.runAsync(() async {
+        container.listen(
+          localFileWatcherProvider,
+          (_, _) {},
+          fireImmediately: true,
+        );
+        final initialBoard = await container.read(taskNotifierProvider.future);
+        deployTask = initialBoard.findTask('tskExecOk2')!;
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+
+        // Complete sibling task tskUndoOk1 so an unrelated entry sits on the TEP-007 undo stack.
+        currentTime = DateTime.utc(2026, 11, 11, 12, 0, 30);
+        await container
+            .read(taskNotifierProvider.notifier)
+            .completeTask('tskUndoOk1');
+        await Future<void>.delayed(const Duration(milliseconds: 60));
+      });
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isTrue,
+        reason: 'Completing sibling task must record an undo entry',
+      );
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const ValueKey('open_task_info_btn'),
+                  onPressed: () =>
+                      showTaskInfoDialog(context, task: deployTask),
+                  child: const Text('Open Task Info'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_task_info_btn')));
+      await tester.pumpAndSettle();
+
+      final chipFinder = find.byKey(
+        const ValueKey('task_info_label_chip_lblOps0001'),
+      );
+      expect(
+        chipFinder,
+        findsOneWidget,
+        reason: 'TaskInfoDialog must render assigned labels as interactive ActionChips',
+      );
+      expect(tester.widget<ActionChip>(chipFinder).onPressed, isNotNull);
+
+      // Tap label ActionChip -> stacks LabelHubDialog above TaskInfoDialog!
+      await tester.tap(chipFinder);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('label_hub_dialog')), findsOneWidget);
+      expect(find.text('Initial ops note'), findsOneWidget);
+      expect(find.text('Dashboard'), findsOneWidget);
+
+      // Edit label via LabelHubDialog -> EditLabelScreen -> Save -> updates BOTH LabelHubDialog and TaskInfoDialog while preserving unrelated task undo!
+      currentTime = DateTime.utc(2026, 11, 11, 12, 1);
+      await tester.tap(find.byKey(const ValueKey('label_hub_edit_button')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Ops Core Runbook',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Updated ops note',
+      );
+      final linkTitleField = find.byKey(
+        const ValueKey('editor_link_title_input'),
+      );
+      await tester.ensureVisible(linkTitleField);
+      await tester.enterText(linkTitleField, 'Pager');
+      await tester.enterText(
+        find.byKey(const ValueKey('editor_link_uri_input')),
+        'https://ops.example.com/pager',
+      );
+      await tester.pump();
+      final addLinkBtn = find.byKey(const ValueKey('editor_add_link_button'));
+      await tester.ensureVisible(addLinkBtn);
+      await tester.tap(addLinkBtn);
+      await tester.pump();
+
+      final saveBtn = find.byKey(const ValueKey('task_editor_save_button'));
+      await tester.ensureVisible(saveBtn);
+      await tester.tap(saveBtn);
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 80)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isTrue,
+        reason:
+            'Updating label metadata must preserve unrelated task undo entries',
+      );
+      expect(find.text('Ops Core Runbook'), findsWidgets);
+      expect(find.text('Updated ops note'), findsOneWidget);
+      expect(find.text('Pager'), findsOneWidget);
+
+      // External .tdf edit via real Directory.watch adds a third link -> LabelHubDialog updates live!
+      currentTime = DateTime.utc(2026, 11, 11, 12, 2);
+      await tester.runAsync(() async {
+        final onDisk = await tdfFile.readAsString();
+        final parsedDisk = const TdfService().parse(
+          onDisk,
+          evaluationTime: currentTime,
+        );
+        final updatedDisk = const TdfService().serialize(
+          parsedDisk.updateLabel(
+            'lblOps0001',
+            links: const <TaskLink>[
+              TaskLink(title: 'Dashboard', uri: 'https://ops.example.com/dash'),
+              TaskLink(title: 'Pager', uri: 'https://ops.example.com/pager'),
+              TaskLink(title: 'Postmortems', uri: 'https://ops.example.com/pm'),
+            ],
+            currentDate: currentTime,
+          ),
+        );
+        await tdfFile.writeAsString(updatedDisk, flush: true);
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+      });
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Postmortems'),
+        findsOneWidget,
+        reason: 'External Directory.watch update to label.links must update open LabelHubDialog live',
+      );
+
+      // External .tdf retirement (tombstone in deleted block) via real Directory.watch -> LabelHubDialog safely auto-dismisses while TaskInfoDialog remains open!
+      currentTime = DateTime.utc(2026, 11, 11, 12, 3);
+      await tester.runAsync(() async {
+        final onDisk = await tdfFile.readAsString();
+        final parsedDisk = const TdfService().parse(
+          onDisk,
+          evaluationTime: currentTime,
+        );
+        final retiredDisk = const TdfService().serialize(
+          parsedDisk.deleteLabel('lblOps0001', currentDate: currentTime),
+        );
+        await tdfFile.writeAsString(retiredDisk, flush: true);
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+      });
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('label_hub_dialog')),
+        findsNothing,
+        reason: 'LabelHubDialog must auto-dismiss when its label is retired externally via Directory.watch',
+      );
+      expect(
+        find.byType(TaskInfoDialog),
+        findsOneWidget,
+        reason: 'Underlying TaskInfoDialog must remain open when stacked LabelHubDialog auto-dismisses',
+      );
+      expect(
+        find.byKey(const ValueKey('task_info_label_chip_lblOps0001')),
+        findsNothing,
+        reason: 'Underlying TaskInfoDialog must reactively remove retired label chip',
+      );
     },
   );
 }

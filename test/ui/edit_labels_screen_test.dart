@@ -24,7 +24,9 @@ import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
+import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/ui/edit_labels_screen.dart';
 import 'package:tiertask/ui/widgets/task_editor_sections.dart';
 
@@ -954,6 +956,400 @@ task 000002OkD2 {
         updatedLabel?.links,
         equals(existingLinks),
         reason: 'Saving an edited TdfLabel must preserve its existing links without dropping or resetting them',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditLabelScreen creates, edits in place, cancels, reorders, removes, launches, and logs label links without leaking PII',
+    (WidgetTester tester) async {
+      AppLogger.clear();
+      AppLogger.setEnabled(
+        true,
+        persistToDisk: false,
+        minimumLevel: LogLevel.info,
+      );
+      addTearDown(() {
+        AppLogger.setEnabled(false, persistToDisk: false);
+        AppLogger.clear();
+      });
+
+      const initialLabel = TdfLabel(
+        id: 'hubLblOkD2',
+        name: 'SecretProjectName',
+        color: '#2196F3',
+        note: 'ConfidentialRunbookNote',
+        isScoped: true,
+        links: <TaskLink>[
+          TaskLink(title: 'FirstDocSecret', uri: 'https://example.com/first'),
+        ],
+      );
+      final fakeLauncher = FakeLinkLauncherRepository();
+      final container = await pumpLeafWidget(
+        tester,
+        const EditLabelScreen(label: initialLabel),
+        board: TaskBoard.empty().copyWith(labels: const [initialLabel]),
+        wrapInScaffold: false,
+        linkLauncherRepository: fakeLauncher,
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('task_editor_links_card')),
+        findsOneWidget,
+        reason: 'EditLabelScreen must render TaskEditorLinksSection',
+      );
+
+      final titleInput = find.byKey(const ValueKey('editor_link_title_input'));
+      final uriInput = find.byKey(const ValueKey('editor_link_uri_input'));
+      final addBtn = find.byKey(const ValueKey('editor_add_link_button'));
+
+      // Add a second link via the + button.
+      await tester.ensureVisible(addBtn);
+      await tester.enterText(titleInput, '  SecondDocSecret  ');
+      await tester.enterText(uriInput, '  mailto:team@example.com  ');
+      await tester.pump();
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+
+      // Add a third link via keyboard Enter on the URI field.
+      await tester.enterText(titleInput, 'ThirdDocSecret');
+      await tester.enterText(uriInput, 'file:///home/user/runbook.md');
+      await tester.pump();
+      await tester.ensureVisible(uriInput);
+      await tester.tap(uriInput);
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('editor_link_item_0')), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor_link_item_1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor_link_item_2')), findsOneWidget);
+
+      // Boundary move buttons must be disabled at 0 and N-1.
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey('editor_move_link_up_0')),
+            )
+            .onPressed,
+        isNull,
+        reason: 'Move-up must be disabled on index 0',
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find.byKey(const ValueKey('editor_move_link_down_2')),
+            )
+            .onPressed,
+        isNull,
+        reason: 'Move-down must be disabled on last index',
+      );
+
+      // Start editing index 1, verify cancel button and check icon, then cancel.
+      final editBtn1 = find.byKey(const ValueKey('editor_edit_link_1'));
+      await tester.ensureVisible(editBtn1);
+      await tester.tap(editBtn1);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.widget<IconButton>(addBtn).tooltip,
+        equals('Update link'),
+        reason: 'Submit button tooltip must switch to Update link during edit',
+      );
+      final cancelEditBtn = find.byKey(
+        const ValueKey('editor_cancel_edit_link_button'),
+      );
+      expect(cancelEditBtn, findsOneWidget);
+      await tester.enterText(titleInput, 'DiscardedEdit');
+      await tester.pump();
+      await tester.tap(cancelEditBtn);
+      await tester.pumpAndSettle();
+
+      expect(cancelEditBtn, findsNothing);
+      expect(find.text('SecondDocSecret'), findsOneWidget);
+
+      // Start editing index 2 ('ThirdDocSecret'), move it up to index 1, then remove index 0 so active edit shifts to index 0!
+      final editBtn2 = find.byKey(const ValueKey('editor_edit_link_2'));
+      await tester.ensureVisible(editBtn2);
+      await tester.tap(editBtn2);
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('editor_move_link_up_2')),
+      );
+      await tester.tap(find.byKey(const ValueKey('editor_move_link_up_2')));
+      await tester.pumpAndSettle();
+      // Now order is: [FirstDocSecret (0), ThirdDocSecret (1, active edit), SecondDocSecret (2)].
+      // Also test swapping from the adjacent item (move index 2 up onto index 1 -> active edit shifts to 2):
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('editor_move_link_up_2')),
+      );
+      await tester.tap(find.byKey(const ValueKey('editor_move_link_up_2')));
+      await tester.pumpAndSettle();
+      // Order is: [FirstDocSecret (0), SecondDocSecret (1), ThirdDocSecret (2, active edit)].
+      // Remove index 0 (before active edit) -> active edit shifts to index 1!
+      final removeBtn0 = find.byKey(const ValueKey('editor_remove_link_0'));
+      await tester.ensureVisible(removeBtn0);
+      await tester.tap(removeBtn0);
+      await tester.pumpAndSettle();
+
+      // Confirm active edit (should update index 1: ThirdDocSecret -> UpdatedThirdSecret).
+      await tester.ensureVisible(addBtn);
+      await tester.enterText(titleInput, 'UpdatedThirdSecret');
+      await tester.enterText(uriInput, 'https://example.com/third-updated');
+      await tester.pump();
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+
+      expect(find.text('SecondDocSecret'), findsOneWidget);
+      expect(find.text('UpdatedThirdSecret'), findsOneWidget);
+
+      // Start editing index 0, then remove index 0 itself -> cancels active edit cleanly without RangeError.
+      final editBtn0 = find.byKey(const ValueKey('editor_edit_link_0'));
+      await tester.ensureVisible(editBtn0);
+      await tester.tap(editBtn0);
+      await tester.pumpAndSettle();
+      expect(cancelEditBtn, findsOneWidget);
+      await tester.ensureVisible(removeBtn0);
+      await tester.tap(removeBtn0);
+      await tester.pumpAndSettle();
+      expect(cancelEditBtn, findsNothing);
+      expect(find.text('SecondDocSecret'), findsNothing);
+
+      // Launch remaining link at index 0: first succeed, then fail with screen-local SnackBar.
+      final openBtn0 = find.byKey(const ValueKey('editor_open_link_0'));
+      await tester.ensureVisible(openBtn0);
+      await tester.tap(openBtn0);
+      await tester.pumpAndSettle();
+      expect(
+        fakeLauncher.launchedUris,
+        equals(const <String>['https://example.com/third-updated']),
+      );
+
+      fakeLauncher.shouldThrow = true;
+      await tester.ensureVisible(openBtn0);
+      await tester.tap(openBtn0);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Could not open link.'),
+        findsOneWidget,
+        reason: 'LinkLaunchException must show localized SnackBar inside EditLabelScreen',
+      );
+      ScaffoldMessenger.of(
+        tester.element(find.byKey(const ValueKey('task_editor_save_button'))),
+      ).clearSnackBars();
+      await tester.pumpAndSettle();
+
+      // Leave a valid pending draft in the inputs and tap Save -> auto-adds draft and persists!
+      await tester.ensureVisible(titleInput);
+      await tester.enterText(titleInput, 'AutoSavedDraftSecret');
+      await tester.enterText(uriInput, 'https://example.com/draft-secret');
+      await tester.pump();
+
+      final saveButton = find.byKey(const ValueKey('task_editor_save_button'));
+      await tester.ensureVisible(saveButton);
+      await tester.tap(saveButton);
+      await tester.pumpAndSettle();
+
+      final savedLabel = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findLabel('hubLblOkD2');
+      expect(
+        savedLabel?.links,
+        equals(const <TaskLink>[
+          TaskLink(
+            title: 'UpdatedThirdSecret',
+            uri: 'https://example.com/third-updated',
+          ),
+          TaskLink(
+            title: 'AutoSavedDraftSecret',
+            uri: 'https://example.com/draft-secret',
+          ),
+        ]),
+        reason: 'Save must persist reordered/edited links plus valid pending draft in declaration order',
+      );
+
+      final uiSaveLine = AppLogger.lines.singleWhere(
+        (line) => line.contains('ui.label_editor.save'),
+      );
+      expect(uiSaveLine, contains('id=hubLblOkD2'));
+      expect(uiSaveLine, contains('links=2'));
+      expect(uiSaveLine, contains('scoped=true'));
+      expect(uiSaveLine, isNot(contains('SecretProjectName')));
+
+      final logOutput = AppLogger.fullLogText;
+      for (final secret in const <String>[
+        'ConfidentialRunbookNote',
+        'UpdatedThirdSecret',
+        'AutoSavedDraftSecret',
+        'https://example.com/draft-secret',
+      ]) {
+        expect(
+          logOutput,
+          isNot(contains(secret)),
+          reason:
+              'AppLogger must never log raw label notes, link titles, or URIs ($secret)',
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    'EditLabelScreen enforces 20-link max bound, Unicode scalar limits, forbidden schemes, and cleared active-edit guard on Save',
+    (WidgetTester tester) async {
+      final nineteenLinks = <TaskLink>[
+        for (var i = 1; i <= 19; i++)
+          TaskLink(title: 'Link $i', uri: 'https://example.com/$i'),
+      ];
+      final initialLabel = TdfLabel(
+        id: 'bndLblOkD2',
+        name: 'Bounded Label',
+        links: nineteenLinks,
+      );
+      final container = await pumpLeafWidget(
+        tester,
+        EditLabelScreen(label: initialLabel),
+        board: TaskBoard.empty().copyWith(labels: [initialLabel]),
+        wrapInScaffold: false,
+      );
+      await tester.pumpAndSettle();
+
+      final titleInput = find.byKey(const ValueKey('editor_link_title_input'));
+      final uriInput = find.byKey(const ValueKey('editor_link_uri_input'));
+      final addBtn = find.byKey(const ValueKey('editor_add_link_button'));
+      final saveBtn = find.byKey(const ValueKey('task_editor_save_button'));
+      final errorFinder = find.byKey(const ValueKey('editor_link_error_text'));
+
+      // Invalid schemes, control characters, and 501-scalar title must fail validation and block Save.
+      for (final badCase in <({String title, String uri})>[
+        (title: 'Missing scheme', uri: 'example.com/path'),
+        (title: 'JS scheme', uri: 'javascript:alert(1)'),
+        (title: 'VBS scheme', uri: 'vbscript:msgbox'),
+        (title: 'Data scheme', uri: 'DaTa:text/html,1'),
+        (title: '', uri: 'https://example.com/notitle'),
+        (title: '\u{10400}' * 501, uri: 'https://example.com/501'),
+        (
+          title: '2049 URI',
+          uri: 'https://example.com/${'\u{1F600}' * (2049 - 20)}',
+        ),
+      ]) {
+        await tester.ensureVisible(addBtn);
+        await tester.enterText(titleInput, badCase.title);
+        await tester.enterText(uriInput, badCase.uri);
+        await tester.pump();
+        await tester.ensureVisible(saveBtn);
+        await tester.tap(saveBtn);
+        await tester.pumpAndSettle();
+        expect(
+          errorFinder,
+          findsOneWidget,
+          reason:
+              'Invalid pending link (${badCase.uri}) must abort Save and show error',
+        );
+      }
+
+      // 19 -> 20th link with 500 supplementary-plane scalars and 2048-scalar URI must succeed!
+      final valid500Title = '\u{10400}' * 500;
+      final valid2048Uri = 'https://example.com/${'\u{1F600}' * (2048 - 20)}';
+      await tester.ensureVisible(addBtn);
+      await tester.enterText(titleInput, valid500Title);
+      await tester.enterText(uriInput, valid2048Uri);
+      await tester.pump();
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+
+      expect(errorFinder, findsNothing);
+      expect(
+        find.byKey(const ValueKey('editor_link_item_19')),
+        findsOneWidget,
+        reason: '20th link (index 19) must be added',
+      );
+
+      // At 20 links (when not editing), add button is disabled, and Enter / Save on a 21st draft fails with labelLinkErrorMaxExceeded.
+      await tester.enterText(titleInput, 'Link 21');
+      await tester.enterText(uriInput, 'https://example.com/21');
+      await tester.pump();
+      expect(
+        tester.widget<IconButton>(addBtn).onPressed,
+        isNull,
+        reason: 'Add button must be disabled when 20 links already exist and not editing',
+      );
+
+      await tester.ensureVisible(uriInput);
+      await tester.tap(uriInput);
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Maximum of 20 links per label reached.'),
+        findsOneWidget,
+        reason: 'Submitting 21st link via Enter must show max links error',
+      );
+
+      await tester.ensureVisible(saveBtn);
+      await tester.tap(saveBtn);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Maximum of 20 links per label reached.'),
+        findsOneWidget,
+        reason: 'Clicking Save with a pending 21st link must abort Save and show max links error',
+      );
+
+      // Editing one of the 20 existing links in place MUST succeed!
+      final editBtn0 = find.byKey(const ValueKey('editor_edit_link_0'));
+      await tester.ensureVisible(editBtn0);
+      await tester.tap(editBtn0);
+      await tester.pumpAndSettle();
+
+      // Clearing both fields while in active edit mode and tapping Save must block Save with linkErrorInvalid!
+      await tester.enterText(titleInput, '');
+      await tester.enterText(uriInput, '');
+      await tester.pump();
+      await tester.ensureVisible(saveBtn);
+      await tester.tap(saveBtn);
+      await tester.pumpAndSettle();
+      expect(
+        errorFinder,
+        findsOneWidget,
+        reason: 'Cleared active in-place edit must block Save instead of silently discarding the edit',
+      );
+
+      // Now enter valid updated values for index 0 at capacity (20 links) and Save!
+      await tester.ensureVisible(addBtn);
+      await tester.enterText(titleInput, 'Edited Link 1');
+      await tester.enterText(uriInput, 'https://example.com/1-edited');
+      await tester.pump();
+      expect(
+        tester.widget<IconButton>(addBtn).onPressed,
+        isNotNull,
+        reason: 'Update button must remain enabled during in-place edit even at 20 links',
+      );
+      await tester.tap(addBtn);
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(saveBtn);
+      await tester.tap(saveBtn);
+      await tester.pumpAndSettle();
+
+      final saved = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findLabel('bndLblOkD2');
+      expect(saved?.links.length, equals(20));
+      expect(
+        saved?.links.first,
+        equals(
+          const TaskLink(
+            title: 'Edited Link 1',
+            uri: 'https://example.com/1-edited',
+          ),
+        ),
+      );
+      expect(
+        saved?.links.last,
+        equals(TaskLink(title: valid500Title, uri: valid2048Uri)),
       );
     },
   );

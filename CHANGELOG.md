@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added a label context dialog accessible from the active top-bar label title, navigation drawer label rows, and task details label chips to view and copy notes, open reference links, inspect conditions, and edit labels.
+- Added reference link management with inline editing and up/down reordering in the label editor.
 - Added support for TierTask Data Format (TDF) 0.7.0 with automatic migration from version 0.6.0.
 - Added TDF 0.7.0 support for label reference links, deferral and deadline notes, recurring preparation lead days, and task history logs.
 - Added a subtle task ID header with a copy button at the top of expanded task cards, allowing every task card to expand on tap.
