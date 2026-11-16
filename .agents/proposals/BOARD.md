@@ -11,6 +11,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
+| TEP-013 | TDF Specification 0.8.0 Standalone Baseline, Canonical Runtime, Synchronization Hardening, and Conformance Suite | spec | in-progress | [`tep-013-tdf-spec-0-8-0.md`](tep-013-tdf-spec-0-8-0.md) |
 
 ### Completed Proposals
 
