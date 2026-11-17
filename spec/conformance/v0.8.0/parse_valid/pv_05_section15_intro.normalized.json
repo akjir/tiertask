@@ -1,0 +1,69 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 0,
+    "tasks": [],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "2026-11-16 09:00:00",
+    "tasks": [
+      "8jKaCdOkD2"
+    ]
+  },
+  "labels": [
+    {
+      "id": "4x9p2mOkD2",
+      "scoped": false,
+      "name": "Home",
+      "color": "#4CAF50",
+      "note": null,
+      "modified": null,
+      "links": [],
+      "conditions": []
+    }
+  ],
+  "locations": [],
+  "tasks": [
+    {
+      "id": "8jKaCdOkD2",
+      "priority": true,
+      "name": "Inspect heating pressure",
+      "note": null,
+      "created": "2026-11-16 08:30:00",
+      "finished": null,
+      "modified": "2026-11-16 09:00:00",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": {
+        "utc": "2026-11-20 17:00:00",
+        "anchor": "2026-11-20 18:00:00",
+        "passive": false,
+        "note": null
+      },
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [],
+      "subtasks": {
+        "autoFinish": false,
+        "steps": [
+          {
+            "completed": false,
+            "text": "Check boiler gauge"
+          },
+          {
+            "completed": false,
+            "text": "Bleed upstairs radiator"
+          }
+        ]
+      }
+    }
+  ]
+}

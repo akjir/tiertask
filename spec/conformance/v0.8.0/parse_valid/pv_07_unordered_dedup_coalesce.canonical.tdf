@@ -1,0 +1,49 @@
+tdf 0.8.0
+
+deleted {
+    generation 2
+    task AAAAAAAAAA 2026-11-01 12:30:00
+    task ZZZZZZZZZZ 2026-11-01 00:00:00 7
+}
+
+queue {
+    modified 2026-11-01 09:00:00
+    task 8jKaCdOkD2
+}
+
+label aaaLblOkD2 {
+    name "Label A"
+}
+
+label zzzLblOkD2 {
+    name      "Label Z"
+    color     "#4CAF50"
+    condition location locTwoOkD2
+}
+
+location locOneOkD2 {
+    name        "Loc One"
+    coordinates 50.9787 11
+    radius      25.5
+}
+
+location locTwoOkD2 {
+    name        "Loc Two"
+    coordinates 0 11.0328
+    radius      150
+}
+
+task 8jKaCdOkD2 {
+    name    "Out of order task"
+    created 2026-11-01 08:00
+    labels  aaaLblOkD2 zzzLblOkD2
+    blocked AAAAAAAAAA:5 ZZZZZZZZZZ
+    history 2026-11-01 08:00:00 "First"
+    history 2026-11-01 09:00:00 "Alpha"
+    history 2026-11-01 09:00:00 "Zulu"
+    condition {
+        day      mon
+        time     09:00 17:00
+        location locTwoOkD2 locOneOkD2
+    }
+}

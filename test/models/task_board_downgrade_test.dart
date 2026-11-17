@@ -19,6 +19,7 @@ import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
@@ -801,6 +802,95 @@ void main() {
       expect(somedayTarget.isDuePassive, isTrue);
       expect(somedayTarget.dueNote, equals('Deadline note'));
       expect(somedayTarget.history.length, equals(1));
+    });
+
+    test('TDF 0.8.0 downgradeTask preserves dueAnchor across Focus -> Ready (Case A and Case B), Ready -> Planned, and Planned -> Someday', () {
+      final now = DateTime.utc(2026, 2, 28, 10, 0);
+      final dueUtc = DateTime.utc(2026, 2, 28, 17, 0);
+      final anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+
+      // Case B (< 7 urgent peers) chain Focus -> Ready -> Planned -> Someday:
+      final fillers = <TaskItem>[
+        for (var i = 1; i <= 8; i++)
+          TaskItem(
+            id: 'fil000000$i',
+            title: 'Filler $i',
+            createdAt: now.subtract(const Duration(hours: 2)),
+          ),
+      ];
+      final target = TaskItem(
+        id: 'ancDown001',
+        title: 'Clamped Urgent Focus Task',
+        createdAt: now.subtract(const Duration(hours: 2)),
+        modifiedAt: now.subtract(const Duration(hours: 2)),
+        dueAt: dueUtc,
+        dueAnchor: anchor,
+        dueNote: 'Clamped Jan 31 deadline',
+      );
+      var board = TaskBoard.evaluate(
+        tasks: <TaskItem>[target, ...fillers],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now.subtract(const Duration(hours: 2)),
+          taskIds: <String>['ancDown001', for (final item in fillers) item.id],
+        ),
+        evaluationTime: now,
+      );
+      expect(board.focus.map((t) => t.id), contains('ancDown001'));
+
+      board = board.downgradeTask(
+        'ancDown001',
+        currentDate: now.add(const Duration(minutes: 1)),
+      );
+      expect(board.ready.map((t) => t.id), contains('ancDown001'));
+      expect(board.findTask('ancDown001')!.dueAnchor, equals(anchor));
+      expect(board.findTask('ancDown001')!.isDuePassive, isTrue);
+
+      board = board.downgradeTask(
+        'ancDown001',
+        currentDate: now.add(const Duration(minutes: 2)),
+      );
+      expect(board.planned.map((t) => t.id), contains('ancDown001'));
+      expect(board.findTask('ancDown001')!.dueAnchor, equals(anchor));
+
+      board = board.downgradeTask(
+        'ancDown001',
+        currentDate: now.add(const Duration(minutes: 3)),
+      );
+      expect(board.someday.map((t) => t.id), contains('ancDown001'));
+      expect(board.findTask('ancDown001')!.dueAnchor, equals(anchor));
+      expect(
+        board.findTask('ancDown001')!.dueNote,
+        equals('Clamped Jan 31 deadline'),
+      );
+
+      // Case A (>= 7 urgent peers): preserves dueAnchor and leaves isDuePassive false:
+      final urgentPeers = <TaskItem>[
+        for (var i = 1; i <= 7; i++)
+          TaskItem(
+            id: 'urgPeer00$i',
+            title: 'Urgent Peer $i',
+            isPriority: true,
+            createdAt: now.subtract(const Duration(hours: 2)),
+          ),
+      ];
+      final caseABoard =
+          TaskBoard.evaluate(
+            tasks: <TaskItem>[target, ...urgentPeers],
+            queueBlock: TdfQueueBlock(
+              modifiedAt: now.subtract(const Duration(hours: 2)),
+              taskIds: <String>[
+                'ancDown001',
+                for (final item in urgentPeers) item.id,
+              ],
+            ),
+            evaluationTime: now,
+          ).downgradeTask(
+            'ancDown001',
+            currentDate: now.add(const Duration(minutes: 4)),
+          );
+      expect(caseABoard.ready.map((t) => t.id), contains('ancDown001'));
+      expect(caseABoard.findTask('ancDown001')!.dueAnchor, equals(anchor));
+      expect(caseABoard.findTask('ancDown001')!.isDuePassive, isFalse);
     });
   });
 }

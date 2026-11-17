@@ -1449,6 +1449,7 @@ class _TaskInfoSectionsBuilder {
         configuration,
         localizations,
         normalizedNow,
+        localDue,
       ),
       icon: Icons.event_rounded,
       keyPrefix: 'due_task_badge',
@@ -1459,52 +1460,31 @@ class _TaskInfoSectionsBuilder {
     );
   }
 
-  /// Resolves the exhaustive deadline auto-priority status detail lines for [task].
+  /// Resolves the exhaustive deadline auto-priority status and schedule-anchor detail lines for [task].
   static List<String> _buildDueStatusDetails(
     TaskItem task,
     WebDavConfig configuration,
     AppLocalizations localizations,
     DateTime normalizedNow,
+    DateTime localDue,
   ) {
     if (task.isCompleted || task.completedAt != null) {
       return const <String>[];
     }
-    if (task.isDuePassive) {
-      return <String>[localizations.taskInfoDuePassiveHint];
+    final statusLine = _resolvePrimaryDueStatusLine(
+      task,
+      configuration,
+      localizations,
+      normalizedNow,
+    );
+    if (task.dueAnchor case final anchor?
+        when _differsFromWallClock(anchor, localDue)) {
+      return <String>[
+        statusLine,
+        localizations.taskInfoDueAnchorDetail(anchor.formatCompact()),
+      ];
     }
-    final leadWindow = configuration.dueLeadWindow;
-    if (leadWindow == DueLeadWindow.off) {
-      return <String>[localizations.taskInfoDueLeadWindowOffHint];
-    }
-    if (task.isWithinDueLeadWindow(normalizedNow, leadWindow.duration)) {
-      return <String>[localizations.taskInfoDueAutoPromotedActive];
-    }
-    return switch (leadWindow) {
-      DueLeadWindow.off => <String>[localizations.taskInfoDueLeadWindowOffHint],
-      DueLeadWindow.atDue => <String>[
-        localizations.taskInfoDueAutoPromoteAtDue,
-      ],
-      DueLeadWindow.hours12 => <String>[
-        localizations.taskInfoDueAutoPromoteScheduled(
-          localizations.dueLeadWindowShort12Hours,
-        ),
-      ],
-      DueLeadWindow.hours24 => <String>[
-        localizations.taskInfoDueAutoPromoteScheduled(
-          localizations.dueLeadWindowShort24Hours,
-        ),
-      ],
-      DueLeadWindow.hours48 => <String>[
-        localizations.taskInfoDueAutoPromoteScheduled(
-          localizations.dueLeadWindowShort48Hours,
-        ),
-      ],
-      DueLeadWindow.days7 => <String>[
-        localizations.taskInfoDueAutoPromoteScheduled(
-          localizations.dueLeadWindowShort7Days,
-        ),
-      ],
-    };
+    return <String>[statusLine];
   }
 
   /// Builds the assigned labels section when [task] references defined labels.
@@ -1684,6 +1664,18 @@ class _TaskInfoSectionsBuilder {
     );
   }
 
+  /// Returns `true` when [anchor] differs in any `(year, month, day, hour, minute, second)` component from [localWallClock].
+  static bool _differsFromWallClock(
+    TdfLocalDateTime anchor,
+    DateTime localWallClock,
+  ) =>
+      anchor.year != localWallClock.year ||
+      anchor.month != localWallClock.month ||
+      anchor.day != localWallClock.day ||
+      anchor.hour != localWallClock.hour ||
+      anchor.minute != localWallClock.minute ||
+      anchor.second != localWallClock.second;
+
   /// Formats a positive [difference] into days/hours, hours/minutes, or minutes remaining.
   static String _formatRemainingDuration(
     Duration difference,
@@ -1716,6 +1708,41 @@ class _TaskInfoSectionsBuilder {
       RepeatUnit.days => localizations.repeatUnitDays,
       RepeatUnit.weeks => localizations.repeatUnitWeeks,
       RepeatUnit.months => localizations.repeatUnitMonths,
+    };
+  }
+
+  /// Resolves the primary deadline auto-priority status line for an open [task].
+  static String _resolvePrimaryDueStatusLine(
+    TaskItem task,
+    WebDavConfig configuration,
+    AppLocalizations localizations,
+    DateTime normalizedNow,
+  ) {
+    if (task.isDuePassive) {
+      return localizations.taskInfoDuePassiveHint;
+    }
+    final leadWindow = configuration.dueLeadWindow;
+    if (leadWindow == DueLeadWindow.off) {
+      return localizations.taskInfoDueLeadWindowOffHint;
+    }
+    if (task.isWithinDueLeadWindow(normalizedNow, leadWindow.duration)) {
+      return localizations.taskInfoDueAutoPromotedActive;
+    }
+    return switch (leadWindow) {
+      DueLeadWindow.off => localizations.taskInfoDueLeadWindowOffHint,
+      DueLeadWindow.atDue => localizations.taskInfoDueAutoPromoteAtDue,
+      DueLeadWindow.hours12 => localizations.taskInfoDueAutoPromoteScheduled(
+        localizations.dueLeadWindowShort12Hours,
+      ),
+      DueLeadWindow.hours24 => localizations.taskInfoDueAutoPromoteScheduled(
+        localizations.dueLeadWindowShort24Hours,
+      ),
+      DueLeadWindow.hours48 => localizations.taskInfoDueAutoPromoteScheduled(
+        localizations.dueLeadWindowShort48Hours,
+      ),
+      DueLeadWindow.days7 => localizations.taskInfoDueAutoPromoteScheduled(
+        localizations.dueLeadWindowShort7Days,
+      ),
     };
   }
 }

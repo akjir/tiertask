@@ -35,6 +35,7 @@ import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/edit_task_screen.dart';
 import 'package:tiertask/ui/widgets/task_editor_scheduling_card.dart';
+import 'package:tiertask/ui/widgets/task_info_dialog.dart';
 
 import 'test_helpers.dart';
 
@@ -60,7 +61,7 @@ void main() {
     'Right-side task edit button and QuickAddBar Advanced button open the dedicated EditTaskScreen panel enforcing non-empty, non-duplicate names and shared fields',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -87,7 +88,6 @@ task 000001OkD2 {
   name "Existing Server Audit"
   note "Initial audit note"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   labels cit000OkD2 officeOkD2
   subtasks {
     step false "Check firewall rules"
@@ -493,7 +493,7 @@ task 000001OkD2 {
       final fakeLauncher = FakeLinkLauncherRepository();
       final container = await _pumpEditorApp(
         tester,
-        initialTdf: 'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
+        initialTdf: 'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
         clock: DateTime.utc(2026, 11, 1, 10, 0),
         linkLauncher: fakeLauncher,
       );
@@ -600,7 +600,7 @@ task 000001OkD2 {
       await _pumpEditorApp(
         tester,
         initialTdf:
-            'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\n\ntask 000001OkD2 {\n  name "Max Links Task"\n  created 2026-11-01 08:00\n  queued 2026-11-01 08:00\n$initialLinks\n}\n',
+            'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\n\ntask 000001OkD2 {\n  name "Max Links Task"\n  created 2026-11-01 08:00\n$initialLinks\n}\n',
         clock: DateTime.utc(2026, 11, 1, 10, 0),
         linkLauncher: fakeLauncher,
       );
@@ -767,7 +767,7 @@ task 000001OkD2 {
     'EditTaskScreen supports due date/time input and preserves task origin across edits',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00
@@ -823,7 +823,7 @@ task 000001OkD2 {
     'EditTaskScreen shows Delete button only when editing an existing task and requires confirmation before deleting in English and German',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -1016,7 +1016,7 @@ task 000002OkD2 {
     'EditTaskScreen unchecks expired suspended on open, clears dead deferral on save, and preserves 0.7.0 fields',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -1049,7 +1049,11 @@ task forSusp003 {
 }
 ''';
       var currentClock = DateTime.utc(2026, 11, 1, 10, 0);
-      const config = WebDavConfig(language: AppLanguage.english);
+      const config = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+      );
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(
@@ -1289,7 +1293,7 @@ task forSusp003 {
     'EditTaskScreen manages task_editor_due_auto_prioritize_switch across new, passive, seconds/9999-12-31, Priority/due auto-resets, manual overrides, and completed tasks',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -1726,7 +1730,7 @@ task doneDue003 {
     (WidgetTester tester) async {
       const tdfService = TdfService();
       final seededBoard = tdfService.parse(
-        'tdf 0.7.0\n\n'
+        'tdf 0.8.0\n\n'
         'queue {\n'
         '  modified 2026-11-01 08:00:00\n'
         '  task crlfTask01\n'
@@ -2035,7 +2039,7 @@ task doneDue003 {
       addTearDown(AppLogger.resetForTesting);
 
       const seededTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -2749,6 +2753,388 @@ task doneRest02 {
       );
     },
   );
+
+  testWidgets(
+    'EditTaskScreen resolves due, suspended, and history in local wall-clock time across CET/CEST/automatic, writes UTC + due.anchor to TDF, reloads as local time across Pill/Info/Editor, and rejects 0001/9999 offset overflows',
+    (WidgetTester tester) async {
+      const cetConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 60,
+      );
+      const cestConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+      );
+      final cetRepo = FakeLocalFileRepository(
+        config: cetConfig,
+        initialTdf: 'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n}\n',
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(cetConfig),
+          ),
+          localFileRepositoryProvider.overrideWith((ref) => cetRepo),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 1, 10, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 1. Author task at 12:00 local in CET (UTC+01:00) -> persists 11:00:00 UTC + anchor 12:00:00:
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Winter Noon Cutoff',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_button')),
+      );
+      // 0001-01-01 00:00 in UTC+01:00 underflows to year 0000 UTC -> inline error, no crash:
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_suspended_input')),
+        '0001-01-01 00:00',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '0001-01-01 00:00',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(tester.takeException(), isNull);
+      expect(
+        find.text('Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).'),
+        findsNWidgets(2),
+        reason: 'Out-of-bounds local-to-UTC due and suspended inputs must surface inline field errors',
+      );
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_suspended_input')),
+        '2026-11-05 12:00',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-11-02 12:00',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      final savedWinter = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .allTasks
+          .singleWhere((task) => task.title == 'Winter Noon Cutoff');
+      expect(savedWinter.dueAt, equals(DateTime.utc(2026, 11, 2, 11, 0)));
+      expect(
+        savedWinter.dueAnchor,
+        equals(TdfLocalDateTime(2026, 11, 2, 12, 0)),
+      );
+      expect(savedWinter.suspendedAt, equals(DateTime.utc(2026, 11, 5, 11, 0)));
+      expect(
+        cetRepo.initialTdf,
+        contains('due       2026-11-02 11:00:00 anchor 2026-11-02 12:00:00'),
+      );
+      expect(cetRepo.initialTdf, contains('suspended 2026-11-05 11:00:00'));
+
+      // Reload serialized TDF and verify local date/clock display in Pill, InfoDialog, and EditTaskScreen:
+      final reloadedBoard = const TdfService().parse(cetRepo.initialTdf);
+      final reloadedTask = reloadedBoard.findTask(savedWinter.id)!;
+      await _tapKey(tester, 'tier_indicator_item_blocked');
+      final badgeFinder = find.byKey(
+        ValueKey('due_task_badge_${reloadedTask.id}'),
+      );
+      expect(badgeFinder, findsOneWidget);
+      expect(
+        tester.widget<Text>(badgeFinder).data,
+        contains('2026-11-02'),
+        reason: 'TierTaskPill due badge must render local calendar date',
+      );
+      await tester.tap(badgeFinder);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('2026-11-02 12:00'), findsOneWidget);
+      expect(find.textContaining('2026-11-05 12:00'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+
+      await _tapKey(tester, 'edit_task_button_${reloadedTask.id}');
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_due_input')),
+            )
+            .controller
+            ?.text,
+        equals('2026-11-02 12:00'),
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_suspended_input')),
+            )
+            .controller
+            ?.text,
+        equals('2026-11-05 12:00'),
+      );
+      // Clearing due clears dueAt, dueAnchor, isDuePassive, and dueNote:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      final clearedWinter = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask(reloadedTask.id)!;
+      expect(clearedWinter.dueAt, isNull);
+      expect(clearedWinter.dueAnchor, isNull);
+
+      // 2. Summer CEST (UTC+02:00) 12:00 local -> 10:00:00 UTC + TaskInfoDialog local 12:00:
+      final cestRepo = FakeLocalFileRepository(
+        config: cestConfig,
+        initialTdf: 'tdf 0.8.0\n\nqueue {\n  modified 2026-07-01 08:00:00\n}\n',
+      );
+      final cestContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(cestConfig),
+          ),
+          localFileRepositoryProvider.overrideWith((ref) => cestRepo),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 7, 1, 10, 0),
+          ),
+        ],
+      );
+      addTearDown(cestContainer.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: cestContainer,
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'quick_add_advanced_button');
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Summer Noon Cutoff',
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_button')),
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_due_input')),
+        '2026-07-10 12:00',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+
+      final savedSummer = cestContainer
+          .read(taskNotifierProvider)
+          .requireValue
+          .allTasks
+          .singleWhere((task) => task.title == 'Summer Noon Cutoff');
+      expect(savedSummer.dueAt, equals(DateTime.utc(2026, 7, 10, 10, 0)));
+      expect(
+        savedSummer.dueAnchor,
+        equals(TdfLocalDateTime(2026, 7, 10, 12, 0)),
+      );
+      expect(
+        cestRepo.initialTdf,
+        contains('due      2026-07-10 10:00:00 anchor 2026-07-10 12:00:00'),
+      );
+
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: savedSummer),
+        board: cestContainer.read(taskNotifierProvider).requireValue,
+        config: cestConfig,
+        clock: () => DateTime.utc(2026, 7, 1, 10, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('2026-07-10 12:00'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen synchronously refreshes controller and initial comparison snapshots when webDavConfigProvider resolves asynchronously, preserving clamped dueAnchor, passive status, and autumn-fold UTC instants',
+    (WidgetTester tester) async {
+      final configCompleter = Completer<WebDavConfig>();
+      const resolvedConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+      );
+      final clampedAndFoldTask = TaskItem(
+        id: 'asyncCfg01',
+        title: 'Clamped Anchor Passive Task',
+        createdAt: DateTime.utc(2026, 2, 1, 8, 0),
+        modifiedAt: DateTime.utc(2026, 2, 1, 8, 0),
+        suspendedAt: DateTime.utc(2026, 10, 25, 1, 30),
+        dueAt: DateTime.utc(2026, 2, 28, 16, 0),
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 0),
+        isDuePassive: true,
+        dueNote: 'Preserve passive + clamped anchor',
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 10, 25, 1, 30),
+            text: 'Second fold occurrence log',
+          ),
+        ],
+      );
+      final initialBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[clampedAndFoldTask],
+        evaluationTime: DateTime.utc(2026, 2, 10, 12, 0),
+      );
+      final fakeNotifier = FakeTaskNotifier(initialBoard);
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(resolvedConfig),
+          ),
+          webDavConfigProvider.overrideWith(
+            () => _CompleterWebDavConfigNotifier(configCompleter.future),
+          ),
+          taskNotifierProvider.overrideWith(() => fakeNotifier),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 2, 10, 12, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const ValueKey('open_async_cfg_editor'),
+                  onPressed: () => openEditTaskScreen(
+                    context,
+                    initialTask: clampedAndFoldTask,
+                  ),
+                  child: const Text('Open Editor'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_async_cfg_editor')));
+      await tester.pumpAndSettle();
+
+      // Begin editing history row 0 BEFORE webDavConfigProvider completes:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_edit_history_0')),
+      );
+
+      // Now complete webDavConfigProvider asynchronously to UTC+02:00:
+      configCompleter.complete(resolvedConfig);
+      await tester.pumpAndSettle();
+
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_due_input')),
+            )
+            .controller
+            ?.text,
+        equals('2026-02-28 18:00'),
+        reason: 'Async config resolution must update unedited due input to UTC+02:00 local wall clock',
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_suspended_input')),
+            )
+            .controller
+            ?.text,
+        equals('2026-10-25 03:30'),
+        reason: 'Async config resolution must update unedited suspended input to UTC+02:00 local wall clock',
+      );
+      expect(
+        tester
+            .widget<Switch>(
+              find.byKey(
+                const ValueKey('task_editor_due_auto_prioritize_switch'),
+              ),
+            )
+            .value,
+        isFalse,
+        reason: 'Synchronous _initialDueText update before controller assignment must not falsely reset isDuePassive',
+      );
+
+      // Edit ONLY the history text (leaving history timestamp unedited) and task note, then save:
+      await _enterVisibleText(
+        tester,
+        find.byKey(const ValueKey('editor_history_text_input')),
+        'Second fold occurrence log (edited text)',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_note_input')),
+        'Updated note only',
+      );
+      await tester.pump();
+      await _tapKey(tester, 'task_editor_save_button');
+
+      final updated = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('asyncCfg01')!;
+      expect(updated.dueAt, equals(DateTime.utc(2026, 2, 28, 16, 0)));
+      expect(
+        updated.dueAnchor,
+        equals(TdfLocalDateTime(2026, 1, 31, 18, 0)),
+        reason: 'Unedited due must preserve clamped 31st dueAnchor verbatim',
+      );
+      expect(updated.isDuePassive, isTrue);
+      expect(updated.suspendedAt, equals(DateTime.utc(2026, 10, 25, 1, 30)));
+      expect(
+        updated.history,
+        equals(<TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: DateTime.utc(2026, 10, 25, 1, 30),
+            text: 'Second fold occurrence log (edited text)',
+          ),
+        ]),
+        reason: 'Unedited history timestamp must preserve original UTC instant verbatim',
+      );
+    },
+  );
+}
+
+class _CompleterWebDavConfigNotifier extends WebDavConfigNotifier {
+  _CompleterWebDavConfigNotifier(this._loadFuture);
+
+  final Future<WebDavConfig> _loadFuture;
+
+  @override
+  Future<WebDavConfig> build() => _loadFuture;
 }
 
 /// Scrolls [finder] into view, enters [text], and settles animations.
@@ -2786,8 +3172,15 @@ Future<ProviderContainer> _pumpEditorApp(
   required String initialTdf,
   required DateTime clock,
   LinkLauncherRepository? linkLauncher,
+  WebDavConfig? configOverride,
 }) async {
-  const config = WebDavConfig(language: AppLanguage.english);
+  final config =
+      configOverride ??
+      const WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+      );
   final container = ProviderContainer(
     overrides: [
       settingsRepositoryProvider.overrideWithValue(

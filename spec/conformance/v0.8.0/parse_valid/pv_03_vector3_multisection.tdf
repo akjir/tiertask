@@ -1,0 +1,41 @@
+tdf 0.8.0
+
+deleted {
+    generation 1
+    task 6uCk8N0aB1 2026-11-01 12:00:00 2
+}
+
+queue {
+    modified 2026-11-16 09:00:00
+    task 8jKaCdOkD2
+}
+
+label 4x9p2mOkD2 {
+    name      "Home"
+    color     "#4CAF50"
+    condition location 7pQr9mOkD2
+}
+
+location 7pQr9mOkD2 {
+    name        "Office"
+    coordinates 50.9787 11.0328
+    radius      150
+}
+
+task 8jKaCdOkD2 priority {
+    name     "Close monthly books"
+    note     "Line 1\nLine 2 with \"quotes\""
+    created  2026-01-01 08:00
+    modified 2026-01-31 18:00:05
+    repeat   1 months 08:00 lead 2 days
+    labels   4x9p2mOkD2
+    due      2026-02-28 17:00:00 anchor 2026-01-31 18:00:00 "Month-end cutoff"
+    condition {
+        day  mon tue wed thu fri
+        time 08:00 18:00
+    }
+    subtasks auto-finish {
+        step false "Reconcile ledger"
+        step true  "Export statements"
+    }
+}

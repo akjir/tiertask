@@ -22,6 +22,7 @@ import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_metadata.dart';
+import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
@@ -333,6 +334,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   late final Set<String> _blockedByIds;
   final _blockedSearchController = TextEditingController();
   late final ConditionEditorController _conditionController;
+  ProviderSubscription<AsyncValue<WebDavConfig>>? _configSubscription;
   bool _didUserToggleAutoPrioritizeDue = false;
   late final TextEditingController _dueController;
   String? _dueErrorMessage;
@@ -349,11 +351,14 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   final TextEditingController _historyTextController = TextEditingController();
   final TextEditingController _historyTimestampController =
       TextEditingController();
+  late final TdfLocalDateTime? _initialDueAnchor;
   late final DateTime? _initialDueAt;
   late final String? _initialDueNote;
-  late final String _initialDueText;
+  late String _initialDueText;
   late final QuickAddMode _initialEditorMode;
+  late final DateTime? _initialSuspendedAt;
   late final String? _initialSuspendedNote;
+  late String _initialSuspendedText;
   late bool _isRepeating;
   late bool _isSuspended;
   late final Set<String> _labelIds;
@@ -417,26 +422,32 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     );
     _blockedByIds = Set.of(task?.blockedByTaskIds ?? const []);
     final nowUtc = ref.read(clockProvider)().toUtc();
+    final initialConfig =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
     final hasActiveSuspension = task?.hasActiveSuspendedAt(nowUtc) ?? false;
     _isSuspended = hasActiveSuspension;
-    _suspendedController = TextEditingController(
-      text: hasActiveSuspension
-          ? TaskEditorSuspendedField.formatInitialText(task?.suspendedAt)
-          : '',
-    )..addListener(_handleSuspendedChanged);
+    _initialSuspendedAt = hasActiveSuspension ? task?.suspendedAt : null;
+    _initialSuspendedText = hasActiveSuspension
+        ? TaskEditorSuspendedField.formatInitialText(
+            _initialSuspendedAt,
+            initialConfig,
+          )
+        : '';
+    _suspendedController = TextEditingController(text: _initialSuspendedText)
+      ..addListener(_handleSuspendedChanged);
     _initialSuspendedNote = hasActiveSuspension ? task?.suspendedNote : null;
     _suspendedNoteController = TextEditingController(
       text: _initialSuspendedNote ?? '',
     )..addListener(_handleSuspendedNoteChanged);
     _hasDue = task?.dueAt != null;
-    final initialFormattedDue = switch (task?.dueAt) {
-      final dueAt? => TaskItem.formatTdfTimestamp(dueAt),
-      null => '',
-    };
-    _dueController = TextEditingController(text: initialFormattedDue)
-      ..addListener(_handleDueChanged);
     _initialDueAt = task?.dueAt;
-    _initialDueText = _dueController.text.trim();
+    _initialDueAnchor = task?.dueAnchor;
+    _initialDueText = TaskEditorSuspendedField.formatLocalTimestamp(
+      _initialDueAt,
+      initialConfig,
+    );
+    _dueController = TextEditingController(text: _initialDueText)
+      ..addListener(_handleDueChanged);
     _initialDueNote = _hasDue ? task?.dueNote : null;
     _dueNoteController = TextEditingController(text: _initialDueNote ?? '')
       ..addListener(_handleDueNoteChanged);
@@ -458,10 +469,15 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _linkUriController.addListener(_handleLinkInputChanged);
     _historyTextController.addListener(_handleHistoryInputChanged);
     _historyTimestampController.addListener(_handleHistoryInputChanged);
+    _configSubscription = ref.listenManual<AsyncValue<WebDavConfig>>(
+      webDavConfigProvider,
+      _handleConfigAsyncChanged,
+    );
   }
 
   @override
   void dispose() {
+    _configSubscription?.close();
     _titleController.dispose();
     _noteController.dispose();
     _subtaskController.dispose();
@@ -577,12 +593,12 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   /// Validates any pending link input, commits resolved pending history, and assembles [_ValidatedTaskDraft].
   _ValidatedTaskDraft? _buildDraft({
     required TaskBoard board,
-    required DateTime? dueAt,
+    required _ResolvedDueDraft due,
     required String? dueNote,
     required ({List<TaskHistoryEntry> entries, String? error, bool hasPending})
     historyResolution,
     required TaskRepeatRule? repeatRule,
-    required DateTime? suspendedAt,
+    required _ResolvedSuspendedDraft suspended,
     required String? suspendedNote,
   }) {
     final hasPendingLink =
@@ -601,7 +617,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         board,
         _blockedByIds,
       ),
-      dueAt: dueAt,
+      due: due,
       dueNote: dueNote,
       history: historyResolution.entries,
       labelIds: TaskEditorBoardHelper.collectOrderedLabelIds(board, _labelIds),
@@ -612,7 +628,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         if (pendingSubtask.isNotEmpty)
           SubtaskItem(title: pendingSubtask, isCompleted: _isCompletedTask),
       ],
-      suspendedAt: suspendedAt,
+      suspended: suspended,
       suspendedNote: suspendedNote,
     );
   }
@@ -671,14 +687,61 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Synchronously updates unedited local timestamp snapshots and controller texts when [webDavConfigProvider] resolves (`DECISION-14`).
+  void _handleConfigAsyncChanged(
+    AsyncValue<WebDavConfig>? previous,
+    AsyncValue<WebDavConfig> next,
+  ) {
+    final nextConfig = next.asData?.value;
+    if (nextConfig == null) return;
+    if (_initialDueAt case final dueAt?
+        when _dueController.text.trim() == _initialDueText) {
+      final nextDueText = TaskEditorSuspendedField.formatLocalTimestamp(
+        dueAt,
+        nextConfig,
+      );
+      if (nextDueText != _initialDueText) {
+        _initialDueText = nextDueText;
+        _dueController.text = nextDueText;
+      }
+    }
+    if (_initialSuspendedAt case final suspendedAt?
+        when _suspendedController.text.trim() == _initialSuspendedText) {
+      final nextSuspendedText = TaskEditorSuspendedField.formatInitialText(
+        suspendedAt,
+        nextConfig,
+      );
+      if (nextSuspendedText != _initialSuspendedText) {
+        _initialSuspendedText = nextSuspendedText;
+        _suspendedController.text = nextSuspendedText;
+      }
+    }
+    if (_editingHistoryOriginalEntry case final entry?
+        when _historyTimestampController.text.trim() ==
+            _editingHistoryInitialTimestampText) {
+      final nextHistoryText = TaskEditorSuspendedField.formatLocalTimestamp(
+        entry.timestampUtc,
+        nextConfig,
+      );
+      if (nextHistoryText != _editingHistoryInitialTimestampText) {
+        _editingHistoryInitialTimestampText = nextHistoryText;
+        _historyTimestampController.text = nextHistoryText;
+      }
+    }
+  }
+
   /// Clears any due validation error and auto-resets passive status when the due timestamp changes without manual switch interaction.
   void _handleDueChanged() {
-    final candidateDueAt = _resolveCurrentEditorDueAt();
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final candidateDue = _resolveCurrentEditorDueDraft(configuration);
     final shouldResetAutoPrioritize =
         !_didUserToggleAutoPrioritizeDue &&
         !_autoPrioritizeDue &&
-        candidateDueAt != null &&
-        !_isSameDueTimestamp(candidateDueAt, _initialDueAt);
+        _hasDue &&
+        candidateDue.isValid &&
+        !candidateDue.isUnchanged &&
+        !_isSameDueState(candidateDue, _initialDueAt, _initialDueAnchor);
     if (_dueErrorMessage != null || shouldResetAutoPrioritize) {
       setState(() {
         _dueErrorMessage = null;
@@ -791,16 +854,19 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     }
   }
 
-  /// Returns whether [resolvedDueAt] and [initialDueAt] represent the same normalized UTC instant.
-  static bool _isSameDueTimestamp(
-    DateTime? resolvedDueAt,
+  /// Returns whether [candidate] matches both [initialDueAt] and [initialDueAnchor].
+  static bool _isSameDueState(
+    _ResolvedDueDraft candidate,
     DateTime? initialDueAt,
+    TdfLocalDateTime? initialDueAnchor,
   ) {
+    final resolvedDueAt = candidate.dueAt;
     if (resolvedDueAt == null || initialDueAt == null) {
       return false;
     }
     return TaskItem.normalizeTimestamp(resolvedDueAt) ==
-        TaskItem.normalizeTimestamp(initialDueAt);
+            TaskItem.normalizeTimestamp(initialDueAt) &&
+        candidate.dueAnchor == initialDueAnchor;
   }
 
   /// Emits redacted `AppLogger` telemetry after [draft] saves without logging raw note or history contents.
@@ -869,16 +935,10 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   Future<void> _persistTask(_ValidatedTaskDraft draft) {
     final note = _noteController.text.trim();
     final notifier = ref.read(taskNotifierProvider.notifier);
-    final isIndefiniteSuspension =
-        _isSuspended && _suspendedController.text.trim().isEmpty;
-    final effectiveSuspendedAt = isIndefiniteSuspension
-        ? null
-        : draft.suspendedAt;
     if (widget.initialTask case final existingTask?) {
       final isDuePassive = !_hasDue
           ? false
-          : (_isCompletedTask &&
-                    _isSameDueTimestamp(draft.dueAt, existingTask.dueAt)
+          : (_isCompletedTask && draft.due.isUnchanged
                 ? existingTask.isDuePassive
                 : !_autoPrioritizeDue);
       final effectiveTargetTier =
@@ -894,14 +954,20 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
         subtasksAutoFinish: _autoFinish,
         subtasks: draft.subtasks,
         labelIds: draft.labelIds,
-        dueAt: draft.dueAt,
+        dueAt: draft.due.dueLocalInput == null ? draft.due.dueAt : null,
+        dueLocalInput: draft.due.dueLocalInput,
+        dueAnchor: draft.due.dueLocalInput == null ? draft.due.dueAnchor : null,
         isDuePassive: isDuePassive,
         dueNote: draft.dueNote,
         clearDueAt: !_hasDue,
+        clearDueAnchor:
+            !_hasDue ||
+            (draft.due.dueLocalInput == null && draft.due.dueAnchor == null),
         clearDueNote: !_hasDue || draft.dueNote == null,
         origin: existingTask.origin,
-        suspendedAt: effectiveSuspendedAt,
-        isSuspendedForever: _isSuspended ? isIndefiniteSuspension : false,
+        suspendedAt: draft.suspended.suspendedAt,
+        suspendedLocalInput: draft.suspended.suspendedLocalInput,
+        isSuspendedForever: _isSuspended ? draft.suspended.isForever : false,
         suspendedNote: draft.suspendedNote,
         clearSuspendedAt: !_isSuspended,
         clearSuspendedNote: !_isSuspended || draft.suspendedNote == null,
@@ -921,11 +987,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       subtasksAutoFinish: _autoFinish,
       subtasks: draft.subtasks,
       labelIds: draft.labelIds,
-      dueAt: draft.dueAt,
+      dueLocalInput: draft.due.dueLocalInput,
       isDuePassive: _hasDue && !_autoPrioritizeDue,
       dueNote: draft.dueNote,
-      suspendedAt: effectiveSuspendedAt,
-      isSuspendedForever: isIndefiniteSuspension,
+      suspendedLocalInput: draft.suspended.suspendedLocalInput,
+      isSuspendedForever: draft.suspended.isForever,
       suspendedNote: draft.suspendedNote,
       repeatRule: draft.repeatRule,
       blockedByTaskIds: draft.blockedByIds,
@@ -1078,16 +1144,98 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _historyTextController.clear();
   }
 
-  /// Resolves the current `due` timestamp in the editor, preserving [_initialDueAt] when the text is unchanged.
-  DateTime? _resolveCurrentEditorDueAt() {
+  /// Resolves the current `due` draft in [configuration]'s local wall-clock time, preserving [_initialDueAt] and [_initialDueAnchor] when unedited.
+  _ResolvedDueDraft _resolveCurrentEditorDueDraft(WebDavConfig configuration) {
     if (!_hasDue) {
-      return null;
+      return (
+        dueAt: null,
+        dueLocalInput: null,
+        dueAnchor: null,
+        isUnchanged: false,
+        isValid: true,
+      );
     }
     final trimmed = _dueController.text.trim();
-    if (trimmed == _initialDueText && _initialDueAt != null) {
-      return _initialDueAt;
+    if (_initialDueAt case final initialDueAt?
+        when trimmed == _initialDueText) {
+      return (
+        dueAt: initialDueAt,
+        dueLocalInput: null,
+        dueAnchor: _initialDueAnchor,
+        isUnchanged: true,
+        isValid: true,
+      );
     }
-    return TaskItem.tryParseTdfTimestampInput(trimmed);
+    final parsed = TaskEditorSuspendedField.tryParseLocalDateTimeInput(
+      trimmed,
+      configuration,
+    );
+    if (parsed == null) {
+      return (
+        dueAt: null,
+        dueLocalInput: null,
+        dueAnchor: null,
+        isUnchanged: false,
+        isValid: false,
+      );
+    }
+    return (
+      dueAt: parsed.resolvedUtc,
+      dueLocalInput: parsed.localInput,
+      dueAnchor: parsed.localInput,
+      isUnchanged: false,
+      isValid: true,
+    );
+  }
+
+  /// Resolves the current `suspended` draft in [configuration]'s local wall-clock time, preserving [_initialSuspendedAt] when unedited.
+  _ResolvedSuspendedDraft _resolveCurrentEditorSuspendedDraft(
+    WebDavConfig configuration,
+  ) {
+    if (!_isSuspended) {
+      return (
+        suspendedAt: null,
+        suspendedLocalInput: null,
+        isForever: false,
+        isValid: true,
+      );
+    }
+    final trimmed = _suspendedController.text.trim();
+    if (trimmed.isEmpty) {
+      return (
+        suspendedAt: null,
+        suspendedLocalInput: null,
+        isForever: true,
+        isValid: true,
+      );
+    }
+    if (_initialSuspendedAt case final initialSuspendedAt?
+        when trimmed == _initialSuspendedText) {
+      return (
+        suspendedAt: initialSuspendedAt,
+        suspendedLocalInput: null,
+        isForever: false,
+        isValid: true,
+      );
+    }
+    final parsed = TaskEditorSuspendedField.tryParseLocalDateTimeInput(
+      trimmed,
+      configuration,
+    );
+    if (parsed == null) {
+      return (
+        suspendedAt: null,
+        suspendedLocalInput: null,
+        isForever: false,
+        isValid: false,
+      );
+    }
+    return (
+      suspendedAt: null,
+      suspendedLocalInput: parsed.localInput,
+      isForever: false,
+      isValid: true,
+    );
   }
 
   /// Validates the current pending history inputs into a single [TaskHistoryEntry] or localized error.
@@ -1169,6 +1317,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       await _persistTask(draft);
     } on TdfException catch (error) {
       _handlePersistFailure(error.kind.name, error.kind, localizations);
+      return;
+    } on TdfContextException catch (error) {
+      _handlePersistFailure(error.kind.name, null, localizations);
       return;
     } on FormatException {
       _handlePersistFailure('FormatException', null, localizations);
@@ -1328,10 +1479,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       excludingTaskId: widget.initialTask?.id,
       localizations: localizations,
     );
-    final suspendedAt = TaskEditorSuspendedField.parseSuspendedTimestamp(
-      isSuspended: _isSuspended,
-      rawText: _suspendedController.text,
-    );
+    final suspendedDraft = _resolveCurrentEditorSuspendedDraft(configuration);
     final suspendedNote = _resolveSchedulingNote(
       initialNote: _initialSuspendedNote,
       isEnabled: _isSuspended,
@@ -1342,7 +1490,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
           suspendedNote,
           localizations,
         );
-    final dueAt = _resolveCurrentEditorDueAt();
+    final dueDraft = _resolveCurrentEditorDueDraft(configuration);
     final dueNote = _resolveSchedulingNote(
       initialNote: _initialDueNote,
       isEnabled: _hasDue,
@@ -1361,8 +1509,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       isRepeating: _isRepeating,
       rawLeadDays: _repeatLeadDaysController.text,
     );
-    final hasSuspendedError = _isSuspended && suspendedAt == null;
-    final hasDueError = _hasDue && dueAt == null;
+    final hasSuspendedError = _isSuspended && !suspendedDraft.isValid;
+    final hasDueError = _hasDue && !dueDraft.isValid;
     final hasRepeatError = _isRepeating && repeatCount == null;
     final hasLeadDaysError = _isRepeating && _hasDue && leadDays == null;
     final hasHistoryError = historyResolution.error != null;
@@ -1415,11 +1563,11 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     );
     return _buildDraft(
       board: board,
-      dueAt: dueAt,
+      due: dueDraft,
       dueNote: dueNote,
       historyResolution: historyResolution,
       repeatRule: repeatRule,
-      suspendedAt: suspendedAt,
+      suspended: suspendedDraft,
       suspendedNote: suspendedNote,
     );
   }
@@ -1479,17 +1627,34 @@ class _EditTaskSubtasksAndLinksSection extends StatelessWidget {
   }
 }
 
+/// Resolved `due` draft state for [_EditTaskScreenState].
+typedef _ResolvedDueDraft = ({
+  DateTime? dueAt,
+  TdfLocalDateTime? dueLocalInput,
+  TdfLocalDateTime? dueAnchor,
+  bool isUnchanged,
+  bool isValid,
+});
+
+/// Resolved `suspended` draft state for [_EditTaskScreenState].
+typedef _ResolvedSuspendedDraft = ({
+  DateTime? suspendedAt,
+  TdfLocalDateTime? suspendedLocalInput,
+  bool isForever,
+  bool isValid,
+});
+
 /// Validated task collections and scheduling metadata passed to [_EditTaskScreenState._persistTask].
 typedef _ValidatedTaskDraft = ({
   List<String> blockedByIds,
-  DateTime? dueAt,
+  _ResolvedDueDraft due,
   String? dueNote,
   List<TaskHistoryEntry> history,
   List<String> labelIds,
   List<TaskLink> links,
   TaskRepeatRule? repeatRule,
   List<SubtaskItem> subtasks,
-  DateTime? suspendedAt,
+  _ResolvedSuspendedDraft suspended,
   String? suspendedNote,
 });
 

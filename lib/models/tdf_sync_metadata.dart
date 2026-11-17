@@ -15,39 +15,97 @@
 
 import 'package:flutter/foundation.dart';
 
+import 'tdf_error.dart';
 import 'tdf_metadata.dart';
 
-/// Scheduling, import, and identifier migration outcome categories defined in `TDF_SPEC.md` Sections 8.2 and 10.4.
+/// Stage-fair cleanup mode for synchronization passes (`TDF-MERGE-009`).
+enum TdfCleanupMode {
+  /// Single-stage or final remote/converging synchronization pass applying `TDF-CLEAN-001`.
+  finalStage,
+
+  /// Intermediate local or rebasing stage deferring `suspended <= now` and `blocked` cleanup.
+  deferred,
+}
+
+/// Runtime context outcome categories defined in `spec/TDF_SPEC_0.8.0.md` Appendix A.1.2.
 enum TdfContextOutcomeKind {
   /// A local calendar operation lacks a configured time zone or its applicable transition rules.
   timeZoneContextRequired,
-
-  /// A historical timestamp conversion requires an explicit source time zone that was not provided.
-  importContextRequired,
-
-  /// All 256 deterministic SHA-256 Base62 migration counters collided for a non-canonical identifier.
-  migrationIdentifierCollision,
 }
 
-/// Resolution choice for a `DeletionConflict` synchronization outcome per `TDF_SPEC.md` Section 6.8.2.
+/// Resolution choice for a `DeletionConflict` synchronization outcome per `spec/TDF_SPEC_0.8.0.md` Section 12.6.3 (`TDF-DEL-003`).
 enum TdfDeletionResolution {
   /// Confirms deletion of the conflicted entity and advances its deletion timestamp past the live edit.
   delete,
 
-  /// Restores the conflicted entity, removes its deletion record, and advances its `modified` timestamp past the deletion.
+  /// Restores the conflicted entity, removes its deletion record, and increments `deleted.generation` once.
   undelete,
 }
 
-/// Synchronization and recovery outcome categories defined in `TDF_SPEC.md` Section 8.1.
+/// Resolution choice for an ambiguous entity during `RecoveryRequired` (`TDF-REC-002`).
+enum TdfRecoveryResolution {
+  /// Discards the retired cached or local-only entity and strips `blocked` references on surviving open tasks.
+  discard,
+
+  /// Keeps the entity under a fresh 10-character Base62 ID and rewrites cross-entity references.
+  recoverAsNew,
+}
+
+/// Synchronization and recovery outcome categories defined in `spec/TDF_SPEC_0.8.0.md` Appendix A.1.2.
 enum TdfSyncOutcomeKind {
   /// Unacknowledged history expiry (`generation > acknowledgedGeneration` or missing acknowledgment) requires user recovery.
   recoveryRequired,
 
-  /// One side deleted an entity while the other side modified it at or after the deletion timestamp.
+  /// One side deleted an entity while the other side modified it or introduced a reference to it.
   deletionConflict,
 
   /// Incoming shared document has a `deleted.generation` lower than the acknowledged generation.
   syncGenerationRollback,
+}
+
+/// Explicit `TDF-DEL-003` deletion-conflict decision optionally bound to observed revisions and payload signature.
+@immutable
+class TdfBoundDeletionDecision {
+  /// Creates a [TdfBoundDeletionDecision].
+  const TdfBoundDeletionDecision({
+    required this.resolution,
+    this.expectedLiveModifiedAt,
+    this.expectedDeletionAt,
+    this.expectedLivePayloadSignature,
+  });
+
+  /// Expected UTC deletion record timestamp observed when the decision was made.
+  final DateTime? expectedDeletionAt;
+
+  /// Expected effective UTC revision of the live entity observed when the decision was made.
+  final DateTime? expectedLiveModifiedAt;
+
+  /// Expected normalized payload signature (including `dueAnchor`) of the live entity.
+  final String? expectedLivePayloadSignature;
+
+  /// Chosen `Delete` or `Undelete` resolution.
+  final TdfDeletionResolution resolution;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TdfBoundDeletionDecision &&
+        other.resolution == resolution &&
+        other.expectedLiveModifiedAt == expectedLiveModifiedAt &&
+        other.expectedDeletionAt == expectedDeletionAt &&
+        other.expectedLivePayloadSignature == expectedLivePayloadSignature;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    resolution,
+    expectedLiveModifiedAt,
+    expectedDeletionAt,
+    expectedLivePayloadSignature,
+  );
+
+  @override
+  String toString() => 'TdfBoundDeletionDecision(${resolution.name})';
 }
 
 /// Typed exception representing a `TDF_SPEC.md` Section 8.2 or 10.4 context/migration outcome.
@@ -102,11 +160,11 @@ class TdfDeletedBlock {
   /// Empty default `deleted` block (`generation = 0`, no records).
   static final TdfDeletedBlock empty = TdfDeletedBlock();
 
-  /// Maximum allowed `deleted` records (`task` + `label` + `location` combined) per `spec/TDF_SPEC_0.6.0.md` Section 7.
-  static const int maxDeletedRecords = 4096;
+  /// Maximum allowed `deleted` records (`task` + `label` + `location` combined) per `spec/TDF_SPEC_0.8.0.md` Section 6.2.
+  static const int maxDeletedRecords = maxTdfDeletedRecords;
 
-  /// Maximum allowed `generation` value (`2^53 - 1`) per `TDF_SPEC.md` Section 4.4.
-  static const int maxGeneration = 9007199254740991;
+  /// Maximum allowed `generation` value (`2^53 - 1`) per `spec/TDF_SPEC_0.8.0.md` Section 6.2.
+  static const int maxGeneration = maxTdfSyncGeneration;
 
   /// Monotonically increasing deletion history generation (`0..9007199254740991`).
   final int generation;
@@ -357,8 +415,8 @@ class TdfQueueBlock {
   /// Empty default `queue` block at the Unix epoch (`1970-01-01 00:00:00` UTC).
   static final TdfQueueBlock empty = TdfQueueBlock();
 
-  /// Maximum allowed `task` entries inside a `queue` block per `TDF_SPEC.md` Section 3.3.
-  static const int maxQueueEntries = 4096;
+  /// Maximum allowed `task` entries inside a `queue` block per `spec/TDF_SPEC_0.8.0.md` Section 6.2.
+  static const int maxQueueEntries = maxTdfQueueEntries;
 
   /// UTC timestamp of the last shared queue order modification.
   final DateTime modifiedAt;
@@ -442,8 +500,8 @@ class TdfTaskDependency {
         'requiredCompletion must be within 1..$maxCompletions',
       );
 
-  /// Maximum allowed cumulative completion count or required completion threshold (`9,007,199,254,740,991`) per `TDF_SPEC.md` Section 7.
-  static const int maxCompletions = 9007199254740991;
+  /// Maximum allowed cumulative completion count or required completion threshold (`9,007,199,254,740,991`) per `spec/TDF_SPEC_0.8.0.md` Section 6.2.
+  static const int maxCompletions = maxTdfCompletions;
 
   /// Minimum completion counter value (`1..999,999,999`) required on [taskId] to satisfy this dependency.
   final int requiredCompletion;

@@ -39,7 +39,7 @@ class _DelayedWebDavRepository extends WebDavRepository {
   @override
   Future<String> fetchTdf() async {
     await fetchGate();
-    return 'tdf 0.6.0\n';
+    return 'tdf 0.8.0\n';
   }
 
   @override
@@ -51,7 +51,7 @@ void main() {
     WidgetTester tester,
   ) async {
     const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 10:00:00
@@ -76,25 +76,21 @@ label persn0OkD2 {
 task 000001OkD2 {
   name "Prepare quarterly report"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   labels busin0OkD2 officeOkD2
 }
 task 000002OkD2 {
   name "Review client contract"
   created 2026-11-01 09:00
-  queued 2026-11-01 09:00
   labels busin0OkD2 officeOkD2
 }
 task 000003OkD2 {
   name "Water plants"
   created 2026-11-01 10:00
-  queued 2026-11-01 10:00
   labels persn0OkD2 home00OkD2
 }
 task 000004OkD2 {
   name "Archived invoice"
   created 2026-10-28 10:00
-  queued 2026-10-28 10:00
   finished 2026-10-29 12:00
   completions 1
   labels busin0OkD2 officeOkD2
@@ -581,7 +577,7 @@ task 000004OkD2 {
     'SettingsScreen shows local watch switch in Local and Both modes, hides in WebDAV mode, renders EN/DE labels, disables while testing, and persists without reloading TaskBoard',
     (WidgetTester tester) async {
       const seededTdf =
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '  modified 2026-11-01 08:00:00\n'
           '  task 000001OkD2\n'
@@ -767,7 +763,7 @@ task 000004OkD2 {
             localFileRepositoryProvider.overrideWithValue(
               FakeLocalFileRepository(
                 config: initialConfig,
-                initialTdf: 'tdf 0.6.0\n',
+                initialTdf: 'tdf 0.8.0\n',
               ),
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
@@ -809,7 +805,7 @@ task 000004OkD2 {
     'SettingsScreen selects all 6 DueLeadWindow options in English and German without saving unsaved WebDAV fields',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00

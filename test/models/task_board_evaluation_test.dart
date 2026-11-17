@@ -22,6 +22,7 @@ import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -32,7 +33,7 @@ void main() {
   group('TDF Section 4.3 & Section 5 Dynamic 6-Tier Derivation, Condition Inheritance & Context Filtering', () {
     test('evaluates blocking conditions, group-level label condition inheritance, task overrides, group resets, global resets, Haversine GPS, and cohesive per-label OR logic', () {
       const tdfWithConditions = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 08:35:00
@@ -47,12 +48,18 @@ queue {
     task offstrOkD2
 }
 
+location locOffOkD2 {
+    name "Office"
+    coordinates 50.9787 11.0328
+    radius 150
+}
+
 label officeOkD2 {
     name "Office"
     condition {
         day mon tue wed thu fri
         time 09:00 17:00
-        location 50.9787 11.0328 150
+        location locOffOkD2
     }
 }
 label wkhom0OkD2 {
@@ -66,13 +73,11 @@ label wkhom0OkD2 {
 task preopnOkD2 {
     name "Open Prerequisite"
     created 2026-11-01 07:00
-    queued 2026-11-01 07:00
 }
 
 task predonOkD2 {
     name "Finished Prerequisite"
     created 2026-11-01 07:00
-    queued 2026-11-01 07:00
     finished 2026-11-01 07:30
     completions 1
 }
@@ -80,35 +85,30 @@ task predonOkD2 {
 task wtopenOkD2 {
     name "Blocked by open task"
     created 2026-11-01 08:00
-    queued 2026-11-01 08:00
     blocked preopnOkD2
 }
 
 task wtdoneOkD2 {
     name "Unblocked because prereq is finished"
     created 2026-11-01 08:05
-    queued 2026-11-01 08:05
     blocked predonOkD2
 }
 
 task susfutOkD2 {
     name "Suspended until tomorrow"
     created 2026-11-01 08:10
-    queued 2026-11-01 08:10
     suspended 2026-11-02 09:00
 }
 
 task multorOkD2 {
     name "Multi-label task (office OR weekend_home)"
     created 2026-11-01 08:15
-    queued 2026-11-01 08:15
     labels officeOkD2 wkhom0OkD2
 }
 
 task ovrdayOkD2 {
     name "Office task overridden to Sunday"
     created 2026-11-01 08:20
-    queued 2026-11-01 08:20
     labels officeOkD2
     condition day sun
 }
@@ -116,7 +116,6 @@ task ovrdayOkD2 {
 task rstdayOkD2 {
     name "Office task with day reset"
     created 2026-11-01 08:25
-    queued 2026-11-01 08:25
     labels officeOkD2
     condition day any
 }
@@ -124,7 +123,6 @@ task rstdayOkD2 {
 task rstglbOkD2 {
     name "Office task with global condition any"
     created 2026-11-01 08:30
-    queued 2026-11-01 08:30
     labels officeOkD2
     condition any
 }
@@ -132,7 +130,6 @@ task rstglbOkD2 {
 task offstrOkD2 {
     name "Strict office task"
     created 2026-11-01 08:35
-    queued 2026-11-01 08:35
     labels officeOkD2
 }
 ''';
@@ -232,11 +229,23 @@ task offstrOkD2 {
 
     test('does not evaluate conditions, prerequisites, or suspension for completed tasks in Section 5.2 and evaluates them upon restoration', () {
       const completedWithUnmetConditionsTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 08:00:00
     task opnpreOkD2
+}
+
+location locOffOkD2 {
+    name "Office"
+    coordinates 50.9787 11.0328
+    radius 150
+}
+
+location locMunOkD2 {
+    name "Munich"
+    coordinates 48.1351 11.582
+    radius 100
 }
 
 label officeOkD2 {
@@ -244,20 +253,18 @@ label officeOkD2 {
     condition {
         day mon tue wed thu fri
         time 09:00 17:00
-        location 50.9787 11.0328 150
+        location locOffOkD2
     }
 }
 
 task opnpreOkD2 {
     name "Open prerequisite"
     created 2026-11-01 08:00
-    queued 2026-11-01 08:00
 }
 
 task donunmOkD2 priority {
     name "Completed with unmet conditions, prereq, and suspension"
     created 2026-10-25 08:00
-    queued 2026-10-25 08:00
     finished 2026-11-01 09:00
     completions 1
     suspended 2026-11-05 09:00
@@ -266,7 +273,7 @@ task donunmOkD2 priority {
     condition {
         day wed
         time 14:00 15:00
-        location 48.1351 11.5820 100
+        location locMunOkD2
     }
 }
 ''';
@@ -348,7 +355,7 @@ task donunmOkD2 priority {
 
     test('sorts priority tasks ahead of regular FIFO tasks and preserves declaration order on ties', () {
       const sortingTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 10:00:00
@@ -362,27 +369,22 @@ queue {
 task reg100OkD2 {
     name "Regular 1 (09:00)"
     created 2026-11-01 09:00
-    queued 2026-11-01 09:00
 }
 task reg200OkD2 {
     name "Regular 2 (08:00 first)"
     created 2026-11-01 08:00
-    queued 2026-11-01 08:00
 }
 task reg300OkD2 {
     name "Regular 3 (08:00 second)"
     created 2026-11-01 08:00
-    queued 2026-11-01 08:00
 }
 task prio10OkD2 priority {
     name "Priority 1 (10:00)"
     created 2026-11-01 10:00
-    queued 2026-11-01 10:00
 }
 task prio20OkD2 priority {
     name "Priority 2 (09:30)"
     created 2026-11-01 09:30
-    queued 2026-11-01 09:30
 }
 ''';
 
@@ -402,7 +404,7 @@ task prio20OkD2 priority {
 
     test('evaluateForContext derives top 3 Focus tasks for an active label while preserving all other filters', () {
       const multiLabelTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 11:00:00
@@ -427,57 +429,48 @@ label cit000OkD2 {
 task hsprioOkD2 priority {
     name "Urgent roof repair"
     created 2026-11-01 11:00
-    queued 2026-11-01 11:00
     labels chouseOkD2
 }
 task hsreg0OkD2 {
     name "Mow lawn"
     created 2026-11-01 07:30
-    queued 2026-11-01 07:30
     labels chouseOkD2
 }
 task it1st0OkD2 {
     name "Patch database"
     created 2026-11-01 08:00
-    queued 2026-11-01 08:00
     labels cit000OkD2
 }
 task it2nd0OkD2 {
     name "Rotate TLS certificates"
     created 2026-11-01 08:30
-    queued 2026-11-01 08:30
     labels cit000OkD2
 }
 task itprioOkD2 priority {
     name "Restore production cluster"
     created 2026-11-01 09:30
-    queued 2026-11-01 09:30
     labels cit000OkD2
 }
 task it4th0OkD2 {
     name "Audit SSH keys"
     created 2026-11-01 10:00
-    queued 2026-11-01 10:00
     labels cit000OkD2
 }
 task itblkdOkD2 {
     name "Deploy app after lawn"
     created 2026-11-01 08:05
-    queued 2026-11-01 08:05
     labels cit000OkD2
     blocked hsreg0OkD2
 }
 task itsuspOkD2 {
     name "Deferred hardware upgrade"
     created 2026-11-01 08:10
-    queued 2026-11-01 08:10
     labels cit000OkD2
     suspended 2026-11-05 09:00
 }
 task itwdayOkD2 {
     name "Monday maintenance window"
     created 2026-11-01 08:15
-    queued 2026-11-01 08:15
     labels cit000OkD2
     condition day mon
 }
@@ -489,7 +482,6 @@ task itsmdeOkD2 {
 task itdoneOkD2 {
     name "Decommission old switch"
     created 2026-10-25 08:00
-    queued 2026-10-25 08:00
     finished 2026-10-26 10:00
     completions 1
     labels cit000OkD2
@@ -572,7 +564,7 @@ task itdoneOkD2 {
       );
 
       const wallClockTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 20:05:00
@@ -583,7 +575,6 @@ queue {
 task monmrnOkD2 {
     name "Monday Early Task"
     created 2026-11-01 20:00
-    queued 2026-11-01 20:00
     condition {
         day mon
         time 01:00 03:00
@@ -593,7 +584,6 @@ task monmrnOkD2 {
 task suslocOkD2 {
     name "Suspended Until Monday 01:00 Local"
     created 2026-11-01 20:00
-    queued 2026-11-01 20:05
     suspended 2026-11-02 01:00
 }
 ''';
@@ -1151,6 +1141,238 @@ task suslocOkD2 {
             TdfErrorKind.invalidTimestamp,
           ),
         ),
+      );
+    });
+  });
+
+  group('TDF 0.8.0 TimeZoneContextRequired (TDF-CTX-001) & Condition Context Resolution', () {
+    test('throws TdfContextException(timeZoneContextRequired) on queued open tasks reaching day/time conditions when timeZone is unavailable while allowing non-reaching tasks', () {
+      final nowUtc = DateTime.utc(2026, 11, 2, 10, 0);
+      const missingZone = TdfTimeZoneContext.missing('Mars/Phobos');
+      final unknownNamedZone = TdfTimeZoneContext.named('Unknown/Zone');
+      expect(unknownNamedZone.isAvailable, isFalse);
+
+      final dayRule = DayTaskCondition(
+        weekdays: const <int>[DateTime.monday],
+        dayTokens: const <String>['mon'],
+      );
+      final timeRule = TimeWindowTaskCondition.tryParse('09:00', '17:00')!;
+      const office = TdfLocation(
+        id: 'locOff0001',
+        name: 'Office',
+        latitude: 52.52,
+        longitude: 13.405,
+        radius: 250,
+      );
+      final locRule = LocationTaskCondition.fromIds(const <String>[
+        'locOff0001',
+      ]);
+
+      final dayLabel = TdfLabel(
+        id: 'lblDay0001',
+        name: 'Weekday Work',
+        conditions: <TaskCondition>[dayRule],
+      );
+      const unrestrictedLabel = TdfLabel(
+        id: 'lblAny0001',
+        name: 'Unrestricted',
+      );
+      final scopedDayLabel = TdfLabel(
+        id: 'lblScp0001',
+        name: 'Scoped Weekday',
+        isScoped: true,
+        conditions: <TaskCondition>[timeRule],
+      );
+
+      // 1. Direct day condition on queued open task fails with TimeZoneContextRequired even if localEvaluationTime is supplied:
+      expect(
+        () => TaskBoard.evaluate(
+          tasks: <TaskItem>[
+            TaskItem(
+              id: 'qDayTask01',
+              title: 'Queued Day Task',
+              createdAt: nowUtc,
+              conditions: <TaskCondition>[dayRule],
+            ),
+          ],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: nowUtc,
+            taskIds: const <String>['qDayTask01'],
+          ),
+          evaluationTime: nowUtc,
+          localEvaluationTime: nowUtc,
+          timeZone: missingZone,
+        ),
+        throwsA(
+          isA<TdfContextException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfContextOutcomeKind.timeZoneContextRequired,
+          ),
+        ),
+        reason: 'TDF-CTX-001: unavailable timeZone must not silently fall back to localEvaluationTime for day condition',
+      );
+
+      // 2. Inherited time condition on queued open task fails with TimeZoneContextRequired:
+      expect(
+        () => TaskBoard.evaluate(
+          tasks: <TaskItem>[
+            TaskItem(
+              id: 'qInhTime01',
+              title: 'Inherited Time Task',
+              createdAt: nowUtc,
+              labelIds: const <String>['lblScp0001'],
+            ),
+          ],
+          labels: <TdfLabel>[scopedDayLabel],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: nowUtc,
+            taskIds: const <String>['qInhTime01'],
+          ),
+          activeLabelId: 'lblScp0001',
+          evaluationTime: nowUtc,
+          timeZone: unknownNamedZone,
+        ),
+        throwsA(
+          isA<TdfContextException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfContextOutcomeKind.timeZoneContextRequired,
+          ),
+        ),
+        reason: 'TDF-CTX-001: active scoped label filter reaching inherited time rule must throw TimeZoneContextRequired',
+      );
+
+      // 3. Tasks NOT reaching day/time condition evaluation succeed without localNow:
+      final prereqOpen = TaskItem(
+        id: 'preOpen001',
+        title: 'Open Prerequisite',
+        createdAt: nowUtc,
+      );
+      final doneWithDay = TaskItem(
+        id: 'doneDay001',
+        title: 'Completed With Day',
+        isCompleted: true,
+        completedAt: nowUtc,
+        completions: 1,
+        createdAt: nowUtc,
+        conditions: <TaskCondition>[dayRule],
+      );
+      final somedayWithTime = TaskItem(
+        id: 'someTim001',
+        title: 'Someday With Time',
+        createdAt: nowUtc,
+        conditions: <TaskCondition>[timeRule],
+      );
+      final suspendedWithDay = TaskItem(
+        id: 'suspDay001',
+        title: 'Suspended Queued With Day',
+        createdAt: nowUtc,
+        suspendedAt: nowUtc.add(const Duration(hours: 2)),
+        conditions: <TaskCondition>[dayRule],
+      );
+      final depBlockedWithTime = TaskItem(
+        id: 'depBlkTm01',
+        title: 'Prerequisite-Blocked With Time',
+        createdAt: nowUtc,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'preOpen001', requiredCompletion: 1),
+        ],
+        conditions: <TaskCondition>[timeRule],
+      );
+      final globalResetTask = TaskItem(
+        id: 'globAny001',
+        title: 'Global Reset Overrides Label Day',
+        createdAt: nowUtc,
+        labelIds: const <String>['lblDay0001'],
+        conditions: const <TaskCondition>[GlobalResetTaskCondition()],
+      );
+      final groupResetTask = TaskItem(
+        id: 'grpAny0001',
+        title: 'Group Reset Clears Day and Time',
+        createdAt: nowUtc,
+        labelIds: const <String>['lblDay0001'],
+        conditions: const <TaskCondition>[
+          GroupResetTaskCondition(targetGroup: ConditionGroup.day),
+          GroupResetTaskCondition(targetGroup: ConditionGroup.time),
+        ],
+      );
+      final locationOnlyTask = TaskItem(
+        id: 'locOnly001',
+        title: 'Location Only Task',
+        createdAt: nowUtc,
+        conditions: <TaskCondition>[locRule],
+      );
+      final scopedGlobalHiddenTask = TaskItem(
+        id: 'scpHid0001',
+        title: 'Scoped Hidden Task',
+        createdAt: nowUtc,
+        labelIds: const <String>['lblScp0001'],
+      );
+      // Multi-label task with ['lblDay0001', 'lblAny0001']: in ascending ASCII <label-id> order,
+      // 'lblAny0001' < 'lblDay0001', so 'lblAny0001' evaluates first and short-circuits OR to true!
+      final asciiShortCircuitTask = TaskItem(
+        id: 'ascOrOk001',
+        title: 'ASCII Label Order Short-Circuit',
+        createdAt: nowUtc,
+        labelIds: const <String>['lblDay0001', 'lblAny0001'],
+      );
+
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          prereqOpen,
+          doneWithDay,
+          somedayWithTime,
+          suspendedWithDay,
+          depBlockedWithTime,
+          globalResetTask,
+          groupResetTask,
+          locationOnlyTask,
+          scopedGlobalHiddenTask,
+          asciiShortCircuitTask,
+        ],
+        labels: <TdfLabel>[dayLabel, unrestrictedLabel, scopedDayLabel],
+        locations: const <TdfLocation>[office],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: nowUtc,
+          taskIds: const <String>[
+            'preOpen001',
+            'suspDay001',
+            'depBlkTm01',
+            'globAny001',
+            'grpAny0001',
+            'locOnly001',
+            'scpHid0001',
+            'ascOrOk001',
+          ],
+        ),
+        evaluationTime: nowUtc,
+        timeZone: missingZone,
+        currentLatitude: 52.52,
+        currentLongitude: 13.405,
+      );
+
+      expect(board.completed.map((t) => t.id), contains('doneDay001'));
+      expect(board.someday.map((t) => t.id), contains('someTim001'));
+      expect(
+        board.blocked.map((t) => t.id),
+        containsAll(<String>['suspDay001', 'depBlkTm01']),
+      );
+      final eligibleIds = <String>[
+        ...board.focus.map((t) => t.id),
+        ...board.ready.map((t) => t.id),
+        ...board.planned.map((t) => t.id),
+      ];
+      expect(
+        eligibleIds,
+        containsAll(<String>[
+          'preOpen001',
+          'globAny001',
+          'grpAny0001',
+          'locOnly001',
+          'ascOrOk001',
+        ]),
+        reason: 'Tasks clearing or short-circuiting before day/time rules must evaluate cleanly when timeZone is unavailable',
       );
     });
   });

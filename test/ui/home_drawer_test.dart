@@ -19,6 +19,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -165,7 +166,7 @@ void main() {
     'Navigation drawer opens secondary tier sheets for Ready, Planned, Blocked (including suspended), Someday, and Completed without a bottom navigation bar',
     (WidgetTester tester) async {
       const secondaryTiersTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 07:50:00
@@ -185,58 +186,47 @@ queue {
 task f10000OkD2 {
   name "Focus Task 1"
   created 2026-11-01 07:00
-  queued 2026-11-01 07:00
 }
 task f20000OkD2 {
   name "Focus Task 2"
   created 2026-11-01 07:05
-  queued 2026-11-01 07:05
 }
 task f30000OkD2 {
   name "Focus Task 3"
   created 2026-11-01 07:10
-  queued 2026-11-01 07:10
 }
 task r10000OkD2 {
   name "Ready Task 1"
   created 2026-11-01 07:15
-  queued 2026-11-01 07:15
 }
 task r20000OkD2 {
   name "Ready Task 2"
   created 2026-11-01 07:20
-  queued 2026-11-01 07:20
 }
 task r30000OkD2 {
   name "Ready Task 3"
   created 2026-11-01 07:25
-  queued 2026-11-01 07:25
 }
 task r40000OkD2 {
   name "Ready Task 4"
   created 2026-11-01 07:30
-  queued 2026-11-01 07:30
 }
 task r50000OkD2 {
   name "Ready Task 5"
   created 2026-11-01 07:35
-  queued 2026-11-01 07:35
 }
 task p10000OkD2 {
   name "Planned Backlog Task"
   created 2026-11-01 07:40
-  queued 2026-11-01 07:40
 }
 task blkdepOkD2 {
   name "Blocked Prerequisite Task"
   created 2026-11-01 07:45
-  queued 2026-11-01 07:45
   blocked f10000OkD2
 }
 task blksusOkD2 {
   name "Suspended Deferred Task"
   created 2026-11-01 07:50
-  queued 2026-11-01 07:50
   suspended 2026-11-05 09:00
 }
 task smd100OkD2 {
@@ -246,7 +236,6 @@ task smd100OkD2 {
 task cmp100OkD2 {
   name "Completed Archive Task"
   created 2026-10-28 08:00
-  queued 2026-10-28 08:00
   finished 2026-10-29 10:00
   completions 1
 }
@@ -458,7 +447,7 @@ task cmp100OkD2 {
     'Navigation drawer displays a task-style scoped indicator directly next to the task count badge only for scoped labels',
     (WidgetTester tester) async {
       const scopedLabelsTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:10:00
@@ -591,7 +580,7 @@ task tskRegOkD2 {
     'Navigation drawer renders label hub info button with exact horizontal order, opens LabelHubDialog without changing activeLabelId, and supports isolated leaf mounting',
     (WidgetTester tester) async {
       const drawerHubTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:10:00
@@ -734,6 +723,48 @@ task tskGenOkD2 {
       expect(selectCalled, isFalse);
       expect(find.byKey(const ValueKey('label_hub_dialog')), findsOneWidget);
       expect(find.text('Leaf note'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'showTdfMarkdownDialog displays localized fallback message without crashing build when serialized board exceeds TDF line limit',
+    (WidgetTester tester) async {
+      final oversizedTasks = <TaskItem>[
+        for (var i = 0; i < 4000; i++)
+          TaskItem(
+            id: 'ovrsz${i.toString().padLeft(5, '0')}',
+            title: 'Oversized Task $i',
+            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
+          ),
+      ];
+      final oversizedBoard = TaskBoard.evaluate(
+        tasks: oversizedTasks,
+        evaluationTime: DateTime.utc(2026, 11, 1, 8, 0),
+      );
+
+      await pumpLeafWidget(
+        tester,
+        Builder(
+          builder: (context) => ElevatedButton(
+            key: const ValueKey('open_raw_tdf_btn'),
+            onPressed: () =>
+                showTdfMarkdownDialog(context, board: oversizedBoard),
+            child: const Text('Open Raw TDF'),
+          ),
+        ),
+        board: oversizedBoard,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('open_raw_tdf_btn')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Raw TDF'), findsOneWidget);
+      expect(
+        find.text('TDF file exceeds the maximum allowed size.'),
+        findsOneWidget,
+      );
     },
   );
 }

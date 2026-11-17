@@ -387,7 +387,7 @@ void main() {
       final initialFilePath =
           '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
       await File(initialFilePath).writeAsString(
-        'tdf 0.5.1\n\ntask 000001OkD2 {\n    name "Keep Safe"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n',
+        'tdf 0.8.0\n\ntask 000001OkD2 {\n    name "Keep Safe"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n',
         flush: true,
       );
 

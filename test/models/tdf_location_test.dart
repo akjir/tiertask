@@ -128,6 +128,20 @@ void main() {
       expect(updated, isNot(equals(location)));
       expect(updated.copyWith(), equals(updated));
       expect(updated.copyWith().hashCode, equals(updated.hashCode));
+      expect(
+        location.canonicalDirectChildStatementCount,
+        equals(5),
+        reason:
+            'name + note + source + coordinates + radius = 5 without modified',
+      );
+      expect(
+        location
+            .copyWith(modifiedAt: DateTime.utc(1970, 1, 1, 0, 0, 0))
+            .canonicalDirectChildStatementCount,
+        equals(6),
+        reason:
+            'Explicit epoch modifiedAt on location must be counted in 0.8.0',
+      );
     });
 
     test('validates 0.6.0 coordinates and radius decimal tokens and precision bounds', () {

@@ -126,7 +126,7 @@ void main() {
 
     test('completes enclosing task automatically when subtasks has auto-finish and all steps become true', () {
       const autoFinishTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 09:05:00
@@ -137,7 +137,6 @@ queue {
 task auto00OkD2 {
     name "Auto-finish task"
     created 2026-11-01 09:00
-    queued 2026-11-01 09:00
     subtasks auto-finish {
         step true "Step 1"
         step false "Step 2"
@@ -146,7 +145,6 @@ task auto00OkD2 {
 task manualOkD2 {
     name "Manual finish task"
     created 2026-11-01 09:05
-    queued 2026-11-01 09:05
     subtasks {
         step true "Step A"
         step false "Step B"
@@ -947,6 +945,157 @@ task manualOkD2 {
       );
       expect(rescheduledCompleted.dueNote, isNull);
       expect(rescheduledCompleted.isDuePassive, isFalse);
+    });
+
+    test('TDF 0.8.0 restoreTask clears dueAt, dueAnchor, isDuePassive, and dueNote across Someday/Planned/Focus while scheduleTask preserves dueAnchor on Someday', () {
+      final t0 = DateTime.utc(2026, 1, 31, 9, 0);
+      final anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+      final openPrereq = TaskItem(
+        id: 'openPre001',
+        title: 'Open Prerequisite',
+        completions: 2,
+        createdAt: t0,
+      );
+      final completedAnchored = TaskItem(
+        id: 'doneAnc001',
+        title: 'Completed With Schedule Anchor',
+        isCompleted: true,
+        completedAt: t0,
+        modifiedAt: t0,
+        completions: 5,
+        isPriority: true,
+        suspendedAt: t0.add(const Duration(days: 2)),
+        suspendedNote: 'Old snooze',
+        dueAt: DateTime.utc(2026, 1, 31, 17, 0, 0),
+        dueAnchor: anchor,
+        isDuePassive: true,
+        dueNote: 'Old SLA note',
+        origin: const TaskOrigin(namespace: 'jira', externalKey: 'OPS-7'),
+        repeatRule: const TaskRepeatRule(
+          count: 1,
+          unit: RepeatUnit.months,
+          clock: TdfRepeatClock(hour: 8, minute: 30),
+          leadDays: 3,
+        ),
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'openPre001', requiredCompletion: 1),
+        ],
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(timestampUtc: t0, text: 'Filed report'),
+        ],
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Verify totals', isCompleted: true),
+        ],
+      );
+
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[openPrereq, completedAnchored],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['openPre001'],
+        ),
+        evaluationTime: t0,
+      );
+      expect(board.findTask('doneAnc001')!.dueAnchor, equals(anchor));
+
+      // Invalid restore target tiers (ready, blocked, completed) are pure no-ops:
+      final t1 = t0.add(const Duration(minutes: 5));
+      expect(
+        board.restoreTask(
+          'doneAnc001',
+          targetTier: TaskTier.ready,
+          currentDate: t1,
+        ),
+        same(board),
+      );
+      expect(
+        board.restoreTask(
+          'doneAnc001',
+          targetTier: TaskTier.blocked,
+          currentDate: t1,
+        ),
+        same(board),
+      );
+
+      for (final target in const <TaskTier>[
+        TaskTier.someday,
+        TaskTier.planned,
+        TaskTier.focus,
+      ]) {
+        final restoredBoard = board.restoreTask(
+          'doneAnc001',
+          targetTier: target,
+          currentDate: t1,
+        );
+        final restored = restoredBoard.findTask('doneAnc001')!;
+        expect(restored.isCompleted, isFalse, reason: 'target=$target');
+        expect(restored.completedAt, isNull, reason: 'target=$target');
+        expect(restored.dueAt, isNull, reason: 'target=$target');
+        expect(
+          restored.dueAnchor,
+          isNull,
+          reason: 'TDF-MUT-007: restoreTask must clear dueAnchor ($target)',
+        );
+        expect(restored.isDuePassive, isFalse, reason: 'target=$target');
+        expect(restored.dueNote, isNull, reason: 'target=$target');
+        expect(restored.suspendedAt, isNull, reason: 'target=$target');
+        expect(restored.isSuspendedForever, isFalse, reason: 'target=$target');
+        expect(restored.suspendedNote, isNull, reason: 'target=$target');
+        expect(restored.completions, equals(5), reason: 'target=$target');
+        expect(
+          restored.repeatRule,
+          equals(completedAnchored.repeatRule),
+          reason: 'target=$target',
+        );
+        expect(
+          restored.origin,
+          equals(completedAnchored.origin),
+          reason: 'target=$target',
+        );
+        expect(
+          restored.history,
+          equals(completedAnchored.history),
+          reason: 'target=$target',
+        );
+        expect(
+          restored.subtasks.single.isCompleted,
+          isFalse,
+          reason: 'target=$target',
+        );
+        expect(
+          restored.dependencies.single.requiredCompletion,
+          equals(3),
+          reason: 'TDF-OCC-001: prerequisite must rearm to 2 + 1 = 3',
+        );
+      }
+
+      // scheduleTask from Someday preserves dueAnchor (and resets passive on priority = true):
+      var someBoard = TaskBoard.empty().addTask(
+        'Anchored Someday',
+        id: 'ancSome001',
+        targetTier: TaskTier.someday,
+        dueAt: DateTime.utc(2026, 2, 28, 17, 0, 0),
+        dueAnchor: anchor,
+        isDuePassive: true,
+        dueNote: 'Carry anchor',
+        currentDate: t0,
+      );
+      someBoard = someBoard.scheduleTask(
+        'ancSome001',
+        isPriority: false,
+        currentDate: t1,
+      );
+      expect(someBoard.findTask('ancSome001')!.dueAnchor, equals(anchor));
+      expect(someBoard.findTask('ancSome001')!.isDuePassive, isTrue);
+
+      final t2 = t1.add(const Duration(minutes: 5));
+      someBoard = someBoard.scheduleTask(
+        'ancSome001',
+        isPriority: true,
+        currentDate: t2,
+      );
+      expect(someBoard.findTask('ancSome001')!.dueAnchor, equals(anchor));
+      expect(someBoard.findTask('ancSome001')!.isDuePassive, isFalse);
     });
   });
 }

@@ -1290,27 +1290,27 @@
   "@localFileRenamedBanner": {
     "description": "Status banner message shown after renaming the local TDF file."
   },
-  "errorUnsupportedTdfVersionLocal": "The local file uses unsupported file version {version}. Please update TierTask to a newer version.",
+  "errorUnsupportedTdfVersionLocal": "The local file uses unsupported TDF version {version} (expected 0.8.0).",
   "@errorUnsupportedTdfVersionLocal": {
-    "description": "Error message shown when the local TDF file uses an unsupported version, recommending an application update.",
+    "description": "Error message shown when the local TDF file uses a format version other than 0.8.0.",
     "placeholders": {
       "version": {
         "type": "String"
       }
     }
   },
-  "errorUnsupportedTdfVersionRemote": "The remote file uses unsupported file version {version}. Please update TierTask to a newer version.",
+  "errorUnsupportedTdfVersionRemote": "The remote file uses unsupported TDF version {version} (expected 0.8.0).",
   "@errorUnsupportedTdfVersionRemote": {
-    "description": "Error message shown when the remote WebDAV TDF file uses an unsupported version, recommending an application update.",
+    "description": "Error message shown when the remote WebDAV TDF file uses a format version other than 0.8.0.",
     "placeholders": {
       "version": {
         "type": "String"
       }
     }
   },
-  "errorUnsupportedTdfVersionBoth": "The local and remote files use unsupported file version {version}. Please update TierTask to a newer version.",
+  "errorUnsupportedTdfVersionBoth": "The local and remote files use unsupported TDF version {version} (expected 0.8.0).",
   "@errorUnsupportedTdfVersionBoth": {
-    "description": "Error message shown when both the local and remote WebDAV TDF files use an unsupported version, recommending an application update.",
+    "description": "Error message shown when both the local and remote WebDAV TDF files use a format version other than 0.8.0.",
     "placeholders": {
       "version": {
         "type": "String"
@@ -2093,5 +2093,26 @@
   "historyErrorMaxExceeded": "Maximum of 500 history entries per task reached.",
   "@historyErrorMaxExceeded": {
     "description": "Validation error shown when adding a distinct entry would exceed 500 history entries on a task."
+  },
+  "syncConflictDeletionBanner": "Synchronization paused: a concurrent edit conflicts with a deletion.",
+  "@syncConflictDeletionBanner": {
+    "description": "Status banner message shown when synchronization pauses due to an edit-versus-deletion conflict."
+  },
+  "syncConflictRecoveryBanner": "Synchronization paused: local changes require recovery after sync history advancement.",
+  "@syncConflictRecoveryBanner": {
+    "description": "Status banner message shown when synchronization pauses because local items require recovery after a generation advance."
+  },
+  "syncErrorGenerationRollbackBanner": "Synchronization stopped: the shared file sync generation is older than the acknowledged state.",
+  "@syncErrorGenerationRollbackBanner": {
+    "description": "Status banner message shown when synchronization stops due to a deleted.generation rollback."
+  },
+  "taskInfoDueAnchorDetail": "Schedule anchor: {anchor}",
+  "@taskInfoDueAnchorDetail": {
+    "description": "Read-only detail line in the task info dialog showing the intended local schedule anchor when clamped or shifted across a DST transition.",
+    "placeholders": {
+      "anchor": {
+        "type": "String"
+      }
+    }
   }
 }

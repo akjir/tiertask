@@ -10,7 +10,9 @@ updated: 2026-11-08
 # TEP-003: TDF Specification 0.6.0 Exploratory Design and Conformance Roadmap
 
 > [!NOTE]
-> **Specification Completed (`status: completed`):** This TEP defines the complete, normative specification changes for **TDF `0.6.0`** based on operational feedback from `0.5.0` / `0.5.1` workflows and multi-tool/agent interoperability. The focus of this proposal is exclusively on [`spec/TDF_SPEC_0.6.0.md`](../../spec/TDF_SPEC_0.6.0.md) semantics, concurrency rules, schema evolution, and machine-readable conformance fixtures — not on modifying the application source code in this step.
+> **Superseded by [`TEP-013`](tep-013-tdf-spec-0-8-0.md) (`status: completed`):** The `TDF 0.6.0` specification and `spec/conformance/v0.6.0/` fixtures delivered in this proposal have been superseded by the standalone **`TDF 0.8.0`** baseline in [`spec/TDF_SPEC_0.8.0.md`](../../spec/TDF_SPEC_0.8.0.md) and [`spec/conformance/v0.8.0/`](../../spec/conformance/v0.8.0/). Historical links below are retained as an archive record.
+>
+> **Specification Completed (`status: completed`):** This TEP defines the complete, normative specification changes for **TDF `0.6.0`** based on operational feedback from `0.5.0` / `0.5.1` workflows and multi-tool/agent interoperability. The focus of this proposal is exclusively on `spec/TDF_SPEC_0.6.0.md` semantics, concurrency rules, schema evolution, and machine-readable conformance fixtures — not on modifying the application source code in this step.
 
 ## Part 1: Concept & Proposal
 

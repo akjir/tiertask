@@ -21,6 +21,7 @@ import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -319,7 +320,7 @@ void main() {
       expect(TdfColor.formatArgb(0xFF00E5FF), equals('#00E5FF'));
 
       const labelWithColorTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 label officeOkD2 {
     name  "Main Office"
@@ -340,7 +341,7 @@ label officeOkD2 {
 
       expect(
         () => tdfService.parse(
-          'tdf 0.5.0\nlabel home00OkD2 {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
+          'tdf 0.8.0\nlabel home00OkD2 {\n  name "Home"\n  color "#112233"\n  color "#445566"\n}',
           evaluationTime: fixedDate,
         ),
         throwsA(
@@ -580,19 +581,36 @@ label officeOkD2 {
       );
       expect(updated.modifiedAt, equals(updateTime));
 
-      final overLimitLinks = List<TaskLink>.generate(
-        TaskLink.maxLinksPerTask + 5,
+      final exactLimitLinks = List<TaskLink>.generate(
+        maxTdfLinksPerTask,
         (index) =>
             TaskLink(title: 'Link $index', uri: 'https://example.com/$index'),
       );
       board = board.updateTask(
         taskId,
         currentDate: updateTime.add(const Duration(minutes: 5)),
-        links: overLimitLinks,
+        links: exactLimitLinks,
       );
+      expect(board.findTask(taskId)!.links.length, equals(maxTdfLinksPerTask));
+
+      final overLimitLinks = <TaskLink>[
+        ...exactLimitLinks,
+        const TaskLink(title: 'Link 20', uri: 'https://example.com/20'),
+      ];
       expect(
-        board.findTask(taskId)!.links.length,
-        equals(TaskLink.maxLinksPerTask),
+        () => board.updateTask(
+          taskId,
+          currentDate: updateTime.add(const Duration(minutes: 6)),
+          links: overLimitLinks,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'TDF-VAL-002: Exceeding maxTdfLinksPerTask (20) must fail with LimitExceeded',
       );
     });
 
@@ -1193,6 +1211,322 @@ label officeOkD2 {
         reason: 'Explicit targetTier: focus promotion must reset isDuePassive to false',
       );
       expect(board.findTask(taskId)!.effectiveModifiedAt, equals(t5));
+    });
+  });
+
+  group('TDF 0.8.0 Local Calendar Scheduling Inputs (TDF-CAL-001), dueAnchor & Bound Enforcement', () {
+    test('resolves dueLocalInput and suspendedLocalInput across CET/CEST gap & fold, manages dueAnchor/isDuePassive/no-op invariants, and enforces queue/deleted bounds', () {
+      final berlin = TdfTimeZoneContext.named('Europe/Berlin');
+      final t0 = DateTime.utc(2026, 1, 15, 9, 0);
+
+      // 1. Winter CET (UTC+1) dueLocalInput + Someday queue exclusion (TDF-MUT-008):
+      var board = TaskBoard.empty().addTask(
+        'Someday Winter Deadline',
+        id: 'someDue001',
+        targetTier: TaskTier.someday,
+        dueLocalInput: TdfLocalDateTime(2026, 1, 31, 18, 0, 0),
+        dueNote: 'Month-end cutoff',
+        currentDate: t0,
+        timeZone: berlin,
+      );
+      final someDue = board.findTask('someDue001')!;
+      expect(
+        someDue.dueAt,
+        equals(DateTime.utc(2026, 1, 31, 17, 0, 0)),
+        reason: 'CET (UTC+1) 18:00 local must resolve to 17:00 UTC',
+      );
+      expect(
+        someDue.dueAnchor,
+        equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 0)),
+      );
+      expect(
+        board.queueTaskIds,
+        isNot(contains('someDue001')),
+        reason: 'TDF-MUT-008: setting due on Someday never adds task to queue',
+      );
+
+      // Updating dueLocalInput on Someday across Spring DST Gap (2026-03-29 02:30 -> pre-gap UTC+1 = 01:30Z, anchor stays 02:30):
+      final t1 = t0.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        'someDue001',
+        dueLocalInput: TdfLocalDateTime(2026, 3, 29, 2, 30, 0),
+        isDuePassive: true,
+        currentDate: t1,
+        timeZone: berlin,
+      );
+      final gapDue = board.findTask('someDue001')!;
+      expect(
+        gapDue.dueAt,
+        equals(DateTime.utc(2026, 3, 29, 1, 30, 0)),
+        reason: 'TDF-CAL-001: spring-forward gap applies pre-gap UTC+1 offset',
+      );
+      expect(
+        gapDue.dueAnchor,
+        equals(TdfLocalDateTime(2026, 3, 29, 2, 30, 0)),
+        reason: 'dueAnchor retains unshifted intended 02:30 local clock',
+      );
+      expect(gapDue.isDuePassive, isTrue);
+      expect(
+        board.queueTaskIds,
+        isNot(contains('someDue001')),
+        reason: 'Editing due on Someday task must keep it outside queue',
+      );
+
+      // Setting finite suspendedLocalInput across Autumn Fold (2026-10-25 02:30 -> earliest CEST UTC+2 = 00:30Z) places unscheduled task in queue:
+      final t2 = t1.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        'someDue001',
+        suspendedLocalInput: TdfLocalDateTime(2026, 10, 25, 2, 30, 0),
+        currentDate: t2,
+        timeZone: berlin,
+      );
+      final foldSusp = board.findTask('someDue001')!;
+      expect(
+        foldSusp.suspendedAt,
+        equals(DateTime.utc(2026, 10, 25, 0, 30, 0)),
+        reason:
+            'TDF-CAL-001: autumn fold selects earliest occurrence (CEST UTC+2)',
+      );
+      expect(
+        board.queueTaskIds,
+        contains('someDue001'),
+        reason: 'TDF-MUT-008: setting future suspended on unscheduled task appends it to queue',
+      );
+
+      // Summer CEST (UTC+2) dueLocalInput + setting isSuspendedForever: true on Someday places task in queue:
+      board = board.addTask(
+        'Summer Someday Task',
+        id: 'sumSome001',
+        targetTier: TaskTier.someday,
+        dueLocalInput: TdfLocalDateTime(2026, 7, 15, 12, 0, 0),
+        currentDate: t2,
+        timeZone: berlin,
+      );
+      expect(
+        board.findTask('sumSome001')!.dueAt,
+        equals(DateTime.utc(2026, 7, 15, 10, 0, 0)),
+        reason: 'CEST (UTC+2) 12:00 local must resolve to 10:00 UTC',
+      );
+      expect(board.queueTaskIds, isNot(contains('sumSome001')));
+      board = board.updateTask(
+        'sumSome001',
+        isSuspendedForever: true,
+        currentDate: t2,
+        timeZone: berlin,
+      );
+      expect(
+        board.queueTaskIds,
+        contains('sumSome001'),
+        reason: 'TDF-MUT-008: setting suspended forever on unscheduled task appends it to queue',
+      );
+
+      // 2. Pure no-op guard vs dueAnchor-only mutation & isDuePassive reset:
+      board = board.addTask(
+        'Bystander Expired Deferral',
+        id: 'bysNoOp001',
+        targetTier: TaskTier.someday,
+        currentDate: t0,
+      );
+      // Inject an expired deferral onto bystander without advancing modifiedAt to verify pure no-op skips cleanup:
+      board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          for (final item in board.allTasks)
+            item.id == 'bysNoOp001'
+                ? item.copyWith(
+                    suspendedAt: t0.subtract(const Duration(minutes: 10)),
+                    suspendedNote: 'Expired note',
+                  )
+                : item,
+        ],
+        queueBlock: board.queueBlock,
+        evaluationTime: t2,
+        timeZone: berlin,
+      );
+      final t3 = t2.add(const Duration(minutes: 5));
+      final noopBoard = board.updateTask(
+        'someDue001',
+        dueAt: foldSusp.dueAt,
+        dueAnchor: foldSusp.dueAnchor,
+        currentDate: t3,
+        timeZone: berlin,
+      );
+      expect(
+        noopBoard,
+        same(board),
+        reason: 'TDF-MUT-001: unchanged dueAt + dueAnchor must return board untouched',
+      );
+      expect(
+        noopBoard.findTask('bysNoOp001')!.suspendedAt,
+        isNotNull,
+        reason: 'Pure no-op must skip board-wide block-reason cleanup',
+      );
+
+      // Changing dueAnchor alone resets isDuePassive to false and advances modifiedAt once:
+      board = board.updateTask(
+        'someDue001',
+        dueAnchor: TdfLocalDateTime(2026, 3, 31, 2, 30, 0),
+        currentDate: t3,
+        timeZone: berlin,
+      );
+      final anchorEdited = board.findTask('someDue001')!;
+      expect(
+        anchorEdited.dueAnchor,
+        equals(TdfLocalDateTime(2026, 3, 31, 2, 30, 0)),
+      );
+      expect(
+        anchorEdited.isDuePassive,
+        isFalse,
+        reason: 'TDF-MUT-008: changing dueAnchor must reset isDuePassive to false when omitted',
+      );
+      expect(anchorEdited.modifiedAt, equals(t3));
+      expect(
+        board.findTask('bysNoOp001')!.suspendedAt,
+        isNull,
+        reason: 'Committed anchor-only mutation must run block cleanup',
+      );
+
+      // Re-enable isDuePassive, then clearDueAnchor alone -> sets dueAnchor = null and resets isDuePassive = false:
+      final t4 = t3.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        'someDue001',
+        isDuePassive: true,
+        currentDate: t4,
+        timeZone: berlin,
+      );
+      expect(board.findTask('someDue001')!.isDuePassive, isTrue);
+      expect(
+        board.findTask('someDue001')!.dueAnchor,
+        equals(TdfLocalDateTime(2026, 3, 31, 2, 30, 0)),
+      );
+
+      final t5 = t4.add(const Duration(minutes: 5));
+      board = board.updateTask(
+        'someDue001',
+        clearDueAnchor: true,
+        currentDate: t5,
+        timeZone: berlin,
+      );
+      final anchorCleared = board.findTask('someDue001')!;
+      expect(anchorCleared.dueAt, equals(DateTime.utc(2026, 3, 29, 1, 30)));
+      expect(anchorCleared.dueAnchor, isNull);
+      expect(anchorCleared.isDuePassive, isFalse);
+      expect(anchorCleared.modifiedAt, equals(t5));
+
+      // clearDueAt clears dueAt, dueAnchor, isDuePassive, and dueNote:
+      final t6 = t5.add(const Duration(minutes: 5));
+      board = board
+          .updateTask(
+            'someDue001',
+            dueAnchor: TdfLocalDateTime(2026, 3, 29, 3, 30, 0),
+            isDuePassive: true,
+            currentDate: t6,
+            timeZone: berlin,
+          )
+          .updateTask(
+            'someDue001',
+            clearDueAt: true,
+            currentDate: t6.add(const Duration(minutes: 1)),
+            timeZone: berlin,
+          );
+      final dueCleared = board.findTask('someDue001')!;
+      expect(dueCleared.dueAt, isNull);
+      expect(dueCleared.dueAnchor, isNull);
+      expect(dueCleared.isDuePassive, isFalse);
+      expect(dueCleared.dueNote, isNull);
+
+      // 3. Error mapping on dueLocalInput / suspendedLocalInput:
+      expect(
+        () => board.addTask(
+          'Missing Zone Local Input',
+          dueLocalInput: TdfLocalDateTime(2026, 5, 1, 10, 0),
+          currentDate: t6,
+          timeZone: const TdfTimeZoneContext.missing('Mars/Phobos'),
+        ),
+        throwsA(
+          isA<TdfContextException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfContextOutcomeKind.timeZoneContextRequired,
+          ),
+        ),
+      );
+      expect(
+        () => board.addTask(
+          'Underflow 0001 Local Input',
+          dueLocalInput: TdfLocalDateTime(1, 1, 1, 0, 0, 0),
+          currentDate: t6,
+          timeZone: berlin,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidTimestamp,
+          ),
+        ),
+      );
+
+      // 4. maxTdfQueueEntries (4096) & maxTdfDeletedRecords (4096) bounds throw TdfException(limitExceeded):
+      final fullQueueTasks = <TaskItem>[
+        for (var i = 0; i < maxTdfQueueEntries; i++)
+          TaskItem(
+            id: 'fq${i.toString().padLeft(4, '0')}OkD2',
+            title: 'Queued $i',
+            createdAt: t0,
+          ),
+        TaskItem(id: 'someExtra1', title: 'Extra Someday', createdAt: t0),
+      ];
+      final fullQueueBoard = TaskBoard.evaluate(
+        tasks: fullQueueTasks,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: <String>[
+            for (var i = 0; i < maxTdfQueueEntries; i++)
+              'fq${i.toString().padLeft(4, '0')}OkD2',
+          ],
+        ),
+        evaluationTime: t0,
+      );
+      expect(
+        () => fullQueueBoard.scheduleTask('someExtra1', currentDate: t1),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Appending 4097th queue entry must throw TdfException(limitExceeded)',
+      );
+
+      final fullDeletedBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(id: 'delOverflow', title: 'Overflow Del', createdAt: t0),
+        ],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            for (var i = 0; i < maxTdfDeletedRecords; i++)
+              TdfDeletedTaskRecord(
+                taskId: 'dt${i.toString().padLeft(4, '0')}OkD2',
+                deletedAt: t0,
+              ),
+          ],
+        ),
+        evaluationTime: t0,
+      );
+      expect(
+        () => fullDeletedBoard.deleteTask('delOverflow', currentDate: t1),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason:
+            'Recording 4097th tombstone must throw TdfException(limitExceeded)',
+      );
     });
   });
 }

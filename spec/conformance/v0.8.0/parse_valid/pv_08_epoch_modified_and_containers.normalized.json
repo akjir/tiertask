@@ -1,0 +1,93 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 3,
+    "tasks": [],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "2026-11-01 08:00:05",
+    "tasks": []
+  },
+  "labels": [
+    {
+      "id": "8jKaCdOkD2",
+      "scoped": false,
+      "name": "Epoch Label",
+      "color": null,
+      "note": null,
+      "modified": "1970-01-01 00:00:00",
+      "links": [],
+      "conditions": []
+    },
+    {
+      "id": "omitMdOkD2",
+      "scoped": false,
+      "name": "Omitted Modified Label",
+      "color": null,
+      "note": null,
+      "modified": null,
+      "links": [],
+      "conditions": []
+    }
+  ],
+  "locations": [
+    {
+      "id": "8jKaCdOkD2",
+      "name": "Epoch Location",
+      "note": null,
+      "source": null,
+      "latitude": "50.9787",
+      "longitude": "11.0328",
+      "radius": "150",
+      "modified": "1970-01-01 00:00:00"
+    },
+    {
+      "id": "omitLcOkD2",
+      "name": "Omitted Modified Location",
+      "note": null,
+      "source": null,
+      "latitude": "50.9787",
+      "longitude": "11.0328",
+      "radius": "100",
+      "modified": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "8jKaCdOkD2",
+      "priority": false,
+      "name": "Epoch Task",
+      "note": null,
+      "created": "2026-11-01 08:00:00",
+      "finished": null,
+      "modified": "1970-01-01 00:00:00",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "8jKaCdOkD2"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": null,
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [],
+      "subtasks": {
+        "autoFinish": false,
+        "steps": [
+          {
+            "completed": true,
+            "text": "Step A"
+          },
+          {
+            "completed": true,
+            "text": "Step B"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import 'package:flutter/foundation.dart';
 import 'task_board_evaluator.dart';
 import 'task_item.dart';
 import 'task_tier.dart';
+import 'tdf_error.dart';
 import 'tdf_sync_metadata.dart';
 import 'tdf_timezone.dart';
 
@@ -74,11 +75,15 @@ class TaskBoardQueueMutator {
     DateTime now,
   ) {
     if (queue.taskIds.contains(taskId)) return queue;
-    if (queue.taskIds.length >= TdfQueueBlock.maxQueueEntries) {
-      throw const FormatException('LimitExceeded');
+    if (queue.taskIds.length >= maxTdfQueueEntries) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Queue block exceeds maximum of $maxTdfQueueEntries entries.',
+      );
     }
     return TdfQueueBlock(
-      modifiedAt: TaskItem.nextModifiedTimestamp(now, queue.modifiedAt),
+      modifiedAt: _nextQueueMutationModifiedAt(now, queue.modifiedAt),
       taskIds: <String>[...queue.taskIds, taskId],
     );
   }
@@ -137,14 +142,19 @@ class TaskBoardQueueMutator {
     ).logDomainMutation('blockTask id=$taskId');
   }
 
-  /// Captures the required completion number for a newly added or rearmed prerequisite [target] per `TDF_SPEC.md` Section 6.9.3.
+  /// Captures the required completion number for a newly added or rearmed prerequisite [target] per `TDF-OCC-001`.
   static int captureDependencyRequirement(TaskItem? target) {
     if (target == null) return 1;
     if (target.isCompleted || target.completedAt != null) {
       return target.completions >= 1 ? target.completions : 1;
     }
-    if (target.completions >= TdfTaskDependency.maxCompletions) {
-      throw const FormatException('LimitExceeded');
+    if (target.completions >= maxTdfCompletions) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Prerequisite completion count exceeds maximum of $maxTdfCompletions.',
+      );
     }
     return target.completions + 1;
   }
@@ -358,7 +368,7 @@ class TaskBoardQueueMutator {
     );
   }
 
-  /// Restores a completed task on [board] back into `Someday`, `Planned`, or `Focus` per `TDF_SPEC.md` Section 6.5.
+  /// Restores a completed task on [board] back into `Someday`, `Planned`, or `Focus` per `spec/TDF_SPEC_0.8.0.md` Section 10.4.5 (`TDF-MUT-007`).
   static NormalizedTierSlices restoreTask(
     NormalizedTierSlices board,
     String taskId, {
@@ -368,7 +378,11 @@ class TaskBoardQueueMutator {
     TdfTimeZoneContext? timeZone,
     Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
-    if (targetTier == TaskTier.completed) return board;
+    if (targetTier != TaskTier.someday &&
+        targetTier != TaskTier.planned &&
+        targetTier != TaskTier.focus) {
+      return board;
+    }
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
     );
@@ -386,12 +400,13 @@ class TaskBoardQueueMutator {
       clearSuspendedNote: true,
       isSuspendedForever: false,
       clearDueAt: true,
+      clearDueAnchor: true,
       clearDueNote: true,
       isDuePassive: false,
       isPriority: targetTier == TaskTier.focus,
       dependencies: rearmDependencies(board, existing.dependencies),
       subtasks: setAllSubtasksCompleted(existing.subtasks, false),
-      modifiedAt: TaskItem.nextModifiedTimestamp(
+      modifiedAt: _nextQueueMutationModifiedAt(
         now,
         existing.effectiveModifiedAt,
       ),
@@ -417,7 +432,7 @@ class TaskBoardQueueMutator {
     ).logDomainMutation('restoreTask id=$taskId targetTier=${targetTier.name}');
   }
 
-  /// Schedules a task on [board] from `Someday` into the active pull cycle per `TDF_SPEC.md` Section 6.2.
+  /// Schedules a task on [board] from `Someday` into the active pull cycle per `spec/TDF_SPEC_0.8.0.md` Section 10.4.2 (`TDF-MUT-004`).
   static NormalizedTierSlices scheduleTask(
     NormalizedTierSlices board,
     String taskId, {
@@ -454,6 +469,7 @@ class TaskBoardQueueMutator {
             clearSuspendedAt: wasCompleted,
             clearSuspendedNote: wasCompleted,
             clearDueAt: wasCompleted,
+            clearDueAnchor: wasCompleted,
             clearDueNote: wasCompleted,
             isDuePassive: nextDuePassive,
             isSuspendedForever: wasCompleted
@@ -466,7 +482,7 @@ class TaskBoardQueueMutator {
             subtasks: wasCompleted
                 ? setAllSubtasksCompleted(existing.subtasks, false)
                 : existing.subtasks,
-            modifiedAt: TaskItem.nextModifiedTimestamp(
+            modifiedAt: _nextQueueMutationModifiedAt(
               now,
               existing.effectiveModifiedAt,
             ),
@@ -761,6 +777,22 @@ class TaskBoardQueueMutator {
       return nextIds;
     }
     return <String>[...withoutTask, taskId];
+  }
+
+  /// Advances `modifiedAt` once for a queue or scheduling mutation, throwing [TdfException] on `9999` overflow.
+  static DateTime _nextQueueMutationModifiedAt(
+    DateTime now,
+    DateTime previousEffectiveModifiedAt,
+  ) {
+    try {
+      return TaskItem.nextModifiedTimestamp(now, previousEffectiveModifiedAt);
+    } on FormatException {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Queue mutation timestamp exceeds supported 9999-12-31 23:59:59 UTC.',
+      );
+    }
   }
 
   /// Moves [taskId] immediately after [anchorTaskId] inside [currentIds], or returns [currentIds] when [anchorTaskId] is `null`.

@@ -212,7 +212,7 @@ void main() {
       expect(File(createdPath).readAsStringSync(), startsWith('tdf '));
 
       File('${tempDirectory.path}${Platform.pathSeparator}alpha.tdf')
-          .writeAsStringSync('tdf 0.5.1\n', flush: true);
+          .writeAsStringSync('tdf 0.8.0\n', flush: true);
       File('${tempDirectory.path}${Platform.pathSeparator}ignore.txt')
           .writeAsStringSync('not tdf', flush: true);
       expect(
@@ -249,7 +249,7 @@ void main() {
       expect(await repository.loadTdf(), isEmpty);
 
       const sampleTdf =
-          'tdf 0.2.0\ntask t001 {\n  name "Local Task"\n  created 2026-11-01 08:00\n  queued 2026-11-01 08:00\n}\n';
+          'tdf 0.8.0\ntask 000001OkD2 {\n    name "Local Task"\n    created 2026-11-01 08:00\n}\n';
       await repository.saveTdf(sampleTdf);
       expect(await repository.loadTdf(), contains('name "Local Task"'));
 
@@ -350,12 +350,12 @@ void main() {
       final backup002File = File('${tempDirectory.path}/wipe_test.tdf.bak.002');
 
       await repository.wipeTdf(createBackup: true);
-      expect(await mainFile.readAsString(), equals('tdf 0.7.0\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.8.0\n'));
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content 1', flush: true);
       await repository.wipeTdf(createBackup: false);
-      expect(await mainFile.readAsString(), equals('tdf 0.7.0\n'));
+      expect(await mainFile.readAsString(), equals('tdf 0.8.0\n'));
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content A', flush: true);
@@ -567,7 +567,8 @@ void main() {
           '${sourceDirectory.path}${Platform.pathSeparator}tasks.tdf';
       final targetPath =
           '${targetDirectory.path}${Platform.pathSeparator}tasks.tdf';
-      const content = 'tdf 0.3.0\ntask t001 {\n    name "Move Me"\n}\n';
+      const content =
+          'tdf 0.8.0\ntask 000001OkD2 {\n    name "Move Me"\n    created 2026-11-01 08:00\n}\n';
       await File(sourcePath).writeAsString(content, flush: true);
 
       LocalFileRepository englishRepository(String path) => LocalFileRepository(
@@ -806,7 +807,7 @@ void main() {
         ),
       );
 
-      const sampleContent = 'tdf 0.6.0\n';
+      const sampleContent = 'tdf 0.8.0\n';
       await repository.saveTdf(sampleContent);
       final populatedRead = await repository.readTdfWithDigest();
       expect(populatedRead.exists, isTrue);
@@ -1071,7 +1072,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 50));
 
       // Noise files and delete events must not emit notifications.
-      File('${watchedDir.path}/work.tdf').writeAsStringSync('tdf 0.6.0\n');
+      File('${watchedDir.path}/work.tdf').writeAsStringSync('tdf 0.8.0\n');
       File('${watchedDir.path}/.tasks.tdf.tmp.0123456789abcdef0123456789abcdef')
           .writeAsStringSync('staging');
       File('${watchedDir.path}/tasks.tdf.bak').writeAsStringSync('backup');
@@ -1087,7 +1088,7 @@ void main() {
       // 1. Direct writeAsString on target file.
       nextEvent = Completer<void>();
       final targetFile = File(repo.resolveFilePath());
-      await targetFile.writeAsString('tdf 0.6.0\n', flush: true);
+      await targetFile.writeAsString('tdf 0.8.0\n', flush: true);
       await nextEvent.future.timeout(const Duration(seconds: 3));
       await Future<void>.delayed(const Duration(milliseconds: 80));
 
@@ -1103,7 +1104,9 @@ void main() {
       // 2. Same-directory atomic .tmp -> rename save.
       nextEvent = Completer<void>();
       final countBeforeAtomic = eventCount;
-      await repo.saveTdf('tdf 0.6.0\n\nqueue {\n}\n');
+      await repo.saveTdf(
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00\n}\n',
+      );
       await nextEvent.future.timeout(const Duration(seconds: 3));
       expect(eventCount, greaterThan(countBeforeAtomic));
       await Future<void>.delayed(const Duration(milliseconds: 80));
@@ -1112,7 +1115,7 @@ void main() {
       nextEvent = Completer<void>();
       final countBeforeCrossDir = eventCount;
       final stagedExternal = File('${externalStagingDir.path}/incoming.tmp')
-        ..writeAsStringSync('tdf 0.6.0\n', flush: true);
+        ..writeAsStringSync('tdf 0.8.0\n', flush: true);
       stagedExternal.renameSync(repo.resolveFilePath());
       await nextEvent.future.timeout(const Duration(seconds: 3));
       expect(eventCount, greaterThan(countBeforeCrossDir));
@@ -1138,6 +1141,146 @@ void main() {
         stopLines.length,
         equals(1),
         reason: 'Closing watch stream on directory deletion plus cancel() must emit local.watch.stop exactly once',
+      );
+    });
+  });
+
+  group('LocalFileRepository withExclusiveTargetLock On-Disk & In-Memory Serialization', () {
+    late Directory lockTempRoot;
+
+    setUp(() async {
+      lockTempRoot = await Directory.systemTemp.createTemp(
+        'tiertask_repo_lock_',
+      );
+    });
+
+    tearDown(() async {
+      if (await lockTempRoot.exists()) {
+        await lockTempRoot.delete(recursive: true);
+      }
+    });
+
+    test('serializes on-disk callers via HostFileLockManager and allows nested saveTdf/wipeTdf/initializeIfMissing without self-deadlock', () async {
+      final workspaceDir = Directory('${lockTempRoot.path}/workspace')
+        ..createSync(recursive: true);
+      final customLockDir = Directory('${lockTempRoot.path}/host_locks');
+
+      final repositoryA = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: workspaceDir.path,
+        hostLockDirectoryOverride: customLockDir.path,
+        lockAcquireTimeout: const Duration(seconds: 2),
+      );
+      final repositoryB = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        baseDirectoryPath: workspaceDir.path,
+        hostLockDirectoryOverride: customLockDir.path,
+        lockAcquireTimeout: const Duration(seconds: 2),
+      );
+
+      final events = <String>[];
+      final aEntered = Completer<void>();
+      final releaseA = Completer<void>();
+
+      final futureA = repositoryA.withExclusiveTargetLock(() async {
+        events.add('A:start');
+        aEntered.complete();
+        await releaseA.future;
+        await repositoryA.initializeIfMissing();
+        await repositoryA.saveTdf('tdf 0.8.0\n# nested-save\n');
+        final snapshot = await repositoryA.readTdfWithDigest();
+        expect(snapshot.content, equals('tdf 0.8.0\n# nested-save\n'));
+        events.add('A:end');
+        return snapshot.digest;
+      });
+
+      await aEntered.future;
+
+      final futureB = repositoryB.withExclusiveTargetLock(() async {
+        events.add('B:start');
+        await repositoryB.wipeTdf(createBackup: true);
+        events.add('B:end');
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(
+        events,
+        equals(<String>['A:start']),
+        reason: 'Second repository instance must wait on shared target lock',
+      );
+
+      releaseA.complete();
+      final digestA = await futureA;
+      await futureB;
+
+      expect(digestA, isNotNull);
+      expect(events, equals(<String>['A:start', 'A:end', 'B:start', 'B:end']));
+      expect(await repositoryB.loadTdf(), equals('tdf 0.8.0\n'));
+      expect(
+        File('${workspaceDir.path}/tasks.tdf.bak').readAsStringSync(),
+        equals('tdf 0.8.0\n# nested-save\n'),
+      );
+      expect(
+        customLockDir.existsSync(),
+        isTrue,
+        reason: 'On-disk repository lock must use hostLockDirectoryOverride',
+      );
+      expect(customLockDir.listSync().single.path, endsWith('.lock'));
+    });
+
+    test('serializes hermetic inMemoryStore callers via in-process mutex without touching host disk and supports nested saveTdf', () async {
+      final nonExistentLockDir = Directory(
+        '${lockTempRoot.path}/must_not_be_created',
+      );
+      final sharedStore = <String, String>{};
+      final inMemoryRepoA = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'hermetic.tdf'),
+        inMemoryStore: sharedStore,
+        hostLockDirectoryOverride: nonExistentLockDir.path,
+      );
+      final inMemoryRepoB = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'hermetic.tdf'),
+        inMemoryStore: sharedStore,
+        hostLockDirectoryOverride: nonExistentLockDir.path,
+      );
+
+      final order = <String>[];
+      final entered = Completer<void>();
+      final proceed = Completer<void>();
+
+      final first = inMemoryRepoA.withExclusiveTargetLock(() async {
+        order.add('mem1:enter');
+        entered.complete();
+        await proceed.future;
+        await inMemoryRepoA.saveTdf('tdf 0.8.0\n# mem1\n');
+        order.add('mem1:exit');
+      });
+
+      await entered.future;
+
+      final second = inMemoryRepoB.withExclusiveTargetLock(() async {
+        order.add('mem2:enter');
+        final previous = await inMemoryRepoB.loadTdf();
+        expect(previous, equals('tdf 0.8.0\n# mem1\n'));
+        await inMemoryRepoB.saveTdf('tdf 0.8.0\n# mem2\n');
+        order.add('mem2:exit');
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(order, equals(<String>['mem1:enter']));
+
+      proceed.complete();
+      await Future.wait(<Future<void>>[first, second]);
+
+      expect(
+        order,
+        equals(<String>['mem1:enter', 'mem1:exit', 'mem2:enter', 'mem2:exit']),
+      );
+      expect(await inMemoryRepoB.loadTdf(), equals('tdf 0.8.0\n# mem2\n'));
+      expect(
+        nonExistentLockDir.existsSync(),
+        isFalse,
+        reason: 'Hermetic inMemoryStore lock must not create host lock directory or files on disk',
       );
     });
   });

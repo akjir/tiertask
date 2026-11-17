@@ -21,6 +21,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
 import '../../models/tdf_error.dart';
+import '../../models/tdf_sync_metadata.dart';
 import '../../models/tdf_timezone.dart';
 import '../../models/webdav_config.dart';
 import '../app_theme.dart';
@@ -289,12 +290,7 @@ class TaskHistoryInputValidator {
     if (parsedLocal == null) {
       return null;
     }
-    final convertedUtc = TaskItem.normalizeTimestamp(
-      configuration.localWallClockToUtc(parsedLocal),
-    );
-    return TdfCalendar.isWithinTimestampBounds(convertedUtc)
-        ? convertedUtc
-        : null;
+    return _tryConvertLocalWallClockToUtc(configuration, parsedLocal);
   }
 
   /// Trims outer ASCII whitespace and collapses internal CR/LF/TAB sequences into single spaces.
@@ -325,7 +321,7 @@ class TaskHistoryInputValidator {
     return _replaceInternalBreaksWithSpaces(rawText, firstKeep, lastKeep);
   }
 
-  /// Validates [sanitizedText] against TDF `0.7.0` single-line `<text>` bounds, returning a localized error or `null`.
+  /// Validates [sanitizedText] against TDF `0.8.0` single-line `<text>` bounds, returning a localized error or `null`.
   static String? validateText(
     String sanitizedText,
     AppLocalizations localizations,
@@ -351,6 +347,27 @@ class TaskHistoryInputValidator {
       return localizations.historyErrorTextTooLong;
     }
     return null;
+  }
+
+  /// Converts [parsedLocal] via [configuration] (`TDF-CAL-001`), returning `null` on calendar or context errors.
+  static DateTime? _tryConvertLocalWallClockToUtc(
+    WebDavConfig configuration,
+    DateTime parsedLocal,
+  ) {
+    try {
+      final convertedUtc = TaskItem.normalizeTimestamp(
+        configuration.localWallClockToUtc(parsedLocal),
+      );
+      return TdfCalendar.isWithinTimestampBounds(convertedUtc)
+          ? convertedUtc
+          : null;
+    } on TdfException {
+      return null;
+    } on TdfContextException {
+      return null;
+    } on FormatException {
+      return null;
+    }
   }
 }
 

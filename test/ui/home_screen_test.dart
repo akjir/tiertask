@@ -387,8 +387,8 @@ void main() {
           extra: '  suspended 2026-11-05 09:00\n',
         ),
         'task s10000OkD2 {\n  name "Echo Someday Match"\n  created 2026-11-01 07:50\n  labels work00OkD2\n}',
-        'task c10000OkD2 {\n  name "Foxtrot Completed Match"\n  created 2026-10-28 08:00\n  queued 2026-10-28 08:00\n  finished 2026-10-29 10:00\n  completions 1\n  labels work00OkD2\n}',
-        'task c20000OkD2 {\n  name "Home Completed Only"\n  created 2026-10-28 09:00\n  queued 2026-10-28 09:00\n  finished 2026-10-29 11:00\n  completions 1\n  labels home00OkD2\n}',
+        'task c10000OkD2 {\n  name "Foxtrot Completed Match"\n  created 2026-10-28 08:00\n  finished 2026-10-29 10:00\n  completions 1\n  labels work00OkD2\n}',
+        'task c20000OkD2 {\n  name "Home Completed Only"\n  created 2026-10-28 09:00\n  finished 2026-10-29 11:00\n  completions 1\n  labels home00OkD2\n}',
       ].join('\n');
 
       await _pumpHomeApp(tester, initialTdf: searchTdf);
@@ -510,7 +510,7 @@ void main() {
         filePath: 'tasks.tdf',
       );
       final remoteStore = <String, String>{
-        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.8.0\n',
+        webDavConfig.resolveEndpointUri()!.path: 'tdf 0.7.0\n',
       };
 
       await tester.pumpWidget(
@@ -538,7 +538,7 @@ void main() {
       expect(remoteFetchCount, equals(1));
       expect(
         find.text(
-          'Die Remote-Datei verwendet die nicht unterstützte Dateiversion 0.8.0. Bitte aktualisieren Sie TierTask auf eine neuere Version.',
+          'Die Remote-Datei verwendet die nicht unterstützte TDF-Version 0.7.0 (erwartet: 0.8.0).',
         ),
         findsOneWidget,
       );
@@ -549,7 +549,7 @@ void main() {
     'HomeScreen shows localized floating Undo SnackBar for complete, auto-finish subtask, and downgrade without obstructing TierPageIndicator',
     (WidgetTester tester) async {
       const initialTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 08:00:00
@@ -636,7 +636,7 @@ task 000002OkD2 priority {
     'Desktop Ctrl+Z reverses stacked actions on Linux and Windows even after SnackBar dismissal and respects Android, modifier, route, and EditableText guards',
     (WidgetTester tester) async {
       const initialTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 08:00:00
@@ -806,7 +806,7 @@ task 000002OkD2 priority {
     'HomeScreen evaluates unfiltered global view against live clockProvider for 24h due lead-window auto-promotion and expired suspended unblocking',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -926,7 +926,7 @@ task dueSoon001 {
       final longLabelName = 'ContextHub' * 50; // 500 characters
       final hubTdf =
           '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 09:00:00
@@ -1026,7 +1026,7 @@ task tskHubOkD2 {
 
       var currentUtc = DateTime.utc(2026, 11, 1, 4, 59, 50);
       const seededTdf = '''
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 04:00:00
@@ -1359,7 +1359,7 @@ String _tdfHeader(String modifiedTime, String spaceSeparatedIds) {
       .split(' ')
       .map((id) => '  task $id')
       .join('\n');
-  return 'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 $modifiedTime\n$entries\n}';
+  return 'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 $modifiedTime\n$entries\n}';
 }
 
 /// Builds a queued `.tdf` task block string for test fixtures.
@@ -1373,5 +1373,5 @@ String _tdfTask(
 }) {
   final header = priority ? 'task $id priority {' : 'task $id {';
   final labelLine = label != null ? '  labels $label\n' : '';
-  return '$header\n  name "$name"\n  created 2026-11-01 $time\n  queued 2026-11-01 $time\n$extra$labelLine}';
+  return '$header\n  name "$name"\n  created 2026-11-01 $time\n$extra$labelLine}';
 }

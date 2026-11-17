@@ -1,0 +1,42 @@
+tdf 0.8.0
+
+deleted {
+    generation 3
+}
+
+queue {
+    modified 2026-11-01 08:00:05
+}
+
+label 8jKaCdOkD2 {
+    name     "Epoch Label"
+    modified 1970-01-01 00:00
+}
+
+label omitMdOkD2 {
+    name "Omitted Modified Label"
+}
+
+location 8jKaCdOkD2 {
+    name        "Epoch Location"
+    coordinates 50.9787 11.0328
+    radius      150
+    modified    1970-01-01 00:00
+}
+
+location omitLcOkD2 {
+    name        "Omitted Modified Location"
+    coordinates 50.9787 11.0328
+    radius      100
+}
+
+task 8jKaCdOkD2 {
+    name     "Epoch Task"
+    created  2026-11-01 08:00
+    modified 1970-01-01 00:00
+    labels   8jKaCdOkD2
+    subtasks {
+        step true "Step A"
+        step true "Step B"
+    }
+}

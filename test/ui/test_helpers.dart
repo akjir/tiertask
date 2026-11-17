@@ -14,6 +14,7 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +32,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/app_theme.dart';
 
@@ -55,12 +57,25 @@ class FakeLocalFileRepository extends LocalFileRepository {
   Future<String> loadTdf() async => initialTdf;
 
   @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    final exists = initialTdf.isNotEmpty;
+    final digest = exists
+        ? Sha256Service.hashHex(utf8.encode(initialTdf))
+        : null;
+    return (content: initialTdf, digest: digest, exists: exists);
+  }
+
+  @override
   Future<void> saveTdf(String tdfContent) async {
     initialTdf = tdfContent;
   }
 
   @override
   Stream<void> watchTdfChanges() => const Stream<void>.empty();
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
 }
 
 /// In-memory [TaskNotifier] test double that returns [initialBoard] and commits mutations in-memory without filesystem or network I/O.

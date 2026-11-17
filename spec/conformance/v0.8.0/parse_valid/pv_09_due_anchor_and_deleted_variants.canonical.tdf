@@ -1,0 +1,20 @@
+tdf 0.8.0
+
+task 111111OkD2 {
+    name      "Date-only due and anchor with clock-shaped note"
+    created   2026-11-01 08:00
+    suspended forever "Indefinite hold"
+    due       2026-11-20 00:00:00 anchor 2026-11-21 00:00:00 "18:00"
+    condition {
+        day      any
+        time     any
+        location any
+    }
+}
+
+task 222222OkD2 {
+    name    "Full due modifiers and midnight repeat clock omission"
+    created 2026-11-01 08:00
+    repeat  2 weeks
+    due     2026-02-28 17:00:00 anchor 2026-01-31 18:00:05 passive "Cutoff"
+}

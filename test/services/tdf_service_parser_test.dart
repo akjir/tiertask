@@ -13,640 +13,715 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
-import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
-import 'package:tiertask/models/tdf_metadata.dart';
-import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
+import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/services/sha256_service.dart';
+import 'package:tiertask/services/tdf_parser.dart';
 import 'package:tiertask/services/tdf_service.dart';
+
+const String _section15ExampleTdf =
+    'tdf 0.8.0\n'
+    '\n'
+    'queue {\n'
+    '    modified 2026-11-16 09:00:00\n'
+    '    task 8jKaCdOkD2\n'
+    '}\n'
+    '\n'
+    'label 4x9p2mOkD2 {\n'
+    '    name  "Home"\n'
+    '    color "#4CAF50"\n'
+    '}\n'
+    '\n'
+    'task 8jKaCdOkD2 priority {\n'
+    '    name     "Inspect heating pressure"\n'
+    '    created  2026-11-16 08:30\n'
+    '    modified 2026-11-16 09:00\n'
+    '    labels   4x9p2mOkD2\n'
+    '    due      2026-11-20 17:00:00 anchor 2026-11-20 18:00:00\n'
+    '    subtasks {\n'
+    '        step false "Check boiler gauge"\n'
+    '        step false "Bleed upstairs radiator"\n'
+    '    }\n'
+    '}\n';
+
+const String _vector2MinimalTaskTdf =
+    'tdf 0.8.0\n'
+    '\n'
+    'task AAAAAAAAAA {\n'
+    '    name    "A"\n'
+    '    created 2026-11-16 00:00\n'
+    '}\n';
+
+const String _vector3MultiSectionTdf =
+    'tdf 0.8.0\n'
+    '\n'
+    'deleted {\n'
+    '    generation 1\n'
+    '    task 6uCk8N0aB1 2026-11-01 12:00:00 2\n'
+    '}\n'
+    '\n'
+    'queue {\n'
+    '    modified 2026-11-16 09:00:00\n'
+    '    task 8jKaCdOkD2\n'
+    '}\n'
+    '\n'
+    'label 4x9p2mOkD2 {\n'
+    '    name      "Home"\n'
+    '    color     "#4CAF50"\n'
+    '    condition location 7pQr9mOkD2\n'
+    '}\n'
+    '\n'
+    'location 7pQr9mOkD2 {\n'
+    '    name        "Office"\n'
+    '    coordinates 50.9787 11.0328\n'
+    '    radius      150\n'
+    '}\n'
+    '\n'
+    'task 8jKaCdOkD2 priority {\n'
+    '    name     "Close monthly books"\n'
+    '    note     "Line 1\\nLine 2 with \\"quotes\\""\n'
+    '    created  2026-01-01 08:00\n'
+    '    modified 2026-01-31 18:00:05\n'
+    '    repeat   1 months 08:00 lead 2 days\n'
+    '    labels   4x9p2mOkD2\n'
+    '    due      2026-02-28 17:00:00 anchor 2026-01-31 18:00:00 "Month-end cutoff"\n'
+    '    condition {\n'
+    '        day  mon tue wed thu fri\n'
+    '        time 08:00 18:00\n'
+    '    }\n'
+    '    subtasks auto-finish {\n'
+    '        step false "Reconcile ledger"\n'
+    '        step true  "Export statements"\n'
+    '    }\n'
+    '}\n';
+
+const String _vector4TiertaskTdf =
+    'tdf 0.8.0\n'
+    '\n'
+    'deleted {\n'
+    '    generation 4\n'
+    '    task 6uCk8N0aB1 2026-11-01 12:00:00\n'
+    '    label 1rQv7S0cD2 2026-11-02 09:00:00\n'
+    '    location 8tYp4M0eF3 2026-11-02 10:15:00\n'
+    '}\n'
+    '\n'
+    'queue {\n'
+    '    modified 2026-11-01 19:30:00\n'
+    '    task 8jKaCdOkD2\n'
+    '    task 5vWx9ZOk91\n'
+    '    task 3nQp7ROkB8\n'
+    '}\n'
+    '\n'
+    'label 4x9p2mOkD2 {\n'
+    '    name     "Home & Garden"\n'
+    '    modified 2026-11-01 08:00\n'
+    '    condition {\n'
+    '        day      sat sun\n'
+    '        time     08:00 20:00\n'
+    '        location 7pQr9mOkD2\n'
+    '    }\n'
+    '}\n'
+    '\n'
+    'label 9kLm2P0aBc scoped {\n'
+    '    name     "IT & Servers"\n'
+    '    color    "#2196F3"\n'
+    '    note     "Infrastructure runbooks and maintenance"\n'
+    '    modified 2026-11-01 08:00\n'
+    '    link     "Grafana Dashboard" "https://grafana.example.com/d/nas"\n'
+    '    link     "Runbook Repo" "https://git.example.com/ops/runbooks"\n'
+    '    condition {\n'
+    '        day  mon tue wed thu fri\n'
+    '        time 08:00 12:00\n'
+    '        time 14:00 18:00\n'
+    '    }\n'
+    '}\n'
+    '\n'
+    'location 7pQr9mOkD2 {\n'
+    '    name        "Home"\n'
+    '    note        "Main residence driveway and garden"\n'
+    '    source      "Erfurt, Germany"\n'
+    '    coordinates 50.9787 11.0328\n'
+    '    radius      150\n'
+    '    modified    2026-11-01 08:00\n'
+    '}\n'
+    '\n'
+    'task 2bDf6HOkA4 {\n'
+    '    name     "Design 3D-printed enclosure for backup NAS"\n'
+    '    created  2026-11-01 12:00\n'
+    '    modified 2026-11-01 12:00\n'
+    '    labels   9kLm2P0aBc\n'
+    '}\n'
+    '\n'
+    'task 3nQp7ROkB8 {\n'
+    '    name      "Order replacement lawnmower blades online"\n'
+    '    created   2026-11-01 18:00\n'
+    '    modified  2026-11-01 18:20\n'
+    '    labels    4x9p2mOkD2\n'
+    '    due       2026-11-03 17:00:00 anchor 2026-11-03 18:00:00 passive "Order before seasonal supplier cutoff"\n'
+    '    origin    "https://jira.example.com" "HOME-42"\n'
+    '    link      "Portal Login" "https://example.com/portal#login"\n'
+    '    link      "Local Folder" "file:///home/user/documents/tax2026"\n'
+    '    history   2026-11-01 18:05:00 "Checked blade part number against mower manual"\n'
+    '    history   2026-11-01 18:20:00 "Confirmed OEM stock with dealer"\n'
+    '    condition any\n'
+    '}\n'
+    '\n'
+    'task 5vWx9ZOk91 {\n'
+    '    name        "Clean dust filters on home NAS server"\n'
+    '    created     2026-10-01 09:00\n'
+    '    modified    2026-11-01 10:00\n'
+    '    completions 1\n'
+    '    repeat      1 months 09:00 lead 5 days\n'
+    '    labels      4x9p2mOkD2 9kLm2P0aBc\n'
+    '    due         2026-02-28 17:00:00 anchor 2026-01-31 18:00:00 "Verify SMART health after cleaning"\n'
+    '    history     2026-10-01 09:30:00 "Replaced front intake filter pad"\n'
+    '}\n'
+    '\n'
+    'task 7mPr4T09xY {\n'
+    '    name        "Mount winter tires"\n'
+    '    created     2026-10-20 14:00\n'
+    '    finished    2026-10-29 16:45\n'
+    '    modified    2026-10-29 16:45\n'
+    '    completions 1\n'
+    '    labels      4x9p2mOkD2\n'
+    '    history     2026-10-29 16:40:00 "Torqued lug nuts to 120 Nm"\n'
+    '}\n'
+    '\n'
+    'task 8jKaCdOkD2 priority {\n'
+    '    name      "Mow the lawn"\n'
+    '    note      "Check fuel level before starting"\n'
+    '    created   2026-11-01 19:30\n'
+    '    modified  2026-11-01 19:30\n'
+    '    labels    4x9p2mOkD2\n'
+    '    blocked   3nQp7ROkB8\n'
+    '    suspended 2026-11-04 23:00:00 "Wait for blade delivery and dry forecast"\n'
+    '    due       2026-11-07 16:00:00 anchor 2026-11-07 17:00:00 "Before first frost"\n'
+    '    condition time 09:00 18:00\n'
+    '    subtasks auto-finish {\n'
+    '        step false "Get lawnmower from the shed"\n'
+    '        step true  "Empty grass catcher bag"\n'
+    '    }\n'
+    '}\n';
+
+int _countLfLines(String text) {
+  var count = 0;
+  for (var i = 0; i < text.length; i++) {
+    if (text.codeUnitAt(i) == 0x0A) {
+      count++;
+    }
+  }
+  return count;
+}
 
 void main() {
   const tdfService = TdfService();
   final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
 
-  group('TdfService 0.5.1 Lexical Scanner, Parser & Canonical Serializer', () {
-    test('parses canonical TDF 0.5.1 document from TDF_SPEC.md Section 9 and derives all 6 tiers', () {
-      const canonicalTdf = '''
-# ==========================================
-# TierTask Data Format (TDF) Example Document
-# ==========================================
-
-tdf 0.5.1
-
-deleted {
-    generation 4
-    task 6uCk8N0aB1 2026-11-01 12:00:00
-    label 1rQv7S0cD2 2026-11-02 09:00:00
-}
-
-queue {
-    modified 2026-11-01 19:30:00
-    task 8jKaCdOkD2
-    task 5vWx9ZOk91
-    task 3nQp7ROkB8
-}
-
-label 4x9p2mOkD2 {
-    name     "Home & Garden"
-    modified 2026-11-01 08:00
-
-    condition {
-        day      sat sun
-        time     08:00 20:00
-        location 50.9787 11.0328 150
-    }
-}
-
-label 9kLm2P0aBc {
-    name     "IT & Servers"
-    color    "#2196F3"
-    modified 2026-11-01 08:00
-
-    condition {
-        day  mon tue wed thu fri
-        time 08:00 12:00
-        time 14:00 18:00
-    }
-}
-
-task 8jKaCdOkD2 priority {
-    name      "Mow the lawn"
-    note      "Check fuel level before starting"
-    created   2026-11-01 19:30
-    modified  2026-11-01 19:30
-    labels    4x9p2mOkD2
-    blocked   3nQp7ROkB8
-    suspended 2026-11-04 23:00:00
-    condition time 09:00 18:00
-
-    subtasks auto-finish {
-        step false "Get lawnmower from the shed"
-        step true  "Empty grass catcher bag"
-    }
-}
-
-task 3nQp7ROkB8 {
-    name      "Order replacement lawnmower blades online"
-    created   2026-11-01 18:00
-    modified  2026-11-01 18:00
-    labels    4x9p2mOkD2
-    link      "Portal Login" "https://example.com/portal#login"
-    link      "Local Folder" "file:///home/user/documents/tax2026"
-    condition any
-}
-
-task 5vWx9ZOk91 {
-    name     "Clean dust filters on home NAS server"
-    created  2026-11-01 10:00
-    modified 2026-11-01 10:00
-    labels   4x9p2mOkD2 9kLm2P0aBc
-    repeat   30 days
-}
-
-task 2bDf6HOkA4 {
-    name     "Design 3D-printed enclosure for backup NAS"
-    created  2026-11-01 12:00
-    modified 2026-11-01 12:00
-    labels   9kLm2P0aBc
-}
-
-task 7mPr4T09xY {
-    name        "Mount winter tires"
-    created     2026-10-20 14:00
-    finished    2026-10-29 16:45
-    modified    2026-10-29 16:45
-    completions 1
-    labels      4x9p2mOkD2
-}
-''';
-
-      final board = tdfService.parse(canonicalTdf, evaluationTime: fixedDate);
-
-      expect(board.deletedBlock.generation, equals(4));
-      expect(board.deletedBlock.tasks.single.taskId, equals('6uCk8N0aB1'));
+  group('TdfService 0.8.0 Lexical Scanner, Parser & Canonical Serializer', () {
+    test('reproduces byte-exact canonical output and SHA-256 digests for Section 1.5 and Vectors 1 through 4 (TDF-SER-005)', () {
+      // Section 1.5 Introductory Example (453 UTF-8 bytes, 23 lines):
+      final section15Bytes = utf8.encode(_section15ExampleTdf);
       expect(
-        board.deletedBlock.tasks.single.deletedAt,
-        equals(DateTime.utc(2026, 11, 1, 12, 0, 0)),
-      );
-      expect(board.deletedBlock.labels.single.labelId, equals('1rQv7S0cD2'));
-      expect(
-        board.queueBlock.modifiedAt,
-        equals(DateTime.utc(2026, 11, 1, 19, 30, 0)),
+        section15Bytes.length,
+        equals(453),
+        reason: 'Section 1.5 introductory example must be 453 UTF-8 bytes',
       );
       expect(
-        board.queueBlock.taskIds,
-        equals(['8jKaCdOkD2', '5vWx9ZOk91', '3nQp7ROkB8']),
+        _countLfLines(_section15ExampleTdf),
+        equals(23),
+        reason: 'Section 1.5 introductory example must have 23 LF lines',
+      );
+      final section15Board = tdfService.parseBytes(
+        section15Bytes,
+        evaluationTime: DateTime.utc(2026, 11, 16, 10, 0),
+        timeZone: TdfTimeZoneContext.europeBerlin,
+      );
+      expect(
+        section15Board.findTask('8jKaCdOkD2')?.dueAnchor,
+        equals(TdfLocalDateTime(2026, 11, 20, 18, 0, 0)),
+      );
+      expect(
+        tdfService.serialize(section15Board),
+        equals(_section15ExampleTdf),
+        reason: 'Section 1.5 example must round-trip byte-identically',
       );
 
+      // Vector 1: Empty Document (10 bytes, 1 line):
+      final vector1Serialized = tdfService.serialize(TaskBoard.empty());
+      final vector1Bytes = utf8.encode(vector1Serialized);
+      expect(vector1Serialized, equals('tdf 0.8.0\n'));
+      expect(vector1Bytes.length, equals(10));
+      expect(_countLfLines(vector1Serialized), equals(1));
       expect(
-        board.labels.map((label) => label.id),
-        equals(['4x9p2mOkD2', '9kLm2P0aBc']),
+        Sha256Service.hashHex(vector1Bytes),
+        equals(
+          '7904b7a8e8cd221287ac91710477af38bbb7beb14dea75e2c827dfa2bfd2097a',
+        ),
+        reason: 'Vector 1 must match normative SHA-256 sourceDigest',
       );
-      expect(
-        board.focus.map((task) => task.id),
-        equals(['5vWx9ZOk91', '3nQp7ROkB8']),
-        reason: '8jKaCdOkD2 is blocked by 3nQp7ROkB8 and suspended until Nov 4, so 5vWx9ZOk91 and 3nQp7ROkB8 enter Focus in saved queue order',
-      );
-      expect(board.blocked.map((task) => task.id), equals(['8jKaCdOkD2']));
-      expect(board.someday.map((task) => task.id), equals(['2bDf6HOkA4']));
-      expect(board.completed.map((task) => task.id), equals(['7mPr4T09xY']));
-      expect(board.completed.single.completions, equals(1));
 
-      final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.7.0\n\ndeleted {\n'));
-      expect(serialized.contains('    queued '), isFalse);
-      expect(
-        serialized,
-        contains('    suspended 2026-11-04 23:00:00\n'),
-        reason: 'Section 6.10.3 requires emitting finite deferrals as YYYY-MM-DD HH:MM:SS',
+      // Vector 2: Minimal Single-Task Alignment (76 bytes, 6 lines):
+      final vector2Board = tdfService.parse(
+        _vector2MinimalTaskTdf,
+        evaluationTime: fixedDate,
       );
-      final repeatIdx = serialized.indexOf('    repeat   30 days\n');
-      final labelsIdx = serialized.indexOf(
-        '    labels   4x9p2mOkD2 9kLm2P0aBc\n',
-      );
+      final vector2Serialized = tdfService.serialize(vector2Board);
+      final vector2Bytes = utf8.encode(vector2Serialized);
+      expect(vector2Serialized, equals(_vector2MinimalTaskTdf));
+      expect(vector2Bytes.length, equals(76));
+      expect(_countLfLines(vector2Serialized), equals(6));
       expect(
-        repeatIdx,
-        lessThan(labelsIdx),
-        reason: 'Section 4.1.2 and 7.1 place repeat (position 7) before labels (position 8)',
+        Sha256Service.hashHex(vector2Bytes),
+        equals(
+          '3211d46b392b7b1efbf53cf07a0c0c6131f987a4b17dba9a733b9971108f7090',
+        ),
+        reason: 'Vector 2 must match normative SHA-256 sourceDigest',
       );
+
+      // Vector 3: Multi-Section Alignment + Inline label condition W_dir = 9 (856 bytes, 41 lines):
+      final vector3Board = tdfService.parse(
+        _vector3MultiSectionTdf,
+        evaluationTime: fixedDate,
+        timeZone: TdfTimeZoneContext.europeBerlin,
+      );
+      final vector3Serialized = tdfService.serialize(vector3Board);
+      final vector3Bytes = utf8.encode(vector3Serialized);
+      expect(vector3Serialized, equals(_vector3MultiSectionTdf));
+      expect(vector3Bytes.length, equals(856));
+      expect(_countLfLines(vector3Serialized), equals(41));
       expect(
-        serialized,
-        contains(
-          'deleted {\n'
-          '    generation 4\n'
-          '    task 6uCk8N0aB1 2026-11-01 12:00:00\n'
-          '    label 1rQv7S0cD2 2026-11-02 09:00:00\n'
-          '}\n\n'
-          'queue {\n'
-          '    modified 2026-11-01 19:30:00\n'
-          '    task 8jKaCdOkD2\n'
-          '    task 5vWx9ZOk91\n'
-          '    task 3nQp7ROkB8\n'
-          '}',
+        Sha256Service.hashHex(vector3Bytes),
+        equals(
+          '8e5771dedbdde3bf9451c247bbab1a826298f90e0c2e20a57e98ed75f53cf7cd',
+        ),
+        reason: 'Vector 3 must match normative SHA-256 sourceDigest',
+      );
+
+      // Vector 4: Appendix B.1 tiertask.tdf (3,086 bytes, 106 lines):
+      final vector4InputBytes = utf8.encode(_vector4TiertaskTdf);
+      expect(vector4InputBytes.length, equals(3086));
+      expect(_countLfLines(_vector4TiertaskTdf), equals(106));
+      expect(
+        Sha256Service.hashHex(vector4InputBytes),
+        equals(
+          'cf9d9f26158d9d58d9561802d9169bb704bac7df64f09d120a1d8a2b0bb17016',
         ),
       );
+      final vector4Board = tdfService.parseBytes(
+        vector4InputBytes,
+        evaluationTime: fixedDate,
+        timeZone: TdfTimeZoneContext.europeBerlin,
+        currentLatitude: 50.9787,
+        currentLongitude: 11.0328,
+      );
+      expect(vector4Board.deletedBlock.generation, equals(4));
+      expect(
+        vector4Board.deletedBlock.tasks.single.taskId,
+        equals('6uCk8N0aB1'),
+      );
+      expect(
+        vector4Board.deletedBlock.labels.single.labelId,
+        equals('1rQv7S0cD2'),
+      );
+      expect(
+        vector4Board.deletedBlock.locations.single.locationId,
+        equals('8tYp4M0eF3'),
+      );
+      expect(
+        vector4Board.queueBlock.taskIds,
+        equals(<String>['8jKaCdOkD2', '5vWx9ZOk91', '3nQp7ROkB8']),
+      );
+      expect(
+        vector4Board.focus.map((task) => task.id),
+        equals(<String>['5vWx9ZOk91', '3nQp7ROkB8']),
+        reason: 'On Sunday 12:00 UTC (13:00 CET) at Home GPS, 5vWx9ZOk91 (urgent non-passive Feb 28 <= Nov 1) and 3nQp7ROkB8 (condition any) enter Focus',
+      );
+      expect(
+        vector4Board.blocked.map((task) => task.id),
+        equals(<String>['8jKaCdOkD2']),
+      );
+      expect(
+        vector4Board.someday,
+        isEmpty,
+        reason: '2bDf6HOkA4 carries only scoped label 9kLm2P0aBc, so global view excludes it while preserving it in allTasks',
+      );
+      expect(
+        vector4Board.allTasks.any((task) => task.id == '2bDf6HOkA4'),
+        isTrue,
+      );
+      expect(
+        vector4Board.completed.map((task) => task.id),
+        equals(<String>['7mPr4T09xY']),
+      );
 
-      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      final vector4Serialized = tdfService.serialize(vector4Board);
+      final vector4OutputBytes = utf8.encode(vector4Serialized);
+      expect(vector4Serialized, equals(_vector4TiertaskTdf));
+      expect(vector4OutputBytes.length, equals(3086));
+      expect(_countLfLines(vector4Serialized), equals(106));
       expect(
-        reparsed.queueBlock.taskIds,
-        equals(['8jKaCdOkD2', '5vWx9ZOk91', '3nQp7ROkB8']),
+        Sha256Service.hashHex(vector4OutputBytes),
+        equals(
+          'cf9d9f26158d9d58d9561802d9169bb704bac7df64f09d120a1d8a2b0bb17016',
+        ),
+        reason: 'Vector 4 must round-trip with identical SHA-256 sourceDigest',
       );
-      expect(reparsed.deletedBlock, equals(board.deletedBlock));
-      expect(
-        reparsed.focus.map((task) => task.id),
-        equals(['5vWx9ZOk91', '3nQp7ROkB8']),
-      );
-      expect(reparsed.blocked.map((task) => task.id), equals(['8jKaCdOkD2']));
-      expect(reparsed.someday.map((task) => task.id), equals(['2bDf6HOkA4']));
-      expect(reparsed.completed.map((task) => task.id), equals(['7mPr4T09xY']));
     });
 
-    test('parses and serializes deleted block checkpoints, queue order, completions, numbered dependencies, suspended forever, and repeat clocks', () {
-      const advanced050Tdf = '''
-tdf 0.5.0
+    test('enforces single-version tdf 0.8.0 contract and parseBytes UTF-8/size checks (TDF-COMPAT-001, TDF-ENT-001, TDF-LEX-001)', () {
+      expect(TdfService.supportedVersion, equals('0.8.0'));
+      expect(TdfBlockParser.supportedVersion, equals('0.8.0'));
 
-deleted {
-    generation 2
-    task ZZZZZZZZZZ 2026-11-01 7
-    task AAAAAAAAAA 2026-11-01 12:30 7
-    task MMMMMMMMMM 2026-11-01 08:00:00 0
-    label LLLLLLLLL2 2026-11-01 09:00
-    label LLLLLLLLL1 2026-11-01 10:00:05
-}
+      expect(
+        tdfService
+            .parse('   \t  \n# leading comment\r\ntdf 0.8.0  # version\n')
+            .allTasks,
+        isEmpty,
+      );
 
-queue {
-    modified 2026-11-01 11:00:00
-    task 222222OkD2
-    task 111111OkD2
-}
+      final unsupportedHeaders = <({String doc, String expectedSource})>[
+        (doc: 'tdf 0.7.0\n', expectedSource: '0.7.0'),
+        (doc: 'tdf 0.6.0\n', expectedSource: '0.6.0'),
+        (doc: 'tdf 0.5.1\n', expectedSource: '0.5.1'),
+        (doc: 'tdf 0.5.0\n', expectedSource: '0.5.0'),
+        (doc: 'tdf 0.4.0\n', expectedSource: '0.4.0'),
+        (doc: 'tdf 0.3.0\n', expectedSource: '0.3.0'),
+        (doc: 'tdf 0.2.0\n', expectedSource: '0.2.0'),
+        (doc: 'tdf 0.1.0\n', expectedSource: '0.1.0'),
+        (doc: 'tdf 1.0.0\n', expectedSource: '1.0.0'),
+        (doc: 'tdf 0.8\n', expectedSource: '0.8'),
+        (doc: 'tdf v0.8.0\n', expectedSource: 'v0.8.0'),
+        (doc: 'tdf "0.8.0"\n', expectedSource: '0.8.0'),
+        (doc: "tdf '0.8.0'\n", expectedSource: '0.8.0'),
+        (doc: 'tdf 0.8.0 extra\n', expectedSource: '0.8.0'),
+      ];
 
-label cdev00OkD2 {
-    name "Dev"
-}
+      for (final testCase in unsupportedHeaders) {
+        expect(
+          () => tdfService.parse(testCase.doc),
+          throwsA(
+            isA<TdfException>()
+                .having(
+                  (error) => error.kind,
+                  'kind',
+                  TdfErrorKind.unsupportedVersion,
+                )
+                .having((error) => error.line, 'line', 1)
+                .having(
+                  (error) => error.sourceVersion,
+                  'sourceVersion',
+                  testCase.expectedSource,
+                ),
+          ),
+          reason:
+              'Header "${testCase.doc.trim()}" must fail with UnsupportedVersion and sourceVersion=${testCase.expectedSource}',
+        );
+      }
+
+      final missingHeaders = <String>[
+        '',
+        '   \t  \r\n# comment only\n',
+        'tdf\n',
+        'tdf {\n}\n',
+        'tdf 0.8.0 {\n}\n',
+        '"tdf" 0.8.0\n',
+        "'tdf' 0.8.0\n",
+        'task AAAAAAAAAA {\n  name "X"\n  created 2026-11-16\n}\n',
+        'name "Missing header"\n',
+        '{\n',
+      ];
+
+      for (final doc in missingHeaders) {
+        expect(
+          () => tdfService.parse(doc),
+          throwsA(
+            isA<TdfException>().having(
+              (error) => error.kind,
+              'kind',
+              TdfErrorKind.missingVersionHeader,
+            ),
+          ),
+          reason: 'Document must fail with MissingVersionHeader: $doc',
+        );
+      }
+
+      // Oversized byte input checked BEFORE UTF-8 decoding:
+      final overLimitBytes = Uint8List(maxTdfFileBytes + 1);
+      overLimitBytes.fillRange(0, maxTdfFileBytes, 0x20);
+      overLimitBytes[maxTdfFileBytes] = 0xFF;
+      expect(
+        () => tdfService.parseBytes(overLimitBytes),
+        throwsA(
+          isA<TdfException>()
+              .having((error) => error.kind, 'kind', TdfErrorKind.limitExceeded)
+              .having((error) => error.line, 'line', 1),
+        ),
+        reason: 'parseBytes must enforce MAX_FILE_BYTES before UTF-8 decoding',
+      );
+
+      // Malformed UTF-8 reports exact 1-based physical line number:
+      final badUtf8Line1 = Uint8List.fromList(<int>[0xFF, 0x0A]);
+      final badUtf8Line2 = Uint8List.fromList(<int>[
+        ...utf8.encode('tdf 0.8.0\n'),
+        0xC3,
+        0x28,
+        0x0A,
+      ]);
+      final badUtf8Line4 = Uint8List.fromList(<int>[
+        ...utf8.encode('tdf 0.8.0\r\n# line 2\n# line 3\n# '),
+        0xE2,
+        0x28,
+        0xA1,
+      ]);
+
+      for (final (bytes, expectedLine) in <(Uint8List, int)>[
+        (badUtf8Line1, 1),
+        (badUtf8Line2, 2),
+        (badUtf8Line4, 4),
+      ]) {
+        expect(
+          () => tdfService.parseBytes(bytes),
+          throwsA(
+            isA<TdfException>()
+                .having(
+                  (error) => error.kind,
+                  'kind',
+                  TdfErrorKind.unexpectedToken,
+                )
+                .having((error) => error.line, 'line', expectedLine),
+          ),
+          reason:
+              'Malformed UTF-8 on line $expectedLine must throw UnexpectedToken at line $expectedLine',
+        );
+      }
+    });
+
+    test('parses and serializes all due modifier combinations including local schedule anchors (TDF-DIR-004)', () {
+      const dueVariantsDoc = '''
+tdf 0.8.0
 
 task 111111OkD2 {
-    name        "Prerequisite Recurring Task"
-    created     2026-11-01 08:00
-    queued      2026-11-01 08:00
-    completions 3
-    labels      cdev00OkD2
-    repeat      1 days 09:30
+    name    "Date-only due"
+    created 2026-11-01 08:00
+    due     2026-11-20
 }
 
 task 222222OkD2 {
-    name      "Dependent Task"
-    created   2026-11-01 09:00
-    queued    2026-11-01 09:00
-    blocked   999999OkD2:1 111111OkD2:2 111111OkD2:5
-    repeat    2 weeks 14:15:30
+    name    "Date-only due with date-only anchor and numeric-looking note"
+    created 2026-11-01 08:00
+    due     2026-11-20 anchor 2026-11-21 "18:00"
 }
 
 task 333333OkD2 {
-    name      "Suspended Forever Task"
-    created   2026-11-01 10:00
-    suspended forever
-    repeat    1 months 00:00:00
+    name      "Full due with anchor, passive, note, and suspended > due"
+    created   2026-11-01 08:00
+    suspended 2026-03-05 12:00:00 "Suspended past due is valid"
+    due       2026-02-28 17:00 anchor 2026-01-31 18:00:05 passive "Month-end\\ncutoff"
 }
 ''';
 
-      final board = tdfService.parse(advanced050Tdf, evaluationTime: fixedDate);
-      expect(board.deletedBlock.generation, equals(2));
-      expect(board.deletedBlock.tasks.length, equals(3));
-      final recA = board.deletedBlock.findTaskRecord('AAAAAAAAAA')!;
-      expect(recA.deletedAt, equals(DateTime.utc(2026, 11, 1, 12, 30, 0)));
-      expect(recA.completionsCheckpoint, equals(7));
-      final recZ = board.deletedBlock.findTaskRecord('ZZZZZZZZZZ')!;
-      expect(recZ.deletedAt, equals(DateTime.utc(2026, 11, 1, 0, 0, 0)));
-      expect(recZ.completionsCheckpoint, equals(7));
+      final board = tdfService.parse(dueVariantsDoc, evaluationTime: fixedDate);
 
-      final task1 = board.findTask('111111OkD2')!;
-      expect(task1.completions, equals(3));
+      final task1 = board.findTask('111111OkD2');
+      expect(task1?.dueAt, equals(DateTime.utc(2026, 11, 20, 0, 0, 0)));
+      expect(task1?.dueAnchor, isNull);
+      expect(task1?.isDuePassive, isFalse);
+      expect(task1?.dueNote, isNull);
+
+      final task2 = board.findTask('222222OkD2');
+      expect(task2?.dueAt, equals(DateTime.utc(2026, 11, 20, 0, 0, 0)));
+      expect(task2?.dueAnchor, equals(TdfLocalDateTime(2026, 11, 21, 0, 0, 0)));
+      expect(task2?.isDuePassive, isFalse);
+      expect(task2?.dueNote, equals('18:00'));
+
+      final task3 = board.findTask('333333OkD2');
+      expect(task3?.dueAt, equals(DateTime.utc(2026, 2, 28, 17, 0, 0)));
+      expect(task3?.dueAnchor, equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 5)));
+      expect(task3?.isDuePassive, isTrue);
+      expect(task3?.dueNote, equals('Month-end\ncutoff'));
+
+      final serialized = tdfService.serialize(board);
+      expect(serialized, contains('    due     2026-11-20 00:00:00\n'));
       expect(
-        task1.repeatRule,
-        equals(
-          const TaskRepeatRule(
-            count: 1,
-            unit: RepeatUnit.days,
-            clock: TdfRepeatClock(hour: 9, minute: 30),
-          ),
+        serialized,
+        contains(
+          '    due     2026-11-20 00:00:00 anchor 2026-11-21 00:00:00 "18:00"\n',
+        ),
+      );
+      expect(
+        serialized,
+        contains(
+          '    due       2026-02-28 17:00:00 anchor 2026-01-31 18:00:05 passive "Month-end\\ncutoff"\n',
         ),
       );
 
-      final task2 = board.findTask('222222OkD2')!;
+      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
+      expect(reparsed.findTask('111111OkD2'), equals(task1));
+      expect(reparsed.findTask('222222OkD2'), equals(task2));
+      expect(reparsed.findTask('333333OkD2'), equals(task3));
+    });
+
+    test('preserves explicit epoch modified (1970-01-01 00:00) vs omitted modified, normalizes colors/decimals/conditions, and supports disjoint namespaces (TDF-MODEL-002, TDF-MODEL-006, TDF-SER-001)', () {
+      const doc =
+          'tdf 0.8.0 # version\u00A0comment\r\n'
+          'deleted {\r\n'
+          '  generation 3\r\n'
+          '}\r\n'
+          'queue {\r\n'
+          '  modified 2026-11-01 08:00:05\r\n'
+          '}\r\n'
+          'label 8jKaCdOkD2 {\r\n'
+          '  name \'Raw "quote" and \\\\backslash\'\r\n'
+          '  color "#4caf50"\r\n'
+          '  modified 1970-01-01 00:00\r\n'
+          '  condition location 8jKaCdOkD2\r\n'
+          '  condition {\r\n'
+          '    location 8jKaCdOkD2\r\n'
+          '  }\r\n'
+          '}\r\n'
+          'label omitMdOkD2 {\r\n'
+          '  name "Omitted Modified Label"\r\n'
+          '}\r\n'
+          'location 8jKaCdOkD2 {\r\n'
+          '  name "Shared ID Location"\r\n'
+          '  coordinates -0.000 0011.032800\r\n'
+          '  radius 0150.00\r\n'
+          '  modified 1970-01-01 00:00\r\n'
+          '}\r\n'
+          'location omitLcOkD2 {\r\n'
+          '  name "Omitted Modified Location"\r\n'
+          '  coordinates 50.9787 11.0328\r\n'
+          '  radius 25.50\r\n'
+          '}\r\n'
+          'task 8jKaCdOkD2 {\r\n'
+          '  name "Shared ID Task"\r\n'
+          '  created 2026-11-01 08:00\r\n'
+          '  modified 1970-01-01 00:00\r\n'
+          '  labels 8jKaCdOkD2\r\n'
+          '  subtasks {\r\n'
+          '    step true "All true uses W_bool = 4"\r\n'
+          '  }\r\n'
+          '}\r\n';
+
+      final board = tdfService.parse(doc, evaluationTime: fixedDate);
+      final epochLabel = board.findLabel('8jKaCdOkD2');
+      final omittedLabel = board.findLabel('omitMdOkD2');
+      final epochLocation = board.findLocation('8jKaCdOkD2');
+      final omittedLocation = board.findLocation('omitLcOkD2');
+      final epochTask = board.findTask('8jKaCdOkD2');
+
+      expect(epochLabel?.color, equals('#4CAF50'));
+      expect(epochLabel?.modifiedAt, equals(DateTime.utc(1970, 1, 1)));
+      expect(omittedLabel?.modifiedAt, isNull);
       expect(
-        task2.dependencies,
-        equals(const [
-          TdfTaskDependency(taskId: '111111OkD2', requiredCompletion: 5),
-          TdfTaskDependency(taskId: '999999OkD2', requiredCompletion: 1),
-        ]),
-        reason: 'Duplicate prerequisite targets must retain greatest requiredCompletion and sort by ascending target ID',
+        omittedLabel?.effectiveModifiedAt,
+        equals(DateTime.utc(1970, 1, 1)),
       );
-      expect(
-        board.blocked.map((task) => task.id),
-        equals(['222222OkD2', '333333OkD2']),
-        reason: '222222OkD2 requires 5 completions of 111111OkD2 (currently 3) and 333333OkD2 is suspended forever',
-      );
-      expect(board.findTask('333333OkD2')!.isSuspendedForever, isTrue);
+
+      expect(epochLocation?.latitudeText, equals('0'));
+      expect(epochLocation?.longitudeText, equals('11.0328'));
+      expect(epochLocation?.radiusText, equals('150'));
+      expect(epochLocation?.modifiedAt, equals(DateTime.utc(1970, 1, 1)));
+      expect(omittedLocation?.modifiedAt, isNull);
+      expect(omittedLocation?.radiusText, equals('25.5'));
+
+      expect(epochTask?.modifiedAt, equals(DateTime.utc(1970, 1, 1)));
 
       final serialized = tdfService.serialize(board);
       expect(
         serialized,
         contains(
           'deleted {\n'
-          '    generation 2\n'
-          '    task AAAAAAAAAA 2026-11-01 12:30:00 7\n'
-          '    task MMMMMMMMMM 2026-11-01 08:00:00\n'
-          '    task ZZZZZZZZZZ 2026-11-01 00:00:00 7\n'
-          '    label LLLLLLLLL1 2026-11-01 10:00:05\n'
-          '    label LLLLLLLLL2 2026-11-01 09:00:00\n'
-          '}',
+          '    generation 3\n'
+          '}\n\n'
+          'queue {\n'
+          '    modified 2026-11-01 08:00:05\n'
+          '}\n',
         ),
-        reason: 'deleted block must emit task records before label records, sorted by ascending ASCII ID, with explicit seconds and omitting zero checkpoints',
+        reason: 'Non-zero generation deleted block and non-epoch empty queue block must be preserved',
       );
-      expect(serialized, contains('    completions 3\n'));
-      expect(serialized, contains('    repeat      1 days 09:30\n'));
-      expect(
-        serialized,
-        contains('    blocked 111111OkD2:5 999999OkD2\n'),
-        reason: 'Canonical blocked directive must sort by ascending ASCII target ID and omit :1 suffix',
-      );
-      expect(serialized, contains('    repeat  2 weeks 14:15:30\n'));
-      expect(serialized, contains('    suspended forever\n'));
-      expect(
-        serialized,
-        contains('    repeat    1 months\n'),
-        reason: 'Default midnight clock 00:00:00 must be omitted canonically',
-      );
-    });
-
-    test('supports bare words, double-quoted escapes, single-quoted raw strings, inline comments with U+00A0, CRLF, and multiple condition blocks', () {
-      const validDocument =
-          'tdf 0.5.0 # version\u00A0comment\r\n'
-          'queue {\r\n'
-          '  modified 2026-11-01 08:00:05\r\n'
-          '  task tax260OkD2\r\n'
-          '}\r\n'
-          'label cdev00OkD2 { # comment\r\n'
-          '  name \'Raw "quote" and \\\\backslash\'\r\n'
-          '  note "Line1\\nLine2\\tTabbed\\rReturn\\\\Slash\\"Quote"\r\n'
-          '  condition {\r\n'
-          '    day mon\r\n'
-          '  }\r\n'
-          '  condition {\r\n'
-          '    day wed fri\r\n'
-          '    time 09:00 17:00\r\n'
-          '  }\r\n'
-          '}#comment\r\n'
-          'task tax260OkD2 {#comment\r\n'
-          '  name "File taxes #2026"#comment\r\n'
-          '  created 2026-11-01#inline_date_comment\r\n'
-          '  queued 2026-11-01 08:00:05\r\n'
-          '  labels cdev00OkD2#inline_id_comment\r\n'
-          '  subtasks {\r\n'
-          '    step false "Collect receipts"\r\n'
-          '  }\r\n'
-          '}';
-
-      final board = tdfService.parse(validDocument, evaluationTime: fixedDate);
-      expect(board.labels.single.id, equals('cdev00OkD2'));
-      expect(board.labels.single.conditions.length, equals(3));
-      expect(board.labels.single.name, equals('Raw "quote" and \\\\backslash'));
-      expect(
-        board.labels.single.note,
-        equals('Line1\nLine2\tTabbed\rReturn\\Slash"Quote'),
-      );
-
-      final serialized = tdfService.serialize(board);
       expect(
         serialized,
         contains(
-          '    condition {\n'
-          '        day  mon\n'
-          '        day  wed fri\n'
-          '        time 09:00 17:00\n'
-          '    }\n',
+          'label 8jKaCdOkD2 {\n'
+          '    name      "Raw \\"quote\\" and \\\\\\\\backslash"\n'
+          '    color     "#4CAF50"\n'
+          '    modified  1970-01-01 00:00\n'
+          '    condition location 8jKaCdOkD2\n'
+          '}\n',
         ),
-        reason: 'Multiple condition blocks must serialize to one canonical condition block preserving rule order within each group',
+        reason: 'Explicit epoch modified and coalesced single location condition (W_dir = 9) must be emitted on label',
       );
+      expect(
+        serialized,
+        contains(
+          'label omitMdOkD2 {\n'
+          '    name "Omitted Modified Label"\n'
+          '}\n',
+        ),
+      );
+      expect(
+        serialized,
+        contains(
+          'location 8jKaCdOkD2 {\n'
+          '    name        "Shared ID Location"\n'
+          '    coordinates 0 11.0328\n'
+          '    radius      150\n'
+          '    modified    1970-01-01 00:00\n'
+          '}\n',
+        ),
+      );
+      expect(
+        serialized,
+        contains('        step true "All true uses W_bool = 4"\n'),
+        reason: 'W_bool must be 4 when every step in subtasks is true',
+      );
+
       final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
-      expect(reparsed.labels.single.conditions.length, equals(3));
+      expect(reparsed.findLabel('8jKaCdOkD2')?.modifiedAt, isNotNull);
+      expect(reparsed.findLabel('omitMdOkD2')?.modifiedAt, isNull);
+      expect(reparsed.findLocation('8jKaCdOkD2')?.modifiedAt, isNotNull);
+      expect(reparsed.findLocation('omitLcOkD2')?.modifiedAt, isNull);
+      expect(reparsed.findTask('8jKaCdOkD2')?.modifiedAt, isNotNull);
     });
 
-    test('accepts tdf 0.7.0, tdf 0.6.0, tdf 0.5.1, and tdf 0.5.0 with zero blocks as valid empty TaskBoard and rejects legacy versions and noncanonical IDs during normal loading', () {
-      expect(
-        TdfService.supportedVersion,
-        equals('0.7.0'),
-        reason: 'Supported TDF version must be 0.7.0',
-      );
-      expect(TdfService.maxLinksPerLabel, equals(20));
-      expect(TdfService.maxHistoryPerTask, equals(500));
-      expect(TdfService.maxStmtsPerBlock, equals(1024));
-      expect(tdfService.parse('tdf 0.7.0\n').focus, isEmpty);
-      expect(tdfService.parse('tdf 0.6.0\n').focus, isEmpty);
-      expect(tdfService.parse('tdf 0.5.1\n').focus, isEmpty);
-      expect(tdfService.parse('tdf 0.5.0\n').focus, isEmpty);
-      expect(
-        tdfService
-            .parse('   \t  \n# only comment\r\ntdf 0.7.0  # version\n')
-            .focus,
-        isEmpty,
-      );
-      expect(tdfService.serialize(TaskBoard.empty()), equals('tdf 0.7.0\n'));
-
-      for (final legacyVersion in ['0.4.0', '0.3.0', '0.2.0', '0.1.0']) {
-        expect(
-          () => tdfService.parse('tdf $legacyVersion\n'),
-          throwsA(
-            isA<TdfException>().having(
-              (error) => error.kind,
-              'kind',
-              TdfErrorKind.unsupportedVersion,
-            ),
-          ),
-          reason:
-              'Normal loading must reject older version $legacyVersion with UnsupportedVersion',
+    test('redacts sensitive notes, links, history, origins, and locations from AppLogger during parse and serialize', () {
+      AppLogger.clear();
+      AppLogger.setEnabled(true, minimumLevel: LogLevel.debug);
+      try {
+        final board = tdfService.parse(
+          _vector4TiertaskTdf,
+          evaluationTime: fixedDate,
+          timeZone: TdfTimeZoneContext.europeBerlin,
         );
+        tdfService.serialize(board);
+        final logs = AppLogger.fullLogText;
+        expect(logs, contains('version=0.8.0'));
+        for (final secret in <String>[
+          'Erfurt, Germany',
+          '50.9787',
+          'HOME-42',
+          'grafana.example.com',
+          'Confirmed OEM stock',
+          'Wait for blade delivery',
+          'Before first frost',
+        ]) {
+          expect(
+            logs,
+            isNot(contains(secret)),
+            reason: 'AppLogger must never emit sensitive TDF payload "$secret"',
+          );
+        }
+      } finally {
+        AppLogger.setEnabled(false);
+        AppLogger.clear();
       }
-
-      final invalidIdDocuments = <String>[
-        'tdf 0.5.1\ntask t001 {\n  name "Noncanonical ID"\n  created 2026-11-01\n}\n',
-        'tdf 0.5.1\ntask t_8jKaCd_OkD2 {\n  name "13-char ID"\n  created 2026-11-01\n}\n',
-        'tdf 0.5.1\nlabel home {\n  name "Short label ID"\n}\n',
-        'tdf 0.5.1\ntask "8jKaCdOkD2" {\n  name "Quoted task ID"\n  created 2026-11-01\n}\n',
-        'tdf 0.5.1\nlabel "4x9p2mOkD2" {\n  name "Quoted label ID"\n}\n',
-        'tdf 0.5.1\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  labels "4x9p2mOkD2"\n}\n',
-        'tdf 0.5.1\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked "3nQp7ROkB8"\n}\n',
-        'tdf 0.5.1\ntask 8jKaCdOkD2 {\n  name "T"\n  created 2026-11-01\n  blocked t001:2\n}\n',
-      ];
-
-      for (final doc in invalidIdDocuments) {
-        expect(
-          () => tdfService.parse(doc, evaluationTime: fixedDate),
-          throwsA(
-            isA<TdfException>().having(
-              (error) => error.kind,
-              'kind',
-              TdfErrorKind.invalidIdentifier,
-            ),
-          ),
-          reason:
-              'Noncanonical or quoted entity token must throw invalidIdentifier during normal loading: $doc',
-        );
-      }
-    });
-
-    test('converts tdf 0.5.0 in memory on load per Section 10.6, preserving queued > created into modified, synthesizing omitted queue, and stripping queued on serialize', () {
-      const tdf050WithOmittedQueue = '''
-tdf 0.5.0
-
-label explicOkD2 {
-    name     "Explicit Label"
-    modified 2026-11-01 09:15:30
-}
-
-label fallbkOkD2 {
-    name "Fallback Label"
-}
-
-task explicOkD2 {
-    name     "Explicit Modified Task"
-    created  2026-11-01 08:00
-    queued   2026-11-01 08:30
-    modified 2026-11-01 10:45:12
-    labels   explicOkD2
-}
-
-task fallbkOkD2 priority {
-    name     "Fallback Modified Task"
-    created  2026-11-01 08:00
-    queued   2026-11-01 09:20
-    labels   fallbkOkD2
-}
-
-task somdayOkD2 {
-    name    "Unqueued Someday Task"
-    created 2026-11-01 07:00
-}
-''';
-
-      final board = tdfService.parse(
-        tdf050WithOmittedQueue,
-        evaluationTime: fixedDate,
-      );
-      expect(
-        board.labels[0].effectiveModifiedAt,
-        equals(DateTime.utc(2026, 11, 1, 9, 15, 30)),
-      );
-      expect(
-        board.labels[1].effectiveModifiedAt,
-        equals(DateTime.utc(1970, 1, 1)),
-        reason: 'Label without modified must fall back to fixed UTC epoch 1970-01-01 00:00:00 per Section 6.7.2',
-      );
-      expect(
-        board.findTask('fallbkOkD2')!.modifiedAt,
-        equals(DateTime.utc(2026, 11, 1, 9, 20)),
-        reason: 'Section 10.6 step 3 must set task.modified to max(created, queued, finished) when modified was omitted and queued > created',
-      );
-      expect(
-        board.queueBlock.taskIds,
-        equals(['fallbkOkD2', 'explicOkD2']),
-        reason: 'Section 10.6 step 2 must construct omitted 0.5.0 queue with priority tasks first, then regular tasks by ascending queued',
-      );
-      expect(
-        board.queueBlock.modifiedAt,
-        equals(DateTime.utc(2026, 11, 1, 10, 45, 12)),
-        reason: 'Constructed 0.5.0 queue.modified must equal greatest 0.5.0 effective revision among queued tasks',
-      );
-      expect(board.someday.map((task) => task.id), equals(['somdayOkD2']));
-
-      final serialized = tdfService.serialize(board);
-      expect(serialized, startsWith('tdf 0.7.0\n'));
-      expect(
-        serialized.contains('\n    queued '),
-        isFalse,
-        reason: 'Serializing a converted 0.5.0 document must emit tdf 0.7.0 with zero queued directives',
-      );
-    });
-
-    test('parses and serializes repeatable link directives in canonical order with escaped characters', () {
-      const tdfWithLinks = '''
-tdf 0.5.0
-
-queue {
-    modified 2026-11-01 08:30:00
-    task link01OkD2
-}
-
-task link01OkD2 {
-    name    "Upgrade database"
-    created 2026-11-01 08:00
-    queued  2026-11-01 08:30
-    repeat  1 weeks 08:30
-    link    "Runbook \\"Prod\\"" "https://example.com/docs/db?env=prod&v=1"
-    link    'Local Notes' 'obsidian://open?vault=Ops&file=DB'
-    link    "Mail Team" "mailto:dba@example.com"
-    condition day mon
-    subtasks {
-        step false "Backup snapshot"
-    }
-}
-''';
-
-      final board = tdfService.parse(tdfWithLinks, evaluationTime: fixedDate);
-      final task = board.findTask('link01OkD2')!;
-      expect(task.links.length, equals(3));
-
-      final serialized = tdfService.serialize(board);
-      final repeatIndex = serialized.indexOf('    repeat    1 weeks 08:30\n');
-      final firstLinkIndex = serialized.indexOf(
-        '    link      "Runbook \\"Prod\\"" "https://example.com/docs/db?env=prod&v=1"\n',
-      );
-      final conditionIndex = serialized.indexOf('    condition day mon\n');
-      final subtasksIndex = serialized.indexOf('    subtasks {\n');
-
-      expect(repeatIndex, greaterThan(0));
-      expect(firstLinkIndex, greaterThan(repeatIndex));
-      expect(conditionIndex, greaterThan(firstLinkIndex));
-      expect(subtasksIndex, greaterThan(conditionIndex));
-
-      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
-      expect(reparsed.findTask('link01OkD2')!.links, equals(task.links));
-    });
-
-    test('enforces Section 2.8 <uri> error precedence: LimitExceeded before InvalidUri when > 2048 scalars and containing a control character', () {
-      final overLimitWithControl = 'https://example.com/\t${'a' * 2048}';
-      final doc =
-          '''
-tdf 0.6.0
-
-task link02OkD2 {
-    name    "Precedence test"
-    created 2026-11-01 08:00
-    link    "Doc" "$overLimitWithControl"
-}
-''';
-
-      expect(
-        () => tdfService.parse(doc, evaluationTime: fixedDate),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.limitExceeded,
-          ),
-        ),
-        reason: 'Section 2.8 requires EmptyText -> LimitExceeded (> 2048 scalars) -> InvalidUri (control char / scheme)',
-      );
-    });
-
-    test('parses and serializes TDF 0.7.0 label links, repeat lead days, suspended/due notes, passive due, and history entries', () {
-      const doc070 = '''
-tdf 0.7.0
-
-label 4x9p2mOkD2 scoped {
-    name     "Context Hub"
-    modified 2026-11-01 08:00
-    link     "Repo" "https://github.com/example/repo"
-}
-
-task 8jKaCdOkD2 {
-    name      "Prepare release"
-    created   2026-11-01 08:00
-    modified  2026-11-01 09:00
-    repeat    1 months 08:30 lead 4 days
-    labels    4x9p2mOkD2
-    suspended 2026-11-10 08:30 "Wait until Monday\\nCheck CI"
-    due       2026-11-14 17:00 passive "Soft cutoff"
-    history   2026-11-01 09:00 "Drafted checklist"
-    history   2026-11-01 08:30 "Created branch"
-    history   2026-11-01 09:00 "Drafted checklist"
-}
-''';
-
-      final board = tdfService.parse(doc070, evaluationTime: fixedDate);
-      final label = board.findLabel('4x9p2mOkD2')!;
-      expect(
-        label.links,
-        equals(const [
-          TaskLink(title: 'Repo', uri: 'https://github.com/example/repo'),
-        ]),
-      );
-      final task = board.findTask('8jKaCdOkD2')!;
-      expect(
-        task.repeatRule,
-        equals(
-          const TaskRepeatRule(
-            count: 1,
-            unit: RepeatUnit.months,
-            clock: TdfRepeatClock(hour: 8, minute: 30),
-            leadDays: 4,
-          ),
-        ),
-      );
-      expect(task.suspendedNote, equals('Wait until Monday\nCheck CI'));
-      expect(task.isDuePassive, isTrue);
-      expect(task.dueNote, equals('Soft cutoff'));
-      expect(
-        task.history,
-        equals([
-          TaskHistoryEntry(
-            timestampUtc: DateTime.utc(2026, 11, 1, 8, 30),
-            text: 'Created branch',
-          ),
-          TaskHistoryEntry(
-            timestampUtc: DateTime.utc(2026, 11, 1, 9, 0),
-            text: 'Drafted checklist',
-          ),
-        ]),
-        reason: 'History entries must be canonically sorted and deduplicated',
-      );
-
-      final serialized = tdfService.serialize(board);
-      final reparsed = tdfService.parse(serialized, evaluationTime: fixedDate);
-      expect(reparsed.findLabel('4x9p2mOkD2'), equals(label));
-      expect(reparsed.findTask('8jKaCdOkD2'), equals(task));
     });
   });
 }

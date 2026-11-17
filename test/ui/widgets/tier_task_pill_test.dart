@@ -39,7 +39,7 @@ void main() {
     'Task pill displays darker right-side indicators for priority, repeat, and subtasks regardless of subtask completion state, distinct from action button icons',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:10:00
@@ -51,7 +51,6 @@ queue {
 task all000OkD2 priority {
   name "Priority Repeating Checklist Task"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   repeat 1 weeks
   subtasks {
     step false "Unchecked step"
@@ -61,7 +60,6 @@ task all000OkD2 priority {
 task donesbOkD2 {
   name "All Checked Subtasks Task"
   created 2026-11-01 08:05
-  queued 2026-11-01 08:05
   subtasks {
     step true "Already completed step"
   }
@@ -69,7 +67,6 @@ task donesbOkD2 {
 task plain0OkD2 {
   name "Plain Task Without Indicators"
   created 2026-11-01 08:10
-  queued 2026-11-01 08:10
 }
 ''';
       await _pumpSeededApp(tester, seededTdf);
@@ -205,7 +202,7 @@ task plain0OkD2 {
     'Closing, downgrading, and restoring tasks animate directionally, slide lower tasks upward, and animate auto-pulled upgraded tasks into the tier',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:15:00
@@ -218,12 +215,10 @@ queue {
 task f10000OkD2 {
   name "Focus Task 1"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
 }
 task f20000OkD2 {
   name "Focus Task 2"
   created 2026-11-01 08:05
-  queued 2026-11-01 08:05
   subtasks {
     step false "Subtask inside Focus 2"
   }
@@ -231,24 +226,20 @@ task f20000OkD2 {
 task f30000OkD2 {
   name "Focus Task 3"
   created 2026-11-01 08:10
-  queued 2026-11-01 08:10
 }
 task r10000OkD2 {
   name "Ready Task 1"
   created 2026-11-01 08:15
-  queued 2026-11-01 08:15
 }
 task c10000OkD2 {
   name "Completed Task 1"
   created 2026-10-30 08:00
-  queued 2026-10-30 08:00
   finished 2026-10-31 09:00
   completions 1
 }
 task c20000OkD2 {
   name "Completed Task 2"
   created 2026-10-29 08:00
-  queued 2026-10-29 08:00
   finished 2026-10-30 09:00
   completions 1
 }

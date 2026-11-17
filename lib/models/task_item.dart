@@ -198,7 +198,10 @@ class TaskRepeatRule {
   });
 
   /// Maximum allowed recurrence interval or lead-window day count (`3650`).
-  static const int maxRepeatCount = 3650;
+  static const int maxRepeatCount = maxTdfRepeatCount;
+
+  /// Maximum calendar days between `0001-01-01` and `9999-12-31` (`3,652,058` days).
+  static const int _maxProlepticDaySpan = 3652058;
 
   /// Intended local wall-clock time (`00:00:00` default) for recurring occurrences.
   final TdfRepeatClock clock;
@@ -211,6 +214,67 @@ class TaskRepeatRule {
 
   /// Time unit (`days`, `weeks`, or `months`) for the recurrence interval.
   final RepeatUnit unit;
+
+  /// Computes the next Mode 2 schedule-anchored occurrence (`newDueUtc`, `newAnchor`, `newSuspendedUtc`, `stepsK`) per `TDF-CAL-003`.
+  ({
+    DateTime newDueUtc,
+    TdfLocalDateTime newAnchor,
+    DateTime? newSuspendedUtc,
+    int stepsK,
+  })
+  computeNextMode2Schedule({
+    required DateTime completedAtUtc,
+    required DateTime oldDueUtc,
+    TdfLocalDateTime? oldAnchor,
+    required TdfTimeZoneContext timeZone,
+  }) {
+    final nowUtc = TaskItem.normalizeTimestamp(completedAtUtc);
+    final oldDue = TaskItem.normalizeTimestamp(oldDueUtc);
+    if (!TdfCalendar.isWithinTimestampBounds(nowUtc) ||
+        !TdfCalendar.isWithinTimestampBounds(oldDue)) {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Recurrence input timestamp is outside 0001..9999 UTC.',
+      );
+    }
+    if (!timeZone.isAvailable) {
+      throw const TdfContextException(
+        kind: TdfContextOutcomeKind.timeZoneContextRequired,
+        message: 'Time zone context is required for Mode 2 recurrence.',
+      );
+    }
+    final anchor =
+        oldAnchor ??
+        TdfLocalDateTime.fromWallClock(timeZone.toLocalWallClock(oldDue));
+    final referenceUtc = oldDue.isAfter(nowUtc) ? oldDue : nowUtc;
+    final nextDue = unit == RepeatUnit.months
+        ? _advanceMonthlyMode2Due(
+            oldDueUtc: oldDue,
+            anchor: anchor,
+            referenceUtc: referenceUtc,
+            timeZone: timeZone,
+          )
+        : _advanceDayOrWeekMode2Due(
+            anchor: anchor,
+            referenceUtc: referenceUtc,
+            timeZone: timeZone,
+          );
+    final newSuspendedUtc = _computeMode2WakeUpInstant(
+      targetYear: nextDue.targetYear,
+      targetMonth: nextDue.targetMonth,
+      targetDay: nextDue.targetDay,
+      newDueUtc: nextDue.newDueUtc,
+      nowUtc: nowUtc,
+      timeZone: timeZone,
+    );
+    return (
+      newDueUtc: nextDue.newDueUtc,
+      newAnchor: nextDue.newAnchor,
+      newSuspendedUtc: newSuspendedUtc,
+      stepsK: nextDue.stepsK,
+    );
+  }
 
   /// Returns a copy of this recurrence rule with updated fields.
   TaskRepeatRule copyWith({
@@ -227,11 +291,7 @@ class TaskRepeatRule {
     );
   }
 
-  /// Computes the next UTC due timestamp per `TDF_SPEC.md` Section 6.10.3:
-  /// 1. Converts [completedAtUtc] into `localNow` in [timeZone].
-  /// 2. Adds the interval to `localNow`'s calendar date.
-  /// 3. Combines the target local date with [clock] and resolves to UTC via Section 6.10.2.
-  /// 4. Requires the resulting UTC instant to be strictly later than [completedAtUtc].
+  /// Computes the Mode 1 completion-relative UTC deferral timestamp (`due` omitted) per `TDF-CAL-002`.
   DateTime nextDueUtc({
     required DateTime completedAtUtc,
     required TdfTimeZoneContext timeZone,
@@ -273,250 +333,6 @@ class TaskRepeatRule {
       throw const FormatException('InvalidTimestamp');
     }
     return resolvedUtc;
-  }
-
-  /// Computes the legacy `0.6.0` schedule-anchored occurrence (`newDueUtc`, `newSuspendedUtc`, `stepsK`)
-  /// using `oldSuspendedUtc` month-end clamping (`spec/TDF_SPEC_0.6.0.md` Section 6.10.3 Mode 2).
-  ({DateTime newDueUtc, DateTime newSuspendedUtc, int stepsK})
-  nextLegacy060ScheduleAnchoredOccurrence({
-    required DateTime completedAtUtc,
-    required DateTime oldDueUtc,
-    DateTime? oldSuspendedUtc,
-    bool isSuspendedForever = false,
-    required TdfTimeZoneContext timeZone,
-  }) {
-    final normalizedCompletionUtc = TaskItem.normalizeTimestamp(completedAtUtc);
-    final normalizedOldDue = TaskItem.normalizeTimestamp(oldDueUtc);
-    final oldDueLocal = timeZone.toLocalWallClock(normalizedOldDue);
-    final nextDue = _advanceLegacyScheduleDue(
-      oldDueLocal: oldDueLocal,
-      normalizedCompletionUtc: normalizedCompletionUtc,
-      timeZone: timeZone,
-    );
-    final targetDueLocal = nextDue.targetDueLocal;
-    final newDueUtc = nextDue.newDueUtc;
-    final stepsK = nextDue.stepsK;
-
-    final normalizedOldSuspended = oldSuspendedUtc == null
-        ? null
-        : TaskItem.normalizeTimestamp(oldSuspendedUtc);
-    final hasLeadWindow =
-        normalizedOldSuspended != null &&
-        !isSuspendedForever &&
-        normalizedOldSuspended != TaskItem.defaultSuspendedAt &&
-        normalizedOldSuspended.isBefore(normalizedOldDue);
-
-    if (!hasLeadWindow) {
-      final candidateSuspended = timeZone.resolveLocalToUtc(
-        targetDueLocal.year,
-        targetDueLocal.month,
-        targetDueLocal.day,
-        clock.hour,
-        clock.minute,
-        clock.second,
-      );
-      if (!TdfCalendar.isWithinTimestampBounds(candidateSuspended)) {
-        throw const FormatException('InvalidTimestamp');
-      }
-      final clampedSuspended = candidateSuspended.isBefore(newDueUtc)
-          ? candidateSuspended
-          : newDueUtc;
-      return (
-        newDueUtc: newDueUtc,
-        newSuspendedUtc: clampedSuspended,
-        stepsK: stepsK,
-      );
-    }
-
-    final oldSuspLocal = timeZone.toLocalWallClock(normalizedOldSuspended);
-    final rawTargetSuspLocal = _advanceLocalDate(
-      oldSuspLocal,
-      stepsK,
-      oldSuspLocal.hour,
-      oldSuspLocal.minute,
-      oldSuspLocal.second,
-    );
-    var targetSuspDay = rawTargetSuspLocal.day;
-    if (unit == RepeatUnit.months &&
-        oldSuspLocal.year == oldDueLocal.year &&
-        oldSuspLocal.month == oldDueLocal.month &&
-        oldSuspLocal.day < oldDueLocal.day) {
-      final dEnd = TdfCalendar.daysInMonth(
-        targetDueLocal.year,
-        targetDueLocal.month,
-      );
-      if (rawTargetSuspLocal.day == dEnd && targetDueLocal.day == dEnd) {
-        targetSuspDay = math.max(
-          1,
-          dEnd - (oldDueLocal.day - oldSuspLocal.day),
-        );
-      }
-    }
-
-    final sameLocalDate =
-        rawTargetSuspLocal.year == targetDueLocal.year &&
-        rawTargetSuspLocal.month == targetDueLocal.month &&
-        targetSuspDay == targetDueLocal.day;
-    final repeatClockSeconds =
-        clock.hour * 3600 + clock.minute * 60 + clock.second;
-    final dueClockSeconds =
-        oldDueLocal.hour * 3600 + oldDueLocal.minute * 60 + oldDueLocal.second;
-    final useRepeatClock =
-        !clock.isMidnight &&
-        !(sameLocalDate && repeatClockSeconds >= dueClockSeconds);
-    final chosenHour = useRepeatClock ? clock.hour : oldSuspLocal.hour;
-    final chosenMinute = useRepeatClock ? clock.minute : oldSuspLocal.minute;
-    final chosenSecond = useRepeatClock ? clock.second : oldSuspLocal.second;
-
-    var candidateSuspended = timeZone.resolveLocalToUtc(
-      rawTargetSuspLocal.year,
-      rawTargetSuspLocal.month,
-      targetSuspDay,
-      chosenHour,
-      chosenMinute,
-      chosenSecond,
-    );
-    if (sameLocalDate &&
-        useRepeatClock &&
-        !candidateSuspended.isBefore(newDueUtc)) {
-      candidateSuspended = timeZone.resolveLocalToUtc(
-        rawTargetSuspLocal.year,
-        rawTargetSuspLocal.month,
-        targetSuspDay,
-        oldSuspLocal.hour,
-        oldSuspLocal.minute,
-        oldSuspLocal.second,
-      );
-    }
-    if (!TdfCalendar.isWithinTimestampBounds(candidateSuspended)) {
-      throw const FormatException('InvalidTimestamp');
-    }
-    final clampedSuspended = candidateSuspended.isBefore(newDueUtc)
-        ? candidateSuspended
-        : newDueUtc;
-    return (
-      newDueUtc: newDueUtc,
-      newSuspendedUtc: clampedSuspended,
-      stepsK: stepsK,
-    );
-  }
-
-  /// Computes the next local due timestamp relative to [completionLocalTime],
-  /// using [clock] (or preserving a non-midnight `<HH:MM[:SS]>` from [previousSuspendedAt] when [clock] is midnight).
-  DateTime nextLocalDueDate(
-    DateTime completionLocalTime, {
-    DateTime? previousSuspendedAt,
-  }) {
-    final int targetHour;
-    final int targetMinute;
-    final int targetSecond;
-    if (!clock.isMidnight) {
-      targetHour = clock.hour;
-      targetMinute = clock.minute;
-      targetSecond = clock.second;
-    } else {
-      final hasExplicitSuspendedTime =
-          previousSuspendedAt != null &&
-          previousSuspendedAt != TaskItem.defaultSuspendedAt &&
-          (previousSuspendedAt.hour != 0 ||
-              previousSuspendedAt.minute != 0 ||
-              previousSuspendedAt.second != 0);
-      targetHour = hasExplicitSuspendedTime ? previousSuspendedAt.hour : 0;
-      targetMinute = hasExplicitSuspendedTime ? previousSuspendedAt.minute : 0;
-      targetSecond = hasExplicitSuspendedTime ? previousSuspendedAt.second : 0;
-    }
-
-    return switch (unit) {
-      RepeatUnit.days => _addDays(
-        completionLocalTime,
-        count,
-        targetHour,
-        targetMinute,
-        targetSecond,
-      ),
-      RepeatUnit.weeks => _addDays(
-        completionLocalTime,
-        count * 7,
-        targetHour,
-        targetMinute,
-        targetSecond,
-      ),
-      RepeatUnit.months => _addMonths(
-        completionLocalTime,
-        count,
-        targetHour,
-        targetMinute,
-        targetSecond,
-      ),
-    };
-  }
-
-  /// Computes the next `0.7.0` schedule-anchored occurrence (`newDueUtc`, `newSuspendedUtc`, `stepsK`)
-  /// using [leadDays] local calendar arithmetic (`TDF_SPEC.md` Section 6.10.3 Mode 2).
-  ({DateTime newDueUtc, DateTime newSuspendedUtc, int stepsK})
-  nextScheduleAnchoredOccurrence({
-    required DateTime completedAtUtc,
-    required DateTime oldDueUtc,
-    DateTime? oldSuspendedUtc,
-    bool isSuspendedForever = false,
-    required TdfTimeZoneContext timeZone,
-  }) {
-    final normalizedCompletionUtc = TaskItem.normalizeTimestamp(completedAtUtc);
-    final normalizedOldDue = TaskItem.normalizeTimestamp(oldDueUtc);
-    if (!TdfCalendar.isWithinTimestampBounds(normalizedCompletionUtc) ||
-        !TdfCalendar.isWithinTimestampBounds(normalizedOldDue)) {
-      throw const TdfException(
-        kind: TdfErrorKind.invalidTimestamp,
-        line: 1,
-        message: 'Recurrence input timestamp is outside 0001..9999 UTC.',
-      );
-    }
-    final oldDueLocal = timeZone.toLocalWallClock(normalizedOldDue);
-    final nextDue = _advanceV070ScheduleDue(
-      oldDueLocal: oldDueLocal,
-      normalizedCompletionUtc: normalizedCompletionUtc,
-      timeZone: timeZone,
-    );
-    final targetDueLocal = nextDue.targetDueLocal;
-    final newDueUtc = nextDue.newDueUtc;
-
-    final targetSuspendedDate = DateTime.utc(
-      targetDueLocal.year,
-      targetDueLocal.month,
-      targetDueLocal.day - leadDays,
-    );
-    if (targetSuspendedDate.year < 1 || targetSuspendedDate.year > 9999) {
-      throw const TdfException(
-        kind: TdfErrorKind.invalidTimestamp,
-        line: 1,
-        message:
-            'Recurring lead window moves suspended date outside 0001..9999.',
-      );
-    }
-    final candidateSuspended = timeZone.resolveLocalToUtc(
-      targetSuspendedDate.year,
-      targetSuspendedDate.month,
-      targetSuspendedDate.day,
-      clock.hour,
-      clock.minute,
-      clock.second,
-    );
-    if (!TdfCalendar.isWithinTimestampBounds(candidateSuspended)) {
-      throw const TdfException(
-        kind: TdfErrorKind.invalidTimestamp,
-        line: 1,
-        message:
-            'Resolved recurring suspended timestamp is outside 0001..9999 UTC.',
-      );
-    }
-    final clampedSuspended = candidateSuspended.isAfter(newDueUtc)
-        ? newDueUtc
-        : candidateSuspended;
-    return (
-      newDueUtc: newDueUtc,
-      newSuspendedUtc: clampedSuspended,
-      stepsK: nextDue.stepsK,
-    );
   }
 
   /// Formats this rule as canonical TDF directive arguments (`<count> <unit> [<repeat-time>] [lead <n> days]`).
@@ -582,128 +398,195 @@ class TaskRepeatRule {
     );
   }
 
-  /// Advances [oldDueLocal] by `k >= 1` intervals until `newDueUtc > normalizedCompletionUtc` under `0.6.0` error rules.
-  ({DateTime targetDueLocal, DateTime newDueUtc, int stepsK})
-  _advanceLegacyScheduleDue({
-    required DateTime oldDueLocal,
-    required DateTime normalizedCompletionUtc,
+  /// Advances `days` or `weeks` Mode 2 deadline in $O(1)$ integer arithmetic beyond [referenceUtc] (`TDF-CAL-003`).
+  ({
+    int targetYear,
+    int targetMonth,
+    int targetDay,
+    DateTime newDueUtc,
+    TdfLocalDateTime newAnchor,
+    int stepsK,
+  })
+  _advanceDayOrWeekMode2Due({
+    required TdfLocalDateTime anchor,
+    required DateTime referenceUtc,
     required TdfTimeZoneContext timeZone,
   }) {
-    var stepsK = 1;
-    while (true) {
-      final targetDueLocal = _advanceLocalDate(
-        oldDueLocal,
-        stepsK,
-        oldDueLocal.hour,
-        oldDueLocal.minute,
-        oldDueLocal.second,
-      );
-      if (!TdfCalendar.isWithinTimestampBounds(targetDueLocal)) {
-        throw const FormatException('InvalidTimestamp');
+    final stepDays = unit == RepeatUnit.weeks ? count * 7 : count;
+    final anchorDateUtc = DateTime.utc(anchor.year, anchor.month, anchor.day);
+    final refLocal = timeZone.toLocalWallClock(referenceUtc);
+    final refDateUtc = DateTime.utc(
+      refLocal.year,
+      refLocal.month,
+      refLocal.day,
+    );
+    final diffDays = refDateUtc.difference(anchorDateUtc).inDays;
+    final initialK = diffDays <= 0
+        ? 1
+        : math.max(1, (diffDays ~/ stepDays) - 2);
+    for (var probe = 0; probe <= 6; probe++) {
+      final k = initialK + probe;
+      final totalDays = k * stepDays;
+      if (totalDays > _maxProlepticDaySpan) {
+        _throwInvalidRecurrenceTimestamp();
       }
-      final newDueUtc = timeZone.resolveLocalToUtc(
-        targetDueLocal.year,
-        targetDueLocal.month,
-        targetDueLocal.day,
-        targetDueLocal.hour,
-        targetDueLocal.minute,
-        targetDueLocal.second,
-      );
-      if (!TdfCalendar.isWithinTimestampBounds(newDueUtc)) {
-        throw const FormatException('InvalidTimestamp');
+      final targetDate = anchorDateUtc.add(Duration(days: totalDays));
+      if (targetDate.year < 1 || targetDate.year > 9999) {
+        _throwInvalidRecurrenceTimestamp();
       }
-      if (newDueUtc.isAfter(normalizedCompletionUtc)) {
+      final candidateUtc = _resolveLocalOrThrowTdf(
+        timeZone,
+        targetDate.year,
+        targetDate.month,
+        targetDate.day,
+        anchor.hour,
+        anchor.minute,
+        anchor.second,
+      );
+      if (candidateUtc.isAfter(referenceUtc)) {
         return (
-          targetDueLocal: targetDueLocal,
-          newDueUtc: newDueUtc,
-          stepsK: stepsK,
+          targetYear: targetDate.year,
+          targetMonth: targetDate.month,
+          targetDay: targetDate.day,
+          newDueUtc: candidateUtc,
+          newAnchor: TdfLocalDateTime(
+            targetDate.year,
+            targetDate.month,
+            targetDate.day,
+            anchor.hour,
+            anchor.minute,
+            anchor.second,
+          ),
+          stepsK: k,
         );
       }
-      stepsK++;
     }
+    _throwInvalidRecurrenceTimestamp();
   }
 
-  /// Advances [baseDate] by `stepsK * count` units while preserving the given local wall-clock time.
-  DateTime _advanceLocalDate(
-    DateTime baseDate,
+  /// Advances `months` Mode 2 deadline from `oldDue`'s `(Y_cur, M_cur)` clamping against `anchor.day` (`TDF-CAL-003`).
+  ({
+    int targetYear,
+    int targetMonth,
+    int targetDay,
+    DateTime newDueUtc,
+    TdfLocalDateTime newAnchor,
     int stepsK,
+  })
+  _advanceMonthlyMode2Due({
+    required DateTime oldDueUtc,
+    required TdfLocalDateTime anchor,
+    required DateTime referenceUtc,
+    required TdfTimeZoneContext timeZone,
+  }) {
+    final oldDueLocal = timeZone.toLocalWallClock(oldDueUtc);
+    final refLocal = timeZone.toLocalWallClock(referenceUtc);
+    final diffMonths =
+        (refLocal.year - oldDueLocal.year) * 12 +
+        (refLocal.month - oldDueLocal.month);
+    final initialK = diffMonths <= 0
+        ? 1
+        : math.max(1, (diffMonths ~/ count) - 2);
+    for (var probe = 0; probe <= 6; probe++) {
+      final k = initialK + probe;
+      final totalMonths =
+          (oldDueLocal.year * 12) + (oldDueLocal.month - 1) + (k * count);
+      final targetYear = totalMonths ~/ 12;
+      final targetMonth = (totalMonths % 12) + 1;
+      if (targetYear < 1 || targetYear > 9999) {
+        _throwInvalidRecurrenceTimestamp();
+      }
+      final maxDay = TdfCalendar.daysInMonth(targetYear, targetMonth);
+      final clampedDay = anchor.day <= maxDay ? anchor.day : maxDay;
+      final candidateUtc = _resolveLocalOrThrowTdf(
+        timeZone,
+        targetYear,
+        targetMonth,
+        clampedDay,
+        anchor.hour,
+        anchor.minute,
+        anchor.second,
+      );
+      if (candidateUtc.isAfter(referenceUtc)) {
+        final nextAnchor = clampedDay == anchor.day
+            ? TdfLocalDateTime(
+                targetYear,
+                targetMonth,
+                clampedDay,
+                anchor.hour,
+                anchor.minute,
+                anchor.second,
+              )
+            : anchor;
+        return (
+          targetYear: targetYear,
+          targetMonth: targetMonth,
+          targetDay: clampedDay,
+          newDueUtc: candidateUtc,
+          newAnchor: nextAnchor,
+          stepsK: k,
+        );
+      }
+    }
+    _throwInvalidRecurrenceTimestamp();
+  }
+
+  /// Computes the Mode 2 wake-up `suspended` instant (`null` when `<= nowUtc`) per `TDF-CAL-003` Steps 4–6.
+  DateTime? _computeMode2WakeUpInstant({
+    required int targetYear,
+    required int targetMonth,
+    required int targetDay,
+    required DateTime newDueUtc,
+    required DateTime nowUtc,
+    required TdfTimeZoneContext timeZone,
+  }) {
+    final targetSuspendedDate = DateTime.utc(
+      targetYear,
+      targetMonth,
+      targetDay,
+    ).subtract(Duration(days: leadDays));
+    if (targetSuspendedDate.year < 1 || targetSuspendedDate.year > 9999) {
+      _throwInvalidRecurrenceTimestamp();
+    }
+    final candidateSuspended = _resolveLocalOrThrowTdf(
+      timeZone,
+      targetSuspendedDate.year,
+      targetSuspendedDate.month,
+      targetSuspendedDate.day,
+      clock.hour,
+      clock.minute,
+      clock.second,
+    );
+    final clamped = candidateSuspended.isAfter(newDueUtc)
+        ? newDueUtc
+        : candidateSuspended;
+    return clamped.isAfter(nowUtc) ? clamped : null;
+  }
+
+  /// Resolves local components via [timeZone], mapping out-of-bounds [FormatException] to [TdfException] (`invalidTimestamp`).
+  static DateTime _resolveLocalOrThrowTdf(
+    TdfTimeZoneContext timeZone,
+    int year,
+    int month,
+    int day,
     int hour,
     int minute,
     int second,
   ) {
-    return switch (unit) {
-      RepeatUnit.days => _addDays(
-        baseDate,
-        count * stepsK,
-        hour,
-        minute,
-        second,
-      ),
-      RepeatUnit.weeks => _addDays(
-        baseDate,
-        count * 7 * stepsK,
-        hour,
-        minute,
-        second,
-      ),
-      RepeatUnit.months => _addMonths(
-        baseDate,
-        count * stepsK,
-        hour,
-        minute,
-        second,
-      ),
-    };
+    try {
+      return timeZone.resolveLocalToUtc(year, month, day, hour, minute, second);
+    } on FormatException {
+      _throwInvalidRecurrenceTimestamp();
+    }
   }
 
-  /// Advances [oldDueLocal] by `k >= 1` intervals until `newDueUtc > normalizedCompletionUtc` under `0.7.0` [TdfException] rules.
-  ({DateTime targetDueLocal, DateTime newDueUtc, int stepsK})
-  _advanceV070ScheduleDue({
-    required DateTime oldDueLocal,
-    required DateTime normalizedCompletionUtc,
-    required TdfTimeZoneContext timeZone,
-  }) {
-    var stepsK = 1;
-    while (true) {
-      final targetDueLocal = _advanceLocalDate(
-        oldDueLocal,
-        stepsK,
-        oldDueLocal.hour,
-        oldDueLocal.minute,
-        oldDueLocal.second,
-      );
-      if (!TdfCalendar.isWithinTimestampBounds(targetDueLocal)) {
-        throw const TdfException(
-          kind: TdfErrorKind.invalidTimestamp,
-          line: 1,
-          message: 'Recurring due date exceeds supported 0001..9999 range.',
-        );
-      }
-      final newDueUtc = timeZone.resolveLocalToUtc(
-        targetDueLocal.year,
-        targetDueLocal.month,
-        targetDueLocal.day,
-        targetDueLocal.hour,
-        targetDueLocal.minute,
-        targetDueLocal.second,
-      );
-      if (!TdfCalendar.isWithinTimestampBounds(newDueUtc)) {
-        throw const TdfException(
-          kind: TdfErrorKind.invalidTimestamp,
-          line: 1,
-          message:
-              'Resolved recurring due timestamp exceeds 0001..9999 UTC range.',
-        );
-      }
-      if (newDueUtc.isAfter(normalizedCompletionUtc)) {
-        return (
-          targetDueLocal: targetDueLocal,
-          newDueUtc: newDueUtc,
-          stepsK: stepsK,
-        );
-      }
-      stepsK++;
-    }
+  /// Throws a canonical [TdfException] (`TdfErrorKind.invalidTimestamp`) for recurrence boundary overflows.
+  static Never _throwInvalidRecurrenceTimestamp() {
+    throw const TdfException(
+      kind: TdfErrorKind.invalidTimestamp,
+      line: 1,
+      message: 'Resolved recurring timestamp exceeds 0001..9999 UTC range.',
+    );
   }
 
   @override
@@ -741,6 +624,7 @@ class TaskItem {
     this.isSuspendedForever = false,
     String? suspendedNote,
     this.dueAt,
+    TdfLocalDateTime? dueAnchor,
     bool isDuePassive = false,
     String? dueNote,
     this.origin,
@@ -760,6 +644,7 @@ class TaskItem {
        suspendedNote = (isSuspendedForever || suspendedAt != null)
            ? suspendedNote
            : null,
+       dueAnchor = dueAt != null ? dueAnchor : null,
        isDuePassive = dueAt != null && isDuePassive,
        dueNote = dueAt != null ? dueNote : null,
        labelIds = List<String>.unmodifiable(labelIds),
@@ -800,6 +685,9 @@ class TaskItem {
 
   /// Prerequisite task dependencies with required completion counts (`blocked <task-id>[:<n>]`).
   final List<TdfTaskDependency> dependencies;
+
+  /// Optional intended local calendar schedule anchor (`due ... anchor <YYYY-MM-DD HH:MM:SS>`).
+  final TdfLocalDateTime? dueAnchor;
 
   /// Optional target deadline in UTC (`due` directive).
   final DateTime? dueAt;
@@ -899,6 +787,7 @@ class TaskItem {
     bool? isSuspendedForever,
     String? suspendedNote,
     DateTime? dueAt,
+    TdfLocalDateTime? dueAnchor,
     bool? isDuePassive,
     String? dueNote,
     TaskOrigin? origin,
@@ -917,6 +806,7 @@ class TaskItem {
     bool clearSuspendedAt = false,
     bool clearSuspendedNote = false,
     bool clearDueAt = false,
+    bool clearDueAnchor = false,
     bool clearDueNote = false,
     bool clearOrigin = false,
     bool clearRepeatRule = false,
@@ -948,6 +838,9 @@ class TaskItem {
           ? null
           : (suspendedNote ?? this.suspendedNote),
       dueAt: clearDueAt ? null : (dueAt ?? this.dueAt),
+      dueAnchor: (clearDueAt || clearDueAnchor)
+          ? null
+          : (dueAnchor ?? this.dueAnchor),
       isDuePassive: clearDueAt ? false : (isDuePassive ?? this.isDuePassive),
       dueNote: clearDueNote ? null : (dueNote ?? this.dueNote),
       origin: clearOrigin ? null : (origin ?? this.origin),
@@ -1276,6 +1169,7 @@ class TaskItem {
         other.isSuspendedForever == isSuspendedForever &&
         other.suspendedNote == suspendedNote &&
         other.dueAt == dueAt &&
+        other.dueAnchor == dueAnchor &&
         other.isDuePassive == isDuePassive &&
         other.dueNote == dueNote &&
         other.origin == origin &&
@@ -1305,6 +1199,7 @@ class TaskItem {
     isSuspendedForever,
     suspendedNote,
     dueAt,
+    dueAnchor,
     isDuePassive,
     dueNote,
     origin,

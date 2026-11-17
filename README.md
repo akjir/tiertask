@@ -3,15 +3,15 @@
 > [!IMPORTANT]
 > `TierTask` is a private, personal project developed for individual use. It is provided without warranty, official support, or maintenance guarantees.
 
-`TierTask` is a task manager for Linux, Android, and Windows that derives six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single `.tdf` file in the TierTask Data Format ([`spec/TDF_SPEC_0.7.0.md`](spec/TDF_SPEC_0.7.0.md)).
+`TierTask` is a task manager for Linux, Android, and Windows that derives six operational tiers (`Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, `Completed`) from a single `.tdf` file in the TierTask Data Format ([`spec/TDF_SPEC_0.8.0.md`](spec/TDF_SPEC_0.8.0.md)).
 
 ## Overview
 
 Tasks and metadata are stored as plain text in a `.tdf` document, while operational tiers are computed at runtime.
 
 - **Deterministic Pull System:** Separates `Completed`, `Someday`, and `Blocked` tasks first, slices active `queue` tasks into `Focus` (limit `3`), `Ready` (limit `5`), and `Planned` with configurable deadline (`due`) lead-window auto-promotion (`24` hours by default), clears expired `suspended` locks and resolved one-shot `blocked` prerequisites on sync, and prunes completed tasks and tombstones after `30` days (UTC).
-- **Scoped Queues & Conditions:** Supports global and label-scoped queues (`scoped`), label and task reference `link` entries, prerequisite dependencies, deferral (`suspended`) and deadline (`due`) notes, recurrence with preparation lead days (`repeat ... lead`), persistent task progress logs (`history`), and `day`, `time`, and geofence (`location`) conditions.
-- **Three-Way Synchronization:** Reconciles in-memory state, watched local `.tdf` file edits, and a WebDAV server at entity and field granularity using 10-character Base62 IDs, UTC modification timestamps, and `deleted` tombstones.
+- **Scoped Queues & Conditions:** Supports global and label-scoped queues (`scoped`), label and task reference `link` entries, prerequisite dependencies, deferral (`suspended`) and deadline (`due ... anchor`) notes, schedule-anchored recurrence with preparation lead days (`repeat ... lead`), persistent task progress logs (`history`), and `day`, `time`, and geofence (`location`) conditions.
+- **Three-Way Synchronization:** Reconciles in-memory state, host-locked local `.tdf` file edits, and a WebDAV server at entity and field granularity using 10-character Base62 IDs, UTC modification timestamps, and `deleted` tombstones.
 - **Workspaces & Local Security:** Isolates independent task boards and storage credentials into switchable workspaces persisted via `flutter_secure_storage`.
 - **Diagnostic Logging:** Writes opt-in, redacted runtime logs per workspace to local storage or WebDAV with an in-app filterable viewer.
 
@@ -67,7 +67,7 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 Example `tasks.tdf`:
 
 ```text
-tdf 0.7.0
+tdf 0.8.0
 
 queue {
     modified 2026-11-01 09:15:00
@@ -78,24 +78,24 @@ queue {
 label 4x9p2mOkD2 {
     name     "Infrastructure"
     color    "#4CAF50"
-    modified 2026-11-01 08:30:00
+    modified 2026-11-01 08:30
     link     "Runbook" "https://docs.example.com/backups"
 }
 
 task 8jKaCdOkD2 priority {
     name     "Verify server backup"
-    created  2026-11-01 08:30:00
-    modified 2026-11-01 08:30:00
-    repeat   1 months lead 3 days
+    created  2026-11-01 08:30
+    modified 2026-11-01 08:30
+    repeat   1 months 09:00 lead 3 days
     labels   4x9p2mOkD2
-    due      2026-11-15 00:00:00 "Before monthly maintenance window"
+    due      2026-11-14 23:00:00 anchor 2026-11-15 00:00:00 "Before monthly maintenance window"
     history  2026-11-01 08:30:00 "Verified offsite snapshot checksums"
 }
 
 task 3nR8vWOkD8 {
     name     "Clean up study"
-    created  2026-11-01 09:00:00
-    modified 2026-11-01 09:15:00
+    created  2026-11-01 09:00
+    modified 2026-11-01 09:15
     subtasks auto-finish {
         step true  "Wipe desk"
         step false "Organize cables"
@@ -104,7 +104,7 @@ task 3nR8vWOkD8 {
 ```
 
 Repository documentation:
-- [`spec/TDF_SPEC_0.7.0.md`](spec/TDF_SPEC_0.7.0.md) — TDF `0.7.0` grammar, tier derivation rules, and three-way merge specification.
+- [`spec/TDF_SPEC_0.8.0.md`](spec/TDF_SPEC_0.8.0.md) — TDF `0.8.0` grammar, tier derivation rules, and three-way merge specification.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — Layer architecture, directory layout, file responsibilities, and execution flow.
 - [`AGENTS.md`](AGENTS.md) — Engineering standards, TDD rules, and verification workflow.
 - [`CHANGELOG.md`](CHANGELOG.md) — Release history.

@@ -1,0 +1,10 @@
+tdf 0.8.0
+location 7pQr9mOkD2 {
+  name "Home"
+  coordinates 0 0
+  radius 10
+}
+label 4x9p2mOkD2 {
+  name "L"
+  condition location 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2 7pQr9mOkD2
+}

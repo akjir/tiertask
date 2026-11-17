@@ -22,6 +22,7 @@ import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_serializer.dart';
 
 void main() {
@@ -1384,6 +1385,285 @@ void main() {
         deleteUndone!.board.findTask('dwnHst0001')!.history,
         equals(<TaskHistoryEntry>[h0, h1]),
         reason: 'Undoing task deletion must restore snapshotTask.history',
+      );
+    });
+  });
+
+  group('TDF 0.8.0 Schedule Anchor (dueAnchor) Undo Restoration & Concurrent Edit Guards', () {
+    test('restores snapshotTask.dueAnchor across Mode 2 recurring complete, delete, and downgrade undo and rejects post-capture dueAnchor edits', () {
+      final berlin = TdfTimeZoneContext.named('Europe/Berlin');
+      final jan31Now = DateTime.utc(2026, 1, 31, 10, 0);
+      final jan31Anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+
+      // 1. Mode 2 recurring task starting with dueAnchor == null completed onto clamped Feb 28 (synthesizing dueAnchor = Jan 31):
+      // Undo must restore dueAt = Jan 31 AND dueAnchor = null!
+      final unanchoredJan31 = TaskItem(
+        id: 'm2NullAnc1',
+        title: 'Monthly Closing Without Initial Anchor',
+        isPriority: true,
+        createdAt: jan31Now,
+        modifiedAt: jan31Now,
+        dueAt: DateTime.utc(2026, 1, 31, 17, 0, 0),
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.months),
+      );
+      final boardJan = TaskBoard.evaluate(
+        tasks: <TaskItem>[unanchoredJan31],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: jan31Now,
+          taskIds: const <String>['m2NullAnc1'],
+        ),
+        evaluationTime: jan31Now,
+        timeZone: berlin,
+      );
+      final boardFeb = boardJan.completeTask(
+        'm2NullAnc1',
+        currentDate: jan31Now.add(const Duration(hours: 1)),
+        timeZone: berlin,
+      );
+      expect(
+        boardFeb.findTask('m2NullAnc1')!.dueAt,
+        equals(DateTime.utc(2026, 2, 28, 17, 0, 0)),
+      );
+      expect(
+        boardFeb.findTask('m2NullAnc1')!.dueAnchor,
+        equals(jan31Anchor),
+        reason:
+            'Precondition: Mode 2 clamp synthesizes Jan 31 anchor on Feb 28',
+      );
+
+      final janEntry = TaskBoardUndo.capture(
+        sequence: 20,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: boardJan,
+        boardAfter: boardFeb,
+        taskBefore: boardJan.findTask('m2NullAnc1')!,
+      );
+      final undoneJan = TaskBoardUndo.apply(
+        boardFeb,
+        janEntry,
+        utcNow: jan31Now.add(const Duration(hours: 2)),
+        timeZone: berlin,
+      );
+      expect(undoneJan, isNotNull);
+      expect(
+        undoneJan!.board.findTask('m2NullAnc1')!.dueAt,
+        equals(DateTime.utc(2026, 1, 31, 17, 0, 0)),
+      );
+      expect(
+        undoneJan.board.findTask('m2NullAnc1')!.dueAnchor,
+        isNull,
+        reason: 'Undoing Mode 2 rollover must clear synthesized dueAnchor back to snapshot null',
+      );
+
+      // 2. Mode 2 recurring task on clamped Feb 28 (dueAnchor = Jan 31) completed onto Mar 31 (advancing dueAnchor = Mar 31):
+      // Undo must restore dueAt = Feb 28 AND dueAnchor = Jan 31!
+      final febNow = DateTime.utc(2026, 2, 28, 10, 0);
+      final boardMar = boardFeb.completeTask(
+        'm2NullAnc1',
+        currentDate: febNow,
+        timeZone: berlin,
+      );
+      expect(
+        boardMar.findTask('m2NullAnc1')!.dueAnchor,
+        equals(TdfLocalDateTime(2026, 3, 31, 18, 0, 0)),
+      );
+      final febEntry = TaskBoardUndo.capture(
+        sequence: 21,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: boardFeb,
+        boardAfter: boardMar,
+        taskBefore: boardFeb.findTask('m2NullAnc1')!,
+      );
+      final undoneFeb = TaskBoardUndo.apply(
+        boardMar,
+        febEntry,
+        utcNow: febNow.add(const Duration(hours: 1)),
+        timeZone: berlin,
+      );
+      expect(undoneFeb, isNotNull);
+      expect(
+        undoneFeb!.board.findTask('m2NullAnc1')!.dueAt,
+        equals(DateTime.utc(2026, 2, 28, 17, 0, 0)),
+      );
+      expect(
+        undoneFeb.board.findTask('m2NullAnc1')!.dueAnchor,
+        equals(jan31Anchor),
+        reason: 'Undoing Feb 28 -> Mar 31 rollover must restore clamped Jan 31 dueAnchor',
+      );
+
+      // Post-capture external edit to dueAnchor on Mode 2 completed task guards/skips undo:
+      final marExternallyEdited = boardMar.updateTask(
+        'm2NullAnc1',
+        dueAnchor: TdfLocalDateTime(2026, 3, 30, 18, 0, 0),
+        currentDate: febNow.add(const Duration(minutes: 30)),
+        timeZone: berlin,
+      );
+      expect(
+        TaskBoardUndo.apply(
+          marExternallyEdited,
+          febEntry,
+          utcNow: febNow.add(const Duration(hours: 1)),
+          timeZone: berlin,
+        ),
+        isNull,
+        reason: 'Post-capture external edit to dueAnchor after Mode 2 completion must invalidate undo',
+      );
+
+      // 3. Delete undo & Downgrade undo preserve snapshotTask.dueAnchor, and post-capture dueAnchor edit invalidates downgrade/one-off-complete undo:
+      final urgentClamped = TaskItem(
+        id: 'urgClamp01',
+        title: 'Urgent Clamped Deadline',
+        createdAt: febNow,
+        modifiedAt: febNow,
+        dueAt: DateTime.utc(2026, 2, 28, 17, 0, 0),
+        dueAnchor: jan31Anchor,
+        dueNote: 'Clamped deadline',
+      );
+      final downBoardBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(id: 'f001000001', title: 'F1', createdAt: febNow),
+          TaskItem(id: 'f002000001', title: 'F2', createdAt: febNow),
+          TaskItem(id: 'f003000001', title: 'F3', createdAt: febNow),
+          urgentClamped,
+        ],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: febNow,
+          taskIds: const <String>[
+            'f001000001',
+            'f002000001',
+            'f003000001',
+            'urgClamp01',
+          ],
+        ),
+        evaluationTime: febNow,
+        timeZone: berlin,
+      );
+      final downBoardAfter = downBoardBefore.downgradeTask(
+        'urgClamp01',
+        currentDate: febNow.add(const Duration(minutes: 5)),
+        timeZone: berlin,
+      );
+      final downEntry = TaskBoardUndo.capture(
+        sequence: 22,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: downBoardBefore,
+        boardAfter: downBoardAfter,
+        taskBefore: downBoardBefore.findTask('urgClamp01')!,
+      );
+      final undoneDown = TaskBoardUndo.apply(
+        downBoardAfter,
+        downEntry,
+        utcNow: febNow.add(const Duration(minutes: 10)),
+        timeZone: berlin,
+      );
+      expect(undoneDown, isNotNull);
+      expect(
+        undoneDown!.board.findTask('urgClamp01')!.dueAnchor,
+        equals(jan31Anchor),
+      );
+      expect(undoneDown.board.findTask('urgClamp01')!.isDuePassive, isFalse);
+
+      // External edit clearing dueAnchor after downgrade invalidates downgrade undo:
+      final downAnchorCleared = downBoardAfter.updateTask(
+        'urgClamp01',
+        clearDueAnchor: true,
+        currentDate: febNow.add(const Duration(minutes: 6)),
+        timeZone: berlin,
+      );
+      expect(
+        TaskBoardUndo.apply(
+          downAnchorCleared,
+          downEntry,
+          utcNow: febNow.add(const Duration(minutes: 10)),
+          timeZone: berlin,
+        ),
+        isNull,
+        reason: 'Post-capture external edit clearing dueAnchor must invalidate downgrade undo',
+      );
+
+      // Delete undo preserves dueAnchor on both open and Completed tasks:
+      final delBoardAfter = downBoardBefore.deleteTask(
+        'urgClamp01',
+        currentDate: febNow.add(const Duration(minutes: 5)),
+        timeZone: berlin,
+      );
+      final delEntry = TaskBoardUndo.capture(
+        sequence: 23,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: downBoardBefore,
+        boardAfter: delBoardAfter,
+        taskBefore: downBoardBefore.findTask('urgClamp01')!,
+      );
+      final undoneDel = TaskBoardUndo.apply(
+        delBoardAfter,
+        delEntry,
+        utcNow: febNow.add(const Duration(minutes: 10)),
+        timeZone: berlin,
+      );
+      expect(undoneDel, isNotNull);
+      expect(
+        undoneDel!.board.findTask('urgClamp01')!.dueAnchor,
+        equals(jan31Anchor),
+      );
+
+      // Post-capture external edit to dueAnchor after one-off complete invalidates complete undo:
+      final oneOffDone = downBoardBefore.completeTask(
+        'urgClamp01',
+        currentDate: febNow.add(const Duration(minutes: 5)),
+        timeZone: berlin,
+      );
+      final oneOffEntry = TaskBoardUndo.capture(
+        sequence: 24,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: downBoardBefore,
+        boardAfter: oneOffDone,
+        taskBefore: downBoardBefore.findTask('urgClamp01')!,
+      );
+      final oneOffAnchorEdited = oneOffDone.updateTask(
+        'urgClamp01',
+        dueAnchor: TdfLocalDateTime(2026, 2, 28, 18, 0, 0),
+        currentDate: febNow.add(const Duration(minutes: 6)),
+        timeZone: berlin,
+      );
+      expect(
+        TaskBoardUndo.apply(
+          oneOffAnchorEdited,
+          oneOffEntry,
+          utcNow: febNow.add(const Duration(minutes: 10)),
+          timeZone: berlin,
+        ),
+        isNull,
+        reason: 'Post-capture external edit to dueAnchor on completed one-off task must invalidate undo',
+      );
+
+      // 4. Mode 2 capture without boardAfter (hasPostActionDueAnchor == false) restores anchor on untouched rollover and skips on external anchor edit:
+      final noAfterEntry = TaskBoardUndo.capture(
+        sequence: 25,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: boardFeb,
+        taskBefore: boardFeb.findTask('m2NullAnc1')!,
+      );
+      expect(noAfterEntry.hasPostActionDueAnchor, isFalse);
+      final undoneNoAfter = TaskBoardUndo.apply(
+        boardMar,
+        noAfterEntry,
+        utcNow: febNow.add(const Duration(hours: 1)),
+        timeZone: berlin,
+      );
+      expect(undoneNoAfter, isNotNull);
+      expect(
+        undoneNoAfter!.board.findTask('m2NullAnc1')!.dueAnchor,
+        equals(jan31Anchor),
+      );
+      expect(
+        TaskBoardUndo.apply(
+          marExternallyEdited,
+          noAfterEntry,
+          utcNow: febNow.add(const Duration(hours: 1)),
+          timeZone: berlin,
+        ),
+        isNull,
+        reason: 'Mode 2 capture without boardAfter must still detect external post-rollover dueAnchor edits',
       );
     });
   });

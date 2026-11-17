@@ -21,6 +21,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/app_workspace.dart';
 import '../../models/task_board.dart';
+import '../../models/tdf_error.dart';
 import '../../models/tdf_location.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/config_providers.dart';
@@ -623,7 +624,7 @@ class _TdfMarkdownDialog extends ConsumerWidget {
         width: double.maxFinite,
         child: SingleChildScrollView(
           child: SelectableText(
-            ref.read(tdfServiceProvider).serialize(board),
+            _formatPreviewText(ref, board, localizations),
             style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
           ),
         ),
@@ -635,6 +636,19 @@ class _TdfMarkdownDialog extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  /// Serializes [board] to `.tdf` text or returns a localized limit-exceeded fallback.
+  static String _formatPreviewText(
+    WidgetRef ref,
+    TaskBoard board,
+    AppLocalizations localizations,
+  ) {
+    try {
+      return ref.read(tdfServiceProvider).serialize(board);
+    } on TdfException {
+      return localizations.errorLocalFileTooLarge;
+    }
   }
 }
 

@@ -32,7 +32,7 @@ void main() {
     'EditTaskScreen supports Suspended with date/time pickers, search-based multi-select Prerequisite tasks (blocked), and Activation Conditions (any, day, time with pickers, location)',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:10
@@ -69,16 +69,19 @@ task 000003OkD2 {
 }
 ''';
       final fixedNow = DateTime.utc(2026, 11, 1, 12, 0);
+      const utcConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+      );
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(
-              const WebDavConfig(language: AppLanguage.english),
-            ),
+            InMemorySettingsRepository(utcConfig),
           ),
           localFileRepositoryProvider.overrideWith(
             (ref) => FakeLocalFileRepository(
-              config: const WebDavConfig(language: AppLanguage.english),
+              config: utcConfig,
               initialTdf: seededTdf,
             ),
           ),

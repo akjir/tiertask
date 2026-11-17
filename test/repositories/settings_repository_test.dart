@@ -19,6 +19,7 @@ import 'dart:ui';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/models/workspace_sync_state.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -140,14 +141,17 @@ void main() {
       expect(arbeit.id, equals('arbeit'));
       expect((await repository.loadActiveWorkspace()).id, equals('arbeit'));
 
+      const digestA =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      const digestB =
+          '2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae';
       final syncState = WorkspaceSyncState(
-        lastSyncedLocalTdf: 'tdf 0.5.1\n',
-        lastSyncedRemoteTdf: 'tdf 0.5.1\n',
-        deletedLabelTimestamps: <String, DateTime>{
-          'work00OkD2': DateTime.utc(2026, 11, 1, 12),
-        },
+        lastSyncedLocalTdf: 'tdf 0.8.0\n',
+        lastSyncedRemoteTdf: 'tdf 0.8.0\n',
         acknowledgedLocalGeneration: 2,
         acknowledgedRemoteGeneration: 3,
+        localSourceDigest: digestA,
+        remoteSourceDigest: digestB,
       );
       await repository.saveWorkspaceSyncState('arbeit', syncState);
       expect(
@@ -302,7 +306,7 @@ void main() {
       );
     });
 
-    test('persists TTS\\x02 WorkspaceSyncState, migrates legacy TTS\\x01 payloads, and recovers from corrupted storage', () async {
+    test('persists TTS\\x04 WorkspaceSyncState across all 8 fields, rejects TTS\\x01..TTS\\x03/TTS\\x05, enforces atomic per-target validation, and recovers from corrupted storage', () async {
       final fakeStorage = _FakeFlutterSecureStorage();
       final repository = SecureSettingsRepository(storage: fakeStorage);
 
@@ -311,43 +315,99 @@ void main() {
         equals(WorkspaceSyncState.empty),
       );
 
-      final v2State = WorkspaceSyncState(
-        lastSyncedLocalTdf: 'tdf 0.5.1\n# local\n',
-        lastSyncedRemoteTdf: 'tdf 0.5.1\n# remote\n',
-        deletedLabelTimestamps: <String, DateTime>{
-          'ops000OkD2': DateTime.utc(2026, 11, 2, 10, 30),
-        },
+      const validLocalDigest =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      const validRemoteDigest =
+          'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+      final v4State = WorkspaceSyncState(
+        lastSyncedLocalTdf: 'tdf 0.8.0\n\ntask 000001OkD2 {\n    name "Local"\n    created 2026-11-01 08:00\n}\n',
+        lastSyncedRemoteTdf: 'tdf 0.8.0\n\ntask 000001OkD2 {\n    name "Remote"\n    created 2026-11-01 08:00\n}\n',
         acknowledgedLocalGeneration: 4,
         acknowledgedRemoteGeneration: 7,
+        localSourceDigest: validLocalDigest,
+        remoteSourceDigest: validRemoteDigest,
+        remoteEtag: '"etag-v4"',
+        remoteLastModified: 'Mon, 09 Nov 2026 22:00:00 GMT',
       );
-      await repository.saveWorkspaceSyncState('tasks', v2State);
-      expect(await repository.loadWorkspaceSyncState('tasks'), equals(v2State));
+      final encodedV4 = v4State.toBytes();
+      expect(
+        encodedV4.sublist(0, 4),
+        equals(<int>[0x54, 0x54, 0x53, 0x04]),
+        reason: 'Must write TTS\\x04 header',
+      );
+      await repository.saveWorkspaceSyncState('tasks', v4State);
+      expect(await repository.loadWorkspaceSyncState('tasks'), equals(v4State));
 
-      // Simulate legacy TTS\x01 payload (without the trailing 16-byte generations and 3-byte v3 suffix).
-      final v3Bytes = v2State.toBytes();
-      final v1Bytes = Uint8List.fromList(<int>[
-        0x54,
-        0x54,
-        0x53,
-        0x01,
-        ...v3Bytes.sublist(4, v3Bytes.length - 19),
-      ]);
-      await fakeStorage.write(
-        key: 't2_sync_v1_legacy',
-        value: const Base64Service().encodeBytes(v1Bytes),
+      for (final rejectedVersion in <int>[1, 2, 3, 5]) {
+        final legacyBytes = Uint8List.fromList(<int>[
+          0x54,
+          0x54,
+          0x53,
+          rejectedVersion,
+          ...encodedV4.sublist(4),
+        ]);
+        await fakeStorage.write(
+          key: 't2_sync_v1_v$rejectedVersion',
+          value: const Base64Service().encodeBytes(legacyBytes),
+        );
+        expect(
+          await repository.loadWorkspaceSyncState('v$rejectedVersion'),
+          equals(WorkspaceSyncState.empty),
+          reason:
+              'TTS\\x0$rejectedVersion must decode to WorkspaceSyncState.empty',
+        );
+      }
+
+      for (var shortLen = 0; shortLen < 4; shortLen++) {
+        expect(
+          WorkspaceSyncState.fromBytes(encodedV4.sublist(0, shortLen)),
+          equals(WorkspaceSyncState.empty),
+          reason:
+              'Payloads shorter than 4 bytes ($shortLen) must decode to empty',
+        );
+      }
+
+      // Atomic local invalidation preserves valid remote target fields:
+      final invalidLocalComment = WorkspaceSyncState(
+        lastSyncedLocalTdf: '# comment\ntdf 0.8.0\n',
+        acknowledgedLocalGeneration: 1,
+        localSourceDigest: validLocalDigest,
+        lastSyncedRemoteTdf: 'tdf 0.8.0\n',
+        acknowledgedRemoteGeneration: maxTdfSyncGeneration,
+        remoteSourceDigest: validRemoteDigest,
+        remoteEtag: '"keep-etag"',
+        remoteLastModified: 'Tue, 10 Nov 2026 10:00:00 GMT',
       );
-      final migratedV1 = await repository.loadWorkspaceSyncState('legacy');
-      expect(migratedV1.lastSyncedLocalTdf, equals(v2State.lastSyncedLocalTdf));
+      expect(invalidLocalComment.lastSyncedLocalTdf, isNull);
+      expect(invalidLocalComment.acknowledgedLocalGeneration, isNull);
+      expect(invalidLocalComment.localSourceDigest, isNull);
+      expect(invalidLocalComment.lastSyncedRemoteTdf, equals('tdf 0.8.0\n'));
       expect(
-        migratedV1.lastSyncedRemoteTdf,
-        equals(v2State.lastSyncedRemoteTdf),
+        invalidLocalComment.acknowledgedRemoteGeneration,
+        equals(maxTdfSyncGeneration),
       );
-      expect(
-        migratedV1.deletedLabelTimestamps,
-        equals(v2State.deletedLabelTimestamps),
+      expect(invalidLocalComment.remoteSourceDigest, equals(validRemoteDigest));
+      expect(invalidLocalComment.remoteEtag, equals('"keep-etag"'));
+
+      // Atomic remote invalidation preserves valid local target fields:
+      final invalidRemoteGen = WorkspaceSyncState(
+        lastSyncedLocalTdf: 'tdf 0.8.0\n',
+        acknowledgedLocalGeneration: 0,
+        localSourceDigest: validLocalDigest,
+        lastSyncedRemoteTdf: 'tdf 0.8.0\n',
+        acknowledgedRemoteGeneration: maxTdfSyncGeneration + 1,
+        remoteSourceDigest: validRemoteDigest,
+        remoteEtag: '"drop-etag"',
+        remoteLastModified: 'Tue, 10 Nov 2026 10:00:00 GMT',
       );
-      expect(migratedV1.acknowledgedLocalGeneration, equals(0));
-      expect(migratedV1.acknowledgedRemoteGeneration, equals(0));
+      expect(invalidRemoteGen.lastSyncedLocalTdf, equals('tdf 0.8.0\n'));
+      expect(invalidRemoteGen.acknowledgedLocalGeneration, equals(0));
+      expect(invalidRemoteGen.localSourceDigest, equals(validLocalDigest));
+      expect(invalidRemoteGen.lastSyncedRemoteTdf, isNull);
+      expect(invalidRemoteGen.acknowledgedRemoteGeneration, isNull);
+      expect(invalidRemoteGen.remoteSourceDigest, isNull);
+      expect(invalidRemoteGen.remoteEtag, isNull);
+      expect(invalidRemoteGen.remoteLastModified, isNull);
 
       // Corrupted Base64 or binary payloads fall back safely without throwing.
       await fakeStorage.write(

@@ -19,9 +19,9 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_evaluator.dart';
-import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -79,7 +79,6 @@ class _CountingParseTdfService extends TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
-    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
     onParse();
     return super.parse(
@@ -92,7 +91,6 @@ class _CountingParseTdfService extends TdfService {
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
-      targetSchema: targetSchema,
     );
   }
 }
@@ -101,7 +99,7 @@ class _CountingWebDavRepository extends WebDavRepository {
   _CountingWebDavRepository({required super.config, required this.onRequest});
 
   final void Function() onRequest;
-  String remoteContent = 'tdf 0.6.0\n';
+  String remoteContent = 'tdf 0.8.0\n';
 
   @override
   Future<String> fetchTdf() async {
@@ -473,7 +471,7 @@ void main() {
             .read(tdfServiceProvider)
             .serialize(remoteConflictedBoard);
         const localDeletedConflict =
-            'tdf 0.6.0\n\n'
+            'tdf 0.8.0\n\n'
             'deleted {\n'
             '    generation 0\n'
             '    task cflBase001 2026-11-14 14:04:00\n'
@@ -491,7 +489,13 @@ void main() {
         watchController.add(null);
         await Future<void>.delayed(const Duration(milliseconds: 60));
 
+        final enL10n = lookupAppLocalizations(const Locale('en'));
         expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+        expect(
+          container.read(syncStateProvider).errorMessage,
+          equals(enL10n.syncConflictDeletionBanner),
+          reason: 'Watch DeletionConflict must set localized syncConflictDeletionBanner instead of raw TdfSyncOutcomeException string',
+        );
 
         // Repeated AppLifecycleState.resumed events while conflict is open and digest is unchanged perform 0 WebDAV requests!
         final requestsAfterConflict = webDavRequests;
@@ -520,13 +524,11 @@ void main() {
         final convergedRaw = await localFile.readAsString();
         await conflictSettings.saveWorkspaceSyncState(
           'tasks',
-          (await conflictSettings.loadWorkspaceSyncState('tasks')).copyWith(
-            clearLastSyncedLocalTdf: true,
-            acknowledgedLocalGeneration: 0,
-          ),
+          (await conflictSettings.loadWorkspaceSyncState('tasks'))
+              .copyWith(clearLastSyncedLocalTdf: true),
         );
         await localFile.writeAsString(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'deleted {\n'
           '    generation 5\n'
           '}\n',
@@ -536,6 +538,11 @@ void main() {
         watchController.add(null);
         await Future<void>.delayed(const Duration(milliseconds: 60));
         expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+        expect(
+          container.read(syncStateProvider).errorMessage,
+          equals(enL10n.syncConflictRecoveryBanner),
+          reason: 'Watch RecoveryRequired must set localized syncConflictRecoveryBanner instead of raw TdfSyncOutcomeException string',
+        );
 
         final requestsBeforeRecoveryResume = webDavRequests;
         TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
@@ -680,8 +687,8 @@ void main() {
 
         // 4. Malformed TDF (unclosed brace, control char, unsupported version) preserves board & disk and suppresses duplicate parses via _lastFailedWatchDigest.
         for (final badPayload in <String>[
-          'tdf 0.6.0\n\ntask broken0001 {\n  name "Unclosed"\n',
-          'tdf 0.6.0\n\ntask badCtrl001 {\n  name "Bad\x07Char"\n  created 2026-11-14 15:00:00\n  modified 2026-11-14 15:00:00\n}\n',
+          'tdf 0.8.0\n\ntask broken0001 {\n  name "Unclosed"\n',
+          'tdf 0.8.0\n\ntask badCtrl001 {\n  name "Bad\x07Char"\n  created 2026-11-14 15:00:00\n  modified 2026-11-14 15:00:00\n}\n',
           'tdf 9.9.9\n',
         ]) {
           liveFile.writeAsStringSync(badPayload, flush: true);
@@ -735,7 +742,7 @@ void main() {
         final brokenStartupDir = Directory('${tempDir.path}/broken_startup')
           ..createSync(recursive: true);
         final startupFile = File('${brokenStartupDir.path}/startup.tdf')
-          ..writeAsStringSync('tdf 0.6.0\n\ntask brokenStart {\n', flush: true);
+          ..writeAsStringSync('tdf 0.8.0\n\ntask brokenStart {\n', flush: true);
 
         final errorContainer = ProviderContainer(
           overrides: [
@@ -771,7 +778,7 @@ void main() {
         expect(errorContainer.read(taskNotifierProvider).hasError, isTrue);
 
         startupFile.writeAsStringSync(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'task fixedStart {\n'
           '    name "Recovered Startup Board"\n'
           '    created 2026-11-14 15:06:00\n'
@@ -797,7 +804,7 @@ void main() {
         }
         var currentTime = DateTime.utc(2026, 11, 14, 16, 0);
         const initialSharedTdf =
-            'tdf 0.6.0\n\n'
+            'tdf 0.8.0\n\n'
             'queue {\n'
             '    modified 2026-11-14 16:00:00\n'
             '    task stage2Cf01\n'
@@ -886,7 +893,7 @@ void main() {
 
         // Remote modifies stage2Cf01 while external local save deletes stage2Cf01 -> Stage 1 succeeds, Stage 2 throws deletionConflict!
         remoteContent =
-            'tdf 0.6.0\n\n'
+            'tdf 0.8.0\n\n'
             'queue {\n'
             '    modified 2026-11-14 16:01:00\n'
             '    task stage2Cf01\n'
@@ -900,7 +907,7 @@ void main() {
 
         currentTime = DateTime.utc(2026, 11, 14, 16, 2);
         await localFile.writeAsString(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'deleted {\n'
           '    generation 0\n'
           '    task stage2Cf01 2026-11-14 16:02:00\n'
@@ -930,7 +937,7 @@ void main() {
         // Now user saves a NEW external .tdf file (D2 != D1) restoring stage2Cf01 + adding extAftCf01!
         currentTime = DateTime.utc(2026, 11, 14, 16, 3);
         await localFile.writeAsString(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'deleted {\n'
           '    generation 1\n'
           '}\n\n'
@@ -977,7 +984,7 @@ void main() {
         final staleDir = Directory('${tempDir.path}/stale_guard')
           ..createSync(recursive: true);
         File('${staleDir.path}/tasks.tdf').writeAsStringSync(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'task initStal01 {\n'
           '    name "Initial Task"\n'
           '    created 2026-11-14 17:00:00\n'
@@ -1024,7 +1031,7 @@ void main() {
         await container.read(taskNotifierProvider.future);
 
         File('${staleDir.path}/tasks.tdf').writeAsStringSync(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'task staleExt01 {\n'
           '    name "Should Abort On Mode Switch"\n'
           '    created 2026-11-14 17:01:00\n'
@@ -1122,7 +1129,7 @@ void main() {
         // External edit in newly created directory must be detected by rebound Directory.watch even while WebDAV remains offline!
         currentTime = DateTime.utc(2026, 11, 14, 17, 6);
         await File('$offlineMissingDirPath/tasks.tdf').writeAsString(
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-14 17:06:00\n'
           '    task offDir0001\n'
@@ -1152,16 +1159,16 @@ void main() {
         );
       });
 
-      test('Directory.watch reconciles TDF 0.7.0 fields across Conflict -> Self-Write/Resume -> New External Input cycles and preserves/prunes undo stack accurately', () async {
+      test('Directory.watch reconciles TDF 0.8.0 fields across Conflict -> Self-Write/Resume -> New External Input cycles and preserves/prunes undo stack accurately', () async {
         final tempDir = await Directory.systemTemp.createTemp(
-          'tiertask_watch_v070_',
+          'tiertask_watch_v080_',
         );
         addTearDown(() => tempDir.delete(recursive: true));
         final tdfFile = File('${tempDir.path}/tasks.tdf');
 
         var currentTime = DateTime.utc(2026, 11, 11, 12, 0);
         await tdfFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-11 12:00:00\n'
           '    task blockerW01\n'
@@ -1284,7 +1291,7 @@ void main() {
         // 3. Error -> Self-Write/Resume -> New External Input cycle:
         currentTime = DateTime.utc(2026, 11, 11, 12, 4);
         await tdfFile.writeAsString(
-          'tdf 0.7.0\ntask broken {{{{\n',
+          'tdf 0.8.0\ntask broken {{{{\n',
           flush: true,
         );
         await Future<void>.delayed(const Duration(milliseconds: 220));

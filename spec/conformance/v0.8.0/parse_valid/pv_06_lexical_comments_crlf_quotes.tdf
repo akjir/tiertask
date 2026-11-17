@@ -1,0 +1,12 @@
+  	 # Leading comment with NBSP   allowed
+tdf 0.8.0 # version comment
+
+label cdev00OkD2 {#attached_comment
+  name 'Raw "quote" and \\backslash'
+  note "Line1\nLine2\tTab\rCR\\Slash\"Quote"
+}
+task tax260OkD2 {
+  name "File #2026 taxes"#comment
+  created 2026-11-01#inline_date_comment
+  labels cdev00OkD2#inline_id_comment
+}

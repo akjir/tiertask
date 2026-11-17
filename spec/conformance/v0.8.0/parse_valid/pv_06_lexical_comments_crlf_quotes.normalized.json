@@ -1,0 +1,50 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 0,
+    "tasks": [],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "1970-01-01 00:00:00",
+    "tasks": []
+  },
+  "labels": [
+    {
+      "id": "cdev00OkD2",
+      "scoped": false,
+      "name": "Raw \"quote\" and \\\\backslash",
+      "color": null,
+      "note": "Line1\nLine2\tTab\rCR\\Slash\"Quote",
+      "modified": null,
+      "links": [],
+      "conditions": []
+    }
+  ],
+  "locations": [],
+  "tasks": [
+    {
+      "id": "tax260OkD2",
+      "priority": false,
+      "name": "File #2026 taxes",
+      "note": null,
+      "created": "2026-11-01 00:00:00",
+      "finished": null,
+      "modified": null,
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "cdev00OkD2"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": null,
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [],
+      "subtasks": null
+    }
+  ]
+}

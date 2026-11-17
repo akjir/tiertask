@@ -216,19 +216,77 @@ class TaskBoardMutator {
     return nextBoard.logDomainMutation('addLocation id=$locationId');
   }
 
-  /// Validates [title], allocates a task ID when [id] is `null`, and runs [mutate].
+  /// Validates [title], allocates a task ID when [id] is `null`, and creates the task per `TDF-MUT-003`.
   static NormalizedTierSlices addTask(
     NormalizedTierSlices board,
     String title, {
-    String? id,
+    TaskTier targetTier = TaskTier.planned,
+    bool isPriority = false,
+    bool subtasksAutoFinish = false,
+    List<SubtaskItem> subtasks = const [],
     DateTime? currentDate,
-    required NormalizedTierSlices Function(String taskId, DateTime now) mutate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+    DateTime? modifiedAt,
+    String? id,
+    String? note,
+    List<String> labelIds = const [],
+    DateTime? suspendedAt,
+    TdfLocalDateTime? suspendedLocalInput,
+    bool? isSuspendedForever,
+    String? suspendedNote,
+    DateTime? dueAt,
+    TdfLocalDateTime? dueLocalInput,
+    TdfLocalDateTime? dueAnchor,
+    bool isDuePassive = false,
+    String? dueNote,
+    TaskRepeatRule? repeatRule,
+    List<String> blockedByTaskIds = const [],
+    List<TdfTaskDependency>? dependencies,
+    TaskOrigin? origin,
+    List<TaskLink> links = const [],
+    Iterable<TaskHistoryEntry> history = const <TaskHistoryEntry>[],
+    List<TaskCondition> conditions = const [],
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty || board.hasDuplicateTaskTitle(trimmed)) return board;
     final now = _resolveNow(currentDate);
     final used = _collectAllUsedEntityIds(board);
-    return mutate(id ?? generateTaskId(timestamp: now, existingIds: used), now);
+    final taskId = id ?? generateTaskId(timestamp: now, existingIds: used);
+    return updateTask(
+      board,
+      taskId,
+      title: title,
+      note: note,
+      targetTier: targetTier,
+      isPriority: isPriority,
+      subtasksAutoFinish: subtasksAutoFinish,
+      subtasks: subtasks,
+      labelIds: labelIds,
+      suspendedAt: suspendedAt,
+      suspendedLocalInput: suspendedLocalInput,
+      isSuspendedForever: isSuspendedForever,
+      suspendedNote: suspendedNote,
+      dueAt: dueAt,
+      dueLocalInput: dueLocalInput,
+      dueAnchor: dueAnchor,
+      isDuePassive: isDuePassive,
+      dueNote: dueNote,
+      repeatRule: repeatRule,
+      blockedByTaskIds: blockedByTaskIds,
+      dependencies: dependencies,
+      origin: origin,
+      links: links,
+      history: history,
+      conditions: conditions,
+      currentDate: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      modifiedAt: modifiedAt,
+      isNewTask: true,
+    );
   }
 
   /// Appends and canonically deduplicates a single [TaskHistoryEntry] on [taskId] (`TDF_SPEC.md` Section 4.1.2 & 6.6).
@@ -302,8 +360,13 @@ class TaskBoardMutator {
         (expectedCompletions ?? task.completions) != task.completions) {
       return board;
     }
-    if (task.completions >= TdfTaskDependency.maxCompletions) {
-      throw const FormatException('LimitExceeded');
+    if (task.completions >= maxTdfCompletions) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task completions counter exceeds maximum of $maxTdfCompletions.',
+      );
     }
     final zone = _zone(now, localEvaluationTime, timeZone);
     final next = _reschedule(board, task, now, zone);
@@ -808,14 +871,18 @@ class TaskBoardMutator {
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
     DateTime? suspendedAt,
+    TdfLocalDateTime? suspendedLocalInput,
     bool? isSuspendedForever,
     String? suspendedNote,
     bool clearSuspendedAt = false,
     bool clearSuspendedNote = false,
     DateTime? dueAt,
+    TdfLocalDateTime? dueLocalInput,
+    TdfLocalDateTime? dueAnchor,
     bool? isDuePassive,
     String? dueNote,
     bool clearDueAt = false,
+    bool clearDueAnchor = false,
     bool clearDueNote = false,
     TaskRepeatRule? repeatRule,
     bool clearRepeatRule = false,
@@ -840,6 +907,7 @@ class TaskBoardMutator {
     final validatedDueNote = (!clearDueNote && dueNote != null)
         ? _validateScheduleNote(dueNote, 'dueNote')
         : null;
+    final validatedLinks = links != null ? _validateTaskLinks(links) : null;
     final validatedHistory = history != null
         ? _validateHistoryEntries(history)
         : null;
@@ -854,6 +922,11 @@ class TaskBoardMutator {
       return board;
     }
     final now = _resolveNow(currentDate);
+    final zone = _zone(now, localEvaluationTime, timeZone);
+    final effectiveSuspendedInput =
+        (!clearSuspendedAt && suspendedLocalInput != null)
+        ? _resolveLocalCalendarInput(zone, suspendedLocalInput)
+        : _normalizeOptionalUtcTimestamp(suspendedAt, 'suspendedAt');
     final wasDone = (prior?.isCompleted ?? false) || prior?.completedAt != null;
     final isTargetDone = targetTier == TaskTier.completed;
     final isRestoring = wasDone && targetTier != null && !isTargetDone;
@@ -873,15 +946,18 @@ class TaskBoardMutator {
         isDone ||
         clearSuspendedAt ||
         isRestoring ||
-        (isSomedayTarget && suspendedAt == null && isSuspendedForever != true);
+        (isSomedayTarget &&
+            effectiveSuspendedInput == null &&
+            isSuspendedForever != true);
     final keepForever =
         (prior?.isSuspendedForever ?? false) ||
         (isBlockedTarget && prior?.suspendedAt == null);
     final autoForever =
-        suspendedAt == TaskItem.defaultSuspendedAt ||
-        (suspendedAt == null && keepForever);
+        (suspendedLocalInput == null &&
+            effectiveSuspendedInput == TaskItem.defaultSuspendedAt) ||
+        (effectiveSuspendedInput == null && keepForever);
     final isForever = !clearDefer && (isSuspendedForever ?? autoForever);
-    final rawSuspended = suspendedAt ?? prior?.suspendedAt;
+    final rawSuspended = effectiveSuspendedInput ?? prior?.suspendedAt;
     final nextSuspended = (clearDefer || isForever) ? null : rawSuspended;
     final nextSuspendedNote = (clearDefer || clearSuspendedNote)
         ? null
@@ -899,35 +975,26 @@ class TaskBoardMutator {
     final nextPriority = !isSomeday && allowPriority && isFocus;
     final explicitlyPromotedPriority =
         (isPriority == true || targetTier == TaskTier.focus) && nextPriority;
-    final stamp = prior != null
-        ? TaskItem.nextModifiedTimestamp(now, prior.effectiveModifiedAt)
-        : TaskItem.normalizeTimestamp(modifiedAt ?? now);
     final prevCount = prior?.completions ?? 0;
     final armed = isDone
         ? const <TdfTaskDependency>[]
         : _armDeps(board, taskId, blockedByTaskIds, dependencies, prior);
-    final nextDueAt = (clearDueAt || (isRestoring && dueAt == null))
-        ? null
-        : (dueAt ?? prior?.dueAt);
-    final normalizedNextDueAt = nextDueAt != null
-        ? TaskItem.normalizeTimestamp(nextDueAt)
-        : null;
-    final normalizedPriorDueAt = switch (prior?.dueAt) {
-      final priorDue? => TaskItem.normalizeTimestamp(priorDue),
-      null => null,
-    };
-    final nextIsDuePassive = normalizedNextDueAt == null
-        ? false
-        : (prior != null &&
-                  normalizedNextDueAt == normalizedPriorDueAt &&
-                  !explicitlyPromotedPriority
-              ? (isDuePassive ?? prior.isDuePassive)
-              : (isDuePassive ?? false));
-    final nextDueNote = (normalizedNextDueAt == null || clearDueNote)
-        ? null
-        : (validatedDueNote ?? prior?.dueNote);
+    final resolvedDue = _resolveUpdatedDueState(
+      prior: prior,
+      zone: zone,
+      dueAt: dueAt,
+      dueLocalInput: dueLocalInput,
+      dueAnchor: dueAnchor,
+      clearAllDue:
+          clearDueAt || (isRestoring && dueLocalInput == null && dueAt == null),
+      clearDueAnchor: clearDueAnchor,
+      clearDueNote: clearDueNote,
+      isDuePassive: isDuePassive,
+      validatedDueNote: validatedDueNote,
+      explicitlyPromotedPriority: explicitlyPromotedPriority,
+    );
     final nextOrigin = clearOrigin ? null : (origin ?? prior?.origin);
-    final baseTask = TaskItem(
+    final candidateWithoutStamp = TaskItem(
       id: taskId,
       title: trimmed,
       note: note != null ? _trimOrNull(note) : prior?.note,
@@ -936,20 +1003,21 @@ class TaskBoardMutator {
       isPriority: nextPriority,
       createdAt: prior?.createdAt ?? now,
       completedAt: isDone ? (prior?.completedAt ?? now) : null,
-      modifiedAt: stamp,
+      modifiedAt: prior?.modifiedAt,
       suspendedAt: nextSuspended,
       isSuspendedForever: isForever,
       suspendedNote: nextSuspendedNote,
-      dueAt: nextDueAt,
-      isDuePassive: nextIsDuePassive,
-      dueNote: nextDueNote,
+      dueAt: resolvedDue.dueAt,
+      dueAnchor: resolvedDue.dueAnchor,
+      isDuePassive: resolvedDue.isDuePassive,
+      dueNote: resolvedDue.dueNote,
       repeatRule: repeat,
       dependencies: isRestoring
           ? TaskBoardQueueMutator.rearmDependencies(board, armed)
           : armed,
       labelIds: labelIds ?? prior?.labelIds ?? const [],
       origin: nextOrigin,
-      links: links != null ? _cleanLinks(links) : (prior?.links ?? const []),
+      links: validatedLinks ?? (prior?.links ?? const <TaskLink>[]),
       history: validatedHistory ?? prior?.history ?? const <TaskHistoryEntry>[],
       conditions: _sanitizeTaskRules(conditions, prior?.conditions ?? const []),
       subtasksAutoFinish: autoFinish,
@@ -957,7 +1025,24 @@ class TaskBoardMutator {
           ? TaskBoardQueueMutator.setAllSubtasksCompleted(steps, isDone)
           : steps,
     );
-    final zone = _zone(now, localEvaluationTime, timeZone);
+    if (prior != null && !isNewTask && !isRecurringAuto) {
+      final candidateQueue = TaskBoardQueueMutator.updateQueueForEditedTask(
+        board.queueBlock,
+        prior,
+        candidateWithoutStamp,
+        !isDone && !isSomeday,
+        now,
+      );
+      if (candidateWithoutStamp == prior &&
+          identical(candidateQueue, board.queueBlock) &&
+          (targetTier == null || board.findTierOfTask(taskId) == targetTier)) {
+        return board;
+      }
+    }
+    final stamp = prior != null
+        ? _nextMutationModifiedAt(now, prior.effectiveModifiedAt)
+        : _normalizeOptionalUtcTimestamp(modifiedAt ?? now, 'modifiedAt');
+    final baseTask = candidateWithoutStamp.copyWith(modifiedAt: stamp);
     final finalTask = isRecurringAuto
         ? (_reschedule(board, baseTask, now, zone, stamp) ?? baseTask)
         : baseTask;
@@ -969,17 +1054,6 @@ class TaskBoardMutator {
       isRecurringAuto || (!isDone && !isSomeday),
       now,
     );
-    if (prior != null && !isNewTask) {
-      final finalWithoutStamp = finalTask.copyWith(
-        modifiedAt: prior.modifiedAt,
-        clearModifiedAt: prior.modifiedAt == null,
-      );
-      if (finalWithoutStamp == prior &&
-          identical(nextQueue, board.queueBlock) &&
-          (targetTier == null || board.findTierOfTask(taskId) == targetTier)) {
-        return board;
-      }
-    }
     final added = isDone
         ? <TaskItem>[finalTask, ...board.allTasks]
         : <TaskItem>[...board.allTasks, finalTask];
@@ -1170,17 +1244,6 @@ class TaskBoardMutator {
     );
   }
 
-  /// Trims, validates, and caps [links] at [TaskLink.maxLinksPerTask] while preserving order.
-  static List<TaskLink> _cleanLinks(List<TaskLink> links) {
-    final cleaned = <TaskLink>[];
-    for (final link in links) {
-      if (cleaned.length >= TaskLink.maxLinksPerTask) break;
-      final parsed = TaskLink.tryParse(rawTitle: link.title, rawUri: link.uri);
-      if (parsed != null) cleaned.add(parsed);
-    }
-    return cleaned;
-  }
-
   /// Trims and filters out empty subtask entries.
   static List<SubtaskItem> _cleanSubtasks(List<SubtaskItem> subtasks) => [
     for (final step in subtasks)
@@ -1304,6 +1367,23 @@ class TaskBoardMutator {
     }
   }
 
+  /// Normalizes optional UTC [timestamp] to whole seconds and validates `0001..9999` bounds.
+  static DateTime? _normalizeOptionalUtcTimestamp(
+    DateTime? timestamp,
+    String fieldName,
+  ) {
+    if (timestamp == null) return null;
+    final normalized = TaskItem.normalizeTimestamp(timestamp);
+    if (!TdfCalendar.isWithinTimestampBounds(normalized)) {
+      throw TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: '$fieldName timestamp is outside 0001..9999 UTC.',
+      );
+    }
+    return normalized;
+  }
+
   /// Returns whether any [LocationTaskCondition] in [conditions] references [locationId].
   static bool _referencesLocationId(
     List<TaskCondition> conditions,
@@ -1323,8 +1403,13 @@ class TaskBoardMutator {
   ]) {
     final repeatRule = task.repeatRule;
     if (repeatRule == null) return null;
-    if (task.completions >= TdfTaskDependency.maxCompletions) {
-      throw const FormatException('LimitExceeded');
+    if (task.completions >= maxTdfCompletions) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task completions counter exceeds maximum of $maxTdfCompletions.',
+      );
     }
     final nextModified =
         preserveModifiedAt ??
@@ -1338,12 +1423,13 @@ class TaskBoardMutator {
       false,
     );
     if (task.dueAt case final currentDueUtc?) {
-      final scheduleNext = repeatRule.nextScheduleAnchoredOccurrence(
+      final scheduleNext = repeatRule.computeNextMode2Schedule(
         completedAtUtc: now,
         oldDueUtc: currentDueUtc,
+        oldAnchor: task.dueAnchor,
         timeZone: zone,
       );
-      final shouldDefer = scheduleNext.newSuspendedUtc.isAfter(now);
+      final nextSuspendedUtc = scheduleNext.newSuspendedUtc;
       AppLogger.info(
         LogTag.domain,
         'Rescheduled recurring task id=${task.id} repeat -> nextDueUtc=${scheduleNext.newDueUtc.toIso8601String()}',
@@ -1353,11 +1439,12 @@ class TaskBoardMutator {
         clearCompletedAt: true,
         completions: task.completions + 1,
         isPriority: true,
-        suspendedAt: shouldDefer ? scheduleNext.newSuspendedUtc : null,
-        clearSuspendedAt: !shouldDefer,
+        suspendedAt: nextSuspendedUtc,
+        clearSuspendedAt: nextSuspendedUtc == null,
         clearSuspendedNote: true,
         isSuspendedForever: false,
         dueAt: scheduleNext.newDueUtc,
+        dueAnchor: scheduleNext.newAnchor,
         isDuePassive: false,
         repeatRule: repeatRule,
         dependencies: rearmedDependencies,
@@ -1385,9 +1472,93 @@ class TaskBoardMutator {
     );
   }
 
+  /// Resolves a local calendar [input] to a UTC [DateTime] via [zone] (`TDF-CAL-001`),
+  /// mapping out-of-bounds [FormatException] to [TdfException] (`invalidTimestamp`).
+  static DateTime _resolveLocalCalendarInput(
+    TdfTimeZoneContext zone,
+    TdfLocalDateTime input,
+  ) {
+    try {
+      return zone.resolveLocalToUtc(
+        input.year,
+        input.month,
+        input.day,
+        input.hour,
+        input.minute,
+        input.second,
+      );
+    } on FormatException {
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Resolved local timestamp exceeds 0001..9999 UTC range.',
+      );
+    }
+  }
+
   /// Normalizes [currentDate] (or `DateTime.now().toUtc()`) to whole UTC seconds.
   static DateTime _resolveNow(DateTime? currentDate) =>
       TaskItem.normalizeTimestamp(currentDate ?? DateTime.now().toUtc());
+
+  /// Resolves the `(dueAt, dueAnchor, isDuePassive, dueNote)` 4-tuple for `updateTask` (`TDF-MUT-008`).
+  static ({
+    DateTime? dueAt,
+    TdfLocalDateTime? dueAnchor,
+    bool isDuePassive,
+    String? dueNote,
+  })
+  _resolveUpdatedDueState({
+    required TaskItem? prior,
+    required TdfTimeZoneContext zone,
+    required DateTime? dueAt,
+    required TdfLocalDateTime? dueLocalInput,
+    required TdfLocalDateTime? dueAnchor,
+    required bool clearAllDue,
+    required bool clearDueAnchor,
+    required bool clearDueNote,
+    required bool? isDuePassive,
+    required String? validatedDueNote,
+    required bool explicitlyPromotedPriority,
+  }) {
+    if (clearAllDue) {
+      return (dueAt: null, dueAnchor: null, isDuePassive: false, dueNote: null);
+    }
+    final DateTime? nextDueAt;
+    final TdfLocalDateTime? nextDueAnchor;
+    if (dueLocalInput != null) {
+      nextDueAt = _resolveLocalCalendarInput(zone, dueLocalInput);
+      nextDueAnchor = dueLocalInput;
+    } else {
+      final rawDue = dueAt ?? prior?.dueAt;
+      nextDueAt = _normalizeOptionalUtcTimestamp(rawDue, 'dueAt');
+      nextDueAnchor = (nextDueAt == null || clearDueAnchor)
+          ? null
+          : (dueAnchor ?? prior?.dueAnchor);
+    }
+    if (nextDueAt == null) {
+      return (dueAt: null, dueAnchor: null, isDuePassive: false, dueNote: null);
+    }
+    final priorDueAt = switch (prior?.dueAt) {
+      final existingDue? => TaskItem.normalizeTimestamp(existingDue),
+      null => null,
+    };
+    final dueOrAnchorChanged =
+        prior == null ||
+        nextDueAt != priorDueAt ||
+        nextDueAnchor != prior.dueAnchor;
+    final nextIsDuePassive = (dueOrAnchorChanged || explicitlyPromotedPriority)
+        ? (isDuePassive ?? false)
+        : (isDuePassive ?? prior.isDuePassive);
+    final nextDueNote = clearDueNote
+        ? null
+        : (validatedDueNote ?? prior?.dueNote);
+    return (
+      dueAt: nextDueAt,
+      dueAnchor: nextDueAnchor,
+      isDuePassive: nextIsDuePassive,
+      dueNote: nextDueNote,
+    );
+  }
 
   /// Orders [rules] for a `label` block by group (`day`, `time`, `location`) while stripping task-only resets and coalescing location rules.
   static List<TaskCondition>? _sanitizeLabelRules(List<TaskCondition>? rules) =>
@@ -1423,24 +1594,23 @@ class TaskBoardMutator {
     return trimmed.isNotEmpty ? trimmed : null;
   }
 
-  /// Validates and normalizes an iterable of [TaskHistoryEntry] items against `0.7.0` limits.
+  /// Validates and normalizes an iterable of [TaskHistoryEntry] items against `0.8.0` limits (`TDF-VAL-002`).
   static List<TaskHistoryEntry> _validateHistoryEntries(
     Iterable<TaskHistoryEntry> entries,
   ) {
     final validated = <TaskHistoryEntry>[];
     for (final entry in entries) {
+      if (validated.length >= maxTdfHistoryPerTask) {
+        throw const TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: 1,
+          message:
+              'Task exceeds maximum of $maxTdfHistoryPerTask history entries.',
+        );
+      }
       validated.add(_validateHistoryEntry(entry.timestampUtc, entry.text));
     }
-    final normalized = TaskHistoryEntry.normalizeList(validated);
-    if (normalized.length > maxTdfHistoryPerTask) {
-      throw const TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: 1,
-        message:
-            'Task exceeds maximum of $maxTdfHistoryPerTask history entries.',
-      );
-    }
-    return normalized;
+    return TaskHistoryEntry.normalizeList(validated);
   }
 
   /// Validates a single `(timestampUtc, text)` history entry under `TDF_SPEC.md` Section 4.1.2 & Section 8.
@@ -1462,22 +1632,22 @@ class TaskBoardMutator {
 
   /// Validates all [links] for a `label` block against [maxTdfLinksPerLabel], single-line `<title>`, and `<uri>` rules.
   static List<TaskLink> _validateLabelLinks(Iterable<TaskLink> links) {
-    final list = List<TaskLink>.from(links);
-    if (list.length > maxTdfLinksPerLabel) {
-      throw const TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: 1,
-        message: 'Label exceeds maximum of $maxTdfLinksPerLabel links.',
-      );
-    }
-    if (list.isEmpty) return const <TaskLink>[];
     final validated = <TaskLink>[];
-    for (final link in list) {
+    for (final link in links) {
+      if (validated.length >= maxTdfLinksPerLabel) {
+        throw const TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: 1,
+          message: 'Label exceeds maximum of $maxTdfLinksPerLabel links.',
+        );
+      }
       final title = _validateSingleLineText(link.title, 'link title');
       final uri = _validateStrictUri(link.uri);
       validated.add(TaskLink(title: title, uri: uri));
     }
-    return List<TaskLink>.unmodifiable(validated);
+    return validated.isEmpty
+        ? const <TaskLink>[]
+        : List<TaskLink>.unmodifiable(validated);
   }
 
   /// Validates [repeat] count (`1..3650`) and `leadDays` (`0..3650`) bounds.
@@ -1630,6 +1800,26 @@ class TaskBoardMutator {
       );
     }
     return rawUri;
+  }
+
+  /// Validates all [links] for a `task` block against [maxTdfLinksPerTask], single-line `<title>`, and `<uri>` rules (`TDF-DIR-006`, `TDF-VAL-002`).
+  static List<TaskLink> _validateTaskLinks(Iterable<TaskLink> links) {
+    final validated = <TaskLink>[];
+    for (final link in links) {
+      if (validated.length >= maxTdfLinksPerTask) {
+        throw const TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: 1,
+          message: 'Task exceeds maximum of $maxTdfLinksPerTask links.',
+        );
+      }
+      final title = _validateSingleLineText(link.title, 'link title');
+      final uri = _validateStrictUri(link.uri);
+      validated.add(TaskLink(title: title, uri: uri));
+    }
+    return validated.isEmpty
+        ? const <TaskLink>[]
+        : List<TaskLink>.unmodifiable(validated);
   }
 
   /// Resolves the effective [TdfTimeZoneContext] for [now], [localTime], and [timeZone].

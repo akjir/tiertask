@@ -1,0 +1,117 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 2,
+    "tasks": [
+      {
+        "id": "AAAAAAAAAA",
+        "deletedAt": "2026-11-01 12:30:00",
+        "checkpoint": 0
+      },
+      {
+        "id": "ZZZZZZZZZZ",
+        "deletedAt": "2026-11-01 00:00:00",
+        "checkpoint": 7
+      }
+    ],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "2026-11-01 09:00:00",
+    "tasks": [
+      "8jKaCdOkD2"
+    ]
+  },
+  "labels": [
+    {
+      "id": "aaaLblOkD2",
+      "scoped": false,
+      "name": "Label A",
+      "color": null,
+      "note": null,
+      "modified": null,
+      "links": [],
+      "conditions": []
+    },
+    {
+      "id": "zzzLblOkD2",
+      "scoped": false,
+      "name": "Label Z",
+      "color": "#4CAF50",
+      "note": null,
+      "modified": null,
+      "links": [],
+      "conditions": [
+        "location locTwoOkD2"
+      ]
+    }
+  ],
+  "locations": [
+    {
+      "id": "locOneOkD2",
+      "name": "Loc One",
+      "note": null,
+      "source": null,
+      "latitude": "50.9787",
+      "longitude": "11",
+      "radius": "25.5",
+      "modified": null
+    },
+    {
+      "id": "locTwoOkD2",
+      "name": "Loc Two",
+      "note": null,
+      "source": null,
+      "latitude": "0",
+      "longitude": "11.0328",
+      "radius": "150",
+      "modified": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "8jKaCdOkD2",
+      "priority": false,
+      "name": "Out of order task",
+      "note": null,
+      "created": "2026-11-01 08:00:00",
+      "finished": null,
+      "modified": null,
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "aaaLblOkD2",
+        "zzzLblOkD2"
+      ],
+      "blocked": {
+        "AAAAAAAAAA": 5,
+        "ZZZZZZZZZZ": 1
+      },
+      "suspended": null,
+      "due": null,
+      "origin": null,
+      "links": [],
+      "history": [
+        {
+          "timestamp": "2026-11-01 08:00:00",
+          "text": "First"
+        },
+        {
+          "timestamp": "2026-11-01 09:00:00",
+          "text": "Alpha"
+        },
+        {
+          "timestamp": "2026-11-01 09:00:00",
+          "text": "Zulu"
+        }
+      ],
+      "conditions": [
+        "day mon",
+        "time 09:00 17:00",
+        "location locTwoOkD2 locOneOkD2"
+      ],
+      "subtasks": null
+    }
+  ]
+}

@@ -49,7 +49,7 @@ void main() {
     'Side panel displays Locations section below Labels, opens EditLocationsScreen, permits duplicate location names, and supports EditLocationScreen with 6-decimal GPS rounding',
     (WidgetTester tester) async {
       const locationsTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:30

@@ -16,13 +16,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
+import 'host_file_lock.dart';
 
 /// Stateless helper operations for local `.tdf` path validation, `.bak` backup
 /// rotation, safe cross-device file moves, and synchronous diagnostic log I/O.
@@ -34,9 +34,7 @@ class LocalFileOperations<E extends Exception> {
   /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
   static const int maxBackupSuffix = 999;
 
-  static const String _hexDigits = '0123456789abcdef';
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
-  static final math.Random _secureRandom = math.Random.secure();
   static final RegExp _windowsDrivePattern = RegExp(r'^[a-zA-Z]:[\\/]');
 
   /// Factory function that constructs a typed domain exception with an optional cause.
@@ -605,54 +603,19 @@ class LocalFileOperations<E extends Exception> {
     }
   }
 
-  /// Atomically writes [bytes] to [filePath] via a dot-prefixed `.tmp.<32hex>` temporary file in the same directory.
-  void writeTdfAtomicallySync(
+  /// Atomically writes [bytes] to [filePath] via [lockManager] using a `.tmp.<32hex>` temporary file.
+  Future<void> writeTdfAtomically(
     String filePath,
     List<int> bytes,
-    AppLocalizations messages,
-  ) {
-    final targetType = FileSystemEntity.typeSync(filePath, followLinks: false);
-    if (targetType == FileSystemEntityType.directory) {
-      throw createException(messages.errorMoveSourceIsDirectory(filePath));
-    }
-    if (targetType == FileSystemEntityType.link) {
-      throw createException(messages.errorMoveSourceIsSymlink(filePath));
-    }
-    final targetFile = File(filePath);
-    targetFile.parent.createSync(recursive: true);
-    final fileName = extractFileNameFromPath(filePath);
-    final tempPath = _joinDirectoryAndChild(
-      targetFile.parent.path,
-      '.$fileName.tmp.${_generateTempHexSuffix()}',
-    );
-    if (FileSystemEntity.typeSync(tempPath, followLinks: false) !=
-        FileSystemEntityType.notFound) {
-      throw createException(
-        messages.errorSaveLocalFileFailed('Temporary file collision'),
-      );
-    }
-    final tempFile = File(tempPath);
-    try {
-      _writeAndFlushTempFileSync(tempFile, bytes, messages);
-      tempFile.renameSync(filePath);
-    } on Object {
-      _cleanupTempFileSync(tempFile);
-      rethrow;
-    }
-  }
-
-  /// Deletes [tempFile] if it exists as a regular file after a failed atomic write or rename.
-  void _cleanupTempFileSync(File tempFile) {
-    if (FileSystemEntity.typeSync(tempFile.path, followLinks: false) !=
-        FileSystemEntityType.file) {
-      return;
-    }
-    try {
-      tempFile.deleteSync();
-    } on FileSystemException {
-      // Preserve original write or rename error as primary cause.
-    }
-  }
+    AppLocalizations messages, {
+    required HostFileLockManager<E> lockManager,
+  }) => lockManager.writeAtomically(
+    filePath,
+    bytes,
+    targetIsDirectoryMessage: messages.errorMoveSourceIsDirectory(filePath),
+    targetIsSymlinkMessage: messages.errorMoveSourceIsSymlink(filePath),
+    formatFailureMessage: messages.errorSaveLocalFileFailed,
+  );
 
   /// Copies [sourcePath] to [targetPath] and deletes [sourcePath] when moving across mount points (`EXDEV`).
   void _copyAndDeleteCrossDevice(
@@ -702,15 +665,6 @@ class LocalFileOperations<E extends Exception> {
       case FileSystemEntityType.unixDomainSock:
         throw createException(messages.errorMoveTargetFileExists(path));
     }
-  }
-
-  /// Generates a 128-bit (`32` lowercase hex characters) CSPRNG suffix for atomic temporary files.
-  String _generateTempHexSuffix() {
-    final buffer = StringBuffer();
-    for (var i = 0; i < 32; i++) {
-      buffer.write(_hexDigits[_secureRandom.nextInt(16)]);
-    }
-    return buffer.toString();
   }
 
   /// Checks whether [value] contains ASCII control characters or null bytes.
@@ -982,27 +936,5 @@ class LocalFileOperations<E extends Exception> {
       workspaceId: workspaceId,
     );
     return sample.substring(19);
-  }
-
-  /// Opens [tempFile] with `FileMode.writeOnly`, applies owner-only `0600` permissions on Linux, writes [bytes], and flushes (`fsync`).
-  void _writeAndFlushTempFileSync(
-    File tempFile,
-    List<int> bytes,
-    AppLocalizations messages,
-  ) {
-    final handle = tempFile.openSync(mode: FileMode.writeOnly);
-    try {
-      if (Platform.isLinux &&
-          Process.runSync('chmod', <String>['0600', tempFile.path]).exitCode !=
-              0) {
-        throw createException(
-          messages.errorSaveLocalFileFailed('Failed to set 0600 permissions'),
-        );
-      }
-      handle.writeFromSync(bytes);
-      handle.flushSync();
-    } finally {
-      handle.closeSync();
-    }
   }
 }

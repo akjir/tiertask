@@ -15,12 +15,9 @@
 
 import 'package:flutter/foundation.dart';
 
-import '../models/task_item.dart';
 import '../models/tdf_error.dart';
-import '../models/tdf_metadata.dart';
-import '../models/tdf_timezone.dart';
 
-/// Lexical category of a scanned token in a TDF document.
+/// Lexical category of a scanned token in a TDF `0.8.0` document.
 enum TdfTokenKind {
   /// Unquoted bare word (`[a-zA-Z0-9_-]`, numbers, dates, etc.).
   bareWord,
@@ -35,7 +32,7 @@ enum TdfTokenKind {
   quotedString,
 }
 
-/// Represents the start, end, and next offset of a single logical TDF line.
+/// Start, end, and next code-unit offset of a single logical TDF line.
 @immutable
 class TdfLineSpan {
   /// Creates a [TdfLineSpan].
@@ -45,8 +42,13 @@ class TdfLineSpan {
     required this.nextOffset,
   });
 
+  /// Exclusive end offset of the line content before `LF` or `CRLF`.
   final int lineEnd;
+
+  /// Inclusive start offset of the line content in the source string.
   final int lineStart;
+
+  /// Start offset of the next physical line (or `source.length` at `EOF`).
   final int nextOffset;
 }
 
@@ -56,7 +58,10 @@ class TdfScannedToken {
   /// Creates a [TdfScannedToken].
   const TdfScannedToken({required this.value, required this.kind});
 
+  /// Lexical category of this token.
   final TdfTokenKind kind;
+
+  /// Decoded string content of this token.
   final String value;
 
   /// Whether this token is an unquoted [TdfTokenKind.bareWord].
@@ -66,22 +71,17 @@ class TdfScannedToken {
   bool get isQuoted => kind == TdfTokenKind.quotedString;
 }
 
-/// Stateless lexical scanner and literal validator for `TDF_SPEC.md` Section 2.
+/// Stateless single-pass lexical scanner for `spec/TDF_SPEC_0.8.0.md` Section 3.
 @immutable
 class TdfScanner {
-  /// Private constructor to prevent instantiation.
+  /// Prevents instantiation of this stateless helper class.
   const TdfScanner._();
-
-  /// Counts Unicode scalar values in [text] and throws [TdfErrorKind.unexpectedToken] on unpaired surrogates.
-  static int countUnicodeScalars(String text, [int line = 1]) =>
-      TdfCalendar.countUnicodeScalars(text) ??
-      fail(TdfErrorKind.unexpectedToken, line, 'Unpaired surrogate.');
 
   /// Throws a [TdfException] with [kind], 1-based [line], and [message].
   static Never fail(TdfErrorKind kind, int line, String message) =>
       throw TdfException(kind: kind, line: line, message: message);
 
-  /// Finds the end of the line starting at [startOffset] and validates line terminators, control chars, and UTF-16 surrogates.
+  /// Finds the end of the line starting at [startOffset] and validates line terminators, control characters, and UTF-16 surrogates.
   static TdfLineSpan findLineSpan(String source, int startOffset, int line) {
     var index = startOffset;
     while (index < source.length) {
@@ -94,33 +94,14 @@ class TdfScanner {
         );
       }
       if (unit == 0x0D) {
-        if (index + 1 >= source.length ||
-            source.codeUnitAt(index + 1) != 0x0A) {
-          fail(TdfErrorKind.unexpectedToken, line, 'Standalone CR without LF.');
-        }
+        _requireCrLfPair(source, index, line);
         return TdfLineSpan(
           lineStart: startOffset,
           lineEnd: index,
           nextOffset: index + 2,
         );
       }
-      if ((unit < 0x20 && unit != 0x09) || unit == 0x7F) {
-        fail(TdfErrorKind.unexpectedToken, line, 'Invalid control character.');
-      }
-      if (unit >= 0xD800 && unit <= 0xDBFF) {
-        final low = index + 1 < source.length
-            ? source.codeUnitAt(index + 1)
-            : 0;
-        if (low < 0xDC00 || low > 0xDFFF) {
-          fail(TdfErrorKind.unexpectedToken, line, 'Unpaired high surrogate.');
-        }
-        index += 2;
-        continue;
-      }
-      if (unit >= 0xDC00 && unit <= 0xDFFF) {
-        fail(TdfErrorKind.unexpectedToken, line, 'Unpaired low surrogate.');
-      }
-      index++;
+      index = _advanceValidatedLineCodeUnit(source, index, unit, line);
     }
     return TdfLineSpan(
       lineStart: startOffset,
@@ -129,82 +110,9 @@ class TdfScanner {
     );
   }
 
-  /// Finds the first index of [kind] in [tokens], or `-1` if absent.
-  static int findTokenKindIndex(
-    List<TdfScannedToken> tokens,
-    TdfTokenKind kind,
-  ) {
-    for (var i = 0; i < tokens.length; i++) {
-      if (tokens[i].kind == kind) {
-        return i;
-      }
-    }
-    return -1;
-  }
-
   /// Checks whether [codeUnit] is an ASCII decimal digit (`0-9`).
   static bool isAsciiDigit(int codeUnit) =>
       codeUnit >= 0x30 && codeUnit <= 0x39;
-
-  /// Checks whether [raw] matches `0` (when [allowZero] is `true`) or `[1-9][0-9]*`.
-  static bool isValidCanonicalUnsignedInt(
-    String raw, {
-    required bool allowZero,
-  }) {
-    if (raw.isEmpty) {
-      return false;
-    }
-    if (raw == '0') {
-      return allowZero;
-    }
-    final first = raw.codeUnitAt(0);
-    if (first < 0x31 || first > 0x39) {
-      return false;
-    }
-    for (var i = 1; i < raw.length; i++) {
-      if (!isAsciiDigit(raw.codeUnitAt(i))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Checks whether [raw] matches `-?[0-9]+(\.[0-9]+)?` without using regular expressions.
-  static bool isValidDecimalLiteral(String raw) {
-    if (raw.isEmpty) {
-      return false;
-    }
-    var index = 0;
-    if (raw.codeUnitAt(0) == 0x2D) {
-      if (raw.length == 1) {
-        return false;
-      }
-      index = 1;
-    }
-    var hasLeadingDigits = false;
-    while (index < raw.length && isAsciiDigit(raw.codeUnitAt(index))) {
-      hasLeadingDigits = true;
-      index++;
-    }
-    if (!hasLeadingDigits) {
-      return false;
-    }
-    if (index == raw.length) {
-      return true;
-    }
-    if (raw.codeUnitAt(index) != 0x2E || index == raw.length - 1) {
-      return false;
-    }
-    for (var i = index + 1; i < raw.length; i++) {
-      if (!isAsciiDigit(raw.codeUnitAt(i))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Checks whether [value] is a strict `#RRGGBB` hexadecimal color string.
-  static bool isValidHexColor(String value) => TdfColor.isStrictHexColor(value);
 
   /// Validates that [value] matches the TDF identifier rule (`[a-zA-Z_][a-zA-Z0-9_-]*`).
   static bool isValidIdentifier(String value) {
@@ -218,46 +126,6 @@ class TdfScanner {
     }
     return true;
   }
-
-  /// Checks whether [value] is a valid `<HH:MM[:SS]>` repeat clock literal.
-  static bool isValidRepeatClock(String value) =>
-      TdfRepeatClock.tryParse(value) != null;
-
-  /// Checks whether [uri] begins with a valid URI scheme and contains no control characters.
-  static bool isValidUriScheme(String uri) => TaskLink.isValidUri(uri);
-
-  /// Validates and parses a canonical unsigned integer [raw] within `[allowZero ? 0 : 1, maxAllowed]`.
-  static int parseCanonicalInt(
-    String raw,
-    int line,
-    int maxAllowed, {
-    bool allowZero = true,
-  }) {
-    final bigVal = isValidCanonicalUnsignedInt(raw, allowZero: allowZero)
-        ? BigInt.tryParse(raw)
-        : null;
-    if (bigVal == null) {
-      fail(TdfErrorKind.invalidNumber, line, 'Invalid integer "$raw".');
-    }
-    if (bigVal > BigInt.from(maxAllowed)) {
-      fail(TdfErrorKind.limitExceeded, line, 'Integer > $maxAllowed.');
-    }
-    return bigVal.toInt();
-  }
-
-  /// Validates and parses `<YYYY-MM-DD> [<HH:MM[:SS]>]` into a canonical UTC [DateTime].
-  static DateTime parseCanonicalUtcTimestamp(
-    String dateToken,
-    int line, [
-    String? timeToken,
-  ]) =>
-      TaskItem.tryParseTdfTimestamp(dateToken, timeToken) ??
-      fail(TdfErrorKind.invalidTimestamp, line, 'Invalid UTC timestamp.');
-
-  /// Validates and parses `<HH:MM>` into minutes since midnight (`0..1439`).
-  static int parseLocalClockMinutes(String token, int line) =>
-      TaskItem.tryParseTimeMinutes(token) ??
-      fail(TdfErrorKind.invalidTimestamp, line, 'Invalid <HH:MM> time.');
 
   /// Scans all lexical tokens on `[lineStart, lineEnd)` in a single $O(N)$ pass.
   static List<TdfScannedToken> scanLineTokens(
@@ -274,6 +142,13 @@ class TdfScanner {
         break;
       }
       if (tokens.length >= maxTdfArgsPerStmt + 3) {
+        if (_containsBraceToken(tokens)) {
+          fail(
+            TdfErrorKind.unexpectedToken,
+            line,
+            'Non-comment tokens after brace.',
+          );
+        }
         fail(TdfErrorKind.limitExceeded, line, 'Too many statement arguments.');
       }
       cursor = _scanNextToken(source, cursor, lineEnd, line, tokens);
@@ -281,18 +156,38 @@ class TdfScanner {
     return tokens;
   }
 
-  /// Validates that [text] contains no disallowed ASCII control characters.
-  static void validateNoControlCharacters(
-    String text, {
-    required int lineNumber,
-  }) {
-    for (var i = 0; i < text.length; i++) {
-      final unit = text.codeUnitAt(i);
-      if ((unit < 0x20 && unit != 0x09 && unit != 0x0A && unit != 0x0D) ||
-          unit == 0x7F) {
-        fail(TdfErrorKind.unexpectedToken, lineNumber, 'Invalid control char.');
+  /// Validates a non-terminator UTF-16 code unit (or surrogate pair) at [index] and returns the next code-unit index.
+  static int _advanceValidatedLineCodeUnit(
+    String source,
+    int index,
+    int unit,
+    int line,
+  ) {
+    if ((unit < 0x20 && unit != 0x09) || unit == 0x7F) {
+      fail(TdfErrorKind.unexpectedToken, line, 'Invalid control character.');
+    }
+    if (unit >= 0xD800 && unit <= 0xDBFF) {
+      final low = index + 1 < source.length ? source.codeUnitAt(index + 1) : 0;
+      if (low < 0xDC00 || low > 0xDFFF) {
+        fail(TdfErrorKind.unexpectedToken, line, 'Unpaired high surrogate.');
+      }
+      return index + 2;
+    }
+    if (unit >= 0xDC00 && unit <= 0xDFFF) {
+      fail(TdfErrorKind.unexpectedToken, line, 'Unpaired low surrogate.');
+    }
+    return index + 1;
+  }
+
+  /// Checks whether [tokens] already contains an opening `{` or closing `}` brace token.
+  static bool _containsBraceToken(List<TdfScannedToken> tokens) {
+    for (final token in tokens) {
+      if (token.kind == TdfTokenKind.openBrace ||
+          token.kind == TdfTokenKind.closeBrace) {
+        return true;
       }
     }
+    return false;
   }
 
   /// Checks whether [codeUnit] is an ASCII alphanumeric, underscore, or hyphen (`[a-zA-Z0-9_-]`).
@@ -320,6 +215,14 @@ class TdfScanner {
         codeUnit == 0x205F ||
         codeUnit == 0x3000 ||
         codeUnit == 0xFEFF;
+  }
+
+  /// Ensures a carriage return (`0x0D`) at [crIndex] is immediately followed by `LF` (`0x0A`).
+  static void _requireCrLfPair(String source, int crIndex, int line) {
+    if (crIndex + 1 >= source.length ||
+        source.codeUnitAt(crIndex + 1) != 0x0A) {
+      fail(TdfErrorKind.unexpectedToken, line, 'Standalone CR without LF.');
+    }
   }
 
   /// Scans an unquoted bare word token starting at [start].
@@ -356,6 +259,26 @@ class TdfScanner {
     return cursor;
   }
 
+  /// Appends one literal or escaped unit from [source] at [cursor] into [buffer] and returns the next cursor.
+  static int _scanDoubleQuotedContentUnit(
+    String source,
+    int cursor,
+    int lineEnd,
+    int line,
+    StringBuffer buffer,
+  ) {
+    final unit = source.codeUnitAt(cursor);
+    if (unit != 0x5C) {
+      buffer.writeCharCode(unit);
+      return cursor + 1;
+    }
+    if (cursor + 1 >= lineEnd) {
+      fail(TdfErrorKind.unterminatedString, line, 'Unterminated escape.');
+    }
+    buffer.writeCharCode(_unescapeChar(source.codeUnitAt(cursor + 1), line));
+    return cursor + 2;
+  }
+
   /// Scans a double-quoted string token (`"..."`) starting at [start].
   static int _scanDoubleQuotedToken(
     String source,
@@ -367,8 +290,7 @@ class TdfScanner {
     final buffer = StringBuffer();
     var cursor = start + 1;
     while (cursor < lineEnd) {
-      final unit = source.codeUnitAt(cursor);
-      if (unit == 0x22) {
+      if (source.codeUnitAt(cursor) == 0x22) {
         final nextCursor = cursor + 1;
         _validatePostQuoteDelimiter(source, nextCursor, lineEnd, line);
         tokens.add(
@@ -379,18 +301,13 @@ class TdfScanner {
         );
         return nextCursor;
       }
-      if (unit == 0x5C) {
-        if (cursor + 1 >= lineEnd) {
-          fail(TdfErrorKind.unterminatedString, line, 'Unterminated escape.');
-        }
-        buffer.writeCharCode(
-          _unescapeChar(source.codeUnitAt(cursor + 1), line),
-        );
-        cursor += 2;
-      } else {
-        buffer.writeCharCode(unit);
-        cursor++;
-      }
+      cursor = _scanDoubleQuotedContentUnit(
+        source,
+        cursor,
+        lineEnd,
+        line,
+        buffer,
+      );
     }
     fail(TdfErrorKind.unterminatedString, line, 'Unterminated string.');
   }

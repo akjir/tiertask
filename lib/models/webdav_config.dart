@@ -18,6 +18,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
 import '../services/app_logger.dart';
+import 'tdf_timezone.dart';
 
 /// Supported display language modes in TierTask.
 enum AppLanguage {
@@ -135,7 +136,7 @@ enum AppTimeZoneMode {
 }
 
 /// Per-workspace lead horizon before `due` during which non-`passive` open
-/// queued tasks gain derived effective priority (`spec/TDF_SPEC_0.7.0.md` Section 5.5).
+/// queued tasks gain derived effective priority (`spec/TDF_SPEC_0.8.0.md` Section 9.5).
 enum DueLeadWindow {
   /// Disables deadline-driven effective priority (`W_due = null`).
   off(id: 0, duration: null),
@@ -437,34 +438,15 @@ class WebDavConfig {
   }
 
   /// Converts a wall-clock [localWallClock] date-time into a second-precision UTC [DateTime]
-  /// according to [timeZoneMode] and [manualTimeZoneOffsetMinutes].
+  /// according to [timeZoneMode] and [manualTimeZoneOffsetMinutes] via `TDF-CAL-001`.
   DateTime localWallClockToUtc(DateTime localWallClock) {
-    if (timeZoneMode == AppTimeZoneMode.manual) {
-      final wallAsUtc = DateTime.utc(
-        localWallClock.year,
-        localWallClock.month,
-        localWallClock.day,
-        localWallClock.hour,
-        localWallClock.minute,
-        localWallClock.second,
-      );
-      return wallAsUtc.subtract(Duration(minutes: manualTimeZoneOffsetMinutes));
-    }
-    final osLocal = DateTime(
+    return resolveTimeZoneContext().resolveLocalToUtc(
       localWallClock.year,
       localWallClock.month,
       localWallClock.day,
       localWallClock.hour,
       localWallClock.minute,
       localWallClock.second,
-    ).toUtc();
-    return DateTime.utc(
-      osLocal.year,
-      osLocal.month,
-      osLocal.day,
-      osLocal.hour,
-      osLocal.minute,
-      osLocal.second,
     );
   }
 
@@ -557,30 +539,20 @@ class WebDavConfig {
     );
   }
 
+  /// Resolves the active [TdfTimeZoneContext] for [timeZoneMode] (`systemLocal()` or manual `fixedOffset`).
+  TdfTimeZoneContext resolveTimeZoneContext() {
+    return switch (timeZoneMode) {
+      AppTimeZoneMode.automatic => const TdfTimeZoneContext.systemLocal(),
+      AppTimeZoneMode.manual => TdfTimeZoneContext.fixedOffset(
+        Duration(minutes: manualTimeZoneOffsetMinutes),
+      ),
+    };
+  }
+
   /// Converts [instant] into a wall-clock [DateTime] (encoded with `isUtc: true` components
   /// for deterministic field access) according to [timeZoneMode] and [manualTimeZoneOffsetMinutes].
   DateTime toLocalWallClock(DateTime instant) {
-    final utc = instant.toUtc();
-    if (timeZoneMode == AppTimeZoneMode.manual) {
-      final shifted = utc.add(Duration(minutes: manualTimeZoneOffsetMinutes));
-      return DateTime.utc(
-        shifted.year,
-        shifted.month,
-        shifted.day,
-        shifted.hour,
-        shifted.minute,
-        shifted.second,
-      );
-    }
-    final local = utc.toLocal();
-    return DateTime.utc(
-      local.year,
-      local.month,
-      local.day,
-      local.hour,
-      local.minute,
-      local.second,
-    );
+    return resolveTimeZoneContext().toLocalWallClock(instant);
   }
 
   /// Returns `true` when [value] contains ASCII control characters or null bytes.

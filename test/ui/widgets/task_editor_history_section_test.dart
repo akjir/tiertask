@@ -236,6 +236,21 @@ void main() {
       equals(DateTime.utc(9999, 12, 31, 23, 59, 59)),
     );
 
+    const autoConfig = WebDavConfig(timeZoneMode: AppTimeZoneMode.automatic);
+    const winterLocalInput = '2026-01-15 12:00:00';
+    final expectedAutoWinterUtc = autoConfig.localWallClockToUtc(
+      DateTime.utc(2026, 1, 15, 12),
+    );
+    expect(
+      TaskHistoryInputValidator.resolveEntryTimestampUtc(
+        configuration: autoConfig,
+        fallbackNowUtc: fallbackUtc,
+        rawTimestamp: winterLocalInput,
+      ),
+      equals(expectedAutoWinterUtc),
+      reason: 'Automatic OS time zone must resolve local wall-clock input via TDF-CAL-001',
+    );
+
     for (final malformed in <String>[
       'not-a-date',
       '2026-02-30',

@@ -1,0 +1,764 @@
+{
+  "version": "0.8.0",
+  "suite": "parse_invalid",
+  "ruleIds": [
+    "TDF-COMPAT-001",
+    "TDF-DIR-001",
+    "TDF-DIR-002",
+    "TDF-DIR-004",
+    "TDF-DIR-006",
+    "TDF-DIR-008",
+    "TDF-DIR-009",
+    "TDF-ENT-001",
+    "TDF-ENT-002",
+    "TDF-ENT-003",
+    "TDF-ENT-004",
+    "TDF-ENT-006",
+    "TDF-GRAM-001",
+    "TDF-GRAM-002",
+    "TDF-LEX-001",
+    "TDF-LEX-002",
+    "TDF-LEX-003",
+    "TDF-MODEL-002",
+    "TDF-TYPE-002",
+    "TDF-TYPE-003",
+    "TDF-TYPE-004",
+    "TDF-TYPE-005",
+    "TDF-VAL-001",
+    "TDF-VAL-002",
+    "TDF-VAL-003"
+  ],
+  "fixtures": [
+    {
+      "id": "pi_01_missing_version_comment_only",
+      "description": "Comment-only input fails with missingVersionHeader",
+      "file": "pi_01_missing_version_comment_only.tdf",
+      "expectedError": "missingVersionHeader",
+      "expectedLine": 1,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_02_missing_version_root_task",
+      "description": "Root task block before tdf header fails with missingVersionHeader",
+      "file": "pi_02_missing_version_root_task.tdf",
+      "expectedError": "missingVersionHeader",
+      "expectedLine": 1,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001"
+      ]
+    },
+    {
+      "id": "pi_03_missing_version_bare_tdf",
+      "description": "Bare tdf with zero arguments fails with missingVersionHeader",
+      "file": "pi_03_missing_version_bare_tdf.tdf",
+      "expectedError": "missingVersionHeader",
+      "expectedLine": 1,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001"
+      ]
+    },
+    {
+      "id": "pi_04_unsupported_version_070",
+      "description": "Legacy tdf 0.7.0 header fails with unsupportedVersion",
+      "file": "pi_04_unsupported_version_070.tdf",
+      "expectedError": "unsupportedVersion",
+      "expectedLine": 1,
+      "expectedSourceVersion": "0.7.0",
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001",
+        "TDF-TYPE-002"
+      ]
+    },
+    {
+      "id": "pi_05_unsupported_version_060",
+      "description": "Legacy tdf 0.6.0 header fails with unsupportedVersion",
+      "file": "pi_05_unsupported_version_060.tdf",
+      "expectedError": "unsupportedVersion",
+      "expectedLine": 1,
+      "expectedSourceVersion": "0.6.0",
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001"
+      ]
+    },
+    {
+      "id": "pi_06_unsupported_version_quoted",
+      "description": "Quoted tdf \"0.8.0\" header fails with unsupportedVersion",
+      "file": "pi_06_unsupported_version_quoted.tdf",
+      "expectedError": "unsupportedVersion",
+      "expectedLine": 1,
+      "expectedSourceVersion": "0.8.0",
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001"
+      ]
+    },
+    {
+      "id": "pi_07_unsupported_version_extra_arg",
+      "description": "Extra argument on tdf 0.8.0 fails with unsupportedVersion",
+      "file": "pi_07_unsupported_version_extra_arg.tdf",
+      "expectedError": "unsupportedVersion",
+      "expectedLine": 1,
+      "expectedSourceVersion": "0.8.0",
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001"
+      ]
+    },
+    {
+      "id": "pi_08_unexpected_root_directive",
+      "description": "Duplicate tdf header at depth 0 fails with unexpectedRootDirective",
+      "file": "pi_08_unexpected_root_directive.tdf",
+      "expectedError": "unexpectedRootDirective",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-ENT-001"
+      ]
+    },
+    {
+      "id": "pi_09_attached_brace_task",
+      "description": "Attached '{' on task header fails with invalidBlockHeader",
+      "file": "pi_09_attached_brace_task.tdf",
+      "expectedError": "invalidBlockHeader",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_10_attached_brace_condition",
+      "description": "Attached '{' on condition header fails with invalidBlockHeader",
+      "file": "pi_10_attached_brace_condition.tdf",
+      "expectedError": "invalidBlockHeader",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-DIR-009"
+      ]
+    },
+    {
+      "id": "pi_11_attached_brace_depth2_before_limit",
+      "description": "Attached '{' at depth 2 fires invalidBlockHeader before limitExceeded",
+      "file": "pi_11_attached_brace_depth2_before_limit.tdf",
+      "expectedError": "invalidBlockHeader",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_12_invalid_block_header_flag",
+      "description": "Unknown flag on task header fails with invalidBlockHeader",
+      "file": "pi_12_invalid_block_header_flag.tdf",
+      "expectedError": "invalidBlockHeader",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-ENT-002"
+      ]
+    },
+    {
+      "id": "pi_13_depth2_nested_block_limit",
+      "description": "Separated nested '{' at depth 2 inside condition fails with limitExceeded",
+      "file": "pi_13_depth2_nested_block_limit.tdf",
+      "expectedError": "limitExceeded",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-DIR-009",
+        "TDF-VAL-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "pi_14_depth2_bare_any_missing_arg",
+      "description": "Zero-argument bare 'any' inside condition block fails with missingDirectiveArgument",
+      "file": "pi_14_depth2_bare_any_missing_arg.tdf",
+      "expectedError": "missingDirectiveArgument",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-DIR-009",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_15_depth2_any_args_invalid_cond",
+      "description": "Parameterized 'any mon' inside condition block fails with invalidCondition",
+      "file": "pi_15_depth2_any_args_invalid_cond.tdf",
+      "expectedError": "invalidCondition",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-009",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_16_depth2_condition_any_unknown_dir_task",
+      "description": "'condition any' inside task condition block fails with unknownDirective",
+      "file": "pi_16_depth2_condition_any_unknown_dir_task.tdf",
+      "expectedError": "unknownDirective",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-009",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_17_depth2_condition_any_unknown_dir_label",
+      "description": "'condition any' inside label condition block fails with unknownDirective",
+      "file": "pi_17_depth2_condition_any_unknown_dir_label.tdf",
+      "expectedError": "unknownDirective",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-ENT-003",
+        "TDF-DIR-009",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_18_depth2_condition_day_unknown_dir",
+      "description": "'condition day mon' inside condition block fails with unknownDirective",
+      "file": "pi_18_depth2_condition_day_unknown_dir.tdf",
+      "expectedError": "unknownDirective",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-009",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_19_due_quoted_primary_ts",
+      "description": "Quoted leading timestamp on due fails with invalidTimestamp",
+      "file": "pi_19_due_quoted_primary_ts.tdf",
+      "expectedError": "invalidTimestamp",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-004",
+        "TDF-TYPE-004"
+      ]
+    },
+    {
+      "id": "pi_20_due_quoted_anchor_ts",
+      "description": "Quoted timestamp after anchor fails with invalidTimestamp",
+      "file": "pi_20_due_quoted_anchor_ts.tdf",
+      "expectedError": "invalidTimestamp",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-004"
+      ]
+    },
+    {
+      "id": "pi_21_due_passive_before_anchor",
+      "description": "Misordered passive before anchor fails with unexpectedToken",
+      "file": "pi_21_due_passive_before_anchor.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-004"
+      ]
+    },
+    {
+      "id": "pi_22_due_duplicate_passive",
+      "description": "Duplicate passive modifier on due fails with unexpectedToken",
+      "file": "pi_22_due_duplicate_passive.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-004"
+      ]
+    },
+    {
+      "id": "pi_23_due_duplicate_anchor",
+      "description": "Duplicate anchor modifier on due fails with unexpectedToken",
+      "file": "pi_23_due_duplicate_anchor.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-004"
+      ]
+    },
+    {
+      "id": "pi_24_due_mid_arg_quote",
+      "description": "Quoted note before passive on due fails with unexpectedToken",
+      "file": "pi_24_due_mid_arg_quote.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-004"
+      ]
+    },
+    {
+      "id": "pi_25_invalid_utf8_line1",
+      "description": "Malformed UTF-8 byte on line 1 fails with unexpectedToken",
+      "file": "pi_25_invalid_utf8_line1.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 1,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": true,
+      "ruleIds": [
+        "TDF-LEX-001",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_26_invalid_utf8_line2",
+      "description": "Truncated UTF-8 sequence on line 2 fails with unexpectedToken at line 2",
+      "file": "pi_26_invalid_utf8_line2.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": true,
+      "ruleIds": [
+        "TDF-LEX-001",
+        "TDF-VAL-001"
+      ]
+    },
+    {
+      "id": "pi_27_cesu8_surrogate_utf8",
+      "description": "CESU-8 unpaired surrogate byte sequence fails with unexpectedToken",
+      "file": "pi_27_cesu8_surrogate_utf8.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 3,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": true,
+      "ruleIds": [
+        "TDF-LEX-001",
+        "TDF-TYPE-003"
+      ]
+    },
+    {
+      "id": "pi_28_nbsp_token_separator",
+      "description": "U+00A0 separating tokens outside quotes/comments fails with unexpectedToken",
+      "file": "pi_28_nbsp_token_separator.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 3,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-LEX-002"
+      ]
+    },
+    {
+      "id": "pi_29_null_byte_in_comment",
+      "description": "U+0000 inside # comment fails with unexpectedToken",
+      "file": "pi_29_null_byte_in_comment.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-LEX-001",
+        "TDF-LEX-002"
+      ]
+    },
+    {
+      "id": "pi_30_escaped_lf_in_text",
+      "description": "Escaped \\n inside single-line <text> fails with unexpectedToken",
+      "file": "pi_30_escaped_lf_in_text.tdf",
+      "expectedError": "unexpectedToken",
+      "expectedLine": 3,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-003"
+      ]
+    },
+    {
+      "id": "pi_31_escaped_lf_in_uri",
+      "description": "Escaped \\n inside non-blank <uri> fails with invalidUri",
+      "file": "pi_31_escaped_lf_in_uri.tdf",
+      "expectedError": "invalidUri",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-DIR-006"
+      ]
+    },
+    {
+      "id": "pi_32_javascript_uri_scheme",
+      "description": "Forbidden javascript: URI scheme fails with invalidUri",
+      "file": "pi_32_javascript_uri_scheme.tdf",
+      "expectedError": "invalidUri",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-DIR-006"
+      ]
+    },
+    {
+      "id": "pi_33_vbscript_uri_scheme",
+      "description": "Forbidden vbscript: URI scheme fails with invalidUri",
+      "file": "pi_33_vbscript_uri_scheme.tdf",
+      "expectedError": "invalidUri",
+      "expectedLine": 4,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-DIR-006"
+      ]
+    },
+    {
+      "id": "pi_34_data_uri_scheme",
+      "description": "Forbidden data: URI scheme fails with invalidUri",
+      "file": "pi_34_data_uri_scheme.tdf",
+      "expectedError": "invalidUri",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-DIR-006"
+      ]
+    },
+    {
+      "id": "pi_35_non_leap_1900_timestamp",
+      "description": "1900-02-29 fails proleptic Gregorian leap check with invalidTimestamp",
+      "file": "pi_35_non_leap_1900_timestamp.tdf",
+      "expectedError": "invalidTimestamp",
+      "expectedLine": 4,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-004"
+      ]
+    },
+    {
+      "id": "pi_36_radius_zero_invalid_number",
+      "description": "location radius 0 fails with invalidNumber",
+      "file": "pi_36_radius_zero_invalid_number.tdf",
+      "expectedError": "invalidNumber",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-ENT-004"
+      ]
+    },
+    {
+      "id": "pi_37_radius_precision_invalid_number",
+      "description": "location radius 10.125 (> 2 fractional digits) fails with invalidNumber",
+      "file": "pi_37_radius_precision_invalid_number.tdf",
+      "expectedError": "invalidNumber",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-ENT-004"
+      ]
+    },
+    {
+      "id": "pi_38_repeat_lead_zero_invalid_number",
+      "description": "repeat lead 0 days fails with invalidNumber",
+      "file": "pi_38_repeat_lead_zero_invalid_number.tdf",
+      "expectedError": "invalidNumber",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-001"
+      ]
+    },
+    {
+      "id": "pi_39_invalid_identifier_directive",
+      "description": "Directive starting with digit fails with invalidIdentifier",
+      "file": "pi_39_invalid_identifier_directive.tdf",
+      "expectedError": "invalidIdentifier",
+      "expectedLine": 3,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-LEX-003",
+        "TDF-GRAM-002"
+      ]
+    },
+    {
+      "id": "pi_40_invalid_identifier_entity_id",
+      "description": "Short non-Base62 task ID fails with invalidIdentifier",
+      "file": "pi_40_invalid_identifier_entity_id.tdf",
+      "expectedError": "invalidIdentifier",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-002"
+      ]
+    },
+    {
+      "id": "pi_41_unterminated_string",
+      "description": "Unterminated double-quoted string fails with unterminatedString",
+      "file": "pi_41_unterminated_string.tdf",
+      "expectedError": "unterminatedString",
+      "expectedLine": 3,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-LEX-003"
+      ]
+    },
+    {
+      "id": "pi_42_invalid_escape_sequence",
+      "description": "Unsupported \\x escape fails with invalidEscapeSequence",
+      "file": "pi_42_invalid_escape_sequence.tdf",
+      "expectedError": "invalidEscapeSequence",
+      "expectedLine": 3,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-LEX-003"
+      ]
+    },
+    {
+      "id": "pi_43_unclosed_block",
+      "description": "EOF inside open task block fails with unclosedBlock",
+      "file": "pi_43_unclosed_block.tdf",
+      "expectedError": "unclosedBlock",
+      "expectedLine": 4,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001"
+      ]
+    },
+    {
+      "id": "pi_44_unexpected_closing_brace",
+      "description": "Closing brace '}' at depth 0 fails with unexpectedClosingBrace",
+      "file": "pi_44_unexpected_closing_brace.tdf",
+      "expectedError": "unexpectedClosingBrace",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001"
+      ]
+    },
+    {
+      "id": "pi_45_unknown_block_type_nested_in_location",
+      "description": "Nested block inside location fails with unknownBlockType",
+      "file": "pi_45_unknown_block_type_nested_in_location.tdf",
+      "expectedError": "unknownBlockType",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-ENT-004"
+      ]
+    },
+    {
+      "id": "pi_46_missing_required_directive",
+      "description": "Empty subtasks block fails with missingRequiredDirective",
+      "file": "pi_46_missing_required_directive.tdf",
+      "expectedError": "missingRequiredDirective",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-DIR-008"
+      ]
+    },
+    {
+      "id": "pi_47_duplicate_directive",
+      "description": "Duplicate due directive fails with duplicateDirective",
+      "file": "pi_47_duplicate_directive.tdf",
+      "expectedError": "duplicateDirective",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-DIR-004"
+      ]
+    },
+    {
+      "id": "pi_48_duplicate_identifier",
+      "description": "Task ID declared in both live task and deleted block fails with duplicateIdentifier",
+      "file": "pi_48_duplicate_identifier.tdf",
+      "expectedError": "duplicateIdentifier",
+      "expectedLine": 8,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-MODEL-002",
+        "TDF-VAL-003"
+      ]
+    },
+    {
+      "id": "pi_49_invalid_queue_membership",
+      "description": "Completed task in queue fails with invalidQueueMembership",
+      "file": "pi_49_invalid_queue_membership.tdf",
+      "expectedError": "invalidQueueMembership",
+      "expectedLine": 4,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-ENT-006",
+        "TDF-VAL-003"
+      ]
+    },
+    {
+      "id": "pi_50_unknown_label_reference",
+      "description": "Undeclared label reference in task.labels fails with unknownLabelReference",
+      "file": "pi_50_unknown_label_reference.tdf",
+      "expectedError": "unknownLabelReference",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-ENT-002",
+        "TDF-VAL-003"
+      ]
+    },
+    {
+      "id": "pi_51_unknown_location_reference",
+      "description": "Undeclared location reference in condition location fails with unknownLocationReference",
+      "file": "pi_51_unknown_location_reference.tdf",
+      "expectedError": "unknownLocationReference",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-009",
+        "TDF-VAL-003"
+      ]
+    },
+    {
+      "id": "pi_52_circular_dependency",
+      "description": "Two-task prerequisite cycle fails with circularDependency",
+      "file": "pi_52_circular_dependency.tdf",
+      "expectedError": "circularDependency",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-DIR-002",
+        "TDF-VAL-003"
+      ]
+    },
+    {
+      "id": "pi_53_empty_text",
+      "description": "ASCII-whitespace-only <note> fails with emptyText",
+      "file": "pi_53_empty_text.tdf",
+      "expectedError": "emptyText",
+      "expectedLine": 4,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-003"
+      ]
+    },
+    {
+      "id": "pi_54_invalid_boolean",
+      "description": "Non-boolean step status fails with invalidBoolean",
+      "file": "pi_54_invalid_boolean.tdf",
+      "expectedError": "invalidBoolean",
+      "expectedLine": 6,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-004",
+        "TDF-DIR-008"
+      ]
+    },
+    {
+      "id": "pi_55_invalid_color",
+      "description": "Unquoted label color fails with invalidColor",
+      "file": "pi_55_invalid_color.tdf",
+      "expectedError": "invalidColor",
+      "expectedLine": 4,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-ENT-003"
+      ]
+    },
+    {
+      "id": "pi_56_invalid_completion_state",
+      "description": "finished present with completions 0 fails with invalidCompletionState",
+      "file": "pi_56_invalid_completion_state.tdf",
+      "expectedError": "invalidCompletionState",
+      "expectedLine": 2,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-ENT-002",
+        "TDF-VAL-003"
+      ]
+    },
+    {
+      "id": "pi_57_invalid_time",
+      "description": "Out-of-range repeat clock 25:00 fails with invalidTime",
+      "file": "pi_57_invalid_time.tdf",
+      "expectedError": "invalidTime",
+      "expectedLine": 5,
+      "expectedSourceVersion": null,
+      "rawBytesOnly": false,
+      "ruleIds": [
+        "TDF-TYPE-004",
+        "TDF-DIR-001"
+      ]
+    }
+  ]
+}

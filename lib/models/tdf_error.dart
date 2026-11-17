@@ -15,14 +15,23 @@
 
 import 'package:flutter/foundation.dart';
 
+/// Normative default deadline urgency lead-window duration (`DEFAULT_DUE_LEAD_SECONDS` = `86,400`, `24` hours).
+const int defaultDueLeadSeconds = 86400;
+
 /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT` = `64`).
 const int maxTdfArgsPerStmt = 64;
 
 /// Maximum total blocks per `.tdf` document (`MAX_BLOCKS_PER_DOC` = `4,096`).
 const int maxTdfBlocksPerDoc = 4096;
 
+/// Maximum `completions` counter, deletion checkpoint, or `blocked` threshold (`MAX_COMPLETIONS` = `9,007,199,254,740,991`).
+const int maxTdfCompletions = 9007199254740991;
+
 /// Maximum stored condition rules across all inline directives and condition blocks on one entity (`MAX_CONDITION_RULES_PER_ENTITY` = `512`).
 const int maxTdfConditionRulesPerEntity = 512;
+
+/// Maximum total deletion records inside `deleted` (`MAX_DELETED_RECORDS` = `4,096`).
+const int maxTdfDeletedRecords = 4096;
 
 /// Maximum input or serialized output size in UTF-8 bytes (`MAX_FILE_BYTES` = `1,048,576`, 1 MiB).
 const int maxTdfFileBytes = 1048576;
@@ -30,14 +39,14 @@ const int maxTdfFileBytes = 1048576;
 /// Maximum `history` entries per `task` block (`MAX_HISTORY_PER_TASK` = `500`).
 const int maxTdfHistoryPerTask = 500;
 
-/// Legacy `< 0.7.0` maximum direct child statements per ordinary block (`512`).
-const int maxTdfLegacy060StmtsPerBlock = 512;
-
 /// Maximum logical lines per `.tdf` document (`MAX_LINE_COUNT` = `16,384`).
 const int maxTdfLineCount = 16384;
 
 /// Maximum `link` entries per `label` block (`MAX_LINKS_PER_LABEL` = `20`).
 const int maxTdfLinksPerLabel = 20;
+
+/// Maximum `link` entries per `task` block (`MAX_LINKS_PER_TASK` = `20`).
+const int maxTdfLinksPerTask = 20;
 
 /// Maximum `radius` in meters (`100 km`) for a `location` block (`MAX_LOCATION_RADIUS` = `100,000`).
 const int maxTdfLocationRadius = 100000;
@@ -57,11 +66,23 @@ const int maxTdfNoteLength = 2000;
 /// Maximum raw ASCII characters in a `<number>` token (`MAX_NUMBER_LENGTH` = `24`).
 const int maxTdfNumberLength = 24;
 
+/// Maximum `task` entries inside `queue` (`MAX_QUEUE_ENTRIES` = `4,096`).
+const int maxTdfQueueEntries = 4096;
+
+/// Maximum `<count>` or `<lead-count>` in `repeat` (`MAX_REPEAT_COUNT` = `3,650`).
+const int maxTdfRepeatCount = 3650;
+
 /// Maximum direct child statements per ordinary block (`MAX_STMTS_PER_BLOCK` = `1,024`).
 const int maxTdfStmtsPerBlock = 1024;
 
+/// Maximum `deleted.generation` value (`MAX_SYNC_GENERATION` = `9,007,199,254,740,991`).
+const int maxTdfSyncGeneration = 9007199254740991;
+
 /// Maximum decoded Unicode scalar values in a `name`, `step`, or link `<title>` (`MAX_TEXT_LENGTH` = `500`).
 const int maxTdfTextLength = 500;
+
+/// Maximum decoded Unicode scalar values in any `link` `<uri>` argument (`MAX_URI_LENGTH` = `2,048`).
+const int maxTdfUriLength = 2048;
 
 /// Mandatory lexical, structural, and semantic error categories defined in `TDF_SPEC.md` Section 8.
 enum TdfErrorKind {
@@ -165,10 +186,9 @@ class TdfException implements Exception {
     required this.line,
     required this.message,
     this.sourceVersion,
-    this.targetVersion,
   });
 
-  /// Normative error category from `TDF_SPEC.md` Section 8.
+  /// Normative error category from `spec/TDF_SPEC_0.8.0.md` Appendix A.1.1.
   final TdfErrorKind kind;
 
   /// 1-based line number where the error occurred.
@@ -177,17 +197,9 @@ class TdfException implements Exception {
   /// Human-readable diagnostic description.
   final String message;
 
-  /// Optional historical source version when thrown during explicit import migration.
+  /// Optional offending `<version>` token when [kind] is [TdfErrorKind.unsupportedVersion].
   final String? sourceVersion;
 
-  /// Optional target version when thrown during explicit import migration.
-  final String? targetVersion;
-
   @override
-  String toString() {
-    if (sourceVersion != null && targetVersion != null) {
-      return 'TdfException(${kind.name}, $sourceVersion->$targetVersion, line $line): $message';
-    }
-    return 'TdfException(${kind.name}, line $line): $message';
-  }
+  String toString() => 'TdfException(${kind.name}, line $line): $message';
 }

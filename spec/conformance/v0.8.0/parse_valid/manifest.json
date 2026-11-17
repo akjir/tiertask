@@ -1,0 +1,223 @@
+{
+  "version": "0.8.0",
+  "suite": "parse_valid",
+  "ruleIds": [
+    "TDF-COMPAT-001",
+    "TDF-DIR-001",
+    "TDF-DIR-002",
+    "TDF-DIR-003",
+    "TDF-DIR-004",
+    "TDF-DIR-005",
+    "TDF-DIR-006",
+    "TDF-DIR-007",
+    "TDF-DIR-008",
+    "TDF-DIR-009",
+    "TDF-ENT-001",
+    "TDF-ENT-002",
+    "TDF-ENT-003",
+    "TDF-ENT-004",
+    "TDF-ENT-005",
+    "TDF-ENT-006",
+    "TDF-GRAM-001",
+    "TDF-LEX-001",
+    "TDF-LEX-002",
+    "TDF-LEX-003",
+    "TDF-MODEL-001",
+    "TDF-MODEL-002",
+    "TDF-MODEL-003",
+    "TDF-MODEL-004",
+    "TDF-MODEL-005",
+    "TDF-MODEL-006",
+    "TDF-SER-001",
+    "TDF-SER-002",
+    "TDF-SER-003",
+    "TDF-SER-004",
+    "TDF-SER-005",
+    "TDF-TYPE-004",
+    "TDF-TYPE-005",
+    "TDF-TYPE-006"
+  ],
+  "fixtures": [
+    {
+      "id": "pv_01_vector1_empty",
+      "description": "Vector 1 empty canonical document (10 bytes, 1 line)",
+      "inputFile": "pv_01_vector1_empty.tdf",
+      "canonicalFile": "pv_01_vector1_empty.canonical.tdf",
+      "normalizedFile": "pv_01_vector1_empty.normalized.json",
+      "expectedCanonicalBytes": 10,
+      "expectedCanonicalLines": 1,
+      "canonicalSourceDigest": "7904b7a8e8cd221287ac91710477af38bbb7beb14dea75e2c827dfa2bfd2097a",
+      "ruleIds": [
+        "TDF-COMPAT-001",
+        "TDF-ENT-001",
+        "TDF-SER-001",
+        "TDF-SER-002",
+        "TDF-SER-004",
+        "TDF-SER-005"
+      ]
+    },
+    {
+      "id": "pv_02_vector2_minimal_task",
+      "description": "Vector 2 minimal single-task alignment (76 bytes, 6 lines)",
+      "inputFile": "pv_02_vector2_minimal_task.tdf",
+      "canonicalFile": "pv_02_vector2_minimal_task.canonical.tdf",
+      "normalizedFile": "pv_02_vector2_minimal_task.normalized.json",
+      "expectedCanonicalBytes": 76,
+      "expectedCanonicalLines": 6,
+      "canonicalSourceDigest": "3211d46b392b7b1efbf53cf07a0c0c6131f987a4b17dba9a733b9971108f7090",
+      "ruleIds": [
+        "TDF-ENT-002",
+        "TDF-MODEL-004",
+        "TDF-SER-003",
+        "TDF-SER-004",
+        "TDF-SER-005"
+      ]
+    },
+    {
+      "id": "pv_03_vector3_multisection",
+      "description": "Vector 3 multi-section alignment, inline label condition (W_dir = 9), and due.anchor (856 bytes, 41 lines)",
+      "inputFile": "pv_03_vector3_multisection.tdf",
+      "canonicalFile": "pv_03_vector3_multisection.canonical.tdf",
+      "normalizedFile": "pv_03_vector3_multisection.normalized.json",
+      "expectedCanonicalBytes": 856,
+      "expectedCanonicalLines": 41,
+      "canonicalSourceDigest": "8e5771dedbdde3bf9451c247bbab1a826298f90e0c2e20a57e98ed75f53cf7cd",
+      "ruleIds": [
+        "TDF-ENT-003",
+        "TDF-ENT-004",
+        "TDF-ENT-005",
+        "TDF-ENT-006",
+        "TDF-DIR-001",
+        "TDF-DIR-004",
+        "TDF-DIR-008",
+        "TDF-DIR-009",
+        "TDF-SER-004",
+        "TDF-SER-005"
+      ]
+    },
+    {
+      "id": "pv_04_vector4_tiertask",
+      "description": "Vector 4 Appendix B.1 complete canonical document tiertask.tdf (3086 bytes, 106 lines)",
+      "inputFile": "pv_04_vector4_tiertask.tdf",
+      "canonicalFile": "pv_04_vector4_tiertask.canonical.tdf",
+      "normalizedFile": "pv_04_vector4_tiertask.normalized.json",
+      "expectedCanonicalBytes": 3086,
+      "expectedCanonicalLines": 106,
+      "canonicalSourceDigest": "cf9d9f26158d9d58d9561802d9169bb704bac7df64f09d120a1d8a2b0bb17016",
+      "ruleIds": [
+        "TDF-MODEL-003",
+        "TDF-MODEL-005",
+        "TDF-DIR-002",
+        "TDF-DIR-003",
+        "TDF-DIR-005",
+        "TDF-DIR-006",
+        "TDF-DIR-007",
+        "TDF-SER-001",
+        "TDF-SER-005"
+      ]
+    },
+    {
+      "id": "pv_05_section15_intro",
+      "description": "Section 1.5 introductory canonical example (453 bytes, 23 lines)",
+      "inputFile": "pv_05_section15_intro.tdf",
+      "canonicalFile": "pv_05_section15_intro.canonical.tdf",
+      "normalizedFile": "pv_05_section15_intro.normalized.json",
+      "expectedCanonicalBytes": 453,
+      "expectedCanonicalLines": 23,
+      "canonicalSourceDigest": "cc1894b0ec3052910b72c1bf5fe3d8017c95ff417ff2f8ddd3d699a0ee960cdc",
+      "ruleIds": [
+        "TDF-ENT-002",
+        "TDF-DIR-004",
+        "TDF-DIR-008",
+        "TDF-SER-004"
+      ]
+    },
+    {
+      "id": "pv_06_lexical_comments_crlf_quotes",
+      "description": "NBSP in comments, CRLF line terminators, single quotes, double-quoted escapes, and trailing EOF normalization",
+      "inputFile": "pv_06_lexical_comments_crlf_quotes.tdf",
+      "canonicalFile": "pv_06_lexical_comments_crlf_quotes.canonical.tdf",
+      "normalizedFile": "pv_06_lexical_comments_crlf_quotes.normalized.json",
+      "expectedCanonicalBytes": 226,
+      "expectedCanonicalLines": 12,
+      "canonicalSourceDigest": "7e100aa0dcc371f69c7add40a26156aabcf982ae20b16b9282d3f4f9ca79b4b1",
+      "ruleIds": [
+        "TDF-LEX-001",
+        "TDF-LEX-002",
+        "TDF-LEX-003",
+        "TDF-GRAM-001",
+        "TDF-MODEL-006"
+      ]
+    },
+    {
+      "id": "pv_07_unordered_dedup_coalesce",
+      "description": "Out-of-order sections/directives, labels/blocked/history deduplication, decimal/color normalization, and condition coalescing",
+      "inputFile": "pv_07_unordered_dedup_coalesce.tdf",
+      "canonicalFile": "pv_07_unordered_dedup_coalesce.canonical.tdf",
+      "normalizedFile": "pv_07_unordered_dedup_coalesce.normalized.json",
+      "expectedCanonicalBytes": 909,
+      "expectedCanonicalLines": 49,
+      "canonicalSourceDigest": "67d449bcf88b9858111c24ec99e21b72612322f6db446ef7d1c270d38ab9225c",
+      "ruleIds": [
+        "TDF-MODEL-006",
+        "TDF-TYPE-005",
+        "TDF-TYPE-006",
+        "TDF-DIR-007",
+        "TDF-DIR-009",
+        "TDF-SER-002",
+        "TDF-SER-003"
+      ]
+    },
+    {
+      "id": "pv_08_epoch_modified_and_containers",
+      "description": "Explicit epoch modified 1970-01-01 00:00 vs omitted modified, disjoint entity namespaces, and W_bool = 4 subtasks alignment",
+      "inputFile": "pv_08_epoch_modified_and_containers.tdf",
+      "canonicalFile": "pv_08_epoch_modified_and_containers.canonical.tdf",
+      "normalizedFile": "pv_08_epoch_modified_and_containers.normalized.json",
+      "expectedCanonicalBytes": 689,
+      "expectedCanonicalLines": 42,
+      "canonicalSourceDigest": "9a147a3279d9c121721bc15a96e13603487fdf260c4662bfdf8ad545241e373d",
+      "ruleIds": [
+        "TDF-MODEL-002",
+        "TDF-MODEL-004",
+        "TDF-ENT-005",
+        "TDF-ENT-006",
+        "TDF-SER-001",
+        "TDF-SER-002",
+        "TDF-SER-004"
+      ]
+    },
+    {
+      "id": "pv_09_due_anchor_and_deleted_variants",
+      "description": "All due/anchor/passive/note combinations, suspended forever note, midnight repeat clock omission, and task group resets",
+      "inputFile": "pv_09_due_anchor_and_deleted_variants.tdf",
+      "canonicalFile": "pv_09_due_anchor_and_deleted_variants.canonical.tdf",
+      "normalizedFile": "pv_09_due_anchor_and_deleted_variants.normalized.json",
+      "expectedCanonicalBytes": 534,
+      "expectedCanonicalLines": 20,
+      "canonicalSourceDigest": "21810f6b58fb83490396036b0b9a992180c9ee79207ee71a2fc6261bd3caa044",
+      "ruleIds": [
+        "TDF-DIR-001",
+        "TDF-DIR-003",
+        "TDF-DIR-004",
+        "TDF-DIR-009",
+        "TDF-SER-003"
+      ]
+    },
+    {
+      "id": "pv_10_calendar_endpoints_and_wallclock_free_decode",
+      "description": "Proleptic Gregorian 0001/9999/2000-02-29 endpoints and wall-clock-free decoding of past deferrals",
+      "inputFile": "pv_10_calendar_endpoints_and_wallclock_free_decode.tdf",
+      "canonicalFile": "pv_10_calendar_endpoints_and_wallclock_free_decode.canonical.tdf",
+      "normalizedFile": "pv_10_calendar_endpoints_and_wallclock_free_decode.normalized.json",
+      "expectedCanonicalBytes": 295,
+      "expectedCanonicalLines": 9,
+      "canonicalSourceDigest": "fd4d1fbaf6187f517f2dcb5432062233013f9c07855bb39b707d5c747838eeda",
+      "ruleIds": [
+        "TDF-MODEL-001",
+        "TDF-MODEL-005",
+        "TDF-TYPE-004"
+      ]
+    }
+  ]
+}

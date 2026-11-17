@@ -30,7 +30,10 @@ const int tdfBase62TimeModulo = 14776336;
 /// Fixed total character length of a TDF `<task-id>` or `<label-id>`.
 const int tdfEntityIdLength = 10;
 
-/// Canonical condition rule groups defined in `TDF_SPEC.md` Section 4.3.
+/// Sole normative TDF version supported by this implementation (`TDF-COMPAT-001`, `TDF-ENT-001`).
+const String tdfSupportedVersion = '0.8.0';
+
+/// Canonical condition rule groups defined in `spec/TDF_SPEC_0.8.0.md` Section 5.5.
 enum ConditionGroup {
   /// Weekday rule group (`day`).
   day,
@@ -40,15 +43,6 @@ enum ConditionGroup {
 
   /// Geographic proximity rule group (`location`).
   location,
-}
-
-/// Supported canonical TDF schema versions for serialization and validation.
-enum TdfSchemaVersion {
-  /// Legacy TDF `0.6.0` schema (`tdf 0.6.0`, `512` statements per block).
-  v060,
-
-  /// Current TDF `0.7.0` schema (`tdf 0.7.0`, `1,024` statements per block).
-  v070,
 }
 
 /// Represents a dynamic activation condition (`condition` directive) on a TDF `label` or `task` block.
@@ -661,10 +655,10 @@ class TaskLink {
   const TaskLink({required this.title, required this.uri});
 
   /// Maximum number of `link` directives permitted on a single task (`20`).
-  static const int maxLinksPerTask = 20;
+  static const int maxLinksPerTask = maxTdfLinksPerTask;
 
   /// Maximum character length of a link `<uri>` (`2048`).
-  static const int maxUriLength = 2048;
+  static const int maxUriLength = maxTdfUriLength;
 
   /// Human-readable display title (`<title>`).
   final String title;
@@ -859,17 +853,14 @@ class TdfLabel {
   /// Optional extended description (`1..2000` characters).
   final String? note;
 
-  /// Number of direct child statements emitted inside this `label` block in canonical `0.7.0` form.
+  /// Number of direct child statements emitted inside this `label` block in canonical `0.8.0` form.
   int get canonicalDirectChildStatementCount {
     var count = 1;
     if (color != null) count++;
     if (note case final currentNote? when currentNote.isNotEmpty) {
       count++;
     }
-    if (modifiedAt case final currentModified?
-        when currentModified.toUtc() != defaultModifiedAt) {
-      count++;
-    }
+    if (modifiedAt != null) count++;
     count += links.length;
     if (conditions.isNotEmpty) count++;
     return count;
@@ -942,32 +933,6 @@ class TdfLabel {
   String toString() => 'label $id ($name)';
 }
 
-/// Deterministically converts a legacy `<task-id>` or `<label-id>` into a 10-character Base62 ID (`TDF_SPEC.md` Section 2.9).
-String convertLegacyEntityId({
-  required String prefix,
-  required String legacyId,
-  DateTime? timestamp,
-  Set<String> existingIds = const <String>{},
-}) {
-  final timePart = timestamp != null
-      ? encodeTdfBase62Time(timestamp)
-      : _encodeBase62Fixed(
-          _fnv1a32('$prefix:time:$legacyId') % tdfBase62TimeModulo,
-          4,
-        );
-  for (var attempt = 0; attempt < 1024; attempt++) {
-    final seed = attempt == 0
-        ? '$prefix:id:$legacyId'
-        : '$prefix:id:$legacyId:$attempt';
-    final randomPart = _deterministicBase62Segment(seed);
-    final candidate = '$randomPart$timePart';
-    if (!existingIds.contains(candidate)) {
-      return candidate;
-    }
-  }
-  return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
-}
-
 /// Encodes the UTC seconds of [timestamp] modulo `62^4` (`14,776,336`) as a 4-character Base62 string.
 String encodeTdfBase62Time(DateTime timestamp) {
   final utcSeconds = timestamp.toUtc().millisecondsSinceEpoch ~/ 1000;
@@ -977,7 +942,7 @@ String encodeTdfBase62Time(DateTime timestamp) {
   return _encodeBase62Fixed(normalized, 4);
 }
 
-/// Generates a unique 10-character TDF 0.4.0 label identifier (`<6xBase62Random><4xBase62Time>`).
+/// Generates a unique 10-character TDF label identifier (`<6xBase62Random><4xBase62Time>`).
 String generateLabelId({
   DateTime? timestamp,
   Set<String> existingIds = const <String>{},
@@ -985,7 +950,7 @@ String generateLabelId({
   return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
 }
 
-/// Generates a unique 10-character TDF 0.4.0 task identifier (`<6xBase62Random><4xBase62Time>`).
+/// Generates a unique 10-character TDF task identifier (`<6xBase62Random><4xBase62Time>`).
 String generateTaskId({
   DateTime? timestamp,
   Set<String> existingIds = const <String>{},
@@ -993,19 +958,11 @@ String generateTaskId({
   return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
 }
 
-/// Checks whether [value] is a canonical 10-character TDF 0.4.0 label identifier (`[0-9A-Za-z]{10}`).
+/// Checks whether [value] is a canonical 10-character TDF label identifier (`[0-9A-Za-z]{10}`).
 bool isValidLabelId(String value) => _isValidEntityId(value);
 
-/// Checks whether [value] is a canonical 10-character TDF 0.4.0 task identifier (`[0-9A-Za-z]{10}`).
+/// Checks whether [value] is a canonical 10-character TDF task identifier (`[0-9A-Za-z]{10}`).
 bool isValidTaskId(String value) => _isValidEntityId(value);
-
-/// Derives a deterministic 6-character Base62 string from [seed].
-String _deterministicBase62Segment(String seed) {
-  final high = _fnv1a32('hi:$seed');
-  final low = _fnv1a32('lo:$seed');
-  final combined = ((high & 0x1FFFFF) << 32) | low;
-  return _encodeBase62Fixed(combined, 6);
-}
 
 /// Encodes non-negative integer [value] into a fixed-width Base62 string of [width] characters, left-padded with `'0'`.
 String _encodeBase62Fixed(int value, int width) {
@@ -1017,16 +974,6 @@ String _encodeBase62Fixed(int value, int width) {
     remaining ~/= 62;
   }
   return String.fromCharCodes(units);
-}
-
-/// Computes a deterministic 32-bit FNV-1a hash of [input].
-int _fnv1a32(String input) {
-  var hash = 0x811c9dc5;
-  for (var i = 0; i < input.length; i++) {
-    hash ^= input.codeUnitAt(i);
-    hash = (hash * 0x01000193) & 0xFFFFFFFF;
-  }
-  return hash;
 }
 
 /// Generates a unique 10-character `<6xBase62Random><4xBase62Time>` identifier not present in [existingIds].

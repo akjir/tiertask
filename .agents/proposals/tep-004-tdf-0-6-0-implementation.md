@@ -9,6 +9,9 @@ updated: 2026-11-14
 
 # TEP-004: TDF 0.6.0 Runtime, Synchronization, and UI Conformance Implementation
 
+> [!NOTE]
+> **Superseded by [`TEP-013`](tep-013-tdf-spec-0-8-0.md) (`status: completed`):** The `TDF 0.6.0` runtime parser/serializer, legacy `0.2.0`–`0.5.1 -> 0.6.0` migration pipeline, `TTS\x03` synchronization state, and `spec/conformance/v0.6.0/` suites delivered in this proposal have been superseded by the standalone **`TDF 0.8.0`** baseline in [`spec/TDF_SPEC_0.8.0.md`](../../spec/TDF_SPEC_0.8.0.md) (`TEP-013`). Reusable `location` blocks, `scoped` labels, `due`, and `origin` remain active capabilities in `TDF 0.8.0`.
+
 ## Part 1: Concept & Proposal
 
 ### 1.1 Summary

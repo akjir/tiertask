@@ -963,17 +963,17 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String errorUnsupportedTdfVersionLocal(String version) {
-    return 'The local file uses unsupported file version $version. Please update TierTask to a newer version.';
+    return 'The local file uses unsupported TDF version $version (expected 0.8.0).';
   }
 
   @override
   String errorUnsupportedTdfVersionRemote(String version) {
-    return 'The remote file uses unsupported file version $version. Please update TierTask to a newer version.';
+    return 'The remote file uses unsupported TDF version $version (expected 0.8.0).';
   }
 
   @override
   String errorUnsupportedTdfVersionBoth(String version) {
-    return 'The local and remote files use unsupported file version $version. Please update TierTask to a newer version.';
+    return 'The local and remote files use unsupported TDF version $version (expected 0.8.0).';
   }
 
   @override
@@ -1522,4 +1522,21 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get historyErrorMaxExceeded =>
       'Maximum of 500 history entries per task reached.';
+
+  @override
+  String get syncConflictDeletionBanner =>
+      'Synchronization paused: a concurrent edit conflicts with a deletion.';
+
+  @override
+  String get syncConflictRecoveryBanner =>
+      'Synchronization paused: local changes require recovery after sync history advancement.';
+
+  @override
+  String get syncErrorGenerationRollbackBanner =>
+      'Synchronization stopped: the shared file sync generation is older than the acknowledged state.';
+
+  @override
+  String taskInfoDueAnchorDetail(String anchor) {
+    return 'Schedule anchor: $anchor';
+  }
 }

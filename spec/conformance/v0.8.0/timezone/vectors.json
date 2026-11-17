@@ -1,0 +1,2066 @@
+{
+  "version": "0.8.0",
+  "ruleIds": [
+    "TDF-CTX-001",
+    "TDF-CTX-002",
+    "TDF-EVAL-001",
+    "TDF-EVAL-004",
+    "TDF-EVAL-005",
+    "TDF-CAL-001",
+    "TDF-CAL-002",
+    "TDF-CAL-003",
+    "TDF-MUT-005",
+    "TDF-MUT-006",
+    "TDF-MUT-007",
+    "TDF-CLEAN-001"
+  ],
+  "pointConversionVectors": [
+    {
+      "id": "pt_berlin_01_cet_before_spring_gap",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-03-28 09:00:00",
+      "expectedUtc": "2026-03-28 08:00:00",
+      "expectedResolvedLocal": "2026-03-28 09:00:00"
+    },
+    {
+      "id": "pt_berlin_02_cest_after_spring_gap",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-03-29 09:00:00",
+      "expectedUtc": "2026-03-29 07:00:00",
+      "expectedResolvedLocal": "2026-03-29 09:00:00"
+    },
+    {
+      "id": "pt_berlin_03_spring_forward_gap_0230_shifts_to_0330_cest",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-03-29 02:30:00",
+      "expectedUtc": "2026-03-29 01:30:00",
+      "expectedResolvedLocal": "2026-03-29 03:30:00"
+    },
+    {
+      "id": "pt_berlin_04_day_after_spring_gap_preserves_0230_cest",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-03-30 02:30:00",
+      "expectedUtc": "2026-03-30 00:30:00",
+      "expectedResolvedLocal": "2026-03-30 02:30:00"
+    },
+    {
+      "id": "pt_berlin_05_autumn_fold_selects_first_cest_occurrence",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-10-25 02:30:00",
+      "expectedUtc": "2026-10-25 00:30:00",
+      "expectedResolvedLocal": "2026-10-25 02:30:00"
+    },
+    {
+      "id": "pt_berlin_06_after_autumn_fold_0900_cet",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-10-25 09:00:00",
+      "expectedUtc": "2026-10-25 08:00:00",
+      "expectedResolvedLocal": "2026-10-25 09:00:00"
+    },
+    {
+      "id": "pt_berlin_07_november_local_midnight_cet",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "Europe/Berlin",
+      "localInput": "2026-11-05 00:00:00",
+      "expectedUtc": "2026-11-04 23:00:00",
+      "expectedResolvedLocal": "2026-11-05 00:00:00"
+    },
+    {
+      "id": "pt_ny_01_est_before_spring_gap",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "America/New_York",
+      "localInput": "2026-03-07 09:00:00",
+      "expectedUtc": "2026-03-07 14:00:00",
+      "expectedResolvedLocal": "2026-03-07 09:00:00"
+    },
+    {
+      "id": "pt_ny_02_spring_forward_gap_0230_shifts_to_0330_edt",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "America/New_York",
+      "localInput": "2026-03-08 02:30:00",
+      "expectedUtc": "2026-03-08 07:30:00",
+      "expectedResolvedLocal": "2026-03-08 03:30:00"
+    },
+    {
+      "id": "pt_ny_03_day_after_spring_gap_preserves_0230_edt",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "America/New_York",
+      "localInput": "2026-03-09 02:30:00",
+      "expectedUtc": "2026-03-09 06:30:00",
+      "expectedResolvedLocal": "2026-03-09 02:30:00"
+    },
+    {
+      "id": "pt_ny_04_autumn_fold_selects_first_edt_occurrence",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "America/New_York",
+      "localInput": "2026-11-01 01:30:00",
+      "expectedUtc": "2026-11-01 05:30:00",
+      "expectedResolvedLocal": "2026-11-01 01:30:00"
+    },
+    {
+      "id": "pt_ny_05_after_autumn_fold_0900_est",
+      "ruleIds": ["TDF-CAL-001", "TDF-CTX-001"],
+      "timeZone": "America/New_York",
+      "localInput": "2026-11-01 09:00:00",
+      "expectedUtc": "2026-11-01 14:00:00",
+      "expectedResolvedLocal": "2026-11-01 09:00:00"
+    },
+    {
+      "id": "pt_missing_tz_throws_timezone_context_required",
+      "ruleIds": ["TDF-CTX-001", "TDF-CAL-001"],
+      "timeZone": "missing",
+      "localInput": "2026-03-29 02:30:00",
+      "expectedContextError": "timeZoneContextRequired"
+    }
+  ],
+  "crossZoneDeferralVectors": [
+    {
+      "id": "tz_deferral_autumn_rollback_cross_zone_invariance",
+      "ruleIds": ["TDF-CTX-002", "TDF-CLEAN-001"],
+      "evaluationUtc": "2026-10-25 01:10:00",
+      "timeZones": ["Europe/Berlin", "America/New_York", "UTC"],
+      "board": {
+        "tasks": [
+          {
+            "id": "tzDef00001",
+            "title": "Cross-Zone Autumn Fold Deferral",
+            "created": "2026-10-24 12:00:00",
+            "modified": "2026-10-24 12:00:00",
+            "suspended": {
+              "timestamp": "2026-10-25 00:30:00",
+              "note": "Expired before autumn rollback"
+            },
+            "due": {
+              "timestamp": "2026-10-25 00:30:00",
+              "anchor": "2026-10-25 02:30:00",
+              "passive": true,
+              "note": "Overdue anchor preserved"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-10-24 12:00:00",
+          "taskIds": ["tzDef00001"]
+        }
+      },
+      "expectedTiers": {
+        "focus": ["tzDef00001"],
+        "blocked": []
+      },
+      "expectedCleanedTask": {
+        "id": "tzDef00001",
+        "title": "Cross-Zone Autumn Fold Deferral",
+        "created": "2026-10-24 12:00:00",
+        "modified": "2026-10-25 01:10:00",
+        "due": {
+          "timestamp": "2026-10-25 00:30:00",
+          "anchor": "2026-10-25 02:30:00",
+          "passive": true,
+          "note": "Overdue anchor preserved"
+        }
+      }
+    }
+  ],
+  "mode2RecurrenceVectors": [
+    {
+      "id": "tz_01_october_cest_to_november_cet_lead_5_days",
+      "ruleIds": ["TDF-CAL-003", "TDF-MUT-006"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-10-17 09:00:00",
+      "initialTask": {
+        "id": "tzRec00001",
+        "title": "Monthly VAT Report",
+        "created": "2026-10-01 08:00:00",
+        "modified": "2026-10-01 08:00:00",
+        "completions": 4,
+        "suspended": {
+          "timestamp": "2026-10-12 06:00:00",
+          "note": "Temporary October snooze"
+        },
+        "due": {
+          "timestamp": "2026-10-15 16:00:00",
+          "anchor": "2026-10-15 18:00:00",
+          "passive": true,
+          "note": "Submit monthly VAT report"
+        },
+        "origin": {
+          "namespace": "erp",
+          "externalKey": "vat-monthly"
+        },
+        "history": [
+          {
+            "timestamp": "2026-10-01 08:00:00",
+            "text": "Initialized VAT recurrence"
+          }
+        ],
+        "repeat": {
+          "count": 1,
+          "unit": "months",
+          "clock": "08:00:00",
+          "leadDays": 5
+        }
+      },
+      "steps": [
+        {
+          "completedAtUtc": "2026-10-17 10:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-11-15 17:00:00",
+          "expectedDueAnchor": "2026-11-15 18:00:00",
+          "expectedSuspendedUtc": "2026-11-10 07:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Submit monthly VAT report"
+        }
+      ]
+    },
+    {
+      "id": "tz_02_month_end_clamping_jan31_feb28_mar31_k1_plus_1_vs_k2",
+      "ruleIds": ["TDF-CAL-003", "TDF-MUT-006"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-01-31 10:00:00",
+      "initialTask": {
+        "id": "tzRec00002",
+        "title": "Month-End Close",
+        "created": "2026-01-01 08:00:00",
+        "modified": "2026-01-01 08:00:00",
+        "completions": 0,
+        "due": {
+          "timestamp": "2026-01-31 17:00:00",
+          "anchor": "2026-01-31 18:00:00",
+          "passive": false,
+          "note": "Close ledger"
+        },
+        "repeat": {
+          "count": 1,
+          "unit": "months",
+          "clock": "08:00:00",
+          "leadDays": 2
+        }
+      },
+      "steps": [
+        {
+          "completedAtUtc": "2026-01-31 12:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-02-28 17:00:00",
+          "expectedDueAnchor": "2026-01-31 18:00:00",
+          "expectedSuspendedUtc": "2026-02-26 07:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Close ledger"
+        },
+        {
+          "completedAtUtc": "2026-02-28 12:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-03-31 16:00:00",
+          "expectedDueAnchor": "2026-03-31 18:00:00",
+          "expectedSuspendedUtc": "2026-03-29 06:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Close ledger"
+        }
+      ],
+      "directJumpStep": {
+        "completedAtUtc": "2026-03-10 12:00:00",
+        "expectedStepsK": 2,
+        "expectedDueUtc": "2026-03-31 16:00:00",
+        "expectedDueAnchor": "2026-03-31 18:00:00",
+        "expectedSuspendedUtc": "2026-03-29 06:00:00",
+        "expectedDuePassive": false,
+        "expectedDueNote": "Close ledger"
+      }
+    },
+    {
+      "id": "tz_03_interval_edit_on_clamped_feb28_to_apr30_jun30_aug31",
+      "ruleIds": ["TDF-CAL-003", "TDF-MUT-008"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-02-28 10:00:00",
+      "initialTask": {
+        "id": "tzRec00003",
+        "title": "Bi-Monthly Clamped Close",
+        "created": "2026-01-01 08:00:00",
+        "modified": "2026-01-31 12:00:00",
+        "completions": 1,
+        "due": {
+          "timestamp": "2026-02-28 17:00:00",
+          "anchor": "2026-01-31 18:00:00",
+          "passive": false,
+          "note": "Anchored to 31st"
+        },
+        "repeat": {
+          "count": 1,
+          "unit": "months",
+          "clock": "08:00:00",
+          "leadDays": 2
+        }
+      },
+      "steps": [
+        {
+          "updatedRepeat": {
+            "count": 2,
+            "unit": "months",
+            "clock": "08:00:00",
+            "leadDays": 2
+          },
+          "completedAtUtc": "2026-02-28 12:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-04-30 16:00:00",
+          "expectedDueAnchor": "2026-01-31 18:00:00",
+          "expectedSuspendedUtc": "2026-04-28 06:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Anchored to 31st"
+        },
+        {
+          "completedAtUtc": "2026-04-30 12:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-06-30 16:00:00",
+          "expectedDueAnchor": "2026-01-31 18:00:00",
+          "expectedSuspendedUtc": "2026-06-28 06:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Anchored to 31st"
+        },
+        {
+          "completedAtUtc": "2026-06-30 12:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-08-31 16:00:00",
+          "expectedDueAnchor": "2026-08-31 18:00:00",
+          "expectedSuspendedUtc": "2026-08-29 06:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Anchored to 31st"
+        }
+      ]
+    },
+    {
+      "id": "tz_04_spring_dst_gap_clock_preservation_k1_plus_1_vs_k2",
+      "ruleIds": ["TDF-CAL-001", "TDF-CAL-003"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-03-28 00:00:00",
+      "initialTask": {
+        "id": "tzRec00004",
+        "title": "Nightly Maintenance Window",
+        "created": "2026-03-20 08:00:00",
+        "modified": "2026-03-20 08:00:00",
+        "completions": 0,
+        "due": {
+          "timestamp": "2026-03-28 01:30:00",
+          "anchor": "2026-03-28 02:30:00",
+          "passive": false
+        },
+        "repeat": {
+          "count": 1,
+          "unit": "days",
+          "clock": "00:00:00",
+          "leadDays": 0
+        }
+      },
+      "steps": [
+        {
+          "completedAtUtc": "2026-03-28 10:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-03-29 01:30:00",
+          "expectedDueAnchor": "2026-03-29 02:30:00",
+          "expectedSuspendedUtc": "2026-03-28 23:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": null
+        },
+        {
+          "completedAtUtc": "2026-03-29 10:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-03-30 00:30:00",
+          "expectedDueAnchor": "2026-03-30 02:30:00",
+          "expectedSuspendedUtc": "2026-03-29 22:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": null
+        }
+      ],
+      "directJumpStep": {
+        "completedAtUtc": "2026-03-29 10:00:00",
+        "expectedStepsK": 2,
+        "expectedDueUtc": "2026-03-30 00:30:00",
+        "expectedDueAnchor": "2026-03-30 02:30:00",
+        "expectedSuspendedUtc": "2026-03-29 22:00:00",
+        "expectedDuePassive": false,
+        "expectedDueNote": null
+      }
+    },
+    {
+      "id": "tz_05_early_completion_preserves_future_suspended",
+      "ruleIds": ["TDF-CAL-003", "TDF-MUT-006"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-11-14 08:00:00",
+      "initialTask": {
+        "id": "tzRec00005",
+        "title": "Early Recurring Completion",
+        "created": "2026-11-01 08:00:00",
+        "modified": "2026-11-01 08:00:00",
+        "completions": 2,
+        "suspended": {
+          "timestamp": "2026-11-12 08:00:00",
+          "note": "Snoozed once"
+        },
+        "due": {
+          "timestamp": "2026-11-15 17:00:00",
+          "anchor": "2026-11-15 18:00:00",
+          "passive": true,
+          "note": "Keep deadline note"
+        },
+        "repeat": {
+          "count": 1,
+          "unit": "months",
+          "clock": "09:00:00",
+          "leadDays": 5
+        }
+      },
+      "steps": [
+        {
+          "completedAtUtc": "2026-11-14 10:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-12-15 17:00:00",
+          "expectedDueAnchor": "2026-12-15 18:00:00",
+          "expectedSuspendedUtc": "2026-12-10 08:00:00",
+          "expectedDuePassive": false,
+          "expectedDueNote": "Keep deadline note"
+        }
+      ]
+    },
+    {
+      "id": "tz_06_overdue_inside_open_window_lead_0_omits_suspended",
+      "ruleIds": ["TDF-CAL-003", "TDF-MUT-006"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-12-15 08:00:00",
+      "initialTask": {
+        "id": "tzRec00006",
+        "title": "Overdue Same-Day Open Window",
+        "created": "2026-11-01 08:00:00",
+        "modified": "2026-11-01 08:00:00",
+        "completions": 1,
+        "due": {
+          "timestamp": "2026-11-15 17:00:00",
+          "anchor": "2026-11-15 18:00:00",
+          "passive": true,
+          "note": "Statutory cutoff"
+        },
+        "repeat": {
+          "count": 1,
+          "unit": "months",
+          "clock": "00:00:00",
+          "leadDays": 0
+        }
+      },
+      "steps": [
+        {
+          "completedAtUtc": "2026-12-15 09:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-12-15 17:00:00",
+          "expectedDueAnchor": "2026-12-15 18:00:00",
+          "expectedSuspendedUtc": null,
+          "expectedDuePassive": false,
+          "expectedDueNote": "Statutory cutoff"
+        }
+      ]
+    },
+    {
+      "id": "tz_07_overdue_inside_5day_lead_window_omits_suspended",
+      "ruleIds": ["TDF-CAL-003", "TDF-MUT-006"],
+      "timeZone": "Europe/Berlin",
+      "initialEvaluationUtc": "2026-11-12 08:00:00",
+      "initialTask": {
+        "id": "tzRec00007",
+        "title": "Overdue Multi-Day Open Window",
+        "created": "2026-10-01 08:00:00",
+        "modified": "2026-10-01 08:00:00",
+        "completions": 3,
+        "due": {
+          "timestamp": "2026-10-15 16:00:00",
+          "anchor": "2026-10-15 18:00:00",
+          "passive": true,
+          "note": "Monthly filing"
+        },
+        "repeat": {
+          "count": 1,
+          "unit": "months",
+          "clock": "09:00:00",
+          "leadDays": 5
+        }
+      },
+      "steps": [
+        {
+          "completedAtUtc": "2026-11-12 10:00:00",
+          "expectedStepsK": 1,
+          "expectedDueUtc": "2026-11-15 17:00:00",
+          "expectedDueAnchor": "2026-11-15 18:00:00",
+          "expectedSuspendedUtc": null,
+          "expectedDuePassive": false,
+          "expectedDueNote": "Monthly filing"
+        }
+      ]
+    }
+  ],
+  "dueLeadPriorityVectors": [
+    {
+      "id": "wdue_01_default_86400s_boundaries_passive_someday_blocked_scoped",
+      "ruleIds": ["TDF-CTX-001", "TDF-EVAL-001", "TDF-EVAL-005"],
+      "now": "2026-11-04 12:00:00",
+      "timeZone": "Europe/Berlin",
+      "dueLeadSeconds": 86400,
+      "board": {
+        "labels": [
+          {
+            "id": "lblScoped1",
+            "name": "Private Scope",
+            "scoped": true,
+            "modified": "2026-11-01 08:00:00"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "regFill001",
+            "title": "Regular Queue 1",
+            "created": "2026-11-01 08:00:00"
+          },
+          {
+            "id": "regFill002",
+            "title": "Regular Queue 2",
+            "created": "2026-11-01 08:05:00"
+          },
+          {
+            "id": "urgPassv01",
+            "title": "Urgent But Passive Opt-Out",
+            "created": "2026-11-01 08:10:00",
+            "due": {
+              "timestamp": "2026-11-04 14:00:00",
+              "passive": true
+            }
+          },
+          {
+            "id": "urgAfter01",
+            "title": "Outside 86400s By 1 Second",
+            "created": "2026-11-01 08:15:00",
+            "due": {
+              "timestamp": "2026-11-05 12:00:01"
+            }
+          },
+          {
+            "id": "urgExact01",
+            "title": "Exact 86400s Boundary Urgent",
+            "created": "2026-11-01 08:20:00",
+            "due": {
+              "timestamp": "2026-11-05 12:00:00"
+            }
+          },
+          {
+            "id": "urgOverd01",
+            "title": "Overdue Urgent",
+            "created": "2026-11-01 08:25:00",
+            "due": {
+              "timestamp": "2026-11-04 10:00:00"
+            }
+          },
+          {
+            "id": "urgSmdy001",
+            "title": "Unqueued Someday With Overdue Due",
+            "created": "2026-11-01 08:30:00",
+            "due": {
+              "timestamp": "2026-11-04 09:00:00"
+            }
+          },
+          {
+            "id": "urgBlkd001",
+            "title": "Deferred Blocked With Urgent Due",
+            "created": "2026-11-01 08:35:00",
+            "suspended": {
+              "timestamp": "2026-11-04 18:00:00"
+            },
+            "due": {
+              "timestamp": "2026-11-04 13:00:00"
+            }
+          },
+          {
+            "id": "urgScpd001",
+            "title": "Scoped Urgent Excluded From Global",
+            "created": "2026-11-01 08:40:00",
+            "labels": ["lblScoped1"],
+            "due": {
+              "timestamp": "2026-11-04 13:00:00"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-01 09:00:00",
+          "taskIds": [
+            "urgBlkd001",
+            "urgScpd001",
+            "regFill001",
+            "regFill002",
+            "urgPassv01",
+            "urgAfter01",
+            "urgExact01",
+            "urgOverd01"
+          ]
+        }
+      },
+      "expected": {
+        "tiers": {
+          "focus": ["urgExact01", "urgOverd01", "regFill001"],
+          "ready": ["regFill002", "urgPassv01", "urgAfter01"],
+          "planned": [],
+          "blocked": ["urgBlkd001"],
+          "someday": ["urgSmdy001"],
+          "completed": []
+        }
+      }
+    },
+    {
+      "id": "wdue_02_scoped_active_label_filter_promotes_due_urgent",
+      "ruleIds": ["TDF-EVAL-001", "TDF-EVAL-005"],
+      "now": "2026-11-04 12:00:00",
+      "timeZone": "Europe/Berlin",
+      "dueLeadSeconds": 86400,
+      "activeLabelId": "lblScoped1",
+      "board": {
+        "labels": [
+          {
+            "id": "lblScoped1",
+            "name": "Private Scope",
+            "scoped": true,
+            "modified": "2026-11-01 08:00:00"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "regFill001",
+            "title": "Scoped Regular",
+            "created": "2026-11-01 08:00:00",
+            "labels": ["lblScoped1"]
+          },
+          {
+            "id": "urgScpd001",
+            "title": "Scoped Urgent Promoted In Context",
+            "created": "2026-11-01 08:40:00",
+            "labels": ["lblScoped1"],
+            "due": {
+              "timestamp": "2026-11-04 13:00:00"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-01 09:00:00",
+          "taskIds": ["regFill001", "urgScpd001"]
+        }
+      },
+      "expected": {
+        "tiers": {
+          "focus": ["urgScpd001", "regFill001"],
+          "ready": [],
+          "planned": [],
+          "blocked": [],
+          "someday": [],
+          "completed": []
+        }
+      }
+    },
+    {
+      "id": "wdue_03_zero_lead_window_0s_promotes_only_at_or_before_now",
+      "ruleIds": ["TDF-CTX-001", "TDF-EVAL-005"],
+      "now": "2026-11-04 12:00:00",
+      "timeZone": "UTC",
+      "dueLeadSeconds": 0,
+      "board": {
+        "tasks": [
+          {
+            "id": "regFill001",
+            "title": "Regular First",
+            "created": "2026-11-01 08:00:00"
+          },
+          {
+            "id": "urgAfter01",
+            "title": "Due At Now + 1s Not Urgent Under W_due=0",
+            "created": "2026-11-01 08:05:00",
+            "due": {
+              "timestamp": "2026-11-04 12:00:01"
+            }
+          },
+          {
+            "id": "urgExact01",
+            "title": "Due Exactly At Now Urgent Under W_due=0",
+            "created": "2026-11-01 08:10:00",
+            "due": {
+              "timestamp": "2026-11-04 12:00:00"
+            }
+          },
+          {
+            "id": "urgOverd01",
+            "title": "Overdue Urgent Under W_due=0",
+            "created": "2026-11-01 08:15:00",
+            "due": {
+              "timestamp": "2026-11-04 11:00:00"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-01 09:00:00",
+          "taskIds": ["regFill001", "urgAfter01", "urgExact01", "urgOverd01"]
+        }
+      },
+      "expected": {
+        "tiers": {
+          "focus": ["urgExact01", "urgOverd01", "regFill001"],
+          "ready": ["urgAfter01"],
+          "planned": [],
+          "blocked": [],
+          "someday": [],
+          "completed": []
+        }
+      }
+    },
+    {
+      "id": "wdue_04_absent_lead_window_disables_due_auto_promotion",
+      "ruleIds": ["TDF-CTX-001", "TDF-EVAL-005"],
+      "now": "2026-11-04 12:00:00",
+      "timeZone": "UTC",
+      "dueLeadSeconds": null,
+      "board": {
+        "tasks": [
+          {
+            "id": "regFill001",
+            "title": "Regular First",
+            "created": "2026-11-01 08:00:00"
+          },
+          {
+            "id": "regFill002",
+            "title": "Regular Second",
+            "created": "2026-11-01 08:05:00"
+          },
+          {
+            "id": "urgOverd01",
+            "title": "Overdue Without Priority Stays Unpromoted",
+            "created": "2026-11-01 08:10:00",
+            "due": {
+              "timestamp": "2026-11-04 08:00:00"
+            }
+          },
+          {
+            "id": "expPrio001",
+            "title": "Explicit Priority Still Promoted",
+            "created": "2026-11-01 08:15:00",
+            "priority": true
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-01 09:00:00",
+          "taskIds": ["regFill001", "regFill002", "urgOverd01", "expPrio001"]
+        }
+      },
+      "expected": {
+        "tiers": {
+          "focus": ["expPrio001", "regFill001", "regFill002"],
+          "ready": ["urgOverd01"],
+          "planned": [],
+          "blocked": [],
+          "someday": [],
+          "completed": []
+        }
+      }
+    },
+    {
+      "id": "wdue_05_missing_timezone_with_day_condition_throws_context_required",
+      "ruleIds": ["TDF-CTX-001", "TDF-EVAL-002", "TDF-EVAL-003"],
+      "now": "2026-11-04 12:00:00",
+      "timeZone": "missing",
+      "expectedContextError": "timeZoneContextRequired",
+      "board": {
+        "tasks": [
+          {
+            "id": "cndDay0001",
+            "title": "Weekday Restricted Task",
+            "created": "2026-11-01 08:00:00",
+            "conditions": [
+              {
+                "kind": "day",
+                "days": ["wed"]
+              }
+            ]
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-01 09:00:00",
+          "taskIds": ["cndDay0001"]
+        }
+      }
+    },
+    {
+      "id": "wdue_06_condition_inheritance_group_reset_and_prerequisite_threshold",
+      "ruleIds": ["TDF-EVAL-002", "TDF-EVAL-003", "TDF-EVAL-004", "TDF-EVAL-005"],
+      "now": "2026-11-04 23:30:00",
+      "timeZone": "Europe/Berlin",
+      "board": {
+        "labels": [
+          {
+            "id": "lblMorning",
+            "name": "Morning Thu",
+            "modified": "2026-11-01 08:00:00",
+            "conditions": [
+              {
+                "kind": "day",
+                "days": ["thu"]
+              },
+              {
+                "kind": "time",
+                "start": "08:00",
+                "end": "12:00"
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "prereqCnt7",
+            "title": "Prerequisite At 7",
+            "created": "2026-11-01 08:00:00",
+            "completions": 7
+          },
+          {
+            "id": "inhBlocked",
+            "title": "Inherits 08:00-12:00 Fails At 00:30 Thu CET",
+            "created": "2026-11-01 08:05:00",
+            "labels": ["lblMorning"]
+          },
+          {
+            "id": "rstTimeAny",
+            "title": "Resets Time Group Passes On Thu 00:30 CET",
+            "created": "2026-11-01 08:10:00",
+            "labels": ["lblMorning"],
+            "conditions": [
+              {
+                "kind": "groupAny",
+                "group": "time"
+              }
+            ]
+          },
+          {
+            "id": "depNeeds08",
+            "title": "Blocked On Counter 8 While Prereq Is 7",
+            "created": "2026-11-01 08:15:00",
+            "blocked": {
+              "prereqCnt7": 8
+            }
+          },
+          {
+            "id": "depSatis07",
+            "title": "Satisfied On Counter 7",
+            "created": "2026-11-01 08:20:00",
+            "blocked": {
+              "prereqCnt7": 7
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-01 09:00:00",
+          "taskIds": [
+            "inhBlocked",
+            "rstTimeAny",
+            "depNeeds08",
+            "depSatis07"
+          ]
+        }
+      },
+      "expected": {
+        "tiers": {
+          "focus": ["rstTimeAny", "depSatis07"],
+          "ready": [],
+          "planned": [],
+          "blocked": ["inhBlocked", "depNeeds08"],
+          "someday": ["prereqCnt7"],
+          "completed": []
+        }
+      }
+    }
+  ],
+  "downgradeVectors": [
+    {
+      "id": "dwn_01_focus_to_ready_case_a_non_urgent_keeps_priority_slot8",
+      "ruleIds": ["TDF-MUT-005"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "timeZone": "Europe/Berlin",
+      "targetTaskId": "dwnTarget1",
+      "board": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Target Priority Task",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer001",
+            "title": "Urgent 1",
+            "created": "2026-02-28 08:01:00",
+            "modified": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Urgent 2",
+            "created": "2026-02-28 08:02:00",
+            "modified": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Urgent 3",
+            "created": "2026-02-28 08:03:00",
+            "modified": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer004",
+            "title": "Urgent 4",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 08:04:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer005",
+            "title": "Urgent 5",
+            "created": "2026-02-28 08:05:00",
+            "modified": "2026-02-28 08:05:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer006",
+            "title": "Urgent 6",
+            "created": "2026-02-28 08:06:00",
+            "modified": "2026-02-28 08:06:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer007",
+            "title": "Urgent 7",
+            "created": "2026-02-28 08:07:00",
+            "modified": "2026-02-28 08:07:00",
+            "priority": true
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": [
+            "dwnTarget1",
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "urgPeer004",
+            "urgPeer005",
+            "urgPeer006",
+            "urgPeer007"
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Target Priority Task",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer001",
+            "title": "Urgent 1",
+            "created": "2026-02-28 08:01:00",
+            "modified": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Urgent 2",
+            "created": "2026-02-28 08:02:00",
+            "modified": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Urgent 3",
+            "created": "2026-02-28 08:03:00",
+            "modified": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer004",
+            "title": "Urgent 4",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 08:04:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer005",
+            "title": "Urgent 5",
+            "created": "2026-02-28 08:05:00",
+            "modified": "2026-02-28 08:05:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer006",
+            "title": "Urgent 6",
+            "created": "2026-02-28 08:06:00",
+            "modified": "2026-02-28 08:06:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer007",
+            "title": "Urgent 7",
+            "created": "2026-02-28 08:07:00",
+            "modified": "2026-02-28 08:07:00",
+            "priority": true
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": [
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "urgPeer004",
+            "urgPeer005",
+            "urgPeer006",
+            "urgPeer007",
+            "dwnTarget1"
+          ]
+        },
+        "tiers": {
+          "focus": ["urgPeer001", "urgPeer002", "urgPeer003"],
+          "ready": [
+            "urgPeer004",
+            "urgPeer005",
+            "urgPeer006",
+            "urgPeer007",
+            "dwnTarget1"
+          ],
+          "planned": []
+        }
+      }
+    },
+    {
+      "id": "dwn_02_focus_to_ready_case_a_urgent_with_explicit_priority_preserved",
+      "ruleIds": ["TDF-MUT-005"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "timeZone": "Europe/Berlin",
+      "targetTaskId": "dwnTarget1",
+      "board": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Urgent Clamped Priority Target",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00",
+            "priority": true,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": false,
+              "note": "Clamped Jan 31"
+            }
+          },
+          {
+            "id": "urgPeer001",
+            "title": "Urgent 1",
+            "created": "2026-02-28 08:01:00",
+            "modified": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Urgent 2",
+            "created": "2026-02-28 08:02:00",
+            "modified": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Urgent 3",
+            "created": "2026-02-28 08:03:00",
+            "modified": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer004",
+            "title": "Urgent 4",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 08:04:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer005",
+            "title": "Urgent 5",
+            "created": "2026-02-28 08:05:00",
+            "modified": "2026-02-28 08:05:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer006",
+            "title": "Urgent 6",
+            "created": "2026-02-28 08:06:00",
+            "modified": "2026-02-28 08:06:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer007",
+            "title": "Urgent 7",
+            "created": "2026-02-28 08:07:00",
+            "modified": "2026-02-28 08:07:00",
+            "priority": true
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": [
+            "dwnTarget1",
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "urgPeer004",
+            "urgPeer005",
+            "urgPeer006",
+            "urgPeer007"
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Urgent Clamped Priority Target",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00",
+            "priority": true,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": false,
+              "note": "Clamped Jan 31"
+            }
+          },
+          {
+            "id": "urgPeer001",
+            "title": "Urgent 1",
+            "created": "2026-02-28 08:01:00",
+            "modified": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Urgent 2",
+            "created": "2026-02-28 08:02:00",
+            "modified": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Urgent 3",
+            "created": "2026-02-28 08:03:00",
+            "modified": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer004",
+            "title": "Urgent 4",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 08:04:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer005",
+            "title": "Urgent 5",
+            "created": "2026-02-28 08:05:00",
+            "modified": "2026-02-28 08:05:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer006",
+            "title": "Urgent 6",
+            "created": "2026-02-28 08:06:00",
+            "modified": "2026-02-28 08:06:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer007",
+            "title": "Urgent 7",
+            "created": "2026-02-28 08:07:00",
+            "modified": "2026-02-28 08:07:00",
+            "priority": true
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": [
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "urgPeer004",
+            "urgPeer005",
+            "urgPeer006",
+            "urgPeer007",
+            "dwnTarget1"
+          ]
+        },
+        "tiers": {
+          "focus": ["urgPeer001", "urgPeer002", "urgPeer003"],
+          "ready": [
+            "urgPeer004",
+            "urgPeer005",
+            "urgPeer006",
+            "urgPeer007",
+            "dwnTarget1"
+          ],
+          "planned": []
+        }
+      }
+    },
+    {
+      "id": "dwn_03_focus_to_ready_case_b_strips_priority_sets_passive_preserves_anchor",
+      "ruleIds": ["TDF-MUT-005"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "timeZone": "Europe/Berlin",
+      "targetTaskId": "dwnTarget1",
+      "board": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Case B Urgent Focus Task",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:30:00",
+            "priority": true,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": false,
+              "note": "Clamped Jan 31"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-28 08:30:00",
+                "text": "Entered focus"
+              }
+            ]
+          },
+          {
+            "id": "regPeer001",
+            "title": "Reg 1",
+            "created": "2026-02-28 08:01:00"
+          },
+          {
+            "id": "regPeer002",
+            "title": "Reg 2",
+            "created": "2026-02-28 08:02:00"
+          },
+          {
+            "id": "regPeer003",
+            "title": "Reg 3",
+            "created": "2026-02-28 08:03:00"
+          },
+          {
+            "id": "regPeer004",
+            "title": "Reg 4",
+            "created": "2026-02-28 08:04:00"
+          },
+          {
+            "id": "regPeer005",
+            "title": "Reg 5",
+            "created": "2026-02-28 08:05:00"
+          },
+          {
+            "id": "regPeer006",
+            "title": "Reg 6",
+            "created": "2026-02-28 08:06:00"
+          },
+          {
+            "id": "regPeer007",
+            "title": "Reg 7",
+            "created": "2026-02-28 08:07:00"
+          },
+          {
+            "id": "regPeer008",
+            "title": "Reg 8",
+            "created": "2026-02-28 08:08:00"
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": [
+            "dwnTarget1",
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005",
+            "regPeer006",
+            "regPeer007",
+            "regPeer008"
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Case B Urgent Focus Task",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 10:05:00",
+            "priority": false,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Clamped Jan 31"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-28 08:30:00",
+                "text": "Entered focus"
+              }
+            ]
+          },
+          {
+            "id": "regPeer001",
+            "title": "Reg 1",
+            "created": "2026-02-28 08:01:00"
+          },
+          {
+            "id": "regPeer002",
+            "title": "Reg 2",
+            "created": "2026-02-28 08:02:00"
+          },
+          {
+            "id": "regPeer003",
+            "title": "Reg 3",
+            "created": "2026-02-28 08:03:00"
+          },
+          {
+            "id": "regPeer004",
+            "title": "Reg 4",
+            "created": "2026-02-28 08:04:00"
+          },
+          {
+            "id": "regPeer005",
+            "title": "Reg 5",
+            "created": "2026-02-28 08:05:00"
+          },
+          {
+            "id": "regPeer006",
+            "title": "Reg 6",
+            "created": "2026-02-28 08:06:00"
+          },
+          {
+            "id": "regPeer007",
+            "title": "Reg 7",
+            "created": "2026-02-28 08:07:00"
+          },
+          {
+            "id": "regPeer008",
+            "title": "Reg 8",
+            "created": "2026-02-28 08:08:00"
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": [
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005",
+            "regPeer006",
+            "regPeer007",
+            "dwnTarget1",
+            "regPeer008"
+          ]
+        },
+        "tiers": {
+          "focus": ["regPeer001", "regPeer002", "regPeer003"],
+          "ready": [
+            "regPeer004",
+            "regPeer005",
+            "regPeer006",
+            "regPeer007",
+            "dwnTarget1"
+          ],
+          "planned": ["regPeer008"]
+        }
+      }
+    },
+    {
+      "id": "dwn_04_ready_to_planned_sets_passive_moves_to_tail",
+      "ruleIds": ["TDF-MUT-005"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "timeZone": "Europe/Berlin",
+      "targetTaskId": "dwnTarget1",
+      "board": {
+        "tasks": [
+          {
+            "id": "urgPeer001",
+            "title": "Focus 1",
+            "created": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Focus 2",
+            "created": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Focus 3",
+            "created": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "dwnTarget1",
+            "title": "Ready Urgent Target",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 08:04:00",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": false,
+              "note": "Clamped Jan 31"
+            }
+          },
+          {
+            "id": "regPeer001",
+            "title": "Reg 1",
+            "created": "2026-02-28 08:05:00"
+          },
+          {
+            "id": "regPeer002",
+            "title": "Reg 2",
+            "created": "2026-02-28 08:06:00"
+          },
+          {
+            "id": "regPeer003",
+            "title": "Reg 3",
+            "created": "2026-02-28 08:07:00"
+          },
+          {
+            "id": "regPeer004",
+            "title": "Reg 4",
+            "created": "2026-02-28 08:08:00"
+          },
+          {
+            "id": "regPeer005",
+            "title": "Reg 5",
+            "created": "2026-02-28 08:09:00"
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": [
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "dwnTarget1",
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005"
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "urgPeer001",
+            "title": "Focus 1",
+            "created": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Focus 2",
+            "created": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Focus 3",
+            "created": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "dwnTarget1",
+            "title": "Ready Urgent Target",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 10:05:00",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Clamped Jan 31"
+            }
+          },
+          {
+            "id": "regPeer001",
+            "title": "Reg 1",
+            "created": "2026-02-28 08:05:00"
+          },
+          {
+            "id": "regPeer002",
+            "title": "Reg 2",
+            "created": "2026-02-28 08:06:00"
+          },
+          {
+            "id": "regPeer003",
+            "title": "Reg 3",
+            "created": "2026-02-28 08:07:00"
+          },
+          {
+            "id": "regPeer004",
+            "title": "Reg 4",
+            "created": "2026-02-28 08:08:00"
+          },
+          {
+            "id": "regPeer005",
+            "title": "Reg 5",
+            "created": "2026-02-28 08:09:00"
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": [
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005",
+            "dwnTarget1"
+          ]
+        },
+        "tiers": {
+          "focus": ["urgPeer001", "urgPeer002", "urgPeer003"],
+          "ready": [
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005"
+          ],
+          "planned": ["dwnTarget1"]
+        }
+      }
+    },
+    {
+      "id": "dwn_05_planned_to_someday_removes_from_queue_preserves_due_tuple",
+      "ruleIds": ["TDF-MUT-004", "TDF-MUT-005"],
+      "now": "2026-02-28 10:05:00",
+      "mutationAt": "2026-02-28 10:10:00",
+      "timeZone": "Europe/Berlin",
+      "targetTaskId": "dwnTarget1",
+      "board": {
+        "tasks": [
+          {
+            "id": "urgPeer001",
+            "title": "Focus 1",
+            "created": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Focus 2",
+            "created": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Focus 3",
+            "created": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "regPeer001",
+            "title": "Reg 1",
+            "created": "2026-02-28 08:05:00"
+          },
+          {
+            "id": "regPeer002",
+            "title": "Reg 2",
+            "created": "2026-02-28 08:06:00"
+          },
+          {
+            "id": "regPeer003",
+            "title": "Reg 3",
+            "created": "2026-02-28 08:07:00"
+          },
+          {
+            "id": "regPeer004",
+            "title": "Reg 4",
+            "created": "2026-02-28 08:08:00"
+          },
+          {
+            "id": "regPeer005",
+            "title": "Reg 5",
+            "created": "2026-02-28 08:09:00"
+          },
+          {
+            "id": "dwnTarget1",
+            "title": "Planned Passive Target",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 10:05:00",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Clamped Jan 31"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": [
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005",
+            "dwnTarget1"
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "urgPeer001",
+            "title": "Focus 1",
+            "created": "2026-02-28 08:01:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer002",
+            "title": "Focus 2",
+            "created": "2026-02-28 08:02:00",
+            "priority": true
+          },
+          {
+            "id": "urgPeer003",
+            "title": "Focus 3",
+            "created": "2026-02-28 08:03:00",
+            "priority": true
+          },
+          {
+            "id": "regPeer001",
+            "title": "Reg 1",
+            "created": "2026-02-28 08:05:00"
+          },
+          {
+            "id": "regPeer002",
+            "title": "Reg 2",
+            "created": "2026-02-28 08:06:00"
+          },
+          {
+            "id": "regPeer003",
+            "title": "Reg 3",
+            "created": "2026-02-28 08:07:00"
+          },
+          {
+            "id": "regPeer004",
+            "title": "Reg 4",
+            "created": "2026-02-28 08:08:00"
+          },
+          {
+            "id": "regPeer005",
+            "title": "Reg 5",
+            "created": "2026-02-28 08:09:00"
+          },
+          {
+            "id": "dwnTarget1",
+            "title": "Planned Passive Target",
+            "created": "2026-02-28 08:04:00",
+            "modified": "2026-02-28 10:05:00",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Clamped Jan 31"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:10:00",
+          "taskIds": [
+            "urgPeer001",
+            "urgPeer002",
+            "urgPeer003",
+            "regPeer001",
+            "regPeer002",
+            "regPeer003",
+            "regPeer004",
+            "regPeer005"
+          ]
+        },
+        "tiers": {
+          "planned": [],
+          "someday": ["dwnTarget1"]
+        }
+      }
+    },
+    {
+      "id": "dwn_06_pure_noop_at_queue_tail_skips_bystander_cleanup",
+      "ruleIds": ["TDF-MUT-001", "TDF-MUT-005"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "timeZone": "UTC",
+      "targetTaskId": "dwnTarget1",
+      "board": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Solo Regular Focus At Queue Tail",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00"
+          },
+          {
+            "id": "bysExp0001",
+            "title": "Bystander Whose Deferral Expires Before MutationAt",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00",
+            "suspended": {
+              "timestamp": "2026-02-28 10:02:00",
+              "note": "Must survive pure no-op"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": ["dwnTarget1"]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "dwnTarget1",
+            "title": "Solo Regular Focus At Queue Tail",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00"
+          },
+          {
+            "id": "bysExp0001",
+            "title": "Bystander Whose Deferral Expires Before MutationAt",
+            "created": "2026-02-28 08:00:00",
+            "modified": "2026-02-28 08:00:00",
+            "suspended": {
+              "timestamp": "2026-02-28 10:02:00",
+              "note": "Must survive pure no-op"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": ["dwnTarget1"]
+        }
+      }
+    }
+  ],
+  "restoreVectors": [
+    {
+      "id": "rst_01_restore_to_someday_clears_due_4tuple_and_rearms_blocked",
+      "ruleIds": ["TDF-MUT-007", "TDF-OCC-001"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "targetTaskId": "rstTarget1",
+      "targetTier": "someday",
+      "board": {
+        "tasks": [
+          {
+            "id": "prereqOpn1",
+            "title": "Open Recurring Prerequisite",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-20 08:00:00",
+            "completions": 2,
+            "repeat": {
+              "count": 1,
+              "unit": "weeks"
+            }
+          },
+          {
+            "id": "rstTarget1",
+            "title": "Completed Task With Anchor AndForever Deferral",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-27 15:00:00",
+            "finished": "2026-02-27 15:00:00",
+            "completions": 7,
+            "priority": true,
+            "suspended": {
+              "forever": true,
+              "note": "Old forever snooze"
+            },
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Old deadline note"
+            },
+            "origin": {
+              "namespace": "jira",
+              "externalKey": "OPS-77"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-15 09:00:00",
+                "text": "Audit trail entry"
+              }
+            ],
+            "repeat": {
+              "count": 1,
+              "unit": "months",
+              "clock": "09:00:00",
+              "leadDays": 5
+            },
+            "blocked": {
+              "prereqOpn1": 1
+            },
+            "subtasks": {
+              "autoFinish": true,
+              "steps": [
+                {
+                  "done": true,
+                  "text": "Step A"
+                },
+                {
+                  "done": true,
+                  "text": "Step B"
+                }
+              ]
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": ["prereqOpn1"]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "prereqOpn1",
+            "title": "Open Recurring Prerequisite",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-20 08:00:00",
+            "completions": 2,
+            "repeat": {
+              "count": 1,
+              "unit": "weeks"
+            }
+          },
+          {
+            "id": "rstTarget1",
+            "title": "Completed Task With Anchor AndForever Deferral",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-28 10:05:00",
+            "completions": 7,
+            "priority": false,
+            "origin": {
+              "namespace": "jira",
+              "externalKey": "OPS-77"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-15 09:00:00",
+                "text": "Audit trail entry"
+              }
+            ],
+            "repeat": {
+              "count": 1,
+              "unit": "months",
+              "clock": "09:00:00",
+              "leadDays": 5
+            },
+            "blocked": {
+              "prereqOpn1": 3
+            },
+            "subtasks": {
+              "autoFinish": true,
+              "steps": [
+                {
+                  "done": false,
+                  "text": "Step A"
+                },
+                {
+                  "done": false,
+                  "text": "Step B"
+                }
+              ]
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": ["prereqOpn1"]
+        },
+        "tiers": {
+          "focus": ["prereqOpn1"],
+          "someday": ["rstTarget1"],
+          "completed": []
+        }
+      }
+    },
+    {
+      "id": "rst_02_restore_to_planned_derives_blocked_when_rearmed_prereq_unmet",
+      "ruleIds": ["TDF-MUT-007", "TDF-OCC-001", "TDF-EVAL-005"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "targetTaskId": "rstTarget1",
+      "targetTier": "planned",
+      "board": {
+        "tasks": [
+          {
+            "id": "prereqOpn1",
+            "title": "Open Recurring Prerequisite",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-20 08:00:00",
+            "completions": 2,
+            "repeat": {
+              "count": 1,
+              "unit": "weeks"
+            }
+          },
+          {
+            "id": "rstTarget1",
+            "title": "Completed Task Restored To Planned",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-27 15:00:00",
+            "finished": "2026-02-27 15:00:00",
+            "completions": 7,
+            "priority": true,
+            "suspended": {
+              "forever": true,
+              "note": "Old forever snooze"
+            },
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Old deadline note"
+            },
+            "repeat": {
+              "count": 1,
+              "unit": "months",
+              "clock": "09:00:00",
+              "leadDays": 5
+            },
+            "blocked": {
+              "prereqOpn1": 1
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": ["prereqOpn1"]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "prereqOpn1",
+            "title": "Open Recurring Prerequisite",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-20 08:00:00",
+            "completions": 2,
+            "repeat": {
+              "count": 1,
+              "unit": "weeks"
+            }
+          },
+          {
+            "id": "rstTarget1",
+            "title": "Completed Task Restored To Planned",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-28 10:05:00",
+            "completions": 7,
+            "priority": false,
+            "repeat": {
+              "count": 1,
+              "unit": "months",
+              "clock": "09:00:00",
+              "leadDays": 5
+            },
+            "blocked": {
+              "prereqOpn1": 3
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": ["prereqOpn1", "rstTarget1"]
+        },
+        "tiers": {
+          "focus": ["prereqOpn1"],
+          "blocked": ["rstTarget1"],
+          "completed": []
+        }
+      }
+    },
+    {
+      "id": "rst_03_restore_to_focus_sets_priority_clears_due_and_enters_focus",
+      "ruleIds": ["TDF-MUT-007"],
+      "now": "2026-02-28 10:00:00",
+      "mutationAt": "2026-02-28 10:05:00",
+      "targetTaskId": "rstTarget1",
+      "targetTier": "focus",
+      "board": {
+        "tasks": [
+          {
+            "id": "rstTarget1",
+            "title": "Completed Task Restored To Focus",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-27 15:00:00",
+            "finished": "2026-02-27 15:00:00",
+            "completions": 7,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true,
+              "note": "Cleared on restore"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 08:00:00",
+          "taskIds": []
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "rstTarget1",
+            "title": "Completed Task Restored To Focus",
+            "created": "2026-02-01 08:00:00",
+            "modified": "2026-02-28 10:05:00",
+            "completions": 7,
+            "priority": true
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-28 10:05:00",
+          "taskIds": ["rstTarget1"]
+        },
+        "tiers": {
+          "focus": ["rstTarget1"],
+          "completed": []
+        }
+      }
+    }
+  ]
+}

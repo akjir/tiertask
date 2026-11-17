@@ -74,7 +74,7 @@ void main() {
     'Side panel removes tier items, displays Google Keep style Labels with Edit at top, task counts, label filtering, and Create new label opening EditLabelsScreen',
     (WidgetTester tester) async {
       const labelsTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:30
@@ -900,7 +900,7 @@ task 000002OkD2 {
           localFileRepositoryProvider.overrideWith(
             (ref) => FakeLocalFileRepository(
               config: config,
-              initialTdf: 'tdf 0.7.0\n',
+              initialTdf: 'tdf 0.8.0\n',
             ),
           ),
           clockProvider.overrideWithValue(

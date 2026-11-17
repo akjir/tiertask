@@ -1,0 +1,9 @@
+tdf 0.8.0
+
+task 000001OkD2 {
+    name      "Calendar endpoints and wall-clock-free decode"
+    created   0001-01-01 00:00
+    modified  9999-12-31 23:59:59
+    suspended 2000-02-29 12:00:00 "Leap century deferral preserved on load"
+    due       9999-12-31 23:59:59 anchor 2000-02-29 23:59:59
+}

@@ -286,9 +286,9 @@
   "localFileNameErrorInvalid": "Bitte einen gültigen Dateinamen ohne Pfadtrennzeichen eingeben.",
   "localFileSelectedBanner": "Lokale TDF-Datei ausgewählt.",
   "localFileRenamedBanner": "Lokale TDF-Datei umbenannt.",
-  "errorUnsupportedTdfVersionLocal": "Die lokale Datei verwendet die nicht unterstützte Dateiversion {version}. Bitte aktualisieren Sie TierTask auf eine neuere Version.",
-  "errorUnsupportedTdfVersionRemote": "Die Remote-Datei verwendet die nicht unterstützte Dateiversion {version}. Bitte aktualisieren Sie TierTask auf eine neuere Version.",
-  "errorUnsupportedTdfVersionBoth": "Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion {version}. Bitte aktualisieren Sie TierTask auf eine neuere Version.",
+  "errorUnsupportedTdfVersionLocal": "Die lokale Datei verwendet die nicht unterstützte TDF-Version {version} (erwartet: 0.8.0).",
+  "errorUnsupportedTdfVersionRemote": "Die Remote-Datei verwendet die nicht unterstützte TDF-Version {version} (erwartet: 0.8.0).",
+  "errorUnsupportedTdfVersionBoth": "Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte TDF-Version {version} (erwartet: 0.8.0).",
   "logLevelLabel": "Minimales Protokoll-Level",
   "logLevelDebug": "Debug",
   "logLevelInfo": "Info",
@@ -443,5 +443,9 @@
   "historyErrorTextTooLong": "Verlaufseintrag darf maximal 500 Zeichen lang sein.",
   "historyErrorTextInvalid": "Verlaufseintrag enthält nicht unterstützte Steuerzeichen.",
   "historyErrorTimestampInvalid": "Gültiges Datum (JJJJ-MM-TT) und optionale Uhrzeit (Std:Min) eingeben.",
-  "historyErrorMaxExceeded": "Maximal 500 Verlaufseinträge pro Aufgabe erreicht."
+  "historyErrorMaxExceeded": "Maximal 500 Verlaufseinträge pro Aufgabe erreicht.",
+  "syncConflictDeletionBanner": "Synchronisierung pausiert: Eine gleichzeitige Bearbeitung steht im Konflikt mit einer Löschung.",
+  "syncConflictRecoveryBanner": "Synchronisierung pausiert: Lokale Änderungen erfordern eine Wiederherstellung nach Fortschreiten der Synchronisierungshistorie.",
+  "syncErrorGenerationRollbackBanner": "Synchronisierung gestoppt: Die Synchronisierungsgeneration der gemeinsamen Datei ist älter als der bestätigte Stand.",
+  "taskInfoDueAnchorDetail": "Terminanker: {anchor}"
 }

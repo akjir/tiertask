@@ -40,8 +40,8 @@ enum TaskUndoActionKind {
 }
 
 /// Stateless helper capturing and reversing single-task mutations on [TaskBoard]
-/// while preserving TDF `0.7.0` monotonic completion, revision, queue, metadata
-/// ownership, and deletion-generation invariants.
+/// while preserving TDF `0.8.0` monotonic completion, revision, queue, schedule
+/// anchor (`dueAnchor`), metadata ownership, and deletion-generation invariants.
 @immutable
 class TaskBoardUndo {
   const TaskBoardUndo._();
@@ -117,6 +117,21 @@ class TaskBoardUndo {
                 targetTaskId: taskBefore.id,
               )
             : _predictStrippedDependencies(kind, boardBefore, taskBefore));
+    final postActionTask =
+        (kind != TaskUndoActionKind.delete && boardAfter != null)
+        ? boardAfter.findTask(taskBefore.id)
+        : null;
+    final hasPostActionDueAnchor =
+        kind != TaskUndoActionKind.delete &&
+        (postActionTask != null ||
+            kind == TaskUndoActionKind.downgrade ||
+            taskBefore.repeatRule == null ||
+            taskBefore.dueAt == null);
+    final postActionDueAnchor = !hasPostActionDueAnchor
+        ? null
+        : (postActionTask != null
+              ? postActionTask.dueAnchor
+              : taskBefore.dueAnchor);
     return TaskUndoEntry(
       sequence: sequence,
       kind: kind,
@@ -129,6 +144,8 @@ class TaskBoardUndo {
       ),
       previouslyBlockedDependentIds: blockedDependents,
       previouslyBlockedDependencies: strippedDependencies,
+      hasPostActionDueAnchor: hasPostActionDueAnchor,
+      postActionDueAnchor: postActionDueAnchor,
     );
   }
 
@@ -145,6 +162,16 @@ class TaskBoardUndo {
     final currentTask = currentBoard.findTask(snapshotTask.id);
     if (currentTask == null) {
       _logSkipped(entry, 'task_missing');
+      return null;
+    }
+    if (_hasConcurrentDueAnchorEdit(
+      currentTask,
+      entry,
+      now,
+      localEvaluationTime,
+      timeZone,
+    )) {
+      _logSkipped(entry, 'concurrent_due_anchor_edit');
       return null;
     }
 
@@ -207,6 +234,8 @@ class TaskBoardUndo {
       clearSuspendedNote: deferral.suspendedNote == null,
       dueAt: snapshotTask.dueAt,
       clearDueAt: snapshotTask.dueAt == null,
+      dueAnchor: snapshotTask.dueAnchor,
+      clearDueAnchor: snapshotTask.dueAnchor == null,
       isDuePassive: snapshotTask.isDuePassive,
       dueNote: snapshotTask.dueNote,
       clearDueNote: snapshotTask.dueNote == null,
@@ -371,6 +400,8 @@ class TaskBoardUndo {
       clearSuspendedNote: deferral.suspendedNote == null,
       dueAt: snapshotTask.dueAt,
       clearDueAt: snapshotTask.dueAt == null,
+      dueAnchor: snapshotTask.dueAnchor,
+      clearDueAnchor: snapshotTask.dueAnchor == null,
       isDuePassive: wasCompleted ? false : snapshotTask.isDuePassive,
       dueNote: snapshotTask.dueNote,
       clearDueNote: snapshotTask.dueNote == null,
@@ -468,6 +499,16 @@ class TaskBoardUndo {
       _logSkipped(entry, 'task_not_open');
       return null;
     }
+    if (_hasConcurrentDueAnchorEdit(
+      currentTask,
+      entry,
+      now,
+      localEvaluationTime,
+      timeZone,
+    )) {
+      _logSkipped(entry, 'concurrent_due_anchor_edit');
+      return null;
+    }
 
     final validLabelIds = <String>{
       for (final label in currentBoard.labels) label.id,
@@ -516,6 +557,7 @@ class TaskBoardUndo {
         currentTask.isSuspendedForever != deferral.isSuspendedForever ||
         currentTask.suspendedNote != deferral.suspendedNote ||
         currentTask.dueAt != snapshotTask.dueAt ||
+        currentTask.dueAnchor != snapshotTask.dueAnchor ||
         currentTask.isDuePassive != snapshotTask.isDuePassive ||
         currentTask.dueNote != snapshotTask.dueNote ||
         !listEquals(currentTask.labelIds, retainedLabels) ||
@@ -550,6 +592,8 @@ class TaskBoardUndo {
         clearSuspendedNote: deferral.suspendedNote == null,
         dueAt: snapshotTask.dueAt,
         clearDueAt: snapshotTask.dueAt == null,
+        dueAnchor: snapshotTask.dueAnchor,
+        clearDueAnchor: snapshotTask.dueAnchor == null,
         isDuePassive: snapshotTask.isDuePassive,
         dueNote: snapshotTask.dueNote,
         clearDueNote: snapshotTask.dueNote == null,
@@ -783,6 +827,62 @@ class TaskBoardUndo {
       }
     }
     return snapshotIndex == 0 ? 0 : withoutTask.length;
+  }
+
+  /// Returns whether [currentTask]'s `dueAnchor` was externally modified after [entry] was captured.
+  static bool _hasConcurrentDueAnchorEdit(
+    TaskItem currentTask,
+    TaskUndoEntry entry,
+    DateTime now,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+  ) {
+    if (entry.hasPostActionDueAnchor) {
+      return currentTask.dueAnchor != entry.postActionDueAnchor;
+    }
+    final currentDue = currentTask.dueAt;
+    final currentAnchor = currentTask.dueAnchor;
+    final snapshotDue = entry.snapshotTask.dueAt;
+    if (currentDue == null || currentAnchor == null || snapshotDue == null) {
+      return true;
+    }
+    final zone = TaskBoardEvaluator.resolveEffectiveTimeZone(
+      now,
+      localEvaluationTime,
+      timeZone,
+    );
+    if (!zone.isAvailable) {
+      if (entry.snapshotTask.dueAnchor case final oldAnchor?) {
+        return currentAnchor.hour != oldAnchor.hour ||
+            currentAnchor.minute != oldAnchor.minute ||
+            currentAnchor.second != oldAnchor.second;
+      }
+      return false;
+    }
+    final oldAnchor =
+        entry.snapshotTask.dueAnchor ??
+        TdfLocalDateTime.fromWallClock(zone.toLocalWallClock(snapshotDue));
+    if (currentAnchor.hour != oldAnchor.hour ||
+        currentAnchor.minute != oldAnchor.minute ||
+        currentAnchor.second != oldAnchor.second) {
+      return true;
+    }
+    if (currentAnchor == oldAnchor) {
+      return false;
+    }
+    try {
+      final resolvedUtc = zone.resolveLocalToUtc(
+        currentAnchor.year,
+        currentAnchor.month,
+        currentAnchor.day,
+        currentAnchor.hour,
+        currentAnchor.minute,
+        currentAnchor.second,
+      );
+      return resolvedUtc != TaskItem.normalizeTimestamp(currentDue);
+    } on FormatException {
+      return true;
+    }
   }
 
   /// Returns whether [tasks] contains any directed dependency cycle.
@@ -1233,7 +1333,21 @@ class TaskUndoEntry {
     Set<String> previouslyBlockedDependentIds = const <String>{},
     Map<String, TdfTaskDependency> previouslyBlockedDependencies =
         const <String, TdfTaskDependency>{},
-  }) : queueOrderSnapshot = List<String>.unmodifiable(queueOrderSnapshot),
+    bool? hasPostActionDueAnchor,
+    TdfLocalDateTime? postActionDueAnchor,
+  }) : hasPostActionDueAnchor =
+           hasPostActionDueAnchor ??
+           (kind != TaskUndoActionKind.delete &&
+               (kind == TaskUndoActionKind.downgrade ||
+                   snapshotTask.repeatRule == null ||
+                   snapshotTask.dueAt == null)),
+       postActionDueAnchor = _resolveInitialPostActionDueAnchor(
+         kind: kind,
+         snapshotTask: snapshotTask,
+         hasPostActionDueAnchor: hasPostActionDueAnchor,
+         postActionDueAnchor: postActionDueAnchor,
+       ),
+       queueOrderSnapshot = List<String>.unmodifiable(queueOrderSnapshot),
        previouslyBlockedDependentIds = Set<String>.unmodifiable(
          previouslyBlockedDependentIds,
        ),
@@ -1245,8 +1359,14 @@ class TaskUndoEntry {
   /// Whether [snapshotTask] was restricted from the global view by scoped-only labels before the mutation.
   final bool hadOnlyScopedLabels;
 
+  /// Whether [postActionDueAnchor] records the exact expected live `dueAnchor` after the action.
+  final bool hasPostActionDueAnchor;
+
   /// Action category recorded by this entry.
   final TaskUndoActionKind kind;
+
+  /// Expected live `dueAnchor` immediately after the action when [hasPostActionDueAnchor] is `true`.
+  final TdfLocalDateTime? postActionDueAnchor;
 
   /// Unmodifiable map of open dependent task IDs to their exact [TdfTaskDependency] on `snapshotTask.id` stripped during the action.
   final Map<String, TdfTaskDependency> previouslyBlockedDependencies;
@@ -1309,6 +1429,24 @@ class TaskUndoEntry {
     return null;
   }
 
+  /// Resolves the stored [postActionDueAnchor] value during [TaskUndoEntry] construction.
+  static TdfLocalDateTime? _resolveInitialPostActionDueAnchor({
+    required TaskUndoActionKind kind,
+    required TaskItem snapshotTask,
+    required bool? hasPostActionDueAnchor,
+    required TdfLocalDateTime? postActionDueAnchor,
+  }) {
+    final effectiveHas =
+        hasPostActionDueAnchor ??
+        (kind != TaskUndoActionKind.delete &&
+            (kind == TaskUndoActionKind.downgrade ||
+                snapshotTask.repeatRule == null ||
+                snapshotTask.dueAt == null));
+    if (!effectiveHas) return null;
+    if (hasPostActionDueAnchor != null) return postActionDueAnchor;
+    return postActionDueAnchor ?? snapshotTask.dueAnchor;
+  }
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
@@ -1318,6 +1456,8 @@ class TaskUndoEntry {
         other.snapshotTask == snapshotTask &&
         other.wasQueued == wasQueued &&
         other.hadOnlyScopedLabels == hadOnlyScopedLabels &&
+        other.hasPostActionDueAnchor == hasPostActionDueAnchor &&
+        other.postActionDueAnchor == postActionDueAnchor &&
         listEquals(other.queueOrderSnapshot, queueOrderSnapshot) &&
         setEquals(
           other.previouslyBlockedDependentIds,
@@ -1336,6 +1476,8 @@ class TaskUndoEntry {
     snapshotTask,
     wasQueued,
     hadOnlyScopedLabels,
+    hasPostActionDueAnchor,
+    postActionDueAnchor,
     Object.hashAll(queueOrderSnapshot),
     Object.hashAllUnordered(previouslyBlockedDependentIds),
     Object.hashAllUnordered(

@@ -1814,22 +1814,22 @@ abstract class AppLocalizations {
   /// **'Local TDF file renamed.'**
   String get localFileRenamedBanner;
 
-  /// Error message shown when the local TDF file uses an unsupported version, recommending an application update.
+  /// Error message shown when the local TDF file uses a format version other than 0.8.0.
   ///
   /// In en, this message translates to:
-  /// **'The local file uses unsupported file version {version}. Please update TierTask to a newer version.'**
+  /// **'The local file uses unsupported TDF version {version} (expected 0.8.0).'**
   String errorUnsupportedTdfVersionLocal(String version);
 
-  /// Error message shown when the remote WebDAV TDF file uses an unsupported version, recommending an application update.
+  /// Error message shown when the remote WebDAV TDF file uses a format version other than 0.8.0.
   ///
   /// In en, this message translates to:
-  /// **'The remote file uses unsupported file version {version}. Please update TierTask to a newer version.'**
+  /// **'The remote file uses unsupported TDF version {version} (expected 0.8.0).'**
   String errorUnsupportedTdfVersionRemote(String version);
 
-  /// Error message shown when both the local and remote WebDAV TDF files use an unsupported version, recommending an application update.
+  /// Error message shown when both the local and remote WebDAV TDF files use a format version other than 0.8.0.
   ///
   /// In en, this message translates to:
-  /// **'The local and remote files use unsupported file version {version}. Please update TierTask to a newer version.'**
+  /// **'The local and remote files use unsupported TDF version {version} (expected 0.8.0).'**
   String errorUnsupportedTdfVersionBoth(String version);
 
   /// Localized string for logLevelLabel
@@ -2761,6 +2761,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Maximum of 500 history entries per task reached.'**
   String get historyErrorMaxExceeded;
+
+  /// Status banner message shown when synchronization pauses due to an edit-versus-deletion conflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Synchronization paused: a concurrent edit conflicts with a deletion.'**
+  String get syncConflictDeletionBanner;
+
+  /// Status banner message shown when synchronization pauses because local items require recovery after a generation advance.
+  ///
+  /// In en, this message translates to:
+  /// **'Synchronization paused: local changes require recovery after sync history advancement.'**
+  String get syncConflictRecoveryBanner;
+
+  /// Status banner message shown when synchronization stops due to a deleted.generation rollback.
+  ///
+  /// In en, this message translates to:
+  /// **'Synchronization stopped: the shared file sync generation is older than the acknowledged state.'**
+  String get syncErrorGenerationRollbackBanner;
+
+  /// Read-only detail line in the task info dialog showing the intended local schedule anchor when clamped or shifted across a DST transition.
+  ///
+  /// In en, this message translates to:
+  /// **'Schedule anchor: {anchor}'**
+  String taskInfoDueAnchorDetail(String anchor);
 }
 
 class _AppLocalizationsDelegate

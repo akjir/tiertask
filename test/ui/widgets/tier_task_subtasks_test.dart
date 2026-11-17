@@ -41,7 +41,7 @@ void main() {
     'Tapping a task pill with subtasks animates subtasks downward, shifts subsequent tasks down, toggles subtasks on and off, and collapses on second tap',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:05:00
@@ -52,7 +52,6 @@ queue {
 task 000001OkD2 {
   name "Deploy release candidate"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   subtasks {
     step false "Prepare backup"
     step false "Verify checksum"
@@ -61,7 +60,6 @@ task 000001OkD2 {
 task 000002OkD2 {
   name "Update status page"
   created 2026-11-01 08:05
-  queued 2026-11-01 08:05
 }
 ''';
       final container = await _pumpSeededApp(tester, seededTdf);
@@ -219,7 +217,7 @@ task 000002OkD2 {
     'Checking all expanded subtasks on a task with subtasks auto-finish completes the task automatically and differentiates subtask indicator icons and hover tooltips',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:05:00
@@ -230,7 +228,6 @@ queue {
 task auto00OkD2 priority {
   name "Auto Finish Checklist Task"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   repeat 1 weeks
   subtasks auto-finish {
     step false "Final verification step"
@@ -240,7 +237,6 @@ task auto00OkD2 priority {
 task manualOkD2 {
   name "Manual Subtasks Task"
   created 2026-11-01 08:05
-  queued 2026-11-01 08:05
   subtasks {
     step false "Manual step"
   }
@@ -400,7 +396,7 @@ task manualOkD2 {
     'Task pill displays passive link indicator, expands link rows on tap, launches URIs via LinkLauncherRepository, and shows SnackBar on launch failure',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -410,7 +406,6 @@ queue {
 task lnk001OkD2 {
   name "Review architecture docs"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
   link "Architecture Spec" "https://example.com/arch"
   link "Issue Tracker" "https://example.com/issues/10"
 }
@@ -461,7 +456,7 @@ task lnk001OkD2 {
     'Task pill displays passive note indicator, expands note-only tasks, and renders expanded note above links and subtasks with leading icon',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:10:00
@@ -474,13 +469,11 @@ task not001OkD2 {
   name "Note Only Task"
   note "Standalone note content"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
 }
 task all001OkD2 priority {
   name "Full Details Task"
   note "Top level task note"
   created 2026-11-01 08:05
-  queued 2026-11-01 08:05
   repeat 1 days
   link "Design Doc" "https://example.com/design"
   subtasks {
@@ -490,7 +483,6 @@ task all001OkD2 priority {
 task plain1OkD2 {
   name "No Note Task"
   created 2026-11-01 08:10
-  queued 2026-11-01 08:10
 }
 ''';
       await _pumpSeededApp(tester, seededTdf);
@@ -786,7 +778,7 @@ task plain1OkD2 {
     'Plain tasks expand on tap to reveal a subtle top-most task ID row, collapse cleanly on second tap or Stage 1 completion, and render above notes, links, and subtasks',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.6.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:10:00

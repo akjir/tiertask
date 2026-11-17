@@ -407,7 +407,7 @@ void main() {
               FakeLocalFileRepository(
                 config: config,
                 initialTdf:
-                    'tdf 0.5.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
+                    'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 00:00:00\n}\n',
               ),
             ),
             webDavRepositoryProvider.overrideWithValue(
@@ -489,7 +489,7 @@ void main() {
     'QuickAddBar, EditTaskScreen, TaskEditorConditionsSection, and EditLabelsScreen text fields show clear button when focused and clear text on click',
     (WidgetTester tester) async {
       const seededTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -502,7 +502,6 @@ label officeOkD2 {
 task 000001OkD2 {
   name "First Task"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
 }
 ''';
       await tester.pumpWidget(

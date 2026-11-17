@@ -13,11 +13,14 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/services/tdf_parser.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -25,40 +28,41 @@ void main() {
   const tdfService = TdfService();
   final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
 
-  group('TDF 0.5.0 Section 7 Resource Bounds & Section 8 Error Conditions', () {
-    test('rejects all mandatory syntax and schema error conditions in Section 8', () {
-      void expectRawTdfError(
-        String input,
-        TdfErrorKind expectedKind, {
-        int? expectedLine,
-      }) {
-        expect(
-          () => tdfService.parse(input, evaluationTime: fixedDate),
-          throwsA(
-            isA<TdfException>()
-                .having((error) => error.kind, 'kind', expectedKind)
-                .having(
-                  (error) => expectedLine == null ? null : error.line,
-                  'line',
-                  expectedLine,
-                ),
-          ),
-          reason: 'Input must fail with $expectedKind: $input',
-        );
-      }
+  void expectRawTdfError(
+    String input,
+    TdfErrorKind expectedKind, {
+    int? expectedLine,
+  }) {
+    expect(
+      () => tdfService.parse(input, evaluationTime: fixedDate),
+      throwsA(
+        isA<TdfException>()
+            .having((error) => error.kind, 'kind', expectedKind)
+            .having(
+              (error) => expectedLine == null ? null : error.line,
+              'line',
+              expectedLine,
+            ),
+      ),
+      reason: 'Input must fail with $expectedKind: $input',
+    );
+  }
 
-      void expectTdfError(
-        String bodyWithoutHeader,
-        TdfErrorKind expectedKind, {
-        int? expectedLine,
-      }) {
-        expectRawTdfError(
-          'tdf 0.5.1\n$bodyWithoutHeader',
-          expectedKind,
-          expectedLine: expectedLine == null ? null : expectedLine + 1,
-        );
-      }
+  void expectTdfError(
+    String bodyWithoutHeader,
+    TdfErrorKind expectedKind, {
+    int? expectedLine,
+  }) {
+    expectRawTdfError(
+      'tdf 0.8.0\n$bodyWithoutHeader',
+      expectedKind,
+      expectedLine: expectedLine == null ? null : expectedLine + 1,
+    );
+  }
 
+  group('TDF 0.8.0 Error Precedence & All 22 Resource Bounds', () {
+    test('rejects all 30 mandatory lexical, structural, and semantic TdfErrorKind categories with deterministic line numbers (TDF-VAL-001, TDF-ERR-001)', () {
+      // Initial root statement & version header framing:
       expectRawTdfError('', TdfErrorKind.missingVersionHeader, expectedLine: 1);
       expectRawTdfError(
         '# comment only\n',
@@ -76,48 +80,67 @@ void main() {
         expectedLine: 1,
       );
       expectRawTdfError(
-        'category home {\n  name "Home"\n}',
-        TdfErrorKind.missingVersionHeader,
+        '}',
+        TdfErrorKind.unexpectedClosingBrace,
         expectedLine: 1,
       );
       expectRawTdfError(
-        'tdf 0.4.0\n',
+        'tdf{\n',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'tdf { extra\n',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 1,
+      );
+      expectRawTdfError(
+        'tdf 0.7.0\n',
         TdfErrorKind.unsupportedVersion,
         expectedLine: 1,
       );
       expectRawTdfError(
-        'tdf "0.5.1"\n',
+        'tdf "0.8.0"\n',
         TdfErrorKind.unsupportedVersion,
         expectedLine: 1,
       );
       expectRawTdfError(
-        'tdf 0.5.1 extra\n',
+        'tdf 0.8.0 extra\n',
         TdfErrorKind.unsupportedVersion,
         expectedLine: 1,
       );
 
+      // Root directives & braces:
       expectTdfError(
-        'tdf 0.5.1',
+        'tdf 0.8.0',
         TdfErrorKind.unexpectedRootDirective,
         expectedLine: 1,
       );
       expectTdfError(
-        'name "Root Directive"',
+        'tdf',
         TdfErrorKind.unexpectedRootDirective,
         expectedLine: 1,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  modified\n}',
-        TdfErrorKind.missingDirectiveArgument,
-        expectedLine: 4,
+        'history 2026-11-01 "Root history"',
+        TdfErrorKind.unexpectedRootDirective,
+        expectedLine: 1,
       );
+      expectTdfError('}', TdfErrorKind.unexpectedClosingBrace, expectedLine: 1);
       expectTdfError(
-        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  queued 2026-11-01 08:00\n}',
-        TdfErrorKind.unknownDirective,
-        expectedLine: 4,
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01',
+        TdfErrorKind.unclosedBlock,
+        expectedLine: 3,
       );
+
+      // Identifier syntax (quoted and invalid start/continue chars):
       expectTdfError(
         '"task" 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        '123task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n}',
         TdfErrorKind.invalidIdentifier,
         expectedLine: 1,
       );
@@ -127,7 +150,40 @@ void main() {
         expectedLine: 2,
       );
       expectTdfError(
+        'task 000001OkD2 {\n  -bad "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  bad.dir "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task short {\n  name "Bad ID"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'label "4x9p2mOkD2" {\n  name "Quoted ID"\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'location bad_id_123 {\n  name "Bad Loc ID"\n  coordinates 0 0\n  radius 10\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 1,
+      );
+
+      // Block headers & lexical tokens:
+      expectTdfError('{\n}', TdfErrorKind.invalidBlockHeader, expectedLine: 1);
+      expectTdfError(
         'task 000001OkD2{\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'label "4x9p2mOkD2"{\n  name "Test"\n}',
         TdfErrorKind.invalidBlockHeader,
         expectedLine: 1,
       );
@@ -140,6 +196,26 @@ void main() {
         'queue extra {\n  modified 2026-11-01 00:00:00\n}',
         TdfErrorKind.invalidBlockHeader,
         expectedLine: 1,
+      );
+      expectTdfError(
+        'task 000001OkD2 urgent {\n  name "Test"\n  created 2026-11-01\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'label 000001OkD2 "scoped" {\n  name "Test"\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 1,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  subtasks urgent {\n    step false "S"\n  }\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  condition extra {\n    day mon\n  }\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 4,
       );
       expectTdfError(
         'task 000001OkD2 { extra\n  name "Test"\n  created 2026-11-01\n}',
@@ -157,6 +233,26 @@ void main() {
         expectedLine: 4,
       );
       expectTdfError(
+        'task 000001OkD2 {\n  name "foo"bar\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name foo"bar"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Line1\\nLine2"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "\\n"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 2,
+      );
+      expectTdfError(
         'task 000001OkD2 {\n  name "Control\x07Char"\n  created 2026-11-01\n}',
         TdfErrorKind.unexpectedToken,
         expectedLine: 2,
@@ -172,12 +268,17 @@ void main() {
         expectedLine: 2,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01',
-        TdfErrorKind.unclosedBlock,
+        'task 000001OkD2 {\r  name "Standalone CR"\n  created 2026-11-01\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 1,
       );
-      expectTdfError('}', TdfErrorKind.unexpectedClosingBrace, expectedLine: 1);
       expectTdfError(
         'task 000001OkD2 {\n  name "Unterminated\n  created 2026-11-01\n}',
+        TdfErrorKind.unterminatedString,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        "task 000001OkD2 {\n  name 'Unterminated\n  created 2026-11-01\n}",
         TdfErrorKind.unterminatedString,
         expectedLine: 2,
       );
@@ -186,6 +287,8 @@ void main() {
         TdfErrorKind.invalidEscapeSequence,
         expectedLine: 2,
       );
+
+      // Unknown blocks & directives at depth 0 and depth 1:
       expectTdfError(
         'project 000001OkD2 {\n  name "Unknown"\n}',
         TdfErrorKind.unknownBlockType,
@@ -202,22 +305,38 @@ void main() {
         expectedLine: 3,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  unknown_dir 123\n}',
+        'location 000001OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius 10\n  condition {\n    day mon\n  }\n}',
+        TdfErrorKind.unknownBlockType,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  due {\n  }\n}',
+        TdfErrorKind.unknownBlockType,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  queued 2026-11-01 08:00\n}',
         TdfErrorKind.unknownDirective,
         expectedLine: 4,
       );
       expectTdfError(
-        'deleted {\n  generation 0\n  unknown_dir 123\n}',
+        'label 000001OkD2 {\n  name "Lbl"\n  history 2026-11-01 "Forbidden in label"\n}',
         TdfErrorKind.unknownDirective,
         expectedLine: 3,
       );
       expectTdfError(
-        'queue {\n  modified 2026-11-01 00:00:00\n  unknown_dir 123\n}',
-        TdfErrorKind.unknownDirective,
-        expectedLine: 3,
+        'task 000001OkD2 {\n  name "Test"\n  created 2026-11-01\n  modified\n}',
+        TdfErrorKind.missingDirectiveArgument,
+        expectedLine: 4,
       );
+
+      // Required directives, duplicates, references, completion state, cycles:
       expectTdfError(
         'task 000001OkD2 {\n  name "Missing created"\n}',
+        TdfErrorKind.missingRequiredDirective,
+      );
+      expectTdfError(
+        'location 000001OkD2 {\n  name "Missing coords and radius"\n}',
         TdfErrorKind.missingRequiredDirective,
       );
       expectTdfError(
@@ -231,24 +350,34 @@ void main() {
         expectedLine: 3,
       );
       expectTdfError(
+        'task 000001OkD2 {\n  name "Empty subtasks"\n  created 2026-11-01\n  subtasks {\n  }\n}',
+        TdfErrorKind.missingRequiredDirective,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Empty condition"\n  created 2026-11-01\n  condition {\n  }\n}',
+        TdfErrorKind.missingRequiredDirective,
+        expectedLine: 5,
+      );
+      expectTdfError(
         'deleted {\n  generation 0\n}\ndeleted {\n  generation 1\n}',
         TdfErrorKind.duplicateDirective,
         expectedLine: 4,
       );
       expectTdfError(
-        'queue {\n  modified 2026-11-01 00:00:00\n}\nqueue {\n  modified 2026-11-01 00:00:00\n}',
+        'task 000001OkD2 {\n  name "Dup subtasks"\n  created 2026-11-01\n  subtasks {\n    step false "One"\n  }\n  subtasks {\n    step false "Two"\n  }\n}',
         TdfErrorKind.duplicateDirective,
-        expectedLine: 4,
-      );
-      expectTdfError(
-        'deleted {\n  generation 0\n  task 000001OkD2 2026-11-01\n  task 000001OkD2 2026-11-02\n}',
-        TdfErrorKind.duplicateIdentifier,
-        expectedLine: 4,
+        expectedLine: 7,
       );
       expectTdfError(
         'deleted {\n  generation 0\n  task 000001OkD2 2026-11-01\n}\ntask 000001OkD2 {\n  name "Live and Deleted"\n  created 2026-11-01\n}',
         TdfErrorKind.duplicateIdentifier,
         expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Live First"\n  created 2026-11-01\n}\ndeleted {\n  generation 0\n  task 000001OkD2 2026-11-01\n}',
+        TdfErrorKind.duplicateIdentifier,
+        expectedLine: 7,
       );
       expectTdfError(
         'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Dup queue"\n  created 2026-11-01\n}',
@@ -261,82 +390,13 @@ void main() {
         expectedLine: 3,
       );
       expectTdfError(
-        'deleted {\n  generation 0\n  task 000001OkD2 2026-11-01\n}\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}',
-        TdfErrorKind.invalidQueueMembership,
-        expectedLine: 7,
-      );
-      expectTdfError(
         'queue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Completed in queue"\n  created 2026-11-01\n  finished 2026-11-01 10:00\n  completions 1\n}',
         TdfErrorKind.invalidQueueMembership,
         expectedLine: 3,
       );
-      expectRawTdfError(
-        'tdf 0.5.0\nqueue {\n  modified 2026-11-01 00:00:00\n}\ntask 000001OkD2 {\n  name "Scheduled but missing from explicit 0.5.0 queue"\n  created 2026-11-01\n  queued 2026-11-01\n}',
-        TdfErrorKind.invalidQueueMembership,
-        expectedLine: 5,
-      );
-      expectRawTdfError(
-        'tdf 0.5.0\nqueue {\n  modified 2026-11-01 00:00:00\n  task 000001OkD2\n}\ntask 000001OkD2 {\n  name "Someday in 0.5.0 queue"\n  created 2026-11-01\n}',
-        TdfErrorKind.invalidQueueMembership,
-        expectedLine: 4,
-      );
       expectTdfError(
         'task 000001OkD2 {\n  name "Finished without completions"\n  created 2026-11-01\n  finished 2026-11-01 10:00\n}',
         TdfErrorKind.invalidCompletionState,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Finished with zero completions"\n  created 2026-11-01\n  finished 2026-11-01 10:00\n  completions 0\n}',
-        TdfErrorKind.invalidCompletionState,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Quoted repeat clock"\n  created 2026-11-01\n  repeat 1 days "09:00"\n}',
-        TdfErrorKind.invalidTime,
-        expectedLine: 4,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Invalid repeat clock"\n  created 2026-11-01\n  repeat 1 days 24:00\n}',
-        TdfErrorKind.invalidTime,
-        expectedLine: 4,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Quoted forever"\n  created 2026-11-01\n  suspended "forever"\n}',
-        TdfErrorKind.invalidTimestamp,
-        expectedLine: 4,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Year 0000"\n  created 0000-01-01\n}',
-        TdfErrorKind.invalidTimestamp,
-        expectedLine: 3,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Year 10000"\n  created 10000-01-01\n}',
-        TdfErrorKind.invalidTimestamp,
-        expectedLine: 3,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "1900 non-leap"\n  created 1900-02-29\n}',
-        TdfErrorKind.invalidTimestamp,
-        expectedLine: 3,
-      );
-      expectTdfError(
-        'deleted {\n  generation 01\n}',
-        TdfErrorKind.invalidNumber,
-        expectedLine: 2,
-      );
-      expectTdfError(
-        'deleted {\n  generation -1\n}',
-        TdfErrorKind.invalidNumber,
-        expectedLine: 2,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Bad completions"\n  created 2026-11-01\n  completions 01\n}',
-        TdfErrorKind.invalidNumber,
-        expectedLine: 4,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Bad blocked count"\n  created 2026-11-01\n  blocked 000002OkD2:0\n}',
-        TdfErrorKind.invalidNumber,
-        expectedLine: 4,
       );
       expectTdfError(
         'task 000001OkD2 {\n  name "Unknown label"\n  created 2026-11-01\n  labels missinOkD2\n}',
@@ -344,8 +404,38 @@ void main() {
         expectedLine: 4,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Self blocked"\n  created 2026-11-01\n  blocked 000001OkD2:2\n}',
+        'task 000001OkD2 {\n  name "Unknown loc"\n  created 2026-11-01\n  condition location missinOkD2\n}',
+        TdfErrorKind.unknownLocationReference,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T1"\n  created 2026-11-01\n  blocked 000002OkD2\n}\n'
+        'task 000002OkD2 {\n  name "T2"\n  created 2026-11-01\n  blocked 000003OkD2\n}\n'
+        'task 000003OkD2 {\n  name "T3"\n  created 2026-11-01\n  blocked 000001OkD2\n}',
         TdfErrorKind.circularDependency,
+        expectedLine: 4,
+      );
+
+      // Primitive errors:
+      expectTdfError(
+        'task 000001OkD2 {\n  name "   "\n  created 2026-11-01\n}',
+        TdfErrorKind.emptyText,
+        expectedLine: 2,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Bad URI"\n  created 2026-11-01\n  link "XSS" "javascript:alert(1)"\n}',
+        TdfErrorKind.invalidUri,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "Bad URI"\n  created 2026-11-01\n  link "Tab" "https://example.com/\\tpath"\n}',
+        TdfErrorKind.invalidUri,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "1900 non-leap"\n  created 1900-02-29\n}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 3,
       );
       expectTdfError(
         'task 000001OkD2 {\n  name "Bad step bool"\n  created 2026-11-01\n  subtasks {\n    step yes "Sub"\n  }\n}',
@@ -358,207 +448,529 @@ void main() {
         expectedLine: 3,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Bad day"\n  created 2026-11-01\n  condition day funday\n}',
-        TdfErrorKind.invalidCondition,
+        'task 000001OkD2 {\n  name "Quoted repeat clock"\n  created 2026-11-01\n  repeat 1 days "09:00"\n}',
+        TdfErrorKind.invalidTime,
         expectedLine: 4,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "   "\n  created 2026-11-01\n}',
-        TdfErrorKind.emptyText,
-        expectedLine: 2,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Link missing scheme"\n  created 2026-11-01\n  link "Docs" "www.example.com"\n}',
-        TdfErrorKind.invalidUri,
+        'task 000001OkD2 {\n  name "Repeat lead weeks"\n  created 2026-11-01\n  repeat 1 months lead 2 weeks\n}',
+        TdfErrorKind.unexpectedToken,
         expectedLine: 4,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Empty subtasks"\n  created 2026-11-01\n  subtasks {\n  }\n}',
-        TdfErrorKind.missingRequiredDirective,
-        expectedLine: 5,
+        'deleted {\n  generation 0\n  label 000001OkD2 2026-11-01 3\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 3,
       );
       expectTdfError(
-        'task 000001OkD2 {\n  name "Empty condition"\n  created 2026-11-01\n  condition {\n  }\n}',
-        TdfErrorKind.missingRequiredDirective,
-        expectedLine: 5,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "Duplicate subtasks"\n  created 2026-11-01\n  subtasks {\n    step false "One"\n  }\n  subtasks {\n    step false "Two"\n  }\n}',
-        TdfErrorKind.duplicateDirective,
-        expectedLine: 7,
-      );
-      expectTdfError(
-        'task 000001OkD2 {\n  name "T1"\n  created 2026-11-01\n  blocked 000002OkD2\n}\n'
-        'task 000002OkD2 {\n  name "T2"\n  created 2026-11-01\n  blocked 000003OkD2\n}\n'
-        'task 000003OkD2 {\n  name "T3"\n  created 2026-11-01\n  blocked 000001OkD2\n}',
-        TdfErrorKind.circularDependency,
-        expectedLine: 4,
+        'deleted {\n  generation 0\n  location 000001OkD2 2026-11-01 3\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 3,
       );
     });
 
-    test('enforces structural parser bounds and guards standalone TdfSubtasksBuilder closure', () {
+    test('enforces exact depth-2 condition { ... } 4-way disambiguation and inline condition rules (TDF-DIR-009, TDF-VAL-001)', () {
+      // 1. Attached '{' at depth 2 -> InvalidBlockHeader BEFORE MAX_NESTING_DEPTH LimitExceeded:
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    day{\n  }\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n    condition{\n  }\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 5,
+      );
+
+      // 2. Malformed/quoted identifier at depth 2 -> InvalidIdentifier:
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    "day" mon\n  }\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 5,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    123bad {\n    }\n  }\n}',
+        TdfErrorKind.invalidIdentifier,
+        expectedLine: 5,
+      );
+
+      // 3. Separated nested '{' at depth 2 -> LimitExceeded (MAX_NESTING_DEPTH = 2):
+      for (final innerBlock in <String>['day', 'condition', 'step', 'foo']) {
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    $innerBlock {\n    }\n  }\n}',
+          TdfErrorKind.limitExceeded,
+          expectedLine: 5,
+        );
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n    $innerBlock {\n    }\n  }\n}',
+          TdfErrorKind.limitExceeded,
+          expectedLine: 5,
+        );
+      }
+
+      // 4. Zero-arg identifier without '{' at depth 2 -> MissingDirectiveArgument:
+      for (final bareId in <String>[
+        'any',
+        'day',
+        'time',
+        'location',
+        'condition',
+        'foo',
+      ]) {
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    $bareId\n  }\n}',
+          TdfErrorKind.missingDirectiveArgument,
+          expectedLine: 5,
+        );
+        expectTdfError(
+          'label 000001OkD2 {\n  name "L"\n  condition {\n    $bareId\n  }\n}',
+          TdfErrorKind.missingDirectiveArgument,
+          expectedLine: 4,
+        );
+      }
+
+      // 5. Identifier outside {day, time, location, any} at depth 2 -> UnknownDirective on BOTH task and label:
+      for (final badStmt in <String>[
+        'condition any',
+        'condition day mon',
+        'foo bar',
+        'step false "S"',
+      ]) {
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    $badStmt\n  }\n}',
+          TdfErrorKind.unknownDirective,
+          expectedLine: 5,
+        );
+        expectTdfError(
+          'label 000001OkD2 {\n  name "L"\n  condition {\n    $badStmt\n  }\n}',
+          TdfErrorKind.unknownDirective,
+          expectedLine: 4,
+        );
+      }
+
+      // UnknownDirective at depth 2 still wins even after 512 rules or after condition any:
+      final rules512 = List<String>.filled(512, '    day mon').join('\n');
+      expectTdfError(
+        'label 000001OkD2 {\n  name "L"\n  condition {\n$rules512\n    condition any\n  }\n}',
+        TdfErrorKind.unknownDirective,
+        expectedLine: 516,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition any\n  condition {\n    condition day mon\n  }\n}',
+        TdfErrorKind.unknownDirective,
+        expectedLine: 6,
+      );
+
+      // 6. 'any <args...>' at depth 2 -> InvalidCondition:
+      for (final anyWithArgs in <String>['any mon', 'any any']) {
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    $anyWithArgs\n  }\n}',
+          TdfErrorKind.invalidCondition,
+          expectedLine: 5,
+        );
+        expectTdfError(
+          'label 000001OkD2 {\n  name "L"\n  condition {\n    $anyWithArgs\n  }\n}',
+          TdfErrorKind.invalidCondition,
+          expectedLine: 4,
+        );
+      }
+
+      // 7. Inline condition semantic validation -> InvalidCondition:
+      for (final badInline in <String>[
+        'condition bogus',
+        'condition "day" mon',
+        'condition day',
+        'condition time',
+        'condition time 08:00',
+        'condition time "08:00" 18:00',
+        'condition time 25:00 18:00',
+        'condition time 09:00 09:00',
+        'condition location',
+        'condition any extra',
+      ]) {
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  $badInline\n}',
+          TdfErrorKind.invalidCondition,
+          expectedLine: 4,
+        );
+      }
+      expectTdfError(
+        'label 000001OkD2 {\n  name "L"\n  condition any\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'label 000001OkD2 {\n  name "L"\n  condition day any\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 3,
+      );
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition day any\n  condition day any\n}',
+        TdfErrorKind.invalidCondition,
+        expectedLine: 5,
+      );
+    });
+
+    test('enforces exact due right-to-left modifier peeling error precedence (TDF-DIR-004)', () {
+      final loneHighSurrogate = String.fromCharCode(0xD800);
+      final invalidDueLines = <({String lineText, TdfErrorKind kind})>[
+        (lineText: 'due', kind: TdfErrorKind.missingDirectiveArgument),
+        (lineText: 'due "2026-11-11"', kind: TdfErrorKind.invalidTimestamp),
+        (
+          lineText: 'due 2026-11-11 "note" passive',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 anchor "2026-11-11" passive',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 anchor "2026-11-11"',
+          kind: TdfErrorKind.invalidTimestamp,
+        ),
+        (
+          lineText: 'due 2026-11-11 17:00 anchor "2026-11-11"',
+          kind: TdfErrorKind.invalidTimestamp,
+        ),
+        (
+          lineText: 'due 2026-11-11 passive passive',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 passive anchor 2026-11-11',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 anchor 2026-11-11 anchor 2026-11-12',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (lineText: 'due 2026-11-11 anchor', kind: TdfErrorKind.unexpectedToken),
+        (
+          lineText: 'due 2026-11-11 17:00 extra anchor 2026-11-11',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 anchor 2026-11-11 18:00 extra',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 17:00 extra',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-02-29 anchor 2026-03-01',
+          kind: TdfErrorKind.invalidTimestamp,
+        ),
+        (
+          lineText: 'due 2026-02-28 anchor 1900-02-29',
+          kind: TdfErrorKind.invalidTimestamp,
+        ),
+        (
+          lineText: 'due 2026-02-28 anchor 0000-01-01',
+          kind: TdfErrorKind.invalidTimestamp,
+        ),
+        (
+          lineText: 'due 2026-02-28 anchor 10000-01-01',
+          kind: TdfErrorKind.invalidTimestamp,
+        ),
+        (
+          lineText: 'due 2026-11-11 "$loneHighSurrogate"',
+          kind: TdfErrorKind.unexpectedToken,
+        ),
+        (
+          lineText: 'due 2026-11-11 "   \\t\\n  "',
+          kind: TdfErrorKind.emptyText,
+        ),
+        (
+          lineText: 'due 2026-11-11 "${'a' * 2001}"',
+          kind: TdfErrorKind.limitExceeded,
+        ),
+      ];
+
+      for (final item in invalidDueLines) {
+        expectTdfError(
+          'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  ${item.lineText}\n}',
+          item.kind,
+          expectedLine: 4,
+        );
+      }
+    });
+
+    test('enforces all 22 normative MAX_* bounds at exact N (accept) and N + 1 (LimitExceeded) across parse and serialize (TDF-VAL-002)', () {
+      // Standalone TdfSubtasksBuilder closure guard:
       final state = TdfParserState();
       final subtasksBuilder = TdfSubtasksBuilder(true)
         ..steps.add(const SubtaskItem(title: 'Step 1', isCompleted: false));
       state.blockStack.add(subtasksBuilder);
-      expect(
-        () => TdfBlockParser.closeCurrentBlock(state, 1),
-        returnsNormally,
-        reason: 'Closing a standalone TdfSubtasksBuilder must not throw StateError on empty blockStack',
-      );
+      expect(() => TdfBlockParser.closeCurrentBlock(state, 1), returnsNormally);
       expect(state.blockStack, isEmpty);
 
-      final nineConditions = List.filled(
-        9,
-        '  condition {\n    day mon\n  }',
-      ).join('\n');
-      final blocks4100 = List.generate(
-        410,
-        (index) =>
-            'label ${index.toString().padLeft(6, '0')}OkD2 {\n  name "L"\n$nineConditions\n}',
-      ).join('\n');
-      final steps513 = List.filled(513, '    step false "Step"').join('\n');
-      final days65 = List.filled(65, 'mon').join(' ');
+      // 1. MAX_FILE_BYTES (1_048_576):
+      const headerPrefix = 'tdf 0.8.0\n#';
+      final exactMaxBytesDoc =
+          '$headerPrefix${'a' * (maxTdfFileBytes - headerPrefix.length)}';
+      expect(utf8.encode(exactMaxBytesDoc).length, equals(maxTdfFileBytes));
+      expect(tdfService.parse(exactMaxBytesDoc).allTasks, isEmpty);
+      expectRawTdfError('${exactMaxBytesDoc}a', TdfErrorKind.limitExceeded);
 
-      final limitCases = <({String description, String document})>[
-        (
-          description: 'maxFileBytes (1048576)',
-          document: 'tdf 0.5.1\n#${'a' * 1048570}',
-        ),
-        (
-          description: 'maxLineCount (16384)',
-          document: 'tdf 0.5.1\n${'\n' * 16384}',
-        ),
-        (
-          description: 'maxNestingDepth (2)',
-          document: 'tdf 0.5.1\ntask 000001OkD2 {\n  subtasks {\n    condition {\n    }\n  }\n}\n',
-        ),
-        (
-          description: 'maxBlocksPerDoc (4096)',
-          document: 'tdf 0.5.1\n$blocks4100\n',
-        ),
-        (
-          description: 'legacy < 0.7.0 maxStmtsPerBlock (512)',
-          document:
-              'tdf 0.5.1\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$steps513\n  }\n}\n',
-        ),
-        (
-          description: '0.7.0 maxStmtsPerBlock (1024)',
-          document:
-              'tdf 0.7.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n${List.filled(1025, '    step false "Step"').join('\n')}\n  }\n}\n',
-        ),
-        (
-          description: 'maxArgsPerStmt (64)',
-          document:
-              'tdf 0.5.1\nlabel 000001OkD2 {\n  name "L"\n  condition {\n    day $days65\n  }\n}\n',
-        ),
-      ];
+      // Multi-byte UTF-8 boundary where string.length < maxTdfFileBytes < utf8.length:
+      const multiByteUnit = '\u{00E9}';
+      const multiByteCount = (maxTdfFileBytes ~/ 2) + 10;
+      final multiByteOverDoc = '$headerPrefix${multiByteUnit * multiByteCount}';
+      expect(multiByteOverDoc.length, lessThan(maxTdfFileBytes));
+      expect(
+        utf8.encode(multiByteOverDoc).length,
+        greaterThan(maxTdfFileBytes),
+      );
+      expectRawTdfError(multiByteOverDoc, TdfErrorKind.limitExceeded);
 
-      final validSteps1024 = List.filled(
+      // 2. MAX_LINE_COUNT (16_384):
+      final exact16384Lines = 'tdf 0.8.0\n${'\n' * 16383}';
+      expect(tdfService.parse(exact16384Lines).allTasks, isEmpty);
+      expectRawTdfError(
+        'tdf 0.8.0\n${'\n' * 16384}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 16385,
+      );
+
+      // 3. MAX_NESTING_DEPTH (2): tested in condition/subtasks above (2 accepted, 3 rejected).
+
+      // 4. MAX_BLOCKS_PER_DOC (4_096):
+      final blocks4096 = List<String>.generate(
+        4096,
+        (i) => 'label ${i.toString().padLeft(6, '0')}OkD2 {\n  name "L"\n}',
+      ).join('\n');
+      expect(
+        tdfService.parse('tdf 0.8.0\n$blocks4096\n').labels.length,
+        equals(4096),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\n$blocks4096\nlabel extra0OkD2 {\n  name "Extra"\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // Serializer MAX_BLOCKS_PER_DOC (4_096 vs 4_097):
+      final labels2048WithCondBlock = List<TdfLabel>.generate(
+        2048,
+        (i) => TdfLabel(
+          id: '${i.toString().padLeft(6, '0')}OkD2',
+          name: 'L',
+          conditions: <TaskCondition>[
+            DayTaskCondition.fromWeekdays(const <int>[1]),
+            const TimeWindowTaskCondition(
+              startMinutes: 480,
+              endMinutes: 720,
+              startToken: '08:00',
+              endToken: '12:00',
+            ),
+          ],
+        ),
+      );
+      expect(
+        () => tdfService.serialize(
+          TaskBoard(
+            labels: labels2048WithCondBlock,
+            deletedBlock: TdfDeletedBlock(generation: 1),
+          ),
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: '2048 labels * 2 blocks + 1 deleted block = 4097 blocks must fail on serialize with LimitExceeded',
+      );
+
+      // 5. MAX_LOCATIONS (200):
+      final locations200 = List<String>.generate(
+        200,
+        (i) =>
+            'location ${i.toString().padLeft(6, '0')}OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius 10\n}',
+      ).join('\n');
+      final board200Locs = tdfService.parse('tdf 0.8.0\n$locations200\n');
+      expect(board200Locs.locations.length, equals(200));
+      expect(tdfService.serialize(board200Locs), isNotEmpty);
+      expectRawTdfError(
+        'tdf 0.8.0\n$locations200\nlocation extra0OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius 10\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // 6. MAX_STMTS_PER_BLOCK (1_024) & Full-Capacity Canonical Task (534 <= 1_024):
+      final steps1024 = List<String>.filled(
         1024,
         '    step false "Step"',
       ).join('\n');
-      final valid1024Doc =
-          'tdf 0.7.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$validSteps1024\n  }\n}\n';
       expect(
         tdfService
-            .parse(valid1024Doc, evaluationTime: fixedDate)
+            .parse(
+              'tdf 0.8.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$steps1024\n  }\n}\n',
+            )
             .someday
             .single
             .subtasks
             .length,
         equals(1024),
-        reason: 'tdf 0.7.0 must accept 1024 statements inside a block',
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$steps1024\n    step false "1025"\n  }\n}\n',
+        TdfErrorKind.limitExceeded,
       );
 
-      for (final testCase in limitCases) {
-        expect(
-          () => tdfService.parse(testCase.document, evaluationTime: fixedDate),
-          throwsA(
-            isA<TdfException>().having(
-              (error) => error.kind,
-              'kind',
-              TdfErrorKind.limitExceeded,
-            ),
-          ),
-          reason: 'Exceeding ${testCase.description} must throw limitExceeded',
-        );
-      }
-    });
-
-    test('enforces Section 7 and Section 7.2 bounds including 512 condition rules across blocks, Unicode scalar text limits, calendar endpoints, and canonical output bounds', () {
-      // Calendar endpoints and 2000-02-29:
-      const endpointDoc = '''
-tdf 0.5.0
-
-task 000001OkD2 {
-    name     "Calendar Endpoints"
-    created  0001-01-01 00:00:00
-    modified 9999-12-31 23:59:59
-    suspended 2000-02-29 12:00:00
-}
-''';
-      final endpointBoard = tdfService.parse(
-        endpointDoc,
-        evaluationTime: fixedDate,
-      );
-      expect(
-        endpointBoard.findTask('000001OkD2')!.createdAt,
-        equals(DateTime.utc(1, 1, 1, 0, 0, 0)),
-      );
-      expect(
-        endpointBoard.findTask('000001OkD2')!.modifiedAt,
-        equals(DateTime.utc(9999, 12, 31, 23, 59, 59)),
-      );
-
-      // 512 condition rules across two condition blocks -> accepted:
-      final block300 = List.filled(300, '    day mon').join('\n');
-      final block212 = List.filled(212, '    time 09:00 17:00').join('\n');
-      final valid512ConditionsDoc =
-          'tdf 0.5.0\n'
-          'label 000001OkD2 {\n'
-          '  name "512 Conditions"\n'
-          '  condition {\n$block300\n  }\n'
-          '  condition {\n$block212\n  }\n'
-          '}\n';
-      final parsed512 = tdfService.parse(valid512ConditionsDoc);
-      expect(parsed512.labels.single.conditions.length, equals(512));
-
-      // Two condition blocks with 300 rules each -> rejected at rule 513 with LimitExceeded:
-      final invalid600ConditionsDoc =
-          'tdf 0.5.0\n'
-          'label 000001OkD2 {\n'
-          '  name "600 Conditions"\n'
-          '  condition {\n$block300\n  }\n'
-          '  condition {\n$block300\n  }\n'
-          '}\n';
-      expect(
-        () => tdfService.parse(invalid600ConditionsDoc),
-        throwsA(
-          isA<TdfException>()
-              .having((error) => error.kind, 'kind', TdfErrorKind.limitExceeded)
-              .having((error) => error.line, 'line', 519),
-        ),
-        reason: 'Two condition blocks of 300 rules each must fail at rule 513 (line 519) with LimitExceeded',
-      );
-
-      // Unicode scalar value limits: 500 supplementary characters above U+FFFF accepted, 501 rejected:
-      final rocket500 = '🚀' * 500;
-      final rocket501 = '🚀' * 501;
+      // 7. MAX_CONDITION_RULES_PER_ENTITY (512):
+      final block300 = List<String>.filled(300, '    day mon').join('\n');
+      final block212 = List<String>.filled(
+        212,
+        '    time 09:00 17:00',
+      ).join('\n');
       expect(
         tdfService
             .parse(
-              'tdf 0.5.0\ntask 000001OkD2 {\n  name "$rocket500"\n  created 2026-11-01\n}\n',
+              'tdf 0.8.0\nlabel 000001OkD2 {\n  name "512"\n  condition {\n$block300\n  }\n  condition {\n$block212\n  }\n}\n',
             )
-            .someday
+            .labels
             .single
-            .title,
-        equals(rocket500),
-        reason: '500 supplementary Unicode scalar values (1000 UTF-16 code units) must be accepted',
+            .conditions
+            .length,
+        equals(512),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlabel 000001OkD2 {\n  name "600"\n  condition {\n$block300\n  }\n  condition {\n$block300\n  }\n}\n',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 519,
+      );
+
+      // 8. MAX_LOCATION_REFS_PER_ENTITY (63 counted before deduplication):
+      final locRefs63 = List<String>.filled(63, '7pQr9mOkD2').join(' ');
+      final locRefs64 = List<String>.filled(64, '7pQr9mOkD2').join(' ');
+      const locDef =
+          'location 7pQr9mOkD2 {\n  name "Home"\n  coordinates 0 0\n  radius 10\n}\n';
+      final parsed63LocRefs = tdfService.parse(
+        'tdf 0.8.0\n$locDef\nlabel 000001OkD2 {\n  name "L"\n  condition location $locRefs63\n}\n',
       );
       expect(
-        () => tdfService.parse(
-          'tdf 0.5.0\ntask 000001OkD2 {\n  name "$rocket501"\n  created 2026-11-01\n}\n',
+        (parsed63LocRefs.labels.single.conditions.single
+                as LocationTaskCondition)
+            .locationIds,
+        equals(<String>['7pQr9mOkD2']),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\n$locDef\nlabel 000001OkD2 {\n  name "L"\n  condition {\n    location $locRefs64\n  }\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // 9. MAX_QUEUE_ENTRIES (4_096) & 10. MAX_DELETED_RECORDS (4_096):
+      final queueTasks3200 = List<String>.generate(
+        3200,
+        (i) => '  task ${i.toString().padLeft(6, '0')}OkD2',
+      ).join('\n');
+      final taskBlocks3200 = List<String>.generate(
+        3200,
+        (i) =>
+            'task ${i.toString().padLeft(6, '0')}OkD2 {\n  name "T"\n  created 2026-11-01\n}',
+      ).join('\n');
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\nqueue {\n  modified 2026-11-01 00:00:00\n$queueTasks3200\n}\n$taskBlocks3200\n',
+            )
+            .queueTaskIds
+            .length,
+        equals(3200),
+        reason: 'Queue block permits > 1024 entries without hitting MAX_STMTS_PER_BLOCK',
+      );
+      final queueTasks4096 = List<String>.generate(
+        4096,
+        (i) => '  task ${i.toString().padLeft(6, '0')}OkD2',
+      ).join('\n');
+      expectRawTdfError(
+        'tdf 0.8.0\nqueue {\n  modified 2026-11-01 00:00:00\n$queueTasks4096\n}\n',
+        TdfErrorKind.invalidQueueMembership,
+        expectedLine: 4,
+      );
+      final queueTasks4097 = List<String>.generate(
+        4097,
+        (i) => '  task ${i.toString().padLeft(6, '0')}OkD2',
+      ).join('\n');
+      expectRawTdfError(
+        'tdf 0.8.0\nqueue {\n  modified 2026-11-01 00:00:00\n$queueTasks4097\n}\n',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 4100,
+      );
+
+      final deleted4096 = List<String>.generate(
+        4096,
+        (i) => '  task ${i.toString().padLeft(6, '0')}OkD2 2026-11-01',
+      ).join('\n');
+      final parsedDeleted4096 = tdfService.parse(
+        'tdf 0.8.0\ndeleted {\n  generation 1\n$deleted4096\n}\n',
+      );
+      expect(parsedDeleted4096.deletedBlock.tasks.length, equals(4096));
+      expectRawTdfError(
+        'tdf 0.8.0\ndeleted {\n  generation 1\n$deleted4096\n  label extra0OkD2 2026-11-01\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // 11. MAX_SYNC_GENERATION & 12. MAX_COMPLETIONS (9_007_199_254_740_991):
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\ndeleted {\n  generation 9007199254740991\n  task 999999OkD2 2026-11-01 9007199254740991\n}\n'
+              'task 000001OkD2 {\n  name "Max"\n  created 2026-11-01\n  completions 9007199254740991\n  blocked 000002OkD2:9007199254740991\n}\n',
+            )
+            .deletedBlock
+            .generation,
+        equals(9007199254740991),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ndeleted {\n  generation 9007199254740992\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "Overflow"\n  created 2026-11-01\n  completions 9007199254740992\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "Overflow"\n  created 2026-11-01\n  blocked 000002OkD2:9007199254740992\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // 13. MAX_ARGS_PER_STMT (64):
+      final days64 = List<String>.filled(64, 'mon').join(' ');
+      final days65 = List<String>.filled(65, 'mon').join(' ');
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\nlabel 000001OkD2 {\n  name "L"\n  condition {\n    day $days64\n  }\n}\n',
+            )
+            .labels
+            .length,
+        equals(1),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlabel 000001OkD2 {\n  name "L"\n  condition {\n    day $days65\n  }\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlabel $days65 {\n  name "L"\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expect(
+        () => tdfService.serialize(
+          TaskBoard(
+            someday: <TaskItem>[
+              TaskItem(
+                id: '000001OkD2',
+                title: '65 Labels',
+                createdAt: fixedDate,
+                labelIds: List<String>.generate(
+                  65,
+                  (i) => '${i.toString().padLeft(6, '0')}OkD2',
+                ),
+              ),
+            ],
+          ),
         ),
         throwsA(
           isA<TdfException>().having(
@@ -569,64 +981,168 @@ task 000001OkD2 {
         ),
       );
 
-      // 250 repetitions of U+0065 U+0301 = 500 scalar values -> accepted:
+      // 14. MAX_TEXT_LENGTH (500), 15. MAX_NOTE_LENGTH (2_000), 16. MAX_URI_LENGTH (2_048):
+      final supplementary500 = '\u{1F680}' * 500;
+      final supplementary501 = '\u{1F680}' * 501;
       final combining500 = 'e\u0301' * 250;
       expect(
         tdfService
             .parse(
-              'tdf 0.5.0\ntask 000001OkD2 {\n  name "$combining500"\n  created 2026-11-01\n}\n',
+              'tdf 0.8.0\ntask 000001OkD2 {\n  name "$supplementary500"\n  created 2026-11-01\n}\n',
+            )
+            .someday
+            .single
+            .title,
+        equals(supplementary500),
+      );
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\ntask 000001OkD2 {\n  name "$combining500"\n  created 2026-11-01\n}\n',
             )
             .someday
             .single
             .title,
         equals(combining500),
       );
-
-      // MAX_SYNC_GENERATION and MAX_COMPLETIONS bounds:
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "$supplementary501"\n  created 2026-11-01\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
       expect(
         tdfService
             .parse(
-              'tdf 0.5.0\ndeleted {\n  generation 9007199254740991\n}\ntask 000001OkD2 {\n  name "Max"\n  created 2026-11-01\n  completions 9007199254740991\n  blocked 000002OkD2:9007199254740991\n}\n',
+              'tdf 0.8.0\ntask 000001OkD2 {\n  name "N"\n  note "${'n' * 2000}"\n  created 2026-11-01\n}\n',
             )
-            .deletedBlock
-            .generation,
-        equals(9007199254740991),
+            .someday
+            .single
+            .note
+            ?.length,
+        equals(2000),
       );
-      expect(
-        () => tdfService.parse(
-          'tdf 0.5.0\ndeleted {\n  generation 9007199254740992\n}\n',
-        ),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.limitExceeded,
-          ),
-        ),
-      );
-      expect(
-        () => tdfService.parse(
-          'tdf 0.5.0\ntask 000001OkD2 {\n  name "Overflow"\n  created 2026-11-01\n  completions 9007199254740992\n}\n',
-        ),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.limitExceeded,
-          ),
-        ),
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "N"\n  note "${'n' * 2001}"\n  created 2026-11-01\n}\n',
+        TdfErrorKind.limitExceeded,
       );
 
-      // Canonical output exceeding MAX_LINE_COUNT -> LimitExceeded on serialize:
-      final manyTasks = List.generate(
-        3500,
-        (index) => TaskItem(
-          id: '${index.toString().padLeft(6, '0')}OkD2',
-          title: 'Task $index',
-          createdAt: fixedDate,
+      final uri2048 = 'https://${'a' * 2040}';
+      expect(uri2048.length, equals(2048));
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\ntask 000001OkD2 {\n  name "U"\n  created 2026-11-01\n  link "T" "$uri2048"\n}\n',
+            )
+            .someday
+            .single
+            .links
+            .single
+            .uri,
+        equals(uri2048),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "U"\n  created 2026-11-01\n  link "T" "https://\t${'a' * 2048}"\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // 17. MAX_LINKS_PER_TASK (20), 18. MAX_LINKS_PER_LABEL (20), 19. MAX_HISTORY_PER_TASK (500):
+      final links20 = List<String>.generate(
+        20,
+        (i) => '  link "L$i" "https://example.com/$i"',
+      ).join('\n');
+      final history500Duplicates = List<String>.filled(
+        500,
+        '  history 2026-11-01 09:00:00 "Same entry"',
+      ).join('\n');
+      final fullTaskBoard = tdfService.parse(
+        'tdf 0.8.0\n'
+        'label 000001OkD2 {\n  name "L"\n$links20\n}\n'
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n$links20\n$history500Duplicates\n}\n',
+      );
+      expect(fullTaskBoard.labels.single.links.length, equals(20));
+      expect(fullTaskBoard.someday.single.links.length, equals(20));
+      expect(fullTaskBoard.someday.single.history.length, equals(1));
+
+      expectRawTdfError(
+        'tdf 0.8.0\nlabel 000001OkD2 {\n  name "L"\n$links20\n  link "21" "https://example.com/21"\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n$links20\n  link "21" "https://example.com/21"\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "T"\n  created 2026-11-01\n$history500Duplicates\n  history 2026-11-01 09:00:00 "Same entry"\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+
+      // 20. MAX_REPEAT_COUNT (3_650):
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\ntask 000001OkD2 {\n  name "R"\n  created 2026-11-01\n  repeat 3650 days 09:00 lead 3650 days\n}\n',
+            )
+            .someday
+            .single
+            .repeatRule
+            ?.leadDays,
+        equals(3650),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "R"\n  created 2026-11-01\n  repeat 3651 days\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "R"\n  created 2026-11-01\n  repeat 1 months lead 3651 days\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\ntask 000001OkD2 {\n  name "R"\n  created 2026-11-01\n  repeat 1 months lead 0 days\n}\n',
+        TdfErrorKind.invalidNumber,
+      );
+
+      // 21. MAX_LOCATION_RADIUS (100_000) & 22. MAX_NUMBER_LENGTH (24):
+      final num24Chars = '${'0' * 21}150';
+      final num25Chars = '${'0' * 22}150';
+      expect(num24Chars.length, equals(24));
+      expect(num25Chars.length, equals(25));
+      expect(
+        tdfService
+            .parse(
+              'tdf 0.8.0\nlocation 000001OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius $num24Chars\n}\n'
+              'location 000002OkD2 {\n  name "Max"\n  coordinates 90 -180\n  radius 100000\n}\n',
+            )
+            .locations
+            .length,
+        equals(2),
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlocation 000001OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius $num25Chars\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlocation 000001OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius 100000.01\n}\n',
+        TdfErrorKind.limitExceeded,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlocation 000001OkD2 {\n  name "Loc"\n  coordinates 0 0\n  radius 10.125\n}\n',
+        TdfErrorKind.invalidNumber,
+      );
+      expectRawTdfError(
+        'tdf 0.8.0\nlocation 000001OkD2 {\n  name "Loc"\n  coordinates 50.1234567 0\n  radius 10\n}\n',
+        TdfErrorKind.invalidNumber,
+      );
+
+      // Canonical output exceeding MAX_LINE_COUNT -> LimitExceeded:
+      final hugeBoard = TaskBoard(
+        someday: List<TaskItem>.generate(
+          3500,
+          (i) => TaskItem(
+            id: '${i.toString().padLeft(6, '0')}OkD2',
+            title: 'Task $i',
+            createdAt: fixedDate,
+          ),
         ),
       );
-      final hugeBoard = TaskBoard(someday: manyTasks);
       expect(
         () => tdfService.serialize(hugeBoard),
         throwsA(
@@ -636,85 +1152,6 @@ task 000001OkD2 {
             TdfErrorKind.limitExceeded,
           ),
         ),
-        reason: 'Canonical output exceeding MAX_LINE_COUNT (16384) must fail with LimitExceeded per Section 7.1',
-      );
-
-      // Unpaired UTF-16 surrogates must fail with UnexpectedToken before EmptyText:
-      final loneHighSurrogate = String.fromCharCode(0xD800);
-      expect(
-        () => tdfService.parse(
-          'tdf 0.7.0\ntask 000001OkD2 {\n  name "$loneHighSurrogate"\n  created 2026-11-01\n}\n',
-        ),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.unexpectedToken,
-          ),
-        ),
-        reason:
-            'Unpaired UTF-16 surrogate in <text> must report UnexpectedToken',
-      );
-      expect(
-        () => tdfService.parse(
-          'tdf 0.7.0\ntask 000001OkD2 {\n  name "Ok"\n  created 2026-11-01\n  suspended forever "$loneHighSurrogate"\n}\n',
-        ),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.unexpectedToken,
-          ),
-        ),
-        reason:
-            'Unpaired UTF-16 surrogate in <note> must report UnexpectedToken',
-      );
-
-      // Serializer pre-flight bounds for label.links (> 20) and task.history (> 500):
-      final overLimitLabel = TdfLabel(
-        id: '4x9p2mOkD2',
-        name: 'Too Many Links',
-        links: List.generate(
-          21,
-          (index) =>
-              TaskLink(title: 'Link $index', uri: 'https://example.com/$index'),
-        ),
-      );
-      expect(
-        () => tdfService.serialize(TaskBoard(labels: [overLimitLabel])),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.limitExceeded,
-          ),
-        ),
-        reason:
-            'Serializer must reject label with > 20 links with LimitExceeded',
-      );
-
-      final overLimitHistoryTask = TaskItem(
-        id: '000001OkD2',
-        title: 'Too Much History',
-        createdAt: fixedDate,
-        history: List.generate(
-          501,
-          (index) => TaskHistoryEntry(
-            timestampUtc: fixedDate.add(Duration(seconds: index)),
-            text: 'Entry $index',
-          ),
-        ),
-      );
-      expect(
-        () => tdfService.serialize(TaskBoard(someday: [overLimitHistoryTask])),
-        throwsA(
-          isA<TdfException>().having(
-            (error) => error.kind,
-            'kind',
-            TdfErrorKind.limitExceeded,
-          ),
-        ),
-        reason: 'Serializer must reject task with > 500 history entries with LimitExceeded',
       );
     });
   });

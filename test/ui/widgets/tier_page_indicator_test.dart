@@ -33,7 +33,7 @@ void main() {
     'Bottom tier indicator renders above QuickAddBar when add button is pressed, updates active icon when sliding across tiers, and jumps to target pane via wave wheel on long-press drag',
     (WidgetTester tester) async {
       const allTiersTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 07:50:00
@@ -53,58 +53,47 @@ queue {
 task f10000OkD2 {
   name "Focus Pane Task"
   created 2026-11-01 07:00
-  queued 2026-11-01 07:00
 }
 task f20000OkD2 {
   name "Focus Pane Task 2"
   created 2026-11-01 07:05
-  queued 2026-11-01 07:05
 }
 task f30000OkD2 {
   name "Focus Pane Task 3"
   created 2026-11-01 07:10
-  queued 2026-11-01 07:10
 }
 task r10000OkD2 {
   name "Ready Pane Task"
   created 2026-11-01 07:15
-  queued 2026-11-01 07:15
 }
 task r20000OkD2 {
   name "Ready Pane Task 2"
   created 2026-11-01 07:20
-  queued 2026-11-01 07:20
 }
 task r30000OkD2 {
   name "Ready Pane Task 3"
   created 2026-11-01 07:25
-  queued 2026-11-01 07:25
 }
 task r40000OkD2 {
   name "Ready Pane Task 4"
   created 2026-11-01 07:30
-  queued 2026-11-01 07:30
 }
 task r50000OkD2 {
   name "Ready Pane Task 5"
   created 2026-11-01 07:35
-  queued 2026-11-01 07:35
 }
 task p10000OkD2 {
   name "Planned Pane Task"
   created 2026-11-01 07:40
-  queued 2026-11-01 07:40
 }
 task blk100OkD2 {
   name "Blocked Pane Task"
   created 2026-11-01 07:45
-  queued 2026-11-01 07:45
   blocked f10000OkD2
 }
 task susp10OkD2 {
   name "Suspended Pane Task"
   created 2026-11-01 07:50
-  queued 2026-11-01 07:50
   suspended 2026-11-05 09:00
 }
 task smd100OkD2 {
@@ -114,7 +103,6 @@ task smd100OkD2 {
 task cmp100OkD2 {
   name "Completed Pane Task"
   created 2026-10-28 08:00
-  queued 2026-10-28 08:00
   finished 2026-10-29 10:00
   completions 1
 }

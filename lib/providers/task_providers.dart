@@ -33,7 +33,6 @@ import '../models/workspace_sync_state.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/webdav_repository.dart';
 import '../services/app_logger.dart';
-import '../services/tdf_importer.dart';
 import 'config_providers.dart';
 import 'location_providers.dart';
 import 'sync_providers.dart';
@@ -66,12 +65,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   String? _conflictWatchDigest;
   Future<void>? _inFlightSync;
   String? _lastFailedWatchDigest;
+  String? _lastSelfWipeDigest;
   int _mutationEpoch = 0;
   int _nextUndoSequence = 0;
-  final Map<String, DateTime> _pendingDeletedLabelTimestamps =
-      <String, DateTime>{};
-  final Map<String, DateTime> _pendingDeletedLocationTimestamps =
-      <String, DateTime>{};
+  TaskBoard? _pendingConflictOriginBoard;
   final Set<int> _rolledBackEpochs = <int>{};
   final ListQueue<TaskUndoEntry> _undoStack = ListQueue<TaskUndoEntry>();
   String? _undoWorkspaceId;
@@ -95,10 +92,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _handleDueLeadWindowChanged,
     );
     _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
-    _pendingDeletedLabelTimestamps.clear();
-    _pendingDeletedLocationTimestamps.clear();
+    _pendingConflictOriginBoard = null;
     _conflictWatchDigest = null;
     _lastFailedWatchDigest = null;
+    _lastSelfWipeDigest = null;
     state = const AsyncLoading();
     final selectedConfig = await ref.watch(
       webDavConfigProvider.selectAsync(
@@ -201,10 +198,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<SubtaskItem> subtasks = const [],
     List<String> labelIds = const [],
     DateTime? dueAt,
+    TdfLocalDateTime? dueLocalInput,
+    TdfLocalDateTime? dueAnchor,
     bool isDuePassive = false,
     String? dueNote,
     TaskOrigin? origin,
     DateTime? suspendedAt,
+    TdfLocalDateTime? suspendedLocalInput,
     bool isSuspendedForever = false,
     String? suspendedNote,
     TaskRepeatRule? repeatRule,
@@ -227,10 +227,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         subtasks: subtasks,
         labelIds: labelIds,
         dueAt: dueAt,
+        dueLocalInput: dueLocalInput,
+        dueAnchor: dueAnchor,
         isDuePassive: isDuePassive,
         dueNote: dueNote,
         origin: origin,
         suspendedAt: suspendedAt,
+        suspendedLocalInput: suspendedLocalInput,
         isSuspendedForever: isSuspendedForever,
         suspendedNote: suspendedNote,
         repeatRule: repeatRule,
@@ -328,17 +331,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
   Future<void> deleteLabel(String labelId, {DateTime? currentDate}) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    final existingLabel = _currentBoard.findLabel(labelId);
-    final deleteTimestamp = TaskItem.nextModifiedTimestamp(
-      utcNow,
-      existingLabel?.effectiveModifiedAt ?? TdfLabel.defaultModifiedAt,
-    );
-    _pendingDeletedLabelTimestamps[labelId] = deleteTimestamp;
-    await TaskSyncPipeline.persistPendingLabelDeletion(
-      ref,
-      labelId,
-      deleteTimestamp,
-    );
     await _commitMutation(
       _currentBoard.deleteLabel(
         labelId,
@@ -356,17 +348,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? currentDate,
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    final existingLocation = _currentBoard.findLocation(locationId);
-    final deleteTimestamp = TaskItem.nextModifiedTimestamp(
-      utcNow,
-      existingLocation?.effectiveModifiedAt ?? TdfLabel.defaultModifiedAt,
-    );
-    _pendingDeletedLocationTimestamps[locationId] = deleteTimestamp;
-    await TaskSyncPipeline.persistPendingLocationDeletion(
-      ref,
-      locationId,
-      deleteTimestamp,
-    );
     await _commitMutation(
       _currentBoard.deleteLocation(
         locationId,
@@ -441,30 +422,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           )
         : null;
     await _commitMutation(updatedBoard, undoEntry: undoEntry);
-  }
-
-  /// Explicitly imports and migrates a historical TDF (`0.2.0`–`0.6.0`) or `0.7.0` [rawTdf]
-  /// document into `tdf 0.7.0`, invalidates any earlier synchronization baseline per
-  /// `TDF_SPEC.md` Section 10.1, and persists the migrated document to active storage.
-  Future<TdfImportResult> importLegacyTdf(
-    String rawTdf, {
-    TdfTimeZoneContext? sourceTimeZone,
-    DateTime? currentDate,
-  }) async {
-    await _awaitInFlightSync();
-    final operation = _executeImportLegacyTdf(
-      rawTdf,
-      sourceTimeZone: sourceTimeZone,
-      currentDate: currentDate,
-    );
-    _inFlightSync = operation;
-    try {
-      return await operation;
-    } finally {
-      if (identical(_inFlightSync, operation)) {
-        _inFlightSync = null;
-      }
-    }
   }
 
   /// Moves [taskId] within the shared `queue` block and persists to storage.
@@ -573,6 +530,36 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     await _commitMutation(updatedBoard);
   }
 
+  /// Resolves pending `DeletionConflict` items via explicit or bound `Delete` / `Undelete` decisions (`TDF-DEL-003`).
+  Future<TaskBoard> resolveDeletionConflicts({
+    Map<String, TdfDeletionResolution> taskResolutions = const {},
+    Map<String, TdfDeletionResolution> labelResolutions = const {},
+    Map<String, TdfDeletionResolution> locationResolutions = const {},
+    Map<String, TdfBoundDeletionDecision> boundTaskDecisions = const {},
+    Map<String, TdfBoundDeletionDecision> boundLabelDecisions = const {},
+    Map<String, TdfBoundDeletionDecision> boundLocationDecisions = const {},
+  }) => _executeResolutionSync(
+    clearUndoReason: 'resolve_deletion_conflict',
+    taskConflictResolutions: taskResolutions,
+    labelConflictResolutions: labelResolutions,
+    locationConflictResolutions: locationResolutions,
+    boundTaskConflictDecisions: boundTaskDecisions,
+    boundLabelConflictDecisions: boundLabelDecisions,
+    boundLocationConflictDecisions: boundLocationDecisions,
+  );
+
+  /// Resolves pending `RecoveryRequired` entities via `discard` or `recoverAsNew` (`TDF-REC-002`).
+  Future<TaskBoard> resolveRecovery({
+    Map<String, TdfRecoveryResolution> taskResolutions = const {},
+    Map<String, TdfRecoveryResolution> labelResolutions = const {},
+    Map<String, TdfRecoveryResolution> locationResolutions = const {},
+  }) => _executeResolutionSync(
+    clearUndoReason: 'resolve_recovery',
+    taskRecoveryResolutions: taskResolutions,
+    labelRecoveryResolutions: labelResolutions,
+    locationRecoveryResolutions: locationResolutions,
+  );
+
   /// Restores a completed task to [targetTier] (defaulting to [TaskTier.planned]) per
   /// `TDF_SPEC.md` Section 6.5 and persists to storage.
   Future<void> restoreTask(
@@ -648,10 +635,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
 
     final workspace = await ref.read(activeWorkspaceProvider.future);
-    _pendingDeletedLabelTimestamps.clear();
-    _pendingDeletedLocationTimestamps.clear();
+    _pendingConflictOriginBoard = null;
     _conflictWatchDigest = null;
     _lastFailedWatchDigest = null;
+    _lastSelfWipeDigest = null;
     _clearUndoStack('select_local_file');
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
@@ -886,13 +873,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<SubtaskItem>? subtasks,
     List<String>? labelIds,
     DateTime? dueAt,
+    TdfLocalDateTime? dueLocalInput,
+    TdfLocalDateTime? dueAnchor,
     bool? isDuePassive,
     String? dueNote,
     bool clearDueAt = false,
+    bool clearDueAnchor = false,
     bool clearDueNote = false,
     TaskOrigin? origin,
     bool clearOrigin = false,
     DateTime? suspendedAt,
+    TdfLocalDateTime? suspendedLocalInput,
     bool? isSuspendedForever,
     String? suspendedNote,
     bool clearSuspendedAt = false,
@@ -918,13 +909,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         subtasks: subtasks,
         labelIds: labelIds,
         dueAt: dueAt,
+        dueLocalInput: dueLocalInput,
+        dueAnchor: dueAnchor,
         isDuePassive: isDuePassive,
         dueNote: dueNote,
         clearDueAt: clearDueAt,
+        clearDueAnchor: clearDueAnchor,
         clearDueNote: clearDueNote,
         origin: origin,
         clearOrigin: clearOrigin,
         suspendedAt: suspendedAt,
+        suspendedLocalInput: suspendedLocalInput,
         isSuspendedForever: isSuspendedForever,
         suspendedNote: suspendedNote,
         clearSuspendedAt: clearSuspendedAt,
@@ -1257,7 +1252,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     if (!hasOpenConflict) {
       _conflictWatchDigest = null;
     }
-    if (disk.digest != null && disk.digest == syncState.localSourceDigest) {
+    if (disk.digest != null &&
+        (disk.digest == syncState.localSourceDigest ||
+            disk.digest == _lastSelfWipeDigest)) {
       _lastFailedWatchDigest = null;
       if (hasOpenConflict) {
         _conflictWatchDigest ??= disk.digest;
@@ -1265,6 +1262,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _logWatchSkip(workspaceId, 'digest_unchanged');
       return false;
     }
+    _lastSelfWipeDigest = null;
     if (hasOpenConflict &&
         disk.digest != null &&
         disk.digest == _conflictWatchDigest) {
@@ -1276,51 +1274,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       return false;
     }
     return _runExternalWatchSynchronize(workspaceId, latestConfig, disk.digest);
-  }
-
-  /// Executes a serialized [importLegacyTdf] pass and updates [syncStateProvider].
-  Future<TdfImportResult> _executeImportLegacyTdf(
-    String rawTdf, {
-    TdfTimeZoneContext? sourceTimeZone,
-    DateTime? currentDate,
-  }) async {
-    final WebDavConfig initialConfig =
-        ref.read(webDavConfigProvider).asData?.value ??
-        await ref.read(webDavConfigProvider.future);
-    final initialLeadWindow = initialConfig.dueLeadWindow;
-    ref.read(syncStateProvider.notifier).setSyncing();
-    try {
-      final importResult = await TaskSyncPipeline.importLegacyTdf(
-        ref,
-        rawTdf,
-        sourceTimeZone: sourceTimeZone,
-        currentDate: currentDate,
-      );
-      _conflictWatchDigest = null;
-      _lastFailedWatchDigest = null;
-      _clearUndoStack('import_tdf');
-      final alignedBoard = _alignBoardWithCurrentLeadWindow(
-        importResult.board,
-        initialLeadWindow,
-        currentDate: currentDate,
-      );
-      state = AsyncData(alignedBoard);
-      ref
-          .read(syncStateProvider.notifier)
-          .setSuccess(ref.read(clockProvider)().toUtc());
-      if (alignedBoard == importResult.board) {
-        return importResult;
-      }
-      return TdfImportResult(
-        sourceVersion: importResult.sourceVersion,
-        executedSteps: importResult.executedSteps,
-        migratedTdfContent: importResult.migratedTdfContent,
-        board: alignedBoard,
-      );
-    } on Object catch (error) {
-      ref.read(syncStateProvider.notifier).setError(error.toString());
-      rethrow;
-    }
   }
 
   /// Executes a single [pushToRemote] persistence pass for [board].
@@ -1344,15 +1297,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final converged = await TaskSyncPipeline.synchronize(
         ref,
         config,
-        pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
-        pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
         taskConflictResolutions: taskConflictResolutions,
         candidateBoard: board,
-        candidateOriginBoard: fallbackBoard,
+        candidateOriginBoard: fallbackBoard ?? _pendingConflictOriginBoard,
         onLocalStageMerged: (mergedBoard) {
           localStageSucceeded = true;
+          _pendingConflictOriginBoard = null;
           _conflictWatchDigest = null;
           _lastFailedWatchDigest = null;
+          _lastSelfWipeDigest = null;
           if (mutationEpoch == null || mutationEpoch == _mutationEpoch) {
             state = AsyncData(
               _alignBoardWithCurrentLeadWindow(
@@ -1363,6 +1316,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           }
         },
       );
+      if (!ref.mounted) {
+        return;
+      }
+      if (taskConflictResolutions.isNotEmpty && mutationEpoch == null) {
+        _clearUndoStack('resolve_deletion_conflict');
+      }
       final isCurrentEpoch =
           mutationEpoch == null || mutationEpoch == _mutationEpoch;
       if (isCurrentEpoch &&
@@ -1371,12 +1330,33 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           _alignBoardWithCurrentLeadWindow(converged, config.dueLeadWindow),
         );
       }
+      _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
+      _lastSelfWipeDigest = null;
       ref
           .read(syncStateProvider.notifier)
           .setSuccess(ref.read(clockProvider)().toUtc());
+    } on TdfSyncOutcomeException catch (error) {
+      if (!ref.mounted) {
+        return;
+      }
+      if (!localStageSucceeded && mutationEpoch != null) {
+        _rolledBackEpochs.add(mutationEpoch);
+        _pendingConflictOriginBoard ??= fallbackBoard;
+      }
+      if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
+        _clearUndoStack('sync_generation_rollback');
+      }
+      TaskSyncPipeline.logSyncOutcomeEvent(error, config.storageMode);
+      ref
+          .read(syncStateProvider.notifier)
+          .setConflict(TaskSyncPipeline.formatSyncOutcomeBanner(ref, error));
+      await _recordConflictWatchDigestIfLocal(config);
     } on Object catch (error) {
+      if (!ref.mounted) {
+        return;
+      }
       if (!localStageSucceeded) {
         if (mutationEpoch != null) {
           _rolledBackEpochs.add(mutationEpoch);
@@ -1395,11 +1375,44 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           );
         }
       }
-      if (error is TdfSyncOutcomeException) {
-        ref.read(syncStateProvider.notifier).setConflict(error.toString());
-        await _recordConflictWatchDigestIfLocal(config);
-      } else {
-        ref.read(syncStateProvider.notifier).setError(error.toString());
+      ref.read(syncStateProvider.notifier).setError(error.toString());
+    }
+  }
+
+  /// Serializes and executes an explicit conflict or recovery resolution pass and clears [_undoStack] on success.
+  Future<TaskBoard> _executeResolutionSync({
+    required String clearUndoReason,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> labelConflictResolutions = const {},
+    Map<String, TdfDeletionResolution> locationConflictResolutions = const {},
+    Map<String, TdfBoundDeletionDecision> boundTaskConflictDecisions = const {},
+    Map<String, TdfBoundDeletionDecision> boundLabelConflictDecisions =
+        const {},
+    Map<String, TdfBoundDeletionDecision> boundLocationConflictDecisions =
+        const {},
+    Map<String, TdfRecoveryResolution> taskRecoveryResolutions = const {},
+    Map<String, TdfRecoveryResolution> labelRecoveryResolutions = const {},
+    Map<String, TdfRecoveryResolution> locationRecoveryResolutions = const {},
+  }) async {
+    await _awaitInFlightSync();
+    final operation = _performResolutionSync(
+      clearUndoReason: clearUndoReason,
+      taskConflictResolutions: taskConflictResolutions,
+      labelConflictResolutions: labelConflictResolutions,
+      locationConflictResolutions: locationConflictResolutions,
+      boundTaskConflictDecisions: boundTaskConflictDecisions,
+      boundLabelConflictDecisions: boundLabelConflictDecisions,
+      boundLocationConflictDecisions: boundLocationConflictDecisions,
+      taskRecoveryResolutions: taskRecoveryResolutions,
+      labelRecoveryResolutions: labelRecoveryResolutions,
+      locationRecoveryResolutions: locationRecoveryResolutions,
+    );
+    _inFlightSync = operation;
+    try {
+      return await operation;
+    } finally {
+      if (identical(_inFlightSync, operation)) {
+        _inFlightSync = null;
       }
     }
   }
@@ -1423,23 +1436,31 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
     final existingBoard = state.asData?.value;
     state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      try {
-        final board = await _runSyncWithStatus(
-          config,
-          candidateBoard: existingBoard,
-        );
-        if (existingBoard != null && board != existingBoard) {
-          _pruneInvalidatedUndoEntries(existingBoard, board);
-        }
-        _conflictWatchDigest = null;
-        _lastFailedWatchDigest = null;
-        return board;
-      } on TdfSyncOutcomeException {
-        await _recordConflictWatchDigestIfLocal(config);
-        rethrow;
+    try {
+      final board = await _runSyncWithStatus(
+        config,
+        candidateBoard: existingBoard,
+        candidateOriginBoard: _pendingConflictOriginBoard,
+      );
+      if (existingBoard != null && board != existingBoard) {
+        _pruneInvalidatedUndoEntries(existingBoard, board);
       }
-    });
+      _pendingConflictOriginBoard = null;
+      _conflictWatchDigest = null;
+      _lastFailedWatchDigest = null;
+      _lastSelfWipeDigest = null;
+      state = AsyncData(board);
+    } on TdfSyncOutcomeException catch (error, stackTrace) {
+      if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
+        _clearUndoStack('sync_generation_rollback');
+      }
+      await _recordConflictWatchDigestIfLocal(config);
+      state = existingBoard != null
+          ? AsyncData(existingBoard)
+          : AsyncError(error, stackTrace);
+    } on Object catch (error, stackTrace) {
+      state = AsyncError(error, stackTrace);
+    }
   }
 
   /// Executes a serialized [testConnectionAndSync] pass for [config].
@@ -1457,15 +1478,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final board = await _runSyncWithStatus(
         config,
         candidateBoard: existingBoard,
+        candidateOriginBoard: _pendingConflictOriginBoard,
         requireTargets: true,
       );
       if (existingBoard != null && board != existingBoard) {
         _pruneInvalidatedUndoEntries(existingBoard, board);
       }
+      _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
+      _lastSelfWipeDigest = null;
       state = AsyncData(board);
-    } on TdfSyncOutcomeException {
+    } on TdfSyncOutcomeException catch (error) {
+      if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
+        _clearUndoStack('sync_generation_rollback');
+      }
       await _recordConflictWatchDigestIfLocal(config);
       rethrow;
     }
@@ -1554,7 +1581,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     required String? diskDigest,
   }) async {
     _logWatchError(workspaceId, config.storageMode, error);
-    ref.read(syncStateProvider.notifier).setConflict(error.toString());
+    if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
+      _clearUndoStack('sync_generation_rollback');
+    }
+    TaskSyncPipeline.logSyncOutcomeEvent(error, config.storageMode);
+    ref
+        .read(syncStateProvider.notifier)
+        .setConflict(TaskSyncPipeline.formatSyncOutcomeBanner(ref, error));
     if (localStageSucceeded) {
       await _recordConflictWatchDigestIfLocal(config);
       return true;
@@ -1657,6 +1690,76 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     );
   }
 
+  /// Executes a conflict or recovery resolution sync pass and clears [_undoStack] on completion.
+  Future<TaskBoard> _performResolutionSync({
+    required String clearUndoReason,
+    required Map<String, TdfDeletionResolution> taskConflictResolutions,
+    required Map<String, TdfDeletionResolution> labelConflictResolutions,
+    required Map<String, TdfDeletionResolution> locationConflictResolutions,
+    required Map<String, TdfBoundDeletionDecision> boundTaskConflictDecisions,
+    required Map<String, TdfBoundDeletionDecision> boundLabelConflictDecisions,
+    required Map<String, TdfBoundDeletionDecision>
+    boundLocationConflictDecisions,
+    required Map<String, TdfRecoveryResolution> taskRecoveryResolutions,
+    required Map<String, TdfRecoveryResolution> labelRecoveryResolutions,
+    required Map<String, TdfRecoveryResolution> locationRecoveryResolutions,
+  }) async {
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    final WebDavConfig config =
+        ref.read(webDavConfigProvider).asData?.value ??
+        await ref.read(webDavConfigProvider.future);
+    if (!config.hasActiveStorage) {
+      return _currentBoard;
+    }
+    try {
+      final board = await TaskSyncPipeline.runSyncWithStatus(
+        ref,
+        config,
+        taskConflictResolutions: taskConflictResolutions,
+        labelConflictResolutions: labelConflictResolutions,
+        locationConflictResolutions: locationConflictResolutions,
+        boundTaskConflictDecisions: boundTaskConflictDecisions,
+        boundLabelConflictDecisions: boundLabelConflictDecisions,
+        boundLocationConflictDecisions: boundLocationConflictDecisions,
+        taskRecoveryResolutions: taskRecoveryResolutions,
+        labelRecoveryResolutions: labelRecoveryResolutions,
+        locationRecoveryResolutions: locationRecoveryResolutions,
+        candidateBoard: state.asData?.value,
+        candidateOriginBoard: _pendingConflictOriginBoard,
+        onLocalStageMerged: (mergedBoard) {
+          if (ref.read(activeWorkspaceProvider).asData?.value.id ==
+              workspace.id) {
+            state = AsyncData(
+              _alignBoardWithCurrentLeadWindow(
+                mergedBoard,
+                config.dueLeadWindow,
+              ),
+            );
+          }
+        },
+      );
+      _pendingConflictOriginBoard = null;
+      _conflictWatchDigest = null;
+      _lastFailedWatchDigest = null;
+      _lastSelfWipeDigest = null;
+      _clearUndoStack(clearUndoReason);
+      final aligned = _alignBoardWithCurrentLeadWindow(
+        board,
+        config.dueLeadWindow,
+      );
+      if (ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
+        state = AsyncData(aligned);
+      }
+      return aligned;
+    } on TdfSyncOutcomeException catch (error) {
+      if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
+        _clearUndoStack('sync_generation_rollback');
+      }
+      await _recordConflictWatchDigestIfLocal(config);
+      rethrow;
+    }
+  }
+
   /// Executes a local or remote `.tdf` wipe and preserves opposite-stage synchronization metadata via `copyWith`.
   Future<void> _performWipe(
     WebDavConfig config, {
@@ -1673,8 +1776,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final currentSyncState = await settingsRepo.loadWorkspaceSyncState(
         workspace.id,
       );
-      _pendingDeletedLabelTimestamps.clear();
-      _pendingDeletedLocationTimestamps.clear();
+      _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
       _clearUndoStack(isRemote ? 'wipe_remote' : 'wipe_local');
@@ -1685,25 +1787,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             ? (await ref.read(localFileRepositoryProvider).readTdfWithDigest())
                   .digest
             : null;
+        _lastSelfWipeDigest = wipedDigest;
         updatedSyncState = currentSyncState.copyWith(
           clearLastSyncedLocalTdf: true,
-          acknowledgedLocalGeneration: 0,
-          deletedLabelTimestamps: const <String, DateTime>{},
-          deletedLocationTimestamps: const <String, DateTime>{},
-          localSourceDigest: wipedDigest,
-          clearLocalSourceDigest: wipedDigest == null,
+          clearAcknowledgedLocalGeneration: true,
+          clearLocalSourceDigest: true,
         );
       } else {
-        final webDavRepo = ref.read(webDavRepositoryProvider);
         updatedSyncState = currentSyncState.copyWith(
           clearLastSyncedRemoteTdf: true,
-          acknowledgedRemoteGeneration: 0,
-          deletedLabelTimestamps: const <String, DateTime>{},
-          deletedLocationTimestamps: const <String, DateTime>{},
-          remoteEtag: webDavRepo.cachedEtag,
-          clearRemoteEtag: webDavRepo.cachedEtag == null,
-          remoteLastModified: webDavRepo.cachedLastModified,
-          clearRemoteLastModified: webDavRepo.cachedLastModified == null,
+          clearAcknowledgedRemoteGeneration: true,
+          clearRemoteSourceDigest: true,
+          clearRemoteEtag: true,
+          clearRemoteLastModified: true,
         );
       }
       await settingsRepo.saveWorkspaceSyncState(workspace.id, updatedSyncState);
@@ -1943,15 +2039,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final converged = await TaskSyncPipeline.synchronize(
         ref,
         config,
-        pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
-        pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
         candidateBoard: existingBoard ?? TaskBoard.empty(),
+        candidateOriginBoard: _pendingConflictOriginBoard,
         isInitialLoad: existingBoard == null,
         onLocalStageMerged: (mergedBoard) {
           localStageSucceeded = true;
           stage1Board = mergedBoard;
+          _pendingConflictOriginBoard = null;
           _lastFailedWatchDigest = null;
           _conflictWatchDigest = null;
+          _lastSelfWipeDigest = null;
           _applyExternalReconciledBoard(
             workspaceId: workspaceId,
             epoch: epoch,
@@ -1968,8 +2065,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         nextBoard: converged,
         evaluatedLeadWindow: config.dueLeadWindow,
       );
+      _pendingConflictOriginBoard = null;
       _lastFailedWatchDigest = null;
       _conflictWatchDigest = null;
+      _lastSelfWipeDigest = null;
       ref
           .read(syncStateProvider.notifier)
           .setSuccess(ref.read(clockProvider)().toUtc());
@@ -1997,15 +2096,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   Future<TaskBoard> _runSyncWithStatus(
     WebDavConfig config, {
     TaskBoard? candidateBoard,
+    TaskBoard? candidateOriginBoard,
     bool isInitialLoad = false,
     bool requireTargets = false,
   }) async {
     final board = await TaskSyncPipeline.runSyncWithStatus(
       ref,
       config,
-      pendingDeletedLabelTimestamps: _pendingDeletedLabelTimestamps,
-      pendingDeletedLocationTimestamps: _pendingDeletedLocationTimestamps,
       candidateBoard: candidateBoard,
+      candidateOriginBoard: candidateOriginBoard,
       isInitialLoad: isInitialLoad,
       requireTargets: requireTargets,
       onLocalStageMerged: (mergedBoard) {

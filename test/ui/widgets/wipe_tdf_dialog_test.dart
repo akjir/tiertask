@@ -40,7 +40,7 @@ void main() {
 
       final remoteFiles = <String, String>{
         '/remote.php/dav/files/alice/remote_board.tdf': '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -50,14 +50,13 @@ queue {
 task 000002OkD2 {
   name "Remote Task 1"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
 }
 ''',
       };
 
       final localFile = File('${tempDir.path}/local_board.tdf');
       localFile.writeAsStringSync('''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 08:00:00
@@ -67,7 +66,6 @@ queue {
 task 000001OkD2 {
   name "Local Task 1"
   created 2026-11-01 08:00
-  queued 2026-11-01 08:00
 }
 ''', flush: true);
 
@@ -206,8 +204,8 @@ task 000001OkD2 {
       );
       expect(
         localFile.readAsStringSync(),
-        equals('tdf 0.7.0\n'),
-        reason: 'Local file must be emptied to canonical tdf 0.7.0',
+        equals('tdf 0.8.0\n'),
+        reason: 'Local file must be emptied to canonical tdf 0.8.0',
       );
       final localBak = File('${tempDir.path}/local_board.tdf.bak');
       expect(
@@ -264,7 +262,7 @@ task 000001OkD2 {
       );
       expect(
         remoteFiles['/remote.php/dav/files/alice/remote_board.tdf'],
-        equals('tdf 0.7.0\n'),
+        equals('tdf 0.8.0\n'),
       );
       expect(
         remoteFiles['/remote.php/dav/files/alice/remote_board.tdf.bak'],

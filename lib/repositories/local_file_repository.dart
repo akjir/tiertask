@@ -23,8 +23,9 @@ import 'package:flutter/services.dart';
 import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
-import '../services/tdf_id_migration.dart';
+import '../services/sha256_service.dart';
 import '../services/tdf_service.dart';
+import 'host_file_lock.dart';
 import 'local_file_operations.dart';
 
 /// Custom domain exception thrown when local TDF file operations fail.
@@ -98,13 +99,15 @@ class LocalFileLogSink implements AppLogSink {
       LocalFileRepository.writeLogFileSync(path, content, append: append);
 }
 
-/// Repository for reading, writing, and migrating the task board `.tdf` file on the local filesystem.
+/// Repository for reading, writing, and locking the task board `.tdf` file on the local filesystem.
 class LocalFileRepository {
   /// Creates a [LocalFileRepository] for [config].
   LocalFileRepository({
     required this.config,
     this.baseDirectoryPath,
+    this.hostLockDirectoryOverride,
     this.inMemoryStore,
+    this.lockAcquireTimeout = HostFileLockManager.defaultLockAcquireTimeout,
     this.maxFileBytes = defaultMaxFileBytes,
   });
 
@@ -128,8 +131,14 @@ class LocalFileRepository {
   /// Active configuration containing the local file name or path and locale setting.
   final WebDavConfig config;
 
+  /// Optional host lock directory override used for hermetic filesystem tests.
+  final String? hostLockDirectoryOverride;
+
   /// Optional in-memory store used during hermetic widget tests.
   final Map<String, String>? inMemoryStore;
+
+  /// Maximum duration to wait when acquiring the exclusive host file lock.
+  final Duration lockAcquireTimeout;
 
   /// Maximum allowed file size in bytes before rejecting a read or write.
   final int maxFileBytes;
@@ -143,6 +152,14 @@ class LocalFileRepository {
 
   /// Host operating system identifier (`linux`, `android`, `windows`) reported by the Dart VM.
   static String get hostPlatform => Platform.operatingSystem;
+
+  /// Builds the [HostFileLockManager] configured for this repository instance.
+  HostFileLockManager<LocalFileException> get _lockManager =>
+      HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: hostLockDirectoryOverride,
+        lockAcquireTimeout: lockAcquireTimeout,
+      );
 
   /// Resolves the active [AppLocalizations] instance for error messages.
   AppLocalizations get _messages => lookupAppLocalizations(
@@ -242,26 +259,31 @@ class LocalFileRepository {
     final messages = _messages;
     final filePath = resolveFilePath();
     const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
-    if (_useInMemoryFallback) {
-      inMemoryStore?.putIfAbsent(filePath, () => emptyContent);
-      return;
-    }
-    final entityType = FileSystemEntity.typeSync(filePath, followLinks: false);
-    if (entityType == FileSystemEntityType.directory) {
-      throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
-    }
-    if (entityType == FileSystemEntityType.link) {
-      throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
-    }
-    if (entityType == FileSystemEntityType.notFound) {
-      await saveTdf(emptyContent);
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.storage,
-        'local.save',
-        fields: <String, Object?>{'path': filePath, 'initialized': true},
+    await _lockManager.withExclusiveLock(filePath, () async {
+      if (_useInMemoryFallback) {
+        inMemoryStore?.putIfAbsent(filePath, () => emptyContent);
+        return;
+      }
+      final entityType = FileSystemEntity.typeSync(
+        filePath,
+        followLinks: false,
       );
-    }
+      if (entityType == FileSystemEntityType.directory) {
+        throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
+      }
+      if (entityType == FileSystemEntityType.link) {
+        throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
+      }
+      if (entityType == FileSystemEntityType.notFound) {
+        await saveTdf(emptyContent);
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          'local.save',
+          fields: <String, Object?>{'path': filePath, 'initialized': true},
+        );
+      }
+    }, inMemoryOnly: _useInMemoryFallback);
   }
 
   /// Alias for [initializeIfMissing] that creates an empty `.tdf` document when the file does not exist yet.
@@ -298,87 +320,8 @@ class LocalFileRepository {
 
   /// Reads the local `.tdf` file and returns its contents, or an empty string if the file does not exist.
   Future<String> loadTdf() async {
-    final stopwatch = Stopwatch()..start();
-    final messages = _messages;
-    final filePath = resolveFilePath();
-    if (_useInMemoryFallback) {
-      final content = inMemoryStore?[filePath] ?? '';
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.storage,
-        'local.load',
-        fields: <String, Object?>{
-          'path': filePath,
-          'bytes': content.length,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
-      return content;
-    }
-    try {
-      final file = File(filePath);
-      if (!file.existsSync()) {
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.storage,
-          'local.load',
-          fields: <String, Object?>{'path': filePath, 'missing': true},
-        );
-        return '';
-      }
-      if (file.lengthSync() > maxFileBytes) {
-        throw LocalFileException(messages.errorLocalFileTooLarge);
-      }
-      final bytes = file.readAsBytesSync();
-      if (bytes.length > maxFileBytes) {
-        throw LocalFileException(messages.errorLocalFileTooLarge);
-      }
-      final decoded = utf8.decode(bytes);
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.storage,
-        'local.load',
-        fields: <String, Object?>{
-          'path': filePath,
-          'bytes': bytes.length,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
-      return decoded;
-    } on LocalFileException catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.storage,
-        'local.load',
-        fields: <String, Object?>{'path': filePath},
-        error: error,
-      );
-      rethrow;
-    } on FileSystemException catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.storage,
-        'local.load',
-        fields: <String, Object?>{'path': filePath},
-        error: error,
-      );
-      throw LocalFileException(
-        messages.errorLoadLocalFileFailed(error.message),
-        cause: error,
-      );
-    } on Object catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.storage,
-        'local.load',
-        fields: <String, Object?>{'path': filePath},
-        error: error,
-      );
-      throw LocalFileException(
-        messages.errorLoadLocalFileFailed(error.toString()),
-        cause: error,
-      );
-    }
+    final snapshot = await _readTdfSnapshot(computeDigest: false);
+    return snapshot.content;
   }
 
   /// Maps a [FileSystemException] during a `.tdf` file move into a specific localized [LocalFileException].
@@ -468,19 +411,8 @@ class LocalFileRepository {
       _operations.readLogFileSync(path, maxBytes: maxBytes);
 
   /// Reads the local `.tdf` file and returns its decoded content, SHA-256 hex digest, and existence flag.
-  Future<({String content, String? digest, bool exists})>
-  readTdfWithDigest() async {
-    final content = await loadTdf();
-    if (content.isNotEmpty) {
-      final digest = TdfIdMigration.sha256Hex(utf8.encode(content));
-      return (content: content, digest: digest, exists: true);
-    }
-    if (fileExists()) {
-      final digest = TdfIdMigration.sha256Hex(const <int>[]);
-      return (content: '', digest: digest, exists: true);
-    }
-    return (content: '', digest: null, exists: false);
-  }
+  Future<({String content, String? digest, bool exists})> readTdfWithDigest() =>
+      _readTdfSnapshot(computeDigest: true);
 
   /// Renames the local `.tdf` file to [newFileName] inside its current directory and returns the new resolved path.
   Future<String> renameTdf(String newFileName) async {
@@ -535,7 +467,7 @@ class LocalFileRepository {
     );
   }
 
-  /// Writes [tdfContent] to the configured local `.tdf` file.
+  /// Writes [tdfContent] to the configured local `.tdf` file under the exclusive host file lock.
   Future<void> saveTdf(String tdfContent) async {
     final stopwatch = Stopwatch()..start();
     final messages = _messages;
@@ -554,22 +486,20 @@ class LocalFileRepository {
       );
       throw LocalFileException(messages.errorLocalFileTooLarge);
     }
-    if (_useInMemoryFallback) {
-      inMemoryStore?[filePath] = tdfContent;
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.storage,
-        'local.save',
-        fields: <String, Object?>{
-          'path': filePath,
-          'bytes': bytes.length,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
-      return;
-    }
+    final lockManager = _lockManager;
     try {
-      _operations.writeTdfAtomicallySync(filePath, bytes, messages);
+      await lockManager.withExclusiveLock(filePath, () async {
+        if (_useInMemoryFallback) {
+          inMemoryStore?[filePath] = tdfContent;
+          return;
+        }
+        await _operations.writeTdfAtomically(
+          filePath,
+          bytes,
+          messages,
+          lockManager: lockManager,
+        );
+      }, inMemoryOnly: _useInMemoryFallback);
       AppLogger.event(
         LogLevel.info,
         LogTag.storage,
@@ -681,40 +611,28 @@ class LocalFileRepository {
     final messages = _messages;
     final filePath = resolveFilePath();
     const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
-    if (_useInMemoryFallback) {
-      _wipeInMemoryEntry(filePath, emptyContent, createBackup: createBackup);
-      return;
-    }
+    final lockManager = _lockManager;
     try {
-      final sourceType = FileSystemEntity.typeSync(
-        filePath,
-        followLinks: false,
-      );
-      if (sourceType == FileSystemEntityType.directory) {
-        throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
-      }
-      if (sourceType == FileSystemEntityType.link) {
-        throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
-      }
-      final file = File(filePath);
-      if (sourceType != FileSystemEntityType.notFound && createBackup) {
-        final backupPath = _operations.resolveNextLocalBackupPath(
+      await lockManager.withExclusiveLock(filePath, () async {
+        if (_useInMemoryFallback) {
+          _wipeInMemoryEntry(
+            filePath,
+            emptyContent,
+            createBackup: createBackup,
+          );
+          return;
+        }
+        await _performDiskWipe(
           filePath,
+          emptyContent,
           messages,
+          lockManager: lockManager,
+          createBackup: createBackup,
         );
-        file.copySync(backupPath);
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.storage,
-          'local.backup',
-          fields: <String, Object?>{'path': backupPath},
-        );
+      }, inMemoryOnly: _useInMemoryFallback);
+      if (_useInMemoryFallback) {
+        return;
       }
-      _operations.writeTdfAtomicallySync(
-        filePath,
-        utf8.encode(emptyContent),
-        messages,
-      );
       AppLogger.event(
         LogLevel.info,
         LogTag.storage,
@@ -761,6 +679,16 @@ class LocalFileRepository {
     }
   }
 
+  /// Acquires the exclusive host-local cooperative lock (or hermetic in-process lock) for [resolveFilePath] and runs [action].
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) {
+    final filePath = resolveFilePath();
+    return _lockManager.withExclusiveLock<T>(
+      filePath,
+      action,
+      inMemoryOnly: _useInMemoryFallback,
+    );
+  }
+
   /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
   static void writeLogFileSync(
     String path,
@@ -786,6 +714,135 @@ class LocalFileRepository {
     }
     final sorted = names.toList()..sort();
     return List<String>.unmodifiable(sorted);
+  }
+
+  /// Validates [filePath], creates an optional `.bak` copy, and atomically writes [emptyContent].
+  Future<void> _performDiskWipe(
+    String filePath,
+    String emptyContent,
+    AppLocalizations messages, {
+    required HostFileLockManager<LocalFileException> lockManager,
+    required bool createBackup,
+  }) async {
+    final sourceType = FileSystemEntity.typeSync(filePath, followLinks: false);
+    if (sourceType == FileSystemEntityType.directory) {
+      throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
+    }
+    if (sourceType == FileSystemEntityType.link) {
+      throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
+    }
+    if (sourceType != FileSystemEntityType.notFound && createBackup) {
+      final backupPath = _operations.resolveNextLocalBackupPath(
+        filePath,
+        messages,
+      );
+      File(filePath).copySync(backupPath);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'local.backup',
+        fields: <String, Object?>{'path': backupPath},
+      );
+    }
+    await _operations.writeTdfAtomically(
+      filePath,
+      utf8.encode(emptyContent),
+      messages,
+      lockManager: lockManager,
+    );
+  }
+
+  /// Reads the resolved `.tdf` file once and optionally computes its SHA-256 hex digest.
+  Future<({String content, String? digest, bool exists})> _readTdfSnapshot({
+    required bool computeDigest,
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final messages = _messages;
+    final filePath = resolveFilePath();
+    if (_useInMemoryFallback) {
+      final store = inMemoryStore;
+      final exists = store?.containsKey(filePath) ?? false;
+      final content = exists ? (store?[filePath] ?? '') : '';
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'local.load',
+        fields: <String, Object?>{
+          'path': filePath,
+          'bytes': content.length,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      final digest = computeDigest && exists
+          ? Sha256Service.hashHex(utf8.encode(content))
+          : null;
+      return (content: content, digest: digest, exists: exists);
+    }
+    try {
+      final file = File(filePath);
+      if (!file.existsSync()) {
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          'local.load',
+          fields: <String, Object?>{'path': filePath, 'missing': true},
+        );
+        return (content: '', digest: null, exists: false);
+      }
+      if (file.lengthSync() > maxFileBytes) {
+        throw LocalFileException(messages.errorLocalFileTooLarge);
+      }
+      final bytes = file.readAsBytesSync();
+      if (bytes.length > maxFileBytes) {
+        throw LocalFileException(messages.errorLocalFileTooLarge);
+      }
+      final decoded = utf8.decode(bytes);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'local.load',
+        fields: <String, Object?>{
+          'path': filePath,
+          'bytes': bytes.length,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      final digest = computeDigest ? Sha256Service.hashHex(bytes) : null;
+      return (content: decoded, digest: digest, exists: true);
+    } on LocalFileException catch (error) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'local.load',
+        fields: <String, Object?>{'path': filePath},
+        error: error,
+      );
+      rethrow;
+    } on FileSystemException catch (error) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'local.load',
+        fields: <String, Object?>{'path': filePath},
+        error: error,
+      );
+      throw LocalFileException(
+        messages.errorLoadLocalFileFailed(error.message),
+        cause: error,
+      );
+    } on Object catch (error) {
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'local.load',
+        fields: <String, Object?>{'path': filePath},
+        error: error,
+      );
+      throw LocalFileException(
+        messages.errorLoadLocalFileFailed(error.toString()),
+        cause: error,
+      );
+    }
   }
 
   /// Wipes [filePath] in [inMemoryStore] during hermetic widget tests, creating a `.bak` or `.bak.NNN` copy when [createBackup] is `true`.

@@ -13,171 +13,171 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:convert' show Utf8Codec;
-import 'dart:typed_data' show BytesBuilder, Uint8List;
+import 'dart:convert';
+import 'dart:typed_data' show ByteData, BytesBuilder;
 
 import 'package:flutter/foundation.dart';
 
-import 'task_item.dart';
+import 'tdf_error.dart';
 
-/// Immutable per-workspace synchronization baseline, acknowledged generations, source digest, and pending deletion state.
+/// Immutable `TTS\x04` per-workspace synchronization baseline, acknowledged
+/// generations, raw source digests, and HTTP conditional request validators.
 @immutable
 class WorkspaceSyncState {
-  /// Creates a [WorkspaceSyncState].
-  WorkspaceSyncState({
+  const WorkspaceSyncState._({
     this.lastSyncedLocalTdf,
     this.lastSyncedRemoteTdf,
-    Map<String, DateTime> deletedLabelTimestamps = const {},
-    Map<String, DateTime> deletedLocationTimestamps = const {},
-    this.acknowledgedLocalGeneration = 0,
-    this.acknowledgedRemoteGeneration = 0,
+    this.acknowledgedLocalGeneration,
+    this.acknowledgedRemoteGeneration,
     this.localSourceDigest,
+    this.remoteSourceDigest,
     this.remoteEtag,
     this.remoteLastModified,
-  }) : deletedLabelTimestamps = Map<String, DateTime>.unmodifiable(
-         <String, DateTime>{
-           for (final entry in deletedLabelTimestamps.entries)
-             entry.key: TaskItem.normalizeTimestamp(entry.value),
-         },
-       ),
-       deletedLocationTimestamps = Map<String, DateTime>.unmodifiable(
-         <String, DateTime>{
-           for (final entry in deletedLocationTimestamps.entries)
-             entry.key: TaskItem.normalizeTimestamp(entry.value),
-         },
-       );
+  });
 
-  /// Creates an empty [WorkspaceSyncState] with default baselines and generations.
-  const WorkspaceSyncState._empty()
-    : lastSyncedLocalTdf = null,
-      lastSyncedRemoteTdf = null,
-      deletedLabelTimestamps = const <String, DateTime>{},
-      deletedLocationTimestamps = const <String, DateTime>{},
-      acknowledgedLocalGeneration = 0,
-      acknowledgedRemoteGeneration = 0,
-      localSourceDigest = null,
-      remoteEtag = null,
-      remoteLastModified = null;
-
-  /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x01`, `TTS\x02`, or `TTS\x03` binary payload,
-  /// returning [empty] if [bytes] is empty or malformed.
-  factory WorkspaceSyncState.fromBytes(List<int> bytes) {
-    if (bytes.length < 6 ||
-        bytes[0] != 0x54 ||
-        bytes[1] != 0x54 ||
-        bytes[2] != 0x53) {
-      return empty;
-    }
-    final version = bytes[3];
-    if (version != _binaryVersionV1 &&
-        version != _binaryVersionV2 &&
-        version != _binaryVersionV3) {
-      return empty;
-    }
-    final source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
-    try {
-      final (localTdf, afterLocal) = _readNullableString(source, 4);
-      final (remoteTdf, afterRemote) = _readNullableString(source, afterLocal);
-      final (deletedLabels, afterLabels) = _readDeletedEntityMap(
-        source,
-        afterRemote,
-      );
-      var cursor = afterLabels;
-      var localGen = 0;
-      var remoteGen = 0;
-      if (version >= _binaryVersionV2) {
-        if (cursor + 16 > source.length) return empty;
-        localGen = _readInt64(source, cursor);
-        remoteGen = _readInt64(source, cursor + 8);
-        cursor += 16;
-      }
-      var deletedLocations = const <String, DateTime>{};
-      String? localDigest;
-      String? remoteEtag;
-      String? remoteLastModified;
-      if (version >= _binaryVersionV3) {
-        (
-          deletedLocations,
-          localDigest,
-          remoteEtag,
-          remoteLastModified,
-          cursor,
-        ) = _readV3Payload(
-          source,
-          cursor,
-        );
-      }
-      if (cursor != source.length) return empty;
-      return WorkspaceSyncState(
-        lastSyncedLocalTdf: localTdf,
-        lastSyncedRemoteTdf: remoteTdf,
-        deletedLabelTimestamps: deletedLabels,
-        deletedLocationTimestamps: deletedLocations,
-        acknowledgedLocalGeneration: localGen,
-        acknowledgedRemoteGeneration: remoteGen,
-        localSourceDigest: localDigest,
-        remoteEtag: remoteEtag,
-        remoteLastModified: remoteLastModified,
-      );
-    } on FormatException {
-      return empty;
-    }
+  /// Creates a validated [WorkspaceSyncState], atomically clearing any target
+  /// whose canonical `tdf 0.8.0\n` baseline, acknowledged generation, or
+  /// 64-character lowercase SHA-256 source digest is missing or invalid.
+  factory WorkspaceSyncState({
+    String? lastSyncedLocalTdf,
+    String? lastSyncedRemoteTdf,
+    int? acknowledgedLocalGeneration,
+    int? acknowledgedRemoteGeneration,
+    String? localSourceDigest,
+    String? remoteSourceDigest,
+    String? remoteEtag,
+    String? remoteLastModified,
+  }) {
+    final validLocal = _isValidTargetBaseline(
+      canonicalTdf: lastSyncedLocalTdf,
+      acknowledgedGeneration: acknowledgedLocalGeneration,
+      sourceDigest: localSourceDigest,
+    );
+    final validRemote = _isValidTargetBaseline(
+      canonicalTdf: lastSyncedRemoteTdf,
+      acknowledgedGeneration: acknowledgedRemoteGeneration,
+      sourceDigest: remoteSourceDigest,
+    );
+    return WorkspaceSyncState._(
+      lastSyncedLocalTdf: validLocal ? lastSyncedLocalTdf : null,
+      lastSyncedRemoteTdf: validRemote ? lastSyncedRemoteTdf : null,
+      acknowledgedLocalGeneration: validLocal
+          ? acknowledgedLocalGeneration
+          : null,
+      acknowledgedRemoteGeneration: validRemote
+          ? acknowledgedRemoteGeneration
+          : null,
+      localSourceDigest: validLocal ? localSourceDigest : null,
+      remoteSourceDigest: validRemote ? remoteSourceDigest : null,
+      remoteEtag: validRemote ? remoteEtag : null,
+      remoteLastModified: validRemote ? remoteLastModified : null,
+    );
   }
 
-  /// Empty synchronization state with no baselines and no pending entity deletions.
-  static const WorkspaceSyncState empty = WorkspaceSyncState._empty();
+  /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x04` binary
+  /// payload, returning [empty] if [bytes] is truncated, malformed, or uses any
+  /// wire format version other than `4` (`TDF-MERGE-001`).
+  factory WorkspaceSyncState.fromBytes(List<int> bytes) {
+    if (!_hasValidHeader(bytes)) {
+      return empty;
+    }
+    var offset = 4;
+    final (localTdf, next1, ok1) = _readNullableString(bytes, offset);
+    if (!ok1) return empty;
+    offset = next1;
 
-  /// Binary wire format version 1 identifier.
-  static const int _binaryVersionV1 = 1;
+    final (remoteTdf, next2, ok2) = _readNullableString(bytes, offset);
+    if (!ok2) return empty;
+    offset = next2;
 
-  /// Binary wire format version 2 identifier.
-  static const int _binaryVersionV2 = 2;
+    final (localGeneration, next3, ok3) = _readNullableInt64(bytes, offset);
+    if (!ok3) return empty;
+    offset = next3;
 
-  /// Binary wire format version 3 identifier.
-  static const int _binaryVersionV3 = 3;
+    final (remoteGeneration, next4, ok4) = _readNullableInt64(bytes, offset);
+    if (!ok4) return empty;
+    offset = next4;
 
-  /// Strict UTF-8 codec that rejects malformed byte sequences.
-  static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
+    final (localDigest, next5, ok5) = _readNullableString(bytes, offset);
+    if (!ok5) return empty;
+    offset = next5;
 
-  /// Last acknowledged `deleted.generation` for the local `.tdf` file.
-  final int acknowledgedLocalGeneration;
+    final (remoteDigest, next6, ok6) = _readNullableString(bytes, offset);
+    if (!ok6) return empty;
+    offset = next6;
 
-  /// Last acknowledged `deleted.generation` for the remote WebDAV `.tdf` file.
-  final int acknowledgedRemoteGeneration;
+    final (etag, next7, ok7) = _readNullableString(bytes, offset);
+    if (!ok7) return empty;
+    offset = next7;
 
-  /// UTC deletion timestamps (`T_del`) for labels deleted since the last full sync.
-  final Map<String, DateTime> deletedLabelTimestamps;
+    final (lastModified, next8, ok8) = _readNullableString(bytes, offset);
+    if (!ok8 || next8 != bytes.length) {
+      return empty;
+    }
 
-  /// UTC deletion timestamps (`T_del`) for locations deleted since the last full sync.
-  final Map<String, DateTime> deletedLocationTimestamps;
+    return WorkspaceSyncState(
+      lastSyncedLocalTdf: localTdf,
+      lastSyncedRemoteTdf: remoteTdf,
+      acknowledgedLocalGeneration: localGeneration,
+      acknowledgedRemoteGeneration: remoteGeneration,
+      localSourceDigest: localDigest,
+      remoteSourceDigest: remoteDigest,
+      remoteEtag: etag,
+      remoteLastModified: lastModified,
+    );
+  }
 
-  /// Canonical `.tdf` snapshot from the last successful local file synchronization.
+  /// Empty synchronization state with no baselines, generations, or validators.
+  static const WorkspaceSyncState empty = WorkspaceSyncState._();
+
+  static const String _canonicalHeaderPrefix = 'tdf 0.8.0\n';
+  static const int _formatVersion = 0x04;
+  static const int _magicByte0 = 0x54;
+  static const int _magicByte1 = 0x54;
+  static const int _magicByte2 = 0x53;
+  static const int _maxStringByteLength = 16777216;
+  static const int _sha256HexLength = 64;
+  static const Utf8Codec _utf8Codec = Utf8Codec();
+
+  /// Last acknowledged `deleted.generation` counter for the local `.tdf` file.
+  final int? acknowledgedLocalGeneration;
+
+  /// Last acknowledged `deleted.generation` counter for the remote WebDAV `.tdf` file.
+  final int? acknowledgedRemoteGeneration;
+
+  /// Canonical `tdf 0.8.0` baseline snapshot last synchronized with the local `.tdf` file.
   final String? lastSyncedLocalTdf;
 
-  /// Canonical `.tdf` snapshot from the last successful WebDAV synchronization.
+  /// Canonical `tdf 0.8.0` baseline snapshot last synchronized with the remote WebDAV `.tdf` file.
   final String? lastSyncedRemoteTdf;
 
-  /// SHA-256 hex digest of the local `.tdf` file from the last successful local publication.
+  /// Raw 64-character lowercase SHA-256 hex digest of the local `.tdf` byte stream.
   final String? localSourceDigest;
 
-  /// Cached HTTP `ETag` validator header from the last successful WebDAV synchronization.
+  /// HTTP `ETag` header observed on the last synchronized remote WebDAV `.tdf` response.
   final String? remoteEtag;
 
-  /// Cached HTTP `Last-Modified` validator header from the last successful WebDAV synchronization.
+  /// HTTP `Last-Modified` header observed on the last synchronized remote WebDAV `.tdf` response.
   final String? remoteLastModified;
 
-  /// Returns a copy of this [WorkspaceSyncState] with updated fields.
+  /// Raw 64-character lowercase SHA-256 hex digest of the remote WebDAV `.tdf` byte stream.
+  final String? remoteSourceDigest;
+
+  /// Creates an updated [WorkspaceSyncState] preserving unspecified fields and
+  /// enforcing atomic per-target validation.
   WorkspaceSyncState copyWith({
     String? lastSyncedLocalTdf,
     bool clearLastSyncedLocalTdf = false,
     String? lastSyncedRemoteTdf,
     bool clearLastSyncedRemoteTdf = false,
-    Map<String, DateTime>? deletedLabelTimestamps,
-    Map<String, DateTime>? deletedLocationTimestamps,
     int? acknowledgedLocalGeneration,
+    bool clearAcknowledgedLocalGeneration = false,
     int? acknowledgedRemoteGeneration,
+    bool clearAcknowledgedRemoteGeneration = false,
     String? localSourceDigest,
     bool clearLocalSourceDigest = false,
+    String? remoteSourceDigest,
+    bool clearRemoteSourceDigest = false,
     String? remoteEtag,
     bool clearRemoteEtag = false,
     String? remoteLastModified,
@@ -190,17 +190,18 @@ class WorkspaceSyncState {
       lastSyncedRemoteTdf: clearLastSyncedRemoteTdf
           ? null
           : (lastSyncedRemoteTdf ?? this.lastSyncedRemoteTdf),
-      deletedLabelTimestamps:
-          deletedLabelTimestamps ?? this.deletedLabelTimestamps,
-      deletedLocationTimestamps:
-          deletedLocationTimestamps ?? this.deletedLocationTimestamps,
-      acknowledgedLocalGeneration:
-          acknowledgedLocalGeneration ?? this.acknowledgedLocalGeneration,
-      acknowledgedRemoteGeneration:
-          acknowledgedRemoteGeneration ?? this.acknowledgedRemoteGeneration,
+      acknowledgedLocalGeneration: clearAcknowledgedLocalGeneration
+          ? null
+          : (acknowledgedLocalGeneration ?? this.acknowledgedLocalGeneration),
+      acknowledgedRemoteGeneration: clearAcknowledgedRemoteGeneration
+          ? null
+          : (acknowledgedRemoteGeneration ?? this.acknowledgedRemoteGeneration),
       localSourceDigest: clearLocalSourceDigest
           ? null
           : (localSourceDigest ?? this.localSourceDigest),
+      remoteSourceDigest: clearRemoteSourceDigest
+          ? null
+          : (remoteSourceDigest ?? this.remoteSourceDigest),
       remoteEtag: clearRemoteEtag ? null : (remoteEtag ?? this.remoteEtag),
       remoteLastModified: clearRemoteLastModified
           ? null
@@ -208,170 +209,136 @@ class WorkspaceSyncState {
     );
   }
 
-  /// Encodes this [WorkspaceSyncState] into a compact `TTS\x03` binary [Uint8List].
+  /// Serializes this [WorkspaceSyncState] into its compact `TTS\x04` binary wire representation.
   Uint8List toBytes() {
     final builder = BytesBuilder(copy: false)
-      ..add(const <int>[0x54, 0x54, 0x53, _binaryVersionV3]);
+      ..addByte(_magicByte0)
+      ..addByte(_magicByte1)
+      ..addByte(_magicByte2)
+      ..addByte(_formatVersion);
     _writeNullableString(builder, lastSyncedLocalTdf);
     _writeNullableString(builder, lastSyncedRemoteTdf);
-    _writeDeletedEntityMap(builder, deletedLabelTimestamps);
-    _writeInt64(builder, acknowledgedLocalGeneration);
-    _writeInt64(builder, acknowledgedRemoteGeneration);
-    _writeDeletedEntityMap(builder, deletedLocationTimestamps);
+    _writeNullableInt64(builder, acknowledgedLocalGeneration);
+    _writeNullableInt64(builder, acknowledgedRemoteGeneration);
     _writeNullableString(builder, localSourceDigest);
-    if (remoteEtag != null || remoteLastModified != null) {
-      _writeNullableString(builder, remoteEtag);
-      _writeNullableString(builder, remoteLastModified);
-    }
+    _writeNullableString(builder, remoteSourceDigest);
+    _writeNullableString(builder, remoteEtag);
+    _writeNullableString(builder, remoteLastModified);
     return builder.toBytes();
   }
 
-  /// Reads a 16-bit count-prefixed map of `(entityId, deletedAt)` entries from [source] at [offset].
-  static (Map<String, DateTime>, int) _readDeletedEntityMap(
-    Uint8List source,
-    int offset,
-  ) {
-    if (offset + 2 > source.length) {
-      throw const FormatException('Truncated deleted entity map count.');
+  /// Returns `true` when [bytes] starts with the 4-byte `TTS\x04` header.
+  static bool _hasValidHeader(List<int> bytes) =>
+      bytes.length >= 4 &&
+      bytes[0] == _magicByte0 &&
+      bytes[1] == _magicByte1 &&
+      bytes[2] == _magicByte2 &&
+      bytes[3] == _formatVersion;
+
+  /// Returns `true` when [codeUnit] is a lowercase ASCII hexadecimal digit (`0-9`, `a-f`).
+  static bool _isLowercaseHexCodeUnit(int codeUnit) =>
+      (codeUnit >= 0x30 && codeUnit <= 0x39) ||
+      (codeUnit >= 0x61 && codeUnit <= 0x66);
+
+  /// Returns `true` when [digest] is a 64-character lowercase SHA-256 hex string.
+  static bool _isValidSha256Hex(String? digest) {
+    if (digest == null || digest.length != _sha256HexLength) {
+      return false;
     }
-    final count = (source[offset] << 8) | source[offset + 1];
-    var cursor = offset + 2;
-    final deletedMap = <String, DateTime>{};
-    for (var i = 0; i < count; i++) {
-      final (entityId, dateVal, nextCursor) = _readDeletedLabelEntry(
-        source,
-        cursor,
-      );
-      deletedMap[entityId] = dateVal;
-      cursor = nextCursor;
+    for (var i = 0; i < _sha256HexLength; i++) {
+      if (!_isLowercaseHexCodeUnit(digest.codeUnitAt(i))) {
+        return false;
+      }
     }
-    return (deletedMap, cursor);
+    return true;
   }
 
-  /// Reads a single `(labelId, deletedAt, nextOffset)` entry from [source] at [offset].
-  static (String, DateTime, int) _readDeletedLabelEntry(
-    Uint8List source,
-    int offset,
-  ) {
-    final (labelId, afterId) = _readNullableString(source, offset);
-    if (labelId == null || labelId.isEmpty || afterId + 8 > source.length) {
-      throw const FormatException('Invalid deleted label entry.');
+  /// Returns `true` when a target's canonical baseline, generation, and SHA-256 digest are all present and valid.
+  static bool _isValidTargetBaseline({
+    required String? canonicalTdf,
+    required int? acknowledgedGeneration,
+    required String? sourceDigest,
+  }) {
+    if (canonicalTdf == null ||
+        !canonicalTdf.startsWith(_canonicalHeaderPrefix)) {
+      return false;
     }
-    final epochSeconds = _readInt64(source, afterId);
-    final timestamp = DateTime.fromMillisecondsSinceEpoch(
-      epochSeconds * 1000,
-      isUtc: true,
+    if (acknowledgedGeneration == null ||
+        acknowledgedGeneration < 0 ||
+        acknowledgedGeneration > maxTdfSyncGeneration) {
+      return false;
+    }
+    return _isValidSha256Hex(sourceDigest);
+  }
+
+  /// Reads a 1-byte presence flag and optional big-endian signed 64-bit integer from [bytes] at [offset].
+  static (int?, int, bool) _readNullableInt64(List<int> bytes, int offset) {
+    if (offset >= bytes.length) {
+      return (null, offset, false);
+    }
+    final presence = bytes[offset];
+    if (presence == 0) {
+      return (null, offset + 1, true);
+    }
+    if (presence != 1 || offset + 9 > bytes.length) {
+      return (null, offset, false);
+    }
+    final slice = Uint8List.fromList(bytes.sublist(offset + 1, offset + 9));
+    final value = ByteData.sublistView(slice).getInt64(0);
+    return (value, offset + 9, true);
+  }
+
+  /// Reads a 1-byte presence flag and optional length-prefixed UTF-8 string from [bytes] at [offset].
+  static (String?, int, bool) _readNullableString(List<int> bytes, int offset) {
+    if (offset >= bytes.length) {
+      return (null, offset, false);
+    }
+    final presence = bytes[offset];
+    if (presence == 0) {
+      return (null, offset + 1, true);
+    }
+    if (presence != 1 || offset + 5 > bytes.length) {
+      return (null, offset, false);
+    }
+    final lengthSlice = Uint8List.fromList(
+      bytes.sublist(offset + 1, offset + 5),
     );
-    return (labelId, TaskItem.normalizeTimestamp(timestamp), afterId + 8);
+    final byteLength = ByteData.sublistView(lengthSlice).getUint32(0);
+    final endOffset = offset + 5 + byteLength;
+    if (byteLength > _maxStringByteLength || endOffset > bytes.length) {
+      return (null, offset, false);
+    }
+    try {
+      final decoded = _utf8Codec.decode(bytes.sublist(offset + 5, endOffset));
+      return (decoded, endOffset, true);
+    } on FormatException {
+      return (null, offset, false);
+    }
   }
 
-  /// Reads a big-endian 64-bit integer from [source] at [offset].
-  static int _readInt64(Uint8List source, int offset) {
-    var value = 0;
-    for (var i = 0; i < 8; i++) {
-      value = (value << 8) | source[offset + i];
+  /// Appends a nullable big-endian signed 64-bit integer [value] to [builder].
+  static void _writeNullableInt64(BytesBuilder builder, int? value) {
+    if (value == null) {
+      builder.addByte(0);
+      return;
     }
-    return value;
-  }
-
-  /// Reads a 32-bit length-prefixed nullable UTF-8 string from [source] at [offset].
-  static (String?, int) _readNullableString(Uint8List source, int offset) {
-    if (offset >= source.length) {
-      throw const FormatException('Truncated string flag.');
-    }
-    final present = source[offset];
-    if (present == 0) {
-      return (null, offset + 1);
-    }
-    if (present != 1 || offset + 5 > source.length) {
-      throw const FormatException('Invalid string header.');
-    }
-    final length =
-        (source[offset + 1] << 24) |
-        (source[offset + 2] << 16) |
-        (source[offset + 3] << 8) |
-        source[offset + 4];
-    final start = offset + 5;
-    final end = start + length;
-    if (length < 0 || end > source.length) {
-      throw const FormatException('Truncated string bytes.');
-    }
-    final decoded = _utf8Codec.decode(
-      Uint8List.sublistView(source, start, end),
-    );
-    return (decoded, end);
-  }
-
-  /// Reads the `TTS\x03` location deletion map, local digest, and optional WebDAV HTTP validators from [source] at [offset].
-  static (
-    Map<String, DateTime> deletedLocations,
-    String? localDigest,
-    String? remoteEtag,
-    String? remoteLastModified,
-    int nextOffset,
-  )
-  _readV3Payload(Uint8List source, int offset) {
-    final (locations, afterLocations) = _readDeletedEntityMap(source, offset);
-    final (digest, afterDigest) = _readNullableString(source, afterLocations);
-    if (afterDigest >= source.length) {
-      return (locations, digest, null, null, afterDigest);
-    }
-    final (etag, afterEtag) = _readNullableString(source, afterDigest);
-    final (lastModified, afterLastModified) = _readNullableString(
-      source,
-      afterEtag,
-    );
-    return (locations, digest, etag, lastModified, afterLastModified);
-  }
-
-  /// Appends a 16-bit count-prefixed map of `(entityId, deletedAt)` entries to [builder].
-  static void _writeDeletedEntityMap(
-    BytesBuilder builder,
-    Map<String, DateTime> timestamps,
-  ) {
-    final entries = timestamps.entries.toList();
-    final count = entries.length <= 0xFFFF ? entries.length : 0xFFFF;
+    final buffer = ByteData(8)..setInt64(0, value);
     builder
-      ..addByte((count >> 8) & 0xFF)
-      ..addByte(count & 0xFF);
-    for (var i = 0; i < count; i++) {
-      _writeDeletedLabelEntry(builder, entries[i].key, entries[i].value);
-    }
+      ..addByte(1)
+      ..add(buffer.buffer.asUint8List());
   }
 
-  /// Appends a single `(labelId, deletedAt)` entry to [builder].
-  static void _writeDeletedLabelEntry(
-    BytesBuilder builder,
-    String labelId,
-    DateTime deletedAt,
-  ) {
-    _writeNullableString(builder, labelId);
-    final epochSeconds =
-        TaskItem.normalizeTimestamp(deletedAt).millisecondsSinceEpoch ~/ 1000;
-    _writeInt64(builder, epochSeconds);
-  }
-
-  /// Appends a big-endian 64-bit integer [value] to [builder].
-  static void _writeInt64(BytesBuilder builder, int value) {
-    for (var shift = 56; shift >= 0; shift -= 8) {
-      builder.addByte((value >> shift) & 0xFF);
-    }
-  }
-
-  /// Appends a nullable UTF-8 [value] to [builder] with a 1-byte presence flag and 32-bit length.
+  /// Appends a nullable length-prefixed UTF-8 [value] to [builder].
   static void _writeNullableString(BytesBuilder builder, String? value) {
     if (value == null) {
       builder.addByte(0);
       return;
     }
     final encoded = _utf8Codec.encode(value);
-    final len = encoded.length;
+    final lengthBuffer = ByteData(4)..setUint32(0, encoded.length);
     builder
       ..addByte(1)
-      ..addByte((len >> 24) & 0xFF)
-      ..addByte((len >> 16) & 0xFF)
-      ..addByte((len >> 8) & 0xFF)
-      ..addByte(len & 0xFF)
+      ..add(lengthBuffer.buffer.asUint8List())
       ..add(encoded);
   }
 
@@ -384,10 +351,9 @@ class WorkspaceSyncState {
         other.acknowledgedLocalGeneration == acknowledgedLocalGeneration &&
         other.acknowledgedRemoteGeneration == acknowledgedRemoteGeneration &&
         other.localSourceDigest == localSourceDigest &&
+        other.remoteSourceDigest == remoteSourceDigest &&
         other.remoteEtag == remoteEtag &&
-        other.remoteLastModified == remoteLastModified &&
-        mapEquals(other.deletedLabelTimestamps, deletedLabelTimestamps) &&
-        mapEquals(other.deletedLocationTimestamps, deletedLocationTimestamps);
+        other.remoteLastModified == remoteLastModified;
   }
 
   @override
@@ -397,17 +363,8 @@ class WorkspaceSyncState {
     acknowledgedLocalGeneration,
     acknowledgedRemoteGeneration,
     localSourceDigest,
+    remoteSourceDigest,
     remoteEtag,
     remoteLastModified,
-    Object.hashAllUnordered(
-      deletedLabelTimestamps.entries.map(
-        (entry) => Object.hash(entry.key, entry.value),
-      ),
-    ),
-    Object.hashAllUnordered(
-      deletedLocationTimestamps.entries.map(
-        (entry) => Object.hash(entry.key, entry.value),
-      ),
-    ),
   );
 }

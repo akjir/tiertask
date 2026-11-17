@@ -1,0 +1,75 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 0,
+    "tasks": [],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "1970-01-01 00:00:00",
+    "tasks": []
+  },
+  "labels": [],
+  "locations": [],
+  "tasks": [
+    {
+      "id": "111111OkD2",
+      "priority": false,
+      "name": "Date-only due and anchor with clock-shaped note",
+      "note": null,
+      "created": "2026-11-01 08:00:00",
+      "finished": null,
+      "modified": null,
+      "completions": 0,
+      "repeat": null,
+      "labels": [],
+      "blocked": {},
+      "suspended": {
+        "forever": true,
+        "utc": null,
+        "note": "Indefinite hold"
+      },
+      "due": {
+        "utc": "2026-11-20 00:00:00",
+        "anchor": "2026-11-21 00:00:00",
+        "passive": false,
+        "note": "18:00"
+      },
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [
+        "day any",
+        "time any",
+        "location any"
+      ],
+      "subtasks": null
+    },
+    {
+      "id": "222222OkD2",
+      "priority": false,
+      "name": "Full due modifiers and midnight repeat clock omission",
+      "note": null,
+      "created": "2026-11-01 08:00:00",
+      "finished": null,
+      "modified": null,
+      "completions": 0,
+      "repeat": "2 weeks",
+      "labels": [],
+      "blocked": {},
+      "suspended": null,
+      "due": {
+        "utc": "2026-02-28 17:00:00",
+        "anchor": "2026-01-31 18:00:05",
+        "passive": true,
+        "note": "Cutoff"
+      },
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [],
+      "subtasks": null
+    }
+  ]
+}

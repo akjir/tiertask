@@ -68,6 +68,7 @@ class WebDavRepository {
 
   String? _cachedContent;
   String? _cachedEtag;
+  bool? _cachedExists;
   String? _cachedLastModified;
   Uri? _cachedUri;
   final HttpClient Function() _clientFactory;
@@ -75,6 +76,9 @@ class WebDavRepository {
 
   /// Cached HTTP `ETag` response header from the most recent `.tdf` synchronization.
   String? get cachedEtag => _cachedEtag;
+
+  /// Tri-state existence cache for the active `.tdf` URI (`null` unknown, `false` after `404`, `true` after `2xx`/`304`/seed).
+  bool? get cachedExists => _cachedExists;
 
   /// Cached HTTP `Last-Modified` response header from the most recent `.tdf` synchronization.
   String? get cachedLastModified => _cachedLastModified;
@@ -98,9 +102,10 @@ class WebDavRepository {
     return lookupAppLocalizations(locale);
   }
 
-  /// Clears cached HTTP `ETag`, `Last-Modified`, and `.tdf` content state.
+  /// Clears cached HTTP `ETag`, `Last-Modified`, existence, and `.tdf` content state.
   void clearCache() {
     _cachedUri = null;
+    _cachedExists = null;
     _cachedEtag = null;
     _cachedLastModified = null;
     _cachedContent = null;
@@ -210,6 +215,7 @@ class WebDavRepository {
     final normalizedLastModified = _normalizeHeaderValue(lastModified);
     if (normalizedEtag == null && normalizedLastModified == null) return;
     _cachedUri = uri;
+    _cachedExists = true;
     _cachedContent = content;
     _cachedEtag = normalizedEtag;
     _cachedLastModified = normalizedLastModified;
@@ -235,12 +241,7 @@ class WebDavRepository {
       }
     }
     clearCache();
-    await _putToUri(
-      uri,
-      emptyContent,
-      localizations,
-      useConditionalCache: true,
-    );
+    await _putToUri(uri, emptyContent, localizations);
     AppLogger.event(
       LogLevel.info,
       LogTag.storage,
@@ -262,12 +263,26 @@ class WebDavRepository {
     }
   }
 
-  /// Attaches `If-Match` to [request] when a strong cached `ETag` exists for [uri].
-  void _applyConditionalPutHeaders(HttpClientRequest request, Uri uri) {
-    if (_cachedUri != uri) return;
-    if (_cachedEtag case final etag? when isStrongEtag(etag)) {
-      request.headers.set(HttpHeaders.ifMatchHeader, etag);
+  /// Attaches `If-Match` or `If-None-Match: *` to [request] according to tri-state [_cachedExists] (`TDF-PUB-003`).
+  ({String? ifMatch, String? ifNoneMatch}) _applyConditionalPutHeaders(
+    HttpClientRequest request,
+    Uri uri,
+  ) {
+    if (_cachedUri != uri) {
+      return (ifMatch: null, ifNoneMatch: null);
     }
+    if (_cachedExists == true) {
+      if (_cachedEtag case final etag? when isStrongEtag(etag)) {
+        request.headers.set(HttpHeaders.ifMatchHeader, etag);
+        return (ifMatch: etag, ifNoneMatch: null);
+      }
+      return (ifMatch: null, ifNoneMatch: null);
+    }
+    if (_cachedExists == false) {
+      request.headers.set(HttpHeaders.ifNoneMatchHeader, '*');
+      return (ifMatch: null, ifNoneMatch: '*');
+    }
+    return (ifMatch: null, ifNoneMatch: null);
   }
 
   /// Executes an HTTP GET against [uri] and returns whether the resource exists along with its decoded body.
@@ -416,6 +431,8 @@ class WebDavRepository {
     if (status == HttpStatus.notFound) {
       if (useConditionalCache) {
         clearCache();
+        _cachedUri = uri;
+        _cachedExists = false;
       }
       AppLogger.event(
         LogLevel.info,
@@ -452,11 +469,14 @@ class WebDavRepository {
     required String eventName,
     required bool logOnSuccess,
     required bool useConditionalCache,
+    String? ifMatch,
+    String? ifNoneMatch,
   }) {
     final status = response.statusCode;
     if (status >= 200 && status < 300) {
       if (useConditionalCache) {
         _cachedUri = uri;
+        _cachedExists = true;
         _cachedContent = payload;
         _cachedEtag = _normalizeHeaderValue(
           response.headers.value(HttpHeaders.etagHeader),
@@ -475,6 +495,8 @@ class WebDavRepository {
             'uri': uri.toString(),
             'status': status,
             'bytes': byteLength,
+            'ifMatch': ?ifMatch,
+            'ifNoneMatch': ?ifNoneMatch,
             if (useConditionalCache && _cachedEtag != null) 'etag': _cachedEtag,
             'elapsed_ms': stopwatch.elapsedMilliseconds,
           },
@@ -483,8 +505,10 @@ class WebDavRepository {
       return;
     }
     if (status == HttpStatus.preconditionFailed && useConditionalCache) {
+      _cachedExists = null;
       _cachedEtag = null;
       _cachedLastModified = null;
+      _cachedContent = null;
     }
     if (status == HttpStatus.unauthorized || status == HttpStatus.forbidden) {
       throw WebDavException(
@@ -517,6 +541,8 @@ class WebDavRepository {
     final stopwatch = Stopwatch()..start();
     final client = _clientFactory();
     client.connectionTimeout = timeout;
+    String? sentIfMatch;
+    String? sentIfNoneMatch;
 
     try {
       final request = await client.putUrl(uri).timeout(timeout);
@@ -526,7 +552,9 @@ class WebDavRepository {
         'text/plain; charset=utf-8',
       );
       if (useConditionalCache) {
-        _applyConditionalPutHeaders(request, uri);
+        final preconditions = _applyConditionalPutHeaders(request, uri);
+        sentIfMatch = preconditions.ifMatch;
+        sentIfNoneMatch = preconditions.ifNoneMatch;
       }
 
       final bytes = utf8.encode(payload);
@@ -545,6 +573,8 @@ class WebDavRepository {
         eventName: eventName,
         logOnSuccess: logOnSuccess,
         useConditionalCache: useConditionalCache,
+        ifMatch: sentIfMatch,
+        ifNoneMatch: sentIfNoneMatch,
       );
     } on WebDavException catch (error) {
       AppLogger.event(
@@ -554,6 +584,8 @@ class WebDavRepository {
         fields: <String, Object?>{
           'uri': uri.toString(),
           'status': error.statusCode,
+          'ifMatch': ?sentIfMatch,
+          'ifNoneMatch': ?sentIfNoneMatch,
         },
         error: error,
       );
@@ -684,6 +716,7 @@ class WebDavRepository {
       headers.value(HttpHeaders.lastModifiedHeader),
     );
     _cachedUri = uri;
+    _cachedExists = true;
     _cachedContent = content;
     _cachedEtag =
         nextEtag ??

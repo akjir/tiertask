@@ -981,17 +981,17 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String errorUnsupportedTdfVersionLocal(String version) {
-    return 'Die lokale Datei verwendet die nicht unterstützte Dateiversion $version. Bitte aktualisieren Sie TierTask auf eine neuere Version.';
+    return 'Die lokale Datei verwendet die nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
   }
 
   @override
   String errorUnsupportedTdfVersionRemote(String version) {
-    return 'Die Remote-Datei verwendet die nicht unterstützte Dateiversion $version. Bitte aktualisieren Sie TierTask auf eine neuere Version.';
+    return 'Die Remote-Datei verwendet die nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
   }
 
   @override
   String errorUnsupportedTdfVersionBoth(String version) {
-    return 'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte Dateiversion $version. Bitte aktualisieren Sie TierTask auf eine neuere Version.';
+    return 'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
   }
 
   @override
@@ -1546,4 +1546,21 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get historyErrorMaxExceeded =>
       'Maximal 500 Verlaufseinträge pro Aufgabe erreicht.';
+
+  @override
+  String get syncConflictDeletionBanner =>
+      'Synchronisierung pausiert: Eine gleichzeitige Bearbeitung steht im Konflikt mit einer Löschung.';
+
+  @override
+  String get syncConflictRecoveryBanner =>
+      'Synchronisierung pausiert: Lokale Änderungen erfordern eine Wiederherstellung nach Fortschreiten der Synchronisierungshistorie.';
+
+  @override
+  String get syncErrorGenerationRollbackBanner =>
+      'Synchronisierung gestoppt: Die Synchronisierungsgeneration der gemeinsamen Datei ist älter als der bestätigte Stand.';
+
+  @override
+  String taskInfoDueAnchorDetail(String anchor) {
+    return 'Terminanker: $anchor';
+  }
 }

@@ -1,0 +1,265 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 4,
+    "tasks": [
+      {
+        "id": "6uCk8N0aB1",
+        "deletedAt": "2026-11-01 12:00:00",
+        "checkpoint": 0
+      }
+    ],
+    "labels": [
+      {
+        "id": "1rQv7S0cD2",
+        "deletedAt": "2026-11-02 09:00:00"
+      }
+    ],
+    "locations": [
+      {
+        "id": "8tYp4M0eF3",
+        "deletedAt": "2026-11-02 10:15:00"
+      }
+    ]
+  },
+  "queue": {
+    "modified": "2026-11-01 19:30:00",
+    "tasks": [
+      "8jKaCdOkD2",
+      "5vWx9ZOk91",
+      "3nQp7ROkB8"
+    ]
+  },
+  "labels": [
+    {
+      "id": "4x9p2mOkD2",
+      "scoped": false,
+      "name": "Home & Garden",
+      "color": null,
+      "note": null,
+      "modified": "2026-11-01 08:00:00",
+      "links": [],
+      "conditions": [
+        "day sat sun",
+        "time 08:00 20:00",
+        "location 7pQr9mOkD2"
+      ]
+    },
+    {
+      "id": "9kLm2P0aBc",
+      "scoped": true,
+      "name": "IT & Servers",
+      "color": "#2196F3",
+      "note": "Infrastructure runbooks and maintenance",
+      "modified": "2026-11-01 08:00:00",
+      "links": [
+        {
+          "title": "Grafana Dashboard",
+          "uri": "https://grafana.example.com/d/nas"
+        },
+        {
+          "title": "Runbook Repo",
+          "uri": "https://git.example.com/ops/runbooks"
+        }
+      ],
+      "conditions": [
+        "day mon tue wed thu fri",
+        "time 08:00 12:00",
+        "time 14:00 18:00"
+      ]
+    }
+  ],
+  "locations": [
+    {
+      "id": "7pQr9mOkD2",
+      "name": "Home",
+      "note": "Main residence driveway and garden",
+      "source": "Erfurt, Germany",
+      "latitude": "50.9787",
+      "longitude": "11.0328",
+      "radius": "150",
+      "modified": "2026-11-01 08:00:00"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "2bDf6HOkA4",
+      "priority": false,
+      "name": "Design 3D-printed enclosure for backup NAS",
+      "note": null,
+      "created": "2026-11-01 12:00:00",
+      "finished": null,
+      "modified": "2026-11-01 12:00:00",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "9kLm2P0aBc"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": null,
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [],
+      "subtasks": null
+    },
+    {
+      "id": "3nQp7ROkB8",
+      "priority": false,
+      "name": "Order replacement lawnmower blades online",
+      "note": null,
+      "created": "2026-11-01 18:00:00",
+      "finished": null,
+      "modified": "2026-11-01 18:20:00",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": {
+        "utc": "2026-11-03 17:00:00",
+        "anchor": "2026-11-03 18:00:00",
+        "passive": true,
+        "note": "Order before seasonal supplier cutoff"
+      },
+      "origin": {
+        "namespace": "https://jira.example.com",
+        "externalKey": "HOME-42"
+      },
+      "links": [
+        {
+          "title": "Portal Login",
+          "uri": "https://example.com/portal#login"
+        },
+        {
+          "title": "Local Folder",
+          "uri": "file:///home/user/documents/tax2026"
+        }
+      ],
+      "history": [
+        {
+          "timestamp": "2026-11-01 18:05:00",
+          "text": "Checked blade part number against mower manual"
+        },
+        {
+          "timestamp": "2026-11-01 18:20:00",
+          "text": "Confirmed OEM stock with dealer"
+        }
+      ],
+      "conditions": [
+        "any"
+      ],
+      "subtasks": null
+    },
+    {
+      "id": "5vWx9ZOk91",
+      "priority": false,
+      "name": "Clean dust filters on home NAS server",
+      "note": null,
+      "created": "2026-10-01 09:00:00",
+      "finished": null,
+      "modified": "2026-11-01 10:00:00",
+      "completions": 1,
+      "repeat": "1 months 09:00 lead 5 days",
+      "labels": [
+        "4x9p2mOkD2",
+        "9kLm2P0aBc"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": {
+        "utc": "2026-02-28 17:00:00",
+        "anchor": "2026-01-31 18:00:00",
+        "passive": false,
+        "note": "Verify SMART health after cleaning"
+      },
+      "origin": null,
+      "links": [],
+      "history": [
+        {
+          "timestamp": "2026-10-01 09:30:00",
+          "text": "Replaced front intake filter pad"
+        }
+      ],
+      "conditions": [],
+      "subtasks": null
+    },
+    {
+      "id": "7mPr4T09xY",
+      "priority": false,
+      "name": "Mount winter tires",
+      "note": null,
+      "created": "2026-10-20 14:00:00",
+      "finished": "2026-10-29 16:45:00",
+      "modified": "2026-10-29 16:45:00",
+      "completions": 1,
+      "repeat": null,
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": null,
+      "origin": null,
+      "links": [],
+      "history": [
+        {
+          "timestamp": "2026-10-29 16:40:00",
+          "text": "Torqued lug nuts to 120 Nm"
+        }
+      ],
+      "conditions": [],
+      "subtasks": null
+    },
+    {
+      "id": "8jKaCdOkD2",
+      "priority": true,
+      "name": "Mow the lawn",
+      "note": "Check fuel level before starting",
+      "created": "2026-11-01 19:30:00",
+      "finished": null,
+      "modified": "2026-11-01 19:30:00",
+      "completions": 0,
+      "repeat": null,
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": {
+        "3nQp7ROkB8": 1
+      },
+      "suspended": {
+        "forever": false,
+        "utc": "2026-11-04 23:00:00",
+        "note": "Wait for blade delivery and dry forecast"
+      },
+      "due": {
+        "utc": "2026-11-07 16:00:00",
+        "anchor": "2026-11-07 17:00:00",
+        "passive": false,
+        "note": "Before first frost"
+      },
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [
+        "time 09:00 18:00"
+      ],
+      "subtasks": {
+        "autoFinish": true,
+        "steps": [
+          {
+            "completed": false,
+            "text": "Get lawnmower from the shed"
+          },
+          {
+            "completed": true,
+            "text": "Empty grass catcher bag"
+          }
+        ]
+      }
+    }
+  ]
+}

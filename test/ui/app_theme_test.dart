@@ -28,7 +28,7 @@ import 'test_helpers.dart';
 
 void main() {
   const sampleTdf = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
   modified 2026-11-01 07:00:00
@@ -41,7 +41,6 @@ label work00OkD2 {
 task 000001OkD2 priority {
   name "Theme Test Task"
   created 2026-11-01 07:00
-  queued 2026-11-01 07:00
   labels work00OkD2
 }
 ''';

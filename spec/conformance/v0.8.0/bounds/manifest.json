@@ -1,0 +1,330 @@
+{
+  "version": "0.8.0",
+  "suite": "bounds",
+  "ruleIds": [
+    "TDF-DIR-001",
+    "TDF-DIR-006",
+    "TDF-DIR-007",
+    "TDF-DIR-009",
+    "TDF-ENT-003",
+    "TDF-ENT-004",
+    "TDF-ENT-005",
+    "TDF-ENT-006",
+    "TDF-GRAM-001",
+    "TDF-SER-001",
+    "TDF-SER-003",
+    "TDF-TYPE-001",
+    "TDF-TYPE-003",
+    "TDF-TYPE-005",
+    "TDF-TYPE-006",
+    "TDF-VAL-001",
+    "TDF-VAL-002"
+  ],
+  "boundConstants": {
+    "MAX_FILE_BYTES": 1048576,
+    "MAX_LINE_COUNT": 16384,
+    "MAX_NESTING_DEPTH": 2,
+    "MAX_BLOCKS_PER_DOC": 4096,
+    "MAX_LOCATIONS": 200,
+    "MAX_STMTS_PER_BLOCK": 1024,
+    "MAX_CONDITION_RULES_PER_ENTITY": 512,
+    "MAX_LOCATION_REFS_PER_ENTITY": 63,
+    "MAX_QUEUE_ENTRIES": 4096,
+    "MAX_DELETED_RECORDS": 4096,
+    "MAX_SYNC_GENERATION": 9007199254740991,
+    "MAX_COMPLETIONS": 9007199254740991,
+    "MAX_ARGS_PER_STMT": 64,
+    "MAX_TEXT_LENGTH": 500,
+    "MAX_NOTE_LENGTH": 2000,
+    "MAX_URI_LENGTH": 2048,
+    "MAX_LINKS_PER_TASK": 20,
+    "MAX_LINKS_PER_LABEL": 20,
+    "MAX_HISTORY_PER_TASK": 500,
+    "MAX_REPEAT_COUNT": 3650,
+    "MAX_LOCATION_RADIUS": 100000,
+    "MAX_NUMBER_LENGTH": 24,
+    "DEFAULT_DUE_LEAD_SECONDS": 86400
+  },
+  "fileCases": [
+    {
+      "id": "bd_01_nesting_depth",
+      "bound": "MAX_NESTING_DEPTH",
+      "acceptFile": "bd_01_nesting_depth_ok.tdf",
+      "rejectFile": "bd_01_nesting_depth_over.tdf",
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_02_location_refs",
+      "bound": "MAX_LOCATION_REFS_PER_ENTITY",
+      "acceptFile": "bd_02_location_refs_ok.tdf",
+      "rejectFile": "bd_02_location_refs_over.tdf",
+      "ruleIds": [
+        "TDF-DIR-009",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_03_args_per_stmt",
+      "bound": "MAX_ARGS_PER_STMT",
+      "acceptFile": "bd_03_args_per_stmt_ok.tdf",
+      "rejectFile": "bd_03_args_per_stmt_over.tdf",
+      "ruleIds": [
+        "TDF-GRAM-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_04_text_length_supplementary",
+      "bound": "MAX_TEXT_LENGTH",
+      "acceptFile": "bd_04_text_length_supplementary_ok.tdf",
+      "rejectFile": "bd_04_text_length_supplementary_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-001",
+        "TDF-TYPE-003",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_05_text_length_combining",
+      "bound": "MAX_TEXT_LENGTH",
+      "acceptFile": "bd_05_text_length_combining_ok.tdf",
+      "rejectFile": "bd_05_text_length_combining_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-001",
+        "TDF-TYPE-003",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_06_note_length",
+      "bound": "MAX_NOTE_LENGTH",
+      "acceptFile": "bd_06_note_length_ok.tdf",
+      "rejectFile": "bd_06_note_length_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-001",
+        "TDF-TYPE-003",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_07_uri_length",
+      "bound": "MAX_URI_LENGTH",
+      "acceptFile": "bd_07_uri_length_ok.tdf",
+      "rejectFile": "bd_07_uri_length_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-001",
+        "TDF-TYPE-005",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_08_links_per_task",
+      "bound": "MAX_LINKS_PER_TASK",
+      "acceptFile": "bd_08_links_per_task_ok.tdf",
+      "rejectFile": "bd_08_links_per_task_over.tdf",
+      "ruleIds": [
+        "TDF-DIR-006",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_09_links_per_label",
+      "bound": "MAX_LINKS_PER_LABEL",
+      "acceptFile": "bd_09_links_per_label_ok.tdf",
+      "rejectFile": "bd_09_links_per_label_over.tdf",
+      "ruleIds": [
+        "TDF-DIR-006",
+        "TDF-ENT-003",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_10_repeat_count",
+      "bound": "MAX_REPEAT_COUNT",
+      "acceptFile": "bd_10_repeat_count_ok.tdf",
+      "rejectFile": "bd_10_repeat_count_over.tdf",
+      "ruleIds": [
+        "TDF-DIR-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_11_location_radius",
+      "bound": "MAX_LOCATION_RADIUS",
+      "acceptFile": "bd_11_location_radius_ok.tdf",
+      "rejectFile": "bd_11_location_radius_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-ENT-004",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_12_number_length",
+      "bound": "MAX_NUMBER_LENGTH",
+      "acceptFile": "bd_12_number_length_ok.tdf",
+      "rejectFile": "bd_12_number_length_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-005",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_13_sync_generation",
+      "bound": "MAX_SYNC_GENERATION",
+      "acceptFile": "bd_13_sync_generation_ok.tdf",
+      "rejectFile": "bd_13_sync_generation_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-006",
+        "TDF-ENT-005",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_14_completions",
+      "bound": "MAX_COMPLETIONS",
+      "acceptFile": "bd_14_completions_ok.tdf",
+      "rejectFile": "bd_14_completions_over.tdf",
+      "ruleIds": [
+        "TDF-TYPE-006",
+        "TDF-VAL-002"
+      ]
+    }
+  ],
+  "templateCases": [
+    {
+      "id": "bd_15_file_bytes_input",
+      "bound": "MAX_FILE_BYTES",
+      "templateKind": "file_bytes",
+      "acceptCount": 1048576,
+      "rejectCount": 1048577,
+      "ruleIds": [
+        "TDF-VAL-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_16_file_bytes_serializer_output",
+      "bound": "MAX_FILE_BYTES",
+      "templateKind": "serializer_output_byte_overflow",
+      "acceptCount": 1048576,
+      "rejectCount": 1048577,
+      "ruleIds": [
+        "TDF-SER-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_17_line_count_input",
+      "bound": "MAX_LINE_COUNT",
+      "templateKind": "line_count",
+      "acceptCount": 16384,
+      "rejectCount": 16385,
+      "ruleIds": [
+        "TDF-VAL-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_18_line_count_serializer_output",
+      "bound": "MAX_LINE_COUNT",
+      "templateKind": "serializer_output_line_overflow",
+      "acceptCount": 16384,
+      "rejectCount": 16385,
+      "ruleIds": [
+        "TDF-SER-001",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_19_blocks_per_doc",
+      "bound": "MAX_BLOCKS_PER_DOC",
+      "templateKind": "blocks_per_doc",
+      "acceptCount": 4096,
+      "rejectCount": 4097,
+      "ruleIds": [
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_20_locations",
+      "bound": "MAX_LOCATIONS",
+      "templateKind": "locations",
+      "acceptCount": 200,
+      "rejectCount": 201,
+      "ruleIds": [
+        "TDF-ENT-004",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_21_stmts_per_block",
+      "bound": "MAX_STMTS_PER_BLOCK",
+      "templateKind": "stmts_per_block",
+      "acceptCount": 1024,
+      "rejectCount": 1025,
+      "ruleIds": [
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_22_full_capacity_canonical_task",
+      "bound": "MAX_STMTS_PER_BLOCK",
+      "templateKind": "full_capacity_canonical_task",
+      "acceptCount": 534,
+      "rejectCount": 1025,
+      "ruleIds": [
+        "TDF-VAL-002",
+        "TDF-SER-003"
+      ]
+    },
+    {
+      "id": "bd_23_condition_rules_per_entity",
+      "bound": "MAX_CONDITION_RULES_PER_ENTITY",
+      "templateKind": "condition_rules_multi_block",
+      "acceptCount": 512,
+      "rejectCount": 513,
+      "ruleIds": [
+        "TDF-DIR-009",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_24_queue_entries",
+      "bound": "MAX_QUEUE_ENTRIES",
+      "templateKind": "queue_entries",
+      "acceptCount": 4096,
+      "rejectCount": 4097,
+      "ruleIds": [
+        "TDF-ENT-006",
+        "TDF-VAL-002",
+        "TDF-SER-001"
+      ]
+    },
+    {
+      "id": "bd_25_deleted_records",
+      "bound": "MAX_DELETED_RECORDS",
+      "templateKind": "deleted_records",
+      "acceptCount": 4096,
+      "rejectCount": 4097,
+      "ruleIds": [
+        "TDF-ENT-005",
+        "TDF-VAL-002"
+      ]
+    },
+    {
+      "id": "bd_26_history_per_task_before_dedup",
+      "bound": "MAX_HISTORY_PER_TASK",
+      "templateKind": "history_raw_duplicates",
+      "acceptCount": 500,
+      "rejectCount": 501,
+      "ruleIds": [
+        "TDF-DIR-007",
+        "TDF-VAL-002"
+      ]
+    }
+  ]
+}

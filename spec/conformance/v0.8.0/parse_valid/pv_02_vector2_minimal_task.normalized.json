@@ -1,0 +1,37 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 0,
+    "tasks": [],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "1970-01-01 00:00:00",
+    "tasks": []
+  },
+  "labels": [],
+  "locations": [],
+  "tasks": [
+    {
+      "id": "AAAAAAAAAA",
+      "priority": false,
+      "name": "A",
+      "note": null,
+      "created": "2026-11-16 00:00:00",
+      "finished": null,
+      "modified": null,
+      "completions": 0,
+      "repeat": null,
+      "labels": [],
+      "blocked": {},
+      "suspended": null,
+      "due": null,
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [],
+      "subtasks": null
+    }
+  ]
+}

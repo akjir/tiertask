@@ -78,6 +78,19 @@ class TdfLocation {
   final String? _longitudeText;
   final String? _radiusText;
 
+  /// Number of direct child statements emitted inside this `location` block in canonical `0.8.0` form.
+  int get canonicalDirectChildStatementCount {
+    var count = 3;
+    if (note case final currentNote? when currentNote.isNotEmpty) {
+      count++;
+    }
+    if (source case final currentSource? when currentSource.isNotEmpty) {
+      count++;
+    }
+    if (modifiedAt != null) count++;
+    return count;
+  }
+
   /// Effective UTC modification timestamp (`modifiedAt ?? defaultModifiedAt`).
   DateTime get effectiveModifiedAt => modifiedAt ?? defaultModifiedAt;
 

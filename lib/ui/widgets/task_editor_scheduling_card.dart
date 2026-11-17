@@ -20,7 +20,9 @@ import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
 import '../../models/tdf_error.dart';
+import '../../models/tdf_sync_metadata.dart';
 import '../../models/tdf_timezone.dart';
+import '../../models/webdav_config.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -642,27 +644,26 @@ class TaskEditorSuspendedField extends StatelessWidget {
     );
   }
 
-  /// Formats an initial `suspended` timestamp for the input field (omitting `defaultSuspendedAt`).
-  static String formatInitialText(DateTime? suspendedAt) {
+  /// Formats an initial `suspended` UTC timestamp in [configuration]'s local wall-clock time (omitting `defaultSuspendedAt`).
+  static String formatInitialText(
+    DateTime? suspendedAt, [
+    WebDavConfig configuration = const WebDavConfig(),
+  ]) {
     if (suspendedAt == null || suspendedAt == TaskItem.defaultSuspendedAt) {
       return '';
     }
-    return TaskItem.formatTdfTimestamp(suspendedAt);
+    return formatLocalTimestamp(suspendedAt, configuration);
   }
 
-  /// Resolves the `suspendedAt` timestamp when [isSuspended] is enabled, or `null` when disabled.
-  static DateTime? parseSuspendedTimestamp({
-    required bool isSuspended,
-    required String rawText,
-  }) {
-    if (!isSuspended) {
-      return null;
+  /// Formats an optional UTC [instant] in [configuration]'s local wall-clock time, or `''` when `null`.
+  static String formatLocalTimestamp(
+    DateTime? instant,
+    WebDavConfig configuration,
+  ) {
+    if (instant == null) {
+      return '';
     }
-    final trimmed = rawText.trim();
-    if (trimmed.isEmpty) {
-      return TaskItem.defaultSuspendedAt;
-    }
-    return TaskItem.tryParseTdfTimestampInput(trimmed);
+    return TaskItem.formatTdfTimestamp(configuration.toLocalWallClock(instant));
   }
 
   /// Opens a Material 3 date picker and returns the updated `YYYY-MM-DD` (or `YYYY-MM-DD HH:MM`) text.
@@ -711,6 +712,31 @@ class TaskEditorSuspendedField extends StatelessWidget {
         _extractDatePart(currentText) ?? TaskItem.formatIsoDate(fallbackDate);
     final formattedTime = _formatTimeOfDay(pickedTime);
     return '$datePart $formattedTime';
+  }
+
+  /// Parses [rawText] as a local calendar timestamp and resolves its UTC instant under [configuration] (`TDF-CAL-001`), returning `null` if invalid.
+  static ({TdfLocalDateTime localInput, DateTime resolvedUtc})?
+  tryParseLocalDateTimeInput(String rawText, WebDavConfig configuration) {
+    final parsedWallClock = TaskItem.tryParseTdfTimestampInput(rawText.trim());
+    if (parsedWallClock == null) {
+      return null;
+    }
+    try {
+      final localInput = TdfLocalDateTime.fromWallClock(parsedWallClock);
+      final resolvedUtc = TaskItem.normalizeTimestamp(
+        configuration.localWallClockToUtc(parsedWallClock),
+      );
+      if (!TdfCalendar.isWithinTimestampBounds(resolvedUtc)) {
+        return null;
+      }
+      return (localInput: localInput, resolvedUtc: resolvedUtc);
+    } on TdfException {
+      return null;
+    } on TdfContextException {
+      return null;
+    } on FormatException {
+      return null;
+    }
   }
 
   /// Wraps a [showTimePicker] dialog in a 24-hour [MediaQuery] configuration.

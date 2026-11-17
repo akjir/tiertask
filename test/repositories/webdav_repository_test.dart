@@ -124,7 +124,7 @@ void main() {
       expect(lastAcceptHeader, contains('text/plain'));
 
       const sampleTdf =
-          'tdf 0.5.1\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "Remote Focus 1"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n';
+          'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "Remote Focus 1"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n';
       for (final successStatus in <int>[
         HttpStatus.ok,
         HttpStatus.created,
@@ -178,7 +178,7 @@ void main() {
 
         forcedPutStatus = authStatus;
         await expectLater(
-          () => repository.saveTdf('tdf 0.5.1\n'),
+          () => repository.saveTdf('tdf 0.8.0\n'),
           throwsA(
             isA<WebDavException>()
                 .having((e) => e.statusCode, 'statusCode', equals(authStatus))
@@ -205,7 +205,7 @@ void main() {
 
       forcedPutStatus = HttpStatus.internalServerError;
       await expectLater(
-        () => repository.saveTdf('tdf 0.5.1\n'),
+        () => repository.saveTdf('tdf 0.8.0\n'),
         throwsA(
           isA<WebDavException>().having(
             (e) => e.statusCode,
@@ -229,7 +229,7 @@ void main() {
         ),
       );
       await expectLater(
-        () => repository.saveTdf('tdf 0.5.1\n'),
+        () => repository.saveTdf('tdf 0.8.0\n'),
         throwsA(
           isA<WebDavException>().having(
             (e) => e.message,
@@ -252,7 +252,7 @@ void main() {
         throwsA(isA<WebDavException>()),
       );
       await expectLater(
-        () => unreachableRepo.saveTdf('tdf 0.5.1\n'),
+        () => unreachableRepo.saveTdf('tdf 0.8.0\n'),
         throwsA(isA<WebDavException>()),
       );
     });
@@ -270,24 +270,24 @@ void main() {
 
       // Wiping a non-existent remote file initializes it without creating .bak.
       await repository.wipeTdf(createBackup: true);
-      expect(remoteFiles[remotePath], equals('tdf 0.7.0\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.8.0\n'));
       expect(remoteFiles.containsKey('$remotePath.bak'), isFalse);
 
       // First wipe with createBackup: true writes .bak.
-      remoteFiles[remotePath] = 'tdf 0.6.0\n# state 1\n';
+      remoteFiles[remotePath] = 'tdf 0.8.0\n# state 1\n';
       await repository.wipeTdf(createBackup: true);
-      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.6.0\n# state 1\n'));
-      expect(remoteFiles[remotePath], equals('tdf 0.7.0\n'));
+      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.8.0\n# state 1\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.8.0\n'));
 
       // Second wipe with createBackup: true writes .bak.001 without overwriting .bak.
-      remoteFiles[remotePath] = 'tdf 0.6.0\n# state 2\n';
+      remoteFiles[remotePath] = 'tdf 0.8.0\n# state 2\n';
       await repository.wipeTdf(createBackup: true);
       expect(
         remoteFiles['$remotePath.bak.001'],
-        equals('tdf 0.6.0\n# state 2\n'),
+        equals('tdf 0.8.0\n# state 2\n'),
       );
-      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.6.0\n# state 1\n'));
-      expect(remoteFiles[remotePath], equals('tdf 0.7.0\n'));
+      expect(remoteFiles['$remotePath.bak'], equals('tdf 0.8.0\n# state 1\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.8.0\n'));
     });
 
     test('validates WebDAV configuration and endpoint URIs and emits sanitized [STORAGE] logs to AppLogger', () async {
@@ -311,7 +311,7 @@ void main() {
         throwsA(isA<WebDavException>()),
       );
       await expectLater(
-        () => unconfiguredRepo.saveTdf('tdf 0.5.1\n'),
+        () => unconfiguredRepo.saveTdf('tdf 0.8.0\n'),
         throwsA(isA<WebDavException>()),
       );
 
@@ -373,7 +373,7 @@ void main() {
         reason: 'WebDavConfig.toString() must redact password',
       );
       final repository = WebDavRepository(config: activeConfig);
-      await repository.saveTdf('tdf 0.5.1\n');
+      await repository.saveTdf('tdf 0.8.0\n');
       await repository.fetchTdf();
 
       AppLogger.error(
@@ -465,7 +465,7 @@ void main() {
       final etagServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => etagServer.close(force: true));
 
-      var serverContent = 'tdf 0.6.0\n# v1\n';
+      var serverContent = 'tdf 0.8.0\n# v1\n';
       String? serverEtag = '"etag-v1"';
       String? serverLastModified = 'Mon, 09 Nov 2026 22:00:00 GMT';
       String? receivedIfNoneMatch;
@@ -484,22 +484,24 @@ void main() {
         receivedIfMatch = request.headers.value(HttpHeaders.ifMatchHeader);
 
         if (request.method == 'GET') {
+          final currentEtag = serverEtag;
+          final currentLastModified = serverLastModified;
           final etagMatched =
-              serverEtag != null && receivedIfNoneMatch == serverEtag;
+              currentEtag != null && receivedIfNoneMatch == currentEtag;
           final lastModMatched =
-              serverEtag == null &&
-              serverLastModified != null &&
-              receivedIfModifiedSince == serverLastModified;
+              currentEtag == null &&
+              currentLastModified != null &&
+              receivedIfModifiedSince == currentLastModified;
           if (etagMatched || lastModMatched) {
             get304Count++;
             request.response.statusCode = HttpStatus.notModified;
-            if (serverEtag != null) {
-              request.response.headers.set(HttpHeaders.etagHeader, serverEtag!);
+            if (currentEtag != null) {
+              request.response.headers.set(HttpHeaders.etagHeader, currentEtag);
             }
-            if (serverLastModified != null) {
+            if (currentLastModified != null) {
               request.response.headers.set(
                 HttpHeaders.lastModifiedHeader,
-                serverLastModified!,
+                currentLastModified,
               );
             }
             await request.response.close();
@@ -507,13 +509,13 @@ void main() {
           }
           get200Count++;
           request.response.statusCode = HttpStatus.ok;
-          if (serverEtag != null) {
-            request.response.headers.set(HttpHeaders.etagHeader, serverEtag!);
+          if (currentEtag != null) {
+            request.response.headers.set(HttpHeaders.etagHeader, currentEtag);
           }
-          if (serverLastModified != null) {
+          if (currentLastModified != null) {
             request.response.headers.set(
               HttpHeaders.lastModifiedHeader,
-              serverLastModified!,
+              currentLastModified,
             );
           }
           request.response.write(serverContent);
@@ -529,14 +531,17 @@ void main() {
             return;
           }
           serverContent = body;
-          if (serverEtag != null && !serverEtag!.startsWith('W/')) {
-            serverEtag = '"etag-v2"';
-            request.response.headers.set(HttpHeaders.etagHeader, serverEtag!);
+          if (serverEtag case final activeEtag?
+              when !activeEtag.startsWith('W/')) {
+            const nextEtag = '"etag-v2"';
+            serverEtag = nextEtag;
+            request.response.headers.set(HttpHeaders.etagHeader, nextEtag);
           }
-          serverLastModified = 'Mon, 09 Nov 2026 22:05:00 GMT';
+          const nextLastModified = 'Mon, 09 Nov 2026 22:05:00 GMT';
+          serverLastModified = nextLastModified;
           request.response.headers.set(
             HttpHeaders.lastModifiedHeader,
-            serverLastModified!,
+            nextLastModified,
           );
           request.response.statusCode = HttpStatus.noContent;
           await request.response.close();
@@ -560,8 +565,9 @@ void main() {
 
       // 1. Initial GET returns 200 OK and caches ETag and Last-Modified.
       final firstBody = await repository.fetchTdf();
-      expect(firstBody, equals('tdf 0.6.0\n# v1\n'));
+      expect(firstBody, equals('tdf 0.8.0\n# v1\n'));
       expect(repository.lastFetchWasNotModified, isFalse);
+      expect(repository.cachedExists, isTrue);
       expect(repository.cachedEtag, equals('"etag-v1"'));
       expect(
         repository.cachedLastModified,
@@ -572,7 +578,7 @@ void main() {
 
       // 2. Second GET sends If-None-Match and If-Modified-Since, receives 304 Not Modified, and returns cached content.
       final secondBody = await repository.fetchTdf();
-      expect(secondBody, equals('tdf 0.6.0\n# v1\n'));
+      expect(secondBody, equals('tdf 0.8.0\n# v1\n'));
       expect(repository.lastFetchWasNotModified, isTrue);
       expect(receivedIfNoneMatch, equals('"etag-v1"'));
       expect(receivedIfModifiedSince, equals('Mon, 09 Nov 2026 22:00:00 GMT'));
@@ -580,8 +586,9 @@ void main() {
       expect(get304Count, equals(1));
 
       // 3. PUT sends If-Match: "etag-v1" and updates cachedEtag to "etag-v2".
-      await repository.saveTdf('tdf 0.6.0\n# v2\n');
+      await repository.saveTdf('tdf 0.8.0\n# v2\n');
       expect(receivedIfMatch, equals('"etag-v1"'));
+      expect(repository.cachedExists, isTrue);
       expect(repository.cachedEtag, equals('"etag-v2"'));
       expect(
         repository.cachedLastModified,
@@ -590,17 +597,17 @@ void main() {
 
       // 4. Subsequent GET uses "etag-v2" from PUT response and receives 304 Not Modified without redownloading.
       final thirdBody = await repository.fetchTdf();
-      expect(thirdBody, equals('tdf 0.6.0\n# v2\n'));
+      expect(thirdBody, equals('tdf 0.8.0\n# v2\n'));
       expect(repository.lastFetchWasNotModified, isTrue);
       expect(receivedIfNoneMatch, equals('"etag-v2"'));
       expect(get200Count, equals(1));
       expect(get304Count, equals(2));
 
-      // 5. Simulate concurrent external modification on server ("etag-v3"); PUT with stale "etag-v2" throws 412 and clears cached ETag.
-      serverContent = 'tdf 0.6.0\n# v3-external\n';
+      // 5. Simulate concurrent external modification on server ("etag-v3"); PUT with stale "etag-v2" throws 412 and clears cached ETag + cachedExists.
+      serverContent = 'tdf 0.8.0\n# v3-external\n';
       serverEtag = '"etag-v3"';
       await expectLater(
-        () => repository.saveTdf('tdf 0.6.0\n# v2-local-conflict\n'),
+        () => repository.saveTdf('tdf 0.8.0\n# v2-local-conflict\n'),
         throwsA(
           isA<WebDavException>().having(
             (e) => e.statusCode,
@@ -614,24 +621,36 @@ void main() {
         isNull,
         reason: 'HTTP 412 must invalidate stale cached ETag',
       );
+      expect(
+        repository.cachedLastModified,
+        isNull,
+        reason: 'HTTP 412 must invalidate stale cached Last-Modified',
+      );
+      expect(
+        repository.cachedExists,
+        isNull,
+        reason: 'HTTP 412 must reset cachedExists to null',
+      );
 
       // 6. Next GET after 412 fetches unconditionally (200 OK) and obtains "etag-v3".
       final fourthBody = await repository.fetchTdf();
-      expect(fourthBody, equals('tdf 0.6.0\n# v3-external\n'));
+      expect(fourthBody, equals('tdf 0.8.0\n# v3-external\n'));
       expect(repository.lastFetchWasNotModified, isFalse);
+      expect(repository.cachedExists, isTrue);
       expect(repository.cachedEtag, equals('"etag-v3"'));
       expect(get200Count, equals(2));
 
       // 7. Weak ETag sends If-None-Match on GET, but omits If-Match on PUT.
       serverEtag = 'W/"weak-v4"';
-      serverContent = 'tdf 0.6.0\n# v4-weak\n';
+      serverContent = 'tdf 0.8.0\n# v4-weak\n';
       repository.clearCache();
+      expect(repository.cachedExists, isNull);
       await repository.fetchTdf();
       expect(repository.cachedEtag, equals('W/"weak-v4"'));
       await repository.fetchTdf();
       expect(repository.lastFetchWasNotModified, isTrue);
       expect(receivedIfNoneMatch, equals('W/"weak-v4"'));
-      await repository.saveTdf('tdf 0.6.0\n# v5\n');
+      await repository.saveTdf('tdf 0.8.0\n# v5\n');
       expect(
         receivedIfMatch,
         isNull,
@@ -641,17 +660,209 @@ void main() {
       // 8. Server with only Last-Modified (no ETag) evaluates 304 via If-Modified-Since.
       serverEtag = null;
       serverLastModified = 'Mon, 09 Nov 2026 22:10:00 GMT';
-      serverContent = 'tdf 0.6.0\n# v6-lastmod-only\n';
+      serverContent = 'tdf 0.8.0\n# v6-lastmod-only\n';
       repository.clearCache();
+      expect(repository.cachedExists, isNull);
       repository.seedCacheIfEmpty(
         etag: null,
         lastModified: 'Mon, 09 Nov 2026 22:10:00 GMT',
-        content: 'tdf 0.6.0\n# v6-lastmod-only\n',
+        content: 'tdf 0.8.0\n# v6-lastmod-only\n',
+      );
+      expect(
+        repository.cachedExists,
+        isTrue,
+        reason: 'seedCacheIfEmpty must mark cachedExists as true',
       );
       final seededBody = await repository.fetchTdf();
-      expect(seededBody, equals('tdf 0.6.0\n# v6-lastmod-only\n'));
+      expect(seededBody, equals('tdf 0.8.0\n# v6-lastmod-only\n'));
       expect(repository.lastFetchWasNotModified, isTrue);
       expect(receivedIfModifiedSince, equals('Mon, 09 Nov 2026 22:10:00 GMT'));
+    });
+
+    test('enforces tri-state cachedExists transitions for fresh PUT, 404 -> If-None-Match: *, ETag-less 201/204 creation (DECISION-15), strong ETag creation, 412, clearCache, and wipeTdf', () async {
+      AppLogger.setEnabled(true, persistToDisk: false);
+      final casServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => casServer.close(force: true));
+
+      var fileExistsOnServer = false;
+      var serverBody = '';
+      String? responsePutEtag;
+      var responsePutStatus = HttpStatus.created;
+      var rejectPutWith412 = false;
+      String? lastPutIfMatch;
+      String? lastPutIfNoneMatch;
+
+      casServer.listen((HttpRequest request) async {
+        if (request.method == 'GET') {
+          if (!fileExistsOnServer) {
+            request.response.statusCode = HttpStatus.notFound;
+          } else {
+            request.response.statusCode = HttpStatus.ok;
+            if (responsePutEtag case final etag?) {
+              request.response.headers.set(HttpHeaders.etagHeader, etag);
+            }
+            request.response.write(serverBody);
+          }
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'PUT') {
+          lastPutIfMatch = request.headers.value(HttpHeaders.ifMatchHeader);
+          lastPutIfNoneMatch = request.headers.value(
+            HttpHeaders.ifNoneMatchHeader,
+          );
+          final body = await utf8.decoder.bind(request).join();
+          if (rejectPutWith412) {
+            request.response.statusCode = HttpStatus.preconditionFailed;
+            await request.response.close();
+            return;
+          }
+          fileExistsOnServer = true;
+          serverBody = body;
+          request.response.statusCode = responsePutStatus;
+          if (responsePutEtag case final etag?) {
+            request.response.headers.set(HttpHeaders.etagHeader, etag);
+          }
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      });
+
+      final config = WebDavConfig(
+        serverUrl: 'http://${casServer.address.host}:${casServer.port}',
+        username: 'stefan',
+        password: 'secret',
+        filePath: 'tri_state.tdf',
+        language: AppLanguage.english,
+      );
+
+      // 1. Fresh WebDavRepository (cachedExists == null) sends NEITHER If-Match NOR If-None-Match.
+      final freshRepo = WebDavRepository(config: config);
+      expect(freshRepo.cachedExists, isNull);
+      responsePutStatus = HttpStatus.noContent;
+      responsePutEtag = null;
+      await freshRepo.saveTdf('tdf 0.8.0\n# fresh\n');
+      expect(
+        lastPutIfMatch,
+        isNull,
+        reason: 'Fresh repo (cachedExists == null) must omit If-Match',
+      );
+      expect(
+        lastPutIfNoneMatch,
+        isNull,
+        reason: 'Fresh repo (cachedExists == null) must omit If-None-Match',
+      );
+      expect(freshRepo.cachedExists, isTrue);
+
+      // 2. 404 Not Found sets cachedExists == false; subsequent PUT sends If-None-Match: *.
+      //    When 201 Created / 204 No Content omits an ETag header, cachedExists transitions
+      //    immediately to true so a second saveTdf does NOT send If-None-Match: * (DECISION-15).
+      fileExistsOnServer = false;
+      freshRepo.clearCache();
+      expect(freshRepo.cachedExists, isNull);
+
+      expect(await freshRepo.fetchTdf(), isEmpty);
+      expect(
+        freshRepo.cachedExists,
+        isFalse,
+        reason: 'GET 404 must set cachedExists to false',
+      );
+
+      responsePutStatus = HttpStatus.created;
+      responsePutEtag = null;
+      await freshRepo.saveTdf('tdf 0.8.0\n# created-no-etag\n');
+      expect(
+        lastPutIfNoneMatch,
+        equals('*'),
+        reason: 'Initial PUT after 404 must send If-None-Match: *',
+      );
+      expect(lastPutIfMatch, isNull);
+      expect(
+        freshRepo.cachedExists,
+        isTrue,
+        reason: '201 Created without ETag must still transition cachedExists to true',
+      );
+      expect(freshRepo.cachedEtag, isNull);
+      expect(AppLogger.fullLogText, contains('ifNoneMatch=*'));
+
+      responsePutStatus = HttpStatus.noContent;
+      await freshRepo.saveTdf('tdf 0.8.0\n# second-put-no-etag\n');
+      expect(
+        lastPutIfNoneMatch,
+        isNull,
+        reason: 'Second PUT after ETag-less creation must NOT resend If-None-Match: *',
+      );
+      expect(lastPutIfMatch, isNull);
+      expect(freshRepo.cachedExists, isTrue);
+
+      // 3. 404 -> saveTdf returning 201 Created WITH strong ETag "v1" transitions cachedExists to true
+      //    and second saveTdf sends If-Match: "v1" without If-None-Match.
+      fileExistsOnServer = false;
+      freshRepo.clearCache();
+      expect(await freshRepo.fetchTdf(), isEmpty);
+      expect(freshRepo.cachedExists, isFalse);
+
+      responsePutStatus = HttpStatus.created;
+      responsePutEtag = '"v1"';
+      await freshRepo.saveTdf('tdf 0.8.0\n# created-with-v1\n');
+      expect(lastPutIfNoneMatch, equals('*'));
+      expect(lastPutIfMatch, isNull);
+      expect(freshRepo.cachedExists, isTrue);
+      expect(freshRepo.cachedEtag, equals('"v1"'));
+
+      responsePutStatus = HttpStatus.noContent;
+      responsePutEtag = '"v2"';
+      await freshRepo.saveTdf('tdf 0.8.0\n# updated-from-v1\n');
+      expect(
+        lastPutIfMatch,
+        equals('"v1"'),
+        reason:
+            'Second PUT after strong ETag creation must send If-Match: "v1"',
+      );
+      expect(
+        lastPutIfNoneMatch,
+        isNull,
+        reason: 'PUT when cachedExists == true must omit If-None-Match',
+      );
+      expect(freshRepo.cachedEtag, equals('"v2"'));
+      expect(AppLogger.fullLogText, contains(r'ifMatch="\"v1\""'));
+
+      // 4. HTTP 412 Precondition Failed resets cachedExists to null alongside cachedEtag and cachedLastModified.
+      rejectPutWith412 = true;
+      await expectLater(
+        () => freshRepo.saveTdf('tdf 0.8.0\n# conflict\n'),
+        throwsA(
+          isA<WebDavException>().having(
+            (e) => e.isPreconditionFailed,
+            'isPreconditionFailed',
+            isTrue,
+          ),
+        ),
+      );
+      expect(freshRepo.cachedExists, isNull);
+      expect(freshRepo.cachedEtag, isNull);
+      expect(freshRepo.cachedLastModified, isNull);
+
+      // 5. seedCacheIfEmpty sets cachedExists to true, and wipeTdf resets cachedExists to null.
+      rejectPutWith412 = false;
+      freshRepo.seedCacheIfEmpty(
+        etag: '"seeded"',
+        content: 'tdf 0.8.0\n# seeded\n',
+      );
+      expect(freshRepo.cachedExists, isTrue);
+      expect(freshRepo.cachedEtag, equals('"seeded"'));
+
+      responsePutEtag = null;
+      await freshRepo.wipeTdf(createBackup: false);
+      expect(
+        freshRepo.cachedExists,
+        isNull,
+        reason: 'wipeTdf must reset cachedExists to null',
+      );
+      expect(freshRepo.cachedEtag, isNull);
+      expect(freshRepo.cachedLastModified, isNull);
     });
   });
 }

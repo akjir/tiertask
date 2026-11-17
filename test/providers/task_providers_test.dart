@@ -16,15 +16,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_payload_comparison.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
@@ -35,6 +39,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 class _ControllableLocalRepository extends LocalFileRepository {
@@ -59,6 +64,15 @@ class _ControllableLocalRepository extends LocalFileRepository {
   Future<String> loadTdf() async => getStore();
 
   @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    final content = getStore();
+    final exists = content.isNotEmpty;
+    final digest = exists ? Sha256Service.hashHex(utf8.encode(content)) : null;
+    return (content: content, digest: digest, exists: exists);
+  }
+
+  @override
   Future<void> saveTdf(String tdfContent) async {
     if (shouldFailSave()) {
       throw const LocalFileException('Simulated disk full failure');
@@ -71,8 +85,11 @@ class _ControllableLocalRepository extends LocalFileRepository {
     if (shouldFailSave()) {
       throw const LocalFileException('Simulated wipe failure');
     }
-    setStore('tdf 0.7.0\n');
+    setStore('tdf 0.8.0\n');
   }
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
 }
 
 class _ControllableWebDavRepository extends WebDavRepository {
@@ -123,7 +140,7 @@ class _ControllableWebDavRepository extends WebDavRepository {
         }
       }
     }
-    remoteFiles[path] = 'tdf 0.7.0\n';
+    remoteFiles[path] = 'tdf 0.8.0\n';
   }
 }
 
@@ -338,11 +355,11 @@ void main() {
       final thirdPath = '${tempDir.path}${Platform.pathSeparator}third.tdf';
 
       await File(firstPath).writeAsString(
-        'tdf 0.5.1\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "First File Task"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n',
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "First File Task"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n',
         flush: true,
       );
       await File(secondPath).writeAsString(
-        'tdf 0.5.1\n\nqueue {\n    modified 2026-11-01 09:00:00\n    task 000002OkD2\n}\n\ntask 000002OkD2 {\n    name "Second File Task"\n    created 2026-11-01 09:00:00\n    modified 2026-11-01 09:00:00\n}\n',
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 09:00:00\n    task 000002OkD2\n}\n\ntask 000002OkD2 {\n    name "Second File Task"\n    created 2026-11-01 09:00:00\n    modified 2026-11-01 09:00:00\n}\n',
         flush: true,
       );
 
@@ -445,13 +462,13 @@ void main() {
 
       await notifier.wipeRemoteFile(webdavConfig, createBackup: true);
       expect(remoteFiles['$remotePath.bak'], contains('Task before wipe'));
-      expect(remoteFiles[remotePath], equals('tdf 0.7.0\n'));
+      expect(remoteFiles[remotePath], equals('tdf 0.8.0\n'));
 
       await notifier.wipeLocalFile(webdavConfig, createBackup: true);
       final localWipeFile = File('${tempDir.path}/local_wipe.tdf');
       final localWipeBak = File('${tempDir.path}/local_wipe.tdf.bak');
       expect(await localWipeBak.exists(), isTrue);
-      expect(await localWipeFile.readAsString(), equals('tdf 0.7.0\n'));
+      expect(await localWipeFile.readAsString(), equals('tdf 0.8.0\n'));
       expect(container.read(taskNotifierProvider).value?.allTasks, isEmpty);
 
       await expectLater(
@@ -632,7 +649,7 @@ void main() {
       });
 
       test('enforces maxUndoEntries = 10 (9, 10, 11 bounds), filters no-ops, checks expectedSequence, and retains entries across unrelated mutations and preference updates', () async {
-        var localStore = 'tdf 0.6.0\n';
+        var localStore = 'tdf 0.8.0\n';
         const config = WebDavConfig(storageMode: StorageMode.local);
         final container = ProviderContainer(
           overrides: [
@@ -764,8 +781,8 @@ void main() {
         );
       });
 
-      test('synchronizes complete+undo and delete+undo over Local + loopback WebDAV HttpServer, guards slow in-flight PUT epochs, rolls back on LocalFileException, and clears on workspace/file/import/wipe', () async {
-        var remoteTdf = 'tdf 0.6.0\n';
+      test('synchronizes complete+undo and delete+undo over Local + loopback WebDAV HttpServer, guards slow in-flight PUT epochs, rolls back on LocalFileException, and clears on workspace/file/wipe', () async {
+        var remoteTdf = 'tdf 0.8.0\n';
         Completer<void>? putGate;
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         addTearDown(() => server.close(force: true));
@@ -795,7 +812,7 @@ void main() {
         addTearDown(() => tempDir.delete(recursive: true));
 
         var failLocalSave = false;
-        var localStore = 'tdf 0.6.0\n';
+        var localStore = 'tdf 0.8.0\n';
         final initialConfig = WebDavConfig(
           storageMode: StorageMode.both,
           serverUrl: 'http://127.0.0.1:${server.port}',
@@ -930,19 +947,8 @@ void main() {
         expect(await notifier.undoLastAction(), isTrue);
         expect(container.read(taskUndoStateProvider).stackDepth, equals(0));
 
-        // 5. Stack clearing on importLegacyTdf, wipeLocalFile, wipeRemoteFile, and workspace switch:
+        // 5. Stack clearing on wipeLocalFile, wipeRemoteFile, selectLocalFile, and workspace switch:
         await notifier.downgradeTask('depGtwOkD2');
-        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
-        await notifier.importLegacyTdf(
-          'tdf 0.6.0\ntask imp001OkD2 {\n    name "Imported"\n    created 2026-11-01 08:00\n}\n',
-        );
-        expect(
-          container.read(taskUndoStateProvider).canUndo,
-          isFalse,
-          reason: 'importLegacyTdf must clear undo stack',
-        );
-
-        await notifier.deleteTask('imp001OkD2');
         expect(container.read(taskUndoStateProvider).canUndo, isTrue);
         await notifier.wipeLocalFile(initialConfig);
         expect(
@@ -976,7 +982,7 @@ void main() {
         await notifier.addTask('Workspace Switch Target', id: 'wsSwitOkD2');
         await notifier.deleteTask('wsSwitOkD2');
         expect(container.read(taskUndoStateProvider).canUndo, isTrue);
-        remoteTdf = 'tdf 0.6.0\n';
+        remoteTdf = 'tdf 0.8.0\n';
         await container
             .read(activeWorkspaceProvider.notifier)
             .createWorkspace(
@@ -1041,7 +1047,7 @@ void main() {
     });
 
     test('serializes reconcileExternalLocalChanges pre-check I/O strictly in FIFO order with user mutations and retries transient FileSystemException locks once', () async {
-      var diskTdf = 'tdf 0.6.0\n';
+      var diskTdf = 'tdf 0.8.0\n';
       Completer<void>? readGate;
       var activePreCheckOrSyncOps = 0;
       var maxConcurrentOps = 0;
@@ -1106,7 +1112,7 @@ void main() {
 
       // 1. Strict FIFO serialization while readTdfWithDigest() is suspended at await.
       diskTdf =
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-14 10:01:00\n'
           '    task extFifo001\n'
@@ -1339,7 +1345,7 @@ void main() {
     });
 
     test('handles StorageMode.both online WebDAV PUT convergence, offline Stage 1 commit, and wipeLocalFile + HTTP 304 cached remote recovery', () async {
-      var remoteTdf = 'tdf 0.6.0\n';
+      var remoteTdf = 'tdf 0.8.0\n';
       var remoteEtag = '"etag-1"';
       var etagCounter = 1;
       var failWebDav = false;
@@ -1608,9 +1614,9 @@ void main() {
       );
     });
 
-    test('queues reconcileExternalLocalChanges behind syncFromRemote AsyncLoading and clears open conflict on importLegacyTdf', () async {
-      var diskContent = 'tdf 0.6.0\n\ntask broken0001 {\n';
-      var remoteContent = 'tdf 0.6.0\n';
+    test('queues reconcileExternalLocalChanges behind syncFromRemote AsyncLoading and clears open conflict on wipeLocalFile', () async {
+      var diskContent = 'tdf 0.8.0\n\ntask broken0001 {\n';
+      var remoteContent = 'tdf 0.8.0\n';
       Completer<void>? remoteFetchGate;
       var currentTime = DateTime.utc(2026, 11, 14, 14, 0);
 
@@ -1685,7 +1691,7 @@ void main() {
       expect(container.read(taskNotifierProvider).hasError, isTrue);
 
       // Repair disk file, start syncFromRemote() (sets state = AsyncLoading() with !state.hasValue), and pause on Stage 2 GET!
-      diskContent = 'tdf 0.6.0\n';
+      diskContent = 'tdf 0.8.0\n';
       failNextRemoteGet = true;
       remoteFetchGate = Completer<void>();
       final notifier = container.read(taskNotifierProvider.notifier);
@@ -1695,7 +1701,7 @@ void main() {
 
       // External edit arrives while syncFromRemote() is still in-flight!
       diskContent =
-          'tdf 0.6.0\n\n'
+          'tdf 0.8.0\n\n'
           'task extSync001 {\n'
           '    name "Saved During SyncFromRemote"\n'
           '    created 2026-11-14 14:01:00\n'
@@ -1721,25 +1727,17 @@ void main() {
         equals('Saved During SyncFromRemote'),
       );
 
-      // Also verify importLegacyTdf clears SyncState.hasOpenConflict!
       container
           .read(syncStateProvider.notifier)
           .setConflict('Unresolved deletionConflict');
       expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
 
       currentTime = DateTime.utc(2026, 11, 14, 14, 5);
-      await notifier.importLegacyTdf(
-        'tdf 0.6.0\n\n'
-        'task import0001 {\n'
-        '    name "Imported Clean Board"\n'
-        '    created 2026-11-14 14:05:00\n'
-        '    modified 2026-11-14 14:05:00\n'
-        '}\n',
-      );
+      await notifier.wipeLocalFile(config);
       expect(
         container.read(syncStateProvider).hasOpenConflict,
         isFalse,
-        reason: 'importLegacyTdf must clear SyncState.hasOpenConflict',
+        reason: 'wipeLocalFile must clear SyncState.hasOpenConflict',
       );
       expect(container.read(syncStateProvider).errorMessage, isNull);
     });
@@ -2740,6 +2738,351 @@ void main() {
         reason: 'Remote WebDAV .tdf must persist preserved history after undo',
       );
     });
+
+    test('forwards dueLocalInput, suspendedLocalInput, dueAnchor, and clearDueAnchor in addTask and updateTask', () async {
+      var localStore = 'tdf 0.8.0\n';
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 1, 8, 0),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _ControllableLocalRepository(
+              config: config,
+              getStore: () => localStore,
+              setStore: (val) => localStore = val,
+              shouldFailSave: () => false,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      await notifier.addTask(
+        'Local Calendar Scheduled Task',
+        id: 'calIn00001',
+        dueLocalInput: TdfLocalDateTime(2026, 11, 10, 14, 30, 0),
+        suspendedLocalInput: TdfLocalDateTime(2026, 11, 5, 10, 0, 0),
+      );
+
+      var created = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('calIn00001')!;
+      expect(created.dueAt, equals(DateTime.utc(2026, 11, 10, 12, 30)));
+      expect(
+        created.dueAnchor,
+        equals(TdfLocalDateTime(2026, 11, 10, 14, 30, 0)),
+      );
+      expect(created.suspendedAt, equals(DateTime.utc(2026, 11, 5, 8, 0)));
+
+      await notifier.updateTask(
+        'calIn00001',
+        dueAnchor: TdfLocalDateTime(2026, 11, 10, 16, 0, 0),
+      );
+      created = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('calIn00001')!;
+      expect(
+        created.dueAnchor,
+        equals(TdfLocalDateTime(2026, 11, 10, 16, 0, 0)),
+      );
+
+      await notifier.updateTask('calIn00001', clearDueAnchor: true);
+      created = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('calIn00001')!;
+      expect(created.dueAnchor, isNull);
+    });
+
+    test('resolves DeletionConflict (including bound decisions and stale dueAnchor mismatch), RecoveryRequired (discard + recoverAsNew reference rewriting), and SyncGenerationRollback while setting localized banners and clearing undo stack', () async {
+      var diskTdf = 'tdf 0.8.0\n';
+      var nowUtc = DateTime.utc(2026, 11, 15, 10, 0);
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        language: AppLanguage.english,
+      );
+      final settings = InMemorySettingsRepository(config);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settings),
+          clockProvider.overrideWithValue(() => nowUtc),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _ControllableLocalRepository(
+              config: config,
+              getStore: () => diskTdf,
+              setStore: (val) => diskTdf = val,
+              shouldFailSave: () => false,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+      final enL10n = lookupAppLocalizations(const Locale('en'));
+
+      // Seed tasks + undo entry:
+      await notifier.addTask('Keep For Undo', id: 'undoSeed01');
+      await notifier.addTask(
+        'Conflict Anchor Task',
+        id: 'cflAnc0001',
+        dueAt: DateTime.utc(2026, 11, 20, 12, 0),
+        dueAnchor: TdfLocalDateTime(2026, 11, 20, 13, 0, 0),
+      );
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 1);
+      await notifier.completeTask('undoSeed01');
+      expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+
+      // 1. Trigger DeletionConflict: externally delete cflAnc0001 while user updates cflAnc0001's dueAnchor locally!
+      final deletedAt = DateTime.utc(2026, 11, 15, 10, 2);
+      diskTdf =
+          'tdf 0.8.0\n\n'
+          'deleted {\n'
+          '    generation 0\n'
+          '    task cflAnc0001 2026-11-15 10:02:00\n'
+          '}\n\n'
+          'task undoSeed01 {\n'
+          '    name        "Keep For Undo"\n'
+          '    created     2026-11-15 10:00:00\n'
+          '    modified    2026-11-15 10:01:00\n'
+          '    finished    2026-11-15 10:01:00\n'
+          '    completions 1\n'
+          '}\n';
+
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 3);
+      await notifier.updateTask(
+        'cflAnc0001',
+        dueAnchor: TdfLocalDateTime(2026, 11, 20, 14, 0, 0),
+      );
+      expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        equals(enL10n.syncConflictDeletionBanner),
+      );
+
+      final liveConflictedTask = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('cflAnc0001')!;
+      expect(
+        liveConflictedTask.dueAnchor,
+        equals(TdfLocalDateTime(2026, 11, 20, 14, 0, 0)),
+        reason: 'In-memory candidate L must preserve user edit awaiting conflict resolution',
+      );
+
+      // Stale bound decision (wrong dueAnchor in payload signature) MUST re-throw DeletionConflict!
+      final staleTask = liveConflictedTask.copyWith(
+        dueAnchor: TdfLocalDateTime(2026, 11, 20, 15, 0, 0),
+      );
+      await expectLater(
+        () => notifier.resolveDeletionConflicts(
+          boundTaskDecisions: <String, TdfBoundDeletionDecision>{
+            'cflAnc0001': TdfBoundDeletionDecision(
+              resolution: TdfDeletionResolution.undelete,
+              expectedLiveModifiedAt: liveConflictedTask.effectiveModifiedAt,
+              expectedDeletionAt: deletedAt,
+              expectedLivePayloadSignature:
+                  TdfPayloadComparison.taskPayloadSignature(staleTask),
+            ),
+          },
+        ),
+        throwsA(
+          isA<TdfSyncOutcomeException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfSyncOutcomeKind.deletionConflict,
+          ),
+        ),
+        reason: 'Stale bound decision with mismatched dueAnchor signature must re-throw DeletionConflict',
+      );
+
+      // Exact bound Undelete decision resolves DeletionConflict, increments generation (0 -> 1), and clears undo stack!
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 4);
+      final resolvedConflictBoard = await notifier.resolveDeletionConflicts(
+        boundTaskDecisions: <String, TdfBoundDeletionDecision>{
+          'cflAnc0001': TdfBoundDeletionDecision(
+            resolution: TdfDeletionResolution.undelete,
+            expectedLiveModifiedAt: liveConflictedTask.effectiveModifiedAt,
+            expectedDeletionAt: deletedAt,
+            expectedLivePayloadSignature:
+                TdfPayloadComparison.taskPayloadSignature(liveConflictedTask),
+          ),
+        },
+      );
+      expect(resolvedConflictBoard.findTask('cflAnc0001'), isNotNull);
+      expect(resolvedConflictBoard.deletedBlock.generation, equals(1));
+      expect(container.read(syncStateProvider).hasOpenConflict, isFalse);
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isFalse,
+        reason: 'Resolving DeletionConflict must immediately clear undo stack and taskUndoStateProvider',
+      );
+
+      // 2. RecoveryRequired resolution (discard + recoverAsNew across label, location, and task references):
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 5);
+      await notifier.addLocation(
+        'Amb Office',
+        latitude: 48.137,
+        longitude: 11.576,
+        radiusMeters: 120,
+        id: 'ambLoc0001',
+      );
+      await notifier.addLabel(
+        'Amb Project',
+        id: 'ambLbl0001',
+        conditions: const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['ambLoc0001']),
+        ],
+      );
+      await notifier.addTask('Discard Blocker', id: 'ambDrop001');
+      await notifier.addTask(
+        'Recover Dependent',
+        id: 'ambKeep001',
+        labelIds: const <String>['ambLbl0001'],
+        blockedByTaskIds: const <String>['ambDrop001'],
+        conditions: const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['ambLoc0001']),
+        ],
+      );
+      await notifier.addTask(
+        'Shared Surviving Dependent',
+        id: 'shrSurv001',
+        blockedByTaskIds: const <String>['ambDrop001', 'ambKeep001'],
+      );
+      // Record an undo entry BEFORE RecoveryRequired:
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 6);
+      await notifier.downgradeTask('cflAnc0001');
+      expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+
+      // External storage jumps to generation 2 keeping only cflAnc0001 and shrSurv001 (retiring ambLoc0001, ambLbl0001, ambDrop001, ambKeep001 while user edits ambKeep001):
+      diskTdf =
+          'tdf 0.8.0\n\n'
+          'deleted {\n'
+          '    generation 2\n'
+          '}\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:07:00\n'
+          '    task cflAnc0001\n'
+          '    task shrSurv001\n'
+          '}\n\n'
+          'task cflAnc0001 {\n'
+          '    name     "Conflict Anchor Task"\n'
+          '    created  2026-11-15 10:00:00\n'
+          '    modified 2026-11-15 10:06:00\n'
+          '}\n\n'
+          'task shrSurv001 {\n'
+          '    name     "Shared Surviving Dependent"\n'
+          '    created  2026-11-15 10:05:00\n'
+          '    modified 2026-11-15 10:05:00\n'
+          '    blocked  ambDrop001 ambKeep001\n'
+          '}\n';
+
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 8);
+      await notifier.updateLocation('ambLoc0001', name: 'Amb Office Edited');
+      await notifier.updateLabel('ambLbl0001', name: 'Amb Project Edited');
+      await notifier.updateTask('ambDrop001', title: 'Discard Blocker Edited');
+      await notifier.updateTask(
+        'ambKeep001',
+        title: 'Recover Dependent Edited',
+      );
+      expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        equals(enL10n.syncConflictRecoveryBanner),
+      );
+
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 9);
+      final recoveredBoard = await notifier.resolveRecovery(
+        locationResolutions: const <String, TdfRecoveryResolution>{
+          'ambLoc0001': TdfRecoveryResolution.recoverAsNew,
+        },
+        labelResolutions: const <String, TdfRecoveryResolution>{
+          'ambLbl0001': TdfRecoveryResolution.recoverAsNew,
+        },
+        taskResolutions: const <String, TdfRecoveryResolution>{
+          'ambDrop001': TdfRecoveryResolution.discard,
+          'ambKeep001': TdfRecoveryResolution.recoverAsNew,
+        },
+      );
+      expect(container.read(syncStateProvider).hasOpenConflict, isFalse);
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isFalse,
+        reason: 'Resolving RecoveryRequired must immediately clear undo stack and taskUndoStateProvider',
+      );
+      expect(recoveredBoard.findTask('ambDrop001'), isNull);
+      expect(recoveredBoard.findTask('ambKeep001'), isNull);
+      expect(recoveredBoard.findLabel('ambLbl0001'), isNull);
+      expect(recoveredBoard.findLocation('ambLoc0001'), isNull);
+
+      final freshLoc = recoveredBoard.locations.single;
+      final freshLbl = recoveredBoard.labels.single;
+      final freshTask = recoveredBoard.allTasks.singleWhere(
+        (task) => task.title == 'Recover Dependent Edited',
+      );
+      expect(freshLoc.id, isNot(equals('ambLoc0001')));
+      expect(freshLbl.id, isNot(equals('ambLbl0001')));
+      expect(freshTask.id, isNot(equals('ambKeep001')));
+      expect(freshTask.labelIds, equals(<String>[freshLbl.id]));
+      expect(
+        freshTask.dependencies,
+        isEmpty,
+        reason: 'Discarded ambDrop001 must be stripped from recovered open task dependencies',
+      );
+      expect(
+        freshTask.conditions
+            .whereType<LocationTaskCondition>()
+            .single
+            .locationIds,
+        equals(<String>[freshLoc.id]),
+      );
+      final survivingShared = recoveredBoard.findTask('shrSurv001')!;
+      expect(
+        survivingShared.blockedByTaskIds,
+        equals(<String>[freshTask.id]),
+        reason: 'Surviving open task must strip discarded ambDrop001 and rewrite ambKeep001 to fresh Base62 ID',
+      );
+
+      // 3. SyncGenerationRollback sets localized banner and immediately clears undo stack:
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 10);
+      await notifier.completeTask('cflAnc0001');
+      expect(container.read(taskUndoStateProvider).canUndo, isTrue);
+
+      // External file rolls deleted.generation backward from 2 -> 0!
+      diskTdf =
+          'tdf 0.8.0\n\n'
+          'deleted {\n'
+          '    generation 0\n'
+          '}\n';
+      nowUtc = DateTime.utc(2026, 11, 15, 10, 11);
+      await notifier.syncFromRemote();
+      expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        equals(enL10n.syncErrorGenerationRollbackBanner),
+        reason: 'SyncGenerationRollback must set localized syncErrorGenerationRollbackBanner',
+      );
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isFalse,
+        reason: 'SyncGenerationRollback handling must immediately clear undo stack and taskUndoStateProvider',
+      );
+    });
   });
 }
 
@@ -2769,11 +3112,17 @@ class _GateableWatchLocalRepository extends LocalFileRepository {
   Future<({String content, String? digest, bool exists})>
   readTdfWithDigest() async {
     await onReadTdfWithDigest();
-    return super.readTdfWithDigest();
+    final content = getStore();
+    final exists = content.isNotEmpty;
+    final digest = exists ? Sha256Service.hashHex(utf8.encode(content)) : null;
+    return (content: content, digest: digest, exists: exists);
   }
 
   @override
   Future<void> saveTdf(String tdfContent) async => setStore(tdfContent);
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
 }
 
 class _GatedCountingWebDavRepository extends WebDavRepository {

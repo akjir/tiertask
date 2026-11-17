@@ -1,0 +1,91 @@
+{
+  "version": "0.8.0",
+  "deleted": {
+    "generation": 1,
+    "tasks": [
+      {
+        "id": "6uCk8N0aB1",
+        "deletedAt": "2026-11-01 12:00:00",
+        "checkpoint": 2
+      }
+    ],
+    "labels": [],
+    "locations": []
+  },
+  "queue": {
+    "modified": "2026-11-16 09:00:00",
+    "tasks": [
+      "8jKaCdOkD2"
+    ]
+  },
+  "labels": [
+    {
+      "id": "4x9p2mOkD2",
+      "scoped": false,
+      "name": "Home",
+      "color": "#4CAF50",
+      "note": null,
+      "modified": null,
+      "links": [],
+      "conditions": [
+        "location 7pQr9mOkD2"
+      ]
+    }
+  ],
+  "locations": [
+    {
+      "id": "7pQr9mOkD2",
+      "name": "Office",
+      "note": null,
+      "source": null,
+      "latitude": "50.9787",
+      "longitude": "11.0328",
+      "radius": "150",
+      "modified": null
+    }
+  ],
+  "tasks": [
+    {
+      "id": "8jKaCdOkD2",
+      "priority": true,
+      "name": "Close monthly books",
+      "note": "Line 1\nLine 2 with \"quotes\"",
+      "created": "2026-01-01 08:00:00",
+      "finished": null,
+      "modified": "2026-01-31 18:00:05",
+      "completions": 0,
+      "repeat": "1 months 08:00 lead 2 days",
+      "labels": [
+        "4x9p2mOkD2"
+      ],
+      "blocked": {},
+      "suspended": null,
+      "due": {
+        "utc": "2026-02-28 17:00:00",
+        "anchor": "2026-01-31 18:00:00",
+        "passive": false,
+        "note": "Month-end cutoff"
+      },
+      "origin": null,
+      "links": [],
+      "history": [],
+      "conditions": [
+        "day mon tue wed thu fri",
+        "time 08:00 18:00"
+      ],
+      "subtasks": {
+        "autoFinish": true,
+        "steps": [
+          {
+            "completed": false,
+            "text": "Reconcile ledger"
+          },
+          {
+            "completed": true,
+            "text": "Export statements"
+          }
+        ]
+      }
+    }
+  ]
+}

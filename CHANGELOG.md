@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added TierTask Data Format (TDF) 0.8.0 as the standalone storage format with byte-exact canonical serialization.
+- Added local schedule anchors on recurring deadlines to preserve month-end dates and local clock times across shorter months and daylight-saving transitions, shown in the task information dialog when clamped or shifted.
+- Added cooperative host-local file locking outside synced folders and conditional initial-creation guards on WebDAV uploads to prevent concurrent local or remote overwrites.
+- Added localized synchronization status banners for deletion conflicts, recovery prompts, and version history rollbacks.
+
+### Changed
+
+- Changed deadline and deferral editing in the task editor to use the workspace local time zone consistently across cards, info dialogs, and forms.
+- Changed multi-stage local and WebDAV synchronization to defer automatic deferral and dependency cleanup until the authoritative final sync stage.
+
+### Removed
+
+- Removed automatic loading and conversion support for pre-0.8.0 TDF files (versions 0.2.0 through 0.7.0).
+
+### Fixed
+
+- Fixed automatic system time-zone mode to apply historical and future daylight-saving transitions when evaluating conditions and advancing recurring tasks.
+
 ## [0.3.0] - 2026-11-16
 
 ### Added

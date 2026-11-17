@@ -1,0 +1,106 @@
+tdf 0.8.0
+
+deleted {
+    generation 4
+    task 6uCk8N0aB1 2026-11-01 12:00:00
+    label 1rQv7S0cD2 2026-11-02 09:00:00
+    location 8tYp4M0eF3 2026-11-02 10:15:00
+}
+
+queue {
+    modified 2026-11-01 19:30:00
+    task 8jKaCdOkD2
+    task 5vWx9ZOk91
+    task 3nQp7ROkB8
+}
+
+label 4x9p2mOkD2 {
+    name     "Home & Garden"
+    modified 2026-11-01 08:00
+    condition {
+        day      sat sun
+        time     08:00 20:00
+        location 7pQr9mOkD2
+    }
+}
+
+label 9kLm2P0aBc scoped {
+    name     "IT & Servers"
+    color    "#2196F3"
+    note     "Infrastructure runbooks and maintenance"
+    modified 2026-11-01 08:00
+    link     "Grafana Dashboard" "https://grafana.example.com/d/nas"
+    link     "Runbook Repo" "https://git.example.com/ops/runbooks"
+    condition {
+        day  mon tue wed thu fri
+        time 08:00 12:00
+        time 14:00 18:00
+    }
+}
+
+location 7pQr9mOkD2 {
+    name        "Home"
+    note        "Main residence driveway and garden"
+    source      "Erfurt, Germany"
+    coordinates 50.9787 11.0328
+    radius      150
+    modified    2026-11-01 08:00
+}
+
+task 2bDf6HOkA4 {
+    name     "Design 3D-printed enclosure for backup NAS"
+    created  2026-11-01 12:00
+    modified 2026-11-01 12:00
+    labels   9kLm2P0aBc
+}
+
+task 3nQp7ROkB8 {
+    name      "Order replacement lawnmower blades online"
+    created   2026-11-01 18:00
+    modified  2026-11-01 18:20
+    labels    4x9p2mOkD2
+    due       2026-11-03 17:00:00 anchor 2026-11-03 18:00:00 passive "Order before seasonal supplier cutoff"
+    origin    "https://jira.example.com" "HOME-42"
+    link      "Portal Login" "https://example.com/portal#login"
+    link      "Local Folder" "file:///home/user/documents/tax2026"
+    history   2026-11-01 18:05:00 "Checked blade part number against mower manual"
+    history   2026-11-01 18:20:00 "Confirmed OEM stock with dealer"
+    condition any
+}
+
+task 5vWx9ZOk91 {
+    name        "Clean dust filters on home NAS server"
+    created     2026-10-01 09:00
+    modified    2026-11-01 10:00
+    completions 1
+    repeat      1 months 09:00 lead 5 days
+    labels      4x9p2mOkD2 9kLm2P0aBc
+    due         2026-02-28 17:00:00 anchor 2026-01-31 18:00:00 "Verify SMART health after cleaning"
+    history     2026-10-01 09:30:00 "Replaced front intake filter pad"
+}
+
+task 7mPr4T09xY {
+    name        "Mount winter tires"
+    created     2026-10-20 14:00
+    finished    2026-10-29 16:45
+    modified    2026-10-29 16:45
+    completions 1
+    labels      4x9p2mOkD2
+    history     2026-10-29 16:40:00 "Torqued lug nuts to 120 Nm"
+}
+
+task 8jKaCdOkD2 priority {
+    name      "Mow the lawn"
+    note      "Check fuel level before starting"
+    created   2026-11-01 19:30
+    modified  2026-11-01 19:30
+    labels    4x9p2mOkD2
+    blocked   3nQp7ROkB8
+    suspended 2026-11-04 23:00:00 "Wait for blade delivery and dry forecast"
+    due       2026-11-07 16:00:00 anchor 2026-11-07 17:00:00 "Before first frost"
+    condition time 09:00 18:00
+    subtasks auto-finish {
+        step false "Get lawnmower from the shed"
+        step true  "Empty grass catcher bag"
+    }
+}

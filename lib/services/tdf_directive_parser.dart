@@ -15,13 +15,17 @@
 
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
+import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import 'tdf_scanner.dart';
 
-/// Mutable field accumulator for a `deleted` root block during TDF parsing.
+/// Mutable field accumulator for a `deleted` root block during TDF `0.8.0` parsing.
 class TdfDeletedDirectiveFields {
+  /// Creates an empty [TdfDeletedDirectiveFields].
+  TdfDeletedDirectiveFields();
+
   /// Seen deleted label IDs (`<label-id>`).
   final Set<String> deletedLabelIds = <String>{};
 
@@ -31,92 +35,58 @@ class TdfDeletedDirectiveFields {
   /// Seen deleted task IDs (`<task-id>`).
   final Set<String> deletedTaskIds = <String>{};
 
-  /// Parsed `generation` value.
+  /// Parsed `generation` counter.
   int? generation;
 
-  /// Parsed deleted label records.
-  final List<TdfDeletedLabelRecord> labels = <TdfDeletedLabelRecord>[];
+  /// Parsed deleted label records with their 1-based source line numbers.
+  final List<({TdfDeletedLabelRecord record, int line})> labelEntries =
+      <({TdfDeletedLabelRecord record, int line})>[];
 
-  /// Parsed deleted location records.
-  final List<TdfDeletedLocationRecord> locations = <TdfDeletedLocationRecord>[];
+  /// Parsed deleted location records with their 1-based source line numbers.
+  final List<({TdfDeletedLocationRecord record, int line})> locationEntries =
+      <({TdfDeletedLocationRecord record, int line})>[];
 
-  /// Parsed deleted task records.
-  final List<TdfDeletedTaskRecord> tasks = <TdfDeletedTaskRecord>[];
+  /// Parsed deleted task records with their 1-based source line numbers.
+  final List<({TdfDeletedTaskRecord record, int line})> taskEntries =
+      <({TdfDeletedTaskRecord record, int line})>[];
 }
 
-/// Mutable field accumulator for a `label` block during TDF parsing.
+/// Mutable field accumulator for a `label` block during TDF `0.8.0` parsing.
 class TdfLabelDirectiveFields {
-  /// Parsed `color` hex literal (`#RRGGBB`).
+  /// Creates an empty [TdfLabelDirectiveFields].
+  TdfLabelDirectiveFields();
+
+  /// Normalized uppercase `#RRGGBB` `color` literal.
   String? color;
 
   /// Accumulated condition rules across all inline and block declarations.
   final List<TaskCondition> conditions = <TaskCondition>[];
 
-  /// Legacy 0.5.x inline location condition tuples in declaration order.
-  final List<TdfLegacyInlineLocationRef> legacyInlineLocations =
-      <TdfLegacyInlineLocationRef>[];
-
-  /// Repeatable `link` attachments in declaration order (`tdf 0.7.0`).
+  /// Repeatable `link` attachments in preserved declaration order.
   final List<TaskLink> links = <TaskLink>[];
 
   /// Raw `<location-id>` reference count across all `location` condition rules before deduplication.
   int locationRefCount = 0;
 
-  /// Referenced `<location-id>` tokens with their source line numbers.
+  /// Referenced `<location-id>` tokens with their 1-based source line numbers.
   final List<({String locationId, int line})> locationReferences =
       <({String locationId, int line})>[];
 
-  /// Optional `modified` UTC timestamp.
+  /// Optional explicit `modified` UTC timestamp.
   DateTime? modifiedAt;
 
-  /// Parsed `name` text.
+  /// Required `name` text.
   String? name;
 
   /// Optional `note` text.
   String? note;
 }
 
-/// Normalized inline location rule from a legacy `0.5.0` or `0.5.1` document (`spec/TDF_SPEC_0.6.0.md` Section 10.7).
-class TdfLegacyInlineLocationRef {
-  /// Creates a [TdfLegacyInlineLocationRef].
-  const TdfLegacyInlineLocationRef({
-    required this.sourceId,
-    required this.normalizedLatitude,
-    required this.normalizedLongitude,
-    required this.normalizedRadius,
-    required this.latitude,
-    required this.longitude,
-    required this.radius,
-    required this.line,
-  });
-
-  /// Parsed numeric latitude.
-  final double latitude;
-
-  /// 1-based line number of the rule.
-  final int line;
-
-  /// Parsed numeric longitude.
-  final double longitude;
-
-  /// Normalized decimal string for latitude (`<= 6` fractional digits).
-  final String normalizedLatitude;
-
-  /// Normalized decimal string for longitude (`<= 6` fractional digits).
-  final String normalizedLongitude;
-
-  /// Normalized decimal string for radius (`<= 2` fractional digits).
-  final String normalizedRadius;
-
-  /// Parsed numeric radius in meters.
-  final double radius;
-
-  /// Canonical deduplication key (`<normalizedLat>:<normalizedLon>:<normalizedRadius>`).
-  final String sourceId;
-}
-
-/// Mutable field accumulator for a `location` block during TDF parsing.
+/// Mutable field accumulator for a `location` block during TDF `0.8.0` parsing.
 class TdfLocationDirectiveFields {
+  /// Creates an empty [TdfLocationDirectiveFields].
+  TdfLocationDirectiveFields();
+
   /// Parsed WGS-84 latitude (`[-90.0, 90.0]`).
   double? latitude;
 
@@ -129,10 +99,10 @@ class TdfLocationDirectiveFields {
   /// Normalized decimal string for [longitude].
   String? longitudeText;
 
-  /// Optional `modified` UTC timestamp.
+  /// Optional explicit `modified` UTC timestamp.
   DateTime? modifiedAt;
 
-  /// Parsed `name` text.
+  /// Required `name` text.
   String? name;
 
   /// Optional `note` text.
@@ -144,32 +114,38 @@ class TdfLocationDirectiveFields {
   /// Normalized decimal string for [radius].
   String? radiusText;
 
-  /// Optional `source` address or location code text.
+  /// Optional passive `source` address or location code text.
   String? source;
 }
 
-/// Mutable field accumulator for a `queue` root block during TDF parsing.
+/// Mutable field accumulator for a `queue` root block during TDF `0.8.0` parsing.
 class TdfQueueDirectiveFields {
-  /// Ordered `<task-id>` entries with their 1-based line numbers.
+  /// Creates an empty [TdfQueueDirectiveFields].
+  TdfQueueDirectiveFields();
+
+  /// Ordered `<task-id>` entries with their 1-based source line numbers.
   final List<({String taskId, int line})> entries =
       <({String taskId, int line})>[];
 
-  /// Parsed `modified` UTC timestamp.
+  /// Required `modified` UTC timestamp.
   DateTime? modifiedAt;
 
-  /// Seen `<task-id>` values in the queue block.
+  /// Seen `<task-id>` values in the `queue` block.
   final Set<String> seenTaskIds = <String>{};
 }
 
-/// Mutable field accumulator for a `task` block during TDF parsing.
+/// Mutable field accumulator for a `task` block during TDF `0.8.0` parsing.
 class TdfTaskDirectiveFields {
+  /// Creates an empty [TdfTaskDirectiveFields].
+  TdfTaskDirectiveFields();
+
   /// Seen `blocked` target task IDs mapped to their greatest required completion count.
   final Map<String, int> blockedByCompletions = <String, int>{};
 
   /// 1-based line number of the `blocked` directive when present.
   int? blockedLine;
 
-  /// Parsed `completions` counter (`0..MAX_COMPLETIONS`).
+  /// Parsed `completions` counter (`0..maxTdfCompletions`).
   int? completions;
 
   /// Accumulated condition rules across all inline and block declarations.
@@ -178,10 +154,13 @@ class TdfTaskDirectiveFields {
   /// Required `created` UTC timestamp.
   DateTime? createdAt;
 
+  /// Optional intended local calendar schedule `anchor` attached to [dueAt] (`TDF-DIR-004`).
+  TdfLocalDateTime? dueAnchor;
+
   /// Optional `due` UTC deadline timestamp.
   DateTime? dueAt;
 
-  /// Optional trailing `<note>` attached to `due` (`tdf 0.7.0`).
+  /// Optional trailing `<note>` attached to `due`.
   String? dueNote;
 
   /// Optional `finished` UTC timestamp.
@@ -193,34 +172,30 @@ class TdfTaskDirectiveFields {
   /// Whether a `labels` directive has already been declared.
   bool hasLabelsDirective = false;
 
-  /// Repeatable `history` entries accumulated inside the `task` block (`tdf 0.7.0`).
+  /// Repeatable `history` entries accumulated inside the `task` block.
   final List<TaskHistoryEntry> history = <TaskHistoryEntry>[];
 
-  /// Whether `due` carries the `passive` modifier (`tdf 0.7.0`).
+  /// Whether `due` carries the `passive` modifier.
   bool isDuePassive = false;
 
   /// Whether `suspended forever` was declared.
   bool isSuspendedForever = false;
 
-  /// Referenced `<label-id>` values with their line numbers.
+  /// Referenced `<label-id>` values with their 1-based source line numbers.
   final List<({String labelId, int line})> labelIds =
       <({String labelId, int line})>[];
 
-  /// Legacy 0.5.x inline location condition tuples in declaration order.
-  final List<TdfLegacyInlineLocationRef> legacyInlineLocations =
-      <TdfLegacyInlineLocationRef>[];
-
-  /// Repeatable `link` attachments in declaration order.
+  /// Repeatable `link` attachments in preserved declaration order.
   final List<TaskLink> links = <TaskLink>[];
 
   /// Raw `<location-id>` reference count across all `location` condition rules before deduplication.
   int locationRefCount = 0;
 
-  /// Referenced `<location-id>` tokens with their source line numbers.
+  /// Referenced `<location-id>` tokens with their 1-based source line numbers.
   final List<({String locationId, int line})> locationReferences =
       <({String locationId, int line})>[];
 
-  /// Optional `modified` UTC timestamp.
+  /// Optional explicit `modified` UTC timestamp.
   DateTime? modifiedAt;
 
   /// Required `name` text.
@@ -229,11 +204,8 @@ class TdfTaskDirectiveFields {
   /// Optional `note` text.
   String? note;
 
-  /// Optional `origin` correlation pair.
+  /// Optional passive `origin` correlation pair.
   TaskOrigin? origin;
-
-  /// Optional legacy `queued` UTC timestamp (permitted only when converting `tdf 0.5.0` on load per Section 10.6).
-  DateTime? queuedAt;
 
   /// Raw `history` directive count before deduplication (`0..maxTdfHistoryPerTask`).
   int rawHistoryCount = 0;
@@ -244,30 +216,34 @@ class TdfTaskDirectiveFields {
   /// Optional finite `suspended` UTC timestamp.
   DateTime? suspendedAt;
 
-  /// 1-based line number of the `suspended` directive when present.
-  int? suspendedLine;
-
-  /// Optional trailing `<note>` attached to `suspended` (`tdf 0.7.0`).
+  /// Optional trailing `<note>` attached to `suspended`.
   String? suspendedNote;
 }
 
-/// Semantic directive and value parser for TDF 0.7.0 (`spec/TDF_SPEC_0.7.0.md` Sections 2.8, 4, 7, and 8).
+/// Semantic directive and primitive value parser for `spec/TDF_SPEC_0.8.0.md` Sections 4–6.
 abstract final class TdfDirectiveParser {
-  /// Forbidden executable or inline-payload URI schemes (`spec/TDF_SPEC_0.6.0.md` Section 2.8).
+  /// Forbidden executable or inline-payload URI schemes (`TDF-TYPE-005`).
   static const List<String> _forbiddenUriSchemes = <String>[
     'javascript:',
     'vbscript:',
     'data:',
   ];
 
-  /// Appends a condition rule to [fields] on a `label` block, enforcing `MAX_CONDITION_RULES_PER_ENTITY` and `MAX_LOCATION_REFS_PER_ENTITY`.
+  /// Appends a condition rule to [fields] on a `label` block (`TDF-DIR-009`, `TDF-VAL-001`).
   static void addConditionToLabel(
     TdfLabelDirectiveFields fields,
     String ruleType,
     List<TdfScannedToken> args,
     int line, {
-    bool isLegacy05x = false,
+    required bool isInlineDirective,
   }) {
+    if (!isInlineDirective && !_isDepth2ConditionKeyword(ruleType)) {
+      fail(
+        TdfErrorKind.unknownDirective,
+        line,
+        'Unknown directive "$ruleType" inside condition block.',
+      );
+    }
     if (fields.conditions.length >= maxTdfConditionRulesPerEntity) {
       fail(
         TdfErrorKind.limitExceeded,
@@ -282,53 +258,55 @@ abstract final class TdfDirectiveParser {
         'Global reset "any" is forbidden inside a label block.',
       );
     }
-    if (args.length == 1 &&
-        args[0].kind == TdfTokenKind.bareWord &&
-        args[0].value == 'any') {
+    final group = _tryConditionGroupFromName(ruleType);
+    if (group == null) {
+      fail(
+        TdfErrorKind.invalidCondition,
+        line,
+        'Invalid condition rule type "$ruleType".',
+      );
+    }
+    if (args.length == 1 && args[0].isBare && args[0].value == 'any') {
       fail(
         TdfErrorKind.invalidCondition,
         line,
         'Group reset "$ruleType any" is forbidden inside a label block.',
       );
     }
-    if (ruleType == 'location') {
+    if (group == ConditionGroup.location) {
       final condition = _parseLocationRuleForEntity(
         args: args,
         line: line,
-        isLegacy05x: isLegacy05x,
         currentRefCount: fields.locationRefCount,
         onUpdateRefCount: (nextCount) => fields.locationRefCount = nextCount,
         locationReferences: fields.locationReferences,
-        legacyInlineLocations: fields.legacyInlineLocations,
       );
       fields.conditions.add(condition);
       return;
     }
-    final condition = _parseConcreteConditionRule(ruleType, args, line);
-    fields.conditions.add(condition);
+    fields.conditions.add(_parseConcreteConditionRule(group, args, line));
   }
 
-  /// Appends a condition rule to [fields] on a `task` block, enforcing `MAX_CONDITION_RULES_PER_ENTITY`, `MAX_LOCATION_REFS_PER_ENTITY`, and reset exclusivity.
+  /// Appends a condition rule or reset to [fields] on a `task` block (`TDF-DIR-009`, `TDF-VAL-001`).
   static void addConditionToTask(
     TdfTaskDirectiveFields fields,
     String ruleType,
     List<TdfScannedToken> args,
     int line, {
     required bool isInlineDirective,
-    bool isLegacy05x = false,
   }) {
+    if (!isInlineDirective && !_isDepth2ConditionKeyword(ruleType)) {
+      fail(
+        TdfErrorKind.unknownDirective,
+        line,
+        'Unknown directive "$ruleType" inside condition block.',
+      );
+    }
     if (fields.conditions.length >= maxTdfConditionRulesPerEntity) {
       fail(
         TdfErrorKind.limitExceeded,
         line,
         'Task exceeds maximum of $maxTdfConditionRulesPerEntity condition rules.',
-      );
-    }
-    if (fields.conditions.any((rule) => rule is GlobalResetTaskCondition)) {
-      fail(
-        TdfErrorKind.invalidCondition,
-        line,
-        'Task with "condition any" cannot declare additional condition rules.',
       );
     }
     if (ruleType == 'any') {
@@ -344,21 +322,26 @@ abstract final class TdfDirectiveParser {
       fields.conditions.add(const GlobalResetTaskCondition());
       return;
     }
-    if (args.length == 1 &&
-        args[0].kind == TdfTokenKind.bareWord &&
-        args[0].value == 'any') {
-      final group = _conditionGroupFromName(ruleType, line);
-      if (_hasConditionGroup(fields.conditions, group)) {
+    final group = _tryConditionGroupFromName(ruleType);
+    if (group == null ||
+        fields.conditions.any((rule) => rule is GlobalResetTaskCondition)) {
+      fail(
+        TdfErrorKind.invalidCondition,
+        line,
+        'Invalid or conflicting condition rule "$ruleType" on task.',
+      );
+    }
+    if (args.length == 1 && args[0].isBare && args[0].value == 'any') {
+      if (fields.conditions.any((rule) => rule.group == group)) {
         fail(
           TdfErrorKind.invalidCondition,
           line,
-          'Cannot combine "$ruleType any" with other "$ruleType" condition rules on the same task.',
+          'Cannot repeat or combine "$ruleType any" with "$ruleType" rules on the same task.',
         );
       }
       fields.conditions.add(GroupResetTaskCondition(targetGroup: group));
       return;
     }
-    final group = _conditionGroupFromName(ruleType, line);
     if (_hasGroupReset(fields.conditions, group)) {
       fail(
         TdfErrorKind.invalidCondition,
@@ -366,24 +349,21 @@ abstract final class TdfDirectiveParser {
         'Cannot combine "$ruleType" rule with "$ruleType any" reset on the same task.',
       );
     }
-    if (ruleType == 'location') {
+    if (group == ConditionGroup.location) {
       final condition = _parseLocationRuleForEntity(
         args: args,
         line: line,
-        isLegacy05x: isLegacy05x,
         currentRefCount: fields.locationRefCount,
         onUpdateRefCount: (nextCount) => fields.locationRefCount = nextCount,
         locationReferences: fields.locationReferences,
-        legacyInlineLocations: fields.legacyInlineLocations,
       );
       fields.conditions.add(condition);
       return;
     }
-    final condition = _parseConcreteConditionRule(ruleType, args, line);
-    fields.conditions.add(condition);
+    fields.conditions.add(_parseConcreteConditionRule(group, args, line));
   }
 
-  /// Applies a directive inside a `deleted` block to [fields].
+  /// Applies a directive inside a `deleted` block to [fields] (`TDF-ENT-005`).
   static void applyDeletedDirective(
     TdfDeletedDirectiveFields fields,
     String directive,
@@ -402,7 +382,7 @@ abstract final class TdfDirectiveParser {
         fields.generation = _parseUnsignedIntWithLimit(
           args,
           line,
-          TdfDeletedBlock.maxGeneration,
+          maxTdfSyncGeneration,
           'generation',
         );
       case 'task':
@@ -420,15 +400,13 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Applies a directive inside a `label` block to [fields].
+  /// Applies a directive inside a `label` block to [fields] (`TDF-ENT-003`).
   static void applyLabelDirective(
     TdfLabelDirectiveFields fields,
     String directive,
     List<TdfScannedToken> args,
-    int line, {
-    bool isLegacy05x = false,
-    bool isPre070 = false,
-  }) {
+    int line,
+  ) {
     switch (directive) {
       case 'name':
         if (fields.name != null) {
@@ -477,13 +455,6 @@ abstract final class TdfDirectiveParser {
         }
         fields.modifiedAt = parseUtcTimestamp(args, line);
       case 'link':
-        if (isPre070) {
-          fail(
-            TdfErrorKind.unknownDirective,
-            line,
-            'Unknown label directive "link" in pre-0.7.0 document.',
-          );
-        }
         if (fields.links.length >= maxTdfLinksPerLabel) {
           fail(
             TdfErrorKind.limitExceeded,
@@ -493,28 +464,7 @@ abstract final class TdfDirectiveParser {
         }
         fields.links.add(_parseTaskLink(args, line));
       case 'condition':
-        if (args.isEmpty) {
-          fail(
-            TdfErrorKind.missingDirectiveArgument,
-            line,
-            'Missing condition arguments.',
-          );
-        }
-        final ruleTypeToken = args[0];
-        if (ruleTypeToken.kind != TdfTokenKind.bareWord) {
-          fail(
-            TdfErrorKind.invalidIdentifier,
-            line,
-            'Condition rule type must not be quoted.',
-          );
-        }
-        addConditionToLabel(
-          fields,
-          ruleTypeToken.value,
-          args.sublist(1),
-          line,
-          isLegacy05x: isLegacy05x,
-        );
+        _applyInlineConditionToLabel(fields, args, line);
       case _:
         fail(
           TdfErrorKind.unknownDirective,
@@ -524,7 +474,7 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Applies a directive inside a `location` block to [fields] (`spec/TDF_SPEC_0.6.0.md` Section 4.3).
+  /// Applies a directive inside a `location` block to [fields] (`TDF-ENT-004`).
   static void applyLocationDirective(
     TdfLocationDirectiveFields fields,
     String directive,
@@ -610,7 +560,7 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Applies a directive inside a `queue` block to [fields].
+  /// Applies a directive inside a `queue` block to [fields] (`TDF-ENT-006`).
   static void applyQueueDirective(
     TdfQueueDirectiveFields fields,
     String directive,
@@ -628,6 +578,13 @@ abstract final class TdfDirectiveParser {
         }
         fields.modifiedAt = parseUtcTimestamp(args, line);
       case 'task':
+        if (fields.entries.length >= maxTdfQueueEntries) {
+          fail(
+            TdfErrorKind.limitExceeded,
+            line,
+            'Queue block exceeds maximum of $maxTdfQueueEntries entries.',
+          );
+        }
         if (args.length != 1) {
           fail(
             TdfErrorKind.unexpectedToken,
@@ -635,16 +592,8 @@ abstract final class TdfDirectiveParser {
             'Queue "task" directive requires exactly 1 <task-id> argument.',
           );
         }
-        if (fields.entries.length >= TdfQueueBlock.maxQueueEntries) {
-          fail(
-            TdfErrorKind.limitExceeded,
-            line,
-            'Queue block exceeds maximum of ${TdfQueueBlock.maxQueueEntries} entries.',
-          );
-        }
         final token = args[0];
-        if (token.kind != TdfTokenKind.bareWord ||
-            !isValidEntityId(token.value)) {
+        if (!token.isBare || !isValidEntityId(token.value)) {
           fail(
             TdfErrorKind.invalidIdentifier,
             line,
@@ -668,16 +617,13 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Applies a directive inside a `task` block to [fields].
+  /// Applies a directive inside a `task` block to [fields] (`TDF-ENT-002`).
   static void applyTaskDirective(
     TdfTaskDirectiveFields fields,
     String directive,
     List<TdfScannedToken> args,
-    int line, {
-    bool allowLegacyQueued = false,
-    bool isLegacy05x = false,
-    bool isPre070 = false,
-  }) {
+    int line,
+  ) {
     switch (directive) {
       case 'name':
         if (fields.name != null) {
@@ -708,22 +654,6 @@ abstract final class TdfDirectiveParser {
           );
         }
         fields.createdAt = parseUtcTimestamp(args, line);
-      case 'queued':
-        if (!allowLegacyQueued) {
-          fail(
-            TdfErrorKind.unknownDirective,
-            line,
-            'Unknown task directive "queued".',
-          );
-        }
-        if (fields.queuedAt != null) {
-          fail(
-            TdfErrorKind.duplicateDirective,
-            line,
-            'Duplicate task "queued".',
-          );
-        }
-        fields.queuedAt = parseUtcTimestamp(args, line);
       case 'finished':
         if (fields.finishedAt != null) {
           fail(
@@ -753,35 +683,9 @@ abstract final class TdfDirectiveParser {
         fields.completions = _parseUnsignedIntWithLimit(
           args,
           line,
-          TdfTaskDependency.maxCompletions,
+          maxTdfCompletions,
           'completions',
         );
-      case 'suspended':
-        _applyTaskSuspended(fields, args, line, isPre070: isPre070);
-      case 'due':
-        _applyTaskDue(
-          fields,
-          args,
-          line,
-          isLegacy05x: isLegacy05x,
-          isPre070: isPre070,
-        );
-      case 'origin':
-        if (isLegacy05x) {
-          fail(
-            TdfErrorKind.unknownDirective,
-            line,
-            'Unknown task directive "origin" in pre-0.6.0 document.',
-          );
-        }
-        if (fields.origin != null) {
-          fail(
-            TdfErrorKind.duplicateDirective,
-            line,
-            'Duplicate task "origin".',
-          );
-        }
-        fields.origin = _parseTaskOrigin(args, line);
       case 'repeat':
         if (fields.repeatRule != null) {
           fail(
@@ -790,7 +694,7 @@ abstract final class TdfDirectiveParser {
             'Duplicate task "repeat".',
           );
         }
-        fields.repeatRule = _parseRepeatRule(args, line, isPre070: isPre070);
+        fields.repeatRule = _parseRepeatRule(args, line);
       case 'labels':
         if (fields.hasLabelsDirective) {
           fail(
@@ -812,23 +716,29 @@ abstract final class TdfDirectiveParser {
         fields.hasBlockedDirective = true;
         fields.blockedLine = line;
         _parseBlockedDependencies(args, line, fields.blockedByCompletions);
+      case 'suspended':
+        _applyTaskSuspended(fields, args, line);
+      case 'due':
+        _applyTaskDue(fields, args, line);
+      case 'origin':
+        if (fields.origin != null) {
+          fail(
+            TdfErrorKind.duplicateDirective,
+            line,
+            'Duplicate task "origin".',
+          );
+        }
+        fields.origin = _parseTaskOrigin(args, line);
       case 'link':
-        if (fields.links.length >= TaskLink.maxLinksPerTask) {
+        if (fields.links.length >= maxTdfLinksPerTask) {
           fail(
             TdfErrorKind.limitExceeded,
             line,
-            'Task exceeds maximum of ${TaskLink.maxLinksPerTask} links.',
+            'Task exceeds maximum of $maxTdfLinksPerTask links.',
           );
         }
         fields.links.add(_parseTaskLink(args, line));
       case 'history':
-        if (isPre070) {
-          fail(
-            TdfErrorKind.unknownDirective,
-            line,
-            'Unknown task directive "history" in pre-0.7.0 document.',
-          );
-        }
         if (fields.rawHistoryCount >= maxTdfHistoryPerTask) {
           fail(
             TdfErrorKind.limitExceeded,
@@ -839,29 +749,7 @@ abstract final class TdfDirectiveParser {
         fields.rawHistoryCount += 1;
         fields.history.add(_parseTaskHistoryEntry(args, line));
       case 'condition':
-        if (args.isEmpty) {
-          fail(
-            TdfErrorKind.missingDirectiveArgument,
-            line,
-            'Missing condition arguments.',
-          );
-        }
-        final ruleTypeToken = args[0];
-        if (ruleTypeToken.kind != TdfTokenKind.bareWord) {
-          fail(
-            TdfErrorKind.invalidIdentifier,
-            line,
-            'Condition rule type must not be quoted.',
-          );
-        }
-        addConditionToTask(
-          fields,
-          ruleTypeToken.value,
-          args.sublist(1),
-          line,
-          isInlineDirective: true,
-          isLegacy05x: isLegacy05x,
-        );
+        _applyInlineConditionToTask(fields, args, line);
       case _:
         fail(
           TdfErrorKind.unknownDirective,
@@ -871,16 +759,16 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Coalesces multiple [LocationTaskCondition] rules in [conditions] into a single canonical [LocationTaskCondition] in first-seen `<location-id>` order (`spec/TDF_SPEC_0.6.0.md` Section 4.4.1).
+  /// Coalesces multiple [LocationTaskCondition] rules in [conditions] into one canonical [LocationTaskCondition] in first-seen `<location-id>` order (`TDF-MODEL-006`).
   static List<TaskCondition> coalesceLocationConditions(
     List<TaskCondition> conditions,
   ) {
     final seenLocationIds = <String>{};
     final orderedLocationIds = <String>[];
     for (final condition in conditions) {
-      if (condition case final LocationTaskCondition loc) {
+      if (condition case final LocationTaskCondition locationCondition) {
         _collectDistinctLocationIds(
-          loc.locationIds,
+          locationCondition.locationIds,
           seenLocationIds,
           orderedLocationIds,
         );
@@ -889,49 +777,48 @@ abstract final class TdfDirectiveParser {
     if (orderedLocationIds.isEmpty) {
       return conditions;
     }
-    final result = <TaskCondition>[];
+    final coalesced = <TaskCondition>[];
     var emittedLocation = false;
     for (final condition in conditions) {
       if (condition is LocationTaskCondition) {
         if (!emittedLocation) {
-          result.add(LocationTaskCondition(locationIds: orderedLocationIds));
+          coalesced.add(LocationTaskCondition(locationIds: orderedLocationIds));
           emittedLocation = true;
         }
       } else {
-        result.add(condition);
+        coalesced.add(condition);
       }
     }
-    return result;
+    return coalesced;
   }
 
   /// Throws a [TdfException] with [kind], [line], and [message].
-  static Never fail(TdfErrorKind kind, int line, String message) {
-    throw TdfException(kind: kind, line: line, message: message);
-  }
+  static Never fail(TdfErrorKind kind, int line, String message) =>
+      TdfScanner.fail(kind, line, message);
 
   /// Checks whether [id] is a canonical 10-character Base62 entity identifier (`[0-9A-Za-z]{10}`).
   static bool isValidEntityId(String id) => _isValidBase62EntityId(id);
 
-  /// Parses a `step <done> "<text>"` directive inside a `subtasks` block.
+  /// Parses a `step <bool> "<text>"` directive inside a `subtasks` block (`TDF-DIR-008`).
   static SubtaskItem parseStepDirective(List<TdfScannedToken> args, int line) {
     if (args.length != 2) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
-        'Subtask "step" requires <done> and "<text>".',
+        'Subtask "step" requires <bool> and "<text>".',
       );
     }
     final doneToken = args[0];
-    if (doneToken.kind != TdfTokenKind.bareWord ||
+    if (!doneToken.isBare ||
         (doneToken.value != 'true' && doneToken.value != 'false')) {
       fail(
         TdfErrorKind.invalidBoolean,
         line,
-        'Subtask <done> must be unquoted true or false.',
+        'Subtask <bool> must be unquoted true or false.',
       );
     }
     final title = _parseQuotedText(
-      [args[1]],
+      <TdfScannedToken>[args[1]],
       line,
       maxTdfTextLength,
       allowMultiline: false,
@@ -941,61 +828,15 @@ abstract final class TdfDirectiveParser {
 
   /// Parses `<YYYY-MM-DD> [<HH:MM[:SS]>]` into a UTC [DateTime] (`0001-01-01 00:00:00`..`9999-12-31 23:59:59`).
   static DateTime parseUtcTimestamp(List<TdfScannedToken> args, int line) {
-    if (args.isEmpty || args.length > 2) {
-      fail(
-        TdfErrorKind.unexpectedToken,
-        line,
-        'Invalid timestamp argument count.',
-      );
-    }
-    if (args.any((token) => token.kind != TdfTokenKind.bareWord)) {
-      fail(
-        TdfErrorKind.invalidTimestamp,
-        line,
-        'Timestamp tokens must not be quoted.',
-      );
-    }
-    final datePart = args[0].value;
-    if (datePart.length != 10 ||
-        datePart.codeUnitAt(4) != 0x2D ||
-        datePart.codeUnitAt(7) != 0x2D) {
-      fail(
-        TdfErrorKind.invalidTimestamp,
-        line,
-        'Invalid date "$datePart": expected YYYY-MM-DD.',
-      );
-    }
-    final year = _parseFixedDigits(datePart, 0, 4);
-    final month = _parseFixedDigits(datePart, 5, 2);
-    final day = _parseFixedDigits(datePart, 8, 2);
-    if (year == null ||
-        month == null ||
-        day == null ||
-        !TdfCalendar.isValidGregorianDate(year, month, day)) {
-      fail(
-        TdfErrorKind.invalidTimestamp,
-        line,
-        'Invalid calendar date "$datePart".',
-      );
-    }
-    var hour = 0;
-    var minute = 0;
-    var second = 0;
-    if (args.length == 2) {
-      final timePart = args[1].value;
-      final parsedClock = TdfRepeatClock.tryParse(timePart);
-      if (parsedClock == null) {
-        fail(
-          TdfErrorKind.invalidTimestamp,
-          line,
-          'Invalid time "$timePart": expected HH:MM or HH:MM:SS.',
-        );
-      }
-      hour = parsedClock.hour;
-      minute = parsedClock.minute;
-      second = parsedClock.second;
-    }
-    return DateTime.utc(year, month, day, hour, minute, second);
+    final parsedLocal = _parseCalendarTimestampTokens(args, line);
+    return DateTime.utc(
+      parsedLocal.year,
+      parsedLocal.month,
+      parsedLocal.day,
+      parsedLocal.hour,
+      parsedLocal.minute,
+      parsedLocal.second,
+    );
   }
 
   /// Parses a `label <label-id> <timestamp>` deletion record inside `deleted`.
@@ -1004,14 +845,7 @@ abstract final class TdfDirectiveParser {
     List<TdfScannedToken> args,
     int line,
   ) {
-    if (fields.tasks.length + fields.labels.length + fields.locations.length >=
-        TdfDeletedBlock.maxDeletedRecords) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Deleted block exceeds maximum of ${TdfDeletedBlock.maxDeletedRecords} records.',
-      );
-    }
+    _ensureDeletedRecordCapacity(fields, line);
     if (args.length < 2 || args.length > 3) {
       fail(
         TdfErrorKind.unexpectedToken,
@@ -1027,8 +861,7 @@ abstract final class TdfDirectiveParser {
       );
     }
     final idToken = args[0];
-    if (idToken.kind != TdfTokenKind.bareWord ||
-        !isValidEntityId(idToken.value)) {
+    if (!idToken.isBare || !isValidEntityId(idToken.value)) {
       fail(
         TdfErrorKind.invalidIdentifier,
         line,
@@ -1043,25 +876,22 @@ abstract final class TdfDirectiveParser {
       );
     }
     final deletedAt = parseUtcTimestamp(args.sublist(1), line);
-    fields.labels.add(
-      TdfDeletedLabelRecord(labelId: idToken.value, deletedAt: deletedAt),
-    );
+    fields.labelEntries.add((
+      record: TdfDeletedLabelRecord(
+        labelId: idToken.value,
+        deletedAt: deletedAt,
+      ),
+      line: line,
+    ));
   }
 
-  /// Parses a `location <location-id> <timestamp>` deletion record inside `deleted` (`spec/TDF_SPEC_0.6.0.md` Section 4.5).
+  /// Parses a `location <location-id> <timestamp>` deletion record inside `deleted`.
   static void _applyDeletedLocationRecord(
     TdfDeletedDirectiveFields fields,
     List<TdfScannedToken> args,
     int line,
   ) {
-    if (fields.tasks.length + fields.labels.length + fields.locations.length >=
-        TdfDeletedBlock.maxDeletedRecords) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Deleted block exceeds maximum of ${TdfDeletedBlock.maxDeletedRecords} records.',
-      );
-    }
+    _ensureDeletedRecordCapacity(fields, line);
     if (args.length < 2 || args.length > 3) {
       fail(
         TdfErrorKind.unexpectedToken,
@@ -1077,8 +907,7 @@ abstract final class TdfDirectiveParser {
       );
     }
     final idToken = args[0];
-    if (idToken.kind != TdfTokenKind.bareWord ||
-        !isValidEntityId(idToken.value)) {
+    if (!idToken.isBare || !isValidEntityId(idToken.value)) {
       fail(
         TdfErrorKind.invalidIdentifier,
         line,
@@ -1093,9 +922,13 @@ abstract final class TdfDirectiveParser {
       );
     }
     final deletedAt = parseUtcTimestamp(args.sublist(1), line);
-    fields.locations.add(
-      TdfDeletedLocationRecord(locationId: idToken.value, deletedAt: deletedAt),
-    );
+    fields.locationEntries.add((
+      record: TdfDeletedLocationRecord(
+        locationId: idToken.value,
+        deletedAt: deletedAt,
+      ),
+      line: line,
+    ));
   }
 
   /// Parses a `task <task-id> <timestamp> [<completion-count>]` deletion record inside `deleted`.
@@ -1104,14 +937,7 @@ abstract final class TdfDirectiveParser {
     List<TdfScannedToken> args,
     int line,
   ) {
-    if (fields.tasks.length + fields.labels.length + fields.locations.length >=
-        TdfDeletedBlock.maxDeletedRecords) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Deleted block exceeds maximum of ${TdfDeletedBlock.maxDeletedRecords} records.',
-      );
-    }
+    _ensureDeletedRecordCapacity(fields, line);
     if (args.length < 2 || args.length > 4) {
       fail(
         TdfErrorKind.unexpectedToken,
@@ -1120,8 +946,7 @@ abstract final class TdfDirectiveParser {
       );
     }
     final idToken = args[0];
-    if (idToken.kind != TdfTokenKind.bareWord ||
-        !isValidEntityId(idToken.value)) {
+    if (!idToken.isBare || !isValidEntityId(idToken.value)) {
       fail(
         TdfErrorKind.invalidIdentifier,
         line,
@@ -1135,10 +960,9 @@ abstract final class TdfDirectiveParser {
         'Duplicate deleted task ID "${idToken.value}".',
       );
     }
-    var timestampArgCount = 1;
-    if (args.length >= 3 && args[2].value.contains(':')) {
-      timestampArgCount = 2;
-    }
+    final timestampArgCount = (args.length >= 3 && args[2].value.contains(':'))
+        ? 2
+        : 1;
     final timestampArgs = args.sublist(1, 1 + timestampArgCount);
     final remainingArgs = args.sublist(1 + timestampArgCount);
     if (remainingArgs.length > 1) {
@@ -1149,32 +973,105 @@ abstract final class TdfDirectiveParser {
       );
     }
     final deletedAt = parseUtcTimestamp(timestampArgs, line);
-    var checkpoint = 0;
-    if (remainingArgs.length == 1) {
-      checkpoint = _parseUnsignedIntWithLimit(
-        remainingArgs,
-        line,
-        TdfTaskDependency.maxCompletions,
-        'completion checkpoint',
-      );
-    }
-    fields.tasks.add(
-      TdfDeletedTaskRecord(
+    final checkpoint = remainingArgs.length == 1
+        ? _parseUnsignedIntWithLimit(
+            remainingArgs,
+            line,
+            maxTdfCompletions,
+            'completion checkpoint',
+          )
+        : 0;
+    fields.taskEntries.add((
+      record: TdfDeletedTaskRecord(
         taskId: idToken.value,
         deletedAt: deletedAt,
         completionsCheckpoint: checkpoint,
       ),
+      line: line,
+    ));
+  }
+
+  /// Validates and applies an inline `condition <type> ...` directive inside a `label` block.
+  static void _applyInlineConditionToLabel(
+    TdfLabelDirectiveFields fields,
+    List<TdfScannedToken> args,
+    int line,
+  ) {
+    if (args.isEmpty) {
+      fail(
+        TdfErrorKind.missingDirectiveArgument,
+        line,
+        'Missing condition arguments.',
+      );
+    }
+    final ruleTypeToken = args[0];
+    if (!ruleTypeToken.isBare) {
+      if (fields.conditions.length >= maxTdfConditionRulesPerEntity) {
+        fail(
+          TdfErrorKind.limitExceeded,
+          line,
+          'Label exceeds maximum of $maxTdfConditionRulesPerEntity condition rules.',
+        );
+      }
+      fail(
+        TdfErrorKind.invalidCondition,
+        line,
+        'Condition rule keyword must not be quoted.',
+      );
+    }
+    addConditionToLabel(
+      fields,
+      ruleTypeToken.value,
+      args.sublist(1),
+      line,
+      isInlineDirective: true,
     );
   }
 
-  /// Validates and applies `coordinates <lat> <lon>` inside a `location` block (`spec/TDF_SPEC_0.6.0.md` Section 4.3).
+  /// Validates and applies an inline `condition <type> ...` directive inside a `task` block.
+  static void _applyInlineConditionToTask(
+    TdfTaskDirectiveFields fields,
+    List<TdfScannedToken> args,
+    int line,
+  ) {
+    if (args.isEmpty) {
+      fail(
+        TdfErrorKind.missingDirectiveArgument,
+        line,
+        'Missing condition arguments.',
+      );
+    }
+    final ruleTypeToken = args[0];
+    if (!ruleTypeToken.isBare) {
+      if (fields.conditions.length >= maxTdfConditionRulesPerEntity) {
+        fail(
+          TdfErrorKind.limitExceeded,
+          line,
+          'Task exceeds maximum of $maxTdfConditionRulesPerEntity condition rules.',
+        );
+      }
+      fail(
+        TdfErrorKind.invalidCondition,
+        line,
+        'Condition rule keyword must not be quoted.',
+      );
+    }
+    addConditionToTask(
+      fields,
+      ruleTypeToken.value,
+      args.sublist(1),
+      line,
+      isInlineDirective: true,
+    );
+  }
+
+  /// Validates and applies `coordinates <lat> <lon>` inside a `location` block (`TDF-ENT-004`).
   static void _applyLocationCoordinates(
     TdfLocationDirectiveFields fields,
     List<TdfScannedToken> args,
     int line,
   ) {
-    if (args.length != 2 ||
-        args.any((token) => token.kind != TdfTokenKind.bareWord)) {
+    if (args.length != 2 || args.any((token) => !token.isBare)) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
@@ -1203,13 +1100,13 @@ abstract final class TdfDirectiveParser {
     fields.longitudeText = parsedLon.normalizedText;
   }
 
-  /// Validates and applies `radius <meters>` inside a `location` block (`spec/TDF_SPEC_0.6.0.md` Section 4.3).
+  /// Validates and applies `radius <meters>` inside a `location` block (`TDF-ENT-004`).
   static void _applyLocationRadius(
     TdfLocationDirectiveFields fields,
     List<TdfScannedToken> args,
     int line,
   ) {
-    if (args.length != 1 || args[0].kind != TdfTokenKind.bareWord) {
+    if (args.length != 1 || !args[0].isBare) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
@@ -1229,8 +1126,8 @@ abstract final class TdfDirectiveParser {
     fields.radiusText = parsedRadius.normalizedText;
   }
 
-  /// Applies `suspended forever ["<note>"]` under `tdf 0.7.0` grammar rules.
-  static void _applySuspendedForever070(
+  /// Applies `suspended forever ["<note>"]` under `TDF-DIR-003`.
+  static void _applySuspendedForever(
     TdfTaskDirectiveFields fields,
     List<TdfScannedToken> args,
     int line,
@@ -1239,7 +1136,7 @@ abstract final class TdfDirectiveParser {
       fields.isSuspendedForever = true;
       return;
     }
-    if (args.length == 2 && args[1].kind == TdfTokenKind.quotedString) {
+    if (args.length == 2 && args[1].isQuoted) {
       fields.isSuspendedForever = true;
       fields.suspendedNote = _validateDecodedText(
         args[1].value,
@@ -1256,29 +1153,16 @@ abstract final class TdfDirectiveParser {
     );
   }
 
-  /// Applies `due <timestamp> [passive] ["<note>"]` inside a `task` block.
+  /// Applies `due <timestamp> [anchor <timestamp>] [passive] ["<note>"]` using right-to-left modifier peeling (`TDF-DIR-004`).
   static void _applyTaskDue(
     TdfTaskDirectiveFields fields,
     List<TdfScannedToken> args,
-    int line, {
-    required bool isLegacy05x,
-    required bool isPre070,
-  }) {
-    if (isLegacy05x) {
-      fail(
-        TdfErrorKind.unknownDirective,
-        line,
-        'Unknown task directive "due" in pre-0.6.0 document.',
-      );
-    }
+    int line,
+  ) {
     if (fields.dueAt != null) {
       fail(TdfErrorKind.duplicateDirective, line, 'Duplicate task "due".');
     }
-    if (isPre070) {
-      fields.dueAt = parseUtcTimestamp(args, line);
-      return;
-    }
-    if (args[0].kind != TdfTokenKind.bareWord) {
+    if (!args[0].isBare) {
       fail(
         TdfErrorKind.invalidTimestamp,
         line,
@@ -1286,45 +1170,56 @@ abstract final class TdfDirectiveParser {
       );
     }
     _rejectQuotedMiddleArgs(args, line, 'due');
+    if (args.length >= 2 &&
+        args[args.length - 2].isBare &&
+        args[args.length - 2].value == 'anchor' &&
+        args.last.isQuoted) {
+      fail(
+        TdfErrorKind.invalidTimestamp,
+        line,
+        'Task "due" anchor timestamp must not be quoted.',
+      );
+    }
     var end = args.length;
     TdfScannedToken? rawNoteToken;
-    if (end >= 2 && args[end - 1].kind == TdfTokenKind.quotedString) {
+    if (end >= 2 && args[end - 1].isQuoted) {
       rawNoteToken = args[end - 1];
       end -= 1;
     }
-    if (end >= 2 &&
-        args[end - 1].kind == TdfTokenKind.bareWord &&
-        args[end - 1].value == 'passive') {
-      fields.isDuePassive = true;
+    var isPassive = false;
+    if (end >= 2 && args[end - 1].isBare && args[end - 1].value == 'passive') {
+      isPassive = true;
       end -= 1;
     }
-    if (end >= 2 &&
-        args[end - 1].kind == TdfTokenKind.bareWord &&
-        args[end - 1].value == 'passive') {
+    if (end >= 2 && args[end - 1].isBare && args[end - 1].value == 'passive') {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
         'Duplicate "passive" modifier on task "due".',
       );
     }
-    fields.dueAt = parseUtcTimestamp(args.sublist(0, end), line);
+    final resolvedSchedule = _parseDueAndAnchorSlices(args, end, line);
+    String? validatedNote;
     if (rawNoteToken != null) {
-      fields.dueNote = _validateDecodedText(
+      validatedNote = _validateDecodedText(
         rawNoteToken.value,
         line,
         maxTdfNoteLength,
         allowMultiline: true,
       );
     }
+    fields.dueAt = resolvedSchedule.dueAt;
+    fields.dueAnchor = resolvedSchedule.dueAnchor;
+    fields.isDuePassive = isPassive;
+    fields.dueNote = validatedNote;
   }
 
-  /// Applies `suspended (<timestamp> | forever) ["<note>"]` inside a `task` block.
+  /// Applies `suspended (<timestamp> | forever) ["<note>"]` inside a `task` block (`TDF-DIR-003`).
   static void _applyTaskSuspended(
     TdfTaskDirectiveFields fields,
     List<TdfScannedToken> args,
-    int line, {
-    required bool isPre070,
-  }) {
+    int line,
+  ) {
     if (fields.suspendedAt != null || fields.isSuspendedForever) {
       fail(
         TdfErrorKind.duplicateDirective,
@@ -1332,18 +1227,7 @@ abstract final class TdfDirectiveParser {
         'Duplicate task "suspended".',
       );
     }
-    fields.suspendedLine = line;
-    if (isPre070) {
-      if (args.length == 1 &&
-          args[0].kind == TdfTokenKind.bareWord &&
-          args[0].value == 'forever') {
-        fields.isSuspendedForever = true;
-      } else {
-        fields.suspendedAt = parseUtcTimestamp(args, line);
-      }
-      return;
-    }
-    if (args[0].kind != TdfTokenKind.bareWord) {
+    if (!args[0].isBare) {
       fail(
         TdfErrorKind.invalidTimestamp,
         line,
@@ -1352,20 +1236,22 @@ abstract final class TdfDirectiveParser {
     }
     _rejectQuotedMiddleArgs(args, line, 'suspended');
     if (args[0].value == 'forever') {
-      _applySuspendedForever070(fields, args, line);
+      _applySuspendedForever(fields, args, line);
       return;
     }
-    if (args.length >= 2 && args.last.kind == TdfTokenKind.quotedString) {
-      fields.suspendedAt = parseUtcTimestamp(
+    if (args.length >= 2 && args.last.isQuoted) {
+      final parsedSuspended = parseUtcTimestamp(
         args.sublist(0, args.length - 1),
         line,
       );
-      fields.suspendedNote = _validateDecodedText(
+      final validatedNote = _validateDecodedText(
         args.last.value,
         line,
         maxTdfNoteLength,
         allowMultiline: true,
       );
+      fields.suspendedAt = parsedSuspended;
+      fields.suspendedNote = validatedNote;
       return;
     }
     fields.suspendedAt = parseUtcTimestamp(args, line);
@@ -1384,26 +1270,23 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Maps a condition rule type name (`day`, `time`, `location`) to [ConditionGroup].
-  static ConditionGroup _conditionGroupFromName(String ruleType, int line) =>
-      switch (ruleType) {
-        'day' => ConditionGroup.day,
-        'time' => ConditionGroup.time,
-        'location' => ConditionGroup.location,
-        _ => fail(
-          TdfErrorKind.unknownDirective,
-          line,
-          'Unknown condition type "$ruleType".',
-        ),
-      };
-
-  /// Checks whether [conditions] already contains a concrete rule for [group].
-  static bool _hasConditionGroup(
-    List<TaskCondition> conditions,
-    ConditionGroup group,
-  ) => conditions.any(
-    (rule) => rule is! GroupResetTaskCondition && rule.group == group,
-  );
+  /// Enforces `MAX_DELETED_RECORDS` before allocating a new tombstone record (`P-BOUND-ALLOC`).
+  static void _ensureDeletedRecordCapacity(
+    TdfDeletedDirectiveFields fields,
+    int line,
+  ) {
+    final totalRecords =
+        fields.taskEntries.length +
+        fields.labelEntries.length +
+        fields.locationEntries.length;
+    if (totalRecords >= maxTdfDeletedRecords) {
+      fail(
+        TdfErrorKind.limitExceeded,
+        line,
+        'Deleted block exceeds maximum of $maxTdfDeletedRecords records.',
+      );
+    }
+  }
 
   /// Checks whether [conditions] already contains a `<type> any` reset for [group].
   static bool _hasGroupReset(
@@ -1424,16 +1307,6 @@ abstract final class TdfDirectiveParser {
     return false;
   }
 
-  /// Checks whether all characters in [source] within `[start, end)` are ASCII decimal digits (`[0-9]`).
-  static bool _hasOnlyAsciiDigits(String source, int start, int end) {
-    for (var i = start; i < end; i++) {
-      if (!_isAsciiDigit(source.codeUnitAt(i))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   /// Checks whether [uri] begins with a valid RFC 3986 URI scheme prefix (`[a-zA-Z][a-zA-Z0-9+.-]*:`).
   static bool _hasValidUriSchemePrefix(String uri) {
     final colonIndex = uri.indexOf(':');
@@ -1452,13 +1325,17 @@ abstract final class TdfDirectiveParser {
   static bool _isAsciiAlpha(int unit) =>
       (unit >= 0x41 && unit <= 0x5A) || (unit >= 0x61 && unit <= 0x7A);
 
-  /// Checks whether [unit] is an ASCII decimal digit (`[0-9]`).
-  static bool _isAsciiDigit(int unit) => unit >= 0x30 && unit <= 0x39;
+  /// Checks whether [keyword] is one of the recognized depth-`2` `condition { ... }` identifiers (`{day, time, location, any}`).
+  static bool _isDepth2ConditionKeyword(String keyword) =>
+      keyword == 'day' ||
+      keyword == 'time' ||
+      keyword == 'location' ||
+      keyword == 'any';
 
   /// Checks whether [unit] is a valid RFC 3986 URI scheme continuation character (`[a-zA-Z0-9+.-]`).
   static bool _isUriSchemeChar(int unit) =>
       _isAsciiAlpha(unit) ||
-      _isAsciiDigit(unit) ||
+      TdfScanner.isAsciiDigit(unit) ||
       unit == 0x2B ||
       unit == 0x2D ||
       unit == 0x2E;
@@ -1470,83 +1347,11 @@ abstract final class TdfDirectiveParser {
     }
     for (var i = 0; i < tdfEntityIdLength; i++) {
       final unit = id.codeUnitAt(i);
-      if (!_isAsciiAlpha(unit) && !_isAsciiDigit(unit)) {
+      if (!_isAsciiAlpha(unit) && !TdfScanner.isAsciiDigit(unit)) {
         return false;
       }
     }
     return true;
-  }
-
-  /// Checks whether [raw] matches a finite ASCII decimal number (`-?[0-9]+(\.[0-9]+)?`).
-  static bool _isValidDecimalNumber(String raw) {
-    if (raw.isEmpty) {
-      return false;
-    }
-    final start = raw.codeUnitAt(0) == 0x2D ? 1 : 0;
-    if (start >= raw.length) {
-      return false;
-    }
-    final dotIndex = raw.indexOf('.', start);
-    if (dotIndex == -1) {
-      return _hasOnlyAsciiDigits(raw, start, raw.length);
-    }
-    if (dotIndex == start || dotIndex == raw.length - 1) {
-      return false;
-    }
-    return _hasOnlyAsciiDigits(raw, start, dotIndex) &&
-        _hasOnlyAsciiDigits(raw, dotIndex + 1, raw.length);
-  }
-
-  /// Checks whether [value] is a valid `#RRGGBB` hex color string (`^#[0-9a-fA-F]{6}$`).
-  static bool _isValidHexColor(String value) {
-    if (value.length != 7 || value.codeUnitAt(0) != 0x23) {
-      return false;
-    }
-    for (var i = 1; i < 7; i++) {
-      final unit = value.codeUnitAt(i);
-      final isHex =
-          _isAsciiDigit(unit) ||
-          (unit >= 0x41 && unit <= 0x46) ||
-          (unit >= 0x61 && unit <= 0x66);
-      if (!isHex) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /// Normalizes a validated ASCII decimal string (`-?[0-9]+(\.[0-9]+)?`) per Section 6.7.3 (`-0.0` -> `0`, strip redundant leading/trailing zeros).
-  static String _normalizeValidatedDecimalString(String raw) {
-    var isNegative = false;
-    var digits = raw;
-    if (digits.startsWith('-')) {
-      isNegative = true;
-      digits = digits.substring(1);
-    }
-    final dotIndex = digits.indexOf('.');
-    var intPart = dotIndex == -1 ? digits : digits.substring(0, dotIndex);
-    var fracPart = dotIndex == -1 ? '' : digits.substring(dotIndex + 1);
-
-    var intStart = 0;
-    while (intStart < intPart.length - 1 &&
-        intPart.codeUnitAt(intStart) == 0x30) {
-      intStart++;
-    }
-    intPart = intPart.substring(intStart);
-
-    var fracEnd = fracPart.length;
-    while (fracEnd > 0 && fracPart.codeUnitAt(fracEnd - 1) == 0x30) {
-      fracEnd--;
-    }
-    fracPart = fracPart.substring(0, fracEnd);
-
-    if (intPart == '0' && fracPart.isEmpty) {
-      return '0';
-    }
-    final signPrefix = isNegative ? '-' : '';
-    return fracPart.isEmpty
-        ? '$signPrefix$intPart'
-        : '$signPrefix$intPart.$fracPart';
   }
 
   /// Parses `blocked <task-id>[:<count>] ...` arguments, retaining the greatest `<count>` for duplicate target IDs.
@@ -1556,53 +1361,46 @@ abstract final class TdfDirectiveParser {
     Map<String, int> targetMap,
   ) {
     for (final token in args) {
-      if (token.kind != TdfTokenKind.bareWord) {
-        fail(
-          TdfErrorKind.invalidIdentifier,
-          line,
-          'Prerequisite token must not be quoted.',
-        );
-      }
-      final raw = token.value;
-      final colonIdx = raw.indexOf(':');
-      final String targetId;
-      var requiredCount = 1;
-      if (colonIdx == -1) {
-        targetId = raw;
-      } else {
-        targetId = raw.substring(0, colonIdx);
-        final countStr = raw.substring(colonIdx + 1);
-        if (countStr.isEmpty || countStr.contains(':')) {
-          fail(
-            TdfErrorKind.invalidNumber,
-            line,
-            'Invalid prerequisite count in "$raw".',
-          );
-        }
-        requiredCount = _parsePositiveIntToken(
-          countStr,
-          line,
-          TdfTaskDependency.maxCompletions,
-          'prerequisite count',
-        );
-      }
-      if (!isValidEntityId(targetId)) {
-        fail(
-          TdfErrorKind.invalidIdentifier,
-          line,
-          'Invalid prerequisite <task-id> "$targetId".',
-        );
-      }
-      final existing = targetMap[targetId];
-      if (existing == null || requiredCount > existing) {
-        targetMap[targetId] = requiredCount;
-      }
+      _parseSingleBlockedDependency(token, line, targetMap);
     }
   }
 
-  /// Parses and validates a `"#RRGGBB"` color argument.
+  /// Parses `1..2` bare `<YYYY-MM-DD> [<HH:MM[:SS]>]` tokens into a validated [TdfLocalDateTime] (`TDF-TYPE-004`).
+  static TdfLocalDateTime _parseCalendarTimestampTokens(
+    List<TdfScannedToken> args,
+    int line,
+  ) {
+    if (args.isEmpty || args.length > 2) {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Invalid timestamp argument count.',
+      );
+    }
+    if (args.any((token) => !token.isBare)) {
+      fail(
+        TdfErrorKind.invalidTimestamp,
+        line,
+        'Timestamp tokens must not be quoted.',
+      );
+    }
+    final parsed = TdfLocalDateTime.tryParse(
+      args[0].value,
+      args.length == 2 ? args[1].value : null,
+    );
+    if (parsed == null) {
+      fail(
+        TdfErrorKind.invalidTimestamp,
+        line,
+        'Invalid calendar timestamp "${args[0].value}".',
+      );
+    }
+    return parsed;
+  }
+
+  /// Parses and normalizes a quoted `"#RRGGBB"` color argument to uppercase (`TDF-MODEL-006`, `TDF-TYPE-005`).
   static String _parseColor(List<TdfScannedToken> args, int line) {
-    if (args.length != 1 || args[0].kind != TdfTokenKind.quotedString) {
+    if (args.length != 1 || !args[0].isQuoted) {
       fail(
         TdfErrorKind.invalidColor,
         line,
@@ -1610,39 +1408,39 @@ abstract final class TdfDirectiveParser {
       );
     }
     final value = args[0].value;
-    if (!_isValidHexColor(value)) {
+    if (!TdfColor.isStrictHexColor(value)) {
       fail(
         TdfErrorKind.invalidColor,
         line,
         'Invalid hex color "$value": expected "#RRGGBB".',
       );
     }
-    return value;
+    return value.toUpperCase();
   }
 
   /// Parses a concrete `day` or `time` condition rule.
   static TaskCondition _parseConcreteConditionRule(
-    String ruleType,
+    ConditionGroup group,
     List<TdfScannedToken> args,
     int line,
-  ) => switch (ruleType) {
-    'day' => _parseDayRuleArgs(args, line),
-    'time' => _parseTimeRuleArgs(args, line),
-    _ => fail(
-      TdfErrorKind.unknownDirective,
+  ) => switch (group) {
+    ConditionGroup.day => _parseDayRuleArgs(args, line),
+    ConditionGroup.time => _parseTimeRuleArgs(args, line),
+    ConditionGroup.location => fail(
+      TdfErrorKind.invalidCondition,
       line,
-      'Unknown condition type "$ruleType".',
+      'Unexpected location dispatch in concrete rule parser.',
     ),
   };
 
-  /// Parses `day <d1> [<d2> ...]`.
+  /// Parses `day <d1> [<d2> ...]` (`TDF-DIR-009`).
   static DayTaskCondition _parseDayRuleArgs(
     List<TdfScannedToken> args,
     int line,
   ) {
     if (args.isEmpty) {
       fail(
-        TdfErrorKind.unexpectedToken,
+        TdfErrorKind.invalidCondition,
         line,
         'Condition "day" requires at least one weekday.',
       );
@@ -1650,14 +1448,9 @@ abstract final class TdfDirectiveParser {
     final weekdays = <int>[];
     final dayTokens = <String>[];
     for (final token in args) {
-      if (token.kind != TdfTokenKind.bareWord) {
-        fail(
-          TdfErrorKind.invalidCondition,
-          line,
-          'Weekday token must not be quoted.',
-        );
-      }
-      final weekday = DayTaskCondition.parseWeekdayToken(token.value);
+      final weekday = token.isBare
+          ? DayTaskCondition.parseWeekdayToken(token.value)
+          : null;
       if (weekday == null) {
         fail(
           TdfErrorKind.invalidCondition,
@@ -1673,12 +1466,68 @@ abstract final class TdfDirectiveParser {
     return DayTaskCondition(weekdays: weekdays, dayTokens: dayTokens);
   }
 
+  /// Disambiguates and validates the UTC `due` slice and optional `anchor` slice in `args[0 .. end - 1]` (`TDF-DIR-004`).
+  static ({DateTime dueAt, TdfLocalDateTime? dueAnchor})
+  _parseDueAndAnchorSlices(List<TdfScannedToken> args, int end, int line) {
+    var anchorCount = 0;
+    var anchorIndex = -1;
+    for (var i = 1; i < end; i++) {
+      if (args[i].isBare && args[i].value == 'anchor') {
+        anchorCount++;
+        anchorIndex = i;
+      }
+    }
+    if (anchorCount > 1) {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Duplicate "anchor" modifier on task "due".',
+      );
+    }
+    if (anchorCount == 0) {
+      if (end >= 3) {
+        fail(
+          TdfErrorKind.unexpectedToken,
+          line,
+          'Unexpected trailing arguments on task "due".',
+        );
+      }
+      return (
+        dueAt: parseUtcTimestamp(args.sublist(0, end), line),
+        dueAnchor: null,
+      );
+    }
+    for (var i = 1; i < end; i++) {
+      if (i != anchorIndex && args[i].isBare && args[i].value == 'passive') {
+        fail(
+          TdfErrorKind.unexpectedToken,
+          line,
+          'Misordered "passive" modifier around "anchor" on task "due".',
+        );
+      }
+    }
+    final dueSlice = args.sublist(0, anchorIndex);
+    final anchorSlice = args.sublist(anchorIndex + 1, end);
+    if (dueSlice.length >= 3 ||
+        anchorSlice.isEmpty ||
+        anchorSlice.length >= 3) {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Malformed "due ... anchor ..." timestamp arity.',
+      );
+    }
+    final parsedDueAt = parseUtcTimestamp(dueSlice, line);
+    final parsedAnchor = _parseCalendarTimestampTokens(anchorSlice, line);
+    return (dueAt: parsedDueAt, dueAnchor: parsedAnchor);
+  }
+
   /// Parses [length] ASCII decimal digits starting at [offset] in [source], or returns `null`.
   static int? _parseFixedDigits(String source, int offset, int length) {
     var result = 0;
     for (var i = 0; i < length; i++) {
       final unit = source.codeUnitAt(offset + i);
-      if (unit < 0x30 || unit > 0x39) {
+      if (!TdfScanner.isAsciiDigit(unit)) {
         return null;
       }
       result = result * 10 + (unit - 0x30);
@@ -1693,8 +1542,7 @@ abstract final class TdfDirectiveParser {
     List<({String labelId, int line})> target,
   ) {
     for (final token in args) {
-      if (token.kind != TdfTokenKind.bareWord ||
-          !isValidEntityId(token.value)) {
+      if (!token.isBare || !isValidEntityId(token.value)) {
         fail(
           TdfErrorKind.invalidIdentifier,
           line,
@@ -1705,170 +1553,24 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Parses a legacy `0.5.0`/`0.5.1` inline `location <lat> <lon> <radius>` condition rule (`spec/TDF_SPEC_0.6.0.md` Section 10.7).
-  static LocationTaskCondition _parseLegacyInlineLocationRule({
-    required List<TdfScannedToken> args,
-    required int line,
-    required int currentRefCount,
-    required void Function(int) onUpdateRefCount,
-    required List<TdfLegacyInlineLocationRef> legacyInlineLocations,
-  }) {
-    if (args.length != 3 ||
-        args.any((token) => token.kind != TdfTokenKind.bareWord)) {
-      fail(
-        TdfErrorKind.unexpectedToken,
-        line,
-        'Legacy 0.5.x condition "location" requires <latitude> <longitude> <radius>.',
-      );
-    }
-    if (currentRefCount >= maxTdfLocationRefsPerEntity) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Entity exceeds maximum of $maxTdfLocationRefsPerEntity location references.',
-      );
-    }
-    onUpdateRefCount(currentRefCount + 1);
-
-    final rawLat = args[0].value;
-    final rawLon = args[1].value;
-    final rawRadius = args[2].value;
-
-    final parsedLat = _parseLegacyRoundedDecimalToken(
-      rawLat,
-      line,
-      maxDecimals: 6,
-      min: -90.0,
-      max: 90.0,
-      strictlyPositive: false,
-    );
-    final parsedLon = _parseLegacyRoundedDecimalToken(
-      rawLon,
-      line,
-      maxDecimals: 6,
-      min: -180.0,
-      max: 180.0,
-      strictlyPositive: false,
-    );
-    final parsedRadius = _parseLegacyRoundedDecimalToken(
-      rawRadius,
-      line,
-      maxDecimals: 2,
-      min: 0.0,
-      max: maxTdfLocationRadius.toDouble(),
-      strictlyPositive: true,
-      maxExceedsIsLimitExceeded: true,
-    );
-    final sourceId =
-        '${parsedLat.normalizedText}:${parsedLon.normalizedText}:${parsedRadius.normalizedText}';
-    legacyInlineLocations.add(
-      TdfLegacyInlineLocationRef(
-        sourceId: sourceId,
-        normalizedLatitude: parsedLat.normalizedText,
-        normalizedLongitude: parsedLon.normalizedText,
-        normalizedRadius: parsedRadius.normalizedText,
-        latitude: parsedLat.value,
-        longitude: parsedLon.value,
-        radius: parsedRadius.value,
-        line: line,
-      ),
-    );
-    return LocationTaskCondition(locationIds: <String>[sourceId]);
-  }
-
-  /// Parses and rounds a legacy `0.5.x` decimal token using exact `half-away-from-zero` decimal rounding per Section 10.7.
-  static ({double value, String normalizedText})
-  _parseLegacyRoundedDecimalToken(
-    String raw,
-    int line, {
-    required int maxDecimals,
-    required double min,
-    required double max,
-    required bool strictlyPositive,
-    bool maxExceedsIsLimitExceeded = false,
-  }) {
-    if (raw.length > maxTdfNumberLength) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Number token exceeds maximum length of $maxTdfNumberLength characters.',
-      );
-    }
-    if (!_isValidDecimalNumber(raw)) {
-      fail(TdfErrorKind.invalidNumber, line, 'Invalid decimal number "$raw".');
-    }
-    final rawDouble = double.tryParse(raw);
-    if (rawDouble == null || !rawDouble.isFinite) {
-      fail(TdfErrorKind.invalidNumber, line, 'Non-finite number "$raw".');
-    }
-    if (strictlyPositive ? rawDouble <= min : rawDouble < min) {
-      fail(
-        TdfErrorKind.invalidNumber,
-        line,
-        'Number "$raw" is below minimum $min.',
-      );
-    }
-    if (rawDouble > max) {
-      fail(
-        maxExceedsIsLimitExceeded
-            ? TdfErrorKind.limitExceeded
-            : TdfErrorKind.invalidNumber,
-        line,
-        'Number "$raw" exceeds maximum $max.',
-      );
-    }
-    final normalizedText = _roundDecimalTokenHalfAwayFromZero(raw, maxDecimals);
-    final roundedDouble = double.parse(normalizedText);
-    if (strictlyPositive && roundedDouble <= 0.0) {
-      fail(
-        TdfErrorKind.invalidNumber,
-        line,
-        'Rounded number "$normalizedText" must be strictly positive.',
-      );
-    }
-    return (
-      value: roundedDouble == 0.0 ? 0.0 : roundedDouble,
-      normalizedText: normalizedText,
-    );
-  }
-
-  /// Parses `location <loc-1> [<loc-2> ...]` in `0.6.0` or inline `location <lat> <lon> <radius>` in `0.5.x`.
+  /// Parses `location <loc-1> [<loc-2> ...]` and enforces `MAX_LOCATION_REFS_PER_ENTITY = 63` before deduplication (`TDF-DIR-009`).
   static LocationTaskCondition _parseLocationRuleForEntity({
     required List<TdfScannedToken> args,
     required int line,
-    required bool isLegacy05x,
     required int currentRefCount,
     required void Function(int) onUpdateRefCount,
     required List<({String locationId, int line})> locationReferences,
-    required List<TdfLegacyInlineLocationRef> legacyInlineLocations,
   }) {
-    if (isLegacy05x) {
-      return _parseLegacyInlineLocationRule(
-        args: args,
-        line: line,
-        currentRefCount: currentRefCount,
-        onUpdateRefCount: onUpdateRefCount,
-        legacyInlineLocations: legacyInlineLocations,
-      );
-    }
     if (args.isEmpty) {
       fail(
-        TdfErrorKind.unexpectedToken,
+        TdfErrorKind.invalidCondition,
         line,
         'Condition "location" requires at least 1 <location-id> argument.',
       );
     }
     var refCount = currentRefCount;
-    final ids = <String>[];
+    final deduplicatedIds = <String>[];
     for (final token in args) {
-      if (token.kind != TdfTokenKind.bareWord ||
-          !isValidEntityId(token.value)) {
-        fail(
-          TdfErrorKind.invalidIdentifier,
-          line,
-          'Invalid <location-id> "${token.value}" in location condition rule.',
-        );
-      }
       if (refCount >= maxTdfLocationRefsPerEntity) {
         fail(
           TdfErrorKind.limitExceeded,
@@ -1876,21 +1578,28 @@ abstract final class TdfDirectiveParser {
           'Entity exceeds maximum of $maxTdfLocationRefsPerEntity location references.',
         );
       }
+      if (!token.isBare || !isValidEntityId(token.value)) {
+        fail(
+          TdfErrorKind.invalidIdentifier,
+          line,
+          'Invalid <location-id> "${token.value}" in location condition rule.',
+        );
+      }
       refCount++;
       locationReferences.add((locationId: token.value, line: line));
-      if (!ids.contains(token.value)) {
-        ids.add(token.value);
+      if (!deduplicatedIds.contains(token.value)) {
+        deduplicatedIds.add(token.value);
       }
     }
     onUpdateRefCount(refCount);
-    return LocationTaskCondition(locationIds: ids);
+    return LocationTaskCondition(locationIds: deduplicatedIds);
   }
 
-  /// Parses `<HH:MM>` into minutes from midnight (`0..1439`).
+  /// Parses `<HH:MM>` into minutes from midnight (`0..1439`), failing with [TdfErrorKind.invalidCondition] (`TDF-TYPE-004`).
   static int _parseMinutesOfDay(TdfScannedToken token, int line) {
-    if (token.kind != TdfTokenKind.bareWord) {
+    if (!token.isBare) {
       fail(
-        TdfErrorKind.invalidTimestamp,
+        TdfErrorKind.invalidCondition,
         line,
         'Time window token must not be quoted.',
       );
@@ -1898,7 +1607,7 @@ abstract final class TdfDirectiveParser {
     final raw = token.value;
     if (raw.length != 5 || raw.codeUnitAt(2) != 0x3A) {
       fail(
-        TdfErrorKind.invalidTimestamp,
+        TdfErrorKind.invalidCondition,
         line,
         'Invalid time window token "$raw": expected HH:MM.',
       );
@@ -1907,7 +1616,7 @@ abstract final class TdfDirectiveParser {
     final minute = _parseFixedDigits(raw, 3, 2);
     if (hour == null || minute == null || hour > 23 || minute > 59) {
       fail(
-        TdfErrorKind.invalidTimestamp,
+        TdfErrorKind.invalidCondition,
         line,
         'Time window "$raw" is out of 00:00..23:59 range.',
       );
@@ -1937,8 +1646,7 @@ abstract final class TdfDirectiveParser {
       );
     }
     for (var i = 1; i < raw.length; i++) {
-      final unit = raw.codeUnitAt(i);
-      if (unit < 0x30 || unit > 0x39) {
+      if (!TdfScanner.isAsciiDigit(raw.codeUnitAt(i))) {
         fail(
           TdfErrorKind.invalidNumber,
           line,
@@ -1957,14 +1665,14 @@ abstract final class TdfDirectiveParser {
     return parsed;
   }
 
-  /// Parses and validates a single quoted `<text>` or `<note>` argument using Unicode scalar value length (`spec/TDF_SPEC_0.6.0.md` Section 2.8).
+  /// Parses and validates a single quoted `<text>` or `<note>` argument (`TDF-TYPE-003`).
   static String _parseQuotedText(
     List<TdfScannedToken> args,
     int line,
     int maxScalars, {
     required bool allowMultiline,
   }) {
-    if (args.length != 1 || args[0].kind != TdfTokenKind.quotedString) {
+    if (args.length != 1 || !args[0].isQuoted) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
@@ -1984,7 +1692,7 @@ abstract final class TdfDirectiveParser {
     TdfScannedToken clockToken,
     int line,
   ) {
-    if (clockToken.kind != TdfTokenKind.bareWord) {
+    if (!clockToken.isBare) {
       fail(
         TdfErrorKind.invalidTime,
         line,
@@ -2002,20 +1710,16 @@ abstract final class TdfDirectiveParser {
     return parsedClock;
   }
 
-  /// Parses `repeat <count> <days|weeks|months> [<repeat-time>] [lead <lead-count> days]`.
-  static TaskRepeatRule _parseRepeatRule(
-    List<TdfScannedToken> args,
-    int line, {
-    bool isPre070 = false,
-  }) {
-    if (args.length < 2 || (isPre070 && args.length > 3)) {
+  /// Parses `repeat <count> <days|weeks|months> [<repeat-time>] [lead <lead-count> days]` (`TDF-DIR-001`).
+  static TaskRepeatRule _parseRepeatRule(List<TdfScannedToken> args, int line) {
+    if (args.length < 2) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
-        'Directive "repeat" has invalid argument count.',
+        'Directive "repeat" requires at least <count> and <unit>.',
       );
     }
-    if (args[0].kind != TdfTokenKind.bareWord) {
+    if (!args[0].isBare) {
       fail(
         TdfErrorKind.invalidNumber,
         line,
@@ -2025,10 +1729,10 @@ abstract final class TdfDirectiveParser {
     final count = _parsePositiveIntToken(
       args[0].value,
       line,
-      TaskRepeatRule.maxRepeatCount,
+      maxTdfRepeatCount,
       'repeat count',
     );
-    if (args[1].kind != TdfTokenKind.bareWord) {
+    if (!args[1].isBare) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
@@ -2043,55 +1747,16 @@ abstract final class TdfDirectiveParser {
         'Invalid repeat unit "${args[1].value}".',
       );
     }
-    if (isPre070) {
-      final clock = args.length == 3
-          ? _parseRepeatClockToken(args[2], line)
-          : TdfRepeatClock.midnight;
-      return TaskRepeatRule(count: count, unit: unit, clock: clock);
-    }
     var index = 2;
     var clock = TdfRepeatClock.midnight;
     if (index < args.length &&
-        !(args[index].kind == TdfTokenKind.bareWord &&
-            args[index].value == 'lead')) {
+        !(args[index].isBare && args[index].value == 'lead')) {
       clock = _parseRepeatClockToken(args[index], line);
       index += 1;
     }
-    var leadDays = 0;
-    if (index < args.length) {
-      if (args[index].kind != TdfTokenKind.bareWord ||
-          args[index].value != 'lead' ||
-          args.length - index != 3) {
-        fail(
-          TdfErrorKind.unexpectedToken,
-          line,
-          'Repeat lead clause must have form "lead <lead-count> days".',
-        );
-      }
-      final leadCountToken = args[index + 1];
-      if (leadCountToken.kind != TdfTokenKind.bareWord) {
-        fail(
-          TdfErrorKind.invalidNumber,
-          line,
-          'Repeat <lead-count> must not be quoted.',
-        );
-      }
-      leadDays = _parsePositiveIntToken(
-        leadCountToken.value,
-        line,
-        TaskRepeatRule.maxRepeatCount,
-        'repeat lead count',
-      );
-      final daysToken = args[index + 2];
-      if (daysToken.kind != TdfTokenKind.bareWord ||
-          daysToken.value != 'days') {
-        fail(
-          TdfErrorKind.unexpectedToken,
-          line,
-          'Repeat lead unit must be unquoted "days".',
-        );
-      }
-    }
+    final leadDays = index < args.length
+        ? _parseRepeatLeadClause(args, index, line)
+        : 0;
     return TaskRepeatRule(
       count: count,
       unit: unit,
@@ -2100,7 +1765,93 @@ abstract final class TdfDirectiveParser {
     );
   }
 
-  /// Parses and validates a native `0.6.0` decimal `<number>` token (`spec/TDF_SPEC_0.6.0.md` Section 4.3).
+  /// Parses the trailing `lead <lead-count> days` clause on `repeat` (`TDF-DIR-001`).
+  static int _parseRepeatLeadClause(
+    List<TdfScannedToken> args,
+    int startIndex,
+    int line,
+  ) {
+    if (!args[startIndex].isBare ||
+        args[startIndex].value != 'lead' ||
+        args.length - startIndex != 3) {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Repeat lead clause must have form "lead <lead-count> days".',
+      );
+    }
+    final leadCountToken = args[startIndex + 1];
+    if (!leadCountToken.isBare) {
+      fail(
+        TdfErrorKind.invalidNumber,
+        line,
+        'Repeat <lead-count> must not be quoted.',
+      );
+    }
+    final leadDays = _parsePositiveIntToken(
+      leadCountToken.value,
+      line,
+      maxTdfRepeatCount,
+      'repeat lead count',
+    );
+    final daysToken = args[startIndex + 2];
+    if (!daysToken.isBare || daysToken.value != 'days') {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Repeat lead unit must be unquoted "days".',
+      );
+    }
+    return leadDays;
+  }
+
+  /// Parses a single `<task-id>[:<required-completion>]` prerequisite token (`TDF-TYPE-006`).
+  static void _parseSingleBlockedDependency(
+    TdfScannedToken token,
+    int line,
+    Map<String, int> targetMap,
+  ) {
+    if (!token.isBare) {
+      fail(
+        TdfErrorKind.invalidIdentifier,
+        line,
+        'Prerequisite token must not be quoted.',
+      );
+    }
+    final raw = token.value;
+    final colonIndex = raw.indexOf(':');
+    final targetId = colonIndex == -1 ? raw : raw.substring(0, colonIndex);
+    if (!isValidEntityId(targetId)) {
+      fail(
+        TdfErrorKind.invalidIdentifier,
+        line,
+        'Invalid prerequisite <task-id> "$targetId".',
+      );
+    }
+    var requiredCount = 1;
+    if (colonIndex != -1) {
+      final countStr = raw.substring(colonIndex + 1);
+      if (countStr.isEmpty || countStr.contains(':')) {
+        fail(
+          TdfErrorKind.invalidNumber,
+          line,
+          'Invalid prerequisite count in "$raw".',
+        );
+      }
+      requiredCount = _parsePositiveIntToken(
+        countStr,
+        line,
+        maxTdfCompletions,
+        'prerequisite count',
+      );
+    }
+    final existing = targetMap[targetId];
+    if (existing == null || requiredCount > existing) {
+      targetMap[targetId] = requiredCount;
+    }
+  }
+
+  /// Parses and normalizes a `tdf 0.8.0` decimal `<number>` token (`TDF-TYPE-005`).
   static ({double value, String normalizedText}) _parseStrictDecimalToken(
     String raw,
     int line, {
@@ -2117,30 +1868,29 @@ abstract final class TdfDirectiveParser {
         'Number token exceeds maximum length of $maxTdfNumberLength characters.',
       );
     }
-    if (!_isValidDecimalNumber(raw)) {
-      fail(TdfErrorKind.invalidNumber, line, 'Invalid decimal number "$raw".');
+    if (!TdfLocation.isValidNumberToken(raw)) {
+      fail(TdfErrorKind.invalidNumber, line, 'Invalid decimal number token.');
     }
-    final normalizedText = _normalizeValidatedDecimalString(raw);
-    final dotIndex = normalizedText.indexOf('.');
-    final significantDecimals = dotIndex == -1
-        ? 0
-        : normalizedText.length - dotIndex - 1;
+    final normalizedText = TdfLocation.normalizeDecimalText(raw);
+    final significantDecimals = TdfLocation.countSignificantFractionalDigits(
+      normalizedText,
+    );
     if (significantDecimals > maxDecimals) {
       fail(
         TdfErrorKind.invalidNumber,
         line,
-        'Decimal number "$raw" exceeds maximum of $maxDecimals fractional digits.',
+        'Decimal number exceeds maximum of $maxDecimals fractional digits.',
       );
     }
     final value = double.tryParse(normalizedText);
     if (value == null || !value.isFinite) {
-      fail(TdfErrorKind.invalidNumber, line, 'Non-finite number "$raw".');
+      fail(TdfErrorKind.invalidNumber, line, 'Non-finite decimal number.');
     }
     if (strictlyPositive ? value <= min : value < min) {
       fail(
         TdfErrorKind.invalidNumber,
         line,
-        'Number "$raw" is below minimum $min.',
+        'Decimal number is below minimum $min.',
       );
     }
     if (value > max) {
@@ -2149,36 +1899,25 @@ abstract final class TdfDirectiveParser {
             ? TdfErrorKind.limitExceeded
             : TdfErrorKind.invalidNumber,
         line,
-        'Number "$raw" exceeds maximum $max.',
+        'Decimal number exceeds maximum $max.',
       );
     }
     return (value: value == 0.0 ? 0.0 : value, normalizedText: normalizedText);
   }
 
-  /// Parses `history <timestamp> "<text>"` inside a `task` block (`spec/TDF_SPEC_0.7.0.md` Section 4.1.2).
+  /// Parses `history <timestamp> "<text>"` inside a `task` block (`TDF-DIR-007`).
   static TaskHistoryEntry _parseTaskHistoryEntry(
     List<TdfScannedToken> args,
     int line,
   ) {
-    if (args.length < 2 || args.length > 3) {
+    if (args.length < 2 ||
+        args.length > 3 ||
+        !args.last.isQuoted ||
+        (args.length == 3 && !args[1].isBare)) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
-        'Task "history" requires <timestamp> and quoted "<text>".',
-      );
-    }
-    if (args.last.kind != TdfTokenKind.quotedString) {
-      fail(
-        TdfErrorKind.unexpectedToken,
-        line,
-        'Task "history" trailing <text> argument must be quoted.',
-      );
-    }
-    if (args.length == 3 && args[1].kind != TdfTokenKind.bareWord) {
-      fail(
-        TdfErrorKind.unexpectedToken,
-        line,
-        'Task "history" clock token must not be quoted.',
+        'Task "history" requires <timestamp> and trailing quoted "<text>".',
       );
     }
     final timestampUtc = parseUtcTimestamp(
@@ -2194,11 +1933,9 @@ abstract final class TdfDirectiveParser {
     return TaskHistoryEntry(timestampUtc: timestampUtc, text: text);
   }
 
-  /// Parses `link "<title>" "<uri>"` inside a `task` or `label` block (`spec/TDF_SPEC_0.7.0.md` Section 2.8, 4.1.2, and 4.2).
+  /// Parses `link "<title>" "<uri>"` inside a `task` or `label` block (`TDF-DIR-006`, `TDF-TYPE-005`).
   static TaskLink _parseTaskLink(List<TdfScannedToken> args, int line) {
-    if (args.length != 2 ||
-        args[0].kind != TdfTokenKind.quotedString ||
-        args[1].kind != TdfTokenKind.quotedString) {
+    if (args.length != 2 || !args[0].isQuoted || !args[1].isQuoted) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
@@ -2211,64 +1948,13 @@ abstract final class TdfDirectiveParser {
       maxTdfTextLength,
       allowMultiline: false,
     );
-    final uri = args[1].value;
-    final scalarCount = TdfCalendar.countUnicodeScalars(uri);
-    if (scalarCount == null) {
-      fail(
-        TdfErrorKind.unexpectedToken,
-        line,
-        'Link <uri> contains unpaired UTF-16 surrogate.',
-      );
-    }
-    if (!_hasNonAsciiWhitespaceContent(uri)) {
-      fail(
-        TdfErrorKind.emptyText,
-        line,
-        'Link <uri> cannot be empty or ASCII whitespace only.',
-      );
-    }
-    if (scalarCount > TaskLink.maxUriLength) {
-      fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Link <uri> exceeds maximum of ${TaskLink.maxUriLength} Unicode scalar values.',
-      );
-    }
-    for (var i = 0; i < uri.length; i++) {
-      final unit = uri.codeUnitAt(i);
-      if (unit < 0x20 || unit == 0x7F) {
-        fail(
-          TdfErrorKind.invalidUri,
-          line,
-          'Link <uri> cannot contain control characters.',
-        );
-      }
-    }
-    if (!_hasValidUriSchemePrefix(uri)) {
-      fail(
-        TdfErrorKind.invalidUri,
-        line,
-        'Link <uri> lacks a valid URI scheme.',
-      );
-    }
-    final lowerUri = uri.toLowerCase();
-    for (final forbidden in _forbiddenUriSchemes) {
-      if (lowerUri.startsWith(forbidden)) {
-        fail(
-          TdfErrorKind.invalidUri,
-          line,
-          'Link <uri> uses forbidden scheme "$forbidden".',
-        );
-      }
-    }
+    final uri = _validateDecodedUri(args[1].value, line);
     return TaskLink(title: title, uri: uri);
   }
 
-  /// Parses `origin "<namespace>" "<external-key>"` inside a `task` block (`spec/TDF_SPEC_0.6.0.md` Section 4.1.2).
+  /// Parses `origin "<namespace>" "<external-key>"` inside a `task` block (`TDF-DIR-005`).
   static TaskOrigin _parseTaskOrigin(List<TdfScannedToken> args, int line) {
-    if (args.length != 2 ||
-        args[0].kind != TdfTokenKind.quotedString ||
-        args[1].kind != TdfTokenKind.quotedString) {
+    if (args.length != 2 || !args[0].isQuoted || !args[1].isQuoted) {
       fail(
         TdfErrorKind.unexpectedToken,
         line,
@@ -2290,16 +1976,16 @@ abstract final class TdfDirectiveParser {
     return TaskOrigin(namespace: namespace, externalKey: externalKey);
   }
 
-  /// Parses `time <start> <end>`.
+  /// Parses `time <start> <end>` (`TDF-DIR-009`).
   static TimeWindowTaskCondition _parseTimeRuleArgs(
     List<TdfScannedToken> args,
     int line,
   ) {
     if (args.length != 2) {
       fail(
-        TdfErrorKind.unexpectedToken,
+        TdfErrorKind.invalidCondition,
         line,
-        'Condition "time" requires <start> and <end>.',
+        'Condition "time" requires exactly 2 <HH:MM> tokens.',
       );
     }
     final startMinutes = _parseMinutesOfDay(args[0], line);
@@ -2334,7 +2020,7 @@ abstract final class TdfDirectiveParser {
       );
     }
     final token = args[0];
-    if (token.kind != TdfTokenKind.bareWord) {
+    if (!token.isBare) {
       fail(
         TdfErrorKind.invalidNumber,
         line,
@@ -2355,18 +2041,18 @@ abstract final class TdfDirectiveParser {
     return _parsePositiveIntToken(raw, line, maxLimit, label);
   }
 
-  /// Rejects any quoted token in intermediate argument slots `1 <= i < args.length - 1`.
+  /// Rejects any quoted token in non-final argument slots `1 <= i < args.length - 1`.
   static void _rejectQuotedMiddleArgs(
     List<TdfScannedToken> args,
     int line,
     String directive,
   ) {
     for (var i = 1; i < args.length - 1; i++) {
-      if (args[i].kind != TdfTokenKind.bareWord) {
+      if (!args[i].isBare) {
         fail(
           TdfErrorKind.unexpectedToken,
           line,
-          'Quoted note on "$directive" must appear as the final argument.',
+          'Quoted argument on "$directive" must appear only in the final slot.',
         );
       }
     }
@@ -2386,39 +2072,16 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Rounds a validated ASCII decimal string (`-?[0-9]+(\.[0-9]+)?`) to at most [maxDecimals] fractional digits using exact `half-away-from-zero` rounding and normalizes the result (`spec/TDF_SPEC_0.6.0.md` Section 10.7).
-  static String _roundDecimalTokenHalfAwayFromZero(
-    String raw,
-    int maxDecimals,
-  ) {
-    final isNegative = raw.startsWith('-');
-    final unsigned = isNegative ? raw.substring(1) : raw;
-    final dotIndex = unsigned.indexOf('.');
-    if (dotIndex == -1) {
-      return _normalizeValidatedDecimalString(raw);
-    }
-    final intPart = unsigned.substring(0, dotIndex);
-    final fracPart = unsigned.substring(dotIndex + 1);
-    if (fracPart.length <= maxDecimals) {
-      return _normalizeValidatedDecimalString(raw);
-    }
-    final roundDigit = fracPart.codeUnitAt(maxDecimals) - 0x30;
-    final keptDigits = '$intPart${fracPart.substring(0, maxDecimals)}';
-    var scaled = BigInt.parse(keptDigits);
-    if (roundDigit >= 5) {
-      scaled += BigInt.one;
-    }
-    final digitsStr = scaled.toString().padLeft(maxDecimals + 1, '0');
-    final splitIndex = digitsStr.length - maxDecimals;
-    final roundedUnsigned = maxDecimals == 0
-        ? digitsStr
-        : '${digitsStr.substring(0, splitIndex)}.${digitsStr.substring(splitIndex)}';
-    return _normalizeValidatedDecimalString(
-      isNegative ? '-$roundedUnsigned' : roundedUnsigned,
-    );
-  }
+  /// Maps a condition group keyword (`day`, `time`, `location`) to [ConditionGroup], or returns `null`.
+  static ConditionGroup? _tryConditionGroupFromName(String ruleType) =>
+      switch (ruleType) {
+        'day' => ConditionGroup.day,
+        'time' => ConditionGroup.time,
+        'location' => ConditionGroup.location,
+        _ => null,
+      };
 
-  /// Validates decoded text content for non-emptiness, multiline restrictions, and Unicode scalar bounds.
+  /// Validates decoded `<text>` or `<note>` content under `TDF-TYPE-003` precedence.
   static String _validateDecodedText(
     String value,
     int line,
@@ -2451,5 +2114,59 @@ abstract final class TdfDirectiveParser {
       );
     }
     return value;
+  }
+
+  /// Validates a decoded `<uri>` string under `TDF-TYPE-005` precedence.
+  static String _validateDecodedUri(String uri, int line) {
+    final scalarCount = TdfCalendar.countUnicodeScalars(uri);
+    if (scalarCount == null) {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Link <uri> contains unpaired UTF-16 surrogate.',
+      );
+    }
+    if (!_hasNonAsciiWhitespaceContent(uri)) {
+      fail(
+        TdfErrorKind.emptyText,
+        line,
+        'Link <uri> cannot be empty or ASCII whitespace only.',
+      );
+    }
+    if (scalarCount > maxTdfUriLength) {
+      fail(
+        TdfErrorKind.limitExceeded,
+        line,
+        'Link <uri> exceeds maximum of $maxTdfUriLength Unicode scalar values.',
+      );
+    }
+    for (var i = 0; i < uri.length; i++) {
+      final unit = uri.codeUnitAt(i);
+      if (unit < 0x20 || unit == 0x7F) {
+        fail(
+          TdfErrorKind.invalidUri,
+          line,
+          'Link <uri> cannot contain control characters.',
+        );
+      }
+    }
+    if (!_hasValidUriSchemePrefix(uri)) {
+      fail(
+        TdfErrorKind.invalidUri,
+        line,
+        'Link <uri> lacks a valid URI scheme.',
+      );
+    }
+    final lowerUri = uri.toLowerCase();
+    for (final forbidden in _forbiddenUriSchemes) {
+      if (lowerUri.startsWith(forbidden)) {
+        fail(
+          TdfErrorKind.invalidUri,
+          line,
+          'Link <uri> uses forbidden scheme "$forbidden".',
+        );
+      }
+    }
+    return uri;
   }
 }

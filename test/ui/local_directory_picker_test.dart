@@ -68,9 +68,9 @@ void main() {
     (WidgetTester tester) async {
       final initialFilePath =
           '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
-      File(initialFilePath).writeAsStringSync('tdf 0.5.1\n', flush: true);
+      File(initialFilePath).writeAsStringSync('tdf 0.8.0\n', flush: true);
       File('${sourceDir.path}${Platform.pathSeparator}other.tdf')
-          .writeAsStringSync('tdf 0.5.1\n', flush: true);
+          .writeAsStringSync('tdf 0.8.0\n', flush: true);
 
       final settingsRepository = InMemorySettingsRepository(
         WebDavConfig(
@@ -205,7 +205,7 @@ void main() {
       final initialFilePath =
           '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
       File(initialFilePath).writeAsStringSync(
-        'tdf 0.5.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "Desktop Task"\n    created 2026-11-01 08:00\n    queued 2026-11-01 08:00\n}\n',
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "Desktop Task"\n    created 2026-11-01 08:00\n}\n',
         flush: true,
       );
 
@@ -552,7 +552,7 @@ void main() {
     (WidgetTester tester) async {
       final tdfPath = '${sourceDir.path}${Platform.pathSeparator}tasks.tdf';
       File(tdfPath).writeAsStringSync(
-        'tdf 0.6.0\n\n'
+        'tdf 0.8.0\n\n'
         'queue {\n'
         '  modified 2026-11-01 08:00:00\n'
         '  task 000001OkD2\n'
@@ -605,7 +605,7 @@ void main() {
       );
 
       File(tdfPath).writeAsStringSync(
-        'tdf 0.6.0\n\n'
+        'tdf 0.8.0\n\n'
         'queue {\n'
         '  modified 2026-11-01 08:30:00\n'
         '  task 000001OkD2\n'
@@ -649,7 +649,7 @@ void main() {
       );
 
       File(tdfPath).writeAsStringSync(
-        'tdf 0.6.0\n\n'
+        'tdf 0.8.0\n\n'
         'queue {\n'
         '  modified 2026-11-01 08:45:00\n'
         '  task 000001OkD2\n'

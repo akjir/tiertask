@@ -14,6 +14,7 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,6 +27,7 @@ import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
+import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/local_file_watch_providers.dart';
@@ -35,6 +37,7 @@ import 'package:tiertask/repositories/link_launcher_repository.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/widgets/task_info_dialog.dart';
 
@@ -427,7 +430,7 @@ void main() {
         );
         tdfFile = File('${tempDir.path}/tasks.tdf');
         await tdfFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-11 12:00:00\n'
           '    task tskUndoOk1\n'
@@ -1132,7 +1135,7 @@ void main() {
         );
         tdfFile = File('${tempDir.path}/tasks.tdf');
         await tdfFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-11 12:00:00\n'
           '    task tskSched01\n'
@@ -1245,7 +1248,7 @@ void main() {
       currentTime = DateTime.utc(2026, 11, 11, 12, 2);
       await tester.runAsync(() async {
         await tdfFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-11 12:02:00\n'
           '    task tskSched01\n'
@@ -1775,7 +1778,7 @@ void main() {
         localFilePath: 'tasks.tdf',
       );
       var storeTdf =
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'task midFlt0001 {\n'
           '    name     "Mid-Flight Task"\n'
           '    created  2026-11-15 08:00:00\n'
@@ -1905,7 +1908,7 @@ void main() {
         );
         watchFile = File('${watchDir.path}/tasks.tdf');
         await watchFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-15 09:00:00\n'
           '    task tskHistW01\n'
@@ -2003,7 +2006,7 @@ void main() {
       watchClock = DateTime.utc(2026, 11, 15, 10, 5);
       await tester.runAsync(() async {
         await watchFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-15 10:05:00\n'
           '}\n\n'
@@ -2059,7 +2062,7 @@ void main() {
       watchClock = DateTime.utc(2026, 11, 15, 10, 10);
       await tester.runAsync(() async {
         await watchFile.writeAsString(
-          'tdf 0.7.0\n\n'
+          'tdf 0.8.0\n\n'
           'queue {\n'
           '    modified 2026-11-15 10:10:00\n'
           '}\n\n'
@@ -2100,6 +2103,164 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'TaskInfoDialog displays localized schedule anchor detail only on open tasks whose dueAnchor differs from local due wall clock and handles 9999-12-31 boundary offsets safely',
+    (WidgetTester tester) async {
+      final nowUtc = DateTime.utc(2026, 2, 15, 12, 0);
+      const cetConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 60,
+      );
+      const cetDeConfig = WebDavConfig(
+        language: AppLanguage.german,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 60,
+      );
+      final clampedTask = TaskItem(
+        id: 'clmpAnc001',
+        title: 'Monthly Billing Close',
+        createdAt: DateTime.utc(2026, 2, 1, 8, 0),
+        dueAt: DateTime.utc(2026, 2, 28, 17, 0),
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 0),
+      );
+      final gapSecondsTask = TaskItem(
+        id: 'gapAnc0002',
+        title: 'Spring Gap Shift',
+        createdAt: DateTime.utc(2026, 3, 1, 8, 0),
+        dueAt: DateTime.utc(2026, 3, 29, 1, 30, 45),
+        dueAnchor: TdfLocalDateTime(2026, 3, 29, 2, 30, 45),
+      );
+      final equalAnchorTask = TaskItem(
+        id: 'eqAnc00003',
+        title: 'Exact Anchor Match',
+        createdAt: DateTime.utc(2026, 3, 1, 8, 0),
+        dueAt: DateTime.utc(2026, 3, 31, 17, 0),
+        dueAnchor: TdfLocalDateTime(2026, 3, 31, 18, 0),
+      );
+      final completedClampedTask = TaskItem(
+        id: 'doneAnc004',
+        title: 'Completed Clamped Task',
+        createdAt: DateTime.utc(2026, 2, 1, 8, 0),
+        isCompleted: true,
+        completions: 1,
+        completedAt: DateTime.utc(2026, 2, 10, 12, 0),
+        dueAt: DateTime.utc(2026, 2, 28, 17, 0),
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 0),
+      );
+      final maxHorizonTask = TaskItem(
+        id: 'maxHorz005',
+        title: 'Max Horizon Boundary',
+        createdAt: DateTime.utc(2026, 2, 1, 8, 0),
+        dueAt: DateTime.utc(9999, 12, 31, 23, 59, 59),
+        dueAnchor: TdfLocalDateTime(9999, 12, 31, 23, 59, 59),
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          clampedTask,
+          gapSecondsTask,
+          equalAnchorTask,
+          completedClampedTask,
+          maxHorizonTask,
+        ],
+        evaluationTime: nowUtc,
+      );
+
+      // 1. Clamped month-end anchor in English -> renders 'Schedule anchor: 2026-01-31 18:00'
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: clampedTask),
+        board: board,
+        config: cetConfig,
+        clock: () => nowUtc,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Schedule anchor: 2026-01-31 18:00'),
+        findsOneWidget,
+        reason: 'Clamped month-end due must show compact schedule anchor in English',
+      );
+
+      // 2. Clamped month-end anchor in German -> renders 'Terminanker: 2026-01-31 18:00'
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: clampedTask),
+        board: board,
+        config: cetDeConfig,
+        locale: const Locale('de'),
+        clock: () => nowUtc,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Terminanker: 2026-01-31 18:00'),
+        findsOneWidget,
+        reason:
+            'Clamped month-end due must show compact schedule anchor in German',
+      );
+
+      // 3. Sub-minute seconds on shifted anchor -> renders HH:MM:SS
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: gapSecondsTask),
+        board: board,
+        config: const WebDavConfig(
+          language: AppLanguage.english,
+          timeZoneMode: AppTimeZoneMode.manual,
+          manualTimeZoneOffsetMinutes: 120,
+        ),
+        clock: () => nowUtc,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Schedule anchor: 2026-03-29 02:30:45'),
+        findsOneWidget,
+        reason: 'Non-zero anchor seconds must render YYYY-MM-DD HH:MM:SS',
+      );
+
+      // 4. Equal anchor (anchor == localDue) -> omitted
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: equalAnchorTask),
+        board: board,
+        config: cetConfig,
+        clock: () => nowUtc,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Schedule anchor:'),
+        findsNothing,
+        reason: 'Anchor matching local due wall clock must not render redundant detail',
+      );
+
+      // 5. Completed task with clamped anchor -> omitted
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: completedClampedTask),
+        board: board,
+        config: cetConfig,
+        clock: () => nowUtc,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Schedule anchor:'),
+        findsNothing,
+        reason: 'Completed tasks must omit due status and anchor details',
+      );
+
+      // 6. 9999-12-31 23:59:59Z in UTC+01:00 shifts localDue to year 10000 without FormatException
+      await pumpLeafWidget(
+        tester,
+        TaskInfoDialog(task: maxHorizonTask),
+        board: board,
+        config: cetConfig,
+        clock: () => nowUtc,
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Schedule anchor: 9999-12-31 23:59:59'), findsOneWidget);
+    },
+  );
 }
 
 class _SuspendingInfoLocalRepository extends LocalFileRepository {
@@ -2127,6 +2288,15 @@ class _SuspendingInfoLocalRepository extends LocalFileRepository {
   Future<String> loadTdf() async => getStore();
 
   @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    final content = getStore();
+    final exists = content.isNotEmpty;
+    final digest = exists ? Sha256Service.hashHex(utf8.encode(content)) : null;
+    return (content: content, digest: digest, exists: exists);
+  }
+
+  @override
   Future<void> saveTdf(String tdfContent) async {
     await onSave();
     setStore(tdfContent);
@@ -2134,4 +2304,7 @@ class _SuspendingInfoLocalRepository extends LocalFileRepository {
 
   @override
   Stream<void> watchTdfChanges() => const Stream<void>.empty();
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
 }

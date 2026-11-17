@@ -102,8 +102,10 @@ class TaskBoardEvaluator {
   /// Retention period in seconds (`30 * 86,400 = 2,592,000` seconds) per `TDF_SPEC.md` Section 6.8.
   static const int completedRetentionSeconds = 2592000;
 
-  /// Default dynamic due-date lead window (`24` hours) for automatic queue priority promotion.
-  static const Duration defaultDueLeadWindow = Duration(hours: 24);
+  /// Default dynamic due-date lead window (`DEFAULT_DUE_LEAD_SECONDS` = `86,400`s) for automatic queue priority promotion.
+  static const Duration defaultDueLeadWindow = Duration(
+    seconds: defaultDueLeadSeconds,
+  );
 
   /// Soft WIP limit for Tier 1 (`Focus`).
   static const int focusSoftLimit = 3;
@@ -127,11 +129,13 @@ class TaskBoardEvaluator {
   }
 
   /// Removes expired task, label, and location deletion records (`now - deletedAt > 2,592,000` seconds) from [board],
-  /// strips `blocked` prerequisite references targeting expired task tombstones from live tasks,
-  /// and increments `deletedBlock.generation` once when at least one record is removed per `TDF_SPEC_0.6.0.md` Section 6.8.3.
+  /// strips `blocked` prerequisite references targeting expired task tombstones across all live tasks (including `Completed`),
+  /// and increments `deletedBlock.generation` once when at least one record is removed per `spec/TDF_SPEC_0.8.0.md` Section 13.2 (`TDF-PUB-004`).
   static NormalizedTierSlices cleanupExpiredDeletions(
     NormalizedTierSlices board, {
     DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
     Duration? dueLeadWindow = defaultDueLeadWindow,
   }) {
     final now = TaskItem.normalizeTimestamp(
@@ -157,8 +161,13 @@ class TaskBoardEvaluator {
         (board.deletedBlock.labels.length - retainedLabels.length) +
         (board.deletedBlock.locations.length - retainedLocations.length);
     if (removedCount == 0) return board;
-    if (board.deletedBlock.generation >= TdfDeletedBlock.maxGeneration) {
-      throw const FormatException('LimitExceeded');
+    if (board.deletedBlock.generation >= maxTdfSyncGeneration) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Deleted block generation exceeds maximum of $maxTdfSyncGeneration.',
+      );
     }
     final nextDeletedBlock = TdfDeletedBlock(
       generation: board.deletedBlock.generation + 1,
@@ -181,19 +190,28 @@ class TaskBoardEvaluator {
     }
     var anyTaskUpdated = false;
     final updatedTasks = <TaskItem>[];
+    final updatedById = <String, TaskItem>{};
     for (final task in board.allTasks) {
       final stripped = _stripExpiredTaskDependencies(task, expiredTaskIds, now);
-      if (!identical(stripped, task)) anyTaskUpdated = true;
+      if (!identical(stripped, task)) {
+        anyTaskUpdated = true;
+        updatedById[task.id] = stripped;
+      }
       updatedTasks.add(stripped);
     }
     if (!anyTaskUpdated) {
       return board.copyWithSlices(deletedBlock: nextDeletedBlock);
+    }
+    if (timeZone != null && !timeZone.isAvailable) {
+      return _replaceUpdatedTasksInSlices(board, updatedById, nextDeletedBlock);
     }
     return reevaluateBoard(
       board,
       tasks: updatedTasks,
       deletedBlock: nextDeletedBlock,
       now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     );
@@ -279,8 +297,8 @@ class TaskBoardEvaluator {
     final now = TaskItem.normalizeTimestamp(
       evaluationTime ?? DateTime.now().toUtc(),
     );
-    final localNow = (timeZone != null && timeZone.isAvailable)
-        ? timeZone.toLocalWallClock(now)
+    final localNow = timeZone != null
+        ? (timeZone.isAvailable ? timeZone.toLocalWallClock(now) : null)
         : resolveLocalEvaluationTime(evaluationTime, localEvaluationTime);
     final taskList = List<TaskItem>.from(tasks);
     final taskMap = <String, TaskItem>{
@@ -564,7 +582,7 @@ class TaskBoardEvaluator {
     );
   }
 
-  /// Prunes tasks in Tier 6 (`Completed`) on [board] older than 30 days (`2,592,000` seconds UTC).
+  /// Prunes completed tasks (both global `completed` and `scopedHidden`) on [board] older than 30 days (`2,592,000` seconds UTC) per `TDF-PUB-004`.
   static NormalizedTierSlices pruneCompletedTasks(
     NormalizedTierSlices board, {
     DateTime? currentDate,
@@ -572,13 +590,25 @@ class TaskBoardEvaluator {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
     );
-    final retained = <TaskItem>[];
+    final retainedCompleted = <TaskItem>[];
+    final retainedScopedHidden = <TaskItem>[];
     final prunedRecords = <TdfDeletedTaskRecord>[];
+    final prunedTaskIds = <String>{};
     for (final task in board.completed) {
       if (_isWithinRetention(task, now)) {
-        retained.add(task);
+        retainedCompleted.add(task);
       } else {
         prunedRecords.add(_toPrunedRecord(task, now));
+        prunedTaskIds.add(task.id);
+      }
+    }
+    for (final task in board.scopedHidden) {
+      final isDone = task.isCompleted || task.completedAt != null;
+      if (isDone && !_isWithinRetention(task, now)) {
+        prunedRecords.add(_toPrunedRecord(task, now));
+        prunedTaskIds.add(task.id);
+      } else {
+        retainedScopedHidden.add(task);
       }
     }
     if (prunedRecords.isEmpty) return board;
@@ -595,38 +625,91 @@ class TaskBoardEvaluator {
       board.deletedBlock,
       recordTaskDeletion,
     );
-    return board.copyWithSlices(completed: retained, deletedBlock: nextDeleted);
+    final nextScopedHidden = <TaskItem>[
+      for (final task in retainedScopedHidden)
+        (task.isCompleted || task.completedAt != null)
+            ? task
+            : _stripExpiredTaskDependencies(task, prunedTaskIds, now),
+    ];
+    return normalizeTierSlices(
+      focus: _stripExpiredTaskDependenciesFromList(
+        board.focus,
+        prunedTaskIds,
+        now,
+      ),
+      ready: _stripExpiredTaskDependenciesFromList(
+        board.ready,
+        prunedTaskIds,
+        now,
+      ),
+      planned: _stripExpiredTaskDependenciesFromList(
+        board.planned,
+        prunedTaskIds,
+        now,
+      ),
+      blocked: _stripExpiredTaskDependenciesFromList(
+        board.blocked,
+        prunedTaskIds,
+        now,
+      ),
+      someday: _stripExpiredTaskDependenciesFromList(
+        board.someday,
+        prunedTaskIds,
+        now,
+      ),
+      completed: retainedCompleted,
+      scopedHidden: nextScopedHidden,
+      labels: board.labels,
+      locations: board.locations,
+      deletedBlock: nextDeleted,
+      explicitQueueBlock: board.queueBlock,
+    );
   }
 
-  /// Records a label deletion [record] in [current] while enforcing [TdfDeletedBlock.maxDeletedRecords].
+  /// Records a label deletion [record] in [current] while enforcing [maxTdfDeletedRecords].
   static TdfDeletedBlock recordLabelDeletion(
     TdfDeletedBlock current,
     TdfDeletedLabelRecord record,
   ) {
-    if (current.totalRecords >= TdfDeletedBlock.maxDeletedRecords) {
-      throw const FormatException('LimitExceeded');
+    if (current.totalRecords >= maxTdfDeletedRecords) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Deleted block exceeds maximum of $maxTdfDeletedRecords records.',
+      );
     }
     return current.copyWith(labels: [...current.labels, record]);
   }
 
-  /// Records a location deletion [record] in [current] while enforcing [TdfDeletedBlock.maxDeletedRecords].
+  /// Records a location deletion [record] in [current] while enforcing [maxTdfDeletedRecords].
   static TdfDeletedBlock recordLocationDeletion(
     TdfDeletedBlock current,
     TdfDeletedLocationRecord record,
   ) {
-    if (current.totalRecords >= TdfDeletedBlock.maxDeletedRecords) {
-      throw const FormatException('LimitExceeded');
+    if (current.totalRecords >= maxTdfDeletedRecords) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Deleted block exceeds maximum of $maxTdfDeletedRecords records.',
+      );
     }
     return current.copyWith(locations: [...current.locations, record]);
   }
 
-  /// Records a task deletion [record] in [current] while enforcing [TdfDeletedBlock.maxDeletedRecords].
+  /// Records a task deletion [record] in [current] while enforcing [maxTdfDeletedRecords].
   static TdfDeletedBlock recordTaskDeletion(
     TdfDeletedBlock current,
     TdfDeletedTaskRecord record,
   ) {
-    if (current.totalRecords >= TdfDeletedBlock.maxDeletedRecords) {
-      throw const FormatException('LimitExceeded');
+    if (current.totalRecords >= maxTdfDeletedRecords) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Deleted block exceeds maximum of $maxTdfDeletedRecords records.',
+      );
     }
     return current.copyWith(tasks: [...current.tasks, record]);
   }
@@ -647,7 +730,9 @@ class TaskBoardEvaluator {
   }) => evaluate(
     tasks: tasks ?? board.allTasks,
     evaluationTime: now,
-    localEvaluationTime: resolveLocalEvaluationTime(now, localEvaluationTime),
+    localEvaluationTime: localEvaluationTime != null
+        ? resolveLocalEvaluationTime(now, localEvaluationTime)
+        : null,
     timeZone: timeZone,
     dueLeadWindow: dueLeadWindow,
     labels: labels ?? board.labels,
@@ -722,12 +807,12 @@ class TaskBoardEvaluator {
         );
   }
 
-  /// Evaluates whether [task]'s effective condition groups are satisfied per `TDF_SPEC_0.6.0.md` Section 4.4.3.
+  /// Evaluates whether [task]'s effective condition groups are satisfied per `spec/TDF_SPEC_0.8.0.md` Section 9.2 (`TDF-EVAL-002`, `TDF-EVAL-003`).
   static bool _areTaskConditionsSatisfied(
     TaskItem task,
     Map<String, TdfLabel> labelMap,
     Map<String, TdfLocation> locationMap,
-    DateTime evaluationTime,
+    DateTime? evaluationTime,
     String? activeLabelId,
     double? latitude,
     double? longitude,
@@ -748,11 +833,11 @@ class TaskBoardEvaluator {
         longitude,
       );
     }
-    for (final labelId in task.labelIds) {
+    for (final labelId in _sortedAsciiIds(task.labelIds)) {
       final label = labelMap[labelId];
       if (label != null && label.isScoped) continue;
       if (_evaluateRuleContext(
-        label?.conditions ?? const [],
+        label?.conditions ?? const <TaskCondition>[],
         task.conditions,
         locationMap,
         evaluationTime,
@@ -889,25 +974,27 @@ class TaskBoardEvaluator {
     );
   }
 
-  /// Evaluates all rules belonging to [group] within [rules] using intra-group `OR` short-circuiting.
+  /// Evaluates all rules belonging to [group] within [rules] using intra-group `OR` short-circuiting (`TDF-EVAL-003`, `TDF-CTX-001`).
   static bool _evaluateGroupRules(
     List<TaskCondition> rules,
     ConditionGroup group,
     Map<String, TdfLocation> locationMap,
-    DateTime evaluationTime,
+    DateTime? evaluationTime,
     double? latitude,
     double? longitude,
   ) {
+    if (_hasGroupReset(rules, group)) return true;
     var hasRuleInGroup = false;
     for (final rule in rules) {
       if (rule.group != group) continue;
-      if (rule is GroupResetTaskCondition) return true;
       hasRuleInGroup = true;
-      if (rule.isSatisfiedAt(
+      if (_evaluateSingleConditionRule(
+        rule,
+        group,
+        locationMap,
         evaluationTime,
-        currentLatitude: latitude,
-        currentLongitude: longitude,
-        locations: locationMap,
+        latitude,
+        longitude,
       )) {
         return true;
       }
@@ -915,12 +1002,12 @@ class TaskBoardEvaluator {
     return !hasRuleInGroup;
   }
 
-  /// Evaluates a single effective condition context (`day` AND `time` AND `location`) per Section 4.4.3.
+  /// Evaluates a single effective condition context (`day` AND `time` AND `location`) per Section 9.2.
   static bool _evaluateRuleContext(
     List<TaskCondition> baseRules,
     List<TaskCondition> taskRules,
     Map<String, TdfLocation> locationMap,
-    DateTime evaluationTime,
+    DateTime? evaluationTime,
     double? latitude,
     double? longitude,
   ) {
@@ -940,6 +1027,37 @@ class TaskBoardEvaluator {
       }
     }
     return true;
+  }
+
+  /// Evaluates a single non-reset [rule] in [group], throwing [TdfContextException] when `day` or `time` lacks [evaluationTime] (`TDF-CTX-001`).
+  static bool _evaluateSingleConditionRule(
+    TaskCondition rule,
+    ConditionGroup group,
+    Map<String, TdfLocation> locationMap,
+    DateTime? evaluationTime,
+    double? latitude,
+    double? longitude,
+  ) {
+    if (group == ConditionGroup.day || group == ConditionGroup.time) {
+      if (evaluationTime == null) {
+        throw const TdfContextException(
+          kind: TdfContextOutcomeKind.timeZoneContextRequired,
+          message: 'Time zone context is required to evaluate local day or time conditions.',
+        );
+      }
+      return rule.isSatisfiedAt(
+        evaluationTime,
+        currentLatitude: latitude,
+        currentLongitude: longitude,
+        locations: locationMap,
+      );
+    }
+    return rule.isSatisfiedAt(
+      evaluationTime ?? TdfQueueBlock.epochModifiedAt,
+      currentLatitude: latitude,
+      currentLongitude: longitude,
+      locations: locationMap,
+    );
   }
 
   /// Filters out resolved or tombstoned dependencies from [task], returning `null` if no entry was removed.
@@ -969,6 +1087,16 @@ class TaskBoardEvaluator {
   /// Checks whether [task] has an active deferral (`suspended forever` or `suspendedAt > nowUtc`).
   static bool _hasActiveDeferral(TaskItem task, DateTime nowUtc) =>
       task.hasActiveSuspendedAt(nowUtc);
+
+  /// Returns whether [rules] contains a [GroupResetTaskCondition] targeting [group].
+  static bool _hasGroupReset(List<TaskCondition> rules, ConditionGroup group) {
+    for (final rule in rules) {
+      if (rule is GroupResetTaskCondition && rule.targetGroup == group) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// Increments [counts] for each label ID in [labelIds].
   static void _incrementLabelCountsForTask(
@@ -1189,6 +1317,30 @@ class TaskBoardEvaluator {
     return <TaskItem>[...priorityGroup, ...regularGroup];
   }
 
+  /// Replaces tasks present in [updatedById] across all slices of [board] while updating [deletedBlock].
+  static NormalizedTierSlices _replaceUpdatedTasksInSlices(
+    NormalizedTierSlices board,
+    Map<String, TaskItem> updatedById,
+    TdfDeletedBlock deletedBlock,
+  ) {
+    List<TaskItem> replaceInList(List<TaskItem> list) => <TaskItem>[
+      for (final item in list) updatedById[item.id] ?? item,
+    ];
+    return normalizeTierSlices(
+      focus: replaceInList(board.focus),
+      ready: replaceInList(board.ready),
+      planned: replaceInList(board.planned),
+      blocked: replaceInList(board.blocked),
+      someday: replaceInList(board.someday),
+      completed: replaceInList(board.completed),
+      scopedHidden: replaceInList(board.scopedHidden),
+      labels: board.labels,
+      locations: board.locations,
+      deletedBlock: deletedBlock,
+      explicitQueueBlock: board.queueBlock,
+    );
+  }
+
   /// Returns whether [dependency] on open [task] should be stripped during Section 5.4 block cleanup.
   static bool _shouldStripDependencyOnCleanup({
     required TaskItem task,
@@ -1209,13 +1361,20 @@ class TaskBoardEvaluator {
     return task.repeatRule == null || liveTarget.repeatRule == null;
   }
 
-  /// Strips prerequisite dependencies in [task] targeting any ID in [expiredTaskIds] and advances `modifiedAt` when changed per Section 6.8.3.
+  /// Returns [ids] ordered in ascending ASCII code-unit order without allocating when `ids.length <= 1`.
+  static List<String> _sortedAsciiIds(List<String> ids) {
+    if (ids.length <= 1) return ids;
+    return List<String>.from(ids)..sort();
+  }
+
+  /// Strips prerequisite dependencies in [task] targeting any ID in [expiredTaskIds] and advances `modifiedAt` when changed per `TDF-PUB-004`.
   static TaskItem _stripExpiredTaskDependencies(
     TaskItem task,
     Set<String> expiredTaskIds,
     DateTime now,
   ) {
-    if (!task.dependencies.any((dep) => expiredTaskIds.contains(dep.taskId))) {
+    if (expiredTaskIds.isEmpty ||
+        !task.dependencies.any((dep) => expiredTaskIds.contains(dep.taskId))) {
       return task;
     }
     final remaining = <TdfTaskDependency>[
@@ -1223,19 +1382,27 @@ class TaskBoardEvaluator {
         if (!expiredTaskIds.contains(dep.taskId)) dep,
     ];
     return task.copyWith(
+      blockedByTaskIds: <String>[for (final dep in remaining) dep.taskId],
       dependencies: remaining,
-      modifiedAt: TaskItem.nextModifiedTimestamp(now, task.effectiveModifiedAt),
+      modifiedAt: _nextBlockCleanupModifiedAt(now, task.effectiveModifiedAt),
     );
   }
+
+  /// Strips prerequisite dependencies targeting [expiredTaskIds] across every task in [tasks].
+  static List<TaskItem> _stripExpiredTaskDependenciesFromList(
+    List<TaskItem> tasks,
+    Set<String> expiredTaskIds,
+    DateTime now,
+  ) => <TaskItem>[
+    for (final task in tasks)
+      _stripExpiredTaskDependencies(task, expiredTaskIds, now),
+  ];
 
   /// Creates a [TdfDeletedTaskRecord] for a completed [task] pruned at [now].
   static TdfDeletedTaskRecord _toPrunedRecord(TaskItem task, DateTime now) =>
       TdfDeletedTaskRecord(
         taskId: task.id,
-        deletedAt: TaskItem.nextModifiedTimestamp(
-          now,
-          task.effectiveModifiedAt,
-        ),
+        deletedAt: _nextBlockCleanupModifiedAt(now, task.effectiveModifiedAt),
         completionsCheckpoint: task.completions,
       );
 }

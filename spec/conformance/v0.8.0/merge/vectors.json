@@ -1,0 +1,3439 @@
+{
+  "version": "0.8.0",
+  "ruleIds": [
+    "TDF-SYNC-001",
+    "TDF-SYNC-002",
+    "TDF-MERGE-001",
+    "TDF-MERGE-002",
+    "TDF-MERGE-003",
+    "TDF-MERGE-004",
+    "TDF-MERGE-005",
+    "TDF-MERGE-006",
+    "TDF-MERGE-007",
+    "TDF-MERGE-008",
+    "TDF-MERGE-009",
+    "TDF-MERGE-010",
+    "TDF-MERGE-011",
+    "TDF-DEL-001",
+    "TDF-DEL-002",
+    "TDF-DEL-003",
+    "TDF-QSYNC-001",
+    "TDF-PUB-003",
+    "TDF-PUB-004",
+    "TDF-REC-001",
+    "TDF-REC-002"
+  ],
+  "mergeVectors": [
+    {
+      "id": "mrg_01_scalar_independent_edits",
+      "ruleIds": ["TDF-MERGE-003", "TDF-MERGE-004", "TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:11"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q1",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q1",
+            "modified": "2026-11-04 12:00:13"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_02_scalar_matching_edits",
+      "ruleIds": ["TDF-MERGE-003", "TDF-MERGE-004", "TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:11"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_03_scalar_same_field_conflict",
+      "ruleIds": ["TDF-MERGE-003", "TDF-MERGE-004", "TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:11"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N2",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N2",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_04_scalar_equal_timestamp_conflict",
+      "ruleIds": ["TDF-MERGE-002", "TDF-MERGE-003", "TDF-MERGE-004", "TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "Alpha",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "Zulu",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "Zulu",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_05_scalar_conflict_plus_independent_edit",
+      "ruleIds": ["TDF-MERGE-003", "TDF-MERGE-004", "TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Alpha",
+            "modified": "2026-11-04 12:00:11"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Zulu",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Zulu",
+            "modified": "2026-11-04 12:00:13"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_06_scalar_unstamped_external_edit",
+      "ruleIds": ["TDF-MERGE-003", "TDF-MERGE-004", "TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:20"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:21"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_07_twoway_no_baseline_winner_selection",
+      "ruleIds": ["TDF-MERGE-001", "TDF-MERGE-003", "TDF-MERGE-004"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": null,
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:11",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Shared entry"
+              }
+            ]
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q1",
+            "modified": "2026-11-04 12:00:12",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Shared entry"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q1",
+            "modified": "2026-11-04 12:00:12",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Shared entry"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_08_twoway_no_baseline_winner_plus_history_union",
+      "ruleIds": ["TDF-MERGE-001", "TDF-MERGE-004", "TDF-MERGE-008"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": null,
+      "left": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N1",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:11",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Entry 1"
+              },
+              {
+                "timestamp": "2026-11-04 12:00:07",
+                "text": "Local journal"
+              }
+            ]
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q1",
+            "modified": "2026-11-04 12:00:12",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Entry 1"
+              },
+              {
+                "timestamp": "2026-11-04 12:00:09",
+                "text": "Remote journal"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "8jKaCdOkD2",
+            "title": "N0",
+            "note": "Q1",
+            "modified": "2026-11-04 12:00:13",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Entry 1"
+              },
+              {
+                "timestamp": "2026-11-04 12:00:07",
+                "text": "Local journal"
+              },
+              {
+                "timestamp": "2026-11-04 12:00:09",
+                "text": "Remote journal"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_09_due_atomic_4tuple_equal_timestamp_tiebreak",
+      "ruleIds": ["TDF-MERGE-002", "TDF-MERGE-005", "TDF-MERGE-010"],
+      "now": "2026-02-20 12:00:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "dueTie0001",
+            "title": "Deadline Tie",
+            "modified": "2026-02-20 12:00:10",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": false,
+              "note": "Original note"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "dueTie0001",
+            "title": "Deadline Tie",
+            "modified": "2026-02-20 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": false,
+              "note": "Updated note on L"
+            }
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "dueTie0001",
+            "title": "Deadline Tie",
+            "modified": "2026-02-20 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00",
+              "passive": true,
+              "note": "Original note"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "dueTie0001",
+            "title": "Deadline Tie",
+            "modified": "2026-02-20 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00",
+              "passive": true,
+              "note": "Original note"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_10_due_anchor_absent_precedes_present_tiebreak",
+      "ruleIds": ["TDF-MERGE-002", "TDF-MERGE-005"],
+      "now": "2026-02-20 12:00:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "dueTie0002",
+            "title": "Anchor Presence Tie",
+            "modified": "2026-02-20 12:00:10",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "dueTie0002",
+            "title": "Anchor Presence Tie",
+            "modified": "2026-02-20 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "note": "Note without anchor"
+            }
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "dueTie0002",
+            "title": "Anchor Presence Tie",
+            "modified": "2026-02-20 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "dueTie0002",
+            "title": "Anchor Presence Tie",
+            "modified": "2026-02-20 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_11_case1_cross_occurrence_winner_with_history_set_merge",
+      "ruleIds": ["TDF-MERGE-008", "TDF-MERGE-010"],
+      "now": "2026-03-01 12:00:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "occCase001",
+            "title": "Recurring Task",
+            "modified": "2026-02-28 10:00:10",
+            "completions": 1,
+            "priority": true,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            },
+            "repeat": {
+              "count": 1,
+              "unit": "months"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-01 09:00:00",
+                "text": "H1"
+              },
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              }
+            ]
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "occCase001",
+            "title": "Recurring Task",
+            "modified": "2026-02-28 10:00:11",
+            "completions": 2,
+            "priority": true,
+            "due": {
+              "timestamp": "2026-03-31 16:00:00",
+              "anchor": "2026-03-31 18:00:00"
+            },
+            "repeat": {
+              "count": 1,
+              "unit": "months"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-01 09:00:00",
+                "text": "H1"
+              },
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              },
+              {
+                "timestamp": "2026-02-28 10:00:11",
+                "text": "H3 completed"
+              }
+            ]
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "occCase001",
+            "title": "Recurring Task",
+            "modified": "2026-02-28 10:00:20",
+            "completions": 1,
+            "priority": false,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "passive": true
+            },
+            "repeat": {
+              "count": 1,
+              "unit": "months"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              },
+              {
+                "timestamp": "2026-02-28 10:00:20",
+                "text": "H4 remote note"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "occCase001",
+            "title": "Recurring Task",
+            "modified": "2026-02-28 10:00:21",
+            "completions": 2,
+            "priority": true,
+            "due": {
+              "timestamp": "2026-03-31 16:00:00",
+              "anchor": "2026-03-31 18:00:00"
+            },
+            "repeat": {
+              "count": 1,
+              "unit": "months"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              },
+              {
+                "timestamp": "2026-02-28 10:00:11",
+                "text": "H3 completed"
+              },
+              {
+                "timestamp": "2026-02-28 10:00:20",
+                "text": "H4 remote note"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_12_case2_same_occurrence_unbundled_with_history_set_merge",
+      "ruleIds": ["TDF-MERGE-008", "TDF-MERGE-010"],
+      "now": "2026-02-20 12:00:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "occCase002",
+            "title": "Same Occurrence",
+            "modified": "2026-02-20 10:00:10",
+            "completions": 1,
+            "priority": false,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            },
+            "subtasks": {
+              "autoFinish": true,
+              "steps": [
+                {
+                  "done": false,
+                  "text": "Step 1"
+                },
+                {
+                  "done": false,
+                  "text": "Step 2"
+                }
+              ]
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-01 09:00:00",
+                "text": "H1"
+              },
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              }
+            ]
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "occCase002",
+            "title": "Same Occurrence",
+            "modified": "2026-02-20 10:00:11",
+            "completions": 1,
+            "priority": true,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            },
+            "subtasks": {
+              "autoFinish": true,
+              "steps": [
+                {
+                  "done": true,
+                  "text": "Step 1"
+                },
+                {
+                  "done": false,
+                  "text": "Step 2"
+                }
+              ]
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-01 09:00:00",
+                "text": "H1"
+              },
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              },
+              {
+                "timestamp": "2026-02-20 10:00:11",
+                "text": "H3"
+              }
+            ]
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "occCase002",
+            "title": "Same Occurrence",
+            "modified": "2026-02-20 10:00:12",
+            "completions": 1,
+            "priority": false,
+            "due": {
+              "timestamp": "2026-03-15 17:00:00",
+              "anchor": "2026-03-15 18:00:00",
+              "note": "Rescheduled"
+            },
+            "subtasks": {
+              "autoFinish": true,
+              "steps": [
+                {
+                  "done": false,
+                  "text": "Step 1"
+                },
+                {
+                  "done": true,
+                  "text": "Step 2"
+                }
+              ]
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "occCase002",
+            "title": "Same Occurrence",
+            "modified": "2026-02-20 10:00:13",
+            "completions": 1,
+            "priority": true,
+            "due": {
+              "timestamp": "2026-03-15 17:00:00",
+              "anchor": "2026-03-15 18:00:00",
+              "note": "Rescheduled"
+            },
+            "subtasks": {
+              "autoFinish": true,
+              "steps": [
+                {
+                  "done": true,
+                  "text": "Step 1"
+                },
+                {
+                  "done": true,
+                  "text": "Step 2"
+                }
+              ]
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-10 09:00:00",
+                "text": "H2"
+              },
+              {
+                "timestamp": "2026-02-20 10:00:11",
+                "text": "H3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_13_case2_final_future_deferral_extension_beats_offline_cleanup",
+      "ruleIds": ["TDF-MERGE-009", "TDF-MERGE-010"],
+      "now": "2026-11-04 12:01:40",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "susPre0001",
+            "title": "Deferral Extension",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Old snooze"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "susPre0001",
+            "title": "Deferral Extension",
+            "modified": "2026-11-04 12:01:20"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "susPre0001",
+            "title": "Deferral Extension",
+            "modified": "2026-11-04 12:01:00",
+            "suspended": {
+              "timestamp": "2026-11-04 12:03:20",
+              "note": "Extended snooze"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "susPre0001",
+            "title": "Deferral Extension",
+            "modified": "2026-11-04 12:01:40",
+            "suspended": {
+              "timestamp": "2026-11-04 12:03:20",
+              "note": "Extended snooze"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_14_case2_final_expired_deferral_not_resurrected",
+      "ruleIds": ["TDF-MERGE-009", "TDF-MERGE-010"],
+      "now": "2026-11-04 12:01:40",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "susPre0002",
+            "title": "Expired Deferral",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "susPre0002",
+            "title": "Expired Deferral",
+            "modified": "2026-11-04 12:01:20"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "susPre0002",
+            "title": "Expired Deferral",
+            "modified": "2026-11-04 12:01:35",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Edited before expiry"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "susPre0002",
+            "title": "Expired Deferral",
+            "modified": "2026-11-04 12:01:40"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_15_case2_final_repeat_aware_blocked_preserves_higher_threshold",
+      "ruleIds": ["TDF-MERGE-010"],
+      "now": "2026-11-04 12:01:40",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "prereqA001",
+            "title": "One-Shot Prerequisite",
+            "modified": "2026-11-04 12:00:10",
+            "completions": 0
+          },
+          {
+            "id": "depTask001",
+            "title": "Dependent Task",
+            "modified": "2026-11-04 12:00:10",
+            "blocked": {
+              "prereqA001": 1
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "prereqA001",
+            "title": "One-Shot Prerequisite",
+            "modified": "2026-11-04 12:00:15",
+            "finished": "2026-11-04 12:00:15",
+            "completions": 1
+          },
+          {
+            "id": "depTask001",
+            "title": "Dependent Task",
+            "modified": "2026-11-04 12:00:15"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "prereqA001",
+            "title": "One-Shot Prerequisite",
+            "modified": "2026-11-04 12:00:10",
+            "completions": 0
+          },
+          {
+            "id": "depTask001",
+            "title": "Dependent Task",
+            "modified": "2026-11-04 12:00:12",
+            "blocked": {
+              "prereqA001": 2
+            }
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "prereqA001",
+            "title": "One-Shot Prerequisite",
+            "modified": "2026-11-04 12:00:15",
+            "finished": "2026-11-04 12:00:15",
+            "completions": 1
+          },
+          {
+            "id": "depTask001",
+            "title": "Dependent Task",
+            "modified": "2026-11-04 12:01:40",
+            "blocked": {
+              "prereqA001": 2
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_16_case2_final_repeat_aware_blocked_preserves_recurring_pipeline",
+      "ruleIds": ["TDF-MERGE-010"],
+      "now": "2026-11-04 12:01:40",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "prereqRec1",
+            "title": "Recurring Prerequisite",
+            "modified": "2026-11-04 12:00:10",
+            "completions": 1,
+            "repeat": {
+              "count": 1,
+              "unit": "days"
+            }
+          },
+          {
+            "id": "depRec0001",
+            "title": "Pipeline Dependent",
+            "modified": "2026-11-04 12:00:10",
+            "blocked": {
+              "prereqRec1": 1
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "prereqRec1",
+            "title": "Recurring Prerequisite",
+            "modified": "2026-11-04 12:00:10",
+            "completions": 1,
+            "repeat": {
+              "count": 1,
+              "unit": "days"
+            }
+          },
+          {
+            "id": "depRec0001",
+            "title": "Pipeline Dependent",
+            "modified": "2026-11-04 12:00:15"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "prereqRec1",
+            "title": "Recurring Prerequisite",
+            "modified": "2026-11-04 12:00:10",
+            "completions": 1,
+            "repeat": {
+              "count": 1,
+              "unit": "days"
+            }
+          },
+          {
+            "id": "depRec0001",
+            "title": "Pipeline Dependent",
+            "modified": "2026-11-04 12:00:12",
+            "repeat": {
+              "count": 1,
+              "unit": "days"
+            },
+            "blocked": {
+              "prereqRec1": 1
+            }
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "prereqRec1",
+            "title": "Recurring Prerequisite",
+            "modified": "2026-11-04 12:00:10",
+            "completions": 1,
+            "repeat": {
+              "count": 1,
+              "unit": "days"
+            }
+          },
+          {
+            "id": "depRec0001",
+            "title": "Pipeline Dependent",
+            "modified": "2026-11-04 12:01:40",
+            "repeat": {
+              "count": 1,
+              "unit": "days"
+            },
+            "blocked": {
+              "prereqRec1": 1
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_17_scoped_label_deletion_evicts_concurrently_scheduled_task",
+      "ruleIds": ["TDF-MERGE-006", "TDF-MERGE-011", "TDF-QSYNC-001"],
+      "now": "2026-11-04 12:01:40",
+      "baseline": {
+        "labels": [
+          {
+            "id": "lblScoped1",
+            "name": "Secret Project",
+            "scoped": true,
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskScoped1",
+            "title": "Scoped Task",
+            "modified": "2026-11-04 12:00:10",
+            "labels": ["lblScoped1"],
+            "due": {
+              "timestamp": "2026-11-10 17:00:00",
+              "anchor": "2026-11-10 18:00:00",
+              "note": "Keep deadline"
+            },
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Created in scope"
+              }
+            ]
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-04 12:00:10",
+          "taskIds": []
+        }
+      },
+      "left": {
+        "labels": [],
+        "tasks": [
+          {
+            "id": "tskScoped1",
+            "title": "Scoped Task",
+            "modified": "2026-11-04 12:00:12",
+            "due": {
+              "timestamp": "2026-11-10 17:00:00",
+              "anchor": "2026-11-10 18:00:00",
+              "note": "Keep deadline"
+            },
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Created in scope"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "labels": [
+            {
+              "id": "lblScoped1",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-11-04 12:00:10",
+          "taskIds": []
+        }
+      },
+      "right": {
+        "labels": [
+          {
+            "id": "lblScoped1",
+            "name": "Secret Project",
+            "scoped": true,
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskScoped1",
+            "title": "Scoped Task",
+            "modified": "2026-11-04 12:00:15",
+            "priority": true,
+            "labels": ["lblScoped1"],
+            "due": {
+              "timestamp": "2026-11-10 17:00:00",
+              "anchor": "2026-11-10 18:00:00",
+              "note": "Keep deadline"
+            },
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Created in scope"
+              }
+            ]
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-04 12:00:15",
+          "taskIds": ["tskScoped1"]
+        }
+      },
+      "expected": {
+        "labels": [],
+        "tasks": [
+          {
+            "id": "tskScoped1",
+            "title": "Scoped Task",
+            "modified": "2026-11-04 12:00:16",
+            "priority": false,
+            "labels": [],
+            "due": {
+              "timestamp": "2026-11-10 17:00:00",
+              "anchor": "2026-11-10 18:00:00",
+              "note": "Keep deadline"
+            },
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:05",
+                "text": "Created in scope"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "labels": [
+            {
+              "id": "lblScoped1",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-11-04 12:00:16",
+          "taskIds": []
+        },
+        "tiers": {
+          "focus": [],
+          "someday": ["tskScoped1"]
+        }
+      }
+    },
+    {
+      "id": "mrg_18_scoped_label_deletion_no_baseline_evicts_scheduled_task",
+      "ruleIds": ["TDF-MERGE-006", "TDF-MERGE-011", "TDF-DEL-003", "TDF-QSYNC-001"],
+      "now": "2026-11-04 12:00:30",
+      "baseline": null,
+      "labelConflictResolutions": {
+        "lblScoped2": "delete"
+      },
+      "left": {
+        "labels": [],
+        "tasks": [
+          {
+            "id": "tskScoped2",
+            "title": "No Baseline Scoped",
+            "modified": "2026-11-04 12:00:25"
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "labels": [
+            {
+              "id": "lblScoped2",
+              "deletedAt": "2026-11-04 12:00:25"
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-11-04 12:00:10",
+          "taskIds": []
+        }
+      },
+      "right": {
+        "labels": [
+          {
+            "id": "lblScoped2",
+            "name": "Scoped No Base",
+            "scoped": true,
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskScoped2",
+            "title": "No Baseline Scoped",
+            "modified": "2026-11-04 12:00:15",
+            "priority": true,
+            "labels": ["lblScoped2"]
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-04 12:00:15",
+          "taskIds": ["tskScoped2"]
+        }
+      },
+      "expected": {
+        "labels": [],
+        "tasks": [
+          {
+            "id": "tskScoped2",
+            "title": "No Baseline Scoped",
+            "modified": "2026-11-04 12:00:30",
+            "priority": false,
+            "labels": []
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "labels": [
+            {
+              "id": "lblScoped2",
+              "deletedAt": "2026-11-04 12:00:30"
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-11-04 12:00:16",
+          "taskIds": []
+        }
+      }
+    },
+    {
+      "id": "mrg_19_location_coupled_coordinates_and_source_unit",
+      "ruleIds": ["TDF-MERGE-005"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "locations": [
+          {
+            "id": "locOffice1",
+            "name": "Office",
+            "source": "Marienplatz 1",
+            "latitude": "48.137154",
+            "longitude": "11.576124",
+            "radius": "150",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "locations": [
+          {
+            "id": "locOffice1",
+            "name": "Office",
+            "source": "Marienplatz 1, Munich",
+            "latitude": "48.137154",
+            "longitude": "11.576124",
+            "radius": "250",
+            "modified": "2026-11-04 12:00:11"
+          }
+        ]
+      },
+      "right": {
+        "locations": [
+          {
+            "id": "locOffice1",
+            "name": "Office",
+            "source": "Alexanderplatz 1",
+            "latitude": "52.520008",
+            "longitude": "13.404954",
+            "radius": "150",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ]
+      },
+      "expected": {
+        "locations": [
+          {
+            "id": "locOffice1",
+            "name": "Office",
+            "source": "Alexanderplatz 1",
+            "latitude": "52.520008",
+            "longitude": "13.404954",
+            "radius": "250",
+            "modified": "2026-11-04 12:00:13"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_20_location_cascade_inserts_location_any_when_label_has_location",
+      "ruleIds": ["TDF-MERGE-007"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "locTemp001",
+            "name": "Pop-Up",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas1",
+            "title": "Original Title",
+            "modified": "2026-11-04 12:00:10",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locTemp001"]
+              }
+            ]
+          }
+        ]
+      },
+      "left": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas1",
+            "title": "Original Title",
+            "modified": "2026-11-04 12:00:12",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "groupAny",
+                "group": "location"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "locations": [
+            {
+              "id": "locTemp001",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        }
+      },
+      "right": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "locTemp001",
+            "name": "Pop-Up",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas1",
+            "title": "Renamed On Right",
+            "modified": "2026-11-04 12:00:15",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locTemp001"]
+              }
+            ]
+          }
+        ]
+      },
+      "expected": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas1",
+            "title": "Renamed On Right",
+            "modified": "2026-11-04 12:00:16",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "groupAny",
+                "group": "location"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "locations": [
+            {
+              "id": "locTemp001",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mrg_21_location_cascade_label_before_task_clears_when_label_location_also_deleted",
+      "ruleIds": ["TDF-MERGE-007"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "locTemp001",
+            "name": "Pop-Up",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas2",
+            "title": "Both Locations Deleted",
+            "modified": "2026-11-04 12:00:10",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locTemp001"]
+              }
+            ]
+          }
+        ]
+      },
+      "left": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas2",
+            "title": "Both Locations Deleted",
+            "modified": "2026-11-04 12:00:12",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "groupAny",
+                "group": "location"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "locations": [
+            {
+              "id": "locTemp001",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        }
+      },
+      "right": {
+        "locations": [
+          {
+            "id": "locTemp001",
+            "name": "Pop-Up",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:14",
+            "conditions": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas2",
+            "title": "Both Locations Deleted",
+            "modified": "2026-11-04 12:00:10",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locTemp001"]
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "locations": [
+            {
+              "id": "locMain001",
+              "deletedAt": "2026-11-04 12:00:14"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "locations": [],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:14",
+            "conditions": []
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas2",
+            "title": "Both Locations Deleted",
+            "modified": "2026-11-04 12:00:13",
+            "labels": ["lblWork001"],
+            "conditions": []
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "locations": [
+            {
+              "id": "locMain001",
+              "deletedAt": "2026-11-04 12:00:14"
+            },
+            {
+              "id": "locTemp001",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mrg_22_location_cascade_explicit_task_condition_removal_wins",
+      "ruleIds": ["TDF-MERGE-007"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "locTemp001",
+            "name": "Pop-Up",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas3",
+            "title": "Explicit Inherit",
+            "modified": "2026-11-04 12:00:10",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locTemp001"]
+              }
+            ]
+          }
+        ]
+      },
+      "left": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas3",
+            "title": "Explicit Inherit",
+            "modified": "2026-11-04 12:00:12",
+            "labels": ["lblWork001"],
+            "conditions": [
+              {
+                "kind": "groupAny",
+                "group": "location"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "locations": [
+            {
+              "id": "locTemp001",
+              "deletedAt": "2026-11-04 12:00:12"
+            }
+          ]
+        }
+      },
+      "right": {
+        "locations": [
+          {
+            "id": "locMain001",
+            "name": "HQ",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "locTemp001",
+            "name": "Pop-Up",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "labels": [
+          {
+            "id": "lblWork001",
+            "name": "Work",
+            "modified": "2026-11-04 12:00:10",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locMain001"]
+              }
+            ]
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskLocCas3",
+            "title": "Explicit Inherit",
+            "modified": "2026-11-04 12:00:15",
+            "labels": ["lblWork001"],
+            "conditions": []
+          }
+        ]
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "tskLocCas3",
+            "title": "Explicit Inherit",
+            "modified": "2026-11-04 12:00:15",
+            "labels": ["lblWork001"],
+            "conditions": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "mrg_23_deletion_screening_ignores_auto_block_cleanup",
+      "ruleIds": ["TDF-DEL-001", "TDF-DEL-002"],
+      "now": "2026-11-04 12:01:40",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "delClean01",
+            "title": "Auto Cleaned Task",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Expired snooze"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "delClean01",
+            "title": "Auto Cleaned Task",
+            "modified": "2026-11-04 12:01:00"
+          }
+        ]
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 0,
+          "tasks": [
+            {
+              "id": "delClean01",
+              "deletedAt": "2026-11-04 12:01:10"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [],
+        "deleted": {
+          "generation": 0,
+          "tasks": [
+            {
+              "id": "delClean01",
+              "deletedAt": "2026-11-04 12:01:10"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mrg_24_deletion_conflict_on_due_anchor_only_edit",
+      "ruleIds": ["TDF-MODEL-006", "TDF-DEL-002"],
+      "now": "2026-02-20 12:00:30",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "delConfAn1",
+            "title": "Anchor Edited Task",
+            "modified": "2026-02-20 12:00:10",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "delConfAn1",
+            "title": "Anchor Edited Task",
+            "modified": "2026-02-20 12:00:15",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            }
+          }
+        ]
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 0,
+          "tasks": [
+            {
+              "id": "delConfAn1",
+              "deletedAt": "2026-02-20 12:00:20"
+            }
+          ]
+        }
+      },
+      "expectedOutcome": {
+        "kind": "deletionConflict",
+        "conflictedTaskIds": ["delConfAn1"]
+      }
+    },
+    {
+      "id": "mrg_25_deletion_conflict_on_history_only_edit",
+      "ruleIds": ["TDF-MERGE-008", "TDF-DEL-002"],
+      "now": "2026-11-04 12:00:30",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "delConfHs1",
+            "title": "History Edited Task",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "delConfHs1",
+            "title": "History Edited Task",
+            "modified": "2026-11-04 12:00:15",
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:15",
+                "text": "Added audit entry"
+              }
+            ]
+          }
+        ]
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 0,
+          "tasks": [
+            {
+              "id": "delConfHs1",
+              "deletedAt": "2026-11-04 12:00:20"
+            }
+          ]
+        }
+      },
+      "expectedOutcome": {
+        "kind": "deletionConflict",
+        "conflictedTaskIds": ["delConfHs1"]
+      }
+    },
+    {
+      "id": "mrg_26_deletion_conflict_on_newly_added_label_and_location_refs",
+      "ruleIds": ["TDF-DEL-002"],
+      "now": "2026-11-04 12:00:30",
+      "baseline": {
+        "labels": [
+          {
+            "id": "lblDelRef1",
+            "name": "Referenced Label",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "locations": [
+          {
+            "id": "locDelRef1",
+            "name": "Referenced Location",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskNewRef1",
+            "title": "Adds Refs",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ]
+      },
+      "left": {
+        "labels": [
+          {
+            "id": "lblDelRef1",
+            "name": "Referenced Label",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "locations": [
+          {
+            "id": "locDelRef1",
+            "name": "Referenced Location",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "tskNewRef1",
+            "title": "Adds Refs",
+            "modified": "2026-11-04 12:00:15",
+            "labels": ["lblDelRef1"],
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["locDelRef1"]
+              }
+            ]
+          }
+        ]
+      },
+      "right": {
+        "labels": [],
+        "locations": [],
+        "tasks": [
+          {
+            "id": "tskNewRef1",
+            "title": "Adds Refs",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "deleted": {
+          "generation": 0,
+          "labels": [
+            {
+              "id": "lblDelRef1",
+              "deletedAt": "2026-11-04 12:00:20"
+            }
+          ],
+          "locations": [
+            {
+              "id": "locDelRef1",
+              "deletedAt": "2026-11-04 12:00:20"
+            }
+          ]
+        }
+      },
+      "expectedOutcome": {
+        "kind": "deletionConflict",
+        "conflictedLabelIds": ["lblDelRef1"],
+        "conflictedLocationIds": ["locDelRef1"]
+      }
+    },
+    {
+      "id": "mrg_27_bound_decision_resolves_delete_without_generation_increment",
+      "ruleIds": ["TDF-DEL-003"],
+      "now": "2026-02-20 12:00:30",
+      "boundTaskConflictDecisions": {
+        "delBound01": {
+          "resolution": "delete",
+          "expectedLiveModified": "2026-02-20 12:00:15",
+          "expectedDeletionAt": "2026-02-20 12:00:20",
+          "expectedLiveTask": {
+            "id": "delBound01",
+            "title": "Conflicted Task",
+            "completions": 2,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            }
+          }
+        }
+      },
+      "baseline": {
+        "tasks": [
+          {
+            "id": "delBound01",
+            "title": "Conflicted Task",
+            "modified": "2026-02-20 12:00:10",
+            "completions": 2,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "delBound01",
+            "title": "Conflicted Task",
+            "modified": "2026-02-20 12:00:15",
+            "completions": 2,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-20 12:00:15",
+          "taskIds": ["delBound01"]
+        }
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 4,
+          "tasks": [
+            {
+              "id": "delBound01",
+              "deletedAt": "2026-02-20 12:00:20",
+              "checkpoint": 5
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-02-20 12:00:20",
+          "taskIds": []
+        }
+      },
+      "expected": {
+        "tasks": [],
+        "deleted": {
+          "generation": 4,
+          "tasks": [
+            {
+              "id": "delBound01",
+              "deletedAt": "2026-02-20 12:00:30",
+              "checkpoint": 5
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-02-20 12:00:20",
+          "taskIds": []
+        }
+      }
+    },
+    {
+      "id": "mrg_28_bound_decision_resolves_undelete_restoring_queue_and_incrementing_generation",
+      "ruleIds": ["TDF-DEL-003", "TDF-PUB-004"],
+      "now": "2026-02-20 12:00:30",
+      "boundTaskConflictDecisions": {
+        "delBound02": {
+          "resolution": "undelete",
+          "expectedLiveModified": "2026-02-20 12:00:15",
+          "expectedDeletionAt": "2026-02-20 12:00:20",
+          "expectedLiveTask": {
+            "id": "delBound02",
+            "title": "Restored Task",
+            "completions": 2,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-20 12:00:15",
+                "text": "Keep journal"
+              }
+            ]
+          }
+        }
+      },
+      "baseline": {
+        "tasks": [
+          {
+            "id": "delBound02",
+            "title": "Restored Task",
+            "modified": "2026-02-20 12:00:10",
+            "completions": 2,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            }
+          }
+        ],
+        "queue": {
+          "modified": "2026-02-20 12:00:10",
+          "taskIds": ["delBound02"]
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "delBound02",
+            "title": "Restored Task",
+            "modified": "2026-02-20 12:00:15",
+            "completions": 2,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-20 12:00:15",
+                "text": "Keep journal"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 4
+        },
+        "queue": {
+          "modified": "2026-02-20 12:00:10",
+          "taskIds": ["delBound02"]
+        }
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 4,
+          "tasks": [
+            {
+              "id": "delBound02",
+              "deletedAt": "2026-02-20 12:00:20",
+              "checkpoint": 5
+            }
+          ]
+        },
+        "queue": {
+          "modified": "2026-02-20 12:00:20",
+          "taskIds": []
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "delBound02",
+            "title": "Restored Task",
+            "modified": "2026-02-20 12:00:30",
+            "completions": 5,
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            },
+            "history": [
+              {
+                "timestamp": "2026-02-20 12:00:15",
+                "text": "Keep journal"
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 5,
+          "tasks": []
+        },
+        "queue": {
+          "modified": "2026-02-20 12:00:21",
+          "taskIds": ["delBound02"]
+        }
+      }
+    },
+    {
+      "id": "mrg_29_bound_decision_mismatch_on_anchor_change_rethrows_conflict",
+      "ruleIds": ["TDF-DEL-003"],
+      "now": "2026-02-20 12:00:30",
+      "boundTaskConflictDecisions": {
+        "delBound03": {
+          "resolution": "delete",
+          "expectedLiveModified": "2026-02-20 12:00:15",
+          "expectedDeletionAt": "2026-02-20 12:00:20",
+          "expectedLiveTask": {
+            "id": "delBound03",
+            "title": "Stale Anchor Signature",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            }
+          }
+        }
+      },
+      "baseline": {
+        "tasks": [
+          {
+            "id": "delBound03",
+            "title": "Stale Anchor Signature",
+            "modified": "2026-02-20 12:00:10",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00"
+            }
+          }
+        ]
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "delBound03",
+            "title": "Stale Anchor Signature",
+            "modified": "2026-02-20 12:00:15",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-02-28 18:00:00"
+            }
+          }
+        ]
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 0,
+          "tasks": [
+            {
+              "id": "delBound03",
+              "deletedAt": "2026-02-20 12:00:20"
+            }
+          ]
+        }
+      },
+      "expectedOutcome": {
+        "kind": "deletionConflict",
+        "conflictedTaskIds": ["delBound03"]
+      }
+    },
+    {
+      "id": "mrg_30_retention_exact_30_days_retains_completed_and_tombstones",
+      "ruleIds": ["TDF-PUB-004"],
+      "now": "2026-10-31 12:00:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "doneExct30",
+            "title": "Completed Exactly 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 1
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombExct30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "doneExct30",
+            "title": "Completed Exactly 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 1
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombExct30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "doneExct30",
+            "title": "Completed Exactly 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 1
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombExct30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "doneExct30",
+            "title": "Completed Exactly 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 1
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombExct30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mrg_31_retention_over_30_days_prunes_completed_retires_tombstones_strips_completed_blocked_once",
+      "ruleIds": ["TDF-PUB-004"],
+      "now": "2026-10-31 12:00:01",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "doneOver30",
+            "title": "Completed Over 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 3
+          },
+          {
+            "id": "doneRecent",
+            "title": "Recent Completed Referencing Expired Tombstone",
+            "created": "2026-10-20 08:00:00",
+            "modified": "2026-10-20 12:00:00",
+            "finished": "2026-10-20 12:00:00",
+            "completions": 1,
+            "blocked": {
+              "tombOver30": 1,
+              "fwdUnknown": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombOver30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "doneOver30",
+            "title": "Completed Over 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 3
+          },
+          {
+            "id": "doneRecent",
+            "title": "Recent Completed Referencing Expired Tombstone",
+            "created": "2026-10-20 08:00:00",
+            "modified": "2026-10-20 12:00:00",
+            "finished": "2026-10-20 12:00:00",
+            "completions": 1,
+            "blocked": {
+              "tombOver30": 1,
+              "fwdUnknown": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombOver30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "doneOver30",
+            "title": "Completed Over 30 Days Ago",
+            "created": "2026-10-01 08:00:00",
+            "modified": "2026-10-01 12:00:00",
+            "finished": "2026-10-01 12:00:00",
+            "completions": 3
+          },
+          {
+            "id": "doneRecent",
+            "title": "Recent Completed Referencing Expired Tombstone",
+            "created": "2026-10-20 08:00:00",
+            "modified": "2026-10-20 12:00:00",
+            "finished": "2026-10-20 12:00:00",
+            "completions": 1,
+            "blocked": {
+              "tombOver30": 1,
+              "fwdUnknown": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 3,
+          "tasks": [
+            {
+              "id": "tombOver30",
+              "deletedAt": "2026-10-01 12:00:00",
+              "checkpoint": 2
+            }
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "doneRecent",
+            "title": "Recent Completed Referencing Expired Tombstone",
+            "created": "2026-10-20 08:00:00",
+            "modified": "2026-10-31 12:00:01",
+            "finished": "2026-10-20 12:00:00",
+            "completions": 1,
+            "blocked": {
+              "fwdUnknown": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 4,
+          "tasks": [
+            {
+              "id": "doneOver30",
+              "deletedAt": "2026-10-31 12:00:01",
+              "checkpoint": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "mrg_32_retention_multiple_tombstones_plus_undelete_single_generation_increment",
+      "ruleIds": ["TDF-PUB-004", "TDF-DEL-003"],
+      "now": "2026-10-31 12:00:01",
+      "taskConflictResolutions": {
+        "undelMulti": "undelete"
+      },
+      "baseline": {
+        "tasks": [
+          {
+            "id": "undelMulti",
+            "title": "Original",
+            "modified": "2026-10-20 10:00:00"
+          }
+        ],
+        "deleted": {
+          "generation": 7,
+          "tasks": [
+            {
+              "id": "expTomb001",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ],
+          "labels": [
+            {
+              "id": "expLbl0001",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ]
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "undelMulti",
+            "title": "Edited Before Undelete",
+            "modified": "2026-10-25 10:00:00"
+          }
+        ],
+        "deleted": {
+          "generation": 7,
+          "tasks": [
+            {
+              "id": "expTomb001",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ],
+          "labels": [
+            {
+              "id": "expLbl0001",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ]
+        }
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 7,
+          "tasks": [
+            {
+              "id": "expTomb001",
+              "deletedAt": "2026-10-01 12:00:00"
+            },
+            {
+              "id": "undelMulti",
+              "deletedAt": "2026-10-26 10:00:00",
+              "checkpoint": 2
+            }
+          ],
+          "labels": [
+            {
+              "id": "expLbl0001",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "undelMulti",
+            "title": "Edited Before Undelete",
+            "modified": "2026-10-31 12:00:01",
+            "completions": 2
+          }
+        ],
+        "deleted": {
+          "generation": 8,
+          "tasks": [],
+          "labels": []
+        }
+      }
+    },
+    {
+      "id": "mrg_33_generation_rollback_throws_sync_generation_rollback",
+      "ruleIds": ["TDF-REC-001"],
+      "now": "2026-11-04 12:01:40",
+      "acknowledgedGeneration": 5,
+      "assertCommutative": false,
+      "baseline": null,
+      "left": {
+        "deleted": {
+          "generation": 5
+        }
+      },
+      "right": {
+        "deleted": {
+          "generation": 4
+        }
+      },
+      "expectedOutcome": {
+        "kind": "syncGenerationRollback"
+      }
+    },
+    {
+      "id": "mrg_34_generation_advance_discards_unchanged_cached_and_strips_blocked",
+      "ruleIds": ["TDF-REC-001", "TDF-REC-002"],
+      "now": "2026-11-04 12:01:40",
+      "acknowledgedGeneration": 2,
+      "assertCommutative": true,
+      "baseline": {
+        "tasks": [
+          {
+            "id": "retiredTsk",
+            "title": "Retired Cached Task With Expired Deferral",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            }
+          },
+          {
+            "id": "survOpen01",
+            "title": "Surviving Open Task",
+            "modified": "2026-11-04 12:00:10",
+            "blocked": {
+              "retiredTsk": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "retiredTsk",
+            "title": "Retired Cached Task With Expired Deferral",
+            "modified": "2026-11-04 12:01:00"
+          },
+          {
+            "id": "survOpen01",
+            "title": "Surviving Open Task",
+            "modified": "2026-11-04 12:00:10",
+            "blocked": {
+              "retiredTsk": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        }
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "survOpen01",
+            "title": "Surviving Open Task",
+            "modified": "2026-11-04 12:00:10",
+            "blocked": {
+              "retiredTsk": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 3
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "survOpen01",
+            "title": "Surviving Open Task",
+            "modified": "2026-11-04 12:01:40",
+            "blocked": {}
+          }
+        ],
+        "deleted": {
+          "generation": 3
+        }
+      }
+    },
+    {
+      "id": "mrg_35_generation_advance_symmetric_primary_gt_secondary_discards_unchanged",
+      "ruleIds": ["TDF-REC-001", "TDF-REC-002"],
+      "now": "2026-11-04 12:01:40",
+      "acknowledgedGeneration": 2,
+      "assertCommutative": true,
+      "baseline": {
+        "tasks": [
+          {
+            "id": "retiredSec",
+            "title": "Stale Secondary Cached Task",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "survOpen02",
+            "title": "Shared Task Edited On Secondary",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "survOpen02",
+            "title": "Shared Task Edited On Secondary",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "deleted": {
+          "generation": 3
+        }
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "retiredSec",
+            "title": "Stale Secondary Cached Task",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "survOpen02",
+            "title": "Edited Externally At Gen 2",
+            "modified": "2026-11-04 12:00:20",
+            "blocked": {
+              "retiredSec": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "id": "survOpen02",
+            "title": "Edited Externally At Gen 2",
+            "modified": "2026-11-04 12:01:40",
+            "blocked": {}
+          }
+        ],
+        "deleted": {
+          "generation": 3
+        }
+      }
+    },
+    {
+      "id": "mrg_36_generation_advance_edited_or_unacknowledged_throws_recovery_required",
+      "ruleIds": ["TDF-REC-001"],
+      "now": "2026-11-04 12:01:40",
+      "acknowledgedGeneration": 2,
+      "assertCommutative": true,
+      "baseline": {
+        "tasks": [
+          {
+            "id": "editedBase",
+            "title": "Original",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        }
+      },
+      "left": {
+        "labels": [
+          {
+            "id": "unackLbl01",
+            "name": "Local Unacknowledged Label",
+            "modified": "2026-11-04 12:00:15"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "editedBase",
+            "title": "Modified Locally",
+            "modified": "2026-11-04 12:00:15"
+          },
+          {
+            "id": "unackTsk01",
+            "title": "Local Unacknowledged Task",
+            "modified": "2026-11-04 12:00:16"
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        }
+      },
+      "right": {
+        "tasks": [],
+        "deleted": {
+          "generation": 3
+        }
+      },
+      "expectedOutcome": {
+        "kind": "recoveryRequired",
+        "ambiguousTaskIds": ["editedBase", "unackTsk01"],
+        "ambiguousLabelIds": ["unackLbl01"]
+      }
+    },
+    {
+      "id": "mrg_37_concurrent_queue_divergence_orders_loser_additions_by_created_then_id",
+      "ruleIds": ["TDF-QSYNC-001"],
+      "now": "2026-11-04 12:05:00",
+      "baseline": {
+        "tasks": [
+          {
+            "id": "qBase00001",
+            "title": "Base 1",
+            "created": "2026-11-01 08:00:00",
+            "modified": "2026-11-04 12:00:10"
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-04 12:00:10",
+          "taskIds": ["qBase00001"]
+        }
+      },
+      "left": {
+        "tasks": [
+          {
+            "id": "qBase00001",
+            "title": "Base 1",
+            "created": "2026-11-01 08:00:00",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "qLoserZ001",
+            "title": "Loser Same Created Z",
+            "created": "2026-11-02 09:00:00",
+            "modified": "2026-11-04 12:00:12"
+          },
+          {
+            "id": "qLoserA001",
+            "title": "Loser Same Created A",
+            "created": "2026-11-02 09:00:00",
+            "modified": "2026-11-04 12:00:12"
+          },
+          {
+            "id": "qLoserEar1",
+            "title": "Loser Earlier Created",
+            "created": "2026-11-02 08:00:00",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-04 12:00:12",
+          "taskIds": ["qBase00001", "qLoserZ001", "qLoserEar1", "qLoserA001"]
+        }
+      },
+      "right": {
+        "tasks": [
+          {
+            "id": "qBase00001",
+            "title": "Base 1",
+            "created": "2026-11-01 08:00:00",
+            "modified": "2026-11-04 12:00:10"
+          },
+          {
+            "id": "qWin000001",
+            "title": "Winner Addition",
+            "created": "2026-11-03 10:00:00",
+            "modified": "2026-11-04 12:00:20"
+          }
+        ],
+        "queue": {
+          "modified": "2026-11-04 12:00:20",
+          "taskIds": ["qWin000001", "qBase00001"]
+        }
+      },
+      "expected": {
+        "queue": {
+          "modified": "2026-11-04 12:00:21",
+          "taskIds": [
+            "qWin000001",
+            "qBase00001",
+            "qLoserEar1",
+            "qLoserA001",
+            "qLoserZ001"
+          ]
+        }
+      }
+    },
+    {
+      "id": "mrg_38_max_sync_generation_overflow_on_expiry_throws_limit_exceeded",
+      "ruleIds": ["TDF-VAL-002", "TDF-PUB-004"],
+      "now": "2026-10-31 12:00:01",
+      "expectedTdfError": "limitExceeded",
+      "baseline": {
+        "deleted": {
+          "generation": 9007199254740991,
+          "tasks": [
+            {
+              "id": "maxGenExp1",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ]
+        }
+      },
+      "left": {
+        "deleted": {
+          "generation": 9007199254740991,
+          "tasks": [
+            {
+              "id": "maxGenExp1",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ]
+        }
+      },
+      "right": {
+        "deleted": {
+          "generation": 9007199254740991,
+          "tasks": [
+            {
+              "id": "maxGenExp1",
+              "deletedAt": "2026-10-01 12:00:00"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "multiStageVectors": [
+    {
+      "id": "stage_01_deferred_then_final_matches_direct_three_way",
+      "ruleIds": ["TDF-MERGE-004", "TDF-MERGE-009"],
+      "now": "2026-11-04 12:01:40",
+      "assertMatchesDirectThreeWay": true,
+      "stage2UsesStage1OtherAsBaseline": false,
+      "baseline": {
+        "tasks": [
+          {
+            "id": "stgFair001",
+            "title": "A",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Expired during sync"
+            }
+          }
+        ]
+      },
+      "localInput": {
+        "tasks": [
+          {
+            "id": "stgFair001",
+            "title": "Z",
+            "modified": "2026-11-04 12:00:11",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Expired during sync"
+            }
+          }
+        ]
+      },
+      "stage1Other": {
+        "tasks": [
+          {
+            "id": "stgFair001",
+            "title": "A",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Expired during sync"
+            }
+          }
+        ]
+      },
+      "remoteBoard": {
+        "tasks": [
+          {
+            "id": "stgFair001",
+            "title": "Y",
+            "modified": "2026-11-04 12:00:12",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Expired during sync"
+            }
+          }
+        ]
+      },
+      "expectedStage1Deferred": {
+        "tasks": [
+          {
+            "id": "stgFair001",
+            "title": "Z",
+            "modified": "2026-11-04 12:00:11",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50",
+              "note": "Expired during sync"
+            }
+          }
+        ]
+      },
+      "expectedStage2Final": {
+        "tasks": [
+          {
+            "id": "stgFair001",
+            "title": "Y",
+            "modified": "2026-11-04 12:01:40"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stage_02_local_step3_retry_deferred_then_remote_final",
+      "ruleIds": ["TDF-PUB-003", "TDF-MERGE-009", "TDF-MERGE-004"],
+      "now": "2026-11-04 12:01:40",
+      "assertMatchesDirectThreeWay": false,
+      "stage2UsesStage1OtherAsBaseline": false,
+      "baseline": {
+        "tasks": [
+          {
+            "id": "prereqDone",
+            "title": "Satisfied Blocker",
+            "modified": "2026-11-04 12:00:10",
+            "finished": "2026-11-04 12:00:10",
+            "completions": 1
+          },
+          {
+            "id": "stgRetry01",
+            "title": "A",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:10",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            },
+            "blocked": {
+              "prereqDone": 1
+            }
+          }
+        ]
+      },
+      "localInput": {
+        "tasks": [
+          {
+            "id": "prereqDone",
+            "title": "Satisfied Blocker",
+            "modified": "2026-11-04 12:00:10",
+            "finished": "2026-11-04 12:00:10",
+            "completions": 1
+          },
+          {
+            "id": "stgRetry01",
+            "title": "Z",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:11",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            },
+            "blocked": {
+              "prereqDone": 1
+            }
+          }
+        ]
+      },
+      "stage1Other": {
+        "tasks": [
+          {
+            "id": "prereqDone",
+            "title": "Satisfied Blocker",
+            "modified": "2026-11-04 12:00:10",
+            "finished": "2026-11-04 12:00:10",
+            "completions": 1
+          },
+          {
+            "id": "stgRetry01",
+            "title": "A",
+            "note": "Q_disk",
+            "modified": "2026-11-04 12:00:11",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            },
+            "blocked": {
+              "prereqDone": 1
+            }
+          }
+        ]
+      },
+      "remoteBoard": {
+        "tasks": [
+          {
+            "id": "prereqDone",
+            "title": "Satisfied Blocker",
+            "modified": "2026-11-04 12:00:10",
+            "finished": "2026-11-04 12:00:10",
+            "completions": 1
+          },
+          {
+            "id": "stgRetry01",
+            "title": "Y",
+            "note": "Q0",
+            "modified": "2026-11-04 12:00:14",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            },
+            "blocked": {
+              "prereqDone": 1
+            }
+          }
+        ]
+      },
+      "expectedStage1Deferred": {
+        "tasks": [
+          {
+            "id": "prereqDone",
+            "title": "Satisfied Blocker",
+            "modified": "2026-11-04 12:00:10",
+            "finished": "2026-11-04 12:00:10",
+            "completions": 1
+          },
+          {
+            "id": "stgRetry01",
+            "title": "Z",
+            "note": "Q_disk",
+            "modified": "2026-11-04 12:00:12",
+            "suspended": {
+              "timestamp": "2026-11-04 12:00:50"
+            },
+            "blocked": {
+              "prereqDone": 1
+            }
+          }
+        ]
+      },
+      "expectedStage2Final": {
+        "tasks": [
+          {
+            "id": "prereqDone",
+            "title": "Satisfied Blocker",
+            "modified": "2026-11-04 12:00:10",
+            "finished": "2026-11-04 12:00:10",
+            "completions": 1
+          },
+          {
+            "id": "stgRetry01",
+            "title": "Y",
+            "note": "Q_disk",
+            "modified": "2026-11-04 12:01:40"
+          }
+        ]
+      }
+    }
+  ],
+  "recoveryResolutionVectors": [
+    {
+      "id": "rec_res_01_recover_as_new_and_discard_rewrites_references",
+      "ruleIds": ["TDF-REC-001", "TDF-REC-002"],
+      "now": "2026-11-04 12:00:30",
+      "expectedGeneration": 2,
+      "recoveredOldLocationId": "recKeepLoc",
+      "recoveredOldLabelId": "recKeepLbl",
+      "recoveredOldTaskId": "recKeepTsk",
+      "sharedOpenTaskId": "shrOpenTsk",
+      "discardedTaskIds": ["recDropTsk"],
+      "discardedLabelIds": ["recDropLbl"],
+      "discardedLocationIds": ["recDropLoc"],
+      "expectedRecoveredAnchor": "2026-01-31 18:00:00",
+      "expectedRecoveredHistory": [
+        {
+          "timestamp": "2026-11-04 12:00:08",
+          "text": "Preserved recovery journal"
+        }
+      ],
+      "taskRecoveryResolutions": {
+        "recKeepTsk": "recoverAsNew",
+        "recDropTsk": "discard"
+      },
+      "labelRecoveryResolutions": {
+        "recKeepLbl": "recoverAsNew",
+        "recDropLbl": "discard"
+      },
+      "locationRecoveryResolutions": {
+        "recKeepLoc": "recoverAsNew",
+        "recDropLoc": "discard"
+      },
+      "sharedBoard": {
+        "tasks": [
+          {
+            "id": "shrOpenTsk",
+            "title": "Shared Open Task",
+            "modified": "2026-11-04 12:00:10",
+            "blocked": {
+              "recDropTsk": 1
+            }
+          }
+        ],
+        "deleted": {
+          "generation": 2
+        },
+        "queue": {
+          "modified": "2026-11-04 12:00:10",
+          "taskIds": ["shrOpenTsk"]
+        }
+      },
+      "localBoard": {
+        "locations": [
+          {
+            "id": "recKeepLoc",
+            "name": "Kept Location",
+            "latitude": "48.1",
+            "longitude": "11.5",
+            "radius": "100",
+            "modified": "2026-11-04 12:00:12"
+          },
+          {
+            "id": "recDropLoc",
+            "name": "Dropped Location",
+            "latitude": "48.2",
+            "longitude": "11.6",
+            "radius": "200",
+            "modified": "2026-11-04 12:00:12"
+          }
+        ],
+        "labels": [
+          {
+            "id": "recKeepLbl",
+            "name": "Kept Label",
+            "modified": "2026-11-04 12:00:12",
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["recKeepLoc", "recDropLoc"]
+              }
+            ]
+          },
+          {
+            "id": "recDropLbl",
+            "name": "Dropped Scoped Label",
+            "scoped": true,
+            "modified": "2026-11-04 12:00:12"
+          }
+        ],
+        "tasks": [
+          {
+            "id": "recKeepTsk",
+            "title": "Kept Task With Anchor And History",
+            "modified": "2026-11-04 12:00:12",
+            "due": {
+              "timestamp": "2026-02-28 17:00:00",
+              "anchor": "2026-01-31 18:00:00",
+              "note": "Month-end"
+            },
+            "history": [
+              {
+                "timestamp": "2026-11-04 12:00:08",
+                "text": "Preserved recovery journal"
+              }
+            ],
+            "labels": ["recKeepLbl", "recDropLbl"],
+            "blocked": {
+              "recDropTsk": 1
+            },
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["recKeepLoc", "recDropLoc"]
+              }
+            ]
+          },
+          {
+            "id": "recDropTsk",
+            "title": "Dropped Task",
+            "modified": "2026-11-04 12:00:12",
+            "labels": ["recDropLbl"]
+          },
+          {
+            "id": "shrOpenTsk",
+            "title": "Shared Open Task",
+            "modified": "2026-11-04 12:00:14",
+            "labels": ["recKeepLbl", "recDropLbl"],
+            "blocked": {
+              "recKeepTsk": 1,
+              "recDropTsk": 1
+            },
+            "conditions": [
+              {
+                "kind": "location",
+                "locationIds": ["recDropLoc"]
+              }
+            ]
+          }
+        ],
+        "deleted": {
+          "generation": 1
+        },
+        "queue": {
+          "modified": "2026-11-04 12:00:14",
+          "taskIds": ["shrOpenTsk", "recKeepTsk", "recDropTsk"]
+        }
+      }
+    }
+  ]
+}

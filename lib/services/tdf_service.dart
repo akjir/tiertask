@@ -13,35 +13,22 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+
 import '../models/task_board.dart';
 import '../models/task_board_evaluator.dart';
-import '../models/task_item.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_metadata.dart';
-import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import 'app_logger.dart';
-import 'tdf_importer.dart';
 import 'tdf_parser.dart';
 import 'tdf_serializer.dart';
 
-/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.7.0` documents
+/// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.8.0` documents
 /// in a single $O(N)$ linear pass without regular expressions.
 class TdfService {
   /// Creates a const [TdfService].
   const TdfService();
-
-  /// Legacy TDF specification version string (`tdf 0.5.0`) converted in memory at load time per Section 10.6.
-  static const String legacySupportedVersion =
-      TdfBlockParser.legacySupportedVersion;
-
-  /// Legacy TDF specification version string (`tdf 0.5.1`) converted in memory at load time per Section 10.7.
-  static const String legacySupportedVersion051 =
-      TdfBlockParser.legacyLoadableVersion051;
-
-  /// Legacy TDF specification version string (`tdf 0.6.0`) converted in memory at load time per Section 10.8.
-  static const String legacySupportedVersion060 =
-      TdfBlockParser.legacyLoadableVersion060;
 
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = maxTdfArgsPerStmt;
@@ -50,13 +37,13 @@ class TdfService {
   static const int maxBlocksPerDoc = maxTdfBlocksPerDoc;
 
   /// Maximum completion counter, deletion checkpoint, and prerequisite completion number (`MAX_COMPLETIONS`).
-  static const int maxCompletions = TdfTaskDependency.maxCompletions;
+  static const int maxCompletions = maxTdfCompletions;
 
   /// Maximum stored condition rules across all inline directives and condition blocks on one entity (`MAX_CONDITION_RULES_PER_ENTITY`).
   static const int maxConditionRulesPerEntity = maxTdfConditionRulesPerEntity;
 
   /// Maximum task, label, and location deletion records in the shared `deleted` block (`MAX_DELETED_RECORDS`).
-  static const int maxDeletedRecords = TdfDeletedBlock.maxDeletedRecords;
+  static const int maxDeletedRecords = maxTdfDeletedRecords;
 
   /// Maximum input or serialized output size in UTF-8 bytes (`MAX_FILE_BYTES`, 1 MiB).
   static const int maxFileBytes = maxTdfFileBytes;
@@ -71,7 +58,7 @@ class TdfService {
   static const int maxLinksPerLabel = maxTdfLinksPerLabel;
 
   /// Maximum `link` directives per `task` block (`MAX_LINKS_PER_TASK`).
-  static const int maxLinksPerTask = TaskLink.maxLinksPerTask;
+  static const int maxLinksPerTask = maxTdfLinksPerTask;
 
   /// Maximum `radius` in meters (`100 km`) for a `location` block (`MAX_LOCATION_RADIUS`).
   static const int maxLocationRadius = maxTdfLocationRadius;
@@ -92,51 +79,32 @@ class TdfService {
   static const int maxNumberLength = maxTdfNumberLength;
 
   /// Maximum `task` entries in the shared `queue` block (`MAX_QUEUE_ENTRIES`).
-  static const int maxQueueEntries = TdfQueueBlock.maxQueueEntries;
+  static const int maxQueueEntries = maxTdfQueueEntries;
 
-  /// Maximum recurrence interval count `<count>` in `repeat <count> <unit>` (`MAX_REPEAT_COUNT`).
-  static const int maxRepeatCount = TaskRepeatRule.maxRepeatCount;
+  /// Maximum recurrence interval or lead count in `repeat` (`MAX_REPEAT_COUNT`).
+  static const int maxRepeatCount = maxTdfRepeatCount;
 
   /// Maximum direct child statements per ordinary block (`MAX_STMTS_PER_BLOCK`).
   static const int maxStmtsPerBlock = maxTdfStmtsPerBlock;
 
   /// Maximum deletion history generation (`MAX_SYNC_GENERATION`).
-  static const int maxSyncGeneration = TdfDeletedBlock.maxGeneration;
+  static const int maxSyncGeneration = maxTdfSyncGeneration;
 
-  /// Maximum decoded Unicode scalar values in a `name`, `step`, `history`, or link `<title>` (`MAX_TEXT_LENGTH`).
+  /// Maximum decoded Unicode scalar values in a `name`, `step`, `origin`, `history`, or link `<title>` (`MAX_TEXT_LENGTH`).
   static const int maxTextLength = maxTdfTextLength;
 
   /// Maximum decoded Unicode scalar values in a `link` `<uri>` (`MAX_URI_LENGTH`).
-  static const int maxUriLength = TaskLink.maxUriLength;
+  static const int maxUriLength = maxTdfUriLength;
 
-  /// Canonical TDF specification version string (`tdf 0.7.0`).
-  static const String supportedVersion = TdfBlockParser.supportedVersion;
+  /// Canonical TDF specification version string (`0.8.0`).
+  static const String supportedVersion = tdfSupportedVersion;
 
-  /// Explicitly imports and migrates [sourceContent] (`0.2.0` through `0.7.0`)
-  /// through the adjacent Section 10 migration chain (`0.2.0 -> 0.3.0 -> 0.4.0 -> 0.5.0 -> 0.5.1 -> 0.6.0 -> 0.7.0`) into a [TaskBoard].
-  TaskBoard importDocument(
-    String sourceContent, {
-    TdfTimeZoneContext? sourceTimeZone,
-    DateTime? evaluationTime,
-    DateTime? localEvaluationTime,
-    TdfTimeZoneContext? evaluationTimeZone,
-    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
-    String? activeLabelId,
-    double? currentLatitude,
-    double? currentLongitude,
-  }) => _importInternal(
-    sourceContent,
-    sourceTimeZone: sourceTimeZone,
-    evaluationTime: evaluationTime,
-    localEvaluationTime: localEvaluationTime,
-    evaluationTimeZone: evaluationTimeZone,
-    dueLeadWindow: dueLeadWindow,
-    activeLabelId: activeLabelId,
-    currentLatitude: currentLatitude,
-    currentLongitude: currentLongitude,
+  /// Strict UTF-8 decoder rejecting malformed byte sequences (`TDF-LEX-001`).
+  static const Utf8Decoder _strictUtf8Decoder = Utf8Decoder(
+    allowMalformed: false,
   );
 
-  /// Scans and parses a `tdf 0.7.0` (or legacy `tdf 0.6.0` / `tdf 0.5.1` / `tdf 0.5.0`) [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
+  /// Scans and parses a `tdf 0.8.0` [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
@@ -147,12 +115,21 @@ class TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
-    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
     final stopwatch = Stopwatch()..start();
     try {
-      final board = _parseInternal(
+      if (tdfContent.length > maxTdfFileBytes ||
+          (tdfContent.length * 4 > maxTdfFileBytes &&
+              utf8.encode(tdfContent).length > maxTdfFileBytes)) {
+        throw const TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: 1,
+          message: 'Document exceeds maximum of $maxTdfFileBytes bytes.',
+        );
+      }
+      return _parseVerifiedContent(
         tdfContent,
+        stopwatch: stopwatch,
         evaluationTime: evaluationTime,
         localEvaluationTime: localEvaluationTime,
         timeZone: timeZone,
@@ -161,101 +138,16 @@ class TdfService {
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
         pruneExpiredCompleted: pruneExpiredCompleted,
-        targetSchema: targetSchema,
       );
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.tdf,
-        'tdf.parse',
-        fields: <String, Object?>{
-          'version': targetSchema == TdfSchemaVersion.v060
-              ? legacySupportedVersion060
-              : supportedVersion,
-          'tasks': board.allTasks.length,
-          'labels': board.labels.length,
-          'locations': board.locations.length,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
-      return board;
     } on TdfException catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.tdf,
-        'tdf.error',
-        fields: <String, Object?>{
-          'kind': error.kind.name,
-          'line': error.line,
-          'message': error.message,
-        },
-      );
+      _logParseError(error);
       rethrow;
     }
   }
 
-  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.7.0` (or `tdf 0.6.0` for [targetSchema]) document string
-  /// and validates canonical output against Section 7.1 bounds.
-  String serialize(
-    TaskBoard board, {
-    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
-  }) => _serializeInternal(board, targetSchema: targetSchema);
-
-  /// Executes the adjacent Section 10 migration chain via [TdfImporter.importDocument].
-  TaskBoard _importInternal(
-    String sourceContent, {
-    TdfTimeZoneContext? sourceTimeZone,
-    DateTime? evaluationTime,
-    DateTime? localEvaluationTime,
-    TdfTimeZoneContext? evaluationTimeZone,
-    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
-    String? activeLabelId,
-    double? currentLatitude,
-    double? currentLongitude,
-  }) {
-    final stopwatch = Stopwatch()..start();
-    try {
-      final result = TdfImporter.importDocument(
-        sourceContent,
-        sourceTimeZone: sourceTimeZone,
-        evaluationTime: evaluationTime,
-        localEvaluationTime: localEvaluationTime,
-        evaluationTimeZone: evaluationTimeZone,
-        dueLeadWindow: dueLeadWindow,
-        activeLabelId: activeLabelId,
-        currentLatitude: currentLatitude,
-        currentLongitude: currentLongitude,
-      );
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.tdf,
-        'tdf.migrate',
-        fields: <String, Object?>{
-          'target_version': supportedVersion,
-          'tasks': result.board.allTasks.length,
-          'labels': result.board.labels.length,
-          'locations': result.board.locations.length,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
-      return result.board;
-    } on TdfException catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.tdf,
-        'tdf.error',
-        fields: <String, Object?>{
-          'kind': error.kind.name,
-          'line': error.line,
-          'message': error.message,
-        },
-      );
-      rethrow;
-    }
-  }
-
-  /// Delegates single-pass TDF 0.7.0 (and legacy 0.6.0 / 0.5.1 / 0.5.0) scanning and parsing to [TdfBlockParser.parseDocument].
-  TaskBoard _parseInternal(
-    String tdfContent, {
+  /// Validates UTF-8 byte length and encoding of [utf8Bytes] before scanning and parsing a `tdf 0.8.0` document (`TDF-LEX-001`, `TDF-VAL-001`).
+  TaskBoard parseBytes(
+    List<int> utf8Bytes, {
     DateTime? evaluationTime,
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
@@ -264,9 +156,102 @@ class TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
-    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
   }) {
-    return TdfBlockParser.parseDocument(
+    final stopwatch = Stopwatch()..start();
+    try {
+      final decoded = _decodeValidatedUtf8Bytes(utf8Bytes);
+      return _parseVerifiedContent(
+        decoded,
+        stopwatch: stopwatch,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+        pruneExpiredCompleted: pruneExpiredCompleted,
+      );
+    } on TdfException catch (error) {
+      _logParseError(error);
+      rethrow;
+    }
+  }
+
+  /// Serializes [board] into a canonical `LF`-terminated `tdf 0.8.0` document string and validates output bounds (`TDF-SER-001`–`TDF-SER-005`).
+  String serialize(TaskBoard board) => _serializeInternal(board);
+
+  /// Computes the 1-based physical line number of the first lexical/UTF-8 failure at or before [failureOffset].
+  static int _computeUtf8FailureLine(List<int> utf8Bytes, int? failureOffset) {
+    final rawOffset = failureOffset ?? 0;
+    final clampedOffset = rawOffset < 0
+        ? 0
+        : (rawOffset > utf8Bytes.length ? utf8Bytes.length : rawOffset);
+    var line = 1;
+    for (var i = 0; i < clampedOffset; i++) {
+      final byte = utf8Bytes[i];
+      if (byte == 0x0A) {
+        line++;
+      } else if (byte == 0x0D) {
+        if (i + 1 >= utf8Bytes.length || utf8Bytes[i + 1] != 0x0A) {
+          return line;
+        }
+      } else if ((byte < 0x20 && byte != 0x09) || byte == 0x7F) {
+        return line;
+      }
+    }
+    return line;
+  }
+
+  /// Enforces `MAX_FILE_BYTES` before decoding [utf8Bytes] strictly as UTF-8.
+  static String _decodeValidatedUtf8Bytes(List<int> utf8Bytes) {
+    if (utf8Bytes.length > maxTdfFileBytes) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Document exceeds maximum of $maxTdfFileBytes bytes.',
+      );
+    }
+    try {
+      return _strictUtf8Decoder.convert(utf8Bytes);
+    } on FormatException catch (error) {
+      final line = _computeUtf8FailureLine(utf8Bytes, error.offset);
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: line,
+        message: 'Invalid UTF-8 byte sequence.',
+      );
+    }
+  }
+
+  /// Emits a redacted structured `tdf.error` log event for [error].
+  static void _logParseError(TdfException error) {
+    AppLogger.event(
+      LogLevel.error,
+      LogTag.tdf,
+      'tdf.error',
+      fields: <String, Object?>{
+        'kind': error.kind.name,
+        'line': error.line,
+        'message': error.message,
+      },
+    );
+  }
+
+  /// Parses [tdfContent] whose byte bound has already been verified and emits a redacted `tdf.parse` log event.
+  TaskBoard _parseVerifiedContent(
+    String tdfContent, {
+    required Stopwatch stopwatch,
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    required bool pruneExpiredCompleted,
+  }) {
+    final board = TdfBlockParser.parseDocument(
       tdfContent,
       evaluationTime: evaluationTime,
       localEvaluationTime: localEvaluationTime,
@@ -276,32 +261,45 @@ class TdfService {
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
-      targetSchema: targetSchema,
+      byteLengthVerified: true,
     );
-  }
-
-  /// Delegates canonical TDF 0.7.0 (or 0.6.0) serialization and bounds validation to [TdfSerializer.serialize].
-  String _serializeInternal(
-    TaskBoard board, {
-    TdfSchemaVersion targetSchema = TdfSchemaVersion.v070,
-  }) {
-    final stopwatch = Stopwatch()..start();
-    final output = TdfSerializer.serialize(board, targetSchema: targetSchema);
     AppLogger.event(
       LogLevel.info,
       LogTag.tdf,
-      'tdf.serialize',
+      'tdf.parse',
       fields: <String, Object?>{
-        'version': targetSchema == TdfSchemaVersion.v060
-            ? legacySupportedVersion060
-            : supportedVersion,
+        'version': supportedVersion,
         'tasks': board.allTasks.length,
         'labels': board.labels.length,
         'locations': board.locations.length,
-        'bytes': output.length,
         'elapsed_ms': stopwatch.elapsedMilliseconds,
       },
     );
-    return output;
+    return board;
+  }
+
+  /// Delegates canonical `tdf 0.8.0` serialization and bounds validation to [TdfSerializer.serialize].
+  String _serializeInternal(TaskBoard board) {
+    final stopwatch = Stopwatch()..start();
+    try {
+      final output = TdfSerializer.serialize(board);
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.tdf,
+        'tdf.serialize',
+        fields: <String, Object?>{
+          'version': supportedVersion,
+          'tasks': board.allTasks.length,
+          'labels': board.labels.length,
+          'locations': board.locations.length,
+          'bytes': output.length,
+          'elapsed_ms': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return output;
+    } on TdfException catch (error) {
+      _logParseError(error);
+      rethrow;
+    }
   }
 }

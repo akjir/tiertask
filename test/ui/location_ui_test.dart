@@ -223,18 +223,23 @@ void main() {
     'evaluates task location conditions dynamically using determined GPS coordinates',
     (WidgetTester tester) async {
       const tdfWithLocationTask = '''
-tdf 0.5.0
+tdf 0.8.0
 
 queue {
     modified 2026-03-29 08:00:00
     task loc100OkD2
 }
 
+location locErfOkD2 {
+    name "Erfurt"
+    coordinates 50.9787 11.0328
+    radius 500
+}
+
 task loc100OkD2 priority {
     name "Buy local specialty in Erfurt"
     created 2026-03-29 08:00
-    queued 2026-03-29 08:00
-    condition location 50.97870 11.03280 500
+    condition location locErfOkD2
 }
 ''';
       const config = WebDavConfig(

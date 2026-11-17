@@ -1,0 +1,12 @@
+tdf 0.8.0
+
+label cdev00OkD2 {
+    name "Raw \"quote\" and \\\\backslash"
+    note "Line1\nLine2\tTab\rCR\\Slash\"Quote"
+}
+
+task tax260OkD2 {
+    name    "File #2026 taxes"
+    created 2026-11-01 00:00
+    labels  cdev00OkD2
+}
