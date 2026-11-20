@@ -457,5 +457,11 @@
   "fileReadSummaryBothFailed": "Die lokale Datei und die Remote-Datei konnten nicht gelesen werden.",
   "fileReadReasonUnsupportedVersion": "Nicht unterstützte TDF-Version {version} (erwartet: 0.8.0).",
   "fileReadReasonTdfFormat": "Formatfehler (Zeile {line}): {details}",
-  "fileReadStatusEntryLine": "{target}: {status}"
+  "fileReadStatusEntryLine": "{target}: {status}",
+  "errorSettingsCorrupt": "Anwendungseinstellungen konnten nicht gelesen werden.",
+  "errorSettingsUnsupportedVersion": "Die Einstellungen wurden von einer neueren TierTask-Version erstellt. Aktualisiere TierTask, um Datenverlust zu vermeiden.",
+  "errorSettingsCredentialStorageUnavailable": "Sicherer Anmeldedatenspeicher ist nicht verfügbar. Das WebDAV-Passwort konnte nicht gespeichert werden.",
+  "errorSettingsSaveFailed": "Anwendungseinstellungen konnten nicht gespeichert werden.",
+  "settingsRecoveredFromBackupNotice": "Einstellungen wurden nach einem Dateifehler aus der Sicherung wiederhergestellt.",
+  "settingsResetAfterQuarantineNotice": "Beschädigte Einstellungen wurden gesichert und auf Standardwerte zurückgesetzt."
 }

@@ -25,6 +25,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     companion object {
+        private const val APP_STORAGE_CHANNEL_NAME = "de.akjir.tiertask/app_storage"
         private const val APP_VERSION_CHANNEL_NAME = "de.akjir.tiertask/app_version"
         private const val CHANNEL_NAME = "de.akjir.tiertask/location"
         private const val LINK_LAUNCHER_CHANNEL_NAME = "de.akjir.tiertask/link_launcher"
@@ -45,6 +46,14 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_STORAGE_CHANNEL_NAME)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "getFilesDirectory") {
+                    result.success(applicationContext.filesDir.absolutePath)
+                } else {
+                    result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_VERSION_CHANNEL_NAME)
             .setMethodCallHandler { call, result ->
                 if (call.method == "getAppVersion") {

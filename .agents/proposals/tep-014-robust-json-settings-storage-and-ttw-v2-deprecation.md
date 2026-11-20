@@ -1,7 +1,7 @@
 ---
 id: TEP-014
 title: Robust Versioned JSON Settings Persistence, Split Credential Storage, and Deprecated TTW v2 Migration Converter
-status: planned
+status: review
 type: architecture
 created: 2026-11-20
 updated: 2026-11-20
@@ -144,7 +144,7 @@ None. `spec/TDF_SPEC_0.8.0.md` is unaffected.
 - `AppThemeMode`: `"system"`, `"light"`, `"dark"` (default `"system"`).
 - `AppThemePalette`: `"slate"`, `"navy"` (default `"slate"`).
 - `AppTimeZoneMode`: `"automatic"`, `"manual"` (default `"automatic"`).
-- `DueLeadWindow`: `"off"`, `"hours12"`, `"hours24"`, `"days2"`, `"days3"`, `"days7"` (default `"hours24"`).
+- `DueLeadWindow`: `"off"`, `"at_due"`, `"hours12"`, `"hours24"`, `"hours48"`, `"days7"` (default `"hours24"`).
 - `LogLevel` (persisted configurable values only): `"debug"`, `"info"`, `"warn"`, `"error"` (default `"info"`; `"crash"` or unknown tokens fall back to `LogLevel.info` with a decode warning).
 
 #### Legacy Binary Persistence Changes (`TTW\x01`, `TTW\x02`, `TTS\x04`)
@@ -369,22 +369,23 @@ Follow strict Red-Green-Refactor TDD (`P-TDD-FIRST`) across all applicable manda
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
-- [ ] Write failing unit and widget tests first in `test/models/settings_codec_test.dart`, `test/models/legacy_ttw_v2_converter_test.dart`, `test/repositories/settings_repository_test.dart`, `test/providers/workspace_providers_test.dart`, `test/ui/settings_screen_test.dart`, and `test/ui/home_screen_test.dart` (TDD Red Phase, `P-TDD-FIRST`).
-- [ ] Implement model changes (`lib/models/webdav_config.dart`, `lib/models/app_build_profile.dart`, `lib/models/app_workspace.dart`, `lib/models/settings_codec.dart`, `@Deprecated` `lib/models/legacy_ttw_v2_converter.dart`) and remove all `TTW\x01` code and `TTW\x02` encoders (TDD Green Phase).
-- [ ] Add Android `de.akjir.tiertask/app_storage` (`getFilesDirectory`) channel in `android/app/src/main/kotlin/de/akjir/tiertask/MainActivity.kt` and update `analysis_options.yaml` with temporary `deprecated_member_use_from_same_package: ignore`.
-- [ ] Implement split `settings.json` + per-workspace `FlutterSecureStorage` persistence, `HostFileLockManager` locking, `.bak` rotation, quarantine, `@Deprecated` `TTW\x02` migration, and `AppLogger` instrumentation in `lib/repositories/settings_repository.dart`.
-- [ ] Add `en`/`de` ARB keys in `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`, run `python3 .agents/scripts/tiertask_dev.py l10n`, and wire recovery notices, `SettingsScreen` rollback/error localization, and `HomeScreen` startup error formatting in `lib/providers/` and `lib/ui/`.
-- [ ] Update existing tests (`app_workspace_test.dart`, `app_build_profile_test.dart`, `location_state_test.dart`, `tdf_primitives_test.dart`, `base64_service_test.dart`, `config_providers_test.dart`) to remove `TTW\x01` / `encodePersistedState` references.
-- [ ] Update Parts 1 and 2 if the implementation changes the design.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
-- [ ] Follow **`update-documentation`** to synchronize `README.md`, `ARCHITECTURE.md`, and `AGENTS.md` as applicable.
-- [ ] Follow **`changelog-updater`** to add a `CHANGELOG.md` entry under `## [Unreleased]`.
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
+- [x] Write failing unit and widget tests first in `test/models/settings_codec_test.dart`, `test/models/legacy_ttw_v2_converter_test.dart`, `test/repositories/settings_repository_test.dart`, `test/providers/workspace_providers_test.dart`, `test/ui/settings_screen_test.dart`, and `test/ui/home_screen_test.dart` (TDD Red Phase, `P-TDD-FIRST`).
+- [x] Implement model changes (`lib/models/webdav_config.dart`, `lib/models/app_build_profile.dart`, `lib/models/app_workspace.dart`, `lib/models/settings_codec.dart`, `@Deprecated` `lib/models/legacy_ttw_v2_converter.dart`) and remove all `TTW\x01` code and `TTW\x02` encoders (TDD Green Phase).
+- [x] Add Android `de.akjir.tiertask/app_storage` (`getFilesDirectory`) channel in `android/app/src/main/kotlin/de/akjir/tiertask/MainActivity.kt` and update `analysis_options.yaml` with temporary `deprecated_member_use_from_same_package: ignore`.
+- [x] Implement split `settings.json` + per-workspace `FlutterSecureStorage` persistence, `HostFileLockManager` locking, `.bak` rotation, quarantine, `@Deprecated` `TTW\x02` migration, and `AppLogger` instrumentation in `lib/repositories/settings_repository.dart`.
+- [x] Add `en`/`de` ARB keys in `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`, run `python3 .agents/scripts/tiertask_dev.py l10n`, and wire recovery notices, `SettingsScreen` rollback/error localization, and `HomeScreen` startup error formatting in `lib/providers/` and `lib/ui/`.
+- [x] Update existing tests (`app_workspace_test.dart`, `app_build_profile_test.dart`, `location_state_test.dart`, `tdf_primitives_test.dart`, `base64_service_test.dart`, `config_providers_test.dart`, `app_theme_test.dart`) to remove `TTW\x01` / `encodePersistedState` / `fromId` references.
+- [x] Update Parts 1 and 2 if the implementation changes the design.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py arch --sync-tree` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix`.
+- [x] Follow **`update-documentation`** to synchronize `README.md`, `ARCHITECTURE.md`, and `AGENTS.md` as applicable.
+- [x] Follow **`changelog-updater`** to add a `CHANGELOG.md` entry under `## [Unreleased]`.
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
 - [ ] After user approval, set `status: completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 - **2026-11-20:** Drafted `TEP-014` (`status: planned`) specifying Option A split persistence (`settings.json` + per-workspace `FlutterSecureStorage` passwords), full Section 3 robustness hardening, complete `TTW\x01` removal, Android `Context.filesDir` channel resolution, and encapsulated `@Deprecated` read-only `TTW\x02` migration converter scheduled for removal no later than `0.5.0`.
+- **2026-11-20:** Implemented `TEP-014` via Red-Green-Refactor TDD across models, Android native channel, `SecureSettingsRepository`, `AppLocalizations`, providers, and UI; aligned `DueLeadWindow` JSON tokens to actual enum variants (`off`, `at_due`, `hours12`, `hours24`, `hours48`, `days7`); added `retry: disableProviderRetry` on `activeWorkspaceProvider` and `webDavConfigProvider`; verified `python3 .agents/scripts/tiertask_dev.py verify --full --fix` (`+465: All tests passed!`, zero analyzer/static/L10N/ARCHITECTURE issues) and moved proposal to `status: review`.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*

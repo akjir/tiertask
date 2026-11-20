@@ -58,23 +58,26 @@ void main() {
           AppLanguage.german.resolveLocale(const Locale('en', 'US')),
           equals(const Locale('de')),
         );
-        expect(AppLanguage.fromId(2), equals(AppLanguage.german));
-        expect(AppLanguage.fromId(1), equals(AppLanguage.english));
-        expect(AppLanguage.fromId(0), equals(AppLanguage.system));
-        expect(AppLanguage.fromId(99), equals(AppLanguage.system));
+        expect(AppLanguage.tryParseJson('german'), equals(AppLanguage.german));
+        expect(
+          AppLanguage.tryParseJson('english'),
+          equals(AppLanguage.english),
+        );
+        expect(AppLanguage.tryParseJson('system'), equals(AppLanguage.system));
+        expect(AppLanguage.tryParseJson('unknown'), isNull);
       },
     );
 
-    test('resolves AppThemeMode and StorageMode binary IDs with system and local tasks.tdf defaults', () {
-      expect(AppThemeMode.fromId(1), equals(AppThemeMode.light));
-      expect(AppThemeMode.fromId(2), equals(AppThemeMode.dark));
-      expect(AppThemeMode.fromId(0), equals(AppThemeMode.system));
-      expect(AppThemeMode.fromId(99), equals(AppThemeMode.system));
+    test('resolves AppThemeMode and StorageMode JSON tokens with system and local tasks.tdf defaults', () {
+      expect(AppThemeMode.tryParseJson('light'), equals(AppThemeMode.light));
+      expect(AppThemeMode.tryParseJson('dark'), equals(AppThemeMode.dark));
+      expect(AppThemeMode.tryParseJson('system'), equals(AppThemeMode.system));
+      expect(AppThemeMode.tryParseJson('unknown'), isNull);
 
-      expect(StorageMode.fromId(0), equals(StorageMode.local));
-      expect(StorageMode.fromId(1), equals(StorageMode.webdav));
-      expect(StorageMode.fromId(2), equals(StorageMode.both));
-      expect(StorageMode.fromId(99), equals(StorageMode.local));
+      expect(StorageMode.tryParseJson('local'), equals(StorageMode.local));
+      expect(StorageMode.tryParseJson('webdav'), equals(StorageMode.webdav));
+      expect(StorageMode.tryParseJson('both'), equals(StorageMode.both));
+      expect(StorageMode.tryParseJson('unknown'), isNull);
 
       const defaultConfig = WebDavConfig();
       expect(defaultConfig.themeMode, equals(AppThemeMode.system));

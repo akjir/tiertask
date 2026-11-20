@@ -16,11 +16,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Changed workspace settings storage to a versioned local file with backup recovery, corruption quarantine, and separate keyring password storage.
 - Changed deadline and deferral editing in the task editor to use the workspace local time zone consistently across cards, info dialogs, and forms.
 - Changed multi-stage local and WebDAV synchronization to defer automatic deferral and dependency cleanup until the authoritative final sync stage.
 
+### Deprecated
+
+- Deprecated automatic migration from legacy binary workspace settings, scheduled for removal in version 0.5.0.
+
 ### Removed
 
+- Removed compatibility with initial-format legacy binary workspace settings.
 - Removed automatic loading and conversion support for pre-0.8.0 TDF files (versions 0.2.0 through 0.7.0).
 
 ### Fixed

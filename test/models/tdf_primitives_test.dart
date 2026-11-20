@@ -375,7 +375,7 @@ void main() {
       expect(reEnabled.hashCode, equals(defaultConfig.hashCode));
     });
 
-    test('exposes DueLeadWindow variants, fromId fallback, and WebDavConfig dueLeadWindow copyWith/equality/toString', () {
+    test('exposes DueLeadWindow variants, jsonValue/tryParseJson, and WebDavConfig dueLeadWindow copyWith/equality/toString', () {
       expect(
         DueLeadWindow.values,
         equals(const <DueLeadWindow>[
@@ -389,19 +389,19 @@ void main() {
         reason: 'DueLeadWindow must declare all 6 ordered horizon variants',
       );
 
-      final expectedSpecs = <(DueLeadWindow, int, Duration?)>[
-        (DueLeadWindow.off, 0, null),
-        (DueLeadWindow.atDue, 1, Duration.zero),
-        (DueLeadWindow.hours12, 2, const Duration(hours: 12)),
-        (DueLeadWindow.hours24, 3, const Duration(hours: 24)),
-        (DueLeadWindow.hours48, 4, const Duration(hours: 48)),
-        (DueLeadWindow.days7, 5, const Duration(days: 7)),
+      final expectedSpecs = <(DueLeadWindow, String, Duration?)>[
+        (DueLeadWindow.off, 'off', null),
+        (DueLeadWindow.atDue, 'at_due', Duration.zero),
+        (DueLeadWindow.hours12, 'hours12', const Duration(hours: 12)),
+        (DueLeadWindow.hours24, 'hours24', const Duration(hours: 24)),
+        (DueLeadWindow.hours48, 'hours48', const Duration(hours: 48)),
+        (DueLeadWindow.days7, 'days7', const Duration(days: 7)),
       ];
-      for (final (window, expectedId, expectedDuration) in expectedSpecs) {
+      for (final (window, expectedToken, expectedDuration) in expectedSpecs) {
         expect(
-          window.id,
-          equals(expectedId),
-          reason: '${window.name} id must equal $expectedId',
+          window.jsonValue,
+          equals(expectedToken),
+          reason: '${window.name} jsonValue must equal "$expectedToken"',
         );
         expect(
           window.duration,
@@ -409,21 +409,22 @@ void main() {
           reason: '${window.name} duration must equal $expectedDuration',
         );
         expect(
-          DueLeadWindow.fromId(expectedId),
+          DueLeadWindow.tryParseJson(expectedToken),
           equals(window),
-          reason: 'fromId($expectedId) must resolve to ${window.name}',
+          reason:
+              'tryParseJson("$expectedToken") must resolve to ${window.name}',
         );
       }
 
       expect(
-        DueLeadWindow.fromId(99),
-        equals(DueLeadWindow.hours24),
-        reason: 'Out-of-range positive ID must fall back to hours24',
+        DueLeadWindow.tryParseJson('unknown'),
+        isNull,
+        reason: 'Unknown token must return null from tryParseJson',
       );
       expect(
-        DueLeadWindow.fromId(-1),
-        equals(DueLeadWindow.hours24),
-        reason: 'Negative ID must fall back to hours24',
+        DueLeadWindow.tryParseJson(null),
+        isNull,
+        reason: 'Null token must return null from tryParseJson',
       );
 
       const defaultConfig = WebDavConfig();

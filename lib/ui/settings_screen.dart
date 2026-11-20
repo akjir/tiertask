@@ -19,6 +19,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../l10n/app_localizations.dart';
+import '../l10n/tier_localization_extension.dart';
+import '../models/app_workspace.dart';
 import '../models/storage_file_read_status.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
@@ -361,7 +363,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (!mounted) {
         return;
       }
-      _showStatusBanner(error.toString(), StatusBannerTone.error);
+      final localizations = AppLocalizations.of(context);
+      _showStatusBanner(
+        _formatSettingsError(error, localizations),
+        StatusBannerTone.error,
+      );
     }
   }
 
@@ -457,9 +463,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (!mounted) {
         return;
       }
+      final localizations = AppLocalizations.of(context);
       _isTesting = false;
       _showStatusBanner(
-        error.toString(),
+        _formatSettingsError(error, localizations),
         StatusBannerTone.error,
         fileReadReport: error is StorageFileReadException ? error.report : null,
       );
@@ -491,6 +498,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Updates [_preferences], clears any status banner, and persists [updatedConfig] via [webDavConfigProvider].
   Future<void> _handlePreferenceChanged(WebDavConfig updatedConfig) async {
+    final previousPreferences = _preferences;
     final diagnosticsChanged =
         updatedConfig.diagnosticsEnabled != _preferences.diagnosticsEnabled;
     final dueLeadWindowChanged =
@@ -524,6 +532,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       }
       _lastSyncedConfig =
           ref.read(webDavConfigProvider).asData?.value ?? updatedConfig;
+    } on WorkspaceException catch (error) {
+      if (mounted) {
+        final localizations = AppLocalizations.of(context);
+        setState(() {
+          _preferences = _lastSyncedConfig ?? previousPreferences;
+        });
+        _showStatusBanner(
+          localizations.localizeWorkspaceError(error),
+          StatusBannerTone.error,
+        );
+      }
     } finally {
       _pendingPreferenceSaves--;
     }
@@ -675,4 +694,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       bannerSelector: (localizations) => localizations.connectionSuccessBanner,
     );
   }
+}
+
+/// Formats [error] for [SettingsScreen] status banners, localizing [WorkspaceException] values.
+String _formatSettingsError(Object error, AppLocalizations localizations) {
+  return switch (error) {
+    final WorkspaceException workspaceError =>
+      localizations.localizeWorkspaceError(workspaceError),
+    _ => error.toString(),
+  };
 }

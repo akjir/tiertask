@@ -2845,6 +2845,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{target}: {status}'**
   String fileReadStatusEntryLine(String target, String status);
+
+  /// Error message shown when persisted application settings cannot be decoded.
+  ///
+  /// In en, this message translates to:
+  /// **'Application settings could not be read.'**
+  String get errorSettingsCorrupt;
+
+  /// Error message shown when settings.json declares a schemaVersion newer than supported.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings were created by a newer TierTask version. Update TierTask to avoid data loss.'**
+  String get errorSettingsUnsupportedVersion;
+
+  /// Error message shown when OS secure storage fails while saving a WebDAV password.
+  ///
+  /// In en, this message translates to:
+  /// **'Secure credential storage is unavailable. WebDAV password could not be saved.'**
+  String get errorSettingsCredentialStorageUnavailable;
+
+  /// Error message shown when host-local settings file persistence or locking fails.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save application settings.'**
+  String get errorSettingsSaveFailed;
+
+  /// One-shot startup notice shown when settings.json was restored from settings.json.bak.
+  ///
+  /// In en, this message translates to:
+  /// **'Settings were restored from backup after a file error.'**
+  String get settingsRecoveredFromBackupNotice;
+
+  /// One-shot startup notice shown when corrupt settings were quarantined and reset to defaults.
+  ///
+  /// In en, this message translates to:
+  /// **'Corrupt settings were backed up and reset to defaults.'**
+  String get settingsResetAfterQuarantineNotice;
 }
 
 class _AppLocalizationsDelegate

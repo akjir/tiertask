@@ -13,13 +13,45 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:convert' show Utf8Codec;
-import 'dart:typed_data' show BytesBuilder;
-
 import 'package:flutter/foundation.dart';
 
-import '../services/app_logger.dart';
 import 'webdav_config.dart';
+
+/// Error categories for workspace validation, persistence, and lifecycle operations.
+enum WorkspaceErrorKind {
+  /// Workspace display name is empty, whitespace-only, contains control characters, or exceeds 128 characters.
+  emptyName,
+
+  /// Another workspace already uses the same display name (case-insensitive).
+  duplicateName,
+
+  /// Another workspace already uses the same local or remote `.tdf` file path.
+  duplicateFilePath,
+
+  /// Local or remote `.tdf` file path is empty, lacks the `.tdf` extension, or contains traversal segments.
+  invalidFilePath,
+
+  /// Target workspace identifier does not exist in storage.
+  workspaceNotFound,
+
+  /// Deleting the last remaining workspace is forbidden.
+  cannotDeleteLastWorkspace,
+
+  /// Creating a new workspace would exceed [AppWorkspace.maxWorkspaces].
+  maxWorkspacesExceeded,
+
+  /// Persisted settings payload is truncated, malformed, or violates format bounds.
+  corruptSettingsPayload,
+
+  /// Persisted settings file declares a `schemaVersion` newer than this build supports.
+  unsupportedSettingsSchemaVersion,
+
+  /// Secure credential storage failed while persisting or deleting a WebDAV password.
+  credentialStorageUnavailable,
+
+  /// Host-local settings file persistence, locking, or quarantine failed.
+  settingsPersistenceFailed,
+}
 
 /// Immutable representation of the single active workspace loaded in memory.
 @immutable
@@ -30,10 +62,6 @@ class AppWorkspace {
     required this.name,
     this.config = const WebDavConfig(),
   });
-
-  /// Reconstructs a single [AppWorkspace] from its compact binary representation.
-  factory AppWorkspace.fromBytes(List<int> bytes) =>
-      decodePersistedState(bytes).workspaces.first;
 
   /// Default `.tdf` file name for the primary `Tasks` workspace.
   static const String defaultFileName = WebDavConfig.defaultFileName;
@@ -50,20 +78,11 @@ class AppWorkspace {
     name: defaultName,
   );
 
-  /// Maximum allowed binary payload size in bytes (`64 KiB`).
-  static const int maxBinaryBytes = 65536;
-
   /// Maximum allowed workspace display name length in characters.
   static const int maxNameLength = 128;
 
   /// Maximum allowed number of persisted workspaces.
   static const int maxWorkspaces = 32;
-
-  static const int _binaryHeaderBytes = 6;
-  static const int _binaryVersion = 2;
-  static const int _legacyBinaryVersion = 1;
-  static const int _minRecordBytesV2 = 18;
-  static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
 
   static final RegExp _pathSeparatorPattern = RegExp(r'[\\/]+');
 
@@ -92,36 +111,6 @@ class AppWorkspace {
         config: config ?? this.config,
       );
 
-  /// Decodes a compact `TTW\x01` or `TTW\x02` binary payload into all persisted [AppWorkspace]s and the active workspace ID.
-  static ({List<AppWorkspace> workspaces, String activeId})
-  decodePersistedState(List<int> bytes) {
-    final header = _validateBinaryHeader(bytes);
-    final source = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
-    final workspaces = <AppWorkspace>[];
-    final summaries = <WorkspaceSummary>[];
-    var offset = _binaryHeaderBytes;
-
-    for (var i = 0; i < header.count; i++) {
-      final (workspace, nextOffset) = _decodeRecord(
-        source,
-        offset,
-        summaries,
-        version: header.version,
-      );
-      workspaces.add(workspace);
-      summaries.add(workspace.summary);
-      offset = nextOffset;
-    }
-
-    if (offset != source.length) {
-      _throwCorrupt('Binary workspace payload has trailing bytes.');
-    }
-    return (
-      workspaces: List<AppWorkspace>.unmodifiable(workspaces),
-      activeId: workspaces[header.activeIndex].id,
-    );
-  }
-
   /// Derives a unique workspace identifier from [workspaceName] against [existingSummaries].
   static String deriveWorkspaceId(
     String workspaceName,
@@ -138,28 +127,21 @@ class AppWorkspace {
     return '${base}_$suffix';
   }
 
-  /// Encodes [workspaces] and [activeId] into a single compact `TTW\x02` binary [Uint8List] payload.
-  static Uint8List encodePersistedState(
-    List<AppWorkspace> workspaces, {
-    required String activeId,
-  }) {
-    final list = workspaces.isEmpty ? const [defaultWorkspace] : workspaces;
-    final count = list.length <= maxWorkspaces ? list.length : maxWorkspaces;
-
-    var activeIndex = 0;
-    final builder = BytesBuilder(copy: false)
-      ..add(<int>[0x54, 0x54, 0x57, _binaryVersion, count, 0]);
-
-    for (var i = 0; i < count; i++) {
-      if (list[i].id == activeId) {
-        activeIndex = i;
+  /// Returns `true` when [value] contains C0/C1 control characters, line separators, or BiDi overrides.
+  static bool hasControlCharacters(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit < 0x20 || (unit >= 0x7F && unit <= 0x9F) || unit == 0x061C) {
+        return true;
       }
-      _appendWorkspaceRecord(builder, list[i]);
+      if (unit == 0x200E ||
+          unit == 0x200F ||
+          (unit >= 0x2028 && unit <= 0x202E) ||
+          (unit >= 0x2066 && unit <= 0x2069)) {
+        return true;
+      }
     }
-
-    final output = builder.toBytes();
-    output[5] = activeIndex;
-    return output;
+    return false;
   }
 
   /// Normalizes a `.tdf` file path into a case-insensitive key for duplicate detection.
@@ -175,10 +157,6 @@ class AppWorkspace {
     final slug = _buildAsciiSlug(workspaceName.trim());
     return '${slug.isEmpty ? 'workspace' : slug}.tdf';
   }
-
-  /// Serializes this single [AppWorkspace] into a compact `TTW\x02` binary [Uint8List].
-  Uint8List toBytes() =>
-      encodePersistedState(<AppWorkspace>[this], activeId: id);
 
   /// Validates that [config] uses valid, non-colliding `.tdf` file paths across [existingSummaries].
   static void validateConfigPaths(
@@ -209,7 +187,7 @@ class AppWorkspace {
     final trimmed = rawName.trim();
     if (trimmed.isEmpty ||
         trimmed.length > maxNameLength ||
-        _hasControlCharacters(trimmed)) {
+        hasControlCharacters(trimmed)) {
       throw const WorkspaceException(
         WorkspaceErrorKind.emptyName,
         'Workspace name must be between 1 and 128 printable characters.',
@@ -226,59 +204,6 @@ class AppWorkspace {
       }
     }
     return trimmed;
-  }
-
-  /// Appends a single [workspace] `TTW\x02` binary record to [builder], enforcing size bounds.
-  static void _appendWorkspaceRecord(
-    BytesBuilder builder,
-    AppWorkspace workspace,
-  ) {
-    if (builder.length + _minRecordBytesV2 > maxBinaryBytes) {
-      _throwCorrupt('Binary workspace payload exceeds maximum size.');
-    }
-    final config = workspace.config;
-    final remoteLogFlag = config.logStorageMode == StorageMode.local ? 0 : 1;
-    builder.addByte(
-      _encodeLowFlagsBits(config) |
-          ((config.themePalette.id & 0x01) << 6) |
-          (remoteLogFlag << 7),
-    );
-    final rawFields = <String>[
-      workspace.id.trim(),
-      workspace.name.trim(),
-      config.serverUrl.trim(),
-      config.username.trim(),
-      config.password,
-      config.filePath.trim(),
-      config.localFilePath.trim(),
-    ];
-    for (var i = 0; i < rawFields.length; i++) {
-      final encoded = _utf8Codec.encode(rawFields[i]);
-      final remainingFixedBytes = 5 + ((rawFields.length - 1 - i) * 2);
-      if (encoded.length > 0xFFFF ||
-          builder.length + remainingFixedBytes + encoded.length >
-              maxBinaryBytes) {
-        _throwCorrupt('Binary workspace payload exceeds maximum size.');
-      }
-      builder
-        ..addByte((encoded.length >> 8) & 0xFF)
-        ..addByte(encoded.length & 0xFF)
-        ..add(encoded);
-    }
-    final offsetField = _encodeOffsetAndLogStorage(
-      config.manualTimeZoneOffsetMinutes,
-      config.logStorageMode,
-    );
-    final tzWord =
-        ((config.timeZoneMode.id & 0x01) << 15) |
-        ((config.locationEnabled ? 1 : 0) << 14) |
-        ((config.diagnosticsEnabled ? 1 : 0) << 13) |
-        ((_encodeLogLevelBits(config.logLevel) & 0x03) << 11) |
-        (offsetField & 0x07FF);
-    builder
-      ..addByte((tzWord >> 8) & 0xFF)
-      ..addByte(tzWord & 0xFF)
-      ..addByte(config.dueLeadWindow.id & 0xFF);
   }
 
   /// Converts [input] into a lowercase ASCII identifier slug with `_` separators.
@@ -298,231 +223,6 @@ class AppWorkspace {
         : rawSlug;
   }
 
-  /// Decodes the 2-bit `tzWord` bits `11..12` into a [LogLevel] (`0 -> info` default).
-  static LogLevel _decodeLogLevelBits(int bits) {
-    return switch (bits & 0x03) {
-      1 => LogLevel.debug,
-      2 => LogLevel.warn,
-      3 => LogLevel.error,
-      _ => LogLevel.info,
-    };
-  }
-
-  /// Decodes `(storageMode, language, themeMode, localWatchEnabled)` from the low 6 bits of [flags].
-  static (StorageMode, AppLanguage, AppThemeMode, bool) _decodeLowFlagsBits(
-    int flags,
-  ) {
-    final lane0 = flags & 0x03;
-    final lane1 = (flags >> 2) & 0x03;
-    final lane2 = (flags >> 4) & 0x03;
-    if (lane0 < 3 && lane1 < 3 && lane2 < 3) {
-      return (
-        StorageMode.fromId(lane0),
-        AppLanguage.fromId(lane1),
-        AppThemeMode.fromId(lane2),
-        true,
-      );
-    }
-    final int comboIndex;
-    if (lane0 == 3) {
-      comboIndex = (flags >> 2) & 0x0F;
-    } else if (lane1 == 3) {
-      final rem = lane0 + (lane2 * 3);
-      if (rem > 10) {
-        _throwCorrupt('Invalid encoded workspace flag combination.');
-      }
-      comboIndex = 16 + rem;
-    } else {
-      _throwCorrupt('Reserved workspace flag bit pattern.');
-    }
-    return (
-      StorageMode.fromId(comboIndex % 3),
-      AppLanguage.fromId((comboIndex ~/ 3) % 3),
-      AppThemeMode.fromId(comboIndex ~/ 9),
-      false,
-    );
-  }
-
-  /// Decodes `(manualTimeZoneOffsetMinutes, logStorageMode)` from [flags] bit 7 and [tzWord].
-  static (int, StorageMode) _decodeOffsetAndLogStorage(int flags, int tzWord) {
-    final rawOffsetField = tzWord & 0x07FF;
-    final hasRemoteLogBit = ((flags >> 7) & 0x01) == 1;
-    if (!hasRemoteLogBit) {
-      return (
-        rawOffsetField + WebDavConfig.minUtcOffsetMinutes,
-        StorageMode.local,
-      );
-    }
-    if (rawOffsetField <= 1560) {
-      return (
-        rawOffsetField + WebDavConfig.minUtcOffsetMinutes,
-        StorageMode.webdav,
-      );
-    }
-    final decodedOffset =
-        ((rawOffsetField - 1561) * 5) + WebDavConfig.minUtcOffsetMinutes;
-    return (decodedOffset, StorageMode.both);
-  }
-
-  /// Decodes and validates a single [AppWorkspace] record from [source] at [offset].
-  static (AppWorkspace, int) _decodeRecord(
-    Uint8List source,
-    int offset,
-    List<WorkspaceSummary> existing, {
-    required int version,
-  }) {
-    if (offset >= source.length) {
-      _throwCorrupt('Unexpected end of binary workspace record.');
-    }
-    final flags = source[offset];
-    final fields = <String>[];
-    var cursor = offset + 1;
-    for (var i = 0; i < 7; i++) {
-      final (decoded, nextCursor) = _readString(source, cursor);
-      fields.add(decoded);
-      cursor = nextCursor;
-    }
-    final trailingBytes = version == _binaryVersion ? 3 : 2;
-    if (cursor + trailingBytes > source.length) {
-      _throwCorrupt('Truncated trailing bytes in binary workspace record.');
-    }
-    final tzWord = (source[cursor] << 8) | source[cursor + 1];
-    cursor += 2;
-    var dueLeadWindow = DueLeadWindow.hours24;
-    if (version == _binaryVersion) {
-      final rawDueLead = source[cursor];
-      cursor += 1;
-      if (rawDueLead > 5) {
-        _throwCorrupt('Workspace record contains invalid due lead window.');
-      }
-      dueLeadWindow = DueLeadWindow.fromId(rawDueLead);
-    }
-
-    final (storageMode, language, themeMode, localWatchEnabled) =
-        _decodeLowFlagsBits(flags);
-    final (manualOffsetMinutes, logStorageMode) = _decodeOffsetAndLogStorage(
-      flags,
-      tzWord,
-    );
-    final filePath = fields[5].trim();
-    final localPath = fields[6].trim();
-    final workspace = AppWorkspace(
-      id: fields[0].trim().isEmpty ? defaultId : fields[0].trim(),
-      name: fields[1].trim().isEmpty ? defaultName : fields[1].trim(),
-      config: WebDavConfig(
-        serverUrl: fields[2].trim(),
-        username: fields[3].trim(),
-        password: fields[4],
-        filePath: filePath.isEmpty ? defaultFileName : filePath,
-        localFilePath: localPath.isEmpty ? defaultFileName : localPath,
-        storageMode: storageMode,
-        language: language,
-        themeMode: themeMode,
-        themePalette: AppThemePalette.fromId((flags >> 6) & 0x01),
-        locationEnabled: ((tzWord >> 14) & 0x01) == 1,
-        timeZoneMode: AppTimeZoneMode.fromId((tzWord >> 15) & 0x01),
-        manualTimeZoneOffsetMinutes: manualOffsetMinutes,
-        diagnosticsEnabled: ((tzWord >> 13) & 0x01) == 1,
-        logLevel: _decodeLogLevelBits((tzWord >> 11) & 0x03),
-        logStorageMode: logStorageMode,
-        localWatchEnabled: localWatchEnabled,
-        dueLeadWindow: dueLeadWindow,
-      ),
-    );
-    if (workspace.id.isEmpty ||
-        _hasControlCharacters(workspace.id) ||
-        existing.any((summary) => summary.id == workspace.id)) {
-      _throwCorrupt('Decoded workspace ID is invalid or duplicated.');
-    }
-    try {
-      validateName(workspace.name, existing);
-      validateConfigPaths(workspace.config, existing);
-    } on WorkspaceException catch (error) {
-      _throwCorrupt(error.message);
-    }
-    return (workspace, cursor);
-  }
-
-  /// Encodes [level] into 2 bits (`0 -> info` default) for `tzWord` bits `11..12`.
-  static int _encodeLogLevelBits(LogLevel level) {
-    return switch (level) {
-      LogLevel.debug => 1,
-      LogLevel.info => 0,
-      LogLevel.warn => 2,
-      LogLevel.error || LogLevel.crash => 3,
-    };
-  }
-
-  /// Encodes `(storageMode, language, themeMode, localWatchEnabled)` into the low 6 bits of `flags`.
-  static int _encodeLowFlagsBits(WebDavConfig config) {
-    if (config.localWatchEnabled) {
-      return (config.storageMode.id & 0x03) |
-          ((config.language.id & 0x03) << 2) |
-          ((config.themeMode.id & 0x03) << 4);
-    }
-    final comboIndex =
-        config.storageMode.id +
-        (config.language.id * 3) +
-        (config.themeMode.id * 9);
-    if (comboIndex < 16) {
-      return 0x03 | (comboIndex << 2);
-    }
-    final rem = comboIndex - 16;
-    return (rem % 3) | 0x0C | ((rem ~/ 3) << 4);
-  }
-
-  /// Encodes [offsetMinutes] and [logStorageMode] into the 11-bit `tzWord` offset field.
-  static int _encodeOffsetAndLogStorage(
-    int offsetMinutes,
-    StorageMode logStorageMode,
-  ) {
-    final shifted = offsetMinutes - WebDavConfig.minUtcOffsetMinutes;
-    final clamped = shifted < 0 ? 0 : (shifted > 1560 ? 1560 : shifted);
-    if (logStorageMode == StorageMode.both) {
-      return 1561 + (clamped ~/ 5);
-    }
-    return clamped;
-  }
-
-  /// Returns `true` when [value] contains C0/C1 control characters, line separators, or BiDi overrides.
-  static bool _hasControlCharacters(String value) {
-    for (var i = 0; i < value.length; i++) {
-      final unit = value.codeUnitAt(i);
-      if (unit < 0x20 || (unit >= 0x7F && unit <= 0x9F) || unit == 0x061C) {
-        return true;
-      }
-      if (unit == 0x200E ||
-          unit == 0x200F ||
-          (unit >= 0x2028 && unit <= 0x202E) ||
-          (unit >= 0x2066 && unit <= 0x2069)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Reads a 16-bit big-endian length-prefixed UTF-8 string from [source] at [offset].
-  static (String, int) _readString(Uint8List source, int offset) {
-    final end = offset + 2 > source.length
-        ? source.length + 1
-        : offset + 2 + ((source[offset] << 8) | source[offset + 1]);
-    if (end > source.length) {
-      _throwCorrupt('Truncated string in binary workspace record.');
-    }
-    try {
-      final view = Uint8List.sublistView(source, offset + 2, end);
-      return (_utf8Codec.decode(view), end);
-    } on FormatException {
-      _throwCorrupt('Invalid UTF-8 string in binary workspace record.');
-    }
-  }
-
-  /// Throws a [WorkspaceException] with [WorkspaceErrorKind.corruptBinaryPayload] and [message].
-  static Never _throwCorrupt(String message) => throw WorkspaceException(
-    WorkspaceErrorKind.corruptBinaryPayload,
-    message,
-  );
-
   /// Transliterates a UTF-16 [codeUnit] into lowercase ASCII characters or `'_'`.
   static String _transliterateCodeUnit(int codeUnit) => switch (codeUnit) {
     0x00E4 || 0x00C4 => 'ae',
@@ -535,33 +235,10 @@ class AppWorkspace {
     _ => '_',
   };
 
-  /// Validates the 6-byte `TTW\x01` or `TTW\x02` binary header and returns `(version, count, activeIndex)`.
-  static ({int version, int count, int activeIndex}) _validateBinaryHeader(
-    List<int> bytes,
-  ) {
-    if (bytes.length < _binaryHeaderBytes || bytes.length > maxBinaryBytes) {
-      _throwCorrupt('Binary workspace payload size is out of bounds.');
-    }
-    final version = bytes[3];
-    final count = bytes[4];
-    final activeIndex = bytes[5];
-    if (bytes[0] != 0x54 ||
-        bytes[1] != 0x54 ||
-        bytes[2] != 0x57 ||
-        (version != _legacyBinaryVersion && version != _binaryVersion) ||
-        count < 1 ||
-        count > maxWorkspaces ||
-        activeIndex < 0 ||
-        activeIndex >= count) {
-      _throwCorrupt('Binary workspace header is invalid or out of range.');
-    }
-    return (version: version, count: count, activeIndex: activeIndex);
-  }
-
   /// Validates that [rawPath] is a safe `.tdf` file path and returns its non-empty path segments.
   static List<String> _validateSingleTdfPath(String rawPath) {
     final trimmed = rawPath.trim();
-    if (_hasControlCharacters(trimmed) ||
+    if (hasControlCharacters(trimmed) ||
         !trimmed.toLowerCase().endsWith('.tdf')) {
       throw const WorkspaceException(
         WorkspaceErrorKind.invalidFilePath,
@@ -606,37 +283,13 @@ class AppWorkspace {
   int get hashCode => Object.hash(id, name, config);
 }
 
-/// Error categories for workspace creation, renaming, path validation, and lifecycle operations.
-enum WorkspaceErrorKind {
-  /// Workspace display name is empty, whitespace-only, contains control characters, or exceeds 128 characters.
-  emptyName,
-
-  /// Another workspace already uses the same display name (case-insensitive).
-  duplicateName,
-
-  /// Another workspace already uses the same local or remote `.tdf` file path.
-  duplicateFilePath,
-
-  /// Local or remote `.tdf` file path is empty, lacks the `.tdf` extension, or contains traversal segments.
-  invalidFilePath,
-
-  /// Target workspace identifier does not exist in storage.
-  workspaceNotFound,
-
-  /// Deleting the last remaining workspace is forbidden.
-  cannotDeleteLastWorkspace,
-
-  /// Creating a new workspace would exceed [AppWorkspace.maxWorkspaces].
-  maxWorkspacesExceeded,
-
-  /// Persisted binary workspace payload is truncated, malformed, or uses an unsupported header/version.
-  corruptBinaryPayload,
-}
-
-/// Domain exception thrown when workspace validation or lifecycle operations fail.
+/// Domain exception thrown when workspace validation, persistence, or lifecycle operations fail.
 class WorkspaceException implements Exception {
-  /// Creates a [WorkspaceException] with [kind] and a human-readable [message].
-  const WorkspaceException(this.kind, this.message);
+  /// Creates a [WorkspaceException] with [kind], a human-readable [message], and optional [cause].
+  const WorkspaceException(this.kind, this.message, {this.cause});
+
+  /// Underlying platform or I/O exception preserved for diagnostics.
+  final Object? cause;
 
   /// Specific workspace error category.
   final WorkspaceErrorKind kind;

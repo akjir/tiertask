@@ -20,6 +20,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
 import '../repositories/app_version_repository.dart';
@@ -202,6 +203,7 @@ final tdfServiceProvider = Provider<TdfService>((ref) {
 final webDavConfigProvider =
     AsyncNotifierProvider<WebDavConfigNotifier, WebDavConfig>(
       WebDavConfigNotifier.new,
+      retry: disableProviderRetry,
     );
 
 /// Provides a [WebDavRepository] configured with the current [WebDavConfig].
@@ -265,14 +267,10 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
       if (shouldMove) {
         await _tryRollbackMove(targetRepo, sourceRepo);
       }
-      final message = switch (error.kind) {
-        WorkspaceErrorKind.duplicateFilePath =>
-          localizations.errorDuplicateWorkspaceFilePath,
-        WorkspaceErrorKind.invalidFilePath =>
-          localizations.errorInvalidLocalFilePath,
-        _ => error.message,
-      };
-      throw LocalFileException(message, cause: error);
+      throw LocalFileException(
+        localizations.localizeWorkspaceError(error),
+        cause: error,
+      );
     } on Object {
       if (shouldMove) {
         await _tryRollbackMove(targetRepo, sourceRepo);

@@ -14,45 +14,12 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
-import 'package:tiertask/services/app_logger.dart';
-
-Uint8List _buildRawRecord({
-  int flags = 0,
-  String id = 'tasks',
-  String name = 'Tasks',
-  String serverUrl = '',
-  String username = '',
-  String password = '',
-  String filePath = 'tasks.tdf',
-  String localFilePath = 'tasks.tdf',
-}) {
-  final builder = BytesBuilder(copy: false)..addByte(flags);
-  for (final field in <String>[
-    id,
-    name,
-    serverUrl,
-    username,
-    password,
-    filePath,
-    localFilePath,
-  ]) {
-    final encoded = utf8.encode(field);
-    builder
-      ..addByte((encoded.length >> 8) & 0xFF)
-      ..addByte(encoded.length & 0xFF)
-      ..add(encoded);
-  }
-  builder
-    ..addByte(0x02)
-    ..addByte(0xD0);
-  return builder.toBytes();
-}
 
 void main() {
   group('AppWorkspace & Suggested TDF File Names', () {
@@ -127,37 +94,21 @@ void main() {
           diagnosticsEnabled: true,
         ),
       );
-      final encodedBytes = updated.toBytes();
-      expect(
-        encodedBytes[6] & 0x80,
-        equals(0),
-        reason: 'Unused bit 7 in workspace flags byte must remain 0',
+      final encodedJson = SettingsCodec.encodeJson(
+        PersistedSettingsDocument(
+          schemaVersion: SettingsCodec.currentSchemaVersion,
+          activeWorkspaceId: updated.id,
+          workspaces: <AppWorkspace>[updated],
+        ),
       );
-      expect(
-        encodedBytes.sublist(0, 4),
-        equals(<int>[0x54, 0x54, 0x57, 0x02]),
-        reason: 'Binary payload must start with TTW\\x02 magic header',
-      );
-      expect(
-        defaultWorkspace.toBytes().length,
-        equals(52),
-        reason: 'Default workspace TTW\\x02 binary encoding must be 52 bytes',
-      );
-      expect(
-        defaultWorkspace.toBytes().last,
-        equals(DueLeadWindow.hours24.id),
-        reason: 'Default workspace TTW\\x02 record must end with hours24 byte (0x03)',
-      );
-      expect(
-        encodedBytes.length,
-        equals(64),
-        reason: 'Updated workspace TTW\\x02 binary encoding must be 64 bytes',
-      );
-      final roundTrip = AppWorkspace.fromBytes(encodedBytes);
+      final roundTrip = SettingsCodec.decodeJsonBytes(utf8.encode(encodedJson))
+          .document
+          .workspaces
+          .single;
       expect(
         roundTrip.config.diagnosticsEnabled,
         isTrue,
-        reason: 'Binary round-trip must preserve diagnosticsEnabled',
+        reason: 'JSON round-trip must preserve diagnosticsEnabled',
       );
       expect(
         roundTrip.config.enableLogging,
@@ -167,12 +118,12 @@ void main() {
       expect(
         roundTrip,
         equals(updated),
-        reason: 'Binary round-trip must preserve AppWorkspace equality',
+        reason: 'JSON round-trip must preserve AppWorkspace equality',
       );
       expect(
         roundTrip.hashCode,
         equals(updated.hashCode),
-        reason: 'Binary round-trip must preserve AppWorkspace hashCode',
+        reason: 'JSON round-trip must preserve AppWorkspace hashCode',
       );
       expect(
         roundTrip.summary,
@@ -190,176 +141,6 @@ void main() {
         roundTrip.summary.hashCode,
         equals(updated.summary.hashCode),
         reason: 'WorkspaceSummary hashCode must be deterministic',
-      );
-    });
-
-    test('preserves logLevel and logStorageMode across all 37 UTC offsets without changing 52-byte default record size', () {
-      const defaultWorkspace = AppWorkspace.defaultWorkspace;
-      expect(
-        defaultWorkspace.toBytes().length,
-        equals(52),
-        reason:
-            'Default workspace TTW\\x02 binary encoding must remain 52 bytes',
-      );
-
-      for (final level in LogLevel.configurableLevels) {
-        for (final logMode in StorageMode.values) {
-          for (final offset in WebDavConfig.supportedUtcOffsetMinutes) {
-            final workspace = defaultWorkspace.copyWith(
-              config: WebDavConfig(
-                timeZoneMode: AppTimeZoneMode.manual,
-                manualTimeZoneOffsetMinutes: offset,
-                diagnosticsEnabled: true,
-                logLevel: level,
-                logStorageMode: logMode,
-              ),
-            );
-            final bytes = workspace.toBytes();
-            expect(
-              bytes.length,
-              equals(52),
-              reason:
-                  'Record size must remain 52 bytes for level=${level.label}, '
-                  'logMode=${logMode.name}, offset=$offset',
-            );
-            final decoded = AppWorkspace.fromBytes(bytes);
-            expect(
-              decoded.config.logLevel,
-              equals(level),
-              reason: 'Decoded logLevel must match ${level.label}',
-            );
-            expect(
-              decoded.config.logStorageMode,
-              equals(logMode),
-              reason: 'Decoded logStorageMode must match ${logMode.name}',
-            );
-            expect(
-              decoded.config.manualTimeZoneOffsetMinutes,
-              equals(offset),
-              reason: 'Decoded manualTimeZoneOffsetMinutes must match $offset',
-            );
-          }
-        }
-      }
-    });
-
-    test('decodes legacy 51-byte TTW v1 records with DueLeadWindow.hours24 and round-trips TTW v2 across all flag and DueLeadWindow combinations', () {
-      final legacyDefaultBytes = <int>[
-        0x54,
-        0x54,
-        0x57,
-        0x01,
-        0x01,
-        0x00,
-        ..._buildRawRecord(),
-      ];
-      final legacyDecoded = AppWorkspace.fromBytes(legacyDefaultBytes);
-      expect(
-        legacyDecoded.config.localWatchEnabled,
-        isTrue,
-        reason: 'Existing 51-byte TTW v1 records must decode with localWatchEnabled == true',
-      );
-      expect(
-        legacyDecoded.config.dueLeadWindow,
-        equals(DueLeadWindow.hours24),
-        reason: 'Legacy 51-byte TTW v1 records must default dueLeadWindow to hours24',
-      );
-      expect(
-        AppWorkspace.defaultWorkspace.toBytes(),
-        equals(
-          Uint8List.fromList(<int>[
-            0x54,
-            0x54,
-            0x57,
-            0x02,
-            0x01,
-            0x00,
-            ..._buildRawRecord(),
-            DueLeadWindow.hours24.id,
-          ]),
-        ),
-        reason: 'Default workspace must encode as 52-byte TTW v2 ending with hours24 byte',
-      );
-
-      final configs = <WebDavConfig>[
-        for (final watchEnabled in <bool>[true, false])
-          for (final storageMode in StorageMode.values)
-            for (final language in AppLanguage.values)
-              for (final themeMode in AppThemeMode.values)
-                for (final palette in AppThemePalette.values)
-                  for (final logMode in StorageMode.values)
-                    for (final logLevel in LogLevel.configurableLevels)
-                      WebDavConfig(
-                        storageMode: storageMode,
-                        language: language,
-                        themeMode: themeMode,
-                        themePalette: palette,
-                        localWatchEnabled: watchEnabled,
-                        logStorageMode: logMode,
-                        logLevel: logLevel,
-                        diagnosticsEnabled: !watchEnabled,
-                        dueLeadWindow:
-                            DueLeadWindow.values[(storageMode.id +
-                                    language.id +
-                                    themeMode.id) %
-                                DueLeadWindow.values.length],
-                      ),
-      ];
-
-      for (final config in configs) {
-        final workspace = AppWorkspace.defaultWorkspace.copyWith(
-          config: config,
-        );
-        final bytes = workspace.toBytes();
-        expect(
-          bytes.length,
-          equals(52),
-          reason:
-              'TTW v2 record must remain 52 bytes for watch=${config.localWatchEnabled}, '
-              'storage=${config.storageMode.name}, lang=${config.language.name}, '
-              'theme=${config.themeMode.name}, dueLead=${config.dueLeadWindow.name}',
-        );
-        final decoded = AppWorkspace.fromBytes(bytes);
-        expect(
-          decoded.config,
-          equals(config),
-          reason:
-              'Decoded config must match encoded config for watch=${config.localWatchEnabled}, '
-              'storage=${config.storageMode.name}, lang=${config.language.name}, '
-              'theme=${config.themeMode.name}, palette=${config.themePalette.name}, '
-              'dueLead=${config.dueLeadWindow.name}',
-        );
-      }
-
-      // Multi-workspace 32-record (maxWorkspaces) TTW v2 round-trip cycling all 6 DueLeadWindow values:
-      final maxWorkspacesList = <AppWorkspace>[
-        for (var i = 0; i < AppWorkspace.maxWorkspaces; i++)
-          AppWorkspace(
-            id: 'ws_$i',
-            name: 'Workspace $i',
-            config: WebDavConfig(
-              localFilePath: 'ws_$i.tdf',
-              filePath: 'ws_$i.tdf',
-              dueLeadWindow:
-                  DueLeadWindow.values[i % DueLeadWindow.values.length],
-            ),
-          ),
-      ];
-      final multiEncoded = AppWorkspace.encodePersistedState(
-        maxWorkspacesList,
-        activeId: 'ws_17',
-      );
-      final multiDecoded = AppWorkspace.decodePersistedState(multiEncoded);
-      expect(
-        multiDecoded.activeId,
-        equals('ws_17'),
-        reason:
-            'Active workspace ID must survive 32-workspace TTW v2 round-trip',
-      );
-      expect(
-        multiDecoded.workspaces,
-        equals(maxWorkspacesList),
-        reason: 'All 32 workspaces and their DueLeadWindow variants must round-trip',
       );
     });
 
@@ -410,51 +191,149 @@ void main() {
     });
   });
 
-  group('Workspace Uniqueness, Path Traversal, Control/BiDi Injection & Bounds', () {
-    test('enforces name bounds, control/BiDi rejection, path traversal rejection, and all WorkspaceErrorKind variants', () async {
-      final repository = InMemorySettingsRepository();
+  group(
+    'Workspace Uniqueness, Path Traversal, Control/BiDi Injection & Bounds',
+    () {
+      test('enforces name bounds, control/BiDi rejection, path traversal rejection, and all WorkspaceErrorKind variants', () async {
+        final repository = InMemorySettingsRepository();
 
-      final maxLenName = 'A' * AppWorkspace.maxNameLength;
-      expect(
-        AppWorkspace.validateName(maxLenName, const <WorkspaceSummary>[]),
-        equals(maxLenName),
-        reason: 'Exact 128-character workspace name must be accepted',
-      );
+        final maxLenName = 'A' * AppWorkspace.maxNameLength;
+        expect(
+          AppWorkspace.validateName(maxLenName, const <WorkspaceSummary>[]),
+          equals(maxLenName),
+          reason: 'Exact 128-character workspace name must be accepted',
+        );
 
-      for (final invalidName in <String>[
-        '',
-        '   ',
-        'Bad\nName',
-        'Bad\rName',
-        'Bad\x00Name',
-        'Bad\x7FName',
-        'Bad\u0085Name',
-        'Bad\u009FName',
-        'Bad\u2028Name',
-        'Bad\u2029Name',
-        'Bad\u202EName',
-        'Bad\u2066Name',
-        'Bad\u061CName',
-        'Bad\u200EName',
-        'Bad\u200FName',
-        'A' * (AppWorkspace.maxNameLength + 1),
-      ]) {
+        for (final invalidName in <String>[
+          '',
+          '   ',
+          'Bad\nName',
+          'Bad\rName',
+          'Bad\x00Name',
+          'Bad\x7FName',
+          'Bad\u0085Name',
+          'Bad\u009FName',
+          'Bad\u2028Name',
+          'Bad\u2029Name',
+          'Bad\u202EName',
+          'Bad\u2066Name',
+          'Bad\u061CName',
+          'Bad\u200EName',
+          'Bad\u200FName',
+          'A' * (AppWorkspace.maxNameLength + 1),
+        ]) {
+          await expectLater(
+            () => repository.createWorkspace(invalidName),
+            throwsA(
+              isA<WorkspaceException>().having(
+                (error) => error.kind,
+                'kind',
+                WorkspaceErrorKind.emptyName,
+              ),
+            ),
+            reason: 'Invalid workspace name "$invalidName" must be rejected',
+          );
+        }
+
+        for (final duplicateName in <String>['Tasks', 'tasks', '  TASKS  ']) {
+          await expectLater(
+            () => repository.createWorkspace(duplicateName),
+            throwsA(
+              isA<WorkspaceException>().having(
+                (error) => error.kind,
+                'kind',
+                WorkspaceErrorKind.duplicateName,
+              ),
+            ),
+            reason:
+                'Duplicate workspace name "$duplicateName" must be rejected',
+          );
+        }
+
+        final arbeitWorkspace = await repository.createWorkspace('Arbeit');
+        expect(
+          arbeitWorkspace.id,
+          equals('arbeit'),
+          reason: 'Arbeit workspace ID must be arbeit',
+        );
+
         await expectLater(
-          () => repository.createWorkspace(invalidName),
+          () => repository.createWorkspace(
+            'Zweiter Job',
+            config: const WebDavConfig(
+              localFilePath: 'ARBEIT.tdf',
+              filePath: 'zweiter_job.tdf',
+            ),
+          ),
           throwsA(
             isA<WorkspaceException>().having(
               (error) => error.kind,
               'kind',
-              WorkspaceErrorKind.emptyName,
+              WorkspaceErrorKind.duplicateFilePath,
             ),
           ),
-          reason: 'Invalid workspace name "$invalidName" must be rejected',
+          reason: 'Duplicate localFilePath must be rejected across workspaces',
         );
-      }
 
-      for (final duplicateName in <String>['Tasks', 'tasks', '  TASKS  ']) {
         await expectLater(
-          () => repository.createWorkspace(duplicateName),
+          () => repository.createWorkspace(
+            'Dritter Job',
+            config: const WebDavConfig(
+              localFilePath: 'dritter_job.tdf',
+              filePath: 'tasks.tdf',
+            ),
+          ),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.duplicateFilePath,
+            ),
+          ),
+          reason:
+              'Duplicate remote filePath must be rejected across workspaces',
+        );
+
+        for (final invalidPath in <String>[
+          '',
+          '.tdf',
+          '/.tdf',
+          'sub/.tdf',
+          'dir/..tdf',
+          'dir/ .tdf',
+          'dir/ .. /tasks.tdf',
+          'dir/ . /tasks.tdf',
+          'dir/ /tasks.tdf',
+          'dir/ sub/tasks.tdf',
+          'dir/sub /tasks.tdf',
+          '../escape.tdf',
+          'notes.txt',
+          'bad\x00.tdf',
+          'bad\u0085.tdf',
+          'bad\u2028.tdf',
+          'bad\u202E.tdf',
+        ]) {
+          await expectLater(
+            () => repository.createWorkspace(
+              'Invalid File Workspace',
+              config: WebDavConfig(
+                localFilePath: invalidPath,
+                filePath: 'valid.tdf',
+              ),
+            ),
+            throwsA(
+              isA<WorkspaceException>().having(
+                (error) => error.kind,
+                'kind',
+                WorkspaceErrorKind.invalidFilePath,
+              ),
+            ),
+            reason: 'Invalid TDF path "$invalidPath" must be rejected',
+          );
+        }
+
+        await expectLater(
+          () => repository.renameWorkspace('arbeit', '  tasks '),
           throwsA(
             isA<WorkspaceException>().having(
               (error) => error.kind,
@@ -462,305 +341,95 @@ void main() {
               WorkspaceErrorKind.duplicateName,
             ),
           ),
-          reason: 'Duplicate workspace name "$duplicateName" must be rejected',
+          reason: 'Renaming to an existing workspace name must be rejected',
         );
-      }
 
-      final arbeitWorkspace = await repository.createWorkspace('Arbeit');
-      expect(
-        arbeitWorkspace.id,
-        equals('arbeit'),
-        reason: 'Arbeit workspace ID must be arbeit',
-      );
-
-      await expectLater(
-        () => repository.createWorkspace(
-          'Zweiter Job',
-          config: const WebDavConfig(
-            localFilePath: 'ARBEIT.tdf',
-            filePath: 'zweiter_job.tdf',
-          ),
-        ),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.duplicateFilePath,
-          ),
-        ),
-        reason: 'Duplicate localFilePath must be rejected across workspaces',
-      );
-
-      await expectLater(
-        () => repository.createWorkspace(
-          'Dritter Job',
-          config: const WebDavConfig(
-            localFilePath: 'dritter_job.tdf',
-            filePath: 'tasks.tdf',
-          ),
-        ),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.duplicateFilePath,
-          ),
-        ),
-        reason: 'Duplicate remote filePath must be rejected across workspaces',
-      );
-
-      for (final invalidPath in <String>[
-        '',
-        '.tdf',
-        '/.tdf',
-        'sub/.tdf',
-        'dir/..tdf',
-        'dir/ .tdf',
-        'dir/ .. /tasks.tdf',
-        'dir/ . /tasks.tdf',
-        'dir/ /tasks.tdf',
-        'dir/ sub/tasks.tdf',
-        'dir/sub /tasks.tdf',
-        '../escape.tdf',
-        'notes.txt',
-        'bad\x00.tdf',
-        'bad\u0085.tdf',
-        'bad\u2028.tdf',
-        'bad\u202E.tdf',
-      ]) {
-        await expectLater(
-          () => repository.createWorkspace(
-            'Invalid File Workspace',
-            config: WebDavConfig(
-              localFilePath: invalidPath,
-              filePath: 'valid.tdf',
-            ),
-          ),
-          throwsA(
-            isA<WorkspaceException>().having(
-              (error) => error.kind,
-              'kind',
-              WorkspaceErrorKind.invalidFilePath,
-            ),
-          ),
-          reason: 'Invalid TDF path "$invalidPath" must be rejected',
+        final renamedArbeit = await repository.renameWorkspace(
+          'arbeit',
+          'Kunde Nord',
         );
-      }
-
-      await expectLater(
-        () => repository.renameWorkspace('arbeit', '  tasks '),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.duplicateName,
-          ),
-        ),
-        reason: 'Renaming to an existing workspace name must be rejected',
-      );
-
-      final renamedArbeit = await repository.renameWorkspace(
-        'arbeit',
-        'Kunde Nord',
-      );
-      expect(
-        renamedArbeit.name,
-        equals('Kunde Nord'),
-        reason: 'Renamed workspace must reflect new display name',
-      );
-      expect(
-        renamedArbeit.config.localFilePath,
-        equals('arbeit.tdf'),
-        reason: 'Renaming a workspace must keep its configured .tdf file',
-      );
-
-      await expectLater(
-        () => repository.saveConfig(
-          const WebDavConfig(
-            localFilePath: 'arbeit.tdf',
-            filePath: 'tasks.tdf',
-          ),
-        ),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.duplicateFilePath,
-          ),
-        ),
-        reason: 'Updating active config to another workspace file must fail',
-      );
-
-      await expectLater(
-        () => repository.activateWorkspace('nonexistent'),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.workspaceNotFound,
-          ),
-        ),
-        reason: 'Activating unknown workspace ID must throw workspaceNotFound',
-      );
-
-      await repository.deleteWorkspace('arbeit');
-      await expectLater(
-        () => repository.deleteWorkspace('tasks'),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.cannotDeleteLastWorkspace,
-          ),
-        ),
-        reason: 'Deleting the sole remaining workspace must be rejected',
-      );
-
-      for (var i = 2; i <= AppWorkspace.maxWorkspaces; i++) {
-        await repository.createWorkspace('Workspace $i');
-      }
-      await expectLater(
-        () => repository.createWorkspace('Overflow Workspace'),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.maxWorkspacesExceeded,
-          ),
-        ),
-        reason: 'Exceeding AppWorkspace.maxWorkspaces must be rejected',
-      );
-    });
-
-    test('rejects corrupt, negative-indexed, oversized, trailing-byte, invalid-UTF8, and duplicate binary payloads', () {
-      final validSingle = AppWorkspace.defaultWorkspace.toBytes();
-      final recordDefault = _buildRawRecord();
-      final recordControlName = _buildRawRecord(name: 'Bad\nName');
-      final recordBiDiPath = _buildRawRecord(localFilePath: 'bad\u202E.tdf');
-      final recordTraversalPath = _buildRawRecord(
-        localFilePath: '../escape.tdf',
-      );
-      final recordOverlongName = _buildRawRecord(
-        name: 'A' * (AppWorkspace.maxNameLength + 1),
-      );
-      final recordReservedLane2 = _buildRawRecord(flags: 0x30);
-      final recordReservedLane2Alt = _buildRawRecord(flags: 0x35);
-      final recordOverflowRem11 = _buildRawRecord(flags: 0x3E);
-
-      for (final corruptBytes in <List<int>>[
-        <int>[],
-        <int>[0x54, 0x54, 0x57],
-        <int>[0x00, 0x00, 0x00, 0x01, 0x01, 0x00],
-        <int>[0x154, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordDefault],
-        <int>[0x54, 0x54, 0x57, 0x00, 0x01, 0x00, ...recordDefault],
-        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00],
-        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00, ...recordDefault],
-        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00, ...recordDefault, 0x06],
-        <int>[0x54, 0x54, 0x57, 0x02, 0x01, 0x00, ...recordDefault, 0xFF],
-        <int>[0x54, 0x54, 0x57, 0x03, 0x01, 0x00, ...recordDefault, 0x03],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x00, 0x00],
-        <int>[0x54, 0x54, 0x57, 0x01, -1, 0x00, ...recordDefault],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x21, 0x00],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x01],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, -256, ...recordDefault],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, 0x00, 0x00],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, 0x00, 0x00, 0x05, 0x61],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, 0x00, 0x00, 0x02, 0xFF, 0xFE],
-        <int>[...validSingle, 0x00],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordControlName],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordBiDiPath],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordTraversalPath],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordOverlongName],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordReservedLane2],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordReservedLane2Alt],
-        <int>[0x54, 0x54, 0x57, 0x01, 0x01, 0x00, ...recordOverflowRem11],
-        <int>[
-          0x54,
-          0x54,
-          0x57,
-          0x01,
-          0x02,
-          0x00,
-          ...recordDefault,
-          ...recordDefault,
-        ],
-        Uint8List(AppWorkspace.maxBinaryBytes + 1),
-      ]) {
         expect(
-          () => AppWorkspace.decodePersistedState(corruptBytes),
+          renamedArbeit.name,
+          equals('Kunde Nord'),
+          reason: 'Renamed workspace must reflect new display name',
+        );
+        expect(
+          renamedArbeit.config.localFilePath,
+          equals('arbeit.tdf'),
+          reason: 'Renaming a workspace must keep its configured .tdf file',
+        );
+
+        await expectLater(
+          () => repository.saveConfig(
+            const WebDavConfig(
+              localFilePath: 'arbeit.tdf',
+              filePath: 'tasks.tdf',
+            ),
+          ),
           throwsA(
             isA<WorkspaceException>().having(
               (error) => error.kind,
               'kind',
-              WorkspaceErrorKind.corruptBinaryPayload,
+              WorkspaceErrorKind.duplicateFilePath,
+            ),
+          ),
+          reason: 'Updating active config to another workspace file must fail',
+        );
+
+        await expectLater(
+          () => repository.activateWorkspace('nonexistent'),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.workspaceNotFound,
             ),
           ),
           reason:
-              'Corrupt binary payload (length ${corruptBytes.length}) must throw corruptBinaryPayload',
+              'Activating unknown workspace ID must throw workspaceNotFound',
         );
-      }
 
-      const exactMaxPasswordLength = AppWorkspace.maxBinaryBytes - 52;
-      final exactMaxWorkspace = AppWorkspace(
-        id: 'tasks',
-        name: 'Tasks',
-        config: WebDavConfig(
-          password: 'P' * exactMaxPasswordLength,
-          dueLeadWindow: DueLeadWindow.days7,
-        ),
-      );
-      final exactMaxBytes = AppWorkspace.encodePersistedState(<AppWorkspace>[
-        exactMaxWorkspace,
-      ], activeId: 'tasks');
-      expect(
-        exactMaxBytes.length,
-        equals(AppWorkspace.maxBinaryBytes),
-        reason: 'Exact 65536-byte TTW v2 workspace payload must succeed',
-      );
-      expect(
-        AppWorkspace.fromBytes(exactMaxBytes).config.dueLeadWindow,
-        equals(DueLeadWindow.days7),
-        reason: 'Exact 65536-byte TTW v2 payload must decode trailing dueLeadWindow byte',
-      );
-
-      final oneByteOverWorkspace = AppWorkspace(
-        id: 'tasks',
-        name: 'Tasks',
-        config: WebDavConfig(password: 'P' * (exactMaxPasswordLength + 1)),
-      );
-      expect(
-        () => AppWorkspace.encodePersistedState(<AppWorkspace>[
-          oneByteOverWorkspace,
-        ], activeId: 'tasks'),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.corruptBinaryPayload,
+        await repository.deleteWorkspace('arbeit');
+        await expectLater(
+          () => repository.deleteWorkspace('tasks'),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.cannotDeleteLastWorkspace,
+            ),
           ),
-        ),
-        reason: '65537-byte TTW v2 payload (maxBinaryBytes + 1) must fail pre-allocation bound check',
-      );
+          reason: 'Deleting the sole remaining workspace must be rejected',
+        );
 
-      final hugePasswordWorkspace = AppWorkspace(
-        id: 'tasks',
-        name: 'Tasks',
-        config: WebDavConfig(password: 'P' * AppWorkspace.maxBinaryBytes),
-      );
-      expect(
-        () => AppWorkspace.encodePersistedState(<AppWorkspace>[
-          hugePasswordWorkspace,
-        ], activeId: 'tasks'),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.corruptBinaryPayload,
+        for (var i = 2; i <= AppWorkspace.maxWorkspaces; i++) {
+          await repository.createWorkspace('Workspace $i');
+        }
+        await expectLater(
+          () => repository.createWorkspace('Overflow Workspace'),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.maxWorkspacesExceeded,
+            ),
           ),
-        ),
-        reason: 'Encoding a workspace payload exceeding maxBinaryBytes must throw corruptBinaryPayload',
-      );
-    });
-  });
+          reason: 'Exceeding AppWorkspace.maxWorkspaces must be rejected',
+        );
+
+        // Verify WorkspaceException preserves cause and toString() across every WorkspaceErrorKind:
+        final rootCause = StateError('disk full');
+        for (final kind in WorkspaceErrorKind.values) {
+          final exception = WorkspaceException(
+            kind,
+            'Error for ${kind.name}',
+            cause: rootCause,
+          );
+          expect(exception.kind, equals(kind));
+          expect(exception.cause, same(rootCause));
+          expect(exception.toString(), equals('Error for ${kind.name}'));
+        }
+      });
+    },
+  );
 }

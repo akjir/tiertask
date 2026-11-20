@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
 import '../models/task_board.dart';
 import '../models/task_board_undo.dart';
@@ -618,14 +619,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     try {
       await settingsRepo.saveConfig(newConfig);
     } on WorkspaceException catch (error) {
-      final message = switch (error.kind) {
-        WorkspaceErrorKind.duplicateFilePath =>
-          localizations.errorDuplicateWorkspaceFilePath,
-        WorkspaceErrorKind.invalidFilePath =>
-          localizations.errorInvalidLocalFilePath,
-        _ => error.message,
-      };
-      throw LocalFileException(message, cause: error);
+      throw LocalFileException(
+        localizations.localizeWorkspaceError(error),
+        cause: error,
+      );
     }
 
     try {

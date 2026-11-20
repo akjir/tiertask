@@ -1598,4 +1598,28 @@ class AppLocalizationsDe extends AppLocalizations {
   String fileReadStatusEntryLine(String target, String status) {
     return '$target: $status';
   }
+
+  @override
+  String get errorSettingsCorrupt =>
+      'Anwendungseinstellungen konnten nicht gelesen werden.';
+
+  @override
+  String get errorSettingsUnsupportedVersion =>
+      'Die Einstellungen wurden von einer neueren TierTask-Version erstellt. Aktualisiere TierTask, um Datenverlust zu vermeiden.';
+
+  @override
+  String get errorSettingsCredentialStorageUnavailable =>
+      'Sicherer Anmeldedatenspeicher ist nicht verfügbar. Das WebDAV-Passwort konnte nicht gespeichert werden.';
+
+  @override
+  String get errorSettingsSaveFailed =>
+      'Anwendungseinstellungen konnten nicht gespeichert werden.';
+
+  @override
+  String get settingsRecoveredFromBackupNotice =>
+      'Einstellungen wurden nach einem Dateifehler aus der Sicherung wiederhergestellt.';
+
+  @override
+  String get settingsResetAfterQuarantineNotice =>
+      'Beschädigte Einstellungen wurden gesichert und auf Standardwerte zurückgesetzt.';
 }

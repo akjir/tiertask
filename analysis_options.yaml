@@ -10,6 +10,9 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
+  errors:
+    # Temporary for encapsulated @Deprecated TTW\x02 migration converter; remove in 0.5.0.
+    deprecated_member_use_from_same_package: ignore
   language:
     strict-casts: true
     strict-inference: true

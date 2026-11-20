@@ -1572,4 +1572,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String fileReadStatusEntryLine(String target, String status) {
     return '$target: $status';
   }
+
+  @override
+  String get errorSettingsCorrupt => 'Application settings could not be read.';
+
+  @override
+  String get errorSettingsUnsupportedVersion =>
+      'Settings were created by a newer TierTask version. Update TierTask to avoid data loss.';
+
+  @override
+  String get errorSettingsCredentialStorageUnavailable =>
+      'Secure credential storage is unavailable. WebDAV password could not be saved.';
+
+  @override
+  String get errorSettingsSaveFailed => 'Could not save application settings.';
+
+  @override
+  String get settingsRecoveredFromBackupNotice =>
+      'Settings were restored from backup after a file error.';
+
+  @override
+  String get settingsResetAfterQuarantineNotice =>
+      'Corrupt settings were backed up and reset to defaults.';
 }

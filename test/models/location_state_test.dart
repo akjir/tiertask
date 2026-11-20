@@ -13,9 +13,12 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/location_state.dart';
+import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
 
 void main() {
@@ -247,8 +250,8 @@ void main() {
     });
   });
 
-  group('WebDavConfig.locationEnabled & TTW\\x02 Binary Persistence', () {
-    test('defaults locationEnabled to false and round-trips locationEnabled in TTW\\x02 binary workspace records', () {
+  group('WebDavConfig.locationEnabled & JSON Settings Persistence', () {
+    test('defaults locationEnabled to false and round-trips locationEnabled in settings.json documents', () {
       const defaultConfig = WebDavConfig();
       expect(
         defaultConfig.locationEnabled,
@@ -275,14 +278,16 @@ void main() {
       final workspaceEnabled = AppWorkspace.defaultWorkspace.copyWith(
         config: enabledConfig,
       );
-      final encodedEnabled = workspaceEnabled.toBytes();
-      expect(
-        encodedEnabled.length,
-        equals(52),
-        reason: 'Encoding locationEnabled in tzWord bit 14 must keep 52-byte TTW\\x02 record size',
+      final encodedEnabled = SettingsCodec.encodeJson(
+        PersistedSettingsDocument(
+          schemaVersion: SettingsCodec.currentSchemaVersion,
+          activeWorkspaceId: workspaceEnabled.id,
+          workspaces: <AppWorkspace>[workspaceEnabled],
+        ),
       );
-
-      final decodedEnabled = AppWorkspace.fromBytes(encodedEnabled);
+      final decodedEnabled = SettingsCodec.decodeJsonBytes(
+        utf8.encode(encodedEnabled),
+      ).document.workspaces.single;
       expect(
         decodedEnabled,
         equals(workspaceEnabled),
@@ -297,7 +302,7 @@ void main() {
       expect(
         decodedEnabled.config.timeZoneMode,
         equals(AppTimeZoneMode.manual),
-        reason: 'Decoded config must preserve timeZoneMode alongside bit 14',
+        reason: 'Decoded config must preserve timeZoneMode',
       );
       expect(
         decodedEnabled.config.manualTimeZoneOffsetMinutes,
@@ -305,12 +310,16 @@ void main() {
         reason: 'Decoded config must preserve manualTimeZoneOffsetMinutes',
       );
 
-      final encodedDefault = AppWorkspace.defaultWorkspace.toBytes();
-      final decodedDefault = AppWorkspace.fromBytes(encodedDefault);
+      final encodedDefault = SettingsCodec.encodeJson(
+        PersistedSettingsDocument.initial,
+      );
+      final decodedDefault = SettingsCodec.decodeJsonBytes(
+        utf8.encode(encodedDefault),
+      ).document.workspaces.single;
       expect(
         decodedDefault.config.locationEnabled,
         isFalse,
-        reason: 'Default binary record must decode locationEnabled: false',
+        reason: 'Default JSON document must decode locationEnabled: false',
       );
     });
   });

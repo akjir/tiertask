@@ -312,6 +312,30 @@ void main() {
       expect(unloadCount, equals(0));
       expect(disableProviderRetry(1, StateError('boom')), isNull);
     });
+
+    test('settingsDirectoryPathProvider wires isolated settings directory into settingsRepositoryProvider', () async {
+      final container = ProviderContainer(
+        overrides: [
+          settingsDirectoryPathProvider.overrideWithValue(tempDir.path),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      expect(
+        container.read(settingsDirectoryPathProvider),
+        equals(tempDir.path),
+      );
+      final repository = container.read(settingsRepositoryProvider);
+      expect(repository, isA<SecureSettingsRepository>());
+      await repository.saveConfig(
+        const WebDavConfig(language: AppLanguage.german),
+      );
+      expect(
+        File('${tempDir.path}/settings.json').existsSync(),
+        isTrue,
+        reason: 'settingsDirectoryPathProvider must direct SecureSettingsRepository writes to the overridden directory',
+      );
+    });
   });
 
   group('LocationNotifier & WebDavConfigNotifier Lifecycle Integration', () {

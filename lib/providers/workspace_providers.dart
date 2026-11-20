@@ -25,6 +25,7 @@ import '../services/app_logger.dart';
 final activeWorkspaceProvider =
     AsyncNotifierProvider<ActiveWorkspaceNotifier, AppWorkspace>(
       ActiveWorkspaceNotifier.new,
+      retry: disableProviderRetry,
     );
 
 /// Provides the active [AppBuildProfile] (`release` or `dev`), overridable in tests.
@@ -32,10 +33,17 @@ final appBuildProfileProvider = Provider<AppBuildProfile>((ref) {
   return AppBuildProfile.current;
 });
 
+/// Optional directory override for host-local `settings.json` persistence, primarily for hermetic tests.
+final settingsDirectoryPathProvider = Provider<String?>((ref) => null);
+
 /// Provides the [SettingsRepository] for loading and saving application settings.
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
   final buildProfile = ref.watch(appBuildProfileProvider);
-  return SecureSettingsRepository(buildProfile: buildProfile);
+  final settingsDirectoryPath = ref.watch(settingsDirectoryPathProvider);
+  return SecureSettingsRepository(
+    buildProfile: buildProfile,
+    settingsDirectoryPath: settingsDirectoryPath,
+  );
 });
 
 /// Provides lightweight [WorkspaceSummary] entries for all persisted workspaces.

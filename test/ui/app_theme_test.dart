@@ -13,11 +13,14 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -47,19 +50,19 @@ task 000001OkD2 priority {
 
   test('AppThemePalette, AppThemeSet, Slate and Navy themes, and Material 3 ColorScheme container roles build complete ThemeData', () {
     expect(
-      AppThemePalette.fromId(0),
+      AppThemePalette.tryParseJson('slate'),
       equals(AppThemePalette.slate),
-      reason: 'fromId(0) must resolve to AppThemePalette.slate',
+      reason: 'tryParseJson("slate") must resolve to AppThemePalette.slate',
     );
     expect(
-      AppThemePalette.fromId(1),
+      AppThemePalette.tryParseJson('navy'),
       equals(AppThemePalette.navy),
-      reason: 'fromId(1) must resolve to AppThemePalette.navy',
+      reason: 'tryParseJson("navy") must resolve to AppThemePalette.navy',
     );
     expect(
-      AppThemePalette.fromId(99),
-      equals(AppThemePalette.slate),
-      reason: 'fromId must default unknown values to AppThemePalette.slate',
+      AppThemePalette.tryParseJson('unknown'),
+      isNull,
+      reason: 'tryParseJson must return null for unknown values',
     );
     expect(
       const WebDavConfig().themePalette,
@@ -72,11 +75,21 @@ task 000001OkD2 priority {
       name: 'Work',
       config: WebDavConfig(themePalette: AppThemePalette.navy),
     );
-    final roundTripped = AppWorkspace.fromBytes(workspace.toBytes());
+    final encodedJson = SettingsCodec.encodeJson(
+      PersistedSettingsDocument(
+        schemaVersion: SettingsCodec.currentSchemaVersion,
+        activeWorkspaceId: workspace.id,
+        workspaces: const <AppWorkspace>[workspace],
+      ),
+    );
+    final roundTripped = SettingsCodec.decodeJsonBytes(utf8.encode(encodedJson))
+        .document
+        .workspaces
+        .single;
     expect(
       roundTripped.config.themePalette,
       equals(AppThemePalette.navy),
-      reason: 'AppWorkspace binary serialization must preserve themePalette',
+      reason: 'SettingsCodec JSON serialization must preserve themePalette',
     );
 
     expect(

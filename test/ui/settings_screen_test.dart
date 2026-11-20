@@ -22,6 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_build_profile.dart';
+import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -984,6 +985,88 @@ task task000004 {
       expect(
         find.textContaining('Remote file: Authentication failed.'),
         findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'SettingsScreen rolls back optimistic preferences and displays localized error banner on WorkspaceException during preference toggle and save',
+    (WidgetTester tester) async {
+      const initialConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        language: AppLanguage.english,
+        localFilePath: 'tasks.tdf',
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+        localWatchEnabled: true,
+      );
+      WorkspaceException? nextSaveError = const WorkspaceException(
+        WorkspaceErrorKind.settingsPersistenceFailed,
+        'raw internal lock failure',
+      );
+      final failingSettingsRepo = _AsyncSaveSettingsRepository(
+        initialConfig,
+        onSaveConfig: () async {
+          if (nextSaveError case final error?) {
+            throw error;
+          }
+        },
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(failingSettingsRepo),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: initialConfig,
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            webDavRepositoryProvider.overrideWithValue(
+              FakeWebDavRepository(
+                config: initialConfig,
+                shouldFail: () => false,
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openSettingsFromMenu(tester);
+
+      // Toggle local watch switch: saveConfig fails with settingsPersistenceFailed -> switch must roll back to true and show localized banner:
+      final watchSwitchFinder = find.byKey(
+        const ValueKey('settings_local_watch_switch'),
+      );
+      await _tapVisible(tester, watchSwitchFinder);
+      final rolledBackSwitch = tester.widget<Switch>(watchSwitchFinder);
+      expect(
+        rolledBackSwitch.value,
+        isTrue,
+        reason: 'Optimistic preference must roll back to _lastSyncedConfig on WorkspaceException',
+      );
+      expect(
+        find.text('Could not save application settings.'),
+        findsOneWidget,
+        reason: 'Preference persistence failure must display localized errorSettingsSaveFailed banner',
+      );
+
+      // Trigger explicit Save with credentialStorageUnavailable -> localized banner must appear:
+      nextSaveError = const WorkspaceException(
+        WorkspaceErrorKind.credentialStorageUnavailable,
+        'raw keyring exception',
+      );
+      await _tapVisible(tester, find.widgetWithText(OutlinedButton, 'Save'));
+      expect(
+        find.text(
+          'Secure credential storage is unavailable. WebDAV password could not be saved.',
+        ),
+        findsOneWidget,
+        reason: 'Explicit Save failure must display localized errorSettingsCredentialStorageUnavailable banner',
       );
     },
   );

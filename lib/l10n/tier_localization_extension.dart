@@ -13,12 +13,32 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import '../models/app_workspace.dart';
 import '../models/task_tier.dart';
 import 'app_localizations.dart';
 
-/// Maps [TaskTier] values (`1` through `6`) to localized display names,
-/// uppercase section headings, and empty-state hints from [AppLocalizations].
+/// Maps [TaskTier] and [WorkspaceException] domain values to localized strings from [AppLocalizations].
 extension TierLocalizationExtension on AppLocalizations {
+  /// Maps a [WorkspaceException] exhaustively to a localized user-facing message.
+  String localizeWorkspaceError(WorkspaceException error) {
+    return switch (error.kind) {
+      WorkspaceErrorKind.emptyName => errorWorkspaceNameEmpty,
+      WorkspaceErrorKind.duplicateName => errorWorkspaceNameDuplicate,
+      WorkspaceErrorKind.duplicateFilePath => errorDuplicateWorkspaceFilePath,
+      WorkspaceErrorKind.invalidFilePath => errorInvalidLocalFilePath,
+      WorkspaceErrorKind.workspaceNotFound => error.message,
+      WorkspaceErrorKind.cannotDeleteLastWorkspace =>
+        errorWorkspaceCannotDeleteLast,
+      WorkspaceErrorKind.maxWorkspacesExceeded => errorWorkspaceMaxExceeded,
+      WorkspaceErrorKind.corruptSettingsPayload => errorSettingsCorrupt,
+      WorkspaceErrorKind.unsupportedSettingsSchemaVersion =>
+        errorSettingsUnsupportedVersion,
+      WorkspaceErrorKind.credentialStorageUnavailable =>
+        errorSettingsCredentialStorageUnavailable,
+      WorkspaceErrorKind.settingsPersistenceFailed => errorSettingsSaveFailed,
+    };
+  }
+
   /// Returns the localized empty-state hint for [tier] on single-tier tabs.
   String tierEmptyHint(TaskTier tier) {
     return switch (tier) {

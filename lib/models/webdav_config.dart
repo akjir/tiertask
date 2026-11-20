@@ -23,28 +23,19 @@ import 'tdf_timezone.dart';
 /// Supported display language modes in TierTask.
 enum AppLanguage {
   /// Follows the operating system language (`de` -> German, otherwise English default).
-  system(id: 0),
+  system(jsonValue: 'system'),
 
   /// Forces English (`en`).
-  english(id: 1),
+  english(jsonValue: 'english'),
 
   /// Forces German (`de`).
-  german(id: 2);
+  german(jsonValue: 'german');
 
   /// Creates an [AppLanguage] option.
-  const AppLanguage({required this.id});
+  const AppLanguage({required this.jsonValue});
 
-  /// Compact 2-bit binary identifier (`0`, `1`, or `2`).
-  final int id;
-
-  /// Resolves an [AppLanguage] from its binary [rawId], defaulting to [AppLanguage.system].
-  static AppLanguage fromId(int rawId) {
-    return switch (rawId) {
-      1 => AppLanguage.english,
-      2 => AppLanguage.german,
-      _ => AppLanguage.system,
-    };
-  }
+  /// Canonical lowercase JSON token persisted in `settings.json`.
+  final String jsonValue;
 
   /// Resolves the effective [Locale] (`en` or `de`) given the host [platformLocale].
   ///
@@ -60,31 +51,48 @@ enum AppLanguage {
             : const Locale('en'),
     };
   }
+
+  /// Parses a canonical JSON token into an [AppLanguage], or returns `null` when unknown.
+  static AppLanguage? tryParseJson(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    return switch (raw.trim().toLowerCase()) {
+      'system' => AppLanguage.system,
+      'english' => AppLanguage.english,
+      'german' => AppLanguage.german,
+      _ => null,
+    };
+  }
 }
 
 /// Supported color theme modes in TierTask.
 enum AppThemeMode {
   /// Follows the operating system brightness setting.
-  system(id: 0),
+  system(jsonValue: 'system'),
 
   /// Forces the light Material 3 theme.
-  light(id: 1),
+  light(jsonValue: 'light'),
 
   /// Forces the dark Material 3 theme.
-  dark(id: 2);
+  dark(jsonValue: 'dark');
 
   /// Creates an [AppThemeMode] option.
-  const AppThemeMode({required this.id});
+  const AppThemeMode({required this.jsonValue});
 
-  /// Compact 2-bit binary identifier (`0`, `1`, or `2`).
-  final int id;
+  /// Canonical lowercase JSON token persisted in `settings.json`.
+  final String jsonValue;
 
-  /// Resolves an [AppThemeMode] from its binary [rawId], defaulting to [AppThemeMode.system].
-  static AppThemeMode fromId(int rawId) {
-    return switch (rawId) {
-      1 => AppThemeMode.light,
-      2 => AppThemeMode.dark,
-      _ => AppThemeMode.system,
+  /// Parses a canonical JSON token into an [AppThemeMode], or returns `null` when unknown.
+  static AppThemeMode? tryParseJson(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    return switch (raw.trim().toLowerCase()) {
+      'system' => AppThemeMode.system,
+      'light' => AppThemeMode.light,
+      'dark' => AppThemeMode.dark,
+      _ => null,
     };
   }
 }
@@ -92,22 +100,26 @@ enum AppThemeMode {
 /// Supported Material 3 color theme palettes in TierTask.
 enum AppThemePalette {
   /// Chromium-inspired Material 3 slate blue-grey palette (default).
-  slate(id: 0),
+  slate(jsonValue: 'slate'),
 
   /// Signature TierTask navy and indigo palette.
-  navy(id: 1);
+  navy(jsonValue: 'navy');
 
   /// Creates an [AppThemePalette] option.
-  const AppThemePalette({required this.id});
+  const AppThemePalette({required this.jsonValue});
 
-  /// Compact 1-bit binary identifier (`0` or `1`).
-  final int id;
+  /// Canonical lowercase JSON token persisted in `settings.json`.
+  final String jsonValue;
 
-  /// Resolves an [AppThemePalette] from its binary [rawId], defaulting to [AppThemePalette.slate].
-  static AppThemePalette fromId(int rawId) {
-    return switch (rawId) {
-      1 => AppThemePalette.navy,
-      _ => AppThemePalette.slate,
+  /// Parses a canonical JSON token into an [AppThemePalette], or returns `null` when unknown.
+  static AppThemePalette? tryParseJson(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    return switch (raw.trim().toLowerCase()) {
+      'slate' => AppThemePalette.slate,
+      'navy' => AppThemePalette.navy,
+      _ => null,
     };
   }
 }
@@ -115,22 +127,26 @@ enum AppThemePalette {
 /// Supported time zone resolution modes in TierTask.
 enum AppTimeZoneMode {
   /// Uses the operating system's local time zone automatically.
-  automatic(id: 0),
+  automatic(jsonValue: 'automatic'),
 
   /// Uses a manually configured fixed UTC offset (`manualTimeZoneOffsetMinutes`).
-  manual(id: 1);
+  manual(jsonValue: 'manual');
 
   /// Creates an [AppTimeZoneMode] option.
-  const AppTimeZoneMode({required this.id});
+  const AppTimeZoneMode({required this.jsonValue});
 
-  /// Compact 1-bit binary identifier (`0` or `1`).
-  final int id;
+  /// Canonical lowercase JSON token persisted in `settings.json`.
+  final String jsonValue;
 
-  /// Resolves an [AppTimeZoneMode] from its binary [rawId], defaulting to [AppTimeZoneMode.automatic].
-  static AppTimeZoneMode fromId(int rawId) {
-    return switch (rawId) {
-      1 => AppTimeZoneMode.manual,
-      _ => AppTimeZoneMode.automatic,
+  /// Parses a canonical JSON token into an [AppTimeZoneMode], or returns `null` when unknown.
+  static AppTimeZoneMode? tryParseJson(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    return switch (raw.trim().toLowerCase()) {
+      'automatic' => AppTimeZoneMode.automatic,
+      'manual' => AppTimeZoneMode.manual,
+      _ => null,
     };
   }
 }
@@ -139,43 +155,45 @@ enum AppTimeZoneMode {
 /// queued tasks gain derived effective priority (`spec/TDF_SPEC_0.8.0.md` Section 9.5).
 enum DueLeadWindow {
   /// Disables deadline-driven effective priority (`W_due = null`).
-  off(id: 0, duration: null),
+  off(jsonValue: 'off', duration: null),
 
   /// Enables effective priority at exact deadline arrival (`W_due = 0s`).
-  atDue(id: 1, duration: Duration.zero),
+  atDue(jsonValue: 'at_due', duration: Duration.zero),
 
   /// Enables effective priority `12 hours` (`43,200s`) before `due`.
-  hours12(id: 2, duration: Duration(hours: 12)),
+  hours12(jsonValue: 'hours12', duration: Duration(hours: 12)),
 
   /// Normative default lead window of `24 hours` (`86,400s`) before `due`.
-  hours24(id: 3, duration: Duration(hours: 24)),
+  hours24(jsonValue: 'hours24', duration: Duration(hours: 24)),
 
   /// Enables effective priority `48 hours` (`172,800s`) before `due`.
-  hours48(id: 4, duration: Duration(hours: 48)),
+  hours48(jsonValue: 'hours48', duration: Duration(hours: 48)),
 
   /// Enables effective priority `7 days` (`604,800s`) before `due`.
-  days7(id: 5, duration: Duration(days: 7));
+  days7(jsonValue: 'days7', duration: Duration(days: 7));
 
   /// Creates a [DueLeadWindow] option.
-  const DueLeadWindow({required this.id, required this.duration});
+  const DueLeadWindow({required this.jsonValue, required this.duration});
 
   /// Lead-window duration passed to `TaskBoard`, or `null` when [off].
   final Duration? duration;
 
-  /// Compact 1-byte identifier (`0..5`) persisted in `TTW\x02` workspace records.
-  final int id;
+  /// Canonical lowercase JSON token persisted in `settings.json`.
+  final String jsonValue;
 
-  /// Resolves a [DueLeadWindow] from its persisted 1-byte [rawId], defaulting
-  /// unknown values to [DueLeadWindow.hours24].
-  static DueLeadWindow fromId(int rawId) {
-    return switch (rawId) {
-      0 => DueLeadWindow.off,
-      1 => DueLeadWindow.atDue,
-      2 => DueLeadWindow.hours12,
-      3 => DueLeadWindow.hours24,
-      4 => DueLeadWindow.hours48,
-      5 => DueLeadWindow.days7,
-      _ => DueLeadWindow.hours24,
+  /// Parses a canonical JSON token into a [DueLeadWindow], or returns `null` when unknown.
+  static DueLeadWindow? tryParseJson(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    return switch (raw.trim().toLowerCase()) {
+      'off' => DueLeadWindow.off,
+      'at_due' => DueLeadWindow.atDue,
+      'hours12' => DueLeadWindow.hours12,
+      'hours24' => DueLeadWindow.hours24,
+      'hours48' => DueLeadWindow.hours48,
+      'days7' => DueLeadWindow.days7,
+      _ => null,
     };
   }
 }
@@ -183,19 +201,19 @@ enum DueLeadWindow {
 /// Supported TDF persistence and synchronization modes in TierTask.
 enum StorageMode {
   /// Persists the `.tdf` file only on the local filesystem.
-  local(id: 0),
+  local(jsonValue: 'local'),
 
   /// Synchronizes the `.tdf` file only with a remote WebDAV server.
-  webdav(id: 1),
+  webdav(jsonValue: 'webdav'),
 
   /// Persists the `.tdf` file locally and synchronizes it with a WebDAV server.
-  both(id: 2);
+  both(jsonValue: 'both');
 
   /// Creates a [StorageMode] option.
-  const StorageMode({required this.id});
+  const StorageMode({required this.jsonValue});
 
-  /// Compact 2-bit binary identifier (`0`, `1`, or `2`).
-  final int id;
+  /// Canonical lowercase JSON token persisted in `settings.json`.
+  final String jsonValue;
 
   /// Whether local `.tdf` file persistence is enabled in this mode.
   bool get usesLocal => this == StorageMode.local || this == StorageMode.both;
@@ -203,12 +221,16 @@ enum StorageMode {
   /// Whether remote WebDAV synchronization is enabled in this mode.
   bool get usesWebDav => this == StorageMode.webdav || this == StorageMode.both;
 
-  /// Resolves a [StorageMode] from its binary [rawId], defaulting to [StorageMode.local].
-  static StorageMode fromId(int rawId) {
-    return switch (rawId) {
-      1 => StorageMode.webdav,
-      2 => StorageMode.both,
-      _ => StorageMode.local,
+  /// Parses a canonical JSON token into a [StorageMode], or returns `null` when unknown.
+  static StorageMode? tryParseJson(String? raw) {
+    if (raw == null) {
+      return null;
+    }
+    return switch (raw.trim().toLowerCase()) {
+      'local' => StorageMode.local,
+      'webdav' => StorageMode.webdav,
+      'both' => StorageMode.both,
+      _ => null,
     };
   }
 }

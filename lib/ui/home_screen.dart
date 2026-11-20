@@ -21,8 +21,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../l10n/app_localizations.dart';
+import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
 import '../models/location_state.dart';
+import '../models/settings_codec.dart';
 import '../models/storage_file_read_status.dart';
 import '../models/task_board.dart';
 import '../models/task_board_undo.dart';
@@ -179,8 +181,14 @@ class _ErrorStateBody extends StatelessWidget {
     if (report case final activeReport?) {
       return FileReadStatusCard(report: activeReport);
     }
+    final localizations = AppLocalizations.of(context);
+    final message = switch (error) {
+      final WorkspaceException workspaceError =>
+        localizations.localizeWorkspaceError(workspaceError),
+      _ => error.toString(),
+    };
     return Text(
-      error.toString(),
+      message,
       textAlign: TextAlign.center,
       style: TextStyle(
         color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -397,6 +405,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _syncBoundaryTimerFromProviders();
+        _consumeSettingsRecoveryNotice();
       }
     });
   }
@@ -458,6 +467,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _pageController = PageController(initialPage: _activeTier.index);
   }
 
+  /// Consumes and displays a one-shot settings recovery [SnackBar] when startup recovery occurred.
+  void _consumeSettingsRecoveryNotice() {
+    if (!mounted) {
+      return;
+    }
+    final notice = ref
+        .read(settingsRepositoryProvider)
+        .takeLastRecoveryNotice();
+    if (notice == null) {
+      return;
+    }
+    final localizations = AppLocalizations.of(context);
+    final message = switch (notice.kind) {
+      SettingsRecoveryKind.recoveredFromBackup =>
+        localizations.settingsRecoveredFromBackupNotice,
+      SettingsRecoveryKind.resetAfterQuarantine =>
+        localizations.settingsResetAfterQuarantineNotice,
+    };
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+    );
+  }
+
   /// Formats the localized undo [SnackBar] message for [notice].
   String _formatUndoMessage(
     AppLocalizations localizations,
@@ -474,6 +506,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         notice.taskTitle,
       ),
     };
+  }
+
+  /// Displays a one-shot recovery notice once [activeWorkspaceProvider] resolves asynchronously.
+  void _handleActiveWorkspaceAsyncChanged(
+    AsyncValue<AppWorkspace>? previous,
+    AsyncValue<AppWorkspace> next,
+  ) {
+    if (next.hasValue) {
+      _consumeSettingsRecoveryNotice();
+    }
   }
 
   /// Pauses [_boundaryTimer] in the background and catches up crossed boundaries on foreground resume.
@@ -802,6 +844,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ({AppWorkspace workspace, TaskBoard board, TdfLabel? activeLabel})
   _watchScaffoldState() {
     _registerBoundaryListeners();
+    ref.listen<AsyncValue<AppWorkspace>>(
+      activeWorkspaceProvider,
+      _handleActiveWorkspaceAsyncChanged,
+    );
     ref.listen<String?>(
       activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
       _handleWorkspaceChanged,
@@ -846,6 +892,14 @@ class _LandingContentSwitcher extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final workspaceAsync = ref.watch(activeWorkspaceProvider);
+    if (workspaceAsync.hasError) {
+      return _ErrorStateView(
+        error: workspaceAsync.error ?? StateError('Settings load failed.'),
+        onRetry: () => ref.invalidate(activeWorkspaceProvider),
+        onOpenSettings: onOpenSettings,
+      );
+    }
     final boardAsync = ref.watch(taskNotifierProvider);
     final activeFix = ref.watch(
       locationStateProvider.select(
@@ -857,7 +911,13 @@ class _LandingContentSwitcher extends ConsumerWidget {
           Center(child: CircularProgressIndicator(color: colorScheme.primary)),
       error: (error, _) => _ErrorStateView(
         error: error,
-        onRetry: () => ref.read(taskNotifierProvider.notifier).syncFromRemote(),
+        onRetry: () {
+          if (ref.read(activeWorkspaceProvider).hasError) {
+            ref.invalidate(activeWorkspaceProvider);
+            return;
+          }
+          ref.read(taskNotifierProvider.notifier).syncFromRemote();
+        },
         onOpenSettings: onOpenSettings,
       ),
       data: (board) {

@@ -17,6 +17,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../l10n/tier_localization_extension.dart';
 import '../../models/app_workspace.dart';
 import '../../models/webdav_config.dart';
 import '../../providers/workspace_providers.dart';
@@ -484,7 +485,7 @@ class _WorkspaceDialogState extends ConsumerState<WorkspaceDialog> {
     final localizations = AppLocalizations.of(context);
     setState(() {
       _isBusy = false;
-      _errorMessage = _localizeWorkspaceError(error, localizations);
+      _errorMessage = localizations.localizeWorkspaceError(error);
     });
   }
 
@@ -618,21 +619,3 @@ String _extractDisplayFileName(WebDavConfig config) {
       : config.localFilePath;
   return LocalFileRepository.extractFileNameFromPath(rawPath);
 }
-
-/// Maps a [WorkspaceException] to a localized error string from [localizations].
-String _localizeWorkspaceError(
-  WorkspaceException error,
-  AppLocalizations localizations,
-) => switch (error.kind) {
-  WorkspaceErrorKind.emptyName => localizations.errorWorkspaceNameEmpty,
-  WorkspaceErrorKind.duplicateName => localizations.errorWorkspaceNameDuplicate,
-  WorkspaceErrorKind.duplicateFilePath =>
-    localizations.errorDuplicateWorkspaceFilePath,
-  WorkspaceErrorKind.invalidFilePath => localizations.errorInvalidLocalFilePath,
-  WorkspaceErrorKind.workspaceNotFound => error.message,
-  WorkspaceErrorKind.cannotDeleteLastWorkspace =>
-    localizations.errorWorkspaceCannotDeleteLast,
-  WorkspaceErrorKind.maxWorkspacesExceeded =>
-    localizations.errorWorkspaceMaxExceeded,
-  WorkspaceErrorKind.corruptBinaryPayload => error.message,
-};

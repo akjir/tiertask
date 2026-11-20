@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +22,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_build_profile.dart';
+import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -1453,6 +1457,176 @@ task maxHoriz06 {
       );
     },
   );
+
+  testWidgets(
+    'HomeScreen consumes one-shot settings recovery notice both for early-resolved and async-resolved workspace loads',
+    (WidgetTester tester) async {
+      // Case 1: Workspace already resolves immediately before post-frame check (recoveredFromBackup):
+      final earlyRepo = InMemorySettingsRepository.withRecoveryNotice(
+        initialConfig: const WebDavConfig(language: AppLanguage.english),
+        recoveryNotice: const SettingsRecoveryNotice(
+          kind: SettingsRecoveryKind.recoveredFromBackup,
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(earlyRepo),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Settings were restored from backup after a file error.'),
+        findsOneWidget,
+        reason: 'Early-resolved recovery notice must display localized backup restoration SnackBar',
+      );
+      expect(
+        earlyRepo.takeLastRecoveryNotice(),
+        isNull,
+        reason: 'Recovery notice must be consumed once',
+      );
+
+      // Case 2: Workspace resolves asynchronously after HomeScreen mounts (resetAfterQuarantine):
+      final loadGate = Completer<void>();
+      final delayedRepo = _DelayedSettingsRepository(
+        initialConfig: const WebDavConfig(language: AppLanguage.english),
+        onLoad: () => loadGate.future,
+        recoveryNotice: const SettingsRecoveryNotice(
+          kind: SettingsRecoveryKind.resetAfterQuarantine,
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          key: UniqueKey(),
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(delayedRepo),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text('Corrupt settings were backed up and reset to defaults.'),
+        findsNothing,
+      );
+      loadGate.complete();
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Corrupt settings were backed up and reset to defaults.'),
+        findsOneWidget,
+        reason: 'Async-resolved recovery notice must trigger localized quarantine reset SnackBar via activeWorkspaceProvider listener',
+      );
+    },
+  );
+
+  testWidgets(
+    'HomeScreen displays localized unsupportedSettingsSchemaVersion error view and invalidates activeWorkspaceProvider on retry',
+    (WidgetTester tester) async {
+      var loadAttempts = 0;
+      var failWithFutureSchema = true;
+      final repo = _DelayedSettingsRepository(
+        initialConfig: const WebDavConfig(language: AppLanguage.english),
+        onLoad: () async {
+          loadAttempts++;
+          if (failWithFutureSchema) {
+            throw const WorkspaceException(
+              WorkspaceErrorKind.unsupportedSettingsSchemaVersion,
+              'Settings schemaVersion 2 is newer than supported version 1.',
+            );
+          }
+        },
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(repo),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: const WebDavConfig(language: AppLanguage.english),
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(loadAttempts, equals(1));
+      expect(
+        find.text(
+          'Settings were created by a newer TierTask version. Update TierTask to avoid data loss.',
+        ),
+        findsOneWidget,
+        reason:
+            'HomeScreen must display localized errorSettingsUnsupportedVersion',
+      );
+
+      // Retry must invalidate activeWorkspaceProvider and reload cleanly when error resolves:
+      failWithFutureSchema = false;
+      await tester.tap(find.widgetWithText(FilledButton, 'Retry'));
+      await tester.pumpAndSettle();
+
+      expect(
+        loadAttempts,
+        greaterThanOrEqualTo(2),
+        reason: 'Retry button must invalidate activeWorkspaceProvider and re-attempt settings load',
+      );
+      expect(
+        find.text(
+          'Settings were created by a newer TierTask version. Update TierTask to avoid data loss.',
+        ),
+        findsNothing,
+      );
+    },
+  );
+}
+
+class _DelayedSettingsRepository extends InMemorySettingsRepository {
+  _DelayedSettingsRepository({
+    WebDavConfig initialConfig = const WebDavConfig(),
+    required this.onLoad,
+    SettingsRecoveryNotice? recoveryNotice,
+  }) : _pendingNotice = recoveryNotice,
+       super(initialConfig);
+
+  final Future<void> Function() onLoad;
+  SettingsRecoveryNotice? _pendingNotice;
+  SettingsRecoveryNotice? _emittedNotice;
+
+  @override
+  Future<AppWorkspace> loadActiveWorkspace() async {
+    await onLoad();
+    _emittedNotice = _pendingNotice;
+    _pendingNotice = null;
+    return super.loadActiveWorkspace();
+  }
+
+  @override
+  SettingsRecoveryNotice? takeLastRecoveryNotice() {
+    final notice = _emittedNotice;
+    _emittedNotice = null;
+    return notice;
+  }
 }
 
 /// Pumps [TierTaskApp] with optional [config] and [initialTdf] overrides.

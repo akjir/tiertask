@@ -18,6 +18,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/app_workspace.dart';
+import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/services/base64_service.dart';
 
@@ -73,30 +74,32 @@ void main() {
       }
     });
 
-    test('encodes binary workspace payloads without quotes or backslashes for GKeyFile compatibility', () {
-      final workspaces = <AppWorkspace>[
-        const AppWorkspace(
-          id: 'tasks',
-          name: 'Tasks ÄÖÜß',
-          config: WebDavConfig(
-            serverUrl: 'https://cloud.example.com',
-            username: 'stefan',
-            password: r'p"a\\s$w0rd!',
-            filePath: 'tasks.tdf',
-            localFilePath: 'tasks.tdf',
-            storageMode: StorageMode.both,
-            language: AppLanguage.german,
-            themeMode: AppThemeMode.dark,
-            themePalette: AppThemePalette.slate,
+    test('encodes UTF-8 JSON workspace payloads without quotes or backslashes for GKeyFile compatibility', () {
+      final document = PersistedSettingsDocument(
+        schemaVersion: SettingsCodec.currentSchemaVersion,
+        activeWorkspaceId: 'tasks',
+        workspaces: const <AppWorkspace>[
+          AppWorkspace(
+            id: 'tasks',
+            name: 'Tasks ÄÖÜß',
+            config: WebDavConfig(
+              serverUrl: 'https://cloud.example.com',
+              username: 'stefan',
+              filePath: 'tasks.tdf',
+              localFilePath: 'tasks.tdf',
+              storageMode: StorageMode.both,
+              language: AppLanguage.german,
+              themeMode: AppThemeMode.dark,
+              themePalette: AppThemePalette.slate,
+            ),
           ),
-        ),
-      ];
-      final binaryPayload = AppWorkspace.encodePersistedState(
-        workspaces,
-        activeId: 'tasks',
+        ],
+      );
+      final jsonBytes = Uint8List.fromList(
+        utf8.encode(SettingsCodec.encodeJson(document)),
       );
 
-      final encoded = service.encodeBytes(binaryPayload);
+      final encoded = service.encodeBytes(jsonBytes);
       expect(encoded, isNotEmpty);
       expect(
         encoded.contains('"'),
@@ -111,7 +114,7 @@ void main() {
       final decodedBytes = service.decodeBytes(encoded);
       expect(
         decodedBytes,
-        equals(binaryPayload),
+        equals(jsonBytes),
         reason: 'Decoded workspace bytes must match the original payload',
       );
     });
