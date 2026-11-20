@@ -1,0 +1,1398 @@
+/* ==========================================================================
+   Prototype Harness Chrome (Preview Controls Only)
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  padding: 16px;
+}
+
+#tt2 [hidden] {
+  display: none !important;
+}
+
+#tt2 .preview {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  font-size: var(--font-size-control);
+}
+
+#tt2 .preview-group-label {
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .preview-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+  margin: 0 4px;
+}
+
+#tt2 .preview button {
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 12px;
+  font: inherit;
+  min-height: 36px;
+  cursor: pointer;
+}
+
+#tt2 .preview button[aria-pressed="true"] {
+  background: var(--soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#tt2 .preview-note {
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+  margin-left: auto;
+}
+
+#tt2 .stage {
+  display: flex;
+  justify-content: center;
+  min-height: 760px;
+}
+
+/* ==========================================================================
+   Layer 2: Primitives
+   Mirrors: packages/tiertask_ui/lib/src/primitives/
+   ========================================================================== */
+
+#tt2 .app {
+  width: 100%;
+  max-width: 1240px;
+  min-width: 0;
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-shell);
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--font-size-body);
+  line-height: 1.45;
+  overflow: hidden;
+  position: relative;
+}
+
+#tt2 .app button,
+#tt2 .app input,
+#tt2 .app select,
+#tt2 .app textarea {
+  font: inherit;
+  color: inherit;
+}
+
+#tt2 .app button,
+#tt2 .app summary {
+  cursor: pointer;
+}
+
+#tt2 .app :is(button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#tt2 .icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+#tt2 .eyebrow {
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+#tt2 .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--label-color, var(--accent));
+  flex-shrink: 0;
+}
+
+#tt2 .limit {
+  font-size: var(--font-size-meta);
+  padding: 5px 10px;
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+#tt2 .tag {
+  background: var(--bg);
+  padding: 2px 8px;
+  border-radius: var(--radius-tag);
+}
+
+#tt2 .primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 0;
+  border-radius: var(--radius-md);
+  min-height: var(--touch-target);
+  padding: 9px 14px;
+  font-weight: 550;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+#tt2 .secondary {
+  background: var(--panel);
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-md);
+  min-height: var(--touch-target);
+  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#tt2 .danger {
+  background: transparent;
+  border: var(--border-width) solid var(--danger-border);
+  color: var(--danger);
+  padding: 9px 13px;
+  border-radius: var(--radius-md);
+  min-height: var(--touch-target);
+  font-size: var(--font-size-control);
+}
+
+#tt2 .text-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 4px 0;
+  font-size: var(--font-size-meta);
+  min-height: 32px;
+}
+
+#tt2 .icon-button {
+  background: transparent;
+  border: 0;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  padding: 8px;
+}
+
+#tt2 .field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+  margin-bottom: 17px;
+  min-width: 0;
+}
+
+#tt2 .field input,
+#tt2 .field select,
+#tt2 .field textarea {
+  border: var(--border-width) solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  width: 100%;
+  padding: 10px;
+  min-height: 42px;
+}
+
+#tt2 .field textarea {
+  min-height: 75px;
+  resize: vertical;
+}
+
+#tt2 .field input[type="color"] {
+  width: 64px;
+  padding: 4px;
+}
+
+#tt2 .check-field {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: var(--font-size-control);
+  margin: 14px 0 20px;
+}
+
+#tt2 .check-field input {
+  margin-top: 4px;
+  accent-color: var(--accent);
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+
+#tt2 .check-field small {
+  display: block;
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+  margin-top: 4px;
+}
+
+#tt2 .notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--font-size-meta);
+  color: var(--accent);
+  margin: 12px 0;
+  min-height: 22px;
+  flex-wrap: wrap;
+}
+
+#tt2 .notice:empty {
+  margin: 0;
+  min-height: 0;
+}
+
+#tt2 .delete-question {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 14px;
+  background: var(--panel);
+  border: var(--border-width) solid var(--line);
+  border-radius: 10px;
+  font-size: var(--font-size-control);
+}
+
+#tt2 .edit-error {
+  font-size: var(--font-size-meta);
+  color: var(--danger);
+  margin-top: 12px;
+}
+
+#tt2 .edit-error:empty {
+  margin-top: 0;
+}
+
+#tt2 .edit-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 20px;
+  border-bottom: var(--border-width) solid var(--line);
+  padding-bottom: 10px;
+}
+
+#tt2 .edit-tabs button {
+  font-size: var(--font-size-control);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 10px 13px;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+#tt2 .edit-tabs button[aria-selected="true"] {
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#tt2 .edit-tabs button span,
+#tt2 .edit-counter {
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+  font-weight: 400;
+}
+
+#tt2 .edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+#tt2 .edit-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  font-size: var(--font-size-meta);
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  min-height: var(--touch-target);
+  overflow-wrap: anywhere;
+}
+
+#tt2 .edit-chip:has(input:checked) {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+
+#tt2 .edit-chip input,
+#tt2 .edit-step input,
+#tt2 .prereq-row input {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+#tt2 .day-pills {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+#tt2 .day-pills label {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 8px 6px;
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-meta);
+  min-height: var(--touch-target);
+}
+
+#tt2 .day-pills label:has(input:checked) {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+
+#tt2 .day-pills input {
+  accent-color: var(--accent);
+  margin: 0;
+  width: 14px;
+  height: 14px;
+}
+
+/* ==========================================================================
+   Layer 3: Adaptive Layout & Shell Patterns
+   Mirrors: packages/tiertask_ui/lib/src/layout/
+   ========================================================================== */
+
+#tt2 .chrome {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  min-height: var(--chrome-height);
+  padding: 12px 20px;
+  background: var(--panel);
+  border-bottom: var(--border-width) solid var(--line);
+}
+
+#tt2 .brand {
+  font-size: var(--font-size-brand);
+  letter-spacing: -0.5px;
+  font-weight: 650;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+
+#tt2 .mark {
+  display: grid;
+  gap: 3px;
+  width: 24px;
+}
+
+#tt2 .mark b {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+#tt2 .mark b:nth-child(2) {
+  width: 75%;
+  opacity: 0.7;
+}
+
+#tt2 .mark b:nth-child(3) {
+  width: 50%;
+  opacity: 0.4;
+}
+
+#tt2 .workspace {
+  padding-left: 16px;
+  border-left: var(--border-width) solid var(--line);
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .sync {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .menu {
+  display: none;
+  background: transparent;
+  border: 0;
+  min-height: var(--touch-target-mobile);
+  min-width: var(--touch-target-mobile);
+  align-items: center;
+  justify-content: center;
+}
+
+#tt2 .layout {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  min-height: 692px;
+}
+
+#tt2 .sidebar {
+  background: var(--panel);
+  border-right: var(--border-width) solid var(--line);
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 19px;
+  min-width: 0;
+}
+
+#tt2 .section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  margin-bottom: 7px;
+  gap: 8px;
+}
+
+#tt2 .nav-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  border-radius: var(--radius-md);
+  color: var(--muted);
+}
+
+#tt2 .nav-row[aria-current="page"] {
+  background: var(--soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+#tt2 .nav-row .count {
+  margin-left: auto;
+  font-size: var(--font-size-eyebrow);
+  white-space: nowrap;
+}
+
+#tt2 .nav-label-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .label-mode {
+  display: block;
+  font-size: var(--font-size-eyebrow);
+  font-weight: 400;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+#tt2 .sidebar-footer {
+  border-top: var(--border-width) solid var(--line);
+  padding: 13px 8px 0;
+  margin-top: auto;
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+}
+
+#tt2 .main {
+  padding: 26px 28px 18px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#tt2 .context-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 23px;
+  flex-wrap: wrap;
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+}
+
+#tt2 .context-bar select {
+  max-width: 100%;
+  min-width: 0;
+  padding: 7px 30px 7px 10px;
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+#tt2 h2 {
+  font-size: var(--font-size-page-title);
+  font-weight: 650;
+  letter-spacing: -0.8px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+#tt2 .heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+#tt2 .subtitle {
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+  margin-top: 7px;
+  max-width: 52ch;
+}
+
+#tt2 .back {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  min-height: var(--touch-target);
+  font-size: var(--font-size-meta);
+  margin-bottom: 14px;
+}
+
+#tt2 .tier-mobile {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+#tt2 .tier-mobile select {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  border: var(--border-width) solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  min-height: var(--touch-target-mobile);
+}
+
+#tt2 .shade {
+  display: none;
+}
+
+#tt2 .field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+#tt2 .edit-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+#tt2 .edit-grid.equal {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#tt2 .edit-column {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+#tt2 .edit-card,
+#tt2 .editor {
+  background: var(--panel);
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-card);
+  padding: 18px;
+  min-width: 0;
+}
+
+#tt2 .edit-card h3 {
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  margin: 0 0 17px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#tt2 .edit-card .field:last-child,
+#tt2 .edit-card .check-field:last-child {
+  margin-bottom: 0;
+}
+
+#tt2 .edit-card .field input,
+#tt2 .edit-card .field select {
+  font-size: var(--font-size-control);
+}
+
+#tt2 .edit-card .field-grid {
+  gap: 10px;
+}
+
+#tt2 .edit-card .field-grid .field {
+  margin-bottom: 14px;
+}
+
+#tt2 .edit-description {
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+  margin: 0 0 16px;
+}
+
+#tt2 .edit-divider {
+  border-top: var(--border-width) solid var(--line);
+  margin: 18px 0;
+}
+
+#tt2 .editor-section {
+  border-top: var(--border-width) solid var(--line);
+  padding-top: 14px;
+  margin-top: 16px;
+  font-size: var(--font-size-control);
+}
+
+#tt2 .editor-section summary {
+  min-height: var(--touch-target);
+}
+
+#tt2 .editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: var(--border-width) solid var(--line);
+  padding-top: 16px;
+  margin-top: 20px;
+}
+
+#tt2 .task-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 0 0;
+  margin-top: 18px;
+  border-top: var(--border-width) solid var(--line);
+}
+
+#tt2 .task-editor-actions > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#tt2 .manager-list {
+  display: grid;
+  gap: 10px;
+}
+
+#tt2 .manager-row {
+  border: var(--border-width) solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius-row);
+  padding: 13px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  min-height: 68px;
+}
+
+#tt2 .manager-row > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#tt2 .manager-row strong {
+  font-weight: 550;
+}
+
+#tt2 .manager-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .empty {
+  padding: 25px 0;
+  color: var(--muted);
+  font-size: var(--font-size-control);
+}
+
+/* ==========================================================================
+   Layer 4: Domain-Agnostic Composite Components
+   Mirrors: packages/tiertask_ui/lib/src/components/
+   ========================================================================== */
+
+#tt2 .tasks {
+  display: grid;
+  gap: 14px;
+}
+
+#tt2 .task {
+  padding: 17px 16px;
+  background: var(--panel);
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-card);
+  min-width: 0;
+}
+
+#tt2 .task-top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+#tt2 .complete {
+  border: 0;
+  background: transparent;
+  min-width: var(--touch-target-mobile);
+  min-height: var(--touch-target-mobile);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  margin: -5px 0 -5px -5px;
+}
+
+#tt2 .circle {
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tt2 .task-title {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: var(--font-size-card-title);
+  font-weight: 550;
+  padding: 0;
+  min-height: 34px;
+  overflow-wrap: anywhere;
+}
+
+#tt2 .task-edit-button {
+  font-size: var(--font-size-eyebrow);
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 6px 0;
+  min-height: 32px;
+}
+
+#tt2 .metadata {
+  display: flex;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  margin-left: 44px;
+  margin-top: 7px;
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+}
+
+#tt2 .task-detail {
+  border-top: var(--border-width) solid var(--line);
+  padding-top: 14px;
+  margin: 16px 0 0 44px;
+  font-size: var(--font-size-control);
+  color: var(--muted);
+}
+
+#tt2 .task-detail label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 36px;
+}
+
+#tt2 .task-detail input {
+  accent-color: var(--accent);
+}
+
+#tt2 .composer {
+  margin-top: auto;
+  padding-top: 28px;
+}
+
+#tt2 .composer form {
+  padding: 13px;
+  background: var(--panel);
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+#tt2 .entry-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+#tt2 .entry-row > input {
+  flex: 1;
+  min-width: 150px;
+  border: 0;
+  background: transparent;
+  padding: 9px 5px;
+  font-size: var(--font-size-card-title);
+  outline-offset: 0;
+}
+
+#tt2 .entry-options {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+#tt2 .entry-options select {
+  font-size: var(--font-size-meta);
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  padding: 9px;
+  max-width: 100%;
+  min-height: var(--touch-target);
+}
+
+#tt2 .composer-hint {
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+  margin: 9px 3px 0;
+  min-height: 17px;
+}
+
+#tt2 .label-picker {
+  margin-top: 10px;
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+}
+
+#tt2 .label-picker summary {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+}
+
+#tt2 .label-checks {
+  display: flex;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  padding: 10px 0;
+  border-top: var(--border-width) solid var(--line);
+}
+
+#tt2 .label-checks label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 36px;
+}
+
+#tt2 .label-checks input {
+  accent-color: var(--accent);
+}
+
+#tt2 .draft-extra {
+  padding-top: 12px;
+  border-top: var(--border-width) solid var(--line);
+  margin-top: 10px;
+}
+
+#tt2 .draft-extra summary {
+  min-height: 32px;
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+}
+
+#tt2 .draft-extra > div {
+  margin-top: 12px;
+}
+
+#tt2 .full-editor-button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-size-meta);
+  padding: 10px 0;
+  min-height: var(--touch-target);
+}
+
+#tt2 .edit-list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-bottom: var(--border-width) solid var(--line);
+  font-size: var(--font-size-control);
+}
+
+#tt2 .edit-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#tt2 .remove-item {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: var(--font-size-eyebrow);
+  padding: 6px 0 6px 6px;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+#tt2 .edit-add-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+#tt2 .edit-add-row input {
+  min-width: 80px;
+  width: 100%;
+  border: var(--border-width) solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: var(--bg);
+  font-size: var(--font-size-control);
+}
+
+#tt2 .edit-add-row .secondary {
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .record {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+  border-bottom: var(--border-width) solid var(--line);
+  padding: 12px 0;
+  margin-bottom: 13px;
+}
+
+#tt2 .record > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-control);
+}
+
+#tt2 .record strong {
+  font-weight: 500;
+}
+
+#tt2 .record small,
+#tt2 .record span {
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+}
+
+#tt2 .edit-empty {
+  font-size: var(--font-size-meta);
+  color: var(--muted);
+  padding: 0 0 22px;
+}
+
+#tt2 .prereq-list {
+  display: grid;
+  gap: 5px;
+}
+
+#tt2 .prereq-row {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: var(--font-size-meta);
+  padding: 8px 0;
+  min-height: var(--touch-target);
+}
+
+#tt2 .prereq-row span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+#tt2 .prereq-row small {
+  display: block;
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+#tt2 .edit-footnote {
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+  margin-top: 10px;
+  text-align: right;
+}
+
+/* ==========================================================================
+   Adaptive Breakpoints (Mobile Preview Toggle & Viewport Media Queries)
+   ========================================================================== */
+
+#tt2 .stage.mobile .app {
+  max-width: 390px;
+}
+
+#tt2 .stage.mobile .layout {
+  display: block;
+  min-height: 720px;
+}
+
+#tt2 .stage.mobile .sidebar {
+  display: none;
+}
+
+#tt2 .stage.mobile .main {
+  padding: 20px 16px 16px;
+  min-height: 720px;
+}
+
+#tt2 .stage.mobile .chrome {
+  padding: 10px;
+  gap: 8px;
+}
+
+#tt2 .stage.mobile .workspace {
+  display: none;
+}
+
+#tt2 .stage.mobile .menu {
+  display: flex;
+}
+
+#tt2 .stage.mobile .tier-mobile {
+  display: flex;
+}
+
+#tt2 .stage.mobile .entry-row {
+  display: block;
+}
+
+#tt2 .stage.mobile .entry-row > input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  font-size: 16px;
+  border-bottom: var(--border-width) solid var(--line);
+  padding: 10px 3px 14px;
+  margin-bottom: 12px;
+}
+
+#tt2 .stage.mobile .entry-options {
+  justify-content: space-between;
+}
+
+#tt2 .stage.mobile .context-bar {
+  margin-bottom: 16px;
+  gap: 6px;
+}
+
+#tt2 .stage.mobile .context-bar > span {
+  display: none;
+}
+
+#tt2 .stage.mobile .context-bar select {
+  flex: 1;
+}
+
+#tt2 .stage.mobile .task {
+  padding: 14px 12px;
+}
+
+#tt2 .stage.mobile .task-title {
+  font-size: var(--font-size-body);
+}
+
+#tt2 .stage.mobile .task-detail {
+  margin-left: 0;
+}
+
+#tt2 .stage.mobile .field-grid {
+  grid-template-columns: 1fr;
+}
+
+#tt2 .stage.mobile .editor,
+#tt2 .stage.mobile .edit-card {
+  padding: 16px;
+}
+
+#tt2 .stage.mobile .edit-grid,
+#tt2 .stage.mobile .edit-grid.equal {
+  grid-template-columns: 1fr;
+}
+
+#tt2 .stage.mobile .edit-card .field-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+#tt2 .stage.mobile .task-editor-actions {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+#tt2 .stage.mobile .task-editor-actions > div {
+  flex: 1;
+  justify-content: flex-end;
+}
+
+#tt2 .stage.mobile .edit-tabs {
+  gap: 3px;
+}
+
+#tt2 .stage.mobile .edit-tabs button {
+  padding: 9px 8px;
+  font-size: var(--font-size-meta);
+}
+
+#tt2 .stage.mobile .task-editor input:not([type="checkbox"]),
+#tt2 .stage.mobile .task-editor textarea {
+  font-size: 16px;
+}
+
+#tt2 .stage.mobile .drawer-open {
+  display: flex;
+  position: absolute;
+  top: var(--chrome-height);
+  left: 0;
+  bottom: 0;
+  width: min(300px, 100%);
+  z-index: 4;
+  border-right: var(--border-width) solid var(--line);
+  overflow-y: auto;
+}
+
+#tt2 .stage.mobile .shade {
+  display: block;
+  position: absolute;
+  inset: var(--chrome-height) 0 0;
+  background: var(--scrim);
+  border: 0;
+  z-index: 3;
+  width: 100%;
+}
+
+@media (max-width: 820px) {
+  #tt2 .edit-grid,
+  #tt2 .edit-grid.equal {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  #tt2 .layout {
+    display: block;
+    min-height: 720px;
+  }
+
+  #tt2 .sidebar {
+    display: none;
+  }
+
+  #tt2 .main {
+    padding: 20px 16px 16px;
+    min-height: 720px;
+  }
+
+  #tt2 .chrome {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  #tt2 .workspace {
+    display: none;
+  }
+
+  #tt2 .menu {
+    display: flex;
+  }
+
+  #tt2 .tier-mobile {
+    display: flex;
+  }
+
+  #tt2 .entry-row {
+    display: block;
+  }
+
+  #tt2 .entry-row > input {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    font-size: 16px;
+    border-bottom: var(--border-width) solid var(--line);
+    padding: 10px 3px 14px;
+    margin-bottom: 12px;
+  }
+
+  #tt2 .entry-options {
+    justify-content: space-between;
+  }
+
+  #tt2 .entry-options select {
+    flex: 1;
+  }
+
+  #tt2 .context-bar {
+    margin-bottom: 16px;
+    gap: 6px;
+  }
+
+  #tt2 .context-bar > span {
+    display: none;
+  }
+
+  #tt2 .context-bar select {
+    flex: 1;
+  }
+
+  #tt2 .task {
+    padding: 14px 12px;
+  }
+
+  #tt2 .task-title {
+    font-size: var(--font-size-body);
+  }
+
+  #tt2 .task-detail {
+    margin-left: 0;
+  }
+
+  #tt2 .field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #tt2 .editor,
+  #tt2 .edit-card {
+    padding: 16px;
+  }
+
+  #tt2 .edit-card .field-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #tt2 .task-editor-actions {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  #tt2 .task-editor-actions > div {
+    flex: 1;
+    justify-content: flex-end;
+  }
+
+  #tt2 .edit-tabs {
+    gap: 3px;
+  }
+
+  #tt2 .edit-tabs button {
+    padding: 9px 8px;
+    font-size: var(--font-size-meta);
+  }
+
+  #tt2 .task-editor input:not([type="checkbox"]),
+  #tt2 .task-editor textarea {
+    font-size: 16px;
+  }
+
+  #tt2 .drawer-open {
+    display: flex;
+    position: absolute;
+    top: var(--chrome-height);
+    left: 0;
+    bottom: 0;
+    width: min(300px, 100%);
+    z-index: 4;
+    border-right: var(--border-width) solid var(--line);
+    overflow-y: auto;
+  }
+
+  #tt2 .shade {
+    display: block;
+    position: absolute;
+    inset: var(--chrome-height) 0 0;
+    background: var(--scrim);
+    border: 0;
+    z-index: 3;
+    width: 100%;
+  }
+
+  #tt2 .preview-note {
+    margin-left: 0;
+  }
+}

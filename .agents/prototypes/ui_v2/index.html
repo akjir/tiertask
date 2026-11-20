@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="de" data-theme="calm" data-mode="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TierTask UI Prototype v2</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="components.css">
+</head>
+<body>
+  <div id="tt2">
+    <div class="preview" role="toolbar" aria-label="Vorschau-Einstellungen">
+      <span class="preview-group-label">Ansicht</span>
+      <button type="button" data-device="desktop" aria-pressed="true">Desktop</button>
+      <button type="button" data-device="mobile" aria-pressed="false">Mobil</button>
+
+      <span class="preview-divider" aria-hidden="true"></span>
+
+      <span class="preview-group-label">Theme</span>
+      <button type="button" data-theme-preset="calm" aria-pressed="true">Calm</button>
+      <button type="button" data-theme-preset="plum-umber" aria-pressed="false">Plum Umber</button>
+
+      <span class="preview-divider" aria-hidden="true"></span>
+
+      <span class="preview-group-label">Modus</span>
+      <button type="button" data-color-mode="light" aria-pressed="true">Hell</button>
+      <button type="button" data-color-mode="dark" aria-pressed="false">Dunkel</button>
+
+      <span class="preview-note">Prototyp · Offline Blueprint für packages/tiertask_ui</span>
+    </div>
+
+    <div class="stage">
+      <div class="app" aria-label="TierTask mit Labels, Orten und Schnelleingabe"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

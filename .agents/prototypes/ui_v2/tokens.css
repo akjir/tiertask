@@ -1,0 +1,111 @@
+/* ==========================================================================
+   Layer 1: Design Tokens & Theme Presets
+   Mirrors: packages/tiertask_ui/lib/src/tokens/
+   All text-on-surface contrast pairs verified >= 4.5:1 (WCAG AA).
+   ========================================================================== */
+
+:root {
+  /* Typography */
+  --font-sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-size-page-title: 28px;
+  --font-size-brand: 18px;
+  --font-size-card-title: 15px;
+  --font-size-body: 14px;
+  --font-size-control: 13px;
+  --font-size-meta: 12px;
+  --font-size-eyebrow: 11px;
+
+  /* Spacing & Sizing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --touch-target: 40px;
+  --touch-target-mobile: 44px;
+  --sidebar-width: 220px;
+  --chrome-height: 66px;
+
+  /* Radii & Borders */
+  --radius-tag: 5px;
+  --radius-sm: 7px;
+  --radius-md: 8px;
+  --radius-row: 11px;
+  --radius-card: 13px;
+  --radius-shell: 16px;
+  --radius-pill: 999px;
+  --border-width: 1px;
+
+  /* Breakpoint Reference: compact <= 720px, medium <= 820px, expanded > 820px */
+}
+
+/* --------------------------------------------------------------------------
+   Preset 1: Calm (Default)
+   -------------------------------------------------------------------------- */
+:root[data-theme="calm"][data-mode="light"] {
+  color-scheme: light;
+  --page-bg: #e7eef2;
+  --bg: #f0f4f7;
+  --panel: #ffffff;
+  --ink: #202c33;
+  --muted: #53646f;
+  --line: #d8e2e8;
+  --accent: #00648b;
+  --soft: #e0eff7;
+  --on-accent: #ffffff;
+  --danger: #a12a2a;
+  --danger-border: #b94242;
+  --scrim: rgba(0, 0, 0, 0.44);
+}
+
+:root[data-theme="calm"][data-mode="dark"] {
+  color-scheme: dark;
+  --page-bg: #111b20;
+  --bg: #19262d;
+  --panel: #243239;
+  --ink: #edf2f5;
+  --muted: #b5c4cc;
+  --line: #3e505a;
+  --accent: #9ac7e9;
+  --soft: #1c4255;
+  --on-accent: #132a36;
+  --danger: #ffc0c0;
+  --danger-border: #ebaaaa;
+  --scrim: rgba(0, 0, 0, 0.56);
+}
+
+/* --------------------------------------------------------------------------
+   Preset 2: Plum Umber (Purple & Brown)
+   -------------------------------------------------------------------------- */
+:root[data-theme="plum-umber"][data-mode="light"] {
+  color-scheme: light;
+  --page-bg: #ece5e0;
+  --bg: #f6f2ef;
+  --panel: #fffdfb;
+  --ink: #2c2220;
+  --muted: #63534f;
+  --line: #e2d7d2;
+  --accent: #6b3fa0;
+  --soft: #f0e7f8;
+  --on-accent: #ffffff;
+  --danger: #a12a2a;
+  --danger-border: #b94242;
+  --scrim: rgba(24, 16, 15, 0.46);
+}
+
+:root[data-theme="plum-umber"][data-mode="dark"] {
+  color-scheme: dark;
+  --page-bg: #161110;
+  --bg: #1f1918;
+  --panel: #2b2322;
+  --ink: #f3ecea;
+  --muted: #c3b4b0;
+  --line: #473a38;
+  --accent: #c5a3f5;
+  --soft: #362945;
+  --on-accent: #1e1429;
+  --danger: #ffb8b8;
+  --danger-border: #ebaaaa;
+  --scrim: rgba(12, 8, 8, 0.6);
+}
