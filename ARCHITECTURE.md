@@ -7,8 +7,8 @@
 
 | Layer | Path | Responsibility |
 | :--- | :--- | :--- |
-| Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, and `TaskTier` localization mappings. |
-| Models | `lib/models/` | Immutable domain data structures (`AppWorkspace`, `WorkspaceSummary`, `WorkspaceException`, `WorkspaceErrorKind`, `GeocodingCandidate`, `LocationFix`, `LocationSource`, `LocationSourceType`, `LocationState`, `LocationStatus`, `TaskTier`, `QuickAddMode`, `TaskItem`, `TaskOrigin`, `SubtaskItem`, `TaskHistoryEntry`, `TaskLink`, `RepeatUnit`, `TaskRepeatRule`, `ConditionGroup`, `TaskCondition`, `TdfLocation`, `TdfLabel`, `TdfColor`, `TdfQueueBlock`, `TdfDeletionRecord`, `TdfDeletedBlock`, `TdfTaskDependency`, `TdfCleanupMode`, `TdfBoundDeletionDecision`, `TdfRecoveryResolution`, `TdfSyncOutcomeException`, `TdfContextException`, `TdfErrorKind`, `TdfException`, `TdfLocalDateTime`, `TdfRepeatClock`, `TdfTimeZoneContext`, `TdfCalendar`, `TdfPayloadComparison`, `TaskBoard`, `TaskBoardEvaluator`, `TaskBoardMutator`, `TaskBoardQueueMutator`, `TaskBoardSync`, `TaskBoardReconciler`, `TaskBoardUndo`, `WorkspaceSyncState`, `AppLanguage`, `AppThemeMode`, `AppThemePalette`, `AppTimeZoneMode`, `DueLeadWindow`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation, mutation, undo, and three-way synchronization pipeline. |
+| Localization | `lib/l10n/` | External English (`app_en.arb`) and German (`app_de.arb`) resource bundles, generated `AppLocalizations` classes, `TaskTier` mappings, and per-file readability localization extensions. |
+| Models | `lib/models/` | Immutable domain data structures (`AppWorkspace`, `WorkspaceSummary`, `WorkspaceException`, `WorkspaceErrorKind`, `GeocodingCandidate`, `LocationFix`, `LocationSource`, `LocationSourceType`, `LocationState`, `LocationStatus`, `StorageFileTarget`, `StorageFileReadState`, `StorageReadFailureScope`, `StorageFileReadStatus`, `StorageFileReadReport`, `TaskTier`, `QuickAddMode`, `TaskItem`, `TaskOrigin`, `SubtaskItem`, `TaskHistoryEntry`, `TaskLink`, `RepeatUnit`, `TaskRepeatRule`, `ConditionGroup`, `TaskCondition`, `TdfLocation`, `TdfLabel`, `TdfColor`, `TdfQueueBlock`, `TdfDeletionRecord`, `TdfDeletedBlock`, `TdfTaskDependency`, `TdfCleanupMode`, `TdfBoundDeletionDecision`, `TdfRecoveryResolution`, `TdfSyncOutcomeException`, `TdfContextException`, `TdfErrorKind`, `TdfException`, `TdfLocalDateTime`, `TdfRepeatClock`, `TdfTimeZoneContext`, `TdfCalendar`, `TdfPayloadComparison`, `TaskBoard`, `TaskBoardEvaluator`, `TaskBoardMutator`, `TaskBoardQueueMutator`, `TaskBoardSync`, `TaskBoardReconciler`, `TaskBoardUndo`, `WorkspaceSyncState`, `AppLanguage`, `AppThemeMode`, `AppThemePalette`, `AppTimeZoneMode`, `DueLeadWindow`, `StorageMode`, `WebDavConfig`) and the dynamic $O(N)$ 6-tier derivation, mutation, undo, and three-way synchronization pipeline. |
 | Services | `lib/services/` | Opt-in diagnostic logging service (`AppLogger`, `AppLogSink`, `LogLevel`, `LogTag`) at DAG rank `0`, stateless single-pass $O(N)$ RFC 4648 Base64 codec (`Base64Service`, `Base64Exception`, `Base64ErrorKind`), Open Location Code parser and decoder (`PlusCodeService`, `PlusCodeArea`, `PlusCodeInput`), pure-Dart FIPS 180-4 SHA-256 digest service (`Sha256Service`), and TDF `0.8.0` lexical scanner (`TdfScanner`), structural parser (`TdfParser`, `TdfDirectiveParser`), and byte-exact canonical `LF` serializer (`TdfSerializer`, `TdfService`). |
 | Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), pure-Dart `dart:ffi` non-blocking host-local cooperative file locking and atomic temp-file publication (`HostFileLockManager`), local `.tdf` file and `tiertask.log` reads/writes (`LocalFileRepository`, `LocalFileOperations`, `LocalFileLogSink`), foreground location channel and bounded reverse/forward geocoding and GeoIP lookup (`MethodChannel` and `HttpClient`), and encrypted workspace and settings persistence (`flutter_secure_storage`). |
 | Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) across `workspace_providers.dart`, `config_providers.dart`, `local_file_watch_providers.dart`, `location_providers.dart`, `sync_providers.dart`, and `task_providers.dart` coordinating single-active-workspace unload/load transitions, parent-directory `.tdf` file watching, foreground lifecycle-aware location determination, locale and theme resolution, domain mutations, conflict/recovery resolution, and multi-stage repository synchronization (`TaskSyncPipeline`). |
@@ -48,11 +48,13 @@ tiertask/
 │   │   ├── app_localizations.dart
 │   │   ├── app_localizations_de.dart
 │   │   ├── app_localizations_en.dart
+│   │   ├── storage_file_read_localization_extension.dart
 │   │   └── tier_localization_extension.dart
 │   ├── models/
 │   │   ├── app_build_profile.dart
 │   │   ├── app_workspace.dart
 │   │   ├── location_state.dart
+│   │   ├── storage_file_read_status.dart
 │   │   ├── task_board.dart
 │   │   ├── task_board_evaluator.dart
 │   │   ├── task_board_mutator.dart
@@ -107,6 +109,7 @@ tiertask/
 │           ├── app_logo.dart
 │           ├── clearable_text_field.dart
 │           ├── condition_editor_controller.dart
+│           ├── file_read_status_info.dart
 │           ├── home_drawer.dart
 │           ├── home_tier_pane.dart
 │           ├── home_top_bar.dart
@@ -133,10 +136,13 @@ tiertask/
 │           ├── workspace_dialog.dart
 │           └── workspace_row_card.dart
 └── test/
+    ├── l10n/
+    │   └── storage_file_read_localization_extension_test.dart
     ├── models/
     │   ├── app_build_profile_test.dart
     │   ├── app_workspace_test.dart
     │   ├── location_state_test.dart
+    │   ├── storage_file_read_status_test.dart
     │   ├── task_board_downgrade_test.dart
     │   ├── task_board_evaluation_test.dart
     │   ├── task_board_lifecycle_test.dart
@@ -183,6 +189,7 @@ tiertask/
         └── widgets/
             ├── app_logo_test.dart
             ├── clearable_text_field_test.dart
+            ├── file_read_status_info_test.dart
             ├── label_color_picker_dialog_test.dart
             ├── label_hub_dialog_test.dart
             ├── quick_add_bar_test.dart
@@ -216,6 +223,7 @@ tiertask/
 | :--- | :--- |
 | `lib/l10n/app_en.arb` | External English (`en`, default fallback) translation bundle for all UI labels, tier headings, and error messages. |
 | `lib/l10n/app_de.arb` | External German (`de`) translation bundle for all UI labels, tier headings, and error messages. |
+| `lib/l10n/storage_file_read_localization_extension.dart` | Extension on `AppLocalizations` mapping `StorageFileReadReport` and `StorageFileReadStatus` values to localized target labels, dual-storage summaries, and per-file readability diagnostics. |
 | `lib/l10n/tier_localization_extension.dart` | Extension on `AppLocalizations` mapping `TaskTier` (`1`–`6`) to localized tier names, uppercase section headings, and empty-state hints. |
 
 ## Domain Models
@@ -225,6 +233,7 @@ tiertask/
 | `lib/models/app_build_profile.dart` | Defines `AppBuildProfile` (`release` and `dev`) resolving compile-time `TIERTASK_ENV` and `kReleaseMode` into isolated user data directories (`tiertask` vs `tiertask-dev`), secure storage keys (`t2_settings_v1` / `t2_sync_v1_` vs `t2_dev_settings_v1` / `t2_dev_sync_v1_`), and window titles. |
 | `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations, suggested `.tdf` filenames (`AppWorkspace.suggestFileName`), uniqueness checks, and compact `TTW\x02` binary serialization (`encodePersistedState`, `decodePersistedState`, `toBytes`, `fromBytes`) with lossless `TTW\x01` backward compatibility. |
 | `lib/models/location_state.dart` | Defines immutable `GeocodingCandidate`, `LocationFix`, `LocationSource` (`gps`, `system`, `internet`), `LocationSourceType` (`gps`, `address`, `plusCode`), `LocationState`, and `LocationStatus` (`disabled`, `searching`, `found`, `unavailable`) with WGS-84 coordinate formatting, 100-meter Haversine displacement gating, and 5-minute resume refresh cooldown evaluation. |
+| `lib/models/storage_file_read_status.dart` | Defines immutable `StorageFileTarget`, `StorageFileReadState`, `StorageReadFailureScope`, `StorageFileReadStatus`, and `StorageFileReadReport` models classifying per-file local and remote `.tdf` readability outcomes. |
 | `lib/models/task_board.dart` | Defines the immutable `TaskBoard` aggregate storing `Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed` tier slices, sorted `TdfLocation` and `TdfLabel` items, `TdfQueueBlock`, and `TdfDeletedBlock`, and delegating evaluation and mutations to `TaskBoardEvaluator`, `TaskBoardQueueMutator`, and `TaskBoardMutator`. |
 | `lib/models/task_board_evaluator.dart` | Stateless dynamic $O(N)$ 6-tier derivation engine (`TaskBoardEvaluator`, `NormalizedTierSlices`, `TaskBoardSlicesX`) implementing `spec/TDF_SPEC_0.8.0.md` Section 9 tier partitioning, configurable `due` lead-window promotion (`24` hours by default), WIP soft limits (`3` `Focus`, `5` `Ready`), `scoped` label queues, block-reason cleanup, 30-day UTC pruning, `subtasks auto-finish`, and label condition inheritance. |
 | `lib/models/task_board_mutator.dart` | Stateless task, location, and label CRUD, history, and recurrence mutation subsystem (`TaskBoardMutator`, `TaskBoardMutationSlicesX`) implementing `spec/TDF_SPEC_0.8.0.md` Section 10 task addition, editing (`dueLocalInput`/`suspendedLocalInput` `TDF-CAL-001` resolution, `due.anchor` preservation, and `priority` `passive` deadline resets), `(Y_cur, M_cur)` Mode 2 recurrence (`TDF-CAL-003`), completion, restoration, deletion, subtask toggling, `history` journal mutations, location and label management, block cleanup, and monotonic `modifiedAt` stamping. |
@@ -277,7 +286,7 @@ tiertask/
 | `lib/providers/config_providers.dart` | Defines `settingsRepositoryProvider`, `localFileRepositoryProvider`, `webDavRepositoryProvider`, `webDavConfigProvider` (`WebDavConfigNotifier`, including `updateDueLeadWindow`), `boundaryTickProvider` (`BoundaryTickNotifier`), `appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `diagnosticsEnabledProvider`, `appVersionRepositoryProvider`, `appFullVersionProvider`, and `linkLauncherRepositoryProvider`. |
 | `lib/providers/local_file_watch_providers.dart` | Defines `LocalFileWatchTarget`, `LocalFileWatcherNotifier`, `localFileWatchDebounceProvider`, `localFileWatchTargetProvider`, and `localFileWatcherProvider` for scoped parent-directory `.tdf` watching, `350 ms` trailing-edge debouncing, missing-directory rebinding, and `AppLifecycleState.resumed` catch-up reconciliation. |
 | `lib/providers/location_providers.dart` | Defines `locationEnabledProvider`, `locationRepositoryProvider`, `locationStateProvider`, and `LocationNotifier` managing foreground-only location determination with startup/enable triggers, 5-minute app-resume cooldown, 15-minute passive foreground refresh, and manual refresh (`refreshLocation`). |
-| `lib/providers/sync_providers.dart` | Defines `SyncState`, `syncStateProvider` (`SyncStateNotifier`), and the stateless multi-stage `tdf 0.8.0` synchronization pipeline (`TaskSyncPipeline`) coordinating stage-fair `In-Memory <-> Local File <-> WebDAV` merges (`TdfCleanupMode.deferred` vs. `finalStage`), host-locked local CAS retries, WebDAV `HTTP 412` retries, authoritative 30-day retention pruning (`TDF-PUB-004`), and localized conflict/recovery banners. |
+| `lib/providers/sync_providers.dart` | Defines `SyncState`, `syncStateProvider` (`SyncStateNotifier`), `StorageFileReadException`, `UnsupportedTdfVersionException`, and the stateless multi-stage `tdf 0.8.0` synchronization pipeline (`TaskSyncPipeline`) coordinating stage-fair merges, host-locked local and WebDAV `HTTP 412` CAS retries, 30-day pruning, per-file local/remote readability diagnostics, and conflict/recovery banners. |
 | `lib/providers/task_providers.dart` | Defines `taskNotifierProvider`, `taskUndoStateProvider`, `localFileWatchReadRetryDelayProvider`, `TaskUndoNotice`, `TaskUndoState`, `TaskUndoStateNotifier`, and `TaskNotifier` orchestrating domain mutations, in-memory `DueLeadWindow` re-evaluation, bounded 10-entry LIFO undo recovery (`undoLastAction`), `resolveDeletionConflicts` and `resolveRecovery` (`TDF-DEL-003` / `TDF-REC-002` with immediate undo stack invalidation), digest-gated external local reconciliation (`reconcileExternalLocalChanges`), workspace unload flushing, local file selection, remote wipe, and multi-stage synchronization. |
 | `lib/providers/workspace_providers.dart` | Defines `activeWorkspaceProvider`, `workspaceSummariesProvider`, `workspaceUnloadCoordinatorProvider` (`WorkspaceUnloadCoordinator`), and `ActiveWorkspaceNotifier` orchestrating single-active-workspace switching (`switchWorkspace`), creation (`createWorkspace`), renaming (`renameWorkspace`), and deletion (`deleteWorkspace`). |
 
@@ -295,6 +304,7 @@ tiertask/
 | `lib/ui/widgets/app_logo.dart` | Vector application logo widget (`AppLogo`) rendering the stacked tier bars and completion checkmark badge in the navigation drawer header. |
 | `lib/ui/widgets/clearable_text_field.dart` | Reusable text input widget (`ClearableTextField`) wrapping `TextField` or `TextFormField` with a focus-aware clear button (`Icons.close_rounded`) that resets the controller and preserves input focus. |
 | `lib/ui/widgets/condition_editor_controller.dart` | Mutable form state controller (`ConditionEditorController`) managing weekday (`day`), time window (`time`), GPS radius (`location`), and reset (`any`) condition edits for `EditTaskScreen` and `EditLabelScreen`. |
+| `lib/ui/widgets/file_read_status_info.dart` | Material 3 readability status widgets (`FileReadStatusCard` and `FileReadStatusBannerContent`) displaying local and remote `.tdf` file health and failure details on error views and banners. |
 | `lib/ui/widgets/home_drawer.dart` | Navigation drawer (`HomeDrawer`) and raw `.tdf` preview dialog (`showTdfMarkdownDialog`) displaying the `AppLogo` header, `DrawerWorkspaceCard`, alphabetical `Labels` filters with one-tap `LabelHubDialog` triggers and open task count badges, alphabetical `Locations` quick-access rows, sync/settings actions, and SemVer build footer. |
 | `lib/ui/widgets/home_tier_pane.dart` | Virtualized single-tier task list (`HomeTierPane`) and all-tasks search result list (`HomeAllTasksSearchList`) rendering `TierTaskPill` items with tier-grouped headers and empty-state hints. |
 | `lib/ui/widgets/home_top_bar.dart` | Top navigation bar (`HomeTopBar`) rendering the drawer menu button, animated active label title with one-tap `LabelHubDialog` trigger, expandable inline task search field, and `TopBarLocationButton`. |

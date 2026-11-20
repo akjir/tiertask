@@ -537,10 +537,15 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
 
       expect(remoteFetchCount, equals(1));
+      expect(find.text('Datei-Lesefehler'), findsOneWidget);
       expect(
-        find.text(
-          'Die Remote-Datei verwendet die nicht unterstützte TDF-Version 0.7.0 (erwartet: 0.8.0).',
-        ),
+        find.text('Die Remote-Datei konnte nicht gelesen werden.'),
+        findsOneWidget,
+      );
+      expect(find.text('Remote-Datei'), findsOneWidget);
+      expect(find.text('Nicht lesbar'), findsOneWidget);
+      expect(
+        find.text('Nicht unterstützte TDF-Version 0.7.0 (erwartet: 0.8.0).'),
         findsOneWidget,
       );
     },
@@ -1313,6 +1318,139 @@ task maxHoriz06 {
       expect(boundaryLogs, isNot(contains('Secret')));
       expect(boundaryLogs, isNot(contains('Confidential')));
       expect(boundaryLogs, isNot(contains('Private deferral note')));
+    },
+  );
+
+  testWidgets(
+    'HomeScreen error state and sync banner display per-file local and remote readability status in dual-storage mode',
+    (WidgetTester tester) async {
+      const bothDeConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        language: AppLanguage.german,
+        localFilePath: 'tasks.tdf',
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+      );
+      final remoteUriPath = bothDeConfig.resolveEndpointUri()?.path ?? '';
+      final remoteStore = <String, String>{
+        remoteUriPath: 'tdf 0.8.0\n\ntask broken0001 {\n',
+      };
+
+      // 1. Startup error in dual-storage mode: local intact, remote has format error.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(bothDeConfig),
+            ),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: bothDeConfig,
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            webDavRepositoryProvider.overrideWithValue(
+              FakeWebDavRepository(
+                config: bothDeConfig,
+                shouldFail: () => false,
+                remoteStore: remoteStore,
+              ),
+            ),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 20, 10),
+            ),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Datei-Lesefehler'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('file_read_status_card')),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Nur die Remote-Datei konnte nicht gelesen werden. Die lokale Datei ist intakt.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Lokale Datei'), findsOneWidget);
+      expect(find.text('OK'), findsOneWidget);
+      expect(find.text('Remote-Datei'), findsOneWidget);
+      expect(find.text('Nicht lesbar'), findsOneWidget);
+      expect(find.textContaining('Formatfehler'), findsOneWidget);
+
+      // 2. Loaded board in dual-storage mode: remote fails on subsequent edit, banner shows local OK + remote error.
+      const bothEnConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        language: AppLanguage.english,
+        localFilePath: 'tasks.tdf',
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+      );
+      var failRemote = false;
+      final onlineRemoteStore = <String, String>{
+        bothEnConfig.resolveEndpointUri()?.path ?? '': 'tdf 0.8.0\n',
+      };
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(bothEnConfig),
+            ),
+            localFileRepositoryProvider.overrideWithValue(
+              FakeLocalFileRepository(
+                config: bothEnConfig,
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            webDavRepositoryProvider.overrideWithValue(
+              FakeWebDavRepository(
+                config: bothEnConfig,
+                shouldFail: () => failRemote,
+                remoteStore: onlineRemoteStore,
+              ),
+            ),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 20, 10),
+            ),
+          ],
+          child: const TierTaskApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      failRemote = true;
+      await tester.tap(find.byKey(const ValueKey('add_task_fab')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('quick_add_input')),
+        'Offline Task',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('file_read_banner_content')),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Only the remote file could not be read. The local file is intact.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Local file: OK'), findsOneWidget);
+      expect(
+        find.textContaining('Remote file: Authentication failed.'),
+        findsOneWidget,
+      );
     },
   );
 }

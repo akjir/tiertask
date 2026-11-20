@@ -21,6 +21,7 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
+import 'package:tiertask/models/storage_file_read_status.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_evaluator.dart';
 import 'package:tiertask/models/task_item.dart';
@@ -207,24 +208,47 @@ void main() {
       equals(SyncState(isSyncing: false, lastSyncedAt: syncedAt).hashCode),
     );
 
-    notifier.setError('Connection failed');
+    const sampleReport = StorageFileReadReport(
+      local: StorageFileReadStatus.readable(StorageFileTarget.local),
+      remote: StorageFileReadStatus.unreadable(
+        StorageFileTarget.remote,
+        detail: 'Connection failed',
+      ),
+    );
+    notifier.setError('Connection failed', fileReadReport: sampleReport);
     expect(container.read(syncStateProvider).isSyncing, isFalse);
     expect(container.read(syncStateProvider).hasOpenConflict, isFalse);
     expect(
       container.read(syncStateProvider).errorMessage,
       equals('Connection failed'),
     );
+    expect(
+      container.read(syncStateProvider).fileReadReport,
+      equals(sampleReport),
+      reason: 'setError must store optional StorageFileReadReport',
+    );
 
     notifier.setConflict('Deletion conflict on taskA');
     expect(container.read(syncStateProvider).isSyncing, isFalse);
     expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
     expect(
+      container.read(syncStateProvider).fileReadReport,
+      isNull,
+      reason: 'setConflict must clear any prior fileReadReport',
+    );
+    expect(
       container.read(syncStateProvider).errorMessage,
       equals('Deletion conflict on taskA'),
     );
 
+    notifier.setError('Read failed', fileReadReport: sampleReport);
     notifier.clearError();
     expect(container.read(syncStateProvider).errorMessage, isNull);
+    expect(
+      container.read(syncStateProvider).fileReadReport,
+      isNull,
+      reason: 'clearError must clear fileReadReport',
+    );
     expect(
       container.read(syncStateProvider).hasOpenConflict,
       isFalse,
@@ -329,6 +353,15 @@ void main() {
         .deleteLabel('ops000OkD2');
 
     expect(container1.read(syncStateProvider).errorMessage, isNotNull);
+    expect(
+      container1.read(syncStateProvider).fileReadReport?.failureScope,
+      equals(StorageReadFailureScope.remoteFailedLocalOk),
+      reason: 'Offline remote fetch in StorageMode.both must report local OK and remote unreadable',
+    );
+    expect(
+      container1.read(syncStateProvider).fileReadReport?.local?.isReadable,
+      isTrue,
+    );
     expect(localTdf, contains('finished    2026-11-01 09:00'));
 
     remoteTdf = 'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n  task 000002OkD2\n}\n\nlabel ops000OkD2 {\n  name "Ops"\n  modified 2026-11-01 08:00:00\n}\n\ntask 000001OkD2 {\n  name "Task One"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n}\n\ntask 000002OkD2 {\n  name "Task Two Updated On Remote"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 09:30:00\n}\n';
@@ -424,10 +457,18 @@ void main() {
 
     expect(remoteFetchCount, equals(1));
     expect(remoteSaveCount, equals(0));
+    expect(caughtRemoteError, isA<UnsupportedTdfVersionException>());
+    if (caughtRemoteError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.remoteOnly),
+      );
+    }
     expect(
       caughtRemoteError.toString(),
       equals(
-        'Die Remote-Datei verwendet die nicht unterstützte TDF-Version 0.9.0 (erwartet: 0.8.0).',
+        'Die Remote-Datei konnte nicht gelesen werden.\n'
+        'Remote-Datei: Nicht unterstützte TDF-Version 0.9.0 (erwartet: 0.8.0).',
       ),
     );
 
@@ -460,10 +501,20 @@ void main() {
       caughtLocalError = error;
     }
     expect(localFailSaveCount, equals(0));
+    expect(caughtLocalError, isA<UnsupportedTdfVersionException>());
+    if (caughtLocalError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.localFailedRemoteOk),
+      );
+      expect(readError.report.remote?.isReadable, isTrue);
+    }
     expect(
       caughtLocalError.toString(),
       equals(
-        'The local file uses unsupported TDF version 0.7.0 (expected 0.8.0).',
+        'Only the local file could not be read. The remote file is intact.\n'
+        'Local file: Unsupported TDF version 0.7.0 (expected 0.8.0).\n'
+        'Remote file: OK',
       ),
     );
 
@@ -499,10 +550,19 @@ void main() {
       caughtBothFailError = error;
     }
     expect(bothFailRemoteFetchCount, equals(1));
+    expect(caughtBothFailError, isA<UnsupportedTdfVersionException>());
+    if (caughtBothFailError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.bothFailed),
+      );
+    }
     expect(
       caughtBothFailError.toString(),
       equals(
-        'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte TDF-Version 0.7.0 / 0.9.0 (erwartet: 0.8.0).',
+        'Die lokale Datei und die Remote-Datei konnten nicht gelesen werden.\n'
+        'Lokale Datei: Nicht unterstützte TDF-Version 0.7.0 (erwartet: 0.8.0).\n'
+        'Remote-Datei: Nicht unterstützte TDF-Version 0.9.0 (erwartet: 0.8.0).',
       ),
     );
   });
@@ -3229,6 +3289,451 @@ void main() {
     expect(recovered.allTasks.single.title, equals('Created On Fresh Remote'));
     expect(recovered.allTasks.single.id, isNot(equals(createdTaskId)));
   });
+
+  test('File read errors across local, remote, and both modes report per-file readability status for format, I/O, network, and mixed failures', () async {
+    final fixedClock = DateTime.utc(2026, 11, 20, 10);
+    const localEnConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      language: AppLanguage.english,
+      localFilePath: 'tasks.tdf',
+    );
+    const remoteEnConfig = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      language: AppLanguage.english,
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    const bothEnConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      language: AppLanguage.english,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    const bothDeConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      language: AppLanguage.german,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'https://cloud.example.com/dav/',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+
+    // 1. Local-only syntax error reports localOnly with format error line.
+    final localSyntaxContainer = createSyncContainer(
+      config: localEnConfig,
+      settingsRepository: InMemorySettingsRepository(localEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => 'tdf 0.8.0\n\ntask broken0001 {\n',
+      setLocal: (_) {},
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(localSyntaxContainer.dispose);
+    Object? localSyntaxError;
+    try {
+      await localSyntaxContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      localSyntaxError = error;
+    }
+    expect(localSyntaxError, isA<StorageFileReadException>());
+    expect(localSyntaxError, isNot(isA<UnsupportedTdfVersionException>()));
+    if (localSyntaxError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.localOnly),
+      );
+      expect(readError.report.local?.state, StorageFileReadState.unreadable);
+      expect(readError.report.local?.line, isNotNull);
+      expect(readError.report.remote, isNull);
+      expect(
+        localSyntaxContainer.read(syncStateProvider).fileReadReport,
+        equals(readError.report),
+      );
+      expect(
+        readError.toString(),
+        contains('The local file could not be read.'),
+      );
+      expect(readError.toString(), contains('Local file: Format error'));
+    }
+
+    // 2. Remote-only WebDAV network error reports remoteOnly.
+    final remoteNetworkContainer = createSyncContainer(
+      config: remoteEnConfig,
+      settingsRepository: InMemorySettingsRepository(remoteEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => '',
+      setLocal: (_) {},
+      getRemote: () => '',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(remoteNetworkContainer.dispose);
+    Object? remoteNetworkError;
+    try {
+      await remoteNetworkContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      remoteNetworkError = error;
+    }
+    expect(remoteNetworkError, isA<StorageFileReadException>());
+    if (remoteNetworkError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.remoteOnly),
+      );
+      expect(readError.report.local, isNull);
+      expect(readError.report.remote?.detail, contains('Network unreachable'));
+      expect(
+        readError.toString(),
+        equals(
+          'The remote file could not be read.\n'
+          'Remote file: Network unreachable',
+        ),
+      );
+    }
+
+    // 3. Dual mode: local intact + remote format error reports remoteFailedLocalOk.
+    final localOkRemoteSyntaxContainer = createSyncContainer(
+      config: bothDeConfig,
+      settingsRepository: InMemorySettingsRepository(bothDeConfig),
+      clock: () => fixedClock,
+      getLocal: () => 'tdf 0.8.0\n',
+      setLocal: (_) {},
+      getRemote: () => 'tdf 0.8.0\n\ntask broken0002 {\n',
+      setRemote: (_) {},
+      isOnline: () => true,
+    );
+    addTearDown(localOkRemoteSyntaxContainer.dispose);
+    Object? localOkRemoteSyntaxError;
+    try {
+      await localOkRemoteSyntaxContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      localOkRemoteSyntaxError = error;
+    }
+    expect(localOkRemoteSyntaxError, isA<StorageFileReadException>());
+    if (localOkRemoteSyntaxError
+        case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.remoteFailedLocalOk),
+      );
+      expect(readError.report.local?.isReadable, isTrue);
+      expect(readError.report.remote?.state, StorageFileReadState.unreadable);
+      expect(
+        readError.toString(),
+        contains(
+          'Nur die Remote-Datei konnte nicht gelesen werden. Die lokale Datei ist intakt.\n'
+          'Lokale Datei: OK\n'
+          'Remote-Datei: Formatfehler',
+        ),
+      );
+    }
+
+    // 4. Dual mode: local intact + remote unsupported version reports remoteFailedLocalOk and UnsupportedTdfVersionException.
+    final localOkRemoteUnsupportedContainer = createSyncContainer(
+      config: bothEnConfig,
+      settingsRepository: InMemorySettingsRepository(bothEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => 'tdf 0.8.0\n',
+      setLocal: (_) {},
+      getRemote: () => 'tdf 0.9.0\n',
+      setRemote: (_) {},
+      isOnline: () => true,
+    );
+    addTearDown(localOkRemoteUnsupportedContainer.dispose);
+    Object? localOkRemoteUnsupportedError;
+    try {
+      await localOkRemoteUnsupportedContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      localOkRemoteUnsupportedError = error;
+    }
+    expect(
+      localOkRemoteUnsupportedError,
+      isA<UnsupportedTdfVersionException>(),
+    );
+    if (localOkRemoteUnsupportedError
+        case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.remoteFailedLocalOk),
+      );
+      expect(readError.report.local?.isReadable, isTrue);
+      expect(
+        readError.report.remote?.state,
+        StorageFileReadState.unsupportedVersion,
+      );
+      expect(
+        readError.toString(),
+        equals(
+          'Only the remote file could not be read. The local file is intact.\n'
+          'Local file: OK\n'
+          'Remote file: Unsupported TDF version 0.9.0 (expected 0.8.0).',
+        ),
+      );
+    }
+
+    // 5. Dual mode: local format error + remote intact probes remote read-only and reports localFailedRemoteOk.
+    var remoteSaveCountOnLocalFail = 0;
+    final localSyntaxRemoteOkContainer = createSyncContainer(
+      config: bothEnConfig,
+      settingsRepository: InMemorySettingsRepository(bothEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => 'invalid header\n',
+      setLocal: (_) {},
+      getRemote: () => 'tdf 0.8.0\n',
+      setRemote: (_) => remoteSaveCountOnLocalFail++,
+      isOnline: () => true,
+    );
+    addTearDown(localSyntaxRemoteOkContainer.dispose);
+    Object? localSyntaxRemoteOkError;
+    try {
+      await localSyntaxRemoteOkContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      localSyntaxRemoteOkError = error;
+    }
+    expect(remoteSaveCountOnLocalFail, equals(0));
+    expect(localSyntaxRemoteOkError, isA<StorageFileReadException>());
+    if (localSyntaxRemoteOkError
+        case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.localFailedRemoteOk),
+      );
+      expect(readError.report.local?.state, StorageFileReadState.unreadable);
+      expect(readError.report.remote?.isReadable, isTrue);
+      expect(
+        readError.toString(),
+        contains(
+          'Only the local file could not be read. The remote file is intact.',
+        ),
+      );
+      expect(readError.toString(), contains('Remote file: OK'));
+    }
+
+    // 6. Dual mode: local I/O LocalFileException + remote intact reports localFailedRemoteOk.
+    final localIoRemoteOkContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(bothEnConfig),
+        ),
+        clockProvider.overrideWithValue(() => fixedClock),
+        localFileRepositoryProvider.overrideWithValue(
+          _FailingReadLocalRepository(
+            config: bothEnConfig,
+            readError: const LocalFileException('Permission denied'),
+          ),
+        ),
+        webDavRepositoryProvider.overrideWithValue(
+          _InMemorySyncWebDavRepository(
+            config: bothEnConfig,
+            getTdf: () => 'tdf 0.8.0\n',
+            setTdf: (_) {},
+            isOnline: () => true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(localIoRemoteOkContainer.dispose);
+    Object? localIoRemoteOkError;
+    try {
+      await localIoRemoteOkContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      localIoRemoteOkError = error;
+    }
+    expect(localIoRemoteOkError, isA<StorageFileReadException>());
+    if (localIoRemoteOkError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.localFailedRemoteOk),
+      );
+      expect(readError.report.local?.detail, equals('Permission denied'));
+      expect(readError.report.remote?.isReadable, isTrue);
+    }
+
+    // 7. Dual mode mixed errors: local unsupported version + remote offline reports bothFailed and UnsupportedTdfVersionException.
+    final mixedBothContainer = createSyncContainer(
+      config: bothEnConfig,
+      settingsRepository: InMemorySettingsRepository(bothEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => 'tdf 0.7.0\n',
+      setLocal: (_) {},
+      getRemote: () => 'tdf 0.8.0\n',
+      setRemote: (_) {},
+      isOnline: () => false,
+    );
+    addTearDown(mixedBothContainer.dispose);
+    Object? mixedBothError;
+    try {
+      await mixedBothContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      mixedBothError = error;
+    }
+    expect(mixedBothError, isA<UnsupportedTdfVersionException>());
+    if (mixedBothError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.bothFailed),
+      );
+      expect(
+        readError.report.local?.state,
+        StorageFileReadState.unsupportedVersion,
+      );
+      expect(readError.report.remote?.state, StorageFileReadState.unreadable);
+      expect(
+        readError.toString(),
+        equals(
+          'Both the local and remote files could not be read.\n'
+          'Local file: Unsupported TDF version 0.7.0 (expected 0.8.0).\n'
+          'Remote file: Network unreachable',
+        ),
+      );
+    }
+
+    // 8. Dual mode mixed errors (reversed): local syntax error + remote unsupported version reports bothFailed and UnsupportedTdfVersionException.
+    final mixedReversedContainer = createSyncContainer(
+      config: bothEnConfig,
+      settingsRepository: InMemorySettingsRepository(bothEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => 'tdf 0.8.0\n\ntask broken {\n',
+      setLocal: (_) {},
+      getRemote: () => 'tdf 0.9.0\n',
+      setRemote: (_) {},
+      isOnline: () => true,
+    );
+    addTearDown(mixedReversedContainer.dispose);
+    Object? mixedReversedError;
+    try {
+      await mixedReversedContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      mixedReversedError = error;
+    }
+    expect(mixedReversedError, isA<UnsupportedTdfVersionException>());
+    if (mixedReversedError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.bothFailed),
+      );
+      expect(readError.report.local?.state, StorageFileReadState.unreadable);
+      expect(
+        readError.report.remote?.state,
+        StorageFileReadState.unsupportedVersion,
+      );
+      expect(
+        readError.toString(),
+        contains('Both the local and remote files could not be read.'),
+      );
+      expect(
+        readError.toString(),
+        contains(
+          'Remote file: Unsupported TDF version 0.9.0 (expected 0.8.0).',
+        ),
+      );
+    }
+
+    // 9. Dual mode with unconfigured WebDAV skips remote probe and reports localOnly.
+    var unconfiguredRemoteFetches = 0;
+    const bothUnconfiguredWebDav = WebDavConfig(
+      storageMode: StorageMode.both,
+      language: AppLanguage.english,
+      localFilePath: 'tasks.tdf',
+    );
+    final unconfiguredRemoteContainer = createSyncContainer(
+      config: bothUnconfiguredWebDav,
+      settingsRepository: InMemorySettingsRepository(bothUnconfiguredWebDav),
+      clock: () => fixedClock,
+      getLocal: () => 'tdf 0.8.0\n\ntask broken {\n',
+      setLocal: (_) {},
+      getRemote: () {
+        unconfiguredRemoteFetches++;
+        return 'tdf 0.8.0\n';
+      },
+      setRemote: (_) {},
+      isOnline: () => true,
+    );
+    addTearDown(unconfiguredRemoteContainer.dispose);
+    Object? unconfiguredRemoteError;
+    try {
+      await unconfiguredRemoteContainer.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      unconfiguredRemoteError = error;
+    }
+    expect(unconfiguredRemoteFetches, equals(0));
+    expect(unconfiguredRemoteError, isA<StorageFileReadException>());
+    if (unconfiguredRemoteError case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.localOnly),
+      );
+      expect(readError.report.remote, isNull);
+    }
+
+    // 10. Stage 3 local read corruption after Stage 2 remote success reports localFailedRemoteOk without re-fetching remote.
+    var stage3LocalTdf = 'tdf 0.8.0\n';
+    const stage3RemoteUpdatedTdf =
+        'tdf 0.8.0\n\nqueue {\n  modified 2026-11-20 10:05:00\n  task stg3Tsk001\n}\n\ntask stg3Tsk001 {\n  name "Remote Task"\n  created 2026-11-20 10:05:00\n  modified 2026-11-20 10:05:00\n}\n';
+    var stage3RemoteFetches = 0;
+    final stage3Container = createSyncContainer(
+      config: bothEnConfig,
+      settingsRepository: InMemorySettingsRepository(bothEnConfig),
+      clock: () => fixedClock,
+      getLocal: () => stage3LocalTdf,
+      setLocal: (value) => stage3LocalTdf = value,
+      getRemote: () {
+        stage3RemoteFetches++;
+        if (stage3RemoteFetches == 1) {
+          stage3LocalTdf = 'tdf 0.8.0\n\ntask corruptAfterStage2 {\n';
+        }
+        return stage3RemoteUpdatedTdf;
+      },
+      setRemote: (_) {},
+      isOnline: () => true,
+    );
+    addTearDown(stage3Container.dispose);
+    Object? stage3Error;
+    try {
+      await stage3Container.read(taskNotifierProvider.future);
+    } on Object catch (error) {
+      stage3Error = error;
+    }
+    expect(
+      stage3RemoteFetches,
+      equals(1),
+      reason: 'Stage 3 local read failure must reuse verified Stage 2 remote status without re-fetching WebDAV',
+    );
+    expect(stage3Error, isA<StorageFileReadException>());
+    if (stage3Error case final StorageFileReadException readError) {
+      expect(
+        readError.report.failureScope,
+        equals(StorageReadFailureScope.localFailedRemoteOk),
+      );
+      expect(readError.report.local?.state, StorageFileReadState.unreadable);
+      expect(readError.report.remote?.isReadable, isTrue);
+    }
+  });
+}
+
+class _FailingReadLocalRepository extends LocalFileRepository {
+  _FailingReadLocalRepository({required super.config, required this.readError});
+
+  final LocalFileException readError;
+
+  @override
+  bool get canWatchDirectory => false;
+
+  @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    throw readError;
+  }
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
 }
 
 class _FailableSaveLocalRepository extends LocalFileRepository {

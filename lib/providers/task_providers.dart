@@ -1232,7 +1232,20 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         return false;
       }
       _logWatchError(workspaceId, config.storageMode, error);
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      final latestConfig = readCurrentConfig(ref);
+      final readFailure = await TaskSyncPipeline.buildLocalReadFailureException(
+        ref,
+        latestConfig,
+        localError: error,
+      );
+      if (!ref.mounted ||
+          readFailure == null ||
+          !_isSameActiveWatchTarget(workspaceId, config)) {
+        return false;
+      }
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(readFailure.toString(), fileReadReport: readFailure.report);
       return false;
     }
     if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
@@ -1376,7 +1389,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           );
         }
       }
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(
+            error.toString(),
+            fileReadReport: error is StorageFileReadException
+                ? error.report
+                : null,
+          );
     }
   }
 
@@ -2148,7 +2168,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         return false;
       }
       _logWatchError(workspaceId, config.storageMode, error);
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(
+            error.toString(),
+            fileReadReport: error is StorageFileReadException
+                ? error.report
+                : null,
+          );
       if (!localStageSucceeded) {
         _lastFailedWatchDigest = diskDigest;
         return false;

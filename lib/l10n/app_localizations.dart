@@ -1814,24 +1814,6 @@ abstract class AppLocalizations {
   /// **'Local TDF file renamed.'**
   String get localFileRenamedBanner;
 
-  /// Error message shown when the local TDF file uses a format version other than 0.8.0.
-  ///
-  /// In en, this message translates to:
-  /// **'The local file uses unsupported TDF version {version} (expected 0.8.0).'**
-  String errorUnsupportedTdfVersionLocal(String version);
-
-  /// Error message shown when the remote WebDAV TDF file uses a format version other than 0.8.0.
-  ///
-  /// In en, this message translates to:
-  /// **'The remote file uses unsupported TDF version {version} (expected 0.8.0).'**
-  String errorUnsupportedTdfVersionRemote(String version);
-
-  /// Error message shown when both the local and remote WebDAV TDF files use a format version other than 0.8.0.
-  ///
-  /// In en, this message translates to:
-  /// **'The local and remote files use unsupported TDF version {version} (expected 0.8.0).'**
-  String errorUnsupportedTdfVersionBoth(String version);
-
   /// Localized string for logLevelLabel
   ///
   /// In en, this message translates to:
@@ -2785,6 +2767,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Schedule anchor: {anchor}'**
   String taskInfoDueAnchorDetail(String anchor);
+
+  /// Heading shown when one or more TDF storage files cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'File Read Error'**
+  String get fileReadErrorTitle;
+
+  /// Label identifying the local TDF storage file in read status diagnostics.
+  ///
+  /// In en, this message translates to:
+  /// **'Local file'**
+  String get fileReadTargetLocal;
+
+  /// Label identifying the remote WebDAV TDF storage file in read status diagnostics.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote file'**
+  String get fileReadTargetRemote;
+
+  /// Compact status label indicating that a TDF storage file is intact and readable.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get fileReadStatusOk;
+
+  /// Compact status label indicating that a TDF storage file could not be read.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot be read'**
+  String get fileReadStatusUnreadable;
+
+  /// Summary shown in local-only mode when the local TDF file cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'The local file could not be read.'**
+  String get fileReadSummaryLocalOnly;
+
+  /// Summary shown in WebDAV-only mode when the remote TDF file cannot be read.
+  ///
+  /// In en, this message translates to:
+  /// **'The remote file could not be read.'**
+  String get fileReadSummaryRemoteOnly;
+
+  /// Summary shown in dual-storage mode when only the local TDF file failed and the remote file is intact.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the local file could not be read. The remote file is intact.'**
+  String get fileReadSummaryLocalFailedRemoteOk;
+
+  /// Summary shown in dual-storage mode when only the remote TDF file failed and the local file is intact.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the remote file could not be read. The local file is intact.'**
+  String get fileReadSummaryRemoteFailedLocalOk;
+
+  /// Summary shown in dual-storage mode when both the local and remote TDF files failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Both the local and remote files could not be read.'**
+  String get fileReadSummaryBothFailed;
+
+  /// Per-file error reason when a TDF file specifies an unsupported version header.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsupported TDF version {version} (expected 0.8.0).'**
+  String fileReadReasonUnsupportedVersion(String version);
+
+  /// Per-file error reason when a TDF file fails lexical, structural, or semantic validation.
+  ///
+  /// In en, this message translates to:
+  /// **'Format error (line {line}): {details}'**
+  String fileReadReasonTdfFormat(String line, String details);
+
+  /// Single-line target and status entry in a file read diagnostic summary.
+  ///
+  /// In en, this message translates to:
+  /// **'{target}: {status}'**
+  String fileReadStatusEntryLine(String target, String status);
 }
 
 class _AppLocalizationsDelegate

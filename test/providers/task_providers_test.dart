@@ -21,7 +21,9 @@ import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
+import 'package:tiertask/l10n/storage_file_read_localization_extension.dart';
 import 'package:tiertask/models/location_state.dart';
+import 'package:tiertask/models/storage_file_read_status.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
@@ -3138,11 +3140,102 @@ void main() {
         equals('Valid Active Task'),
       );
       final enL10n = lookupAppLocalizations(const Locale('en'));
+      const expectedReport = StorageFileReadReport(
+        local: StorageFileReadStatus.unsupportedVersion(
+          StorageFileTarget.local,
+          version: '99.0.0',
+        ),
+      );
       expect(
         container.read(syncStateProvider).errorMessage,
-        equals(enL10n.errorUnsupportedTdfVersionLocal('99.0.0')),
+        equals(enL10n.formatStorageFileReadMessage(expectedReport)),
         reason: 'UnsupportedTdfVersionException must set localized error banner in syncStateProvider',
       );
+      expect(
+        container.read(syncStateProvider).fileReadReport,
+        equals(expectedReport),
+        reason: 'UnsupportedTdfVersionException must populate structured fileReadReport in syncStateProvider',
+      );
+    });
+
+    test('reconcileExternalLocalChanges reports dual-storage fileReadReport on local read failure in StorageMode.both', () async {
+      var diskTdf = 'tdf 0.8.0\n';
+      var remoteTdf = 'tdf 0.8.0\n';
+      var failLocalRead = false;
+      var failRemoteFetch = false;
+      const bothConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        language: AppLanguage.english,
+        localFilePath: 'tasks.tdf',
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+      );
+      final settings = InMemorySettingsRepository(bothConfig);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settings),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 15, 10, 5),
+          ),
+          localFileRepositoryProvider.overrideWithValue(
+            _GateableWatchLocalRepository(
+              config: bothConfig,
+              maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+              getStore: () => diskTdf,
+              setStore: (value) => diskTdf = value,
+              onReadTdfWithDigest: () async {
+                if (failLocalRead) {
+                  throw const LocalFileException('Local file too large');
+                }
+              },
+            ),
+          ),
+          webDavRepositoryProvider.overrideWithValue(
+            _GatedCountingWebDavRepository(
+              config: bothConfig,
+              remoteFiles: <String, String>{
+                bothConfig.resolveEndpointUri()?.path ?? '': remoteTdf,
+              },
+              onFetch: () async {
+                if (failRemoteFetch) {
+                  throw const WebDavException('Server unreachable');
+                }
+              },
+              onSave: () {},
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      failLocalRead = true;
+      expect(await notifier.reconcileExternalLocalChanges(), isFalse);
+      final localFailState = container.read(syncStateProvider);
+      expect(
+        localFailState.fileReadReport?.failureScope,
+        equals(StorageReadFailureScope.localFailedRemoteOk),
+      );
+      expect(localFailState.fileReadReport?.remote?.isReadable, isTrue);
+      expect(localFailState.errorMessage, contains('Local file too large'));
+      expect(localFailState.errorMessage, contains('Remote file: OK'));
+
+      failRemoteFetch = true;
+      expect(await notifier.reconcileExternalLocalChanges(), isFalse);
+      final bothFailState = container.read(syncStateProvider);
+      expect(
+        bothFailState.fileReadReport?.failureScope,
+        equals(StorageReadFailureScope.bothFailed),
+      );
+      expect(
+        bothFailState.errorMessage,
+        contains('Both the local and remote files could not be read.'),
+      );
+      expect(bothFailState.errorMessage, contains('Server unreachable'));
     });
 
     test('disposing ProviderContainer mid-flight during _performResolutionSync and _runExternalWatchSynchronize completes cleanly without StateError', () async {

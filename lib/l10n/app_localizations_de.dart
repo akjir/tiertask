@@ -980,21 +980,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get localFileRenamedBanner => 'Lokale TDF-Datei umbenannt.';
 
   @override
-  String errorUnsupportedTdfVersionLocal(String version) {
-    return 'Die lokale Datei verwendet die nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
-  }
-
-  @override
-  String errorUnsupportedTdfVersionRemote(String version) {
-    return 'Die Remote-Datei verwendet die nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
-  }
-
-  @override
-  String errorUnsupportedTdfVersionBoth(String version) {
-    return 'Die lokale Datei und die Remote-Datei verwenden die nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
-  }
-
-  @override
   String get logLevelLabel => 'Minimales Protokoll-Level';
 
   @override
@@ -1562,5 +1547,55 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String taskInfoDueAnchorDetail(String anchor) {
     return 'Terminanker: $anchor';
+  }
+
+  @override
+  String get fileReadErrorTitle => 'Datei-Lesefehler';
+
+  @override
+  String get fileReadTargetLocal => 'Lokale Datei';
+
+  @override
+  String get fileReadTargetRemote => 'Remote-Datei';
+
+  @override
+  String get fileReadStatusOk => 'OK';
+
+  @override
+  String get fileReadStatusUnreadable => 'Nicht lesbar';
+
+  @override
+  String get fileReadSummaryLocalOnly =>
+      'Die lokale Datei konnte nicht gelesen werden.';
+
+  @override
+  String get fileReadSummaryRemoteOnly =>
+      'Die Remote-Datei konnte nicht gelesen werden.';
+
+  @override
+  String get fileReadSummaryLocalFailedRemoteOk =>
+      'Nur die lokale Datei konnte nicht gelesen werden. Die Remote-Datei ist intakt.';
+
+  @override
+  String get fileReadSummaryRemoteFailedLocalOk =>
+      'Nur die Remote-Datei konnte nicht gelesen werden. Die lokale Datei ist intakt.';
+
+  @override
+  String get fileReadSummaryBothFailed =>
+      'Die lokale Datei und die Remote-Datei konnten nicht gelesen werden.';
+
+  @override
+  String fileReadReasonUnsupportedVersion(String version) {
+    return 'Nicht unterstützte TDF-Version $version (erwartet: 0.8.0).';
+  }
+
+  @override
+  String fileReadReasonTdfFormat(String line, String details) {
+    return 'Formatfehler (Zeile $line): $details';
+  }
+
+  @override
+  String fileReadStatusEntryLine(String target, String status) {
+    return '$target: $status';
   }
 }

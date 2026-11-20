@@ -19,7 +19,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
+import '../l10n/storage_file_read_localization_extension.dart';
 import '../models/app_workspace.dart';
+import '../models/storage_file_read_status.dart';
 import '../models/task_board.dart';
 import '../models/task_board_sync.dart';
 import '../models/task_item.dart';
@@ -51,11 +53,15 @@ class SyncState {
     this.isSyncing = false,
     this.lastSyncedAt,
     this.errorMessage,
+    this.fileReadReport,
     this.hasOpenConflict = false,
   });
 
   /// Optional error message from the most recent synchronization attempt.
   final String? errorMessage;
+
+  /// Optional structured local/remote readability report when the latest error was a file read failure.
+  final StorageFileReadReport? fileReadReport;
 
   /// Whether an unresolved `TdfSyncOutcomeException` synchronization conflict is active.
   final bool hasOpenConflict;
@@ -72,11 +78,16 @@ class SyncState {
     DateTime? lastSyncedAt,
     String? errorMessage,
     bool clearError = false,
+    StorageFileReadReport? fileReadReport,
+    bool clearFileReadReport = false,
     bool? hasOpenConflict,
   }) => SyncState(
     isSyncing: isSyncing ?? this.isSyncing,
     lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
     errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+    fileReadReport: (clearError || clearFileReadReport)
+        ? null
+        : (fileReadReport ?? this.fileReadReport),
     hasOpenConflict:
         hasOpenConflict ?? (clearError ? false : this.hasOpenConflict),
   );
@@ -88,11 +99,17 @@ class SyncState {
           other.isSyncing == isSyncing &&
           other.lastSyncedAt == lastSyncedAt &&
           other.errorMessage == errorMessage &&
+          other.fileReadReport == fileReadReport &&
           other.hasOpenConflict == hasOpenConflict);
 
   @override
-  int get hashCode =>
-      Object.hash(isSyncing, lastSyncedAt, errorMessage, hasOpenConflict);
+  int get hashCode => Object.hash(
+    isSyncing,
+    lastSyncedAt,
+    errorMessage,
+    fileReadReport,
+    hasOpenConflict,
+  );
 }
 
 /// Manages [SyncState] updates during local and WebDAV load and save operations.
@@ -113,15 +130,19 @@ class SyncStateNotifier extends Notifier<SyncState> {
   void setConflict(String message) => state = state.copyWith(
     isSyncing: false,
     errorMessage: message,
+    clearFileReadReport: true,
     hasOpenConflict: true,
   );
 
-  /// Records a synchronization failure with [message].
-  void setError(String message) => state = state.copyWith(
-    isSyncing: false,
-    errorMessage: message,
-    hasOpenConflict: false,
-  );
+  /// Records a synchronization failure with [message] and optional structured [fileReadReport].
+  void setError(String message, {StorageFileReadReport? fileReadReport}) =>
+      state = state.copyWith(
+        isSyncing: false,
+        errorMessage: message,
+        fileReadReport: fileReadReport,
+        clearFileReadReport: fileReadReport == null,
+        hasOpenConflict: false,
+      );
 
   /// Records a successful synchronization at [timestamp].
   void setSuccess(DateTime timestamp) =>
@@ -143,6 +164,31 @@ class TaskSyncPipeline {
 
   /// Maximum number of compare-and-swap (CAS) merge retries before aborting local publication (`3`).
   static const int maxCasRetries = 3;
+
+  /// Builds a localized [StorageFileReadException] for a local read failure, probing remote read-only when dual-storage mode is active.
+  static Future<StorageFileReadException?> buildLocalReadFailureException(
+    Ref ref,
+    WebDavConfig config, {
+    required Object localError,
+    WorkspaceSyncState? syncState,
+    bool requireTargets = false,
+  }) {
+    final (utcNow, localNow) = resolveTimestamps(ref, null);
+    final willRunRemote =
+        config.storageMode.usesWebDav &&
+        (requireTargets || config.isWebDavConfigured);
+    return _resolveLocalReadFailure(
+      ref,
+      config,
+      localError,
+      mode: willRunRemote
+          ? _LocalReadErrorMode.probeRemote
+          : _LocalReadErrorMode.localOnly,
+      syncState: syncState,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
+  }
 
   /// Flushes [board] to the local `.tdf` file of [workspace] before unloading when local persistence is enabled.
   static Future<void> flushOutgoingLocalBoard(
@@ -182,6 +228,7 @@ class TaskSyncPipeline {
             ? TdfCleanupMode.finalStage
             : TdfCleanupMode.deferred,
         isAuthoritativeSource: isAuthoritative,
+        readErrorMode: _LocalReadErrorMode.raw,
         utcNow: utcNow,
         localNow: localNow,
       );
@@ -356,7 +403,14 @@ class TaskSyncPipeline {
         error: error,
       );
       if (ref.mounted) {
-        ref.read(syncStateProvider.notifier).setError(error.toString());
+        ref
+            .read(syncStateProvider.notifier)
+            .setError(
+              error.toString(),
+              fileReadReport: error is StorageFileReadException
+                  ? error.report
+                  : null,
+            );
       }
       rethrow;
     }
@@ -446,6 +500,7 @@ class TaskSyncPipeline {
         hasWorking: hasWorking,
         hasCandidate: hasCandidate,
         requireTargets: requireTargets,
+        willRunRemoteStage: willRunRemoteStage,
         cleanupMode: localCleanupMode,
         isAuthoritativeSource: !willRunRemoteStage,
         syncState: syncState,
@@ -538,24 +593,45 @@ class TaskSyncPipeline {
     return working;
   }
 
-  /// Checks whether the remote WebDAV `.tdf` file fails with [TdfErrorKind.unsupportedVersion] without mutating storage.
-  static Future<TdfException?> _checkRemoteUnsupportedVersion(
-    Ref ref,
-    WebDavConfig config,
-    DateTime utcNow,
-    DateTime localNow,
-  ) async {
-    try {
-      final rawRemote = await ref.read(webDavRepositoryProvider).fetchTdf();
-      if (rawRemote.trim().isNotEmpty) {
-        _parseTdf(ref, config, rawRemote, utcNow, localNow);
+  /// Classifies a file read or parse [error] on [target] into a structured [StorageFileReadStatus].
+  static StorageFileReadStatus _classifyReadError(
+    StorageFileTarget target,
+    Object error,
+  ) {
+    if (error is TdfException) {
+      if (error.kind == TdfErrorKind.unsupportedVersion) {
+        return StorageFileReadStatus.unsupportedVersion(
+          target,
+          version: error.sourceVersion ?? '?',
+          cause: error,
+        );
       }
-      return null;
-    } on TdfException catch (error) {
-      return error.kind == TdfErrorKind.unsupportedVersion ? error : null;
-    } on Object {
-      return null;
+      return StorageFileReadStatus.unreadable(
+        target,
+        detail: error.message,
+        line: error.line,
+        cause: error,
+      );
     }
+    if (error is LocalFileException) {
+      return StorageFileReadStatus.unreadable(
+        target,
+        detail: error.message,
+        cause: error,
+      );
+    }
+    if (error is WebDavException) {
+      return StorageFileReadStatus.unreadable(
+        target,
+        detail: error.toString(),
+        cause: error,
+      );
+    }
+    return StorageFileReadStatus.unreadable(
+      target,
+      detail: AppLogger.sanitize(error.toString()),
+      cause: error,
+    );
   }
 
   /// Writes the converged [candidateBoard] back to local storage after the remote WebDAV stage using the CAS-merge loop.
@@ -592,6 +668,7 @@ class TaskSyncPipeline {
       skipWriteIfUnchanged: !requireTargets,
       cleanupMode: TdfCleanupMode.finalStage,
       isAuthoritativeSource: false,
+      readErrorMode: _LocalReadErrorMode.remoteAlreadyReadable,
       utcNow: utcNow,
       localNow: localNow,
     );
@@ -603,43 +680,49 @@ class TaskSyncPipeline {
     return (published.board, updatedSyncState);
   }
 
-  /// Builds and logs a localized [UnsupportedTdfVersionException] for [localError] and/or [remoteError].
-  static UnsupportedTdfVersionException _createUnsupportedVersionException({
+  /// Builds and logs a localized [StorageFileReadException] (or [UnsupportedTdfVersionException]) for [localStatus] and/or [remoteStatus].
+  static StorageFileReadException _createFileReadException({
     required WebDavConfig config,
-    TdfException? localError,
-    TdfException? remoteError,
+    StorageFileReadStatus? localStatus,
+    StorageFileReadStatus? remoteStatus,
   }) {
+    final report = StorageFileReadReport(
+      local: localStatus,
+      remote: remoteStatus,
+    );
     final locale = config.language.resolveLocale(
       PlatformDispatcher.instance.locale,
     );
     final localizations = lookupAppLocalizations(locale);
-    final localVersion = localError?.sourceVersion;
-    final remoteVersion = remoteError?.sourceVersion;
-    final String versionLabel;
-    final String message;
-    if (localError != null && remoteError != null) {
-      versionLabel =
-          (localVersion != null &&
-              remoteVersion != null &&
-              localVersion != remoteVersion)
-          ? '$localVersion / $remoteVersion'
-          : (localVersion ?? remoteVersion ?? '?');
-      message = localizations.errorUnsupportedTdfVersionBoth(versionLabel);
-    } else if (localError != null) {
-      versionLabel = localVersion ?? '?';
-      message = localizations.errorUnsupportedTdfVersionLocal(versionLabel);
-    } else {
-      versionLabel = remoteVersion ?? '?';
-      message = localizations.errorUnsupportedTdfVersionRemote(versionLabel);
-    }
-    AppLogger.error(
+    final message = localizations.formatStorageFileReadMessage(report);
+    AppLogger.event(
+      LogLevel.error,
       LogTag.sync,
-      'Unsupported TDF version detected (local=$localVersion, remote=$remoteVersion): $message',
+      'sync.file_read_error',
+      fields: <String, Object?>{
+        'mode': config.storageMode.name,
+        'scope': report.failureScope?.name,
+        'local': localStatus?.state.name,
+        'remote': remoteStatus?.state.name,
+        if (localStatus?.unsupportedVersion != null)
+          'local_version': localStatus?.unsupportedVersion,
+        if (remoteStatus?.unsupportedVersion != null)
+          'remote_version': remoteStatus?.unsupportedVersion,
+      },
+      error: report.primaryCause,
     );
-    return UnsupportedTdfVersionException(
+    if (report.hasUnsupportedVersion) {
+      return UnsupportedTdfVersionException(
+        message,
+        version: report.unsupportedVersionLabel ?? '?',
+        report: report,
+        cause: _firstUnsupportedTdfCause(report),
+      );
+    }
+    return StorageFileReadException(
       message,
-      version: versionLabel,
-      cause: localError ?? remoteError,
+      report: report,
+      cause: report.primaryCause,
     );
   }
 
@@ -910,6 +993,25 @@ class TaskSyncPipeline {
     return ids;
   }
 
+  /// Fetches the remote `.tdf` document via [webDavRepo], wrapping any read failure into [StorageFileReadException].
+  static Future<String> _fetchRemoteOrThrow(
+    WebDavConfig config,
+    WebDavRepository webDavRepo, {
+    required bool hasLocalStage,
+  }) async {
+    try {
+      return await webDavRepo.fetchTdf();
+    } on Object catch (error) {
+      throw _createFileReadException(
+        config: config,
+        localStatus: hasLocalStage
+            ? const StorageFileReadStatus.readable(StorageFileTarget.local)
+            : null,
+        remoteStatus: _classifyReadError(StorageFileTarget.remote, error),
+      );
+    }
+  }
+
   /// Retains baseline labels known to [originLabels] (including tombstoned or retired labels when requested), preferring pre-reconcile [originLabels] revisions unless [baselineLabels] predates [originLabels].
   static List<TdfLabel> _filterBaselineLabels(
     List<TdfLabel> baselineLabels,
@@ -1002,6 +1104,19 @@ class TaskSyncPipeline {
       }
     }
     return result;
+  }
+
+  /// Extracts the first underlying unsupported-version [TdfException] from [report], if present.
+  static TdfException? _firstUnsupportedTdfCause(StorageFileReadReport report) {
+    if (report.local?.cause case final TdfException error
+        when error.kind == TdfErrorKind.unsupportedVersion) {
+      return error;
+    }
+    if (report.remote?.cause case final TdfException error
+        when error.kind == TdfErrorKind.unsupportedVersion) {
+      return error;
+    }
+    return null;
   }
 
   /// Returns `true` when any identifier in [ids] is contained in [targetSet].
@@ -1119,6 +1234,7 @@ class TaskSyncPipeline {
     required String rawRemote,
     required bool notModified,
     required bool hadPriorRemoteSync,
+    required bool hasLocalStage,
     required TaskBoard working,
     required TaskBoard? candidateOriginBoard,
     required bool hasWorking,
@@ -1151,8 +1267,9 @@ class TaskSyncPipeline {
             ref,
             config,
             rawRemote,
-            utcNow,
-            localNow,
+            hasLocalStage: hasLocalStage,
+            utcNow: utcNow,
+            localNow: localNow,
           );
           return (
             board: parsed,
@@ -1204,8 +1321,9 @@ class TaskSyncPipeline {
       ref,
       config,
       rawRemote,
-      utcNow,
-      localNow,
+      hasLocalStage: hasLocalStage,
+      utcNow: utcNow,
+      localNow: localNow,
     );
     final canonicalRemote = notModified
         ? (baselineTdf ?? _serializeTdf(ref, remoteBoard))
@@ -1267,47 +1385,56 @@ class TaskSyncPipeline {
     );
   }
 
-  /// Parses [rawLocal] and converts [TdfErrorKind.unsupportedVersion] into [UnsupportedTdfVersionException].
-  static Future<TaskBoard> _parseLocalOrThrow(
+  /// Parses [rawLocal], wrapping any read or format error into [StorageFileReadException] according to [readErrorMode].
+  static Future<TaskBoard?> _parseLocalOrThrow(
     Ref ref,
     WebDavConfig config,
-    String rawLocal,
-    bool requireTargets,
-    DateTime utcNow,
-    DateTime localNow,
-  ) async {
+    String rawLocal, {
+    required _LocalReadErrorMode readErrorMode,
+    WorkspaceSyncState? syncState,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
     try {
       return _parseTdf(ref, config, rawLocal, utcNow, localNow);
-    } on TdfException catch (error) {
-      if (error.kind != TdfErrorKind.unsupportedVersion) rethrow;
-      final remoteError =
-          (config.storageMode.usesWebDav &&
-              (requireTargets || config.isWebDavConfigured))
-          ? await _checkRemoteUnsupportedVersion(ref, config, utcNow, localNow)
-          : null;
-      throw _createUnsupportedVersionException(
-        config: config,
-        localError: error,
-        remoteError: remoteError,
+    } on Object catch (error) {
+      if (readErrorMode == _LocalReadErrorMode.raw) {
+        rethrow;
+      }
+      final exception = await _resolveLocalReadFailure(
+        ref,
+        config,
+        error,
+        mode: readErrorMode,
+        syncState: syncState,
+        utcNow: utcNow,
+        localNow: localNow,
       );
+      if (exception == null) {
+        return null;
+      }
+      throw exception;
     }
   }
 
-  /// Parses [rawRemote] and converts [TdfErrorKind.unsupportedVersion] into [UnsupportedTdfVersionException].
+  /// Parses [rawRemote], wrapping any read or format error into [StorageFileReadException].
   static TaskBoard _parseRemoteOrThrow(
     Ref ref,
     WebDavConfig config,
-    String rawRemote,
-    DateTime utcNow,
-    DateTime localNow,
-  ) {
+    String rawRemote, {
+    required bool hasLocalStage,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) {
     try {
       return _parseTdf(ref, config, rawRemote, utcNow, localNow);
-    } on TdfException catch (error) {
-      if (error.kind != TdfErrorKind.unsupportedVersion) rethrow;
-      throw _createUnsupportedVersionException(
+    } on Object catch (error) {
+      throw _createFileReadException(
         config: config,
-        remoteError: error,
+        localStatus: hasLocalStage
+            ? const StorageFileReadStatus.readable(StorageFileTarget.local)
+            : null,
+        remoteStatus: _classifyReadError(StorageFileTarget.remote, error),
       );
     }
   }
@@ -1329,6 +1456,48 @@ class TaskSyncPipeline {
         dueLeadWindow: config.dueLeadWindow.duration,
       );
 
+  /// Probes the remote WebDAV `.tdf` file read-only to report whether it is readable or unreadable alongside a local failure.
+  static Future<StorageFileReadStatus?> _probeRemoteReadStatus(
+    Ref ref,
+    WebDavConfig config, {
+    WorkspaceSyncState? syncState,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    if (!ref.mounted) {
+      return null;
+    }
+    try {
+      final webDavRepo = ref.read(webDavRepositoryProvider);
+      if (syncState != null) {
+        webDavRepo.seedCacheIfEmpty(
+          etag: syncState.remoteEtag,
+          lastModified: syncState.remoteLastModified,
+          content: syncState.lastSyncedRemoteTdf,
+        );
+      }
+      final rawRemote = await webDavRepo.fetchTdf();
+      if (!ref.mounted) {
+        return null;
+      }
+      final notModified = webDavRepo.lastFetchWasNotModified;
+      final effectiveRawRemote = switch ((
+        notModified,
+        rawRemote.trim().isEmpty,
+        syncState?.lastSyncedRemoteTdf,
+      )) {
+        (true, true, final stored?) => stored,
+        _ => rawRemote,
+      };
+      if (effectiveRawRemote.trim().isNotEmpty) {
+        _parseTdf(ref, config, effectiveRawRemote, utcNow, localNow);
+      }
+      return const StorageFileReadStatus.readable(StorageFileTarget.remote);
+    } on Object catch (error) {
+      return _classifyReadError(StorageFileTarget.remote, error);
+    }
+  }
+
   /// Executes the guarded local publication compare-and-swap (CAS) merge loop while holding `withExclusiveTargetLock` (`TDF-PUB-002`, `TDF-PUB-003`).
   static Future<({TaskBoard board, String serialized, String? digest})>
   _publishLocalWithCasLoop(
@@ -1345,6 +1514,8 @@ class TaskSyncPipeline {
     required bool skipWriteIfUnchanged,
     required TdfCleanupMode cleanupMode,
     required bool isAuthoritativeSource,
+    required _LocalReadErrorMode readErrorMode,
+    WorkspaceSyncState? syncStateForRemoteProbe,
     required DateTime utcNow,
     required DateTime localNow,
   }) async {
@@ -1355,8 +1526,16 @@ class TaskSyncPipeline {
       var loopAckGen = initialAckGeneration;
       var loopL = candidateBoard;
       for (var attempt = 0; attempt <= maxCasRetries; attempt++) {
-        final disk = await localRepo.readTdfWithDigest();
-        if (!ref.mounted) {
+        final disk = await _readLocalSnapshotOrThrow(
+          ref,
+          config,
+          localRepo,
+          readErrorMode: readErrorMode,
+          syncState: syncStateForRemoteProbe,
+          utcNow: utcNow,
+          localNow: localNow,
+        );
+        if (disk == null || !ref.mounted) {
           return (board: loopL, serialized: '', digest: loopDigest);
         }
         final digestMatches =
@@ -1392,9 +1571,10 @@ class TaskSyncPipeline {
           loopDigest: loopDigest,
           preTransactionGeneration: preTransactionGeneration,
           resolutions: resolutions,
-          requireTargets: requireTargets,
           cleanupMode: cleanupMode,
           isAuthoritativeSource: isAuthoritativeSource,
+          readErrorMode: readErrorMode,
+          syncStateForRemoteProbe: syncStateForRemoteProbe,
           utcNow: utcNow,
           localNow: localNow,
         );
@@ -1413,6 +1593,7 @@ class TaskSyncPipeline {
     Ref ref,
     WebDavConfig config, {
     required WebDavRepository webDavRepo,
+    required bool hasLocalStage,
     required TaskBoard working,
     required TaskBoard? initialBaseline,
     required int? initialAckGeneration,
@@ -1446,6 +1627,7 @@ class TaskSyncPipeline {
           ref,
           config,
           webDavRepo: webDavRepo,
+          hasLocalStage: hasLocalStage,
           loopWorking: loopWorking,
           loopBaseline: loopBaseline,
           loopAckGeneration: loopAckGeneration,
@@ -1462,6 +1644,39 @@ class TaskSyncPipeline {
       }
     }
     return (loopWorking, currentSerialized);
+  }
+
+  /// Reads the local `.tdf` file via [localRepo], wrapping read errors into [StorageFileReadException] per [readErrorMode].
+  static Future<({String content, String? digest, bool exists})?>
+  _readLocalSnapshotOrThrow(
+    Ref ref,
+    WebDavConfig config,
+    LocalFileRepository localRepo, {
+    required _LocalReadErrorMode readErrorMode,
+    WorkspaceSyncState? syncState,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    try {
+      return await localRepo.readTdfWithDigest();
+    } on Object catch (error) {
+      if (readErrorMode == _LocalReadErrorMode.raw) {
+        rethrow;
+      }
+      final exception = await _resolveLocalReadFailure(
+        ref,
+        config,
+        error,
+        mode: readErrorMode,
+        syncState: syncState,
+        utcNow: utcNow,
+        localNow: localNow,
+      );
+      if (exception == null) {
+        return null;
+      }
+      throw exception;
+    }
   }
 
   /// Rebases [candidate] onto [targetGeneration] after stripping untouched entities and `blocked` references retired by an already-acknowledged generation bump.
@@ -1521,6 +1736,51 @@ class TaskSyncPipeline {
       dueLeadWindow: dueLeadWindow,
       pruneExpiredCompleted: false,
     );
+  }
+
+  /// Resolves a local file read or parse [localError] into a [StorageFileReadException] according to [mode].
+  static Future<StorageFileReadException?> _resolveLocalReadFailure(
+    Ref ref,
+    WebDavConfig config,
+    Object localError, {
+    required _LocalReadErrorMode mode,
+    WorkspaceSyncState? syncState,
+    required DateTime utcNow,
+    required DateTime localNow,
+  }) async {
+    final localStatus = _classifyReadError(StorageFileTarget.local, localError);
+    switch (mode) {
+      case _LocalReadErrorMode.raw:
+      case _LocalReadErrorMode.localOnly:
+        return _createFileReadException(
+          config: config,
+          localStatus: localStatus,
+        );
+      case _LocalReadErrorMode.remoteAlreadyReadable:
+        return _createFileReadException(
+          config: config,
+          localStatus: localStatus,
+          remoteStatus: const StorageFileReadStatus.readable(
+            StorageFileTarget.remote,
+          ),
+        );
+      case _LocalReadErrorMode.probeRemote:
+        final remoteStatus = await _probeRemoteReadStatus(
+          ref,
+          config,
+          syncState: syncState,
+          utcNow: utcNow,
+          localNow: localNow,
+        );
+        if (remoteStatus == null || !ref.mounted) {
+          return null;
+        }
+        return _createFileReadException(
+          config: config,
+          localStatus: localStatus,
+          remoteStatus: remoteStatus,
+        );
+    }
   }
 
   /// Restores pre-cleanup snapshots from [storedBaseline] or [originTasks] for open tasks in [candidate] whose only change was automatic block-reason cleanup.
@@ -1598,9 +1858,10 @@ class TaskSyncPipeline {
     required String? loopDigest,
     required int preTransactionGeneration,
     required _SyncResolutions resolutions,
-    required bool requireTargets,
     required TdfCleanupMode cleanupMode,
     required bool isAuthoritativeSource,
+    required _LocalReadErrorMode readErrorMode,
+    WorkspaceSyncState? syncStateForRemoteProbe,
     required DateTime utcNow,
     required DateTime localNow,
   }) async {
@@ -1649,10 +1910,14 @@ class TaskSyncPipeline {
       ref,
       config,
       disk.content,
-      requireTargets,
-      utcNow,
-      localNow,
+      readErrorMode: readErrorMode,
+      syncState: syncStateForRemoteProbe,
+      utcNow: utcNow,
+      localNow: localNow,
     );
+    if (diskBoard == null || !ref.mounted) {
+      return (loopB, loopAckGen, loopL, loopDigest);
+    }
     final diskGen = diskBoard.deletedBlock.generation;
     final floorGen = preTransactionGeneration >= diskGen
         ? preTransactionGeneration
@@ -1699,6 +1964,7 @@ class TaskSyncPipeline {
     Ref ref,
     WebDavConfig config, {
     required WebDavRepository webDavRepo,
+    required bool hasLocalStage,
     required TaskBoard loopWorking,
     required TaskBoard? loopBaseline,
     required int? loopAckGeneration,
@@ -1710,7 +1976,11 @@ class TaskSyncPipeline {
   }) async {
     final timeZone = resolveWorkspaceTimeZone(config, utcNow);
     final dueLeadWindow = config.dueLeadWindow.duration;
-    final retryRaw = await webDavRepo.fetchTdf();
+    final retryRaw = await _fetchRemoteOrThrow(
+      config,
+      webDavRepo,
+      hasLocalStage: hasLocalStage,
+    );
     if (!ref.mounted) {
       return (loopBaseline, loopAckGeneration, loopWorking, '');
     }
@@ -1746,8 +2016,9 @@ class TaskSyncPipeline {
       ref,
       config,
       retryRaw,
-      utcNow,
-      localNow,
+      hasLocalStage: hasLocalStage,
+      utcNow: utcNow,
+      localNow: localNow,
     );
     final remoteGen = retryRemote.deletedBlock.generation;
     final floorGen = preTransactionGeneration >= remoteGen
@@ -2093,6 +2364,7 @@ class TaskSyncPipeline {
     required bool hasWorking,
     required bool hasCandidate,
     required bool requireTargets,
+    required bool willRunRemoteStage,
     required TdfCleanupMode cleanupMode,
     required bool isAuthoritativeSource,
     required WorkspaceSyncState syncState,
@@ -2103,10 +2375,19 @@ class TaskSyncPipeline {
     required void Function(TaskBoard mergedBoard)? onLocalStageMerged,
   }) async {
     final settingsRepository = ref.read(settingsRepositoryProvider);
-    final initialRead = await ref
-        .read(localFileRepositoryProvider)
-        .readTdfWithDigest();
-    if (!ref.mounted) {
+    final readErrorMode = willRunRemoteStage
+        ? _LocalReadErrorMode.probeRemote
+        : _LocalReadErrorMode.localOnly;
+    final initialRead = await _readLocalSnapshotOrThrow(
+      ref,
+      config,
+      ref.read(localFileRepositoryProvider),
+      readErrorMode: readErrorMode,
+      syncState: syncState,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
+    if (initialRead == null || !ref.mounted) {
       return (working, hasWorking, syncState);
     }
     final rawLocal = initialRead.content;
@@ -2122,10 +2403,14 @@ class TaskSyncPipeline {
         ref,
         config,
         rawLocal,
-        requireTargets,
-        utcNow,
-        localNow,
+        readErrorMode: readErrorMode,
+        syncState: syncState,
+        utcNow: utcNow,
+        localNow: localNow,
       );
+      if (localBoard == null || !ref.mounted) {
+        return (working, hasWorking, syncState);
+      }
       initialCanonicalDiskTdf = _serializeTdf(ref, localBoard);
       if (!nextHasWorking || localBoard.deletedBlock.generation > preStageGen) {
         preStageGen = localBoard.deletedBlock.generation;
@@ -2246,6 +2531,8 @@ class TaskSyncPipeline {
       skipWriteIfUnchanged: !requireTargets,
       cleanupMode: cleanupMode,
       isAuthoritativeSource: isAuthoritativeSource,
+      readErrorMode: readErrorMode,
+      syncStateForRemoteProbe: syncState,
       utcNow: utcNow,
       localNow: localNow,
     );
@@ -2288,12 +2575,19 @@ class TaskSyncPipeline {
   }) async {
     final settingsRepository = ref.read(settingsRepositoryProvider);
     final webDavRepo = ref.read(webDavRepositoryProvider);
+    final hasLocalStage =
+        config.storageMode.usesLocal &&
+        (requireTargets || config.isLocalConfigured);
     webDavRepo.seedCacheIfEmpty(
       etag: syncState.remoteEtag,
       lastModified: syncState.remoteLastModified,
       content: syncState.lastSyncedRemoteTdf,
     );
-    final rawRemote = await webDavRepo.fetchTdf();
+    final rawRemote = await _fetchRemoteOrThrow(
+      config,
+      webDavRepo,
+      hasLocalStage: hasLocalStage,
+    );
     if (!ref.mounted) {
       return (working, hasWorking, syncState);
     }
@@ -2317,6 +2611,7 @@ class TaskSyncPipeline {
       rawRemote: effectiveRawRemote,
       notModified: notModified,
       hadPriorRemoteSync: syncState.remoteSourceDigest != null,
+      hasLocalStage: hasLocalStage,
       working: working,
       candidateOriginBoard: candidateOriginBoard,
       hasWorking: hasWorking,
@@ -2388,6 +2683,7 @@ class TaskSyncPipeline {
         ref,
         config,
         webDavRepo: webDavRepo,
+        hasLocalStage: hasLocalStage,
         working: nextWorking,
         initialBaseline: casInitialBaseline,
         initialAckGeneration: casInitialAckGen,
@@ -2458,27 +2754,57 @@ class TaskSyncPipeline {
   }
 }
 
-/// Exception thrown when a local and/or remote `.tdf` file uses an unsupported TDF version.
+/// Exception thrown when one or both active `.tdf` files cannot be read or parsed.
 @immutable
-class UnsupportedTdfVersionException implements Exception {
-  /// Creates an [UnsupportedTdfVersionException].
-  const UnsupportedTdfVersionException(
+class StorageFileReadException implements Exception {
+  /// Creates a [StorageFileReadException].
+  const StorageFileReadException(
     this.message, {
-    required this.version,
+    required this.report,
     this.cause,
   });
 
-  /// Underlying [TdfException] that triggered this error.
-  final TdfException? cause;
+  /// Primary underlying exception that caused the read failure.
+  final Object? cause;
 
-  /// Localized user-facing description recommending an application update.
+  /// Localized user-facing summary and per-file readability status message.
   final String message;
 
-  /// Detected unsupported TDF version token.
-  final String version;
+  /// Structured readability report for every active storage target.
+  final StorageFileReadReport report;
 
   @override
   String toString() => message;
+}
+
+/// Exception thrown when a local and/or remote `.tdf` file uses an unsupported TDF version.
+@immutable
+class UnsupportedTdfVersionException extends StorageFileReadException {
+  /// Creates an [UnsupportedTdfVersionException].
+  const UnsupportedTdfVersionException(
+    super.message, {
+    required this.version,
+    required super.report,
+    TdfException? super.cause,
+  });
+
+  /// Detected unsupported TDF version token.
+  final String version;
+}
+
+/// Strategy for handling local `.tdf` read or parse errors during synchronization stages.
+enum _LocalReadErrorMode {
+  /// Propagates raw repository or parser exceptions (used for silent outgoing unload flushes).
+  raw,
+
+  /// Reports only the local file status without probing WebDAV.
+  localOnly,
+
+  /// Probes the remote WebDAV `.tdf` file read-only so both targets are reported.
+  probeRemote,
+
+  /// Reports local failure alongside an already-verified readable remote status (Stage 3 convergence).
+  remoteAlreadyReadable,
 }
 
 /// Bundles explicit deletion conflict, bound deletion decision, and recovery resolution maps for a synchronization pass.

@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added local schedule anchors on recurring deadlines to preserve month-end dates and local clock times across shorter months and daylight-saving transitions, shown in the task information dialog when clamped or shifted.
 - Added cooperative host-local file locking outside synced folders and conditional initial-creation guards on WebDAV uploads to prevent concurrent local or remote overwrites.
 - Added localized synchronization status banners for deletion conflicts, recovery prompts, and version history rollbacks.
+- Added per-file readability status diagnostics showing whether local, remote, or both files failed or remain intact.
 
 ### Changed
 

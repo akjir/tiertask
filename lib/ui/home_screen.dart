@@ -23,6 +23,7 @@ import 'package:material_ui/material_ui.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_workspace.dart';
 import '../models/location_state.dart';
+import '../models/storage_file_read_status.dart';
 import '../models/task_board.dart';
 import '../models/task_board_undo.dart';
 import '../models/task_item.dart';
@@ -38,6 +39,7 @@ import '../services/app_logger.dart';
 import 'edit_labels_screen.dart';
 import 'edit_locations_screen.dart';
 import 'settings_screen.dart';
+import 'widgets/file_read_status_info.dart';
 import 'widgets/home_drawer.dart';
 import 'widgets/home_tier_pane.dart';
 import 'widgets/home_top_bar.dart';
@@ -164,6 +166,30 @@ class _ErrorActionButtons extends StatelessWidget {
   }
 }
 
+/// Renders either the structured [FileReadStatusCard] or fallback error text inside [_ErrorStateView].
+class _ErrorStateBody extends StatelessWidget {
+  /// Creates an [_ErrorStateBody].
+  const _ErrorStateBody({required this.error, required this.report});
+
+  final Object error;
+  final StorageFileReadReport? report;
+
+  @override
+  Widget build(BuildContext context) {
+    if (report case final activeReport?) {
+      return FileReadStatusCard(report: activeReport);
+    }
+    return Text(
+      error.toString(),
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontSize: 14,
+      ),
+    );
+  }
+}
+
 /// Full-screen error state view when initial synchronization fails.
 class _ErrorStateView extends StatelessWidget {
   /// Creates an [_ErrorStateView].
@@ -173,7 +199,7 @@ class _ErrorStateView extends StatelessWidget {
     required this.onOpenSettings,
   });
 
-  final String error;
+  final Object error;
   final VoidCallback onOpenSettings;
   final VoidCallback onRetry;
 
@@ -181,29 +207,35 @@ class _ErrorStateView extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
-    final titleStyle = TextStyle(
-      color: colorScheme.onSurface,
-      fontSize: 18,
-      fontWeight: FontWeight.bold,
-    );
+    final report = switch (error) {
+      final StorageFileReadException readError => readError.report,
+      _ => null,
+    };
+    final icon = report?.failureScope == StorageReadFailureScope.localOnly
+        ? Icons.description_outlined
+        : Icons.cloud_off_rounded;
+    final title = report != null
+        ? localizations.fileReadErrorTitle
+        : localizations.syncErrorTitle;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off_rounded, size: 48, color: colorScheme.primary),
+            Icon(icon, size: 48, color: colorScheme.primary),
             const SizedBox(height: 12),
-            Text(localizations.syncErrorTitle, style: titleStyle),
-            const SizedBox(height: 8),
             Text(
-              error,
+              title,
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: colorScheme.onSurfaceVariant,
-                fontSize: 14,
+                color: colorScheme.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
+            const SizedBox(height: 8),
+            _ErrorStateBody(error: error, report: report),
             const SizedBox(height: 16),
             _ErrorActionButtons(
               onOpenSettings: onOpenSettings,
@@ -824,7 +856,7 @@ class _LandingContentSwitcher extends ConsumerWidget {
       loading: () =>
           Center(child: CircularProgressIndicator(color: colorScheme.primary)),
       error: (error, _) => _ErrorStateView(
-        error: error.toString(),
+        error: error,
         onRetry: () => ref.read(taskNotifierProvider.notifier).syncFromRemote(),
         onOpenSettings: onOpenSettings,
       ),
@@ -995,7 +1027,7 @@ class _QuickAddBottomBar extends StatelessWidget {
   }
 }
 
-/// Dismissible error banner shown when a background WebDAV sync fails.
+/// Dismissible error banner shown when a background WebDAV or local sync fails.
 class _SyncErrorBanner extends ConsumerWidget {
   /// Creates a [_SyncErrorBanner].
   const _SyncErrorBanner();
@@ -1005,33 +1037,67 @@ class _SyncErrorBanner extends ConsumerWidget {
     final hasBoardError = ref.watch(
       taskNotifierProvider.select((board) => board.hasError),
     );
-    final message = ref.watch(
-      syncStateProvider.select((state) => state.errorMessage),
+    final syncError = ref.watch(
+      syncStateProvider.select(
+        (state) => (message: state.errorMessage, report: state.fileReadReport),
+      ),
     );
+    final message = syncError.message;
     if (message == null || hasBoardError) {
       return const SizedBox.shrink();
     }
+    return _SyncErrorBannerCard(
+      message: message,
+      report: syncError.report,
+      onDismiss: () => ref.read(syncStateProvider.notifier).clearError(),
+    );
+  }
+}
+
+/// Visual banner strip inside [_SyncErrorBanner].
+class _SyncErrorBannerCard extends StatelessWidget {
+  /// Creates a [_SyncErrorBannerCard].
+  const _SyncErrorBannerCard({
+    required this.message,
+    required this.report,
+    required this.onDismiss,
+  });
+
+  final String message;
+  final VoidCallback onDismiss;
+  final StorageFileReadReport? report;
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final foregroundColor = colorScheme.onErrorContainer;
+    final activeReport = report;
     return Material(
       color: colorScheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
+          crossAxisAlignment: activeReport != null
+              ? CrossAxisAlignment.start
+              : CrossAxisAlignment.center,
           children: [
             Icon(Icons.warning_amber_rounded, size: 20, color: foregroundColor),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                message,
-                style: TextStyle(fontSize: 13, color: foregroundColor),
-              ),
+              child: activeReport != null
+                  ? FileReadStatusBannerContent(
+                      report: activeReport,
+                      foregroundColor: foregroundColor,
+                    )
+                  : Text(
+                      message,
+                      style: TextStyle(fontSize: 13, color: foregroundColor),
+                    ),
             ),
             IconButton(
               visualDensity: VisualDensity.compact,
               icon: Icon(Icons.close_rounded, size: 18, color: foregroundColor),
-              onPressed: () =>
-                  ref.read(syncStateProvider.notifier).clearError(),
+              onPressed: onDismiss,
             ),
           ],
         ),

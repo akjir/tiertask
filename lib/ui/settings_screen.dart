@@ -19,11 +19,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/storage_file_read_status.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
+import '../providers/sync_providers.dart';
 import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
 import '../repositories/local_file_repository.dart';
+import 'widgets/file_read_status_info.dart';
 import 'widgets/settings_local_storage_section.dart';
 import 'widgets/settings_preference_cards.dart';
 import 'widgets/settings_webdav_storage_section.dart';
@@ -115,7 +118,11 @@ class SettingsStatusBanner extends StatelessWidget {
     required this.message,
     required this.onFadeOutComplete,
     required this.tone,
+    this.fileReadReport,
   });
+
+  /// Optional structured per-file readability report for file read failures.
+  final StorageFileReadReport? fileReadReport;
 
   /// Whether the banner is currently opaque (`true`) or fading out (`false`).
   final bool isVisible;
@@ -136,6 +143,9 @@ class SettingsStatusBanner extends StatelessWidget {
     final foregroundColor = isError
         ? colorScheme.onErrorContainer
         : colorScheme.onPrimaryContainer;
+    final backgroundColor = isError
+        ? colorScheme.errorContainer
+        : colorScheme.primaryContainer;
     final icon = isError
         ? Icons.error_outline_rounded
         : Icons.check_circle_outline_rounded;
@@ -149,27 +159,12 @@ class SettingsStatusBanner extends StatelessWidget {
         duration: SettingsScreen.statusBannerFadeDuration,
         curve: Curves.easeOut,
         onEnd: onFadeOutComplete,
-        child: Material(
-          elevation: 4,
-          color: isError
-              ? colorScheme.errorContainer
-              : colorScheme.primaryContainer,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              spacing: 10,
-              children: [
-                Icon(icon, color: foregroundColor),
-                Expanded(
-                  child: Text(
-                    message,
-                    style: TextStyle(color: foregroundColor),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        child: _SettingsStatusBannerBody(
+          backgroundColor: backgroundColor,
+          fileReadReport: fileReadReport,
+          foregroundColor: foregroundColor,
+          icon: icon,
+          message: message,
         ),
       ),
     );
@@ -183,6 +178,54 @@ enum StatusBannerTone {
 
   /// Indicates a validation, filesystem, or synchronization failure.
   error,
+}
+
+/// Visual banner card rendered inside [SettingsStatusBanner].
+class _SettingsStatusBannerBody extends StatelessWidget {
+  /// Creates a [_SettingsStatusBannerBody].
+  const _SettingsStatusBannerBody({
+    required this.backgroundColor,
+    required this.fileReadReport,
+    required this.foregroundColor,
+    required this.icon,
+    required this.message,
+  });
+
+  final Color backgroundColor;
+  final StorageFileReadReport? fileReadReport;
+  final Color foregroundColor;
+  final IconData icon;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final report = fileReadReport;
+    return Material(
+      elevation: 4,
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: report != null
+              ? CrossAxisAlignment.start
+              : CrossAxisAlignment.center,
+          spacing: 10,
+          children: [
+            Icon(icon, color: foregroundColor),
+            Expanded(
+              child: report != null
+                  ? FileReadStatusBannerContent(
+                      report: report,
+                      foregroundColor: foregroundColor,
+                    )
+                  : Text(message, style: TextStyle(color: foregroundColor)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// State for [SettingsScreen].
@@ -202,6 +245,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   int _pendingPreferenceSaves = 0;
   WebDavConfig _preferences = const WebDavConfig();
   String? _statusBannerMessage;
+  StorageFileReadReport? _statusBannerReport;
   StatusBannerTone _statusTone = StatusBannerTone.success;
 
   @override
@@ -254,10 +298,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       SettingsStatusBanner(
                         isVisible: _isBannerVisible,
                         message: bannerMessage,
+                        fileReadReport: _statusBannerReport,
                         tone: _statusTone,
                         onFadeOutComplete: () {
                           if (mounted && !_isBannerVisible) {
-                            setState(() => _statusBannerMessage = null);
+                            setState(() {
+                              _statusBannerMessage = null;
+                              _statusBannerReport = null;
+                            });
                           }
                         },
                       ),
@@ -385,6 +433,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _bannerTimer = null;
     _isBannerVisible = false;
     _statusBannerMessage = null;
+    _statusBannerReport = null;
   }
 
   /// Executes an asynchronous storage [action] while setting [_isTesting] and showing [bannerSelector] on completion.
@@ -409,7 +458,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         return;
       }
       _isTesting = false;
-      _showStatusBanner(error.toString(), StatusBannerTone.error);
+      _showStatusBanner(
+        error.toString(),
+        StatusBannerTone.error,
+        fileReadReport: error is StorageFileReadException ? error.report : null,
+      );
     }
   }
 
@@ -579,12 +632,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// Displays [message] with [tone] and schedules an automatic fade-out.
-  void _showStatusBanner(String message, StatusBannerTone tone) {
+  /// Displays [message] with [tone] and optional [fileReadReport] and schedules an automatic fade-out.
+  void _showStatusBanner(
+    String message,
+    StatusBannerTone tone, {
+    StorageFileReadReport? fileReadReport,
+  }) {
     _bannerTimer?.cancel();
     setState(() {
       _statusTone = tone;
       _statusBannerMessage = message;
+      _statusBannerReport = fileReadReport;
       _isBannerVisible = true;
     });
     _bannerTimer = Timer(SettingsScreen.statusBannerDisplayDuration, () {

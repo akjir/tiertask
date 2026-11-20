@@ -1290,33 +1290,6 @@
   "@localFileRenamedBanner": {
     "description": "Status banner message shown after renaming the local TDF file."
   },
-  "errorUnsupportedTdfVersionLocal": "The local file uses unsupported TDF version {version} (expected 0.8.0).",
-  "@errorUnsupportedTdfVersionLocal": {
-    "description": "Error message shown when the local TDF file uses a format version other than 0.8.0.",
-    "placeholders": {
-      "version": {
-        "type": "String"
-      }
-    }
-  },
-  "errorUnsupportedTdfVersionRemote": "The remote file uses unsupported TDF version {version} (expected 0.8.0).",
-  "@errorUnsupportedTdfVersionRemote": {
-    "description": "Error message shown when the remote WebDAV TDF file uses a format version other than 0.8.0.",
-    "placeholders": {
-      "version": {
-        "type": "String"
-      }
-    }
-  },
-  "errorUnsupportedTdfVersionBoth": "The local and remote files use unsupported TDF version {version} (expected 0.8.0).",
-  "@errorUnsupportedTdfVersionBoth": {
-    "description": "Error message shown when both the local and remote WebDAV TDF files use a format version other than 0.8.0.",
-    "placeholders": {
-      "version": {
-        "type": "String"
-      }
-    }
-  },
   "logLevelLabel": "Minimum Log Level",
   "@logLevelLabel": {
     "description": "Localized string for logLevelLabel"
@@ -2111,6 +2084,79 @@
     "description": "Read-only detail line in the task info dialog showing the intended local schedule anchor when clamped or shifted across a DST transition.",
     "placeholders": {
       "anchor": {
+        "type": "String"
+      }
+    }
+  },
+  "fileReadErrorTitle": "File Read Error",
+  "@fileReadErrorTitle": {
+    "description": "Heading shown when one or more TDF storage files cannot be read."
+  },
+  "fileReadTargetLocal": "Local file",
+  "@fileReadTargetLocal": {
+    "description": "Label identifying the local TDF storage file in read status diagnostics."
+  },
+  "fileReadTargetRemote": "Remote file",
+  "@fileReadTargetRemote": {
+    "description": "Label identifying the remote WebDAV TDF storage file in read status diagnostics."
+  },
+  "fileReadStatusOk": "OK",
+  "@fileReadStatusOk": {
+    "description": "Compact status label indicating that a TDF storage file is intact and readable."
+  },
+  "fileReadStatusUnreadable": "Cannot be read",
+  "@fileReadStatusUnreadable": {
+    "description": "Compact status label indicating that a TDF storage file could not be read."
+  },
+  "fileReadSummaryLocalOnly": "The local file could not be read.",
+  "@fileReadSummaryLocalOnly": {
+    "description": "Summary shown in local-only mode when the local TDF file cannot be read."
+  },
+  "fileReadSummaryRemoteOnly": "The remote file could not be read.",
+  "@fileReadSummaryRemoteOnly": {
+    "description": "Summary shown in WebDAV-only mode when the remote TDF file cannot be read."
+  },
+  "fileReadSummaryLocalFailedRemoteOk": "Only the local file could not be read. The remote file is intact.",
+  "@fileReadSummaryLocalFailedRemoteOk": {
+    "description": "Summary shown in dual-storage mode when only the local TDF file failed and the remote file is intact."
+  },
+  "fileReadSummaryRemoteFailedLocalOk": "Only the remote file could not be read. The local file is intact.",
+  "@fileReadSummaryRemoteFailedLocalOk": {
+    "description": "Summary shown in dual-storage mode when only the remote TDF file failed and the local file is intact."
+  },
+  "fileReadSummaryBothFailed": "Both the local and remote files could not be read.",
+  "@fileReadSummaryBothFailed": {
+    "description": "Summary shown in dual-storage mode when both the local and remote TDF files failed."
+  },
+  "fileReadReasonUnsupportedVersion": "Unsupported TDF version {version} (expected 0.8.0).",
+  "@fileReadReasonUnsupportedVersion": {
+    "description": "Per-file error reason when a TDF file specifies an unsupported version header.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "fileReadReasonTdfFormat": "Format error (line {line}): {details}",
+  "@fileReadReasonTdfFormat": {
+    "description": "Per-file error reason when a TDF file fails lexical, structural, or semantic validation.",
+    "placeholders": {
+      "line": {
+        "type": "String"
+      },
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "fileReadStatusEntryLine": "{target}: {status}",
+  "@fileReadStatusEntryLine": {
+    "description": "Single-line target and status entry in a file read diagnostic summary.",
+    "placeholders": {
+      "target": {
+        "type": "String"
+      },
+      "status": {
         "type": "String"
       }
     }

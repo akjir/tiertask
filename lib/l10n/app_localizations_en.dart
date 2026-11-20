@@ -962,21 +962,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get localFileRenamedBanner => 'Local TDF file renamed.';
 
   @override
-  String errorUnsupportedTdfVersionLocal(String version) {
-    return 'The local file uses unsupported TDF version $version (expected 0.8.0).';
-  }
-
-  @override
-  String errorUnsupportedTdfVersionRemote(String version) {
-    return 'The remote file uses unsupported TDF version $version (expected 0.8.0).';
-  }
-
-  @override
-  String errorUnsupportedTdfVersionBoth(String version) {
-    return 'The local and remote files use unsupported TDF version $version (expected 0.8.0).';
-  }
-
-  @override
   String get logLevelLabel => 'Minimum Log Level';
 
   @override
@@ -1538,5 +1523,53 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String taskInfoDueAnchorDetail(String anchor) {
     return 'Schedule anchor: $anchor';
+  }
+
+  @override
+  String get fileReadErrorTitle => 'File Read Error';
+
+  @override
+  String get fileReadTargetLocal => 'Local file';
+
+  @override
+  String get fileReadTargetRemote => 'Remote file';
+
+  @override
+  String get fileReadStatusOk => 'OK';
+
+  @override
+  String get fileReadStatusUnreadable => 'Cannot be read';
+
+  @override
+  String get fileReadSummaryLocalOnly => 'The local file could not be read.';
+
+  @override
+  String get fileReadSummaryRemoteOnly => 'The remote file could not be read.';
+
+  @override
+  String get fileReadSummaryLocalFailedRemoteOk =>
+      'Only the local file could not be read. The remote file is intact.';
+
+  @override
+  String get fileReadSummaryRemoteFailedLocalOk =>
+      'Only the remote file could not be read. The local file is intact.';
+
+  @override
+  String get fileReadSummaryBothFailed =>
+      'Both the local and remote files could not be read.';
+
+  @override
+  String fileReadReasonUnsupportedVersion(String version) {
+    return 'Unsupported TDF version $version (expected 0.8.0).';
+  }
+
+  @override
+  String fileReadReasonTdfFormat(String line, String details) {
+    return 'Format error (line $line): $details';
+  }
+
+  @override
+  String fileReadStatusEntryLine(String target, String status) {
+    return '$target: $status';
   }
 }

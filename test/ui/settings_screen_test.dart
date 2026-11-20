@@ -401,10 +401,12 @@ task 000004OkD2 {
       await tester.pumpAndSettle();
 
       const errorText =
-          'Authentication failed. Please check username and app password. (HTTP 401)';
+          'Remote file: Authentication failed. Please check username and app password. (HTTP 401)';
+      expect(find.text('The remote file could not be read.'), findsOneWidget);
       expect(find.text(errorText), findsOneWidget);
       await tester.pump(const Duration(seconds: 3));
       await tester.pumpAndSettle();
+      expect(find.text('The remote file could not be read.'), findsNothing);
       expect(find.text(errorText), findsNothing);
     },
   );
@@ -938,6 +940,50 @@ task task000004 {
         liveBoard.focus.first.id,
         equals('task000004'),
         reason: 'Selecting 48h in Settings must immediately pull the 36h task into Focus in memory',
+      );
+    },
+  );
+
+  testWidgets(
+    'SettingsScreen status banner displays per-file local and remote readability status when testConnectionAndSync fails',
+    (WidgetTester tester) async {
+      const bothConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        language: AppLanguage.english,
+        localFilePath: 'tasks.tdf',
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+      );
+      var failRemote = false;
+      await _pumpSettingsApp(
+        tester,
+        config: bothConfig,
+        initialTdf: 'tdf 0.8.0\n',
+        shouldFailWebDav: () => failRemote,
+      );
+
+      failRemote = true;
+      await _tapVisible(
+        tester,
+        find.widgetWithText(FilledButton, 'Test Connection / Sync Now'),
+      );
+
+      expect(
+        find.byKey(const ValueKey('file_read_banner_content')),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Only the remote file could not be read. The local file is intact.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Local file: OK'), findsOneWidget);
+      expect(
+        find.textContaining('Remote file: Authentication failed.'),
+        findsOneWidget,
       );
     },
   );
