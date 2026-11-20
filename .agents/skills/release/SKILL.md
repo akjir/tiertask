@@ -1,50 +1,46 @@
 ---
 name: release
-description: Executes the official TierTask release workflow (verification gate, version alignment, concise user-facing CHANGELOG.md finalization, git commit, annotated vX.Y.Z tag, and push to origin). Triggered when the user types `/release <version>`, `/release v<version>`, or asks to release a version.
+description: Executes the official TierTask release workflow (pre-flight verify, version alignment, CHANGELOG.md finalization, commit, annotated vX.Y.Z tag, and push). Triggered by /release <version> or release requests.
 ---
 
 # TierTask Release Workflow (`/release`)
 
-Execute this workflow when instructed to release a version (for example, `/release 0.1.0` or `Release version 0.2.0`). Every verification check must pass before committing, tagging, and pushing.
+Run every verification gate before committing, tagging, and pushing.
 
-## 1. Pre-Flight Validation
-1. **Normalize Version & Tag:** Strip any leading `v` to obtain `<VERSION>` (`X.Y.Z`) and verify that it matches strict SemVer (`^\d+\.\d+\.\d+$`). Set `<TAG>` to `v<VERSION>` (for example, `0.1.0` -> `v0.1.0`).
-2. **Verify Branch:** Confirm `git branch --show-current` is `main` (or the target release branch).
-3. **Verify Tag Availability:** Run `git rev-parse -q --verify "refs/tags/v<VERSION>"`. Abort immediately if the tag already exists.
-4. **Pre-Release Verification Gate:** Run `python3 .agents/scripts/tiertask_dev.py verify --full`. Abort if any static check, formatter check, analyzer check, or test fails.
+## 1. Pre-Flight
+1. **Normalize Version:** Strip any leading `v` to get `<VERSION>` (`^\d+\.\d+\.\d+$`); set `<TAG>` = `v<VERSION>`. Abort if invalid.
+2. **Check Branch & Tree:** Confirm `git branch --show-current` is `main` (or the target release branch) and inspect `git status --short` so no unintended dirty or untracked files are swept into the release.
+3. **Check Tag:** Run `git rev-parse -q --verify "refs/tags/v<VERSION>"`; abort if the tag already exists.
+4. **Verify Baseline:** Run `python3 .agents/scripts/tiertask_dev.py verify --full`; abort on failure.
 
 ## 2. Version Alignment
-When bumping to a new `<VERSION>` (`X.Y.Z`), ensure all version-bearing files match `<VERSION>`:
-1. **`pubspec.yaml`:** Set `version: <VERSION>+<BUILD_NUMBER>` (incrementing `+<BUILD_NUMBER>` when bumping `<VERSION>`).
-2. **`lib/repositories/app_version_repository.dart`:** Set `static const String packageVersion = '<VERSION>';` and align version doc comments.
-3. **`linux/runner/CMakeLists.txt` & `linux/runner/generate_version.cmake`:** Set `PACKAGE_VERSION` to `<VERSION>`.
-4. **`windows/runner/CMakeLists.txt` & `windows/runner/generate_version.cmake`:** Set `PACKAGE_VERSION` to `<VERSION>`.
-5. **`android/app/build.gradle.kts`:** Update the fallback version string in `resolveFullAppVersion(..., flutter.versionName ?: "<VERSION>")`.
-6. **Tests:** Update `packageVersion` expectations in `test/repositories/app_version_repository_test.dart` if `<VERSION>` changed.
+Align all version-bearing files to `<VERSION>` (`X.Y.Z`):
+1. `pubspec.yaml`: `version: <VERSION>+<BUILD_NUMBER>` (increment `<BUILD_NUMBER>` when bumping `<VERSION>`).
+2. `lib/repositories/app_version_repository.dart`: `static const String packageVersion = '<VERSION>';` and matching version doc comments.
+3. `linux/runner/CMakeLists.txt` & `linux/runner/generate_version.cmake`: `PACKAGE_VERSION` = `<VERSION>`.
+4. `windows/runner/CMakeLists.txt` & `windows/runner/generate_version.cmake`: `PACKAGE_VERSION` = `<VERSION>`.
+5. `android/app/build.gradle.kts`: fallback string in `resolveFullAppVersion(..., flutter.versionName ?: "<VERSION>")`.
+6. `test/repositories/app_version_repository_test.dart`: update `packageVersion` expectations if `<VERSION>` changed.
 
 ## 3. Changelog Finalization (`CHANGELOG.md`)
-1. Review all bullets under `## [Unreleased]` against `changelog-updater` rules:
-   - Keep only changes relevant to end users that affect observable program behavior.
-   - Remove internal formatting, code structuring, or refactoring notes.
-   - Rewrite any code-specific wording into concise, user-focused statements without class, function, or file names.
-2. Replace `## [Unreleased]` with `## [<VERSION>] - <YYYY-MM-DD>` using the current local date.
-3. Do **not** insert or leave an empty `## [Unreleased]` section.
+1. Confirm `## [Unreleased]` exists and has entries; if missing or empty, stop and ask the user before proceeding.
+2. Audit `## [Unreleased]` per **`changelog-updater`** (end-user observable changes only; remove internal/refactoring notes and code identifiers).
+3. Replace `## [Unreleased]` with `## [<VERSION>] - <YYYY-MM-DD>` (current local date). Do not leave an empty `## [Unreleased]` heading.
 
-## 4. Post-Update Verification Gate
-1. Run `python3 .agents/scripts/tiertask_dev.py verify --full` to confirm all tests, static analysis, formatting, and Markdown rules pass.
-2. If any check fails, stop and fix or roll back before committing.
+## 4. Post-Update Verification
+Run `python3 .agents/scripts/tiertask_dev.py verify --full`. Abort and fix or roll back on any failure.
 
-## 5. Commit, Annotated Git Tag (`v<VERSION>`) & Push to Origin
-1. Stage all release changes (`git add -A`) and inspect `git status --short` and `git diff --cached --stat`.
-2. Create the release commit and annotated tag:
+## 5. Commit, Tag & Push
+1. Run `git add -A` and inspect `git status --short` and `git diff --cached --stat`.
+2. Commit and create the annotated tag:
    ```bash
    git commit -m "Release v<VERSION>"
    git tag -a "v<VERSION>" -m "Release v<VERSION>"
    ```
-3. Verify that `git status --porcelain` is empty so compile-time Git version metadata resolves to `v<VERSION>+<count>.<hash>` without `.dev`.
-4. Push the release commit and annotated tag to `origin`:
+3. Confirm `git status --porcelain` is empty so compile-time Git version metadata resolves to `v<VERSION>+<count>.<hash>` without `.dev`.
+4. Push commit and tag:
    ```bash
    git push origin HEAD
    git push origin "v<VERSION>"
    ```
-5. Verify the commit, tag, and remote synchronization with `git log -1 --stat`, `git tag -n -l "v<VERSION>"`, and `git status -sb`.
+5. Verify with `git log -1 --stat`, `git tag -n -l "v<VERSION>"`, and `git status -sb`.

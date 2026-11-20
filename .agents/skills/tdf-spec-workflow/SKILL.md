@@ -1,30 +1,24 @@
 ---
 name: tdf-spec-workflow
-description: >-
-  Enforces Spec-Driven Test-Driven Development (TDD) for the TierTask Data Format (TDF) defined in spec/TDF_SPEC_0.8.0.md. Activate whenever spec/TDF_SPEC_0.8.0.md is modified or when implementing or changing the TDF lexical scanner, structural parser, serializer, dynamic tier derivation pipeline, or document mutation rules in lib/services/ and lib/models/.
+description: Enforces Spec-Driven TDD for spec/TDF_SPEC_0.8.0.md. Activate when editing the TDF spec or changing TDF scanning, parsing, serialization, tier derivation, mutation, or sync rules.
 ---
 
-# TDF Spec-Driven Development Workflow
+# TDF Spec-Driven Workflow
 
-## 1. Standalone Specification Boundary (`spec/TDF_SPEC_0.8.0.md`)
-- **Language- & Project-Agnostic Format Spec:** Keep `spec/TDF_SPEC_0.8.0.md` strictly focused on the `.tdf` file format, its lexical/structural grammar, directive semantics (including behavior when optional flags or directives are omitted), dynamic 6-tier derivation pipeline, state mutations, synchronization/publication rules, resource bounds, and error conditions.
-- **No Implementation Specifics in `spec/TDF_SPEC_0.8.0.md`:** Never place Dart/Flutter types, repository file paths (`lib/services/`), CLI test commands (`flutter test`), or `AGENTS.md` rule identifiers (`P-TDD-FIRST`, `P-BOUND-ALLOC`) inside `spec/TDF_SPEC_0.8.0.md`. All TierTask implementation mappings belong in this skill, `AGENTS.md`, and `ARCHITECTURE.md`.
+## 1. Standalone Spec Boundary (`spec/TDF_SPEC_0.8.0.md`)
+Keep `spec/TDF_SPEC_0.8.0.md` strictly language- and project-agnostic (lexical/structural grammar, directives with present vs. omitted semantics, 6-tier derivation, mutations, sync/publication, bounds, errors). Never place Dart/Flutter types, `lib/` paths, `flutter` commands, or `AGENTS.md` rule IDs inside `spec/TDF_SPEC_0.8.0.md`.
 
-## 2. TierTask Architectural Mapping for `spec/TDF_SPEC_0.8.0.md`
-- **Target Parser & Serializer Layer (`lib/services/`):** Implement the TDF lexical scanner, structural block/directive parser, and canonical `LF` (`\n`) serializer in `lib/services/` using only the Dart standard library (`dart:core`, `dart:convert`, `StringBuffer`) in a single $O(N)$ pass (`P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-ZERO-COPY`).
-- **Target Domain Model Layer (`lib/models/`):** Implement immutable domain models (`P-IMMUTABLE-MODELS`), the $O(N)$ 6-tier evaluation pipeline (`Completed`, `Someday`, `Blocked`, `Focus`, `Ready`, `Planned` per `spec/TDF_SPEC_0.8.0.md` Sections 8–9), deterministic state mutations (`spec/TDF_SPEC_0.8.0.md` Section 10), and three-way synchronization (`spec/TDF_SPEC_0.8.0.md` Sections 11–13) in `lib/models/`.
-- **Resource Bounds Enforcement (`P-BOUND-ALLOC`):** Map the normative bounds in `spec/TDF_SPEC_0.8.0.md` Section 6.2 (`MAX_FILE_BYTES`, `MAX_LINE_COUNT`, `MAX_NESTING_DEPTH`, `MAX_BLOCKS_PER_DOC`, `MAX_LOCATIONS`, `MAX_STMTS_PER_BLOCK`, `MAX_CONDITION_RULES_PER_ENTITY`, `MAX_LOCATION_REFS_PER_ENTITY`, `MAX_QUEUE_ENTRIES`, `MAX_DELETED_RECORDS`, `MAX_SYNC_GENERATION`, `MAX_COMPLETIONS`, `MAX_ARGS_PER_STMT`, `MAX_TEXT_LENGTH`, `MAX_NOTE_LENGTH`, `MAX_URI_LENGTH`, `MAX_LINKS_PER_TASK`, `MAX_LINKS_PER_LABEL`, `MAX_HISTORY_PER_TASK`, `MAX_REPEAT_COUNT`, `MAX_LOCATION_RADIUS`, `MAX_NUMBER_LENGTH`) to `const int maxTdf*` constants and check every cardinality bound **before** scanning or allocating the $(N+1)$-th element.
+## 2. Codebase Mapping
+- **Scanner, Parser & Serializer (`lib/services/`):** Dart SDK only, single-pass $O(N)$, canonical `LF` (`\n`) output (`tdf_scanner.dart`, `tdf_parser.dart`, `tdf_directive_parser.dart`, `tdf_serializer.dart`, `tdf_service.dart`; `P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-ZERO-COPY`).
+- **Domain Models, Evaluation, Mutations & Sync (`lib/models/`):** Immutable models, $O(N)$ 6-tier derivation (Sections 8–9), mutations (Section 10), and three-way sync/recovery (Sections 11–13) (`tdf_error.dart`, `tdf_metadata.dart`, `tdf_location.dart`, `tdf_timezone.dart`, `tdf_sync_metadata.dart`, `tdf_payload_comparison.dart`, `task_item.dart`, `task_board*.dart`).
+- **Resource Bounds (`P-BOUND-ALLOC`):** Map every `MAX_*` constant in `spec/TDF_SPEC_0.8.0.md` Section 6.2 to `const int maxTdf*` in `lib/models/tdf_error.dart` and enforce before scanning or allocating the $(N+1)$-th element.
 
-## 3. Spec-Driven Modification Protocol (`P-TDD-FIRST`)
-Whenever the user modifies `spec/TDF_SPEC_0.8.0.md` or instructs you to implement or change TDF parsing, serialization, or domain evaluation rules, execute these exact steps in order:
-
-1. **Outline & Diff Spec:** Run `python3 .agents/scripts/tiertask_dev.py outline spec/TDF_SPEC_0.8.0.md` (or `git diff spec/TDF_SPEC_0.8.0.md`) to locate exact section `StartLine-EndLine` ranges, then read only the relevant sections of `spec/TDF_SPEC_0.8.0.md` (Sections 1 through 13 and Appendix A). Never paginate blindly through all lines of `spec/TDF_SPEC_0.8.0.md`.
-2. **Update Tests First (TDD Red Phase — `P-TDD-FIRST`, `P-TEST-MIRROR`):**
-   - Locate the corresponding domain or service test suite in `test/services/` and `test/models/` (plus `spec/conformance/v0.8.0/`) using `python3 .agents/scripts/tiertask_dev.py outline` or `find`.
-   - Add or update positive test cases for valid TDF syntax, root blocks (`deleted`, `queue`, `label`, `location`, `task`), present vs. omitted directive/flag semantics (`priority`, `finished`, `modified`, `blocked`, `suspended`, `due ... anchor ... passive`, `origin`, `repeat`, `condition`, `link`, `history`, `subtasks auto-finish`), 6-tier derivation, three-way synchronization, and document mutations.
-   - Add or update negative test cases for every error condition in `spec/TDF_SPEC_0.8.0.md` Appendix A.1 and resource bound in Section 6.2 (`M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`).
-   - Run `flutter test --no-pub --no-test-assets -r failures-only <target_tests>` to verify that the new or updated tests fail as expected against the current implementation.
-3. **Update Implementation (TDD Green & Refactor Phase — `P-FILE-SIZE`):**
-   - Modify the scanner, parser, serializer (`lib/services/`), and domain models (`lib/models/`) to satisfy `spec/TDF_SPEC_0.8.0.md` while adhering to `AGENTS.md` layout, responsibility-based modularity (`P-FILE-SIZE`), and memory rules (`P-STDLIB-FIRST`, `P-NO-QUADRATIC`, `P-BOUND-ALLOC`, `P-ZERO-COPY`, `P-FLAT-CONTROL-FLOW`, `P-NO-NESTED-LOOPS`).
-4. **Update Documentation:** Synchronize `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and `CHANGELOG.md` per **`update-documentation`** and **`changelog-updater`**.
-5. **Verify:** Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` until all static checks, analyzer diagnostics, formatting, and tests pass with zero warnings.
+## 3. Spec-Driven TDD Steps (`P-TDD-FIRST`)
+1. **Outline & Diff Spec:** Run `python3 .agents/scripts/tiertask_dev.py outline spec/TDF_SPEC_0.8.0.md` (or `git diff spec/TDF_SPEC_0.8.0.md`) and read only relevant line ranges.
+2. **Red (Tests & Conformance Vectors First):**
+   - Locate suites in `test/services/`, `test/models/`, and `spec/conformance/v0.8.0/` (`tdf_v080_conformance_test.dart`, `tdf_v080_merge_conformance_test.dart`).
+   - Add/update positive cases (all root blocks, present vs. omitted directives/flags, 6-tier derivation, mutations, three-way sync) and negative cases covering `spec/TDF_SPEC_0.8.0.md` Appendix A.1 errors and Section 6.2 bounds (`M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`).
+   - Run `flutter test --no-pub --no-test-assets -r failures-only <target_tests>` and confirm failure.
+3. **Green & Refactor:** Update `lib/services/` and `lib/models/` per `AGENTS.md` (Sections 1–4 and Section 6 `AppLogger` instrumentation).
+4. **Sync Spec Appendices & Docs:** Keep `spec/TDF_SPEC_0.8.0.md` Appendix A.1–A.3, `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, and `CHANGELOG.md` aligned (`update-documentation`, `changelog-updater`).
+5. **Verify:** Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` until all checks pass with zero warnings.

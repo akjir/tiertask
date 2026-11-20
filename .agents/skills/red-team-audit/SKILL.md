@@ -1,79 +1,74 @@
 ---
 name: red
-description: Acts as an adversarial Red Team Security, Stability, Performance, Readability, and Code Efficiency Auditor to break, exploit, audit, and harden the Flutter and Dart codebase. Triggered when the user types `/red`, `/red all`, `/red changed`, or `/red <file_or_dir...>`.
+description: Adversarial Red Team security, stability, performance, readability, and efficiency audit for Flutter/Dart code. Triggered by /red, /red all, /red changed, or /red <path...>.
 ---
 
 # Red Team Audit & Hardening Workflow
 
-Execute this workflow on `/red`, `/red all`, `/red changed`, or `/red <path...>` (files or directories). Act as an adversarial security researcher and strict Flutter/Dart systems engineer. Enforce `AGENTS.md` strictly.
+Execute on `/red`, `/red all`, `/red changed`, or `/red <path...>`. Act as an adversarial security researcher and strict Flutter/Dart systems engineer enforcing `AGENTS.md`.
 
 ## 1. Scope Resolution & Context-Isolated Dispatch
 Audit **every file in an isolated context window**:
-1. **Single File (`/red <file>`):** Audit the target file directly (or via one `research` subagent) with exclusive focus on that file.
-2. **Multiple Files, Directory, or Changed Files (`/red <file1> <file2> ...`, `/red <dir>`, `/red changed`):**
-   - Expand any directory path to all `.dart` files inside it (recursively).
-   - For `/red changed`, resolve non-deleted `.dart` files modified, staged, or untracked relative to `HEAD` (`git diff --name-only --diff-filter=d HEAD -- '*.dart'` and `git ls-files --others --exclude-standard -- '*.dart'`); stop immediately if none changed.
-   - Spawn **one `research` subagent per file** (`invoke_subagent`, `TypeName: "research"`, `Model: "inherit"`) with Section 2 instructions. Each subagent must inspect **only its assigned file** (reading external definitions only to verify called functions, helpers, or type contracts).
-3. **Full Project (`/red` or `/red all`):**
-   - Enumerate all `.dart` files under `lib/`.
-   - Audit `.dart` files via **one `research` subagent per file** in architectural waves, waiting for each wave to finish before starting the next:
-     - **Wave 1 (Domain Models & Pure Services):** `lib/models/*`, `lib/services/*`, `lib/l10n/tier_localization_extension.dart`
-     - **Wave 2 (I/O Repositories & Riverpod Providers):** `lib/repositories/*`, `lib/providers/*`
-     - **Wave 3 (Application Entry & UI Layer):** `lib/main.dart`, `lib/ui/**`
+1. **Single File (`/red <file>`):** Audit directly (or via one `research` subagent) with exclusive focus on that file.
+2. **Multiple Files, Directory, or Changed (`/red <path...>`, `/red changed`):**
+   - Recursively expand directories to `.dart` files (excluding generated `lib/l10n/app_localizations*.dart`).
+   - For `/red changed`, resolve non-deleted `.dart` files relative to `HEAD` (`git diff --name-only --diff-filter=d HEAD -- '*.dart'` and `git ls-files --others --exclude-standard -- '*.dart'`), excluding generated `lib/l10n/app_localizations*.dart`; stop if empty.
+   - Spawn **one `research` subagent per file** (`invoke_subagent`, `TypeName: "research"`, `Model: "inherit"`) with Section 2 instructions. Each subagent audits ONLY its assigned file (reading external symbols solely to verify contracts).
+3. **Full Project (`/red` or `/red all`):** Enumerate all hand-written `.dart` files under `lib/` (excluding `lib/l10n/app_localizations*.dart`) and dispatch one `research` subagent per file in waves (wait for each wave to finish before starting the next):
+   - **Wave 1 (Models, Services, L10n):** `lib/models/*`, `lib/services/*`, `lib/l10n/tier_localization_extension.dart`
+   - **Wave 2 (Repositories & Providers):** `lib/repositories/*`, `lib/providers/*`
+   - **Wave 3 (Entry & UI):** `lib/main.dart`, `lib/ui/**`
 
-## 2. Five-Pillar Reconnaissance (Red Team Phase — Per-File Instructions)
-Assume the assigned `.dart` file is flawed and non-compliant. Audit exhaustively across all five pillars:
+## 2. Five-Pillar Audit (Per-File Subagent Instructions)
+Assume the assigned `.dart` file is flawed. Check every pillar strictly against `AGENTS.md`:
 
-### 2.1 Security (Sicherheit)
-1. **Unidirectional Layer Isolation, Acyclic DAG, WebDAV SSRF & TLS Hardening (`dart:io`, `P-UDF-ARCHITECTURE`, `P-ACYCLIC-DAG`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-TRANSPORT-SECURITY`):** Does any module violate the strict bottom-up layer rank order (`0: app_logger < 1: models < 2: l10n < 3: services < 4: repositories < 5: providers < 6: ui < 7: main`) or introduce circular import SCCs (`P-ACYCLIC-DAG`)? Does any module outside `lib/repositories/` perform network, secure storage, or local filesystem I/O or import `dart:io` in `lib/models/`, `lib/services/`, or `lib/ui/` (`P-IO-ISOLATION`), invoke `HttpClient` outside `lib/repositories/webdav_repository.dart` (`P-WEBDAV-API`), or invoke `File` outside `lib/repositories/`? Do UI widgets bypass Riverpod notifiers (`P-UDF-ARCHITECTURE`)? Is `badCertificateCallback` ever enabled to bypass TLS validation? Are Android platform defaults hardened (`android:usesCleartextTraffic="false"` and `android:allowBackup="false"`)? Can malformed server URLs inject non-HTTP(S) schemes (`file://`, `ftp://`), embedded userinfo (`user:pass@host`), query/fragment components (`?`, `#`), or silent cleartext `http://` downgrades on remote networks?
-2. **Path Traversal & Endpoint Manipulation (`Uri`, `File`):** Can remote WebDAV or local filesystem `filePath` or `username` inputs containing `..`, `\0`, backslashes (`\`), encoded slashes (`%2F`), symbolic links, or unvalidated path segments escape the intended WebDAV base path or local file target and read or overwrite arbitrary files on Linux, Android, or Windows?
-3. **Unbounded Network/File Streams & Denial of Service (`P-BOUND-ALLOC`):** Can a rogue or misconfigured WebDAV server or oversized local `.tdf` file return an unbounded payload (`response.transform(utf8.decoder).join()` or `file.readAsString()`) or stall connections without strict byte-count limits (`maxFileBytes`), stream timeouts, and guaranteed `client.close()` / file handle cleanup?
-4. **TDF Delimiter Injection, Control Characters & BiDi Spoofing (`M-DELIM-INJECT-TESTS`):** Can untrusted task/label strings or externally edited `.tdf` documents containing `{`, `}`, quotes (`"`, `'`), backslashes (`\`), inline `#` comments, `\n`, `\r`, `\0`, C0/C1 control characters (`\u{0000}..=\u{001F}`, `\u{007F}..=\u{009F}`), or Unicode BiDi overrides forge TDF blocks/directives or corrupt the `.tdf` file on round-trip serialization?
-5. **Credential Hygiene, Secret Leakage & Obfuscation Safety (`P-SECRET-HYGIENE`, `P-TRANSPORT-SECURITY`):** Are any secrets hardcoded in source code? Can passwords, Basic Auth headers, tokens, or raw system stack traces leak into exception strings, user-facing UI error banners, `toString()` outputs, `print()` / `debugPrint()` logs (`avoid_print`), or unencrypted storage outside `FlutterSecureStorage`? Does any code rely on `runtimeType.toString()` comparisons that break under `--obfuscate --split-debug-info` release builds?
+### 2.1 Security
+1. **Layer Isolation, DAG & Transport (`P-UDF-ARCHITECTURE`, `P-ACYCLIC-DAG`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-TRANSPORT-SECURITY`):** Upward layer imports or circular SCCs (`app_logger < models < l10n < services < repositories < providers < ui < main`); `dart:io` or `dart:ffi` outside `lib/repositories/`; `HttpClient` outside `webdav_repository.dart`; `File` outside `lib/repositories/`; UI bypassing notifiers; `badCertificateCallback` TLS bypass; non-HTTP(S) schemes, URL userinfo (`user:pass@host`), query/fragment injection, or silent remote `http://` downgrades; Android `usesCleartextTraffic` / `allowBackup` regressions.
+2. **Path Traversal (`Uri`, `File`):** Remote WebDAV or local paths containing `..`, `\0`, `\`, `%2F`, symlinks, or unvalidated segments escaping the intended base path on Linux, Android, or Windows.
+3. **Unbounded I/O & DoS (`P-BOUND-ALLOC`):** Unbounded stream/file reads (`response.transform(utf8.decoder).join()`, `file.readAsString()`) without `maxTdfFileBytes`, `connectionTimeout`, or guaranteed `HttpClient.close()` / handle cleanup.
+4. **TDF Injection & Control Characters (`M-DELIM-INJECT-TESTS`):** Untrusted strings with `{`, `}`, quotes, `\`, `#`, `\n`, `\r`, `\0`, C0/C1 controls (`\u{0000}..=\u{001F}`, `\u{007F}..=\u{009F}`), or Unicode BiDi overrides forging directives or corrupting round-trips.
+5. **Secrets, Diagnostic PII & Obfuscation (`P-SECRET-HYGIENE`, `P-TRANSPORT-SECURITY`, `AGENTS.md` Section 6):** Hardcoded secrets; credentials, Basic Auth headers, raw stack traces, GPS coordinates, street addresses, BSSIDs, notes, link titles/URIs, or `history` text leaking into `toString()`, exceptions, UI banners, `print()`/`debugPrint()`, or `AppLogger`; `runtimeType.toString()` branching breaking `--obfuscate`.
 
-### 2.2 Stability (Stabilität)
-1. **Null-Safety, Pattern Matching & Sound Types (`P-NULL-SAFE`, `P-STRICT-TYPES`, `P-FLAT-CONTROL-FLOW`):** Does production code use the null-assertion operator (`!`), uninitialized `late` fields without lifecycle guarantees, `dynamic`, unchecked `as` casts, check-then-unwrap (`if (x != null) x!.foo`), or unchecked index/substring slicing (`list[i]`, `str.substring(a, b)`) instead of Dart 3 pattern matching (`if (x case final v?)`), `.firstOrNull`, or bounds checks?
-2. **Async Lifecycle Safety, Global Error Boundaries & Resource Disposal (`P-GLOBAL-ERROR-BOUNDARY`, `P-DISPOSE-RESOURCES`):** Does `main.dart` register `FlutterError.onError` and `PlatformDispatcher.instance.onError` (`P-GLOBAL-ERROR-BOUNDARY`)? Are `BuildContext` or `State.setState` used across `await` gaps without `if (!mounted) return;` (`use_build_context_synchronously`)? Are all `TextEditingController`, `FocusNode`, `ScrollController`, `StreamSubscription`, and `HttpClient` instances disposed in `dispose()` or `finally` blocks? Are any `Future`s unawaited (`unawaited_futures`)?
-3. **Pre-Scan Resource Bounds (`P-BOUND-ALLOC`):** Are `maxFileBytes`, `maxLineCount`, `maxNestingDepth`, `maxBlocksPerDoc`, `maxStmtsPerBlock`, `maxArgsPerStmt`, `maxTextLength`, `maxNoteLength`, and `maxDeletedRecords` enforced **before** scanning or allocating the $(N+1)$-th element?
-4. **Deterministic Domain Invariants, Optimistic State Integrity & Error Preservation (`P-ERR-PRESERVE`, `P-ATOMIC-STATE`, `P-IMMUTABLE-MODELS`):** Are domain models strictly immutable (`List.unmodifiable`, value `==` and `hashCode`)? Are all point-in-time timestamps normalized to UTC (`DateTime.utc`) to prevent timezone/DST drift in 30-day pruning and sync comparisons? Can concurrent user mutations race, or can failed local/WebDAV saves leave inconsistent state or swallow exceptions (`catch (_) {}`) without preserving causes and signaling failure (`P-ATOMIC-STATE`)?
-5. **Test Coverage, Real Mechanics, Mirror Harness, Reason Strings & Parallel Isolation (`P-TDD-FIRST`, `P-TEST-MIRROR`, `M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`, `M-URI-PATH-EDGE-TESTS`, `M-IO-TESTS`, `M-REAL-MECHANICS-TESTS`):** Is any `enum` / `sealed class` branch, WIP/retention/`max*` boundary, TDF delimiter injection vector, URI traversal edge case, or I/O failure untested? Do tests use synthetic shortcuts that bypass real side effects instead of exercising full `Conflict/Error -> Self-Write/Resume -> New Input` cycles, queued mutations across deletions/`deleted.generation` bumps/same-timestamp tie-breaks, container (`queue`) undo/cache invalidation, mid-flight UI frames across suspended async saves, and post-`await` config/mode/path switches (`M-REAL-MECHANICS-TESTS`)? Are tests mapped deterministically under `test/<layer>/`, using `pumpLeafWidget` (`FakeTaskNotifier`) for isolated leaf widgets and `HttpOverrides.global = null` in `setUp()` for loopback `HttpServer` repository tests (`P-TEST-MIRROR`)? Do loop or table-driven `expect()` assertions omit `reason:` strings? Do tests rely on wall-clock `DateTime.now()` or shared mutable static state?
+### 2.2 Stability
+1. **Null & Type Safety (`P-NULL-SAFE`, `P-STRICT-TYPES`, `P-FLAT-CONTROL-FLOW`):** `!` null-assertions, uninitialized `late`, `dynamic`, unchecked `as`, check-then-unwrap, or unchecked indexing/substring slicing (`list[i]`, `str.substring(a, b)`).
+2. **Async, Error Boundaries & Disposal (`P-GLOBAL-ERROR-BOUNDARY`, `P-DISPOSE-RESOURCES`):** Missing `FlutterError.onError` / `PlatformDispatcher.instance.onError` in `main.dart`; `BuildContext`/`setState` across `await` without `if (!mounted) return;`; undisposed controllers, streams, or `HttpClient`s; unawaited `Future`s.
+3. **Pre-Scan Resource Bounds (`P-BOUND-ALLOC`):** Missing pre-allocation checks for any `spec/TDF_SPEC_0.8.0.md` Section 6.2 `maxTdf*` constant (`lib/models/tdf_error.dart`) before reading or allocating the $(N+1)$-th element.
+4. **Domain Invariants, UTC & Atomic State (`P-IMMUTABLE-MODELS`, `P-ERR-PRESERVE`, `P-ATOMIC-STATE`):** Mutable collections or broken value `==`/`hashCode`; non-UTC point-in-time timestamps risking DST/30-day pruning drift; concurrent mutation races; failed saves leaving inconsistent state; swallowed exceptions (`catch (_) {}`) or lost causes.
+5. **Test Rigor (`P-TDD-FIRST`, `P-TEST-MIRROR`, all `M-*`):** Missing branch/bound/injection/URI/I/O tests; synthetic shortcuts violating `M-REAL-MECHANICS-TESTS`; non-mirrored tests, missing `pumpLeafWidget` or `HttpOverrides.global = null;`; missing `reason:` strings in loops/tables; wall-clock `DateTime.now()` or shared mutable static state in tests.
 
-### 2.3 Speed & Performance (Geschwindigkeit)
-1. **Const Widgets, Rebuild Scoping & Lazy Virtualization (`P-CONST-WIDGETS`, `P-SELECT-REBUILDS`, `P-LAZY-LISTS`):** Are `const` constructors (`prefer_const_constructors`) and `super.key` used everywhere possible? Do widgets watch full providers when `.select(...)` suffices, or trigger whole-form `setState(() {})` on every keystroke? Are dynamic task lists rendered lazily via `ListView.builder` with deterministic `ValueKey`s rather than materializing all items in `Column` or `ListView(children: [...])`?
-2. **Zero-Waste Allocations (`P-ZERO-ALLOC`):** Are `RegExp` patterns instantiated inside methods or loops instead of `static final`? Are there avoidable `.toList()`, `List.from()`, or string concatenations inside loops or `build()` methods?
-3. **Single-Pass O(N) Complexity (`P-NO-QUADRATIC`):** Are there $O(N^2)$ `List.removeAt(0)` shifts inside loops, redundant linear scans across all tasks for the same ID, or chained `.replaceAll()` / `.split()` passes?
-4. **Unfragmented Buffer Serialization (`StringBuffer`):** Does `.tdf` serialization write directly to a single `StringBuffer` without intermediate string allocations?
+### 2.3 Performance
+1. **Widgets & Virtualization (`P-CONST-WIDGETS`, `P-SELECT-REBUILDS`, `P-LAZY-LISTS`):** Missing `const`/`super.key`; broad `ref.watch` where `.select(...)` applies; full-form `setState` per keystroke; eager `Column`/`ListView(children: [...])` instead of `ListView.builder` with deterministic `ValueKey`s.
+2. **Allocations & Complexity (`P-ZERO-ALLOC`, `P-NO-QUADRATIC`, `P-ZERO-COPY`):** Non-`static final` `RegExp`; avoidable `.toList()`/`List.from()`/`+` concatenation in loops or `build()`; $O(N^2)$ `List.removeAt(0)`, redundant board scans, or chained `.replaceAll()`/`.split()`; non-`StringBuffer` `.tdf` serialization.
 
-### 2.4 Readability & Deterministic Layout (Lesbarkeit)
-1. **Strict 7-Part File Layout, Class Cohesion & Member Order (`P-LICENSE-HEADER`, `P-DIRECTIVES-ORDER`, `P-CLASS-COHESION`, `AGENTS.md` Section 2):** Does the file follow the exact 7-part vertical order: (1) verbatim GPL-3.0 header + blank line, (2) `///` library doc, (3) 3-group alphabetized imports (`dart:`, `package:`, relative in `lib/`), (4) alphabetized constants/providers, (5) cohesive types (`P-CLASS-COHESION`) with strictly ordered members (constructors, `static const`/`static final`, `final` fields, getters, lifecycle overrides, public methods, `_private` methods, `==`/`hashCode`/`toString`), (6) alphabetized top-level functions, (7) `dart format` compliance with trailing commas?
-2. **Flat Control Flow, Combinators & Widget Modularity (`P-VERTICAL-CLARITY`, `P-FILE-SIZE`, `P-FLAT-CONTROL-FLOW`, `P-FLATTEN-BUILD`, `P-NO-NESTED-LOOPS`, `P-LOOP-MODULARITY`, `P-FUNCTIONAL-COMBINATORS`):** Are there nested loops, multi-arm `switch` or deep `if/else` blocks inside loops/closures, indentation $> 3$ levels, loop bodies $\ge 25$ lines, `build()` / dispatcher methods $\ge 40$ lines, helper methods returning `Widget` instead of dedicated `StatelessWidget` classes, complex `.where().map()` chains, or forbidden `part` / `part of` or `export` directives (`P-FILE-SIZE`)? Never flag file line counts or `_private` method counts as findings.
-3. **Naming, Language & Documentation Integrity (`P-NO-ABBREV-VARS`, `P-FN-DOCS`, `P-LANG-RULES`):** Are variable names unabbreviated (`configuration` > `cfg`, `repository` > `repo`, `task` > `t`)? Are two-state enums or sealed classes used over ambiguous `bool` parameters? Does every production item have a concise English `///` comment (ASD-STE100 80%, zero emojis) while `test()` blocks omit redundant `///` comments? Are all strings, comments, and identifiers compliant with `P-LANG-RULES`?
+### 2.4 Readability & Layout
+1. **7-Part Layout & Member Order (`P-LICENSE-HEADER`, `P-DIRECTIVES-ORDER`, `P-CLASS-COHESION`, `AGENTS.md` Section 2):** GPL-3.0 header + blank line, `///` doc, 3-group alphabetized imports, alphabetized constants/providers, cohesive types with strict member order, alphabetized top-level functions, `dart format` + trailing commas.
+2. **Flatness & Modularity (`P-VERTICAL-CLARITY`, `P-FILE-SIZE`, `P-FLAT-CONTROL-FLOW`, `P-FLATTEN-BUILD`, `P-NO-NESTED-LOOPS`, `P-LOOP-MODULARITY`, `P-FUNCTIONAL-COMBINATORS`):** Nested loops; multi-arm `switch`/deep `if/else` in loops; indentation $> 3$; loop bodies $\ge 25$L; `build()`/dispatchers $\ge 40$L; helper methods returning `Widget` instead of `StatelessWidget` classes; dense combinator chains; forbidden `part`/`part of`/`export`. Never flag file line counts or `_private` method counts.
+3. **Naming & Docs (`P-NO-ABBREV-VARS`, `P-FN-DOCS`, `P-LANG-RULES`):** Abbreviated variables; ambiguous `bool` params instead of enums/sealed types; missing `///` on production items or redundant `///` on `test()` blocks; non-English/emoji/filler prose.
 
-### 2.5 Code Efficiency (Code-Effizienz)
-1. **Zero Dead Code & Zero Ignore Directives (`P-NO-DEAD-CODE`, `P-NO-IGNORE`):** Does the file contain unused functions, methods, fields, enum values, providers, parameters, imports, or `// ignore:` / `// ignore_for_file:` directives?
-2. **DRY & Shared Logic Reuse:** Does the file duplicate task lookup, tier filtering, UTC date normalization, or string sanitization logic?
-3. **Exhaustive State Modeling (`P-EXHAUSTIVE-SWITCH`, `P-MASK-SAFE`):** Are exhaustive `switch` expressions/statements over `enum` / `sealed class` types used without redundant `default:` branches, and are mutually exclusive states modeled via `enum` / `sealed class` instead of chained boolean fields?
+### 2.5 Code Efficiency
+1. **Dead Code & Ignores (`P-NO-DEAD-CODE`, `P-NO-IGNORE`):** Unused symbols/params/imports or `// ignore:` / `// ignore_for_file:`.
+2. **DRY:** Duplicated task lookup, tier filtering, UTC normalization, or sanitization logic.
+3. **Exhaustive State (`P-EXHAUSTIVE-SWITCH`, `P-MASK-SAFE`):** Redundant `default:` on exhaustive switches; chained boolean flags instead of one `enum`/`sealed class`.
 
-Each subagent must return either **"SECURE"** (if zero violations exist; never invent subjective issues outside `AGENTS.md`) or confirmed findings tagged by pillar (`[Security]`, `[Stability]`, `[Speed]`, `[Readability]`, `[Efficiency]`) with line numbers, triggering inputs/defects, and violated rule IDs.
+**Subagent Output Contract:** Return ONLY `"SECURE"` (never invent subjective issues outside `AGENTS.md`) OR a list of confirmed findings formatted as:
+`[Security|Stability|Performance|Readability|Efficiency] <file>:<lines> | <Rule IDs> | <Trigger/Defect>`
 
-## 3. Consolidated Audit Report & Remediation Plan (Decision Gate)
-Aggregate all per-file results in the orchestrator context:
-- **Guard Against Immutability Over-Optimization:** Classify bounded, structurally required allocations (`P-BOUND-ALLOC`, immutable `copyWith` models, `List.unmodifiable` views, `StringBuffer` outputs) as **"SECURE"**. Never sacrifice `P-VERTICAL-CLARITY` or `P-IMMUTABLE-MODELS`; report only unbounded (OOM/DoS) or trivially avoidable allocations (`P-ZERO-ALLOC`, `P-NO-QUADRATIC`).
-- **If All Files Pass:** Declare the audited scope **"SECURE"** and stop immediately without modifying code.
-- **If Findings Exist:** Present a unified **Audit Report & Remediation Plan** and **wait for explicit user approval** before editing code:
+## 3. Consolidated Report & Decision Gate
+Aggregate all per-file results in the orchestrator:
+- **Immutability Guard:** Treat bounded, required allocations (`copyWith`, `List.unmodifiable`, `StringBuffer`, `P-BOUND-ALLOC`) as `"SECURE"`. Flag only unbounded (OOM/DoS) or trivially avoidable waste.
+- **All Clean:** Report **"SECURE"** and stop without editing files.
+- **Findings Exist:** Present one **Audit Report & Remediation Plan** and **wait for explicit user approval** before editing:
   1. List files verified as **SECURE**.
-  2. Group findings by file in bottom-up dependency order (`lib/services/app_logger.dart` -> `lib/models/` -> `lib/l10n/` -> `lib/services/` -> `lib/repositories/` -> `lib/providers/` -> `lib/ui/` -> `lib/main.dart`).
-  3. State each finding's pillar tag, file, line numbers, defect/attack vector, violated rule IDs, and planned TDD fix + test.
+  2. Group findings by file in bottom-up layer order (`app_logger` -> `models` -> `l10n` -> `services` -> `repositories` -> `providers` -> `ui` -> `main`).
+  3. Include pillar tag, file/lines, attack vector/defect, violated rule IDs, and planned TDD fix + regression test.
 
-## 4. Remediation (Blue Team Phase — Adaptive TDD Execution)
-After user approval, remediate findings without breaking existing behavior:
-- **Small Scope (1–2 files):** Remediate directly one by one.
-- **Large Scope (3+ files, `P-SUBAGENT-ISOLATION`):** Delegate to `self` subagents with strictly disjoint file `Write Set`s in bottom-up dependency waves (`lib/models/` and `lib/services/` first) to keep each subagent's context isolated while preventing concurrent edits on the same file.
-- **Per-File TDD Remediation Checklist (`P-TDD-FIRST`):**
-  1. **Exploit & Regression Tests First (`Red`):** Add unit or widget tests in `test/` covering the identified attacks, bounds, or state branches (`M-EXHAUSTIVE-STATE-TESTS`, `M-EXTREME-BOUND-TESTS`, `M-DELIM-INJECT-TESTS`, `M-URI-PATH-EDGE-TESTS`, `M-IO-TESTS`) and verify failure via `flutter test`.
-  2. **Harden & Optimize Source (`Green` & `Refactor`):** Resolve all approved findings while preserving business logic and public contracts.
-  3. **Compliance Gate:** Re-verify the modified file against Sections 2.4 and 2.5 (`AGENTS.md` Sections 2–4, `P-LICENSE-HEADER`, `P-FILE-SIZE`, `P-CLASS-COHESION`, `P-ACYCLIC-DAG`, `P-FN-DOCS`, `P-NO-DEAD-CODE`, `P-NO-IGNORE`, `P-LANG-RULES`).
-  4. **Closed-Loop Verification:** Run `python3 .agents/scripts/tiertask_dev.py verify --fast --fix`, fixing any issues until all pass with zero warnings.
+## 4. Remediation (After User Approval, Adaptive TDD)
+- **1–2 Files:** Remediate directly one by one.
+- **3+ Files (`P-SUBAGENT-ISOLATION`):** Dispatch `self` subagents with strictly disjoint file `Write Set`s in bottom-up dependency waves.
+- **Per-File TDD Checklist (`P-TDD-FIRST`):**
+  1. **Red:** Add exploit/regression tests in `test/` covering all applicable `M-*` categories (including `M-REAL-MECHANICS-TESTS`) and confirm failure via `flutter test`.
+  2. **Green & Refactor:** Fix all approved findings while preserving public contracts and `AGENTS.md` compliance (including Section 6 `AppLogger` instrumentation).
+  3. **Fast Verify:** Run `python3 .agents/scripts/tiertask_dev.py verify --fast --fix` until clean.
 
 ## 5. Finalization
-Run workspace-wide `python3 .agents/scripts/tiertask_dev.py verify --full --fix`, then report the resolved findings and verification status concisely. Never run `git commit`.
+Run workspace-wide `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and report resolved findings concisely. Never run `git commit`.

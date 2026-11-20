@@ -1,31 +1,27 @@
 ---
 name: changelog-updater
-description: Updates and maintains CHANGELOG.md adhering to Keep a Changelog under [Unreleased].
+description: Updates CHANGELOG.md under [Unreleased] per Keep a Changelog for end-user-visible changes only. Skip internal refactors and fixes to unreleased code.
 ---
+
 # Changelog Updater
-**Goal:** Maintain `CHANGELOG.md` per Keep a Changelog 1.1.0 & SemVer 2.0.0 with concise, strictly end-user-relevant entries.
 
-## USE WHEN
-- Adding, changing, or removing features, settings, or file format capabilities that directly affect end-user behavior relative to the latest released version.
-- Fixing bugs or improving performance in already-released behavior observable by the user.
-- **NEVER USE WHEN:** Fixing bugs, discrepancies, or regressions in an unreleased feature or implementation already under `## [Unreleased]`. Correcting an unreleased implementation MUST NEVER modify `CHANGELOG.md` or add `### Fixed` entries.
+Maintain `CHANGELOG.md` per Keep a Changelog 1.1.0 and SemVer 2.0.0 with concise, end-user-relevant entries.
 
-## RULES
-- **Section:** Place new entries ONLY under `## [Unreleased]`. If `## [Unreleased]` does not exist (for example, right after a release), insert `## [Unreleased]` directly above the latest `## [X.Y.Z] - YYYY-MM-DD` section. Never commit or leave an empty `## [Unreleased]` section.
-- **Allowed Categories:** `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`. Include only non-empty categories, separated by a blank line after each heading.
-- **Scope (End-User Behavior Relative to Last Release ONLY):**
-  - **INCLUDE:** New user-facing features, observable behavior changes, workflow or UI improvements, `.tdf` format capabilities, synchronization changes, and user-facing bug or performance fixes affecting released versions.
-  - **BANNED (Fixes to Unreleased Implementations):** Bug fixes, audit remediations, edge-case corrections, or spec-alignment fixes for code introduced after the latest release tag (`## [Unreleased]`). Leave `CHANGELOG.md` untouched for such corrections.
-  - **BANNED (Internal Changes):** Internal formatting, code restructuring, modularization, refactoring, architecture adjustments, build/analyzer configuration, agent skills/rules, or test changes (`M-*` rules) that do not alter observable program behavior.
-  - **BANNED (Code-Specific Details):** Source file paths (`lib/...`), class, method, function, or widget identifiers (`TaskBoard`, `PageView`, `TierPageIndicator`), internal state/storage representations (`Base64Service`, binary encodings, `step true`), algorithm complexity notation (`O(N)`), and widget keys.
-- **Outcome-Focused & Concise Wording (`P-LANG-RULES`):**
-  - Describe the effect for the user, never the code mechanism. Write `Reduced startup time when loading large task boards.` instead of `Added XAdapterSubscriber function to accelerate execution time.`.
-  - Keep every bullet brief (1 concise sentence, typically 8–20 words).
-  - Start with an action verb matching the category (`Added ...`, `Changed ...`, `Deprecated ...`, `Removed ...`, `Fixed ...`, `Reduced ...`).
-  - Use factual English (ASD-STE100 80%) with zero emojis and no Markdown horizontal rules (`---`).
+## When to Use / Skip
+- **Include:** New user-facing features, observable behavior/UI/workflow/sync/`.tdf` changes, and bug or performance fixes affecting an already-released version.
+- **Skip (Fixes to Unreleased Code):** Never modify `CHANGELOG.md` or add `### Fixed` entries when fixing bugs, audit findings, or spec discrepancies in code introduced under `## [Unreleased]`.
+- **Skip (Internal Changes):** Formatting, refactoring, modularization, build/analyzer config, agent rules/skills, or tests without observable user impact.
+
+## Rules
+- **Placement:** Put new entries ONLY under `## [Unreleased]`. If absent (e.g., right after a release), insert `## [Unreleased]` directly above the latest `## [X.Y.Z] - YYYY-MM-DD`. Never commit or leave an empty `## [Unreleased]` section.
+- **Categories:** Use only non-empty headings from `### Added`, `### Changed`, `### Deprecated`, `### Removed`, `### Fixed`, `### Security`, each followed by a blank line.
+- **No Code Internals:** Never mention file paths (`lib/...`), class/method/widget identifiers (`TaskBoard`, `PageView`), storage encodings (`Base64Service`, `step true`), complexity (`O(N)`), or widget keys.
+- **Wording (`P-LANG-RULES`):**
+  - Describe user outcome, not code mechanism (e.g., `Reduced startup time when loading large task boards.` instead of `Added XAdapterSubscriber to accelerate execution.`).
+  - One concise sentence (8–20 words), starting with an action verb matching the category (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Reduced`).
   - Consolidate or update existing `## [Unreleased]` bullets when an unreleased change is modified or superseded before release.
 
-## WORKFLOW
-1. Verify observable end-user impact relative to the latest release. Skip immediately without touching `CHANGELOG.md` if the change is internal, structural, test-only, or fixes a bug in an unreleased implementation.
-2. Locate or create `## [Unreleased]` at the top of `CHANGELOG.md`.
-3. Add or update a concise, code-free entry under the matching category (`### Added`, `### Changed`, `### Fixed`, `### Removed`, etc.).
+## Steps
+1. Verify observable end-user impact relative to the latest release tag; stop immediately without editing `CHANGELOG.md` if none.
+2. Locate or insert `## [Unreleased]` at the top of `CHANGELOG.md`.
+3. Add or consolidate a concise, code-free bullet under the matching category.
