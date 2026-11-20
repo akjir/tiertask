@@ -19,6 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -799,6 +800,59 @@ task 000002OkD2 priority {
         equals('Abbrechen'),
         reason: 'German pumpLeafWidget must register material_ui GlobalMaterialLocalizations',
       );
+    },
+  );
+
+  testWidgets(
+    'TierTaskApp displays DEV indicator and (Dev) title only in dev build profile',
+    (WidgetTester tester) async {
+      const config = WebDavConfig(language: AppLanguage.english);
+      for (final profile in AppBuildProfile.values) {
+        final container = ProviderContainer(
+          overrides: [
+            appBuildProfileProvider.overrideWithValue(profile),
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localFileRepositoryProvider.overrideWith(
+              (ref) => FakeLocalFileRepository(
+                config: config,
+                initialTdf: 'tdf 0.8.0\n',
+              ),
+            ),
+            clockProvider.overrideWithValue(
+              () => DateTime.utc(2026, 11, 1, 12, 0),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final app = tester.widget<MaterialApp>(find.byType(MaterialApp));
+        final context = tester.element(find.byType(Scaffold));
+        final expectedTitle = profile.isDev ? 'TierTask (Dev)' : 'TierTask';
+        expect(
+          app.title,
+          equals(expectedTitle),
+          reason: 'MaterialApp.title must match $profile',
+        );
+        expect(
+          app.onGenerateTitle?.call(context),
+          equals(expectedTitle),
+          reason: 'MaterialApp.onGenerateTitle must match $profile',
+        );
+        expect(
+          find.byKey(const ValueKey<String>('dev_build_banner')),
+          profile.isDev ? findsOneWidget : findsNothing,
+          reason: 'DEV banner must render only for dev build profile',
+        );
+      }
     },
   );
 

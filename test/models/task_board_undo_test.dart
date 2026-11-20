@@ -1666,6 +1666,189 @@ void main() {
         reason: 'Mode 2 capture without boardAfter must still detect external post-rollover dueAnchor edits',
       );
     });
+
+    test('undo delete preserves isDuePassive on Completed tasks, guards fromWallClock underflow, aggregates multiple LocationTaskCondition rules, and handles 9999 timestamp overflow', () {
+      final t0 = DateTime.utc(2026, 9, 1, 10, 0, 0);
+      final t1 = t0.add(const Duration(minutes: 1));
+      final t2 = t1.add(const Duration(minutes: 1));
+
+      // 1. Delete + undo of Completed task preserves isDuePassive == true:
+      final donePassive = TaskItem(
+        id: 'donePass01',
+        title: 'Completed With Passive Due',
+        isCompleted: true,
+        completions: 1,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+        dueAt: DateTime.utc(2026, 9, 5, 12, 0, 0),
+        isDuePassive: true,
+      );
+      final boardDone = TaskBoard.evaluate(
+        tasks: <TaskItem>[donePassive],
+        evaluationTime: t0,
+      );
+      final afterDeleteDone = boardDone.deleteTask(
+        'donePass01',
+        currentDate: t1,
+      );
+      final deleteEntry = TaskBoardUndo.capture(
+        sequence: 30,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: boardDone,
+        boardAfter: afterDeleteDone,
+        taskBefore: boardDone.findTask('donePass01')!,
+      );
+      final undoneDelete = TaskBoardUndo.apply(
+        afterDeleteDone,
+        deleteEntry,
+        utcNow: t2,
+      );
+      expect(undoneDelete, isNotNull);
+      expect(
+        undoneDelete!.board.findTask('donePass01')!.isDuePassive,
+        isTrue,
+        reason: 'Undoing deletion of a Completed task must preserve snapshotTask.isDuePassive',
+      );
+
+      // 2. Mode 2 undo without boardAfter when snapshotDue is 0001-01-01T00:00:00Z in UTC-5 does not throw FormatException:
+      final minUtc = DateTime.utc(1, 1, 1, 0, 0, 0);
+      final minTask = TaskItem(
+        id: 'minDue0001',
+        title: 'Min Boundary Mode 2',
+        createdAt: minUtc,
+        modifiedAt: minUtc,
+        dueAt: minUtc,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+      );
+      final rolledTask = minTask.copyWith(
+        completions: 1,
+        dueAt: DateTime.utc(1, 1, 2, 0, 0, 0),
+        dueAnchor: TdfLocalDateTime(1, 1, 2, 0, 0, 0),
+        modifiedAt: DateTime.utc(1, 1, 1, 0, 0, 1),
+      );
+      final boardMinBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[minTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: minUtc,
+          taskIds: const <String>['minDue0001'],
+        ),
+        evaluationTime: minUtc,
+      );
+      final boardMinAfter = TaskBoard.evaluate(
+        tasks: <TaskItem>[rolledTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: minUtc,
+          taskIds: const <String>['minDue0001'],
+        ),
+        evaluationTime: minUtc,
+      );
+      final minEntry = TaskBoardUndo.capture(
+        sequence: 31,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: boardMinBefore,
+        taskBefore: boardMinBefore.findTask('minDue0001')!,
+      );
+      expect(
+        TaskBoardUndo.apply(
+          boardMinAfter,
+          minEntry,
+          utcNow: DateTime.utc(1, 1, 1, 0, 5, 0),
+          timeZone: TdfTimeZoneContext.fixedOffset(const Duration(hours: -5)),
+        ),
+        isNull,
+        reason: '_hasConcurrentDueAnchorEdit must catch FormatException from fromWallClock underflow and return null',
+      );
+
+      // 3. Undo delete sanitizing multiple LocationTaskCondition objects aggregates surviving IDs:
+      const locA = TdfLocation(
+        id: 'locUndoA01',
+        name: 'Undo Site A',
+        latitude: 52.5,
+        longitude: 13.4,
+        radius: 100,
+      );
+      const locB = TdfLocation(
+        id: 'locUndoB01',
+        name: 'Undo Site B',
+        latitude: 52.6,
+        longitude: 13.5,
+        radius: 100,
+      );
+      const locLabel = TdfLabel(
+        id: 'lblUndoL01',
+        name: 'Field',
+        conditions: <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locUndoB01']),
+        ],
+      );
+      final multiLocTask = TaskItem(
+        id: 'tskUndoM01',
+        title: 'Multi Location Undo Task',
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblUndoL01'],
+        conditions: const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locUndoA01']),
+          LocationTaskCondition(locationIds: <String>['locUndoB01']),
+        ],
+      );
+      final boardLoc = TaskBoard.evaluate(
+        tasks: <TaskItem>[multiLocTask],
+        labels: const <TdfLabel>[locLabel],
+        locations: const <TdfLocation>[locA, locB],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['tskUndoM01'],
+        ),
+        evaluationTime: t0,
+      );
+      final afterTaskDel = boardLoc.deleteTask('tskUndoM01', currentDate: t1);
+      final taskDelEntry = TaskBoardUndo.capture(
+        sequence: 32,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: boardLoc,
+        boardAfter: afterTaskDel,
+        taskBefore: boardLoc.findTask('tskUndoM01')!,
+      );
+      final afterLocDel = afterTaskDel.deleteLocation(
+        'locUndoA01',
+        currentDate: t2,
+      );
+      final undoneLocTask = TaskBoardUndo.apply(
+        afterLocDel,
+        taskDelEntry,
+        utcNow: t2.add(const Duration(minutes: 1)),
+      );
+      expect(undoneLocTask, isNotNull);
+      expect(
+        undoneLocTask!.board.findTask('tskUndoM01')!.conditions,
+        equals(const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locUndoB01']),
+        ]),
+        reason: 'Undo condition sanitization must aggregate surviving location IDs and omit location any when any ID survives',
+      );
+
+      // 4. Undo gracefully returns null when nextModifiedTimestamp overflows 9999-12-31 23:59:59:
+      final maxUtc = DateTime.utc(9999, 12, 31, 23, 59, 59);
+      final maxDeletedBoard = afterDeleteDone.copyWith(
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(
+              taskId: 'donePass01',
+              deletedAt: maxUtc,
+              completionsCheckpoint: 1,
+            ),
+          ],
+        ),
+      );
+      expect(
+        TaskBoardUndo.apply(maxDeletedBoard, deleteEntry, utcNow: maxUtc),
+        isNull,
+        reason: 'Undo _tryNextTimestamp must catch TdfException on 9999 overflow and skip gracefully',
+      );
+    });
   });
 }
 

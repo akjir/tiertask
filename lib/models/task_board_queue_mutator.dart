@@ -101,13 +101,24 @@ class TaskBoardQueueMutator {
     final now = TaskItem.normalizeTimestamp(
       currentDate ?? DateTime.now().toUtc(),
     );
-    final sourceTier = board.findTierOfTask(taskId);
     final task = board.findTask(taskId);
-    if (sourceTier == null || sourceTier == TaskTier.blocked || task == null) {
+    if (task == null) return board;
+    final sourceTier = board.findTierOfTask(taskId);
+    if (sourceTier == TaskTier.blocked) return board;
+    final wasCompleted = task.isCompleted || task.completedAt != null;
+    if (sourceTier == null &&
+        !wasCompleted &&
+        _isScopedTaskAlreadyBlocked(
+          board,
+          task,
+          now,
+          localEvaluationTime: localEvaluationTime,
+          timeZone: timeZone,
+          dueLeadWindow: dueLeadWindow,
+        )) {
       return board;
     }
 
-    final wasCompleted = task.isCompleted || task.completedAt != null;
     final useForever =
         suspendedUntil == null || suspendedUntil == TaskItem.defaultSuspendedAt;
     final blockedTask = task.copyWith(
@@ -365,6 +376,24 @@ class TaskBoardQueueMutator {
         for (final id in queue.taskIds)
           if (id != taskId) id,
       ],
+    );
+  }
+
+  /// Removes every ID in [taskIds] from [queue] in a single pass, advancing `queue.modified` at most once when changed.
+  static TdfQueueBlock removeTasksFromQueue(
+    TdfQueueBlock queue,
+    Set<String> taskIds,
+    DateTime now,
+  ) {
+    if (taskIds.isEmpty) return queue;
+    final remaining = <String>[
+      for (final id in queue.taskIds)
+        if (!taskIds.contains(id)) id,
+    ];
+    if (remaining.length == queue.taskIds.length) return queue;
+    return TdfQueueBlock(
+      modifiedAt: _nextQueueMutationModifiedAt(now, queue.modifiedAt),
+      taskIds: remaining,
     );
   }
 
@@ -779,21 +808,50 @@ class TaskBoardQueueMutator {
     return <String>[...withoutTask, taskId];
   }
 
+  /// Returns whether an open `scoped`-only [task] on [board] is already effectively `Blocked` at [now].
+  static bool _isScopedTaskAlreadyBlocked(
+    NormalizedTierSlices board,
+    TaskItem task,
+    DateTime now, {
+    required DateTime? localEvaluationTime,
+    required TdfTimeZoneContext? timeZone,
+    required Duration? dueLeadWindow,
+  }) {
+    if (task.hasActiveSuspendedAt(now)) return true;
+    if (!board.queueBlock.taskIds.contains(task.id)) return false;
+    final taskMap = <String, TaskItem>{
+      for (final item in board.allTasks) item.id: item,
+    };
+    if (!TaskBoardEvaluator.areDependenciesSatisfied(task, taskMap)) {
+      return true;
+    }
+    if (task.labelIds.isEmpty) return false;
+    for (final labelId in task.labelIds) {
+      final labelBoard = TaskBoardEvaluator.evaluate(
+        tasks: board.allTasks,
+        evaluationTime: now,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        labels: board.labels,
+        locations: board.locations,
+        deletedBlock: board.deletedBlock,
+        queueBlock: board.queueBlock,
+        activeLabelId: labelId,
+        pruneExpiredCompleted: false,
+      );
+      if (labelBoard.findTierOfTask(task.id) != TaskTier.blocked) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Advances `modifiedAt` once for a queue or scheduling mutation, throwing [TdfException] on `9999` overflow.
   static DateTime _nextQueueMutationModifiedAt(
     DateTime now,
-    DateTime previousEffectiveModifiedAt,
-  ) {
-    try {
-      return TaskItem.nextModifiedTimestamp(now, previousEffectiveModifiedAt);
-    } on FormatException {
-      throw const TdfException(
-        kind: TdfErrorKind.invalidTimestamp,
-        line: 1,
-        message: 'Queue mutation timestamp exceeds supported 9999-12-31 23:59:59 UTC.',
-      );
-    }
-  }
+    DateTime? previousEffectiveModifiedAt,
+  ) => TaskItem.nextModifiedTimestamp(now, previousEffectiveModifiedAt);
 
   /// Moves [taskId] immediately after [anchorTaskId] inside [currentIds], or returns [currentIds] when [anchorTaskId] is `null`.
   static List<String> _reorderAfterAnchor({

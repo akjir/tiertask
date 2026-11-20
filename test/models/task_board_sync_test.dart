@@ -3185,5 +3185,724 @@ label 000001OkD2 {
       );
       expect(retried.deletedBlock.findLocationRecord('expLoc0001'), isNull);
     });
+
+    test('Defect 1: D^label_X preserves Undeleted label on tasks and triggers scoped flood protection on expired scoped label', () {
+      const labelUndelId = 'LblUndel01';
+      const taskUndelId = 'TskUndel01';
+      const labelScopedExpId = 'LblScpEx01';
+      const taskScopedExpId = 'TskScpEx01';
+
+      // 1a: Undeleted label must stay in D^label_R so R's cascade strip is not misclassified as explicit unassignment.
+      final baseLabel = TdfLabel(
+        id: labelUndelId,
+        name: 'Base Label',
+        modifiedAt: t(10),
+      );
+      final baseTask = makeTask(
+        taskUndelId,
+        'Labeled Task',
+        10,
+      ).copyWith(labelIds: const <String>[labelUndelId]);
+      final baselineA = evalBoard(
+        <TaskItem>[baseTask],
+        null,
+        10,
+        0,
+        <TdfLabel>[baseLabel],
+      );
+      final localA = evalBoard(
+        <TaskItem>[baseTask],
+        null,
+        16,
+        0,
+        <TdfLabel>[baseLabel.copyWith(name: 'Edited Label', modifiedAt: t(16))],
+      );
+      final remoteA = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          baseTask.copyWith(labelIds: const <String>[], modifiedAt: t(15)),
+        ],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          labels: <TdfDeletedLabelRecord>[
+            TdfDeletedLabelRecord(labelId: labelUndelId, deletedAt: t(15)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+      final mergedA = TaskBoardSync.merge(
+        primary: localA,
+        secondary: remoteA,
+        baseline: baselineA,
+        labelConflictResolutions: const <String, TdfDeletionResolution>{
+          labelUndelId: TdfDeletionResolution.undelete,
+        },
+        evaluationTime: t(25),
+      );
+      expect(
+        mergedA.findTask(taskUndelId)?.labelIds,
+        equals(const <String>[labelUndelId]),
+        reason: 'Undeleted label must not be wiped off tasks by opposing cascade strip',
+      );
+
+      // 1b: Expired scoped label retired across generation advance must stay in D^label_R so TDF-MERGE-011 flood protection fires.
+      final scopedLabel = TdfLabel(
+        id: labelScopedExpId,
+        name: 'Scoped Project',
+        isScoped: true,
+        modifiedAt: t(10),
+      );
+      final scopedBaseTask = makeTask(
+        taskScopedExpId,
+        'Scoped Task',
+        10,
+      ).copyWith(labelIds: const <String>[labelScopedExpId], isPriority: true);
+      final baselineB = evalBoard(
+        <TaskItem>[scopedBaseTask],
+        makeQueue(10, const <String>[taskScopedExpId]),
+        10,
+        0,
+        <TdfLabel>[scopedLabel],
+      );
+      final localB = evalBoard(
+        <TaskItem>[
+          scopedBaseTask.copyWith(
+            title: 'Scoped Task Edited',
+            modifiedAt: t(25),
+          ),
+        ],
+        makeQueue(25, const <String>[taskScopedExpId]),
+        25,
+        0,
+        <TdfLabel>[scopedLabel],
+      );
+      final remoteB = evalBoard(
+        <TaskItem>[
+          scopedBaseTask.copyWith(
+            labelIds: const <String>[],
+            isPriority: false,
+            modifiedAt: t(20),
+          ),
+        ],
+        makeQueue(20, const <String>[]),
+        20,
+        1,
+      );
+      final mergedB = TaskBoardSync.merge(
+        primary: localB,
+        secondary: remoteB,
+        baseline: baselineB,
+        acknowledgedGeneration: 0,
+        evaluationTime: t(30),
+      );
+      final mergedScopedTask = mergedB.findTask(taskScopedExpId);
+      expect(mergedScopedTask, isNotNull);
+      expect(mergedScopedTask?.labelIds, isEmpty);
+      expect(
+        mergedScopedTask?.isPriority,
+        isFalse,
+        reason: 'Expired scoped label cascade must strip priority per TDF-MERGE-011',
+      );
+      expect(
+        mergedB.queueTaskIds,
+        isNot(contains(taskScopedExpId)),
+        reason: 'Expired scoped label cascade must evict task from queue per TDF-MERGE-011',
+      );
+    });
+
+    test('Defect 2: TDF-MERGE-010 Case 1 copies Task state atomically from winner W rather than 3-way _mergeScalar', () {
+      const taskCase1Id = 'TskCase101';
+      final baseTask = TaskItem(
+        id: taskCase1Id,
+        title: 'Original',
+        createdAt: t(5),
+        modifiedAt: t(10),
+        completions: 1,
+        isCompleted: true,
+        completedAt: t(10),
+      );
+      final localWinner = baseTask.copyWith(
+        title: 'Renamed By Winner',
+        modifiedAt: t(20),
+      );
+      final remoteReopenedLoser = baseTask.copyWith(
+        isCompleted: false,
+        clearCompletedAt: true,
+        isPriority: true,
+        modifiedAt: t(15),
+      );
+
+      final previewHeader =
+          TdfPayloadComparison.previewMergedTaskPrerequisiteHeader(
+            local: localWinner,
+            incoming: remoteReopenedLoser,
+            baseline: baseTask,
+          );
+      expect(
+        previewHeader.isCompleted,
+        isTrue,
+        reason: 'Case 1 prerequisite preview must copy Task state atomically from winner W',
+      );
+      expect(previewHeader.completedAt, equals(t(10)));
+
+      final merged = TaskBoardSync.merge(
+        primary: evalBoard(<TaskItem>[localWinner], null, 20, 0),
+        secondary: evalBoard(<TaskItem>[remoteReopenedLoser], null, 15, 0),
+        baseline: evalBoard(<TaskItem>[baseTask], null, 10, 0),
+        evaluationTime: t(25),
+      );
+      final mergedTask = merged.findTask(taskCase1Id);
+      expect(mergedTask, isNotNull);
+      expect(mergedTask?.title, equals('Renamed By Winner'));
+      expect(
+        mergedTask?.isCompleted,
+        isTrue,
+        reason: 'Case 1 must copy Task state atomically from winner W without 3-way state fallback to loser',
+      );
+      expect(mergedTask?.completedAt, equals(t(10)));
+      expect(mergedTask?.isPriority, isFalse);
+    });
+
+    test('Defect 3: recoverAmbiguousEntities filters superseded acknowledged tombstones and preserves unresolved DeletionConflict entities', () {
+      const oldAckTaskId = 'TskOldAck1';
+      const localDelTaskId = 'TskLocDel1';
+      const ambTaskId = 'TskAmbRec1';
+      const confTaskId = 'TskConfRc1';
+
+      // 3a: Superseded acknowledged tombstones must be discarded while unacknowledged local deletion intents are kept.
+      final ambBase = makeTask(ambTaskId, 'Ambiguous Base', 10);
+      final baselineA = TaskBoard.evaluate(
+        tasks: <TaskItem>[ambBase],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: oldAckTaskId, deletedAt: t(5)),
+          ],
+        ),
+        evaluationTime: t(10),
+      );
+      final localA = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          ambBase.copyWith(title: 'Ambiguous Edited', modifiedAt: t(15)),
+        ],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: oldAckTaskId, deletedAt: t(5)),
+            TdfDeletedTaskRecord(taskId: localDelTaskId, deletedAt: t(16)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+      final sharedA = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: t(20),
+      );
+      final recoveredA = TaskBoardSync.recoverAmbiguousEntities(
+        localBoard: localA,
+        sharedBoard: sharedA,
+        baseline: baselineA,
+        recoverTaskIds: const <String>[ambTaskId],
+        evaluationTime: t(30),
+      );
+      expect(
+        recoveredA.deletedBlock.findTaskRecord(oldAckTaskId),
+        isNull,
+        reason: 'Superseded acknowledged tombstone must not be reintroduced during recovery',
+      );
+      expect(
+        recoveredA.deletedBlock.findTaskRecord(localDelTaskId),
+        isNotNull,
+        reason: 'Unacknowledged local deletion intent must be preserved during recovery',
+      );
+
+      // 3b: Locally edited entity conflicting with an active tombstone on sharedBoard must raise DeletionConflict instead of being silently discarded.
+      final confBase = makeTask(confTaskId, 'Conflict Base', 10);
+      final baselineB = TaskBoard.evaluate(
+        tasks: <TaskItem>[ambBase, confBase],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(10),
+      );
+      final localB = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          ambBase.copyWith(title: 'Ambiguous Edited', modifiedAt: t(15)),
+          confBase.copyWith(title: 'Conflict Edited', modifiedAt: t(16)),
+        ],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(20),
+      );
+      final sharedB = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(
+          generation: 1,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: confTaskId, deletedAt: t(18)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+      expect(
+        () => TaskBoardSync.recoverAmbiguousEntities(
+          localBoard: localB,
+          sharedBoard: sharedB,
+          baseline: baselineB,
+          recoverTaskIds: const <String>[ambTaskId],
+          evaluationTime: t(30),
+        ),
+        throwsSyncOutcome(
+          TdfSyncOutcomeKind.deletionConflict,
+          conflictedTasks: contains(confTaskId),
+        ),
+        reason: 'recoverAmbiguousEntities must preserve actively tombstoned edited entities for DeletionConflict',
+      );
+    });
+
+    test('Defect 4: newly referenced label/location screening excludes explicitly Delete-resolved and discard-resolved entities', () {
+      const labelDelId = 'LblDelRef1';
+      const locDelId = 'LocDelRef1';
+      const taskDelId = 'TskDelRef1';
+
+      // 4a: Delete-resolved task referencing tombstoned label and location must not trigger false DeletionConflict on them.
+      final baseLabel = TdfLabel(
+        id: labelDelId,
+        name: 'Base Label',
+        modifiedAt: t(10),
+      );
+      final baseLoc = TdfLocation(
+        id: locDelId,
+        name: 'Base Loc',
+        latitude: 48.1,
+        longitude: 11.5,
+        radius: 100,
+        modifiedAt: t(10),
+      );
+      final baseTask = makeTask(taskDelId, 'Base Task', 10);
+      final baselineA = TaskBoard.evaluate(
+        tasks: <TaskItem>[baseTask],
+        labels: <TdfLabel>[baseLabel],
+        locations: <TdfLocation>[baseLoc],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(10),
+      );
+      final localA = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          baseTask.copyWith(
+            labelIds: const <String>[labelDelId],
+            conditions: const <TaskCondition>[
+              LocationTaskCondition(locationIds: <String>[locDelId]),
+            ],
+            modifiedAt: t(15),
+          ),
+        ],
+        labels: <TdfLabel>[baseLabel],
+        locations: <TdfLocation>[baseLoc],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(15),
+      );
+      final remoteA = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: taskDelId, deletedAt: t(16)),
+          ],
+          labels: <TdfDeletedLabelRecord>[
+            TdfDeletedLabelRecord(labelId: labelDelId, deletedAt: t(16)),
+          ],
+          locations: <TdfDeletedLocationRecord>[
+            TdfDeletedLocationRecord(locationId: locDelId, deletedAt: t(16)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+      final mergedA = TaskBoardSync.merge(
+        primary: localA,
+        secondary: remoteA,
+        baseline: baselineA,
+        taskConflictResolutions: const <String, TdfDeletionResolution>{
+          taskDelId: TdfDeletionResolution.delete,
+        },
+        evaluationTime: t(25),
+      );
+      expect(mergedA.findTask(taskDelId), isNull);
+      expect(mergedA.findLabel(labelDelId), isNull);
+      expect(mergedA.findLocation(locDelId), isNull);
+
+      // 4b: Delete-resolved label referencing tombstoned location must not trigger false DeletionConflict on location.
+      const labelDel2Id = 'LblDelRef2';
+      const locDel2Id = 'LocDelRef2';
+      final baseLabel2 = TdfLabel(
+        id: labelDel2Id,
+        name: 'Label Two',
+        modifiedAt: t(10),
+      );
+      final baseLoc2 = TdfLocation(
+        id: locDel2Id,
+        name: 'Loc Two',
+        latitude: 48.2,
+        longitude: 11.6,
+        radius: 100,
+        modifiedAt: t(10),
+      );
+      final baselineB = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        labels: <TdfLabel>[baseLabel2],
+        locations: <TdfLocation>[baseLoc2],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(10),
+      );
+      final localB = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        labels: <TdfLabel>[
+          baseLabel2.copyWith(
+            conditions: const <TaskCondition>[
+              LocationTaskCondition(locationIds: <String>[locDel2Id]),
+            ],
+            modifiedAt: t(15),
+          ),
+        ],
+        locations: <TdfLocation>[baseLoc2],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(15),
+      );
+      final remoteB = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          labels: <TdfDeletedLabelRecord>[
+            TdfDeletedLabelRecord(labelId: labelDel2Id, deletedAt: t(16)),
+          ],
+          locations: <TdfDeletedLocationRecord>[
+            TdfDeletedLocationRecord(locationId: locDel2Id, deletedAt: t(16)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+      final mergedB = TaskBoardSync.merge(
+        primary: localB,
+        secondary: remoteB,
+        baseline: baselineB,
+        labelConflictResolutions: const <String, TdfDeletionResolution>{
+          labelDel2Id: TdfDeletionResolution.delete,
+        },
+        evaluationTime: t(25),
+      );
+      expect(mergedB.findLabel(labelDel2Id), isNull);
+      expect(mergedB.findLocation(locDel2Id), isNull);
+
+      // 4c: discard-only inline recovery resolution excludes discarded task from newlyRef and strips its blocked reference on surviving open task.
+      const labelTombId = 'LblTombDc1';
+      const taskSurvId = 'TskSurvDc1';
+      const taskDiscId = 'TskDiscDc1';
+      final baseLabel3 = TdfLabel(
+        id: labelTombId,
+        name: 'Tombstoned Label',
+        modifiedAt: t(10),
+      );
+      final survBase = makeTask(taskSurvId, 'Surviving Open', 10);
+      final baselineC = TaskBoard.evaluate(
+        tasks: <TaskItem>[survBase],
+        labels: <TdfLabel>[baseLabel3],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(10),
+      );
+      final localC = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          makeTask(
+            taskDiscId,
+            'Discarded Local Task',
+            15,
+          ).copyWith(labelIds: const <String>[labelTombId]),
+          survBase.copyWith(
+            dependencies: const <TdfTaskDependency>[
+              TdfTaskDependency(taskId: taskDiscId, requiredCompletion: 1),
+            ],
+            modifiedAt: t(15),
+          ),
+        ],
+        labels: <TdfLabel>[baseLabel3],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: t(15),
+      );
+      final remoteC = TaskBoard.evaluate(
+        tasks: <TaskItem>[survBase],
+        deletedBlock: TdfDeletedBlock(
+          generation: 1,
+          labels: <TdfDeletedLabelRecord>[
+            TdfDeletedLabelRecord(labelId: labelTombId, deletedAt: t(16)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+      final mergedC = TaskBoardSync.merge(
+        primary: localC,
+        secondary: remoteC,
+        baseline: baselineC,
+        acknowledgedGeneration: 0,
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          taskDiscId: TdfRecoveryResolution.discard,
+        },
+        evaluationTime: t(25),
+      );
+      expect(mergedC.findTask(taskDiscId), isNull);
+      expect(mergedC.findLabel(labelTombId), isNull);
+      expect(
+        mergedC.findTask(taskSurvId)?.dependencies,
+        isEmpty,
+        reason: 'Discard-only inline recovery must strip blocked reference targeting discarded task on surviving open task',
+      );
+    });
+
+    test('Defect 5: conflicting task tombstones are not treated as non-conflicting preview deletions that hide dependent DeletionConflict', () {
+      const prereqId = 'TskPrqCnf1';
+      const dependentId = 'TskDepCnf1';
+      final basePrereq = makeTask(prereqId, 'Prereq Base', 10);
+      final baseDependent = makeTask(dependentId, 'Dependent Base', 10)
+          .copyWith(
+            dependencies: const <TdfTaskDependency>[
+              TdfTaskDependency(taskId: prereqId, requiredCompletion: 1),
+            ],
+          );
+      final baseline = evalBoard(
+        <TaskItem>[basePrereq, baseDependent],
+        null,
+        10,
+        0,
+      );
+      final local = evalBoard(
+        <TaskItem>[
+          basePrereq.copyWith(title: 'Prereq Edited', modifiedAt: t(15)),
+          baseDependent.copyWith(
+            dependencies: const <TdfTaskDependency>[],
+            modifiedAt: t(15),
+          ),
+        ],
+        null,
+        15,
+        0,
+      );
+      final remote = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: prereqId, deletedAt: t(18)),
+            TdfDeletedTaskRecord(taskId: dependentId, deletedAt: t(18)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+
+      expect(
+        () => TaskBoardSync.merge(
+          primary: local,
+          secondary: remote,
+          baseline: baseline,
+          evaluationTime: t(25),
+        ),
+        throwsSyncOutcome(
+          TdfSyncOutcomeKind.deletionConflict,
+          conflictedTasks: containsAll(<String>[prereqId, dependentId]),
+        ),
+        reason: 'Conflicting prerequisite tombstone must not hide DeletionConflict on dependent task',
+      );
+    });
+
+    test('Defect 6: TaskBoardSync.merge throws TdfException(invalidTimestamp) when baseline-implied deletion or recovery overflows 9999-12-31 23:59:59Z', () {
+      const maxTaskId = 'TskMaxTs01';
+      final maxTs = DateTime.utc(9999, 12, 31, 23, 59, 59);
+      final baseTask = TaskItem(
+        id: maxTaskId,
+        title: 'Boundary Task',
+        createdAt: t(10),
+        modifiedAt: maxTs,
+      );
+      final baseline = TaskBoard.evaluate(
+        tasks: <TaskItem>[baseTask],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: maxTs,
+      );
+      final local = TaskBoard.evaluate(
+        tasks: <TaskItem>[baseTask],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: maxTs,
+      );
+      final remoteDeletedWithoutTombstone = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: maxTs,
+      );
+
+      expect(
+        () => TaskBoardSync.merge(
+          primary: local,
+          secondary: remoteDeletedWithoutTombstone,
+          baseline: baseline,
+          evaluationTime: maxTs,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidTimestamp,
+          ),
+        ),
+        reason: 'Baseline-implied deletion overflow at 9999-12-31 23:59:59Z must throw TdfException(invalidTimestamp)',
+      );
+
+      final remoteAdvanced = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: maxTs,
+      );
+      expect(
+        () => TaskBoardSync.merge(
+          primary: local,
+          secondary: remoteAdvanced,
+          baseline: baseline,
+          acknowledgedGeneration: 0,
+          taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+            maxTaskId: TdfRecoveryResolution.recoverAsNew,
+          },
+          evaluationTime: maxTs,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidTimestamp,
+          ),
+        ),
+        reason: 'Recovery advancing a 9999-12-31 23:59:59Z revision must throw TdfException(invalidTimestamp)',
+      );
+    });
+
+    test('Defect 7: inline recoverAsNew rewrites both primaryRefresh and secondaryRefresh when both refresh flags are true', () {
+      const primTaskId = 'TskPrimRf1';
+      const secTaskId = 'TskSecRf01';
+      final baseline = evalBoard(const <TaskItem>[], null, 10, 0);
+      final primary = evalBoard(
+        <TaskItem>[makeTask(primTaskId, 'Primary Stale-Ack Task', 12)],
+        null,
+        15,
+        2,
+      );
+      final secondary = evalBoard(
+        <TaskItem>[makeTask(secTaskId, 'Secondary Lower-Gen Task', 12)],
+        null,
+        15,
+        1,
+      );
+
+      final merged = TaskBoardSync.merge(
+        primary: primary,
+        secondary: secondary,
+        baseline: baseline,
+        acknowledgedGeneration: 0,
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          primTaskId: TdfRecoveryResolution.recoverAsNew,
+          secTaskId: TdfRecoveryResolution.recoverAsNew,
+        },
+        evaluationTime: t(30),
+      );
+      expect(merged.allTasks.length, equals(2));
+      expect(merged.findTask(primTaskId), isNull);
+      expect(merged.findTask(secTaskId), isNull);
+      expect(
+        merged.allTasks.map((task) => task.title).toSet(),
+        equals(const <String>{
+          'Primary Stale-Ack Task',
+          'Secondary Lower-Gen Task',
+        }),
+      );
+    });
+
+    test('Defect 8: freshly recovered task with expired suspended does not double-advance modified or falsely overflow at 9999-12-31 23:59:59Z', () {
+      const recTaskId = 'TskRecSus1';
+
+      // 8a: Normal evaluation time -> modifiedAt must stay at now (not now + 1s).
+      final localNormal = evalBoard(
+        <TaskItem>[
+          makeTask(
+            recTaskId,
+            'Suspended Recovery Task',
+            10,
+          ).copyWith(suspendedAt: t(20)),
+        ],
+        null,
+        15,
+        0,
+      );
+      final remoteNormal = evalBoard(const <TaskItem>[], null, 20, 1);
+
+      final mergedInline = TaskBoardSync.merge(
+        primary: localNormal,
+        secondary: remoteNormal,
+        acknowledgedGeneration: 0,
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          recTaskId: TdfRecoveryResolution.recoverAsNew,
+        },
+        evaluationTime: t(30),
+      );
+      final inlineTask = mergedInline.allTasks.single;
+      expect(inlineTask.suspendedAt, isNull);
+      expect(
+        inlineTask.modifiedAt,
+        equals(t(30)),
+        reason: 'Inline freshly recovered task with expired suspended must not double-bump modified to now + 1s',
+      );
+
+      final mergedRecoverApi = TaskBoardSync.recoverAmbiguousEntities(
+        localBoard: localNormal,
+        sharedBoard: remoteNormal,
+        recoverTaskIds: const <String>[recTaskId],
+        evaluationTime: t(30),
+      );
+      final apiTask = mergedRecoverApi.allTasks.single;
+      expect(apiTask.suspendedAt, isNull);
+      expect(
+        apiTask.modifiedAt,
+        equals(t(30)),
+        reason: 'recoverAmbiguousEntities task with expired suspended must not double-bump modified to now + 1s',
+      );
+
+      // 8b: Boundary timestamp 9999-12-31 23:59:59Z with previous modified 23:59:58Z must succeed without false overflow.
+      final maxMinusOne = DateTime.utc(9999, 12, 31, 23, 59, 58);
+      final maxTs = DateTime.utc(9999, 12, 31, 23, 59, 59);
+      final localBoundary = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: recTaskId,
+            title: 'Boundary Suspended Recovery',
+            createdAt: t(10),
+            modifiedAt: maxMinusOne,
+            suspendedAt: maxMinusOne,
+          ),
+        ],
+        deletedBlock: TdfDeletedBlock(generation: 0),
+        evaluationTime: maxMinusOne,
+      );
+      final remoteBoundary = TaskBoard.evaluate(
+        tasks: const <TaskItem>[],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: maxMinusOne,
+      );
+
+      final boundaryMerged = TaskBoardSync.merge(
+        primary: localBoundary,
+        secondary: remoteBoundary,
+        acknowledgedGeneration: 0,
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          recTaskId: TdfRecoveryResolution.recoverAsNew,
+        },
+        evaluationTime: maxTs,
+      );
+      expect(boundaryMerged.allTasks.single.suspendedAt, isNull);
+      expect(
+        boundaryMerged.allTasks.single.modifiedAt,
+        equals(maxTs),
+        reason: 'Freshly recovered task at 9999-12-31 23:59:59Z must not falsely overflow',
+      );
+    });
   });
 }

@@ -3083,6 +3083,206 @@ void main() {
         reason: 'SyncGenerationRollback handling must immediately clear undo stack and taskUndoStateProvider',
       );
     });
+
+    test('syncFromRemote preserves loaded TaskBoard in AsyncData and sets localized banner on UnsupportedTdfVersionException', () async {
+      var diskTdf =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:00:00\n'
+          '    task vldTask001\n'
+          '}\n\n'
+          'task vldTask001 {\n'
+          '    name     "Valid Active Task"\n'
+          '    created  2026-11-15 10:00:00\n'
+          '    modified 2026-11-15 10:00:00\n'
+          '}\n';
+      const localConfig = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        language: AppLanguage.english,
+      );
+      final settings = InMemorySettingsRepository(localConfig);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settings),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 15, 10, 5),
+          ),
+          localFileRepositoryProvider.overrideWithValue(
+            _ControllableLocalRepository(
+              config: localConfig,
+              getStore: () => diskTdf,
+              setStore: (value) => diskTdf = value,
+              shouldFailSave: () => false,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final loaded = await container.read(taskNotifierProvider.future);
+      expect(loaded.findTask('vldTask001')?.title, equals('Valid Active Task'));
+
+      // Overwrite local file with unsupported future TDF version:
+      diskTdf = 'tdf 99.0.0\n';
+      await container.read(taskNotifierProvider.notifier).syncFromRemote();
+
+      final postSyncState = container.read(taskNotifierProvider);
+      expect(
+        postSyncState,
+        isA<AsyncData<TaskBoard>>(),
+        reason: 'UnsupportedTdfVersionException during syncFromRemote must preserve loaded TaskBoard instead of wiping state into AsyncError',
+      );
+      expect(
+        postSyncState.asData?.value.findTask('vldTask001')?.title,
+        equals('Valid Active Task'),
+      );
+      final enL10n = lookupAppLocalizations(const Locale('en'));
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        equals(enL10n.errorUnsupportedTdfVersionLocal('99.0.0')),
+        reason: 'UnsupportedTdfVersionException must set localized error banner in syncStateProvider',
+      );
+    });
+
+    test('disposing ProviderContainer mid-flight during _performResolutionSync and _runExternalWatchSynchronize completes cleanly without StateError', () async {
+      // 1. Mid-flight container disposal during resolveDeletionConflicts (_performResolutionSync):
+      var diskTdf1 =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:00:00\n'
+          '    task dspTask001\n'
+          '}\n\n'
+          'task dspTask001 {\n'
+          '    name     "Dispose Target"\n'
+          '    created  2026-11-15 10:00:00\n'
+          '    modified 2026-11-15 10:00:00\n'
+          '}\n';
+      const localConfig1 = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+      );
+      final settings1 = InMemorySettingsRepository(localConfig1);
+      var gateNextRead1 = false;
+      final readStarted1 = Completer<void>();
+      final releaseRead1 = Completer<void>();
+      final container1 = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settings1),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 15, 10, 5),
+          ),
+          localFileRepositoryProvider.overrideWithValue(
+            _GateableWatchLocalRepository(
+              config: localConfig1,
+              maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+              getStore: () => diskTdf1,
+              setStore: (value) => diskTdf1 = value,
+              onReadTdfWithDigest: () async {
+                if (gateNextRead1) {
+                  gateNextRead1 = false;
+                  readStarted1.complete();
+                  await releaseRead1.future;
+                }
+              },
+            ),
+          ),
+        ],
+      );
+
+      await container1.read(taskNotifierProvider.future);
+      gateNextRead1 = true;
+      final resolutionFuture = container1
+          .read(taskNotifierProvider.notifier)
+          .resolveDeletionConflicts(
+            taskResolutions: const <String, TdfDeletionResolution>{
+              'dspTask001': TdfDeletionResolution.undelete,
+            },
+          );
+      await readStarted1.future;
+      container1.dispose();
+      releaseRead1.complete();
+      await expectLater(
+        resolutionFuture,
+        completes,
+        reason: 'Disposing ProviderContainer mid-flight during _performResolutionSync must not throw StateError',
+      );
+
+      // 2. Mid-flight container disposal during reconcileExternalLocalChanges (_runExternalWatchSynchronize):
+      var diskTdf2 =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:00:00\n'
+          '    task wtcTask001\n'
+          '}\n\n'
+          'task wtcTask001 {\n'
+          '    name     "Watch Dispose Target"\n'
+          '    created  2026-11-15 10:00:00\n'
+          '    modified 2026-11-15 10:00:00\n'
+          '}\n';
+      const localConfig2 = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+        localWatchEnabled: true,
+      );
+      final settings2 = InMemorySettingsRepository(localConfig2);
+      var readCount2 = 0;
+      var gateOnSyncRead2 = false;
+      final syncReadStarted2 = Completer<void>();
+      final releaseSyncRead2 = Completer<void>();
+      final container2 = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settings2),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 15, 10, 5),
+          ),
+          localFileRepositoryProvider.overrideWithValue(
+            _GateableWatchLocalRepository(
+              config: localConfig2,
+              maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+              getStore: () => diskTdf2,
+              setStore: (value) => diskTdf2 = value,
+              onReadTdfWithDigest: () async {
+                readCount2++;
+                // Read 1 of reconcile is _executeExternalLocalReconcile's digest gate;
+                // Read 2 is inside _runExternalWatchSynchronize -> TaskSyncPipeline.synchronize.
+                if (gateOnSyncRead2 && readCount2 == 2) {
+                  gateOnSyncRead2 = false;
+                  syncReadStarted2.complete();
+                  await releaseSyncRead2.future;
+                }
+              },
+            ),
+          ),
+        ],
+      );
+
+      await container2.read(taskNotifierProvider.future);
+      diskTdf2 =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-15 10:06:00\n'
+          '    task wtcTask001\n'
+          '}\n\n'
+          'task wtcTask001 {\n'
+          '    name     "Watch Dispose Target Updated Externally"\n'
+          '    created  2026-11-15 10:00:00\n'
+          '    modified 2026-11-15 10:06:00\n'
+          '}\n';
+      readCount2 = 0;
+      gateOnSyncRead2 = true;
+      final watchFuture = container2
+          .read(taskNotifierProvider.notifier)
+          .reconcileExternalLocalChanges();
+      await syncReadStarted2.future;
+      container2.dispose();
+      releaseSyncRead2.complete();
+      await expectLater(
+        watchFuture,
+        completion(isFalse),
+        reason: 'Disposing ProviderContainer mid-flight during _runExternalWatchSynchronize must not throw StateError',
+      );
+    });
   });
 }
 

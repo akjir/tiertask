@@ -93,8 +93,11 @@ class TaskBoardMutator {
     final validatedLinks = _validateLabelLinks(links);
     final trimmed = name.trim();
     if (trimmed.isEmpty) return board;
-    final rawTime = modifiedAt ?? currentDate;
-    final stamp = rawTime != null ? TaskItem.normalizeTimestamp(rawTime) : null;
+    final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
+    final stamp = _normalizeOptionalUtcTimestamp(
+      modifiedAt ?? cleanupNow,
+      'modifiedAt',
+    );
     final used = _collectAllUsedEntityIds(board);
     final labelId =
         _trimOrNull(id) ?? generateLabelId(timestamp: stamp, existingIds: used);
@@ -120,7 +123,6 @@ class TaskBoardMutator {
             'Label block exceeds maximum of $maxTdfStmtsPerBlock statements.',
       );
     }
-    final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
     final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
       tasks: board.allTasks,
       deleted: board.deletedBlock,
@@ -173,8 +175,11 @@ class TaskBoardMutator {
         board.locations.length >= maxTdfLocations) {
       return board;
     }
-    final rawTime = modifiedAt ?? currentDate;
-    final stamp = rawTime != null ? TaskItem.normalizeTimestamp(rawTime) : null;
+    final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
+    final stamp = _normalizeOptionalUtcTimestamp(
+      modifiedAt ?? cleanupNow,
+      'modifiedAt',
+    );
     final used = _collectAllUsedEntityIds(board);
     final locationId =
         _trimOrNull(id) ??
@@ -193,7 +198,6 @@ class TaskBoardMutator {
       source: _trimOrNull(source),
       modifiedAt: stamp,
     );
-    final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
     final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
       tasks: board.allTasks,
       deleted: board.deletedBlock,
@@ -423,6 +427,7 @@ class TaskBoardMutator {
     final labelMap = <String, TdfLabel>{
       for (final label in board.labels) label.id: label,
     };
+    final queuedTaskIds = board.queueBlock.taskIds.toSet();
     final evictedQueueIds = <String>{};
     final stampedTaskIds = <String>{};
     final updatedTasks = <TaskItem>[];
@@ -440,13 +445,16 @@ class TaskBoardMutator {
           .where((id) => id != labelId)
           .toList();
       final lostAllScopedLabels = wasRestricted && remainingLabels.isEmpty;
-      if (lostAllScopedLabels && board.queueBlock.taskIds.contains(task.id)) {
+      final isOpen = !task.isCompleted && task.completedAt == null;
+      final wasQueued = isOpen && queuedTaskIds.contains(task.id);
+      final evictFromQueue = lostAllScopedLabels && wasQueued;
+      if (evictFromQueue) {
         evictedQueueIds.add(task.id);
       }
       updatedTasks.add(
         task.copyWith(
           labelIds: remainingLabels,
-          isPriority: lostAllScopedLabels ? false : task.isPriority,
+          isPriority: evictFromQueue ? false : task.isPriority,
           modifiedAt: TaskItem.nextModifiedTimestamp(
             now,
             task.effectiveModifiedAt,
@@ -454,14 +462,11 @@ class TaskBoardMutator {
         ),
       );
     }
-    var nextQueueBlock = board.queueBlock;
-    for (final evictedId in evictedQueueIds) {
-      nextQueueBlock = TaskBoardQueueMutator.removeTaskFromQueue(
-        nextQueueBlock,
-        evictedId,
-        now,
-      );
-    }
+    final nextQueueBlock = TaskBoardQueueMutator.removeTasksFromQueue(
+      board.queueBlock,
+      evictedQueueIds,
+      now,
+    );
     final nextDeletedBlock = TaskBoardEvaluator.recordLabelDeletion(
       board.deletedBlock,
       record,
@@ -657,10 +662,10 @@ class TaskBoardMutator {
     Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
   }) {
     final now = _resolveNow(currentDate);
-    final tier = board.findTierOfTask(taskId);
     final task = board.findTask(taskId);
-    final isDone = task == null || task.isCompleted || task.completedAt != null;
-    if (tier == null || tier == TaskTier.completed || isDone) return board;
+    if (task == null || task.isCompleted || task.completedAt != null) {
+      return board;
+    }
     if (stepIndex < 0 || stepIndex >= task.subtasks.length) return board;
     final targetStep = task.subtasks[stepIndex];
     final toggled = targetStep.copyWith(isCompleted: !targetStep.isCompleted);
@@ -936,7 +941,8 @@ class TaskBoardMutator {
         : (prior?.subtasks ?? const <SubtaskItem>[]);
     final repeat = clearRepeatRule ? null : (repeatRule ?? prior?.repeatRule);
     _validateRepeatRule(repeat);
-    final autoDone = !isRestoring && _allStepsDone(autoFinish, steps);
+    final autoDone =
+        !wasDone && !isRestoring && _allStepsDone(autoFinish, steps);
     final isRecurringAuto = autoDone && !isTargetDone && repeat != null;
     final keepDone = targetTier == null && wasDone;
     final isDone = isTargetDone || keepDone || (autoDone && !isRecurringAuto);
@@ -976,6 +982,14 @@ class TaskBoardMutator {
     final explicitlyPromotedPriority =
         (isPriority == true || targetTier == TaskTier.focus) && nextPriority;
     final prevCount = prior?.completions ?? 0;
+    if (isDone && !wasDone && prevCount >= maxTdfCompletions) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task completions counter exceeds maximum of $maxTdfCompletions.',
+      );
+    }
     final armed = isDone
         ? const <TdfTaskDependency>[]
         : _armDeps(board, taskId, blockedByTaskIds, dependencies, prior);
@@ -1159,24 +1173,30 @@ class TaskBoardMutator {
       for (final item in prior?.dependencies ?? const <TdfTaskDependency>[])
         item.taskId: item.requiredCompletion,
     };
-    final trimmedIds = (blockedIds ?? const <String>[]).map((s) => s.trim());
-    final items = explicitDeps != null
-        ? [
-            for (final dep in explicitDeps)
-              if (allow(dep.taskId.trim())) dep,
-          ]
-        : [
-            for (final id in trimmedIds)
-              if (allow(id))
-                TdfTaskDependency(
-                  taskId: id,
-                  requiredCompletion:
-                      priorMap[id] ??
-                      TaskBoardQueueMutator.captureDependencyRequirement(
-                        board.findTask(id),
-                      ),
-                ),
-          ];
+    final items = <TdfTaskDependency>[];
+    if (explicitDeps != null) {
+      for (final dep in explicitDeps) {
+        if (!allow(dep.taskId.trim())) continue;
+        _ensureDependencyArgBound(items.length);
+        items.add(dep);
+      }
+      return List<TdfTaskDependency>.unmodifiable(items);
+    }
+    for (final rawId in blockedIds ?? const <String>[]) {
+      final id = rawId.trim();
+      if (!allow(id)) continue;
+      _ensureDependencyArgBound(items.length);
+      items.add(
+        TdfTaskDependency(
+          taskId: id,
+          requiredCompletion:
+              priorMap[id] ??
+              TaskBoardQueueMutator.captureDependencyRequirement(
+                board.findTask(id),
+              ),
+        ),
+      );
+    }
     return List<TdfTaskDependency>.unmodifiable(items);
   }
 
@@ -1190,17 +1210,18 @@ class TaskBoardMutator {
       return label;
     }
     final nextConditions = <TaskCondition>[];
+    final survivingLocationIds = <String>[];
     for (final rule in label.conditions) {
-      if (rule is! LocationTaskCondition) {
+      if (rule is! LocationTaskCondition || rule.locationIds.isEmpty) {
         nextConditions.add(rule);
         continue;
       }
-      final remainingIds = rule.locationIds
-          .where((id) => id != deletedLocationId)
-          .toList();
-      if (remainingIds.isNotEmpty) {
-        nextConditions.add(LocationTaskCondition.fromIds(remainingIds));
-      }
+      survivingLocationIds.addAll(
+        rule.locationIds.where((id) => id != deletedLocationId),
+      );
+    }
+    if (survivingLocationIds.isNotEmpty) {
+      nextConditions.add(LocationTaskCondition.fromIds(survivingLocationIds));
     }
     return label.copyWith(
       conditions: nextConditions,
@@ -1222,20 +1243,31 @@ class TaskBoardMutator {
       return task;
     }
     final nextConditions = <TaskCondition>[];
+    final survivingLocationIds = <String>[];
+    var hasLegacyLocationRule = false;
     for (final rule in task.conditions) {
       if (rule is! LocationTaskCondition) {
         nextConditions.add(rule);
         continue;
       }
-      final remainingIds = rule.locationIds
-          .where((id) => id != deletedLocationId)
-          .toList();
-      if (remainingIds.isNotEmpty) {
-        nextConditions.add(LocationTaskCondition.fromIds(remainingIds));
-      } else if (task.labelIds.any(postCascadeLabelsWithLocation.contains)) {
-        nextConditions.add(
-          const GroupResetTaskCondition(targetGroup: ConditionGroup.location),
-        );
+      if (rule.locationIds.isEmpty) {
+        hasLegacyLocationRule = true;
+        nextConditions.add(rule);
+        continue;
+      }
+      survivingLocationIds.addAll(
+        rule.locationIds.where((id) => id != deletedLocationId),
+      );
+    }
+    if (survivingLocationIds.isNotEmpty) {
+      nextConditions.add(LocationTaskCondition.fromIds(survivingLocationIds));
+    } else if (!hasLegacyLocationRule &&
+        task.labelIds.any(postCascadeLabelsWithLocation.contains)) {
+      const locationReset = GroupResetTaskCondition(
+        targetGroup: ConditionGroup.location,
+      );
+      if (!nextConditions.contains(locationReset)) {
+        nextConditions.add(locationReset);
       }
     }
     return task.copyWith(
@@ -1280,6 +1312,18 @@ class TaskBoardMutator {
         for (final record in board.deletedBlock.labels) record.labelId,
         for (final record in board.deletedBlock.locations) record.locationId,
       };
+
+  /// Verifies that adding another prerequisite dependency will not exceed [maxTdfArgsPerStmt].
+  static void _ensureDependencyArgBound(int currentCount) {
+    if (currentCount >= maxTdfArgsPerStmt) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task dependencies exceed maximum of $maxTdfArgsPerStmt per blocked directive.',
+      );
+    }
+  }
 
   /// Verifies that [task] does not exceed [maxTdfStmtsPerBlock] direct child statements.
   static void _ensureTaskStatementBound(TaskItem task) {
@@ -1355,17 +1399,7 @@ class TaskBoardMutator {
   static DateTime _nextMutationModifiedAt(
     DateTime now,
     DateTime previousEffectiveModifiedAt,
-  ) {
-    try {
-      return TaskItem.nextModifiedTimestamp(now, previousEffectiveModifiedAt);
-    } on FormatException {
-      throw const TdfException(
-        kind: TdfErrorKind.invalidTimestamp,
-        line: 1,
-        message: 'Task modified timestamp exceeds supported 9999-12-31 23:59:59 UTC.',
-      );
-    }
-  }
+  ) => TaskItem.nextModifiedTimestamp(now, previousEffectiveModifiedAt);
 
   /// Normalizes optional UTC [timestamp] to whole seconds and validates `0001..9999` bounds.
   static DateTime? _normalizeOptionalUtcTimestamp(

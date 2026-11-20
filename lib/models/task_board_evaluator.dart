@@ -300,7 +300,13 @@ class TaskBoardEvaluator {
     final localNow = timeZone != null
         ? (timeZone.isAvailable ? timeZone.toLocalWallClock(now) : null)
         : resolveLocalEvaluationTime(evaluationTime, localEvaluationTime);
-    final taskList = List<TaskItem>.from(tasks);
+    final rawTaskList = List<TaskItem>.from(tasks);
+    final pruned = _pruneExpiredTasksForEvaluation(
+      rawTaskList,
+      now,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+    );
+    final taskList = pruned.tasks;
     final taskMap = <String, TaskItem>{
       for (final task in taskList) task.id: task,
     };
@@ -316,7 +322,6 @@ class TaskBoardEvaluator {
     final blockedList = <TaskItem>[];
     final scopedHiddenList = <TaskItem>[];
     final eligibleById = <String, TaskItem>{};
-    final prunedTaskRecords = <TdfDeletedTaskRecord>[];
     final resolvedQueueBlock = queueBlock ?? TdfQueueBlock.empty;
     final queuedTaskIds = resolvedQueueBlock.taskIds.toSet();
     final hasActiveLabelFilter =
@@ -324,10 +329,6 @@ class TaskBoardEvaluator {
 
     for (final task in taskList) {
       final isDone = task.completedAt != null || task.isCompleted;
-      if (isDone && pruneExpiredCompleted && !_isWithinRetention(task, now)) {
-        prunedTaskRecords.add(_toPrunedRecord(task, now));
-        continue;
-      }
       if (hasActiveLabelFilter) {
         if (!task.labelIds.contains(activeLabelId)) continue;
       } else if (isRestrictedFromGlobalView(task, labelMap)) {
@@ -365,7 +366,7 @@ class TaskBoardEvaluator {
       }
     }
 
-    final resolvedDeletedBlock = prunedTaskRecords.fold(
+    final resolvedDeletedBlock = pruned.prunedRecords.fold(
       deletedBlock ?? TdfDeletedBlock.empty,
       recordTaskDeletion,
     );
@@ -726,7 +727,7 @@ class TaskBoardEvaluator {
     DateTime? localEvaluationTime,
     TdfTimeZoneContext? timeZone,
     Duration? dueLeadWindow = defaultDueLeadWindow,
-    bool pruneExpiredCompleted = true,
+    bool pruneExpiredCompleted = false,
   }) => evaluate(
     tasks: tasks ?? board.allTasks,
     evaluationTime: now,
@@ -1263,21 +1264,10 @@ class TaskBoardEvaluator {
   static DateTime _nextBlockCleanupModifiedAt(
     DateTime normalizedNow,
     DateTime previousEffectiveModifiedAt,
-  ) {
-    try {
-      return TaskItem.nextModifiedTimestamp(
-        normalizedNow,
-        previousEffectiveModifiedAt,
-      );
-    } on FormatException {
-      throw const TdfException(
-        kind: TdfErrorKind.invalidTimestamp,
-        line: 1,
-        message:
-            'Block cleanup modified timestamp exceeds 9999-12-31 23:59:59 UTC.',
-      );
-    }
-  }
+  ) => TaskItem.nextModifiedTimestamp(
+    normalizedNow,
+    previousEffectiveModifiedAt,
+  );
 
   /// Normalizes open tasks in [slice] so `isCompleted` and `completedAt` are cleared.
   static List<TaskItem> _normalizeOpenSlice(List<TaskItem> slice) => [
@@ -1315,6 +1305,41 @@ class TaskBoardEvaluator {
       }
     }
     return <TaskItem>[...priorityGroup, ...regularGroup];
+  }
+
+  /// Prunes expired completed tasks (>30 days) from [tasks] when [pruneExpiredCompleted] is enabled,
+  /// stripping dangling `blocked` references to pruned IDs from surviving open tasks and advancing their `modifiedAt`.
+  static ({List<TaskItem> tasks, List<TdfDeletedTaskRecord> prunedRecords})
+  _pruneExpiredTasksForEvaluation(
+    List<TaskItem> tasks,
+    DateTime now, {
+    required bool pruneExpiredCompleted,
+  }) {
+    if (!pruneExpiredCompleted) {
+      return (tasks: tasks, prunedRecords: const <TdfDeletedTaskRecord>[]);
+    }
+    final surviving = <TaskItem>[];
+    final prunedRecords = <TdfDeletedTaskRecord>[];
+    final prunedTaskIds = <String>{};
+    for (final task in tasks) {
+      final isDone = task.completedAt != null || task.isCompleted;
+      if (isDone && !_isWithinRetention(task, now)) {
+        prunedRecords.add(_toPrunedRecord(task, now));
+        prunedTaskIds.add(task.id);
+        continue;
+      }
+      surviving.add(task);
+    }
+    if (prunedTaskIds.isEmpty) {
+      return (tasks: surviving, prunedRecords: prunedRecords);
+    }
+    final cleanedSurviving = <TaskItem>[
+      for (final task in surviving)
+        (task.completedAt != null || task.isCompleted)
+            ? task
+            : _stripExpiredTaskDependencies(task, prunedTaskIds, now),
+    ];
+    return (tasks: cleanedSurviving, prunedRecords: prunedRecords);
   }
 
   /// Replaces tasks present in [updatedById] across all slices of [board] while updating [deletedBlock].

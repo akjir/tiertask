@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -2480,6 +2481,772 @@ void main() {
       reason: 'RecoveryRequired on external file removal must NOT recreate <target>',
     );
   });
+
+  test('StorageMode.webdav HTTP 304 on queued optimistic mutation merges against cached remote baseline instead of wiping remote additions, edits, and generation bumps', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    const initialTdf =
+        'tdf 0.8.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '    task tsk0000001\n'
+        '    task tsk0000002\n'
+        '    task tsk0000003\n'
+        '    task tskRet0001\n'
+        '}\n\n'
+        'task tsk0000001 {\n'
+        '    name     "Task One"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tsk0000002 {\n'
+        '    name     "Task Two"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tsk0000003 {\n'
+        '    name     "Task Three"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tskRet0001 {\n'
+        '    name     "Retired Remote Task"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n';
+    const remoteV2Tdf =
+        'tdf 0.8.0\n\n'
+        'deleted {\n'
+        '    generation 1\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '    task tsk0000001\n'
+        '    task tsk0000002\n'
+        '    task tsk0000003\n'
+        '    task tskRem0001\n'
+        '}\n\n'
+        'task tsk0000001 {\n'
+        '    name     "Task One Edited Remotely"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '}\n\n'
+        'task tsk0000002 {\n'
+        '    name     "Task Two"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tsk0000003 {\n'
+        '    name     "Task Three"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tskRem0001 {\n'
+        '    name     "Remote Added Task"\n'
+        '    created  2026-11-01 09:00:00\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '}\n';
+
+    var remoteTdf = initialTdf;
+    var remoteEtag = '"etag-v1"';
+    var get304Count = 0;
+    var putCount = 0;
+    var gateNextGet = false;
+    final mut1GetStarted = Completer<void>();
+    final releaseMut1Get = Completer<void>();
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        if (gateNextGet) {
+          gateNextGet = false;
+          mut1GetStarted.complete();
+          await releaseMut1Get.future;
+        }
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          get304Count++;
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        putCount++;
+        final body = await utf8.decoder.bind(request).join();
+        remoteTdf = body;
+        remoteEtag = '"etag-put-$putCount"';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    var currentTime = DateTime.utc(2026, 11, 1, 8, 30);
+    final config = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settings = InMemorySettingsRepository(config);
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settings),
+        clockProvider.overrideWithValue(() => currentTime),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(taskNotifierProvider.future);
+    final notifier = container.read(taskNotifierProvider.notifier);
+
+    // Remote server advances to v2 with a remote addition, edit, and generation 0 -> 1 retirement.
+    remoteTdf = remoteV2Tdf;
+    remoteEtag = '"etag-v2"';
+    gateNextGet = true;
+
+    currentTime = DateTime.utc(2026, 11, 1, 9, 10);
+    final mutation1Future = notifier.updateTask(
+      'tsk0000002',
+      title: 'Task Two Local 1',
+    );
+    await mut1GetStarted.future;
+
+    // Queue Mutation 2 against optimistic B_mut1 (which lacks v2 changes and still has gen 0 + tskRet0001).
+    currentTime = DateTime.utc(2026, 11, 1, 9, 11);
+    final mutation2Future = notifier.updateTask(
+      'tsk0000003',
+      title: 'Task Three Local 2',
+    );
+    releaseMut1Get.complete();
+    await Future.wait(<Future<void>>[mutation1Future, mutation2Future]);
+
+    expect(
+      get304Count,
+      greaterThanOrEqualTo(1),
+      reason: 'Queued Mutation 2 must hit HTTP 304 Not Modified after Mutation 1 published v3',
+    );
+    final finalBoard = container.read(taskNotifierProvider).requireValue;
+    expect(
+      finalBoard.findTask('tskRem0001')?.title,
+      equals('Remote Added Task'),
+      reason: 'HTTP 304 on queued optimistic mutation must not wipe remote additions',
+    );
+    expect(
+      finalBoard.findTask('tsk0000001')?.title,
+      equals('Task One Edited Remotely'),
+      reason: 'HTTP 304 on queued optimistic mutation must not roll back remote edits',
+    );
+    expect(
+      finalBoard.findTask('tskRet0001'),
+      isNull,
+      reason: 'HTTP 304 on queued optimistic mutation must not resurrect tasks retired by generation bump',
+    );
+    expect(
+      finalBoard.deletedBlock.generation,
+      equals(1),
+      reason: 'HTTP 304 on queued optimistic mutation must preserve remote deleted.generation',
+    );
+    expect(
+      finalBoard.findTask('tsk0000002')?.title,
+      equals('Task Two Local 1'),
+    );
+    expect(
+      finalBoard.findTask('tsk0000003')?.title,
+      equals('Task Three Local 2'),
+    );
+    expect(remoteTdf, contains('tskRem0001'));
+    expect(remoteTdf, contains('Task One Edited Remotely'));
+    expect(remoteTdf, contains('generation 1'));
+    expect(remoteTdf, isNot(contains('tskRet0001')));
+  });
+
+  test('WebDAV 412 CAS retry uses fetched R1 baseline instead of stale R0 (preserving R2 deletions and scalar clears)', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    const remoteR0 =
+        'tdf 0.8.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '    task tskA000001\n'
+        '    task tskLoc0001\n'
+        '}\n\n'
+        'task tskA000001 {\n'
+        '    name     "Task A"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tskLoc0001 {\n'
+        '    name     "Local Target"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n';
+    const remoteR1 =
+        'tdf 0.8.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '    task tskA000001\n'
+        '    task tskLoc0001\n'
+        '    task tskB000001\n'
+        '}\n\n'
+        'task tskA000001 {\n'
+        '    name     "Task A"\n'
+        '    note     "Note From R1"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '}\n\n'
+        'task tskLoc0001 {\n'
+        '    name     "Local Target"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tskB000001 {\n'
+        '    name     "Task B Added In R1"\n'
+        '    created  2026-11-01 09:00:00\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '}\n';
+    const remoteR2 =
+        'tdf 0.8.0\n\n'
+        'deleted {\n'
+        '    generation 0\n'
+        '    task tskB000001 2026-11-01 09:30:00\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 09:30:00\n'
+        '    task tskA000001\n'
+        '    task tskLoc0001\n'
+        '}\n\n'
+        'task tskA000001 {\n'
+        '    name     "Task A"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 09:30:00\n'
+        '}\n\n'
+        'task tskLoc0001 {\n'
+        '    name     "Local Target"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n';
+
+    var remoteTdf = remoteR0;
+    var remoteEtag = '"etag-r0"';
+    var injectR2OnNextPut = false;
+    var put412Count = 0;
+    var put2xxCount = 0;
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        final body = await utf8.decoder.bind(request).join();
+        final ifMatch = request.headers.value(HttpHeaders.ifMatchHeader);
+        if (injectR2OnNextPut) {
+          injectR2OnNextPut = false;
+          remoteTdf = remoteR2;
+          remoteEtag = '"etag-r2"';
+        }
+        if (ifMatch != null && ifMatch != remoteEtag) {
+          put412Count++;
+          request.response.statusCode = HttpStatus.preconditionFailed;
+          await request.response.close();
+          return;
+        }
+        put2xxCount++;
+        remoteTdf = body;
+        remoteEtag = '"etag-put-$put2xxCount"';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    var currentTime = DateTime.utc(2026, 11, 1, 8, 30);
+    final config = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settings = InMemorySettingsRepository(config);
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settings),
+        clockProvider.overrideWithValue(() => currentTime),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(taskNotifierProvider.future);
+
+    // Advance remote to R1, and inject R2 between GET(R1) and PUT(If-Match: "etag-r1").
+    remoteTdf = remoteR1;
+    remoteEtag = '"etag-r1"';
+    injectR2OnNextPut = true;
+
+    currentTime = DateTime.utc(2026, 11, 1, 9, 40);
+    await container
+        .read(taskNotifierProvider.notifier)
+        .updateTask('tskLoc0001', title: 'Local Target Updated');
+
+    expect(put412Count, equals(1));
+    expect(put2xxCount, equals(1));
+    expect(
+      container.read(syncStateProvider).hasOpenConflict,
+      isFalse,
+      reason: '412 retry against R1 baseline must not raise false DeletionConflict for tskB000001 deleted in R2',
+    );
+    expect(container.read(syncStateProvider).errorMessage, isNull);
+    final converged = container.read(taskNotifierProvider).requireValue;
+    expect(
+      converged.findTask('tskB000001'),
+      isNull,
+      reason: 'Task B added in R1 and deleted in R2 must stay deleted after 412 CAS retry',
+    );
+    expect(converged.deletedBlock.findTaskRecord('tskB000001'), isNotNull);
+    expect(
+      converged.findTask('tskA000001')?.note ?? '',
+      isEmpty,
+      reason: 'Scalar clear of Task A note in R2 must not be overwritten by R1 note via stale R0 baseline',
+    );
+    expect(
+      converged.findTask('tskLoc0001')?.title,
+      equals('Local Target Updated'),
+    );
+  });
+
+  test('WebDAV 412 CAS retry encountering external remote 404 deletion throws RecoveryRequired without silently wiping tasks', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    var remoteExists = true;
+    var remoteTdf =
+        'tdf 0.8.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '    task tskKeep001\n'
+        '}\n\n'
+        'task tskKeep001 {\n'
+        '    name     "Keep Me"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n';
+    var remoteEtag = '"etag-v1"';
+    var deleteRemoteOnNextPut = false;
+    var putSuccessCount = 0;
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        if (!remoteExists) {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        final body = await utf8.decoder.bind(request).join();
+        if (deleteRemoteOnNextPut) {
+          deleteRemoteOnNextPut = false;
+          remoteExists = false;
+          remoteTdf = '';
+          request.response.statusCode = HttpStatus.preconditionFailed;
+          await request.response.close();
+          return;
+        }
+        putSuccessCount++;
+        remoteExists = true;
+        remoteTdf = body;
+        remoteEtag = '"etag-put-$putSuccessCount"';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    final config = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settings = InMemorySettingsRepository(config);
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settings),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9, 0)),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final loaded = await container.read(taskNotifierProvider.future);
+    final mutated = loaded.updateTask(
+      'tskKeep001',
+      title: 'Keep Me Edited',
+      currentDate: DateTime.utc(2026, 11, 1, 9, 5),
+    );
+    deleteRemoteOnNextPut = true;
+
+    await expectLater(
+      () => container.read(
+        Provider<Future<TaskBoard> Function()>(
+          (ref) =>
+              () => TaskSyncPipeline.runSyncWithStatus(
+                ref,
+                config,
+                candidateBoard: mutated,
+                candidateOriginBoard: loaded,
+              ),
+        ),
+      )(),
+      throwsA(
+        isA<TdfSyncOutcomeException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TdfSyncOutcomeKind.recoveryRequired,
+            )
+            .having(
+              (error) => error.ambiguousTaskIds,
+              'ambiguousTaskIds',
+              contains('tskKeep001'),
+            ),
+      ),
+    );
+    expect(
+      putSuccessCount,
+      equals(0),
+      reason: 'External 404 on 412 CAS retry must raise RecoveryRequired without overwriting remote',
+    );
+    expect(remoteExists, isFalse);
+  });
+
+  test('StorageMode.both persists Stage 2 committed WebDAV WorkspaceSyncState even when Stage 3 local convergence fails', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    const initialTdf =
+        'tdf 0.8.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '    task tskInit001\n'
+        '}\n\n'
+        'task tskInit001 {\n'
+        '    name     "Initial Task"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n';
+    const remoteStage2Tdf =
+        'tdf 0.8.0\n\n'
+        'deleted {\n'
+        '    generation 1\n'
+        '}\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '    task tskInit001\n'
+        '    task tskRem0002\n'
+        '}\n\n'
+        'task tskInit001 {\n'
+        '    name     "Initial Task"\n'
+        '    created  2026-11-01 08:00:00\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '}\n\n'
+        'task tskRem0002 {\n'
+        '    name     "Remote Stage 2 Task"\n'
+        '    created  2026-11-01 09:00:00\n'
+        '    modified 2026-11-01 09:00:00\n'
+        '}\n';
+
+    var remoteTdf = initialTdf;
+    var remoteEtag = '"etag-both-v1"';
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        remoteTdf = await utf8.decoder.bind(request).join();
+        remoteEtag = '"etag-both-put"';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    final tempDir = await Directory.systemTemp.createTemp(
+      'tiertask_both_stage3_fail_',
+    );
+    addTearDown(() => tempDir.delete(recursive: true));
+
+    final bothConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settings = InMemorySettingsRepository(bothConfig);
+    var failLocalSave = false;
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settings),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9, 30)),
+        localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+        localFileRepositoryProvider.overrideWithValue(
+          _FailableSaveLocalRepository(
+            config: bothConfig,
+            baseDirectoryPath: tempDir.path,
+            shouldFailSave: () => failLocalSave,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    // 1. Converge initial state across local and remote.
+    final loaded = await container.read(taskNotifierProvider.future);
+    expect(loaded.findTask('tskInit001'), isNotNull);
+
+    // 2. Remote advances to generation 1 with tskRem0002; Stage 3 local save fails.
+    remoteTdf = remoteStage2Tdf;
+    remoteEtag = '"etag-both-v2"';
+    failLocalSave = true;
+
+    await expectLater(
+      () => container.read(
+        Provider<Future<TaskBoard> Function()>(
+          (ref) =>
+              () => TaskSyncPipeline.synchronize(
+                ref,
+                bothConfig,
+                candidateBoard: loaded,
+              ),
+        ),
+      )(),
+      throwsA(isA<LocalFileException>()),
+    );
+
+    final workspace = await container.read(activeWorkspaceProvider.future);
+    final savedState = await settings.loadWorkspaceSyncState(workspace.id);
+    expect(
+      savedState.remoteEtag,
+      equals('"etag-both-v2"'),
+      reason: 'Stage 2 WebDAV ETag must be persisted before Stage 3 local convergence runs',
+    );
+    expect(
+      savedState.acknowledgedRemoteGeneration,
+      equals(1),
+      reason: 'Stage 2 acknowledgedRemoteGeneration must survive Stage 3 local write failure',
+    );
+    expect(
+      savedState.lastSyncedRemoteTdf,
+      contains('tskRem0002'),
+      reason: 'Stage 2 lastSyncedRemoteTdf must be durably committed before Stage 3 fails',
+    );
+    expect(
+      savedState.remoteSourceDigest,
+      equals(Sha256Service.hashHex(utf8.encode(remoteStage2Tdf))),
+    );
+  });
+
+  test('External WebDAV HTTP 404 after prior sync throws RecoveryRequired without re-uploading, while fresh remoteSourceDigest == null still creates via PUT', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    var remoteExists = false;
+    var remoteTdf = '';
+    var remoteEtag = '"etag-init"';
+    var putCount = 0;
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        if (!remoteExists) {
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        putCount++;
+        remoteExists = true;
+        remoteTdf = await utf8.decoder.bind(request).join();
+        remoteEtag = '"etag-put-$putCount"';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    final config = WebDavConfig(
+      storageMode: StorageMode.webdav,
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settings = InMemorySettingsRepository(config);
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settings),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9, 0)),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    // 1. Fresh WebDAV workspace (remoteSourceDigest == null) with 404 initializes and uploads via PUT.
+    await container.read(taskNotifierProvider.future);
+    await container
+        .read(taskNotifierProvider.notifier)
+        .addTask('Created On Fresh Remote', targetTier: TaskTier.someday);
+    expect(remoteExists, isTrue);
+    expect(putCount, equals(1));
+    final createdBoard = container.read(taskNotifierProvider).requireValue;
+    final createdTaskId = createdBoard.allTasks.single.id;
+
+    // 2. Externally delete remote file (HTTP 404) while remoteSourceDigest != null: must throw RecoveryRequired without re-uploading.
+    remoteExists = false;
+    remoteTdf = '';
+    final putsBeforeExternal404 = putCount;
+
+    await expectLater(
+      () => container.read(
+        Provider<Future<TaskBoard> Function()>(
+          (ref) =>
+              () => TaskSyncPipeline.runSyncWithStatus(
+                ref,
+                config,
+                candidateBoard: createdBoard,
+              ),
+        ),
+      )(),
+      throwsA(
+        isA<TdfSyncOutcomeException>()
+            .having(
+              (error) => error.kind,
+              'kind',
+              TdfSyncOutcomeKind.recoveryRequired,
+            )
+            .having(
+              (error) => error.ambiguousTaskIds,
+              'ambiguousTaskIds',
+              contains(createdTaskId),
+            ),
+      ),
+    );
+    expect(
+      putCount,
+      equals(putsBeforeExternal404),
+      reason: 'External WebDAV 404 after prior sync must NOT silently re-upload the remote file',
+    );
+    expect(remoteExists, isFalse);
+
+    // 3. Explicit RecoveryRequired resolution recovers the task with a fresh ID and uploads cleanly.
+    final recovered = await container.read(
+      Provider<Future<TaskBoard> Function()>(
+        (ref) =>
+            () => TaskSyncPipeline.runSyncWithStatus(
+              ref,
+              config,
+              candidateBoard: createdBoard,
+              taskRecoveryResolutions: <String, TdfRecoveryResolution>{
+                createdTaskId: TdfRecoveryResolution.recoverAsNew,
+              },
+            ),
+      ),
+    )();
+    expect(remoteExists, isTrue);
+    expect(putCount, equals(putsBeforeExternal404 + 1));
+    expect(recovered.allTasks.single.title, equals('Created On Fresh Remote'));
+    expect(recovered.allTasks.single.id, isNot(equals(createdTaskId)));
+  });
+}
+
+class _FailableSaveLocalRepository extends LocalFileRepository {
+  _FailableSaveLocalRepository({
+    required super.config,
+    super.baseDirectoryPath,
+    required this.shouldFailSave,
+  });
+
+  final bool Function() shouldFailSave;
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    if (shouldFailSave()) {
+      throw const LocalFileException('Simulated Stage 3 local save failure');
+    }
+    await super.saveTdf(tdfContent);
+  }
 }
 
 class _CountingSaveLocalRepository extends LocalFileRepository {

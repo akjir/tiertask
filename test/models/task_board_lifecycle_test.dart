@@ -234,9 +234,16 @@ task manualOkD2 {
       expect(afterComplete.blocked, isEmpty);
       expect(
         afterComplete.completed.map((task) => task.title),
+        equals(['Finish spec', '29 Days Ago', '30 Days Ago', '31 Days Ago']),
+        reason: 'Ordinary mutations must not prune >30 day completed tasks before explicit pruneCompletedTasks (TDF-PUB-004)',
+      );
+      final afterPrune = afterComplete.pruneCompletedTasks(
+        currentDate: fixedDate,
+      );
+      expect(
+        afterPrune.completed.map((task) => task.title),
         equals(['Finish spec', '29 Days Ago', '30 Days Ago']),
-        reason:
-            '29 and 30 day old tasks must be kept while 31 day old is pruned',
+        reason: 'pruneCompletedTasks must keep 29 and 30 day old tasks while pruning 31 day old tasks',
       );
       expect(
         afterComplete
@@ -1096,6 +1103,216 @@ task manualOkD2 {
       );
       expect(someBoard.findTask('ancSome001')!.dueAnchor, equals(anchor));
       expect(someBoard.findTask('ancSome001')!.isDuePassive, isFalse);
+    });
+
+    test('toggleSubtask and blockTask operate on scoped-only tasks just like global tasks', () {
+      final t0 = DateTime.utc(2026, 6, 1, 9, 0, 0);
+      final t1 = t0.add(const Duration(minutes: 5));
+      final t2 = t1.add(const Duration(minutes: 5));
+      final t3 = t2.add(const Duration(minutes: 5));
+      final t4 = t3.add(const Duration(minutes: 5));
+      final t5 = t4.add(const Duration(minutes: 5));
+      const scopedLabel = TdfLabel(
+        id: 'lblScp0001',
+        name: 'Work',
+        isScoped: true,
+      );
+      final openScoped = TaskItem(
+        id: 'scpOpen001',
+        title: 'Scoped Open Task',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScp0001'],
+        subtasksAutoFinish: true,
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Step 1', isCompleted: false),
+          SubtaskItem(title: 'Step 2', isCompleted: false),
+        ],
+      );
+      final doneScoped = TaskItem(
+        id: 'scpDone001',
+        title: 'Scoped Done Task',
+        isCompleted: true,
+        completions: 1,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScp0001'],
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Done Step', isCompleted: true),
+        ],
+      );
+      final somedayScoped = TaskItem(
+        id: 'scpSome001',
+        title: 'Scoped Someday Task',
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScp0001'],
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[openScoped, doneScoped, somedayScoped],
+        labels: const <TdfLabel>[scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['scpOpen001'],
+        ),
+        evaluationTime: t0,
+      );
+      expect(board.findTierOfTask('scpOpen001'), isNull);
+
+      // toggleSubtask toggles step 0 on open scoped-only task:
+      final afterToggle0 = board.toggleSubtask(
+        'scpOpen001',
+        0,
+        currentDate: t1,
+      );
+      expect(
+        afterToggle0.findTask('scpOpen001')!.subtasks[0].isCompleted,
+        isTrue,
+        reason: 'toggleSubtask must toggle steps on open scoped-only tasks',
+      );
+      expect(afterToggle0.findTask('scpOpen001')!.isCompleted, isFalse);
+
+      // toggleSubtask on final step auto-completes open scoped-only task:
+      final afterToggle1 = afterToggle0.toggleSubtask(
+        'scpOpen001',
+        1,
+        currentDate: t2,
+      );
+      expect(
+        afterToggle1.findTask('scpOpen001')!.isCompleted,
+        isTrue,
+        reason: 'Auto-finish toggleSubtask must complete scoped-only task',
+      );
+      expect(afterToggle1.queueTaskIds, isNot(contains('scpOpen001')));
+
+      // toggleSubtask on completed scoped-only task remains a no-op:
+      final afterToggleDone = board.toggleSubtask(
+        'scpDone001',
+        0,
+        currentDate: t1,
+      );
+      expect(identical(afterToggleDone, board), isTrue);
+
+      // blockTask blocks open scoped-only task (queued) and someday scoped-only task:
+      final deferUntil = t5.add(const Duration(days: 2));
+      final afterBlockOpen = board.blockTask(
+        'scpOpen001',
+        currentDate: t3,
+        suspendedUntil: deferUntil,
+      );
+      final blockedOpen = afterBlockOpen.findTask('scpOpen001')!;
+      expect(blockedOpen.suspendedAt, equals(deferUntil));
+      expect(blockedOpen.isPriority, isFalse);
+      expect(afterBlockOpen.queueTaskIds, contains('scpOpen001'));
+
+      // Calling blockTask again on already-blocked scoped-only task is a no-op:
+      final afterReblock = afterBlockOpen.blockTask(
+        'scpOpen001',
+        currentDate: t4,
+      );
+      expect(identical(afterReblock, afterBlockOpen), isTrue);
+
+      // blockTask on unqueued someday scoped-only task sets forever deferral and queues it:
+      final afterBlockSomeday = board.blockTask('scpSome001', currentDate: t3);
+      expect(
+        afterBlockSomeday.findTask('scpSome001')!.isSuspendedForever,
+        isTrue,
+      );
+      expect(afterBlockSomeday.queueTaskIds, contains('scpSome001'));
+
+      // blockTask on completed scoped-only task un-completes, resets subtasks, defers, and queues it:
+      final afterBlockDone = board.blockTask('scpDone001', currentDate: t3);
+      final blockedDone = afterBlockDone.findTask('scpDone001')!;
+      expect(blockedDone.isCompleted, isFalse);
+      expect(blockedDone.completedAt, isNull);
+      expect(blockedDone.isSuspendedForever, isTrue);
+      expect(blockedDone.subtasks.single.isCompleted, isFalse);
+      expect(afterBlockDone.queueTaskIds, contains('scpDone001'));
+    });
+
+    test('reevaluateBoard defaults to pruneExpiredCompleted=false and evaluate(pruneExpiredCompleted: true) strips dangling blocked refs', () {
+      final t0 = DateTime.utc(2026, 1, 1, 12, 0, 0);
+      final t31 = t0.add(const Duration(days: 31));
+      final expiredDone = TaskItem(
+        id: 'expDone001',
+        title: 'Expired Completed',
+        isCompleted: true,
+        completions: 1,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+      );
+      final openDependent = TaskItem(
+        id: 'openDep001',
+        title: 'Open Dependent',
+        createdAt: t0,
+        modifiedAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'expDone001', requiredCompletion: 2),
+        ],
+      );
+      final otherOpen = TaskItem(
+        id: 'otherOp001',
+        title: 'Other Open',
+        createdAt: t0,
+        modifiedAt: t0,
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[expiredDone, openDependent, otherOpen],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['openDep001', 'otherOp001'],
+        ),
+        evaluationTime: t31,
+      );
+
+      // Ordinary mutations (updateTask, blockTask, scheduleTask, deleteTask) must NOT prune >30d completed tasks:
+      final afterUpdate = board.updateTask(
+        'otherOp001',
+        title: 'Other Open Renamed',
+        currentDate: t31,
+      );
+      expect(
+        afterUpdate.findTask('expDone001'),
+        isNotNull,
+        reason: 'reevaluateBoard default must preserve >30d completed tasks during ordinary mutations',
+      );
+      expect(afterUpdate.deletedBlock.findTaskRecord('expDone001'), isNull);
+
+      // Explicit evaluate(pruneExpiredCompleted: true) prunes expDone001 AND strips dangling blocked ref + advances modifiedAt:
+      final evaluatedPruned = TaskBoard.evaluate(
+        tasks: <TaskItem>[expiredDone, openDependent, otherOpen],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['openDep001', 'otherOp001'],
+        ),
+        evaluationTime: t31,
+        pruneExpiredCompleted: true,
+      );
+      expect(evaluatedPruned.findTask('expDone001'), isNull);
+      expect(
+        evaluatedPruned.deletedBlock.findTaskRecord('expDone001'),
+        isNotNull,
+      );
+      final cleanedDep = evaluatedPruned.findTask('openDep001')!;
+      expect(
+        cleanedDep.dependencies,
+        isEmpty,
+        reason: 'Pruning an expired completed task must strip dangling blocked refs on surviving open tasks',
+      );
+      expect(cleanedDep.blockedByTaskIds, isEmpty);
+      expect(
+        cleanedDep.modifiedAt,
+        equals(t31),
+        reason: 'Stripping a dangling blocked ref during pruning must advance task.modifiedAt',
+      );
+      expect(
+        evaluatedPruned.findTierOfTask('openDep001'),
+        isNot(equals(TaskTier.blocked)),
+        reason: 'Task whose sole blocker was pruned must no longer be evaluated as Blocked',
+      );
     });
   });
 }

@@ -181,6 +181,26 @@ void main() {
         reason: 'bounds/manifest.json must test all 22 normative MAX_* constants in Section 6.2',
       );
     });
+
+    test('accepts EOF-terminated standalone tdf 0.8.0 version header and serializes canonically with LF (TDF-LEX-002, TDF-GRAM-002)', () {
+      for (final raw in const <String>[
+        'tdf 0.8.0',
+        '  tdf 0.8.0  # trailing comment at EOF',
+        '# leading comment\ntdf 0.8.0',
+      ]) {
+        final parsed = tdfService.parse(raw);
+        expect(
+          parsed.allTasks,
+          isEmpty,
+          reason: 'EOF-terminated "$raw" must parse as empty board',
+        );
+        expect(
+          tdfService.serialize(parsed),
+          equals('tdf 0.8.0\n'),
+          reason: 'Canonical output for "$raw" must end with LF',
+        );
+      }
+    });
   });
 }
 
@@ -415,10 +435,10 @@ Set<String> _executeOperationalAndMetaRuleAssertions(TdfService tdfService) {
       DateTime.utc(9999, 12, 31, 23, 59, 59),
     ),
     throwsA(
-      isA<FormatException>().having(
-        (error) => error.message,
-        'message',
-        'InvalidTimestamp',
+      isA<TdfException>().having(
+        (error) => error.kind,
+        'kind',
+        TdfErrorKind.invalidTimestamp,
       ),
     ),
   );

@@ -590,6 +590,26 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
+  /// Assigns a timestamp-related persistence error to the most specific active scheduling field.
+  void _assignTimestampPersistError(
+    String timestampError, {
+    required bool includeRepeatLeadDays,
+    String? repeatLeadDaysError,
+  }) {
+    if (includeRepeatLeadDays &&
+        repeatLeadDaysError != null &&
+        _isRepeating &&
+        _hasDue) {
+      _repeatLeadDaysErrorMessage = repeatLeadDaysError;
+    } else if (_isSuspended) {
+      _suspendedErrorMessage = timestampError;
+    } else if (_hasDue) {
+      _dueErrorMessage = timestampError;
+    } else {
+      _errorMessage = timestampError;
+    }
+  }
+
   /// Validates any pending link input, commits resolved pending history, and assembles [_ValidatedTaskDraft].
   _ValidatedTaskDraft? _buildDraft({
     required TaskBoard board,
@@ -687,44 +707,48 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Synchronously updates unedited local timestamp snapshots and controller texts when [webDavConfigProvider] resolves (`DECISION-14`).
+  /// Synchronously updates local timestamp baseline snapshots and unedited controller texts when [webDavConfigProvider] resolves (`DECISION-14`).
   void _handleConfigAsyncChanged(
     AsyncValue<WebDavConfig>? previous,
     AsyncValue<WebDavConfig> next,
   ) {
     final nextConfig = next.asData?.value;
     if (nextConfig == null) return;
-    if (_initialDueAt case final dueAt?
-        when _dueController.text.trim() == _initialDueText) {
+    if (_initialDueAt case final dueAt?) {
+      final previousInitialText = _initialDueText;
+      final wasUnedited = _dueController.text.trim() == previousInitialText;
       final nextDueText = TaskEditorSuspendedField.formatLocalTimestamp(
         dueAt,
         nextConfig,
       );
-      if (nextDueText != _initialDueText) {
-        _initialDueText = nextDueText;
+      _initialDueText = nextDueText;
+      if (wasUnedited && nextDueText != previousInitialText) {
         _dueController.text = nextDueText;
       }
     }
-    if (_initialSuspendedAt case final suspendedAt?
-        when _suspendedController.text.trim() == _initialSuspendedText) {
+    if (_initialSuspendedAt case final suspendedAt?) {
+      final previousInitialText = _initialSuspendedText;
+      final wasUnedited =
+          _suspendedController.text.trim() == previousInitialText;
       final nextSuspendedText = TaskEditorSuspendedField.formatInitialText(
         suspendedAt,
         nextConfig,
       );
-      if (nextSuspendedText != _initialSuspendedText) {
-        _initialSuspendedText = nextSuspendedText;
+      _initialSuspendedText = nextSuspendedText;
+      if (wasUnedited && nextSuspendedText != previousInitialText) {
         _suspendedController.text = nextSuspendedText;
       }
     }
-    if (_editingHistoryOriginalEntry case final entry?
-        when _historyTimestampController.text.trim() ==
-            _editingHistoryInitialTimestampText) {
+    if (_editingHistoryOriginalEntry case final entry?) {
+      final previousInitialText = _editingHistoryInitialTimestampText;
+      final wasUnedited =
+          _historyTimestampController.text.trim() == previousInitialText;
       final nextHistoryText = TaskEditorSuspendedField.formatLocalTimestamp(
         entry.timestampUtc,
         nextConfig,
       );
-      if (nextHistoryText != _editingHistoryInitialTimestampText) {
-        _editingHistoryInitialTimestampText = nextHistoryText;
+      _editingHistoryInitialTimestampText = nextHistoryText;
+      if (wasUnedited && nextHistoryText != previousInitialText) {
         _historyTimestampController.text = nextHistoryText;
       }
     }
@@ -780,8 +804,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   void _handlePersistFailure(
     String kindLabel,
     TdfErrorKind? kind,
-    AppLocalizations localizations,
-  ) {
+    AppLocalizations localizations, {
+    TdfContextOutcomeKind? contextKind,
+  }) {
     if (AppLogger.shouldLog(LogLevel.warn)) {
       AppLogger.event(
         LogLevel.warn,
@@ -792,21 +817,30 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     }
     if (!mounted) return;
     setState(() {
-      if (kind == TdfErrorKind.limitExceeded &&
+      if (contextKind == TdfContextOutcomeKind.timeZoneContextRequired) {
+        _assignTimestampPersistError(
+          localizations.taskSuspendedErrorInvalid,
+          includeRepeatLeadDays: false,
+        );
+      } else if (kind == TdfErrorKind.limitExceeded &&
           _historyEntries.length >= maxTdfHistoryPerTask) {
         _historyErrorMessage = localizations.historyErrorMaxExceeded;
-      } else if (kind == TdfErrorKind.invalidTimestamp &&
-          _isRepeating &&
-          _hasDue) {
-        _repeatLeadDaysErrorMessage = localizations.repeatLeadDaysErrorInvalid;
-      } else if (kind == TdfErrorKind.invalidTimestamp && _isSuspended) {
-        _suspendedErrorMessage = localizations.taskSuspendedErrorInvalid;
-      } else if (kind == TdfErrorKind.invalidTimestamp && _hasDue) {
-        _dueErrorMessage = localizations.taskSuspendedErrorInvalid;
-      } else if (kind == TdfErrorKind.invalidTimestamp) {
-        _errorMessage = localizations.taskSuspendedErrorInvalid;
-      } else {
+      } else if (kind == TdfErrorKind.limitExceeded) {
         _errorMessage = localizations.schedulingNoteErrorTooLong;
+      } else if (kind == TdfErrorKind.invalidTimestamp) {
+        _assignTimestampPersistError(
+          localizations.taskSuspendedErrorInvalid,
+          includeRepeatLeadDays: true,
+          repeatLeadDaysError: localizations.repeatLeadDaysErrorInvalid,
+        );
+      } else if (kind == TdfErrorKind.unexpectedToken) {
+        _errorMessage = localizations.schedulingNoteErrorInvalid;
+      } else if (kind == TdfErrorKind.invalidUri) {
+        _linkErrorMessage = localizations.linkErrorInvalid;
+      } else if (kind == TdfErrorKind.emptyText) {
+        _errorMessage = localizations.taskNameErrorEmpty;
+      } else {
+        _errorMessage = localizations.taskSuspendedErrorInvalid;
       }
     });
   }
@@ -1319,10 +1353,19 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       _handlePersistFailure(error.kind.name, error.kind, localizations);
       return;
     } on TdfContextException catch (error) {
-      _handlePersistFailure(error.kind.name, null, localizations);
+      _handlePersistFailure(
+        error.kind.name,
+        null,
+        localizations,
+        contextKind: error.kind,
+      );
       return;
     } on FormatException {
-      _handlePersistFailure('FormatException', null, localizations);
+      _handlePersistFailure(
+        'FormatException',
+        TdfErrorKind.invalidTimestamp,
+        localizations,
+      );
       return;
     }
     _logTaskSaved(draft);

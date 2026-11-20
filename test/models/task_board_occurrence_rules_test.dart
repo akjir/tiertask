@@ -860,5 +860,125 @@ void main() {
         reason: 'TDF-PUB-004: generation >= maxTdfSyncGeneration must fail with LimitExceeded instead of wrapping',
       );
     });
+
+    test('editing a Completed recurring task with subtasksAutoFinish via updateTask keeps it Completed', () {
+      final t0 = DateTime.utc(2026, 8, 1, 9, 0, 0);
+      final t1 = t0.add(const Duration(minutes: 5));
+      final t2 = t1.add(const Duration(minutes: 5));
+      final completedRecurring = TaskItem(
+        id: 'doneRecAf1',
+        title: 'Completed Recurring AutoFinish',
+        isCompleted: true,
+        completions: 4,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
+        subtasksAutoFinish: true,
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Step A', isCompleted: true),
+        ],
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[completedRecurring],
+        evaluationTime: t0,
+      );
+
+      // No-op updateTask returns identical board without resurrecting:
+      final noOp = board.updateTask(
+        'doneRecAf1',
+        title: 'Completed Recurring AutoFinish',
+        currentDate: t1,
+      );
+      expect(identical(noOp, board), isTrue);
+
+      // Editing note and adding a new subtask keeps Completed, locks all steps true, preserves completions, and stays out of queue:
+      final edited = board.updateTask(
+        'doneRecAf1',
+        note: 'Updated retrospective note',
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Step A', isCompleted: true),
+          SubtaskItem(title: 'Step B', isCompleted: false),
+        ],
+        currentDate: t2,
+      );
+      final after = edited.findTask('doneRecAf1')!;
+      expect(
+        after.isCompleted,
+        isTrue,
+        reason: 'Editing a Completed recurring task with auto-finish must not resurrect it',
+      );
+      expect(after.completedAt, equals(t0));
+      expect(after.completions, equals(4));
+      expect(after.note, equals('Updated retrospective note'));
+      expect(
+        after.subtasks.every((step) => step.isCompleted),
+        isTrue,
+        reason: 'Subtasks on a Completed task must stay locked true',
+      );
+      expect(edited.queueTaskIds, isNot(contains('doneRecAf1')));
+    });
+
+    test('nextModifiedTimestamp, computeNextMode2Schedule, and nextDueUtc map out-of-bounds timestamps to TdfException(invalidTimestamp)', () {
+      final maxUtc = DateTime.utc(9999, 12, 31, 23, 59, 59);
+      final minUtc = DateTime.utc(1, 1, 1, 0, 0, 0);
+      final tdfInvalidTimestamp = isA<TdfException>().having(
+        (error) => error.kind,
+        'kind',
+        TdfErrorKind.invalidTimestamp,
+      );
+
+      // 1. TaskItem.nextModifiedTimestamp overflow & invalid now:
+      expect(
+        () => TaskItem.nextModifiedTimestamp(maxUtc, maxUtc),
+        throwsA(tdfInvalidTimestamp),
+        reason: 'nextModifiedTimestamp +1s past 9999 must throw TdfException(invalidTimestamp)',
+      );
+      expect(
+        () => TaskItem.nextModifiedTimestamp(
+          DateTime.utc(10000, 1, 1, 0, 0, 0),
+          null,
+        ),
+        throwsA(tdfInvalidTimestamp),
+      );
+
+      // 2. TaskRepeatRule.computeNextMode2Schedule local anchor underflow/overflow when oldAnchor is null:
+      const daily = TaskRepeatRule(count: 1, unit: RepeatUnit.days);
+      expect(
+        () => daily.computeNextMode2Schedule(
+          completedAtUtc: DateTime.utc(2026, 1, 1, 0, 0, 0),
+          oldDueUtc: minUtc,
+          timeZone: TdfTimeZoneContext.fixedOffset(const Duration(hours: -5)),
+        ),
+        throwsA(tdfInvalidTimestamp),
+        reason: '0001-01-01T00:00:00Z in UTC-5 local anchor underflow must throw TdfException(invalidTimestamp)',
+      );
+      expect(
+        () => daily.computeNextMode2Schedule(
+          completedAtUtc: maxUtc,
+          oldDueUtc: maxUtc,
+          timeZone: TdfTimeZoneContext.fixedOffset(const Duration(hours: 2)),
+        ),
+        throwsA(tdfInvalidTimestamp),
+        reason: '9999-12-31T23:59:59Z in UTC+2 local anchor overflow must throw TdfException(invalidTimestamp)',
+      );
+
+      // 3. TaskRepeatRule.nextDueUtc 9999 overflow and non-advancing resolved timestamp:
+      expect(
+        () => daily.nextDueUtc(
+          completedAtUtc: maxUtc,
+          timeZone: TdfTimeZoneContext.utc,
+        ),
+        throwsA(tdfInvalidTimestamp),
+        reason: 'nextDueUtc past 9999-12-31 must throw TdfException(invalidTimestamp)',
+      );
+      expect(
+        () => daily.nextDueUtc(
+          completedAtUtc: DateTime.utc(10000, 1, 1, 0, 0, 0),
+          timeZone: TdfTimeZoneContext.utc,
+        ),
+        throwsA(tdfInvalidTimestamp),
+      );
+    });
   });
 }

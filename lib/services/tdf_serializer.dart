@@ -108,6 +108,16 @@ abstract final class TdfSerializer {
     }
   }
 
+  /// Validates [value] against [maxScalars] Unicode scalar values and escapes it as a double-quoted TDF string literal.
+  static String _escapeBoundedQuoted(
+    String value,
+    int maxScalars,
+    String fieldName,
+  ) {
+    _validateScalarLength(value, maxScalars, fieldName);
+    return _escapeQuoted(value);
+  }
+
   /// Escapes a string for a double-quoted TDF string literal (`\"`, `\\`, `\n`, `\r`, `\t`).
   static String _escapeQuoted(String value) {
     final buffer = StringBuffer('"');
@@ -196,7 +206,7 @@ abstract final class TdfSerializer {
         : '';
     final passiveSuffix = isPassive ? ' passive' : '';
     final noteSuffix = (note != null && note.isNotEmpty)
-        ? ' ${_escapeQuoted(note)}'
+        ? ' ${_escapeBoundedQuoted(note, maxTdfNoteLength, 'Due note')}'
         : '';
     return '$base$anchorSuffix$passiveSuffix$noteSuffix';
   }
@@ -237,7 +247,7 @@ abstract final class TdfSerializer {
     }
     final note = task.suspendedNote;
     if (note != null && note.isNotEmpty) {
-      return '$base ${_escapeQuoted(note)}';
+      return '$base ${_escapeBoundedQuoted(note, maxTdfNoteLength, 'Suspended note')}';
     }
     return base;
   }
@@ -309,6 +319,9 @@ abstract final class TdfSerializer {
     StringBuffer buffer,
     List<TaskCondition> ordered,
   ) {
+    for (final rule in ordered) {
+      _validateConditionArgsBound(rule, isInline: false);
+    }
     final parts = <({String key, String args})>[
       for (final rule in ordered) _formatConditionRuleParts(rule),
     ];
@@ -393,20 +406,29 @@ abstract final class TdfSerializer {
     }
     final orderedConditions = _orderConditionsCanonically(label.conditions);
     final lines = <({String key, String value})>[
-      (key: 'name', value: _escapeQuoted(label.name)),
+      (
+        key: 'name',
+        value: _escapeBoundedQuoted(label.name, maxTdfTextLength, 'Label name'),
+      ),
       if (label.color case final color?)
         (key: 'color', value: _escapeQuoted(color.toUpperCase())),
       if (label.note case final note? when note.isNotEmpty)
-        (key: 'note', value: _escapeQuoted(note)),
+        (
+          key: 'note',
+          value: _escapeBoundedQuoted(note, maxTdfNoteLength, 'Label note'),
+        ),
       if (label.modifiedAt case final modified?)
         (key: 'modified', value: _formatUtcTimestamp(modified)),
       for (final link in label.links)
         (
           key: 'link',
-          value: '${_escapeQuoted(link.title)} ${_escapeQuoted(link.uri)}',
+          value:
+              '${_escapeBoundedQuoted(link.title, maxTdfTextLength, 'Link title')} '
+              '${_escapeBoundedQuoted(link.uri, maxTdfUriLength, 'Link URI')}',
         ),
     ];
     if (orderedConditions.length == 1) {
+      _validateConditionArgsBound(orderedConditions.single, isInline: true);
       final part = _formatConditionRuleParts(orderedConditions.single);
       final inlineValue = part.args.isEmpty
           ? part.key
@@ -437,17 +459,37 @@ abstract final class TdfSerializer {
         'Location radius exceeds maximum of $maxTdfLocationRadius meters.',
       );
     }
+    final latitudeText = location.latitudeText;
+    final longitudeText = location.longitudeText;
+    final radiusText = location.radiusText;
+    _validateNumberLength(latitudeText, 'Location latitude');
+    _validateNumberLength(longitudeText, 'Location longitude');
+    _validateNumberLength(radiusText, 'Location radius');
     final lines = <({String key, String value})>[
-      (key: 'name', value: _escapeQuoted(location.name)),
-      if (location.note case final note? when note.isNotEmpty)
-        (key: 'note', value: _escapeQuoted(note)),
-      if (location.source case final source? when source.isNotEmpty)
-        (key: 'source', value: _escapeQuoted(source)),
       (
-        key: 'coordinates',
-        value: '${location.latitudeText} ${location.longitudeText}',
+        key: 'name',
+        value: _escapeBoundedQuoted(
+          location.name,
+          maxTdfTextLength,
+          'Location name',
+        ),
       ),
-      (key: 'radius', value: location.radiusText),
+      if (location.note case final note? when note.isNotEmpty)
+        (
+          key: 'note',
+          value: _escapeBoundedQuoted(note, maxTdfNoteLength, 'Location note'),
+        ),
+      if (location.source case final source? when source.isNotEmpty)
+        (
+          key: 'source',
+          value: _escapeBoundedQuoted(
+            source,
+            maxTdfTextLength,
+            'Location source',
+          ),
+        ),
+      (key: 'coordinates', value: '$latitudeText $longitudeText'),
+      (key: 'radius', value: radiusText),
       if (location.modifiedAt case final modified?)
         (key: 'modified', value: _formatUtcTimestamp(modified)),
     ];
@@ -509,9 +551,15 @@ abstract final class TdfSerializer {
     final orderedConditions = _orderConditionsCanonically(task.conditions);
     final suspendedValue = _formatSuspendedValue(task);
     final lines = <({String key, String value})>[
-      (key: 'name', value: _escapeQuoted(task.title)),
+      (
+        key: 'name',
+        value: _escapeBoundedQuoted(task.title, maxTdfTextLength, 'Task name'),
+      ),
       if (task.note case final note? when note.isNotEmpty)
-        (key: 'note', value: _escapeQuoted(note)),
+        (
+          key: 'note',
+          value: _escapeBoundedQuoted(note, maxTdfNoteLength, 'Task note'),
+        ),
       (key: 'created', value: _formatUtcTimestamp(task.createdAt)),
       if (task.completedAt case final finished?)
         (key: 'finished', value: _formatUtcTimestamp(finished)),
@@ -540,22 +588,27 @@ abstract final class TdfSerializer {
         (
           key: 'origin',
           value:
-              '${_escapeQuoted(origin.namespace)} ${_escapeQuoted(origin.externalKey)}',
+              '${_escapeBoundedQuoted(origin.namespace, maxTdfTextLength, 'Origin namespace')} '
+              '${_escapeBoundedQuoted(origin.externalKey, maxTdfTextLength, 'Origin key')}',
         ),
       for (final link in task.links)
         (
           key: 'link',
-          value: '${_escapeQuoted(link.title)} ${_escapeQuoted(link.uri)}',
+          value:
+              '${_escapeBoundedQuoted(link.title, maxTdfTextLength, 'Link title')} '
+              '${_escapeBoundedQuoted(link.uri, maxTdfUriLength, 'Link URI')}',
         ),
       for (final entry in task.history)
         (
           key: 'history',
           value:
-              '${_formatExplicitSecondsUtcTimestamp(entry.timestampUtc)} ${_escapeQuoted(entry.text)}',
+              '${_formatExplicitSecondsUtcTimestamp(entry.timestampUtc)} '
+              '${_escapeBoundedQuoted(entry.text, maxTdfTextLength, 'History text')}',
         ),
     ];
 
     if (orderedConditions.length == 1) {
+      _validateConditionArgsBound(orderedConditions.single, isInline: true);
       final part = _formatConditionRuleParts(orderedConditions.single);
       final inlineValue = part.args.isEmpty
           ? part.key
@@ -594,12 +647,41 @@ abstract final class TdfSerializer {
         final doneStr = (step.isCompleted ? 'true' : 'false').padRight(
           boolPadWidth,
         );
-        buffer.writeln('        step $doneStr ${_escapeQuoted(step.title)}');
+        final escapedTitle = _escapeBoundedQuoted(
+          step.title,
+          maxTdfTextLength,
+          'Subtask step title',
+        );
+        buffer.writeln('        step $doneStr $escapedTitle');
       }
       buffer.writeln('    }');
     }
     buffer.writeln('}');
     return 1 + (hasConditionBlock ? 1 : 0) + (hasSubtasksBlock ? 1 : 0);
+  }
+
+  /// Enforces `MAX_ARGS_PER_STMT = 64` on a serialized condition rule (`TDF-VAL-002`, `TDF-SER-001`).
+  static void _validateConditionArgsBound(
+    TaskCondition condition, {
+    required bool isInline,
+  }) {
+    if (condition case final DayTaskCondition dayCondition) {
+      final maxDayTokens = isInline ? maxTdfArgsPerStmt - 1 : maxTdfArgsPerStmt;
+      if (dayCondition.dayTokens.length > maxDayTokens) {
+        _failLimitExceeded(
+          'Condition "day" exceeds maximum of $maxTdfArgsPerStmt statement arguments.',
+        );
+      }
+    }
+  }
+
+  /// Validates that formatted numeric token [value] does not exceed `MAX_NUMBER_LENGTH = 24` ASCII characters (`TDF-VAL-002`).
+  static void _validateNumberLength(String value, String fieldName) {
+    if (value.length > maxTdfNumberLength) {
+      _failLimitExceeded(
+        '$fieldName exceeds maximum of $maxTdfNumberLength characters.',
+      );
+    }
   }
 
   /// Validates that serialized canonical output does not exceed `MAX_FILE_BYTES` or `MAX_LINE_COUNT` (`TDF-SER-001`).
@@ -635,6 +717,27 @@ abstract final class TdfSerializer {
               'Canonical output exceeds maximum of $maxTdfLineCount lines.',
         );
       }
+    }
+  }
+
+  /// Validates that [value] contains valid Unicode scalars and does not exceed [maxScalars] (`TDF-TYPE-001`, `TDF-SER-001`).
+  static void _validateScalarLength(
+    String value,
+    int maxScalars,
+    String fieldName,
+  ) {
+    final scalarCount = TdfCalendar.countUnicodeScalars(value);
+    if (scalarCount == null) {
+      throw TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: 1,
+        message: '$fieldName contains an unpaired UTF-16 surrogate.',
+      );
+    }
+    if (scalarCount > maxScalars) {
+      _failLimitExceeded(
+        '$fieldName exceeds maximum of $maxScalars Unicode scalar values.',
+      );
     }
   }
 

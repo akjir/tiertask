@@ -21,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/main.dart';
+import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
@@ -167,7 +168,10 @@ task 000004OkD2 {
       MaterialApp appWidget = tester.widget<MaterialApp>(
         find.byType(MaterialApp),
       );
-      expect(appWidget.title, equals('TierTask'));
+      expect(
+        appWidget.title,
+        equals(AppBuildProfile.current.formatWindowTitle('TierTask')),
+      );
       expect(appWidget.themeMode, equals(ThemeMode.system));
 
       await openSettingsFromMenu(tester);
@@ -965,6 +969,7 @@ Future<InMemorySettingsRepository> _pumpSettingsApp(
   bool openSettings = true,
 }) async {
   final settingsRepository = InMemorySettingsRepository(config);
+  final remoteStore = <String, String>{};
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
@@ -981,6 +986,7 @@ Future<InMemorySettingsRepository> _pumpSettingsApp(
             return FakeWebDavRepository(
               config: currentConfig,
               shouldFail: shouldFailWebDav,
+              remoteStore: remoteStore,
             );
           }),
         if (storageDirPath != null)

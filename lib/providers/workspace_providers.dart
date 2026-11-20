@@ -15,6 +15,7 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/app_build_profile.dart';
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
 import '../repositories/settings_repository.dart';
@@ -26,9 +27,15 @@ final activeWorkspaceProvider =
       ActiveWorkspaceNotifier.new,
     );
 
+/// Provides the active [AppBuildProfile] (`release` or `dev`), overridable in tests.
+final appBuildProfileProvider = Provider<AppBuildProfile>((ref) {
+  return AppBuildProfile.current;
+});
+
 /// Provides the [SettingsRepository] for loading and saving application settings.
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
-  return SecureSettingsRepository();
+  final buildProfile = ref.watch(appBuildProfileProvider);
+  return SecureSettingsRepository(buildProfile: buildProfile);
 });
 
 /// Provides lightweight [WorkspaceSummary] entries for all persisted workspaces.

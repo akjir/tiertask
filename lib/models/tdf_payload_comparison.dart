@@ -667,13 +667,7 @@ class TdfPayloadComparison {
         !local.isCompleted &&
         !incoming.isCompleted;
     if (!sameOccurrenceOpen) {
-      return _mergeScalar(
-        local: local,
-        incoming: incoming,
-        baseline: baseline,
-        winner: winner,
-        equalsFn: (first, second) => compareTaskStates(first, second) == 0,
-      );
+      return winner;
     }
     final mergedRepeat = _mergeScalar(
       local: local.repeatRule,
@@ -783,38 +777,31 @@ class TdfPayloadComparison {
         !incoming.isCompleted;
 
     if (!sameOccurrenceOpen) {
-      final stateSource = _mergeScalar(
-        local: local,
-        incoming: incoming,
-        baseline: baseline,
-        winner: winner,
-        equalsFn: (first, second) => compareTaskStates(first, second) == 0,
-      );
       return TaskItem(
         id: winner.id,
         title: mergedName,
         note: mergedNote,
         createdAt: winner.createdAt,
-        completedAt: stateSource.completedAt,
-        isCompleted: stateSource.isCompleted || stateSource.completedAt != null,
-        completions: stateSource.completions,
-        isPriority: stateSource.isPriority,
-        suspendedAt: stateSource.suspendedAt,
-        isSuspendedForever: stateSource.isSuspendedForever,
-        suspendedNote: stateSource.suspendedNote,
-        dueAt: stateSource.dueAt,
-        dueAnchor: stateSource.dueAnchor,
-        isDuePassive: stateSource.isDuePassive,
-        dueNote: stateSource.dueNote,
-        repeatRule: stateSource.repeatRule,
+        completedAt: winner.completedAt,
+        isCompleted: winner.isCompleted || winner.completedAt != null,
+        completions: winner.completions,
+        isPriority: winner.isPriority,
+        suspendedAt: winner.suspendedAt,
+        isSuspendedForever: winner.isSuspendedForever,
+        suspendedNote: winner.suspendedNote,
+        dueAt: winner.dueAt,
+        dueAnchor: winner.dueAnchor,
+        isDuePassive: winner.isDuePassive,
+        dueNote: winner.dueNote,
+        repeatRule: winner.repeatRule,
         origin: mergedOrigin,
         labelIds: mergedLabels,
-        dependencies: stateSource.dependencies,
+        dependencies: winner.dependencies,
         links: mergedLinks,
         history: mergedHistory,
         conditions: mergedConditions,
-        subtasksAutoFinish: stateSource.subtasksAutoFinish,
-        subtasks: stateSource.subtasks,
+        subtasksAutoFinish: winner.subtasksAutoFinish,
+        subtasks: winner.subtasks,
       );
     }
 

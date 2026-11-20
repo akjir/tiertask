@@ -20,6 +20,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/app_build_profile.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
 import 'host_file_lock.dart';
@@ -45,9 +46,15 @@ class LocalFileOperations<E extends Exception> {
       _joinDirectoryAndChild(directoryPath, extractFileNameFromPath(fileName));
 
   /// Resolves the default filesystem path for [fileName] (or `tiertask.log`) inside [baseDirectoryPath] or the user data directory.
-  String defaultLogFilePath({String? baseDirectoryPath, String? fileName}) {
+  String defaultLogFilePath({
+    String? baseDirectoryPath,
+    String? fileName,
+    AppBuildProfile? buildProfile,
+  }) {
     final trimmed = baseDirectoryPath?.trim() ?? '';
-    final base = trimmed.isNotEmpty ? trimmed : resolveDefaultDirectoryPath();
+    final base = trimmed.isNotEmpty
+        ? trimmed
+        : resolveDefaultDirectoryPath(buildProfile: buildProfile);
     final targetName = (fileName != null && fileName.trim().isNotEmpty)
         ? extractFileNameFromPath(fileName.trim())
         : AppLogger.defaultLogFileName;
@@ -430,26 +437,36 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Resolves the platform-appropriate user data directory for relative local file names.
-  String resolveDefaultDirectoryPath() {
-    final environment = Platform.environment;
-    final separator = Platform.pathSeparator;
+  String resolveDefaultDirectoryPath({
+    AppBuildProfile? buildProfile,
+    Map<String, String>? environment,
+    bool? isWindows,
+  }) {
+    final effectiveProfile = buildProfile ?? AppBuildProfile.current;
+    final directoryName = effectiveProfile.dataDirectoryName;
+    final activeEnvironment = environment ?? Platform.environment;
+    final effectiveWindows = isWindows ?? Platform.isWindows;
+    final separator = effectiveWindows ? r'\' : '/';
     final candidates = <String?>[
-      if (Platform.isWindows) ...<String?>[
-        environment['APPDATA'],
-        environment['LOCALAPPDATA'],
-        environment['USERPROFILE'],
+      if (effectiveWindows) ...<String?>[
+        activeEnvironment['APPDATA'],
+        activeEnvironment['LOCALAPPDATA'],
+        activeEnvironment['USERPROFILE'],
       ],
-      environment['XDG_DATA_HOME'],
+      activeEnvironment['XDG_DATA_HOME'],
     ];
     for (final candidate in candidates) {
       final trimmed = candidate?.trim() ?? '';
       if (trimmed.isNotEmpty) {
-        return '${trimTrailingSeparators(trimmed)}${separator}tiertask';
+        return '${trimTrailingSeparators(trimmed)}$separator$directoryName';
       }
     }
-    final home = (environment['HOME'] ?? '').trim();
+    final home = (activeEnvironment['HOME'] ?? '').trim();
     if (home.isNotEmpty) {
-      return '${trimTrailingSeparators(home)}$separator.local${separator}share${separator}tiertask';
+      return '${trimTrailingSeparators(home)}$separator.local${separator}share$separator$directoryName';
+    }
+    if (effectiveProfile.isDev) {
+      return '${trimTrailingSeparators(Directory.systemTemp.path)}$separator$directoryName';
     }
     return Directory.systemTemp.path;
   }
@@ -469,14 +486,15 @@ class LocalFileOperations<E extends Exception> {
   String resolveFilePath(
     String rawPath,
     String? baseDirectoryPath,
-    AppLocalizations messages,
-  ) {
+    AppLocalizations messages, {
+    AppBuildProfile? buildProfile,
+  }) {
     final normalized = validateRelativeOrAbsolutePath(rawPath, messages);
     if (isAbsolutePath(rawPath.trim())) return normalized;
     final trimmedBase = baseDirectoryPath?.trim() ?? '';
     final base = trimmedBase.isNotEmpty
         ? _validateBaseDirectoryPath(trimmedBase, messages)
-        : resolveDefaultDirectoryPath();
+        : resolveDefaultDirectoryPath(buildProfile: buildProfile);
     return _joinDirectoryAndChild(base, normalized);
   }
 

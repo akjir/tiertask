@@ -22,6 +22,7 @@ import '../l10n/app_localizations.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
+import '../providers/workspace_providers.dart';
 import '../repositories/local_file_repository.dart';
 import 'widgets/settings_local_storage_section.dart';
 import 'widgets/settings_preference_cards.dart';
@@ -562,6 +563,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     return LocalFileRepository(
       config: config,
       baseDirectoryPath: ref.read(localStorageDirectoryPathProvider),
+      buildProfile: ref.read(appBuildProfileProvider),
     ).tryResolveFilePath();
   }
 

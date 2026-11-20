@@ -15,6 +15,7 @@
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import '../models/app_build_profile.dart';
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
 import '../models/workspace_sync_state.dart';
@@ -132,13 +133,17 @@ class InMemorySettingsRepository implements SettingsRepository {
 
 /// Encrypted settings repository backed by [FlutterSecureStorage].
 class SecureSettingsRepository implements SettingsRepository {
-  /// Creates a [SecureSettingsRepository] with an optional [storage] instance.
-  SecureSettingsRepository({FlutterSecureStorage? storage})
-    : _storage = storage ?? const FlutterSecureStorage();
+  /// Creates a [SecureSettingsRepository] with an optional [storage] instance and [buildProfile].
+  SecureSettingsRepository({
+    FlutterSecureStorage? storage,
+    AppBuildProfile? buildProfile,
+  }) : buildProfile = buildProfile ?? AppBuildProfile.current,
+       _storage = storage ?? const FlutterSecureStorage();
 
   static const Base64Service _base64Service = Base64Service();
-  static const String _keySettings = 't2_settings_v1';
-  static const String _keySyncPrefix = 't2_sync_v1_';
+
+  /// Active build storage profile determining the encrypted storage key namespace.
+  final AppBuildProfile buildProfile;
 
   final FlutterSecureStorage _storage;
 
@@ -180,7 +185,7 @@ class SecureSettingsRepository implements SettingsRepository {
     );
     await _writePersistedState(updated.workspaces, updated.activeId);
     await _storage.write(
-      key: '$_keySyncPrefix${workspaceId.trim()}',
+      key: '${buildProfile.syncStorageKeyPrefix}${workspaceId.trim()}',
       value: null,
     );
     return _resolveActiveWorkspace(updated.workspaces, updated.activeId);
@@ -210,7 +215,7 @@ class SecureSettingsRepository implements SettingsRepository {
   Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId) async {
     try {
       final raw = await _storage.read(
-        key: '$_keySyncPrefix${workspaceId.trim()}',
+        key: '${buildProfile.syncStorageKeyPrefix}${workspaceId.trim()}',
       );
       if (raw == null || raw.trim().isEmpty) {
         return WorkspaceSyncState.empty;
@@ -255,7 +260,7 @@ class SecureSettingsRepository implements SettingsRepository {
   ) async {
     final encoded = _base64Service.encodeBytes(state.toBytes());
     await _storage.write(
-      key: '$_keySyncPrefix${workspaceId.trim()}',
+      key: '${buildProfile.syncStorageKeyPrefix}${workspaceId.trim()}',
       value: encoded,
     );
   }
@@ -264,7 +269,9 @@ class SecureSettingsRepository implements SettingsRepository {
   Future<({List<AppWorkspace> workspaces, String activeId})>
   _readPersistedState() async {
     try {
-      final rawSettings = await _storage.read(key: _keySettings);
+      final rawSettings = await _storage.read(
+        key: buildProfile.settingsStorageKey,
+      );
       if (rawSettings == null || rawSettings.trim().isEmpty) {
         return (
           workspaces: const <AppWorkspace>[AppWorkspace.defaultWorkspace],
@@ -291,7 +298,10 @@ class SecureSettingsRepository implements SettingsRepository {
       activeId: activeId,
     );
     final encodedPayload = _base64Service.encodeBytes(binaryPayload);
-    await _storage.write(key: _keySettings, value: encodedPayload);
+    await _storage.write(
+      key: buildProfile.settingsStorageKey,
+      value: encodedPayload,
+    );
   }
 }
 

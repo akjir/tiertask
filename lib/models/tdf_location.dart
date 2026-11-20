@@ -318,7 +318,10 @@ String generateLocationId({
   math.Random? random,
 }) {
   final resolvedTime = timestamp ?? DateTime.now().toUtc();
-  final utcSeconds = resolvedTime.toUtc().millisecondsSinceEpoch ~/ 1000;
+  final milliseconds = resolvedTime.toUtc().millisecondsSinceEpoch;
+  final utcSeconds = milliseconds >= 0
+      ? milliseconds ~/ 1000
+      : (milliseconds - 999) ~/ 1000;
   final normalizedTime =
       ((utcSeconds % _timeModulo) + _timeModulo) % _timeModulo;
   final timePart = _encodeBase62Fixed(normalizedTime, 4);

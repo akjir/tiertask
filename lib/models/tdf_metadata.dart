@@ -935,7 +935,10 @@ class TdfLabel {
 
 /// Encodes the UTC seconds of [timestamp] modulo `62^4` (`14,776,336`) as a 4-character Base62 string.
 String encodeTdfBase62Time(DateTime timestamp) {
-  final utcSeconds = timestamp.toUtc().millisecondsSinceEpoch ~/ 1000;
+  final milliseconds = timestamp.toUtc().millisecondsSinceEpoch;
+  final utcSeconds = milliseconds >= 0
+      ? milliseconds ~/ 1000
+      : (milliseconds - 999) ~/ 1000;
   final normalized =
       ((utcSeconds % tdfBase62TimeModulo) + tdfBase62TimeModulo) %
       tdfBase62TimeModulo;

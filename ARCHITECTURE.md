@@ -50,6 +50,7 @@ tiertask/
 │   │   ├── app_localizations_en.dart
 │   │   └── tier_localization_extension.dart
 │   ├── models/
+│   │   ├── app_build_profile.dart
 │   │   ├── app_workspace.dart
 │   │   ├── location_state.dart
 │   │   ├── task_board.dart
@@ -133,6 +134,7 @@ tiertask/
 │           └── workspace_row_card.dart
 └── test/
     ├── models/
+    │   ├── app_build_profile_test.dart
     │   ├── app_workspace_test.dart
     │   ├── location_state_test.dart
     │   ├── task_board_downgrade_test.dart
@@ -220,6 +222,7 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
+| `lib/models/app_build_profile.dart` | Defines `AppBuildProfile` (`release` and `dev`) resolving compile-time `TIERTASK_ENV` and `kReleaseMode` into isolated user data directories (`tiertask` vs `tiertask-dev`), secure storage keys (`t2_settings_v1` / `t2_sync_v1_` vs `t2_dev_settings_v1` / `t2_dev_sync_v1_`), and window titles. |
 | `lib/models/app_workspace.dart` | Defines immutable `AppWorkspace`, `WorkspaceSummary`, `WorkspaceErrorKind`, and `WorkspaceException` for isolated workspace configurations, suggested `.tdf` filenames (`AppWorkspace.suggestFileName`), uniqueness checks, and compact `TTW\x02` binary serialization (`encodePersistedState`, `decodePersistedState`, `toBytes`, `fromBytes`) with lossless `TTW\x01` backward compatibility. |
 | `lib/models/location_state.dart` | Defines immutable `GeocodingCandidate`, `LocationFix`, `LocationSource` (`gps`, `system`, `internet`), `LocationSourceType` (`gps`, `address`, `plusCode`), `LocationState`, and `LocationStatus` (`disabled`, `searching`, `found`, `unavailable`) with WGS-84 coordinate formatting, 100-meter Haversine displacement gating, and 5-minute resume refresh cooldown evaluation. |
 | `lib/models/task_board.dart` | Defines the immutable `TaskBoard` aggregate storing `Focus`, `Ready`, `Planned`, `Blocked`, `Someday`, and `Completed` tier slices, sorted `TdfLocation` and `TdfLabel` items, `TdfQueueBlock`, and `TdfDeletedBlock`, and delegating evaluation and mutations to `TaskBoardEvaluator`, `TaskBoardQueueMutator`, and `TaskBoardMutator`. |

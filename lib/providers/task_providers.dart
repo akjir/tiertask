@@ -610,6 +610,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final targetRepo = LocalFileRepository(
       config: newConfig,
       baseDirectoryPath: ref.read(localStorageDirectoryPathProvider),
+      buildProfile: ref.read(appBuildProfileProvider),
       inMemoryStore: ref.read(inMemoryLocalStoreProvider),
     );
     final targetPath = targetRepo.resolveFilePath();
@@ -1395,6 +1396,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     Map<String, TdfRecoveryResolution> locationRecoveryResolutions = const {},
   }) async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return TaskBoard.empty();
+    }
     final operation = _performResolutionSync(
       clearUndoReason: clearUndoReason,
       taskConflictResolutions: taskConflictResolutions,
@@ -1420,6 +1424,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Executes a serialized [syncFromRemote] pass.
   Future<void> _executeSyncFromRemote() async {
     final config = await ref.read(webDavConfigProvider.future);
+    if (!ref.mounted) {
+      return;
+    }
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
     if (config.storageMode.usesWebDav && !config.isWebDavConfigured) {
       ref
@@ -1442,6 +1449,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         candidateBoard: existingBoard,
         candidateOriginBoard: _pendingConflictOriginBoard,
       );
+      if (!ref.mounted) {
+        return;
+      }
       if (existingBoard != null && board != existingBoard) {
         _pruneInvalidatedUndoEntries(existingBoard, board);
       }
@@ -1451,14 +1461,34 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _lastSelfWipeDigest = null;
       state = AsyncData(board);
     } on TdfSyncOutcomeException catch (error, stackTrace) {
+      if (!ref.mounted) {
+        return;
+      }
       if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
         _clearUndoStack('sync_generation_rollback');
       }
       await _recordConflictWatchDigestIfLocal(config);
+      if (!ref.mounted) {
+        return;
+      }
+      state = existingBoard != null
+          ? AsyncData(existingBoard)
+          : AsyncError(error, stackTrace);
+    } on UnsupportedTdfVersionException catch (error, stackTrace) {
+      if (!ref.mounted) {
+        return;
+      }
+      await _recordConflictWatchDigestIfLocal(config);
+      if (!ref.mounted) {
+        return;
+      }
       state = existingBoard != null
           ? AsyncData(existingBoard)
           : AsyncError(error, stackTrace);
     } on Object catch (error, stackTrace) {
+      if (!ref.mounted) {
+        return;
+      }
       state = AsyncError(error, stackTrace);
     }
   }
@@ -1590,6 +1620,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         .setConflict(TaskSyncPipeline.formatSyncOutcomeBanner(ref, error));
     if (localStageSucceeded) {
       await _recordConflictWatchDigestIfLocal(config);
+      if (!ref.mounted) {
+        return false;
+      }
       return true;
     }
     _conflictWatchDigest = diskDigest;
@@ -1705,9 +1738,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     required Map<String, TdfRecoveryResolution> locationRecoveryResolutions,
   }) async {
     final workspace = await ref.read(activeWorkspaceProvider.future);
+    if (!ref.mounted) {
+      return TaskBoard.empty();
+    }
     final WebDavConfig config =
         ref.read(webDavConfigProvider).asData?.value ??
         await ref.read(webDavConfigProvider.future);
+    if (!ref.mounted) {
+      return TaskBoard.empty();
+    }
     if (!config.hasActiveStorage) {
       return _currentBoard;
     }
@@ -1727,6 +1766,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         candidateBoard: state.asData?.value,
         candidateOriginBoard: _pendingConflictOriginBoard,
         onLocalStageMerged: (mergedBoard) {
+          if (!ref.mounted) {
+            return;
+          }
           if (ref.read(activeWorkspaceProvider).asData?.value.id ==
               workspace.id) {
             state = AsyncData(
@@ -1738,6 +1780,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           }
         },
       );
+      if (!ref.mounted) {
+        return board;
+      }
       _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
@@ -1752,6 +1797,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       }
       return aligned;
     } on TdfSyncOutcomeException catch (error) {
+      if (!ref.mounted) {
+        rethrow;
+      }
       if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
         _clearUndoStack('sync_generation_rollback');
       }
@@ -1917,13 +1965,18 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Records the current on-disk SHA-256 digest into [_conflictWatchDigest] when local storage is active.
   Future<void> _recordConflictWatchDigestIfLocal(WebDavConfig config) async {
-    if (!config.storageMode.usesLocal || !config.isLocalConfigured) {
+    if (!ref.mounted ||
+        !config.storageMode.usesLocal ||
+        !config.isLocalConfigured) {
       return;
     }
     try {
       final snapshot = await ref
           .read(localFileRepositoryProvider)
           .readTdfWithDigest();
+      if (!ref.mounted) {
+        return;
+      }
       _conflictWatchDigest = snapshot.digest;
     } on LocalFileException {
       // Keep prior conflict digest if reading local storage fails.
@@ -2043,6 +2096,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         candidateOriginBoard: _pendingConflictOriginBoard,
         isInitialLoad: existingBoard == null,
         onLocalStageMerged: (mergedBoard) {
+          if (!ref.mounted) {
+            return;
+          }
           localStageSucceeded = true;
           stage1Board = mergedBoard;
           _pendingConflictOriginBoard = null;
@@ -2058,6 +2114,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           );
         },
       );
+      if (!ref.mounted) {
+        return false;
+      }
       _applyExternalReconciledBoard(
         workspaceId: workspaceId,
         epoch: epoch,
@@ -2074,6 +2133,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           .setSuccess(ref.read(clockProvider)().toUtc());
       return true;
     } on TdfSyncOutcomeException catch (error) {
+      if (!ref.mounted) {
+        return false;
+      }
       return _handleWatchConflictException(
         workspaceId: workspaceId,
         config: config,
@@ -2082,6 +2144,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         diskDigest: diskDigest,
       );
     } on Object catch (error) {
+      if (!ref.mounted) {
+        return false;
+      }
       _logWatchError(workspaceId, config.storageMode, error);
       ref.read(syncStateProvider.notifier).setError(error.toString());
       if (!localStageSucceeded) {
@@ -2108,11 +2173,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       isInitialLoad: isInitialLoad,
       requireTargets: requireTargets,
       onLocalStageMerged: (mergedBoard) {
+        if (!ref.mounted) {
+          return;
+        }
         state = AsyncData(
           _alignBoardWithCurrentLeadWindow(mergedBoard, config.dueLeadWindow),
         );
       },
     );
+    if (!ref.mounted) {
+      return board;
+    }
     return _alignBoardWithCurrentLeadWindow(board, config.dueLeadWindow);
   }
 

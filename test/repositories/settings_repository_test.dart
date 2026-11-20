@@ -18,6 +18,7 @@ import 'dart:ui';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -236,7 +237,10 @@ void main() {
   group('SecureSettingsRepository Binary Persistence & Corruption Recovery', () {
     test('persists TTW\\x01 workspaces and activeId in Base64 and restores WebDavConfig across restarts', () async {
       final fakeStorage = _FakeFlutterSecureStorage();
-      final repository = SecureSettingsRepository(storage: fakeStorage);
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+      );
 
       final initial = await repository.loadActiveWorkspace();
       expect(initial, equals(AppWorkspace.defaultWorkspace));
@@ -265,7 +269,10 @@ void main() {
       expect(rawStoredSettings?.contains('"'), isFalse);
       expect(rawStoredSettings?.contains(r'\'), isFalse);
 
-      final reloadedRepository = SecureSettingsRepository(storage: fakeStorage);
+      final reloadedRepository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+      );
       final reloaded = await reloadedRepository.loadActiveWorkspace();
       expect(reloaded.id, equals('tasks'));
       expect(reloaded.name, equals('Tasks'));
@@ -308,7 +315,10 @@ void main() {
 
     test('persists TTS\\x04 WorkspaceSyncState across all 8 fields, rejects TTS\\x01..TTS\\x03/TTS\\x05, enforces atomic per-target validation, and recovers from corrupted storage', () async {
       final fakeStorage = _FakeFlutterSecureStorage();
-      final repository = SecureSettingsRepository(storage: fakeStorage);
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+      );
 
       expect(
         await repository.loadWorkspaceSyncState('tasks'),
@@ -428,6 +438,108 @@ void main() {
         await repository.loadWorkspaceSyncState('tasks'),
         equals(WorkspaceSyncState.empty),
         reason: 'Corrupted sync state payload must fall back to empty',
+      );
+    });
+
+    test('isolates dev profile settings and sync keys from release keys on shared storage', () async {
+      final fakeStorage = _FakeFlutterSecureStorage();
+      final releaseRepository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+      );
+      final devRepository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.dev,
+      );
+      final defaultRepository = SecureSettingsRepository(storage: fakeStorage);
+
+      expect(
+        defaultRepository.buildProfile,
+        equals(AppBuildProfile.current),
+        reason: 'Default SecureSettingsRepository must bind to AppBuildProfile.current',
+      );
+
+      await releaseRepository.saveConfig(
+        const WebDavConfig(
+          serverUrl: 'https://prod.example.com',
+          username: 'prod-user',
+          password: 'prod-password',
+          localFilePath: '/home/alice/prod.tdf',
+        ),
+      );
+      await releaseRepository.saveWorkspaceSyncState(
+        'tasks',
+        WorkspaceSyncState(
+          lastSyncedLocalTdf: 'tdf 0.8.0\n',
+          acknowledgedLocalGeneration: 2,
+          localSourceDigest: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        ),
+      );
+
+      expect(
+        await devRepository.loadActiveWorkspace(),
+        equals(AppWorkspace.defaultWorkspace),
+        reason: 'Dev profile must not read release workspaces or credentials',
+      );
+      expect(
+        await devRepository.loadWorkspaceSyncState('tasks'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Dev profile must not read release sync state',
+      );
+
+      await devRepository.saveConfig(
+        const WebDavConfig(
+          serverUrl: 'https://dev.example.com',
+          username: 'dev-user',
+          password: 'dev-password',
+          localFilePath: 'dev-tasks.tdf',
+        ),
+      );
+      await devRepository.saveWorkspaceSyncState(
+        'tasks',
+        WorkspaceSyncState(
+          lastSyncedLocalTdf: 'tdf 0.8.0\n',
+          acknowledgedLocalGeneration: 9,
+          localSourceDigest: 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+        ),
+      );
+
+      expect(
+        await fakeStorage.read(key: 't2_settings_v1'),
+        isNotNull,
+        reason: 'Release settings key must remain intact',
+      );
+      expect(
+        await fakeStorage.read(key: 't2_dev_settings_v1'),
+        isNotNull,
+        reason: 'Dev settings must persist under t2_dev_settings_v1',
+      );
+      expect(
+        await fakeStorage.read(key: 't2_sync_v1_tasks'),
+        isNotNull,
+        reason: 'Release sync key must remain intact',
+      );
+      expect(
+        await fakeStorage.read(key: 't2_dev_sync_v1_tasks'),
+        isNotNull,
+        reason: 'Dev sync state must persist under t2_dev_sync_v1_tasks',
+      );
+
+      final reloadedRelease = await releaseRepository.loadConfig();
+      expect(reloadedRelease.serverUrl, equals('https://prod.example.com'));
+      expect(reloadedRelease.localFilePath, equals('/home/alice/prod.tdf'));
+      final reloadedDev = await devRepository.loadConfig();
+      expect(reloadedDev.serverUrl, equals('https://dev.example.com'));
+      expect(reloadedDev.localFilePath, equals('dev-tasks.tdf'));
+      expect(
+        (await releaseRepository.loadWorkspaceSyncState('tasks'))
+            .acknowledgedLocalGeneration,
+        equals(2),
+      );
+      expect(
+        (await devRepository.loadWorkspaceSyncState('tasks'))
+            .acknowledgedLocalGeneration,
+        equals(9),
       );
     });
   });

@@ -178,6 +178,7 @@ class TaskBoardSync {
     Map<String, TdfRecoveryResolution> taskRecoveryResolutions = const {},
     Map<String, TdfRecoveryResolution> labelRecoveryResolutions = const {},
     Map<String, TdfRecoveryResolution> locationRecoveryResolutions = const {},
+    Set<String> extraFreshlyRecoveredTaskIds = const <String>{},
     Set<String> extraRewrittenLabelIds = const <String>{},
     Set<String> extraRewrittenTaskIds = const <String>{},
     Set<String> extraDiscardedTaskIds = const <String>{},
@@ -221,6 +222,10 @@ class TaskBoardSync {
     final effectiveSecondary = inlineRewrite.secondary;
     final boards = (effectivePrimary, effectiveSecondary, baseline);
     final options = (ackGen, requireAcknowledgedGeneration, now);
+    final allFreshlyRecoveredTaskIds = <String>{
+      ...inlineRewrite.freshlyRecoveredTaskIds,
+      ...extraFreshlyRecoveredTaskIds,
+    };
 
     final initialDeleted = combineInitialDeletedRecords(
       effectivePrimary.deletedBlock,
@@ -229,11 +234,33 @@ class TaskBoardSync {
       refreshFlags.primaryRefresh,
       refreshFlags.secondaryRefresh,
     );
+    final explicitlyDeletedTaskIds =
+        TaskBoardReconciler.computeExplicitlyDeletedTaskIds(
+          boards,
+          initialDeleted.tasks,
+          options,
+          resolutions: taskConflictResolutions,
+          boundDecisions: boundTaskConflictDecisions,
+          recoveryResolutions: taskRecoveryResolutions,
+          freshlyRecoveredIds: allFreshlyRecoveredTaskIds,
+        );
+    final explicitlyDeletedLabelIds =
+        TaskBoardReconciler.computeExplicitlyDeletedLabelIds(
+          boards,
+          initialDeleted.labels,
+          options,
+          resolutions: labelConflictResolutions,
+          boundDecisions: boundLabelConflictDecisions,
+          recoveryResolutions: labelRecoveryResolutions,
+          freshlyRecoveredIds: inlineRewrite.freshlyRecoveredLabelIds,
+        );
     final newlyRefLocations =
         TaskBoardReconciler.computeNewlyReferencedLocationIds(
           boards,
           initialDeleted.tasks,
           initialDeleted.labels,
+          explicitlyDeletedTaskIds: explicitlyDeletedTaskIds,
+          explicitlyDeletedLabelIds: explicitlyDeletedLabelIds,
         );
     final locationOutcome = TaskBoardReconciler.reconcileLocations(
       boards,
@@ -259,6 +286,7 @@ class TaskBoardSync {
     final newlyRefLabels = TaskBoardReconciler.computeNewlyReferencedLabelIds(
       boards,
       initialDeleted.tasks,
+      explicitlyDeletedTaskIds: explicitlyDeletedTaskIds,
     );
     final labelOutcome = TaskBoardReconciler.reconcileLabels(
       boards,
@@ -278,13 +306,11 @@ class TaskBoardSync {
       side: effectivePrimary,
       baseline: baseline,
       isSideRefresh: refreshFlags.primaryRefresh,
-      mergedDeletedLabelsById: labelOutcome.deletedLabelsById,
     );
     final deletedLabelsSecondary = _computeDeletedLabelsForSide(
       side: effectiveSecondary,
       baseline: baseline,
       isSideRefresh: refreshFlags.secondaryRefresh,
-      mergedDeletedLabelsById: labelOutcome.deletedLabelsById,
     );
     final previewLabelsById = _previewPostCascadeLabels(
       labelOutcome.liveLabels,
@@ -298,7 +324,7 @@ class TaskBoardSync {
       options,
       boundDecisions: boundTaskConflictDecisions,
       recoveryResolutions: taskRecoveryResolutions,
-      freshlyRecoveredIds: inlineRewrite.freshlyRecoveredTaskIds,
+      freshlyRecoveredIds: allFreshlyRecoveredTaskIds,
       tombstonedLocationIds: tombstonedLocationIds,
       deletedLabelsLocal: deletedLabelsPrimary,
       deletedLabelsIncoming: deletedLabelsSecondary,
@@ -332,8 +358,8 @@ class TaskBoardSync {
     };
     final knownScopedLabelIds = _resolveScopedLabelIds(
       postCascadeLabelsById: postCascadeLabelsById,
-      primary: effectivePrimary,
-      secondary: effectiveSecondary,
+      primary: primary,
+      secondary: secondary,
       baseline: baseline,
     );
 
@@ -442,6 +468,10 @@ class TaskBoardSync {
             tasks: tasksAfterRetention,
             deleted: finalizedDeleted,
             nowUtc: now,
+            alreadyStampedTaskIds: <String>{
+              ...allFreshlyRecoveredTaskIds,
+              ...taskOutcome.undeletedTaskIds,
+            },
           ).tasks
         : tasksAfterRetention;
 
@@ -450,6 +480,7 @@ class TaskBoardSync {
       reconciledLiveTasks: taskOutcome.liveTasks,
       uncleanedAfterCascadesById: uncleanedAfterCascadesById,
       undeletedTaskIds: taskOutcome.undeletedTaskIds,
+      freshlyRecoveredTaskIds: allFreshlyRecoveredTaskIds,
       mutatedByNowTaskIds: mutatedByNowTaskIds,
       boards: boards,
       now: now,
@@ -685,6 +716,7 @@ class TaskBoardSync {
       secondary: sharedBoard,
       baseline: baseline,
       acknowledgedGeneration: sharedBoard.deletedBlock.generation,
+      extraFreshlyRecoveredTaskIds: prepared.freshlyRecoveredTaskIds,
       extraRewrittenLabelIds: prepared.rewrittenLabelIds,
       extraRewrittenTaskIds: prepared.rewrittenTaskIds,
       extraDiscardedTaskIds: prepared.discardedTaskIds,
@@ -1064,10 +1096,19 @@ class TaskBoardSync {
       const <String>[],
       taskRecoveryResolutions,
     );
+    var currentPrimary = primary;
+    var currentSecondary = secondary;
+    final freshlyRecoveredLocationIds = <String>{};
+    final freshlyRecoveredLabelIds = <String>{};
+    final freshlyRecoveredTaskIds = <String>{};
+    final rewrittenLabelIds = <String>{};
+    final rewrittenTaskIds = <String>{};
+    final discardedTaskIds = <String>{};
+
     if (primaryRefresh) {
       final prepared = _prepareBoardForRecovery(
-        staleBoard: primary,
-        advancedBoard: secondary,
+        staleBoard: currentPrimary,
+        advancedBoard: currentSecondary,
         baseline: baseline,
         recoverLocationIds: recoverLocs,
         recoverLabelIds: recoverLabels,
@@ -1081,21 +1122,18 @@ class TaskBoardSync {
         timeZone: timeZone,
         dueLeadWindow: dueLeadWindow,
       );
-      return (
-        primary: prepared.board,
-        secondary: secondary,
-        freshlyRecoveredLocationIds: prepared.freshlyRecoveredLocationIds,
-        freshlyRecoveredLabelIds: prepared.freshlyRecoveredLabelIds,
-        freshlyRecoveredTaskIds: prepared.freshlyRecoveredTaskIds,
-        rewrittenLabelIds: prepared.rewrittenLabelIds,
-        rewrittenTaskIds: prepared.rewrittenTaskIds,
-        discardedTaskIds: prepared.discardedTaskIds,
-      );
+      currentPrimary = prepared.board;
+      freshlyRecoveredLocationIds.addAll(prepared.freshlyRecoveredLocationIds);
+      freshlyRecoveredLabelIds.addAll(prepared.freshlyRecoveredLabelIds);
+      freshlyRecoveredTaskIds.addAll(prepared.freshlyRecoveredTaskIds);
+      rewrittenLabelIds.addAll(prepared.rewrittenLabelIds);
+      rewrittenTaskIds.addAll(prepared.rewrittenTaskIds);
+      discardedTaskIds.addAll(prepared.discardedTaskIds);
     }
     if (secondaryRefresh) {
       final prepared = _prepareBoardForRecovery(
-        staleBoard: secondary,
-        advancedBoard: primary,
+        staleBoard: currentSecondary,
+        advancedBoard: currentPrimary,
         baseline: baseline,
         recoverLocationIds: recoverLocs,
         recoverLabelIds: recoverLabels,
@@ -1109,26 +1147,23 @@ class TaskBoardSync {
         timeZone: timeZone,
         dueLeadWindow: dueLeadWindow,
       );
-      return (
-        primary: primary,
-        secondary: prepared.board,
-        freshlyRecoveredLocationIds: prepared.freshlyRecoveredLocationIds,
-        freshlyRecoveredLabelIds: prepared.freshlyRecoveredLabelIds,
-        freshlyRecoveredTaskIds: prepared.freshlyRecoveredTaskIds,
-        rewrittenLabelIds: prepared.rewrittenLabelIds,
-        rewrittenTaskIds: prepared.rewrittenTaskIds,
-        discardedTaskIds: prepared.discardedTaskIds,
-      );
+      currentSecondary = prepared.board;
+      freshlyRecoveredLocationIds.addAll(prepared.freshlyRecoveredLocationIds);
+      freshlyRecoveredLabelIds.addAll(prepared.freshlyRecoveredLabelIds);
+      freshlyRecoveredTaskIds.addAll(prepared.freshlyRecoveredTaskIds);
+      rewrittenLabelIds.addAll(prepared.rewrittenLabelIds);
+      rewrittenTaskIds.addAll(prepared.rewrittenTaskIds);
+      discardedTaskIds.addAll(prepared.discardedTaskIds);
     }
     return (
-      primary: primary,
-      secondary: secondary,
-      freshlyRecoveredLocationIds: const <String>{},
-      freshlyRecoveredLabelIds: const <String>{},
-      freshlyRecoveredTaskIds: const <String>{},
-      rewrittenLabelIds: const <String>{},
-      rewrittenTaskIds: const <String>{},
-      discardedTaskIds: const <String>{},
+      primary: currentPrimary,
+      secondary: currentSecondary,
+      freshlyRecoveredLocationIds: freshlyRecoveredLocationIds,
+      freshlyRecoveredLabelIds: freshlyRecoveredLabelIds,
+      freshlyRecoveredTaskIds: freshlyRecoveredTaskIds,
+      rewrittenLabelIds: rewrittenLabelIds,
+      rewrittenTaskIds: rewrittenTaskIds,
+      discardedTaskIds: discardedTaskIds,
     );
   }
 
@@ -1138,6 +1173,7 @@ class TaskBoardSync {
     required List<TaskItem> reconciledLiveTasks,
     required Map<String, TaskItem> uncleanedAfterCascadesById,
     required Set<String> undeletedTaskIds,
+    required Set<String> freshlyRecoveredTaskIds,
     required Set<String> mutatedByNowTaskIds,
     required (TaskBoard, TaskBoard, TaskBoard?) boards,
     required DateTime now,
@@ -1168,6 +1204,7 @@ class TaskBoardSync {
           secondaryTask: secondaryById[task.id],
           baselineTask: baselineById[task.id],
           wasUndeleted: undeletedTaskIds.contains(task.id),
+          wasFreshlyRecovered: freshlyRecoveredTaskIds.contains(task.id),
           mutatedByNowStrip: mutatedByNowTaskIds.contains(task.id),
           now: now,
           cleanupMode: cleanupMode,
@@ -1184,6 +1221,7 @@ class TaskBoardSync {
     required TaskItem? secondaryTask,
     required TaskItem? baselineTask,
     required bool wasUndeleted,
+    required bool wasFreshlyRecovered,
     required bool mutatedByNowStrip,
     required DateTime now,
     required TdfCleanupMode cleanupMode,
@@ -1252,6 +1290,11 @@ class TaskBoardSync {
     final sourceTask = primaryTask ?? secondaryTask;
     if (sourceTask == null) {
       return finalTask;
+    }
+    if (wasFreshlyRecovered) {
+      return finalTask.copyWith(
+        modifiedAt: _checkedTimestamp(sourceTask.effectiveModifiedAt),
+      );
     }
     if (mutatedByNowStrip) {
       final bumpedStrip = _checkedBumpPlusOneSecond(
@@ -1455,17 +1498,13 @@ class TaskBoardSync {
     required TaskBoard side,
     required TaskBoard? baseline,
     required bool isSideRefresh,
-    required Map<String, TdfDeletedLabelRecord> mergedDeletedLabelsById,
   }) {
     final sideLiveIds = <String>{for (final label in side.labels) label.id};
     return <String>{
-      for (final record in side.deletedBlock.labels)
-        if (mergedDeletedLabelsById.containsKey(record.labelId)) record.labelId,
+      for (final record in side.deletedBlock.labels) record.labelId,
       if (baseline != null && !isSideRefresh)
         for (final baseLabel in baseline.labels)
-          if (!sideLiveIds.contains(baseLabel.id) &&
-              mergedDeletedLabelsById.containsKey(baseLabel.id))
-            baseLabel.id,
+          if (!sideLiveIds.contains(baseLabel.id)) baseLabel.id,
     };
   }
 
@@ -1478,6 +1517,54 @@ class TaskBoardSync {
       }
     }
     return count;
+  }
+
+  /// Filters superseded acknowledged tombstones out of [staleDeleted] before adopting [advancedBoard]'s generation (`TDF-REC-001` Step 4).
+  static TdfDeletedBlock _filterStaleDeletedBlockForRecovery({
+    required TdfDeletedBlock staleDeleted,
+    required TaskBoard advancedBoard,
+    required TdfDeletedBlock? baselineDeleted,
+    required DateTime now,
+  }) {
+    final advancedTaskIds = <String>{
+      for (final task in advancedBoard.allTasks) task.id,
+    };
+    final advancedLabelIds = <String>{
+      for (final label in advancedBoard.labels) label.id,
+    };
+    final advancedLocationIds = <String>{
+      for (final location in advancedBoard.locations) location.id,
+    };
+    final retainedTasks = <TdfDeletedTaskRecord>[
+      for (final record in staleDeleted.tasks)
+        if (baselineDeleted != null
+            ? !_isAckedTask(record, baselineDeleted, true)
+            : (!advancedTaskIds.contains(record.taskId) &&
+                  !_isDeletedRecordExpired(record.deletedAt, now, true)))
+          record,
+    ];
+    final retainedLabels = <TdfDeletedLabelRecord>[
+      for (final record in staleDeleted.labels)
+        if (baselineDeleted != null
+            ? !_isAckedLabel(record, baselineDeleted, true)
+            : (!advancedLabelIds.contains(record.labelId) &&
+                  !_isDeletedRecordExpired(record.deletedAt, now, true)))
+          record,
+    ];
+    final retainedLocations = <TdfDeletedLocationRecord>[
+      for (final record in staleDeleted.locations)
+        if (baselineDeleted != null
+            ? !_isAckedLocation(record, baselineDeleted, true)
+            : (!advancedLocationIds.contains(record.locationId) &&
+                  !_isDeletedRecordExpired(record.deletedAt, now, true)))
+          record,
+    ];
+    return TdfDeletedBlock(
+      generation: advancedBoard.deletedBlock.generation,
+      tasks: retainedTasks,
+      labels: retainedLabels,
+      locations: retainedLocations,
+    );
   }
 
   /// Returns whether [resolutions] contains at least one [TdfRecoveryResolution.recoverAsNew] entry.
@@ -1629,6 +1716,15 @@ class TaskBoardSync {
       advancedBoard,
       baseline,
     );
+    final staleLocationIds = <String>{
+      for (final location in staleBoard.locations) location.id,
+    };
+    final staleLabelIds = <String>{
+      for (final label in staleBoard.labels) label.id,
+    };
+    final staleTaskIds = <String>{
+      for (final task in staleBoard.allTasks) task.id,
+    };
     final advancedLocationIds = <String>{
       for (final location in advancedBoard.locations) location.id,
     };
@@ -1641,7 +1737,8 @@ class TaskBoardSync {
 
     final locationIdMap = <String, String>{};
     for (final oldLocId in recoverLocationIds) {
-      if (advancedLocationIds.contains(oldLocId)) {
+      if (!staleLocationIds.contains(oldLocId) ||
+          advancedLocationIds.contains(oldLocId)) {
         continue;
       }
       final newId = generateLocationId(
@@ -1653,7 +1750,8 @@ class TaskBoardSync {
     }
     final labelIdMap = <String, String>{};
     for (final oldLabelId in recoverLabelIds) {
-      if (advancedLabelIds.contains(oldLabelId)) {
+      if (!staleLabelIds.contains(oldLabelId) ||
+          advancedLabelIds.contains(oldLabelId)) {
         continue;
       }
       final newId = generateLabelId(
@@ -1665,7 +1763,8 @@ class TaskBoardSync {
     }
     final taskIdMap = <String, String>{};
     for (final oldTaskId in recoverTaskIds) {
-      if (advancedTaskIds.contains(oldTaskId)) {
+      if (!staleTaskIds.contains(oldTaskId) ||
+          advancedTaskIds.contains(oldTaskId)) {
         continue;
       }
       final newId = generateTaskId(timestamp: now, existingIds: usedIds.tasks);
@@ -1677,6 +1776,8 @@ class TaskBoardSync {
       for (final location in staleBoard.locations)
         if (!locationIdMap.containsKey(location.id) &&
             !advancedLocationIds.contains(location.id) &&
+            advancedBoard.deletedBlock.findLocationRecord(location.id) ==
+                null &&
             (discardAllUnrecoveredStaleOnly ||
                 explicitLocationResolutions[location.id] ==
                     TdfRecoveryResolution.discard))
@@ -1686,6 +1787,7 @@ class TaskBoardSync {
       for (final label in staleBoard.labels)
         if (!labelIdMap.containsKey(label.id) &&
             !advancedLabelIds.contains(label.id) &&
+            advancedBoard.deletedBlock.findLabelRecord(label.id) == null &&
             (discardAllUnrecoveredStaleOnly ||
                 explicitLabelResolutions[label.id] ==
                     TdfRecoveryResolution.discard))
@@ -1695,6 +1797,7 @@ class TaskBoardSync {
       for (final task in staleBoard.allTasks)
         if (!taskIdMap.containsKey(task.id) &&
             !advancedTaskIds.contains(task.id) &&
+            advancedBoard.deletedBlock.findTaskRecord(task.id) == null &&
             (discardAllUnrecoveredStaleOnly ||
                 explicitTaskResolutions[task.id] ==
                     TdfRecoveryResolution.discard))
@@ -1814,8 +1917,11 @@ class TaskBoardSync {
       labels: adjustedLabels,
       locations: adjustedLocations,
       deletedBlock: discardAllUnrecoveredStaleOnly
-          ? staleBoard.deletedBlock.copyWith(
-              generation: advancedBoard.deletedBlock.generation,
+          ? _filterStaleDeletedBlockForRecovery(
+              staleDeleted: staleBoard.deletedBlock,
+              advancedBoard: advancedBoard,
+              baselineDeleted: baseline?.deletedBlock,
+              now: now,
             )
           : staleBoard.deletedBlock,
       queueBlock: staleBoard.queueBlock.copyWith(taskIds: adjustedQueueIds),

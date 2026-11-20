@@ -58,6 +58,10 @@ class HostFileLockManager<E extends Exception> {
   static const int _posixEagain = 11;
   static const int _posixEexist = 17;
   static const int _posixEintr = 4;
+  static const int _posixEinval = 22;
+  static const int _posixEnosys = 38;
+  static const int _posixEopnotsupp = 95;
+  static const int _posixEperm = 1;
   static const int _posixFileMode0600 = 0x180;
   static const int _posixLockEx = 2;
   static const int _posixLockNb = 4;
@@ -94,6 +98,69 @@ class HostFileLockManager<E extends Exception> {
   /// Maximum duration to wait for an exclusive lock before aborting with [createException].
   final Duration lockAcquireTimeout;
 
+  /// Applies permissions and polls [tryLock] on an opened POSIX [descriptor],
+  /// guaranteeing [closeDescriptor] runs if any step throws before ownership
+  /// transfers to the returned releaser.
+  @visibleForTesting
+  Future<void Function()> acquirePosixDescriptorLock({
+    required int descriptor,
+    required void Function() applyPermissions,
+    required bool Function() tryLock,
+    required void Function(int descriptor) closeDescriptor,
+    required void Function(int descriptor) releaseAndClose,
+    required String lockFilePath,
+    required String targetHash,
+    required Stopwatch stopwatch,
+  }) async {
+    var acquired = false;
+    try {
+      applyPermissions();
+      await _pollLockWithBackoff(
+        tryAcquire: tryLock,
+        targetHash: targetHash,
+        lockFilePath: lockFilePath,
+        stopwatch: stopwatch,
+      );
+      acquired = true;
+      return () => releaseAndClose(descriptor);
+    } finally {
+      if (!acquired) {
+        closeDescriptor(descriptor);
+      }
+    }
+  }
+
+  /// Applies descriptor-based `fchmod` via [performFchmod], tolerating
+  /// non-POSIX filesystem errnos (`EPERM`, `EINVAL`, `ENOSYS`, `EOPNOTSUPP`)
+  /// with a debug log event and throwing via [createException] on hard errors.
+  @visibleForTesting
+  void applyPosixFchmodBestEffort({
+    required int Function() performFchmod,
+    required int Function() readErrno,
+    required String path,
+    String Function(String details)? formatFailureMessage,
+  }) {
+    while (true) {
+      if (performFchmod() == 0) {
+        return;
+      }
+      final errorCode = readErrno();
+      if (errorCode == _posixEintr) {
+        continue;
+      }
+      if (isTolerablePosixFchmodErrno(errorCode)) {
+        _logFchmodSkipped(errorCode);
+        return;
+      }
+      throw _posixException(
+        'fchmod',
+        path,
+        errorCode,
+        formatFailureMessage: formatFailureMessage,
+      );
+    }
+  }
+
   /// Resolves [targetPath] to its canonical `/`-separated UTF-8 form (`TDF-PUB-002`).
   static String canonicalizeTargetPath(String targetPath, {bool? isWindows}) {
     final effectiveWindows = isWindows ?? Platform.isWindows;
@@ -124,6 +191,16 @@ class HostFileLockManager<E extends Exception> {
     return 0;
   }
 
+  /// Returns `true` when POSIX `fchmod` [errorCode] indicates a non-POSIX
+  /// filesystem (`EPERM`, `EINVAL`, `ENOSYS`, `EOPNOTSUPP`) where permission
+  /// adjustment is unsupported after `open(..., 0600)`.
+  @visibleForTesting
+  static bool isTolerablePosixFchmodErrno(int errorCode) =>
+      errorCode == _posixEperm ||
+      errorCode == _posixEinval ||
+      errorCode == _posixEnosys ||
+      errorCode == _posixEopnotsupp;
+
   /// Retries [performMove] up to [maxWindowsRenameAttempts] times on transient Win32 sharing errors (`32`, `5`).
   @visibleForTesting
   Future<void> replaceTargetWithSharingRetry({
@@ -131,6 +208,7 @@ class HostFileLockManager<E extends Exception> {
     required void Function() cleanupTemp,
     Future<void> Function(Duration)? delay,
     String? targetPath,
+    String Function(String details)? formatFailureMessage,
   }) async {
     final waitDelay = delay ?? Future<void>.delayed;
     var backoffMs = initialBackoff.inMilliseconds;
@@ -141,7 +219,13 @@ class HostFileLockManager<E extends Exception> {
       } on Object catch (error) {
         cleanupTemp();
         if (error is E) rethrow;
-        throw createException(error.toString(), cause: error);
+        final details = error.toString();
+        throw createException(
+          formatFailureMessage != null
+              ? formatFailureMessage(details)
+              : details,
+          cause: error,
+        );
       }
       if (errorCode == null) {
         return;
@@ -152,14 +236,10 @@ class HostFileLockManager<E extends Exception> {
       final hasRemainingRetry = attempt + 1 < maxWindowsRenameAttempts;
       if (!isTransientSharing || !hasRemainingRetry) {
         cleanupTemp();
-        final label = targetPath ?? 'target';
-        throw createException(
-          'Atomic target replacement failed (Win32 error $errorCode) for $label',
-          cause: FileSystemException(
-            'MoveFileExW failed',
-            targetPath,
-            OSError('Win32 error $errorCode', errorCode),
-          ),
+        _throwWindowsReplaceFailure(
+          errorCode: errorCode,
+          targetPath: targetPath,
+          formatFailureMessage: formatFailureMessage,
         );
       }
       await waitDelay(Duration(milliseconds: backoffMs));
@@ -382,23 +462,17 @@ class HostFileLockManager<E extends Exception> {
     final openFlags =
         _posixORdwr | _posixOCreat | _posixOCloexec | bindings.noFollowFlag;
     final descriptor = _posixOpen(lockFilePath, openFlags, _posixFileMode0600);
-    _posixChmod(lockFilePath, _posixFileMode0600);
-
-    var acquired = false;
-    try {
-      await _pollLockWithBackoff(
-        tryAcquire: () => _posixTryFlockExclusive(descriptor, lockFilePath),
-        targetHash: targetHash,
-        lockFilePath: lockFilePath,
-        stopwatch: stopwatch,
-      );
-      acquired = true;
-      return () => _posixReleaseAndClose(descriptor);
-    } finally {
-      if (!acquired) {
-        bindings.close(descriptor);
-      }
-    }
+    return acquirePosixDescriptorLock(
+      descriptor: descriptor,
+      applyPermissions: () =>
+          _posixFchmodBestEffort(descriptor, _posixFileMode0600, lockFilePath),
+      tryLock: () => _posixTryFlockExclusive(descriptor, lockFilePath),
+      closeDescriptor: bindings.close,
+      releaseAndClose: _posixReleaseAndClose,
+      lockFilePath: lockFilePath,
+      targetHash: targetHash,
+      stopwatch: stopwatch,
+    );
   }
 
   /// Opens [lockFilePath] (`FILE_SHARE_READ | FILE_SHARE_WRITE`) and polls `LockFileEx(LOCKFILE_FAIL_IMMEDIATELY)`.
@@ -531,6 +605,19 @@ class HostFileLockManager<E extends Exception> {
     return buffer.toString();
   }
 
+  /// Emits a debug diagnostic event when `fchmod` is unsupported by the filesystem.
+  static void _logFchmodSkipped(int errorCode) {
+    if (!AppLogger.shouldLog(LogLevel.debug)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.storage,
+      'local.fchmod.skipped',
+      fields: <String, Object?>{'errno': errorCode},
+    );
+  }
+
   /// Emits a sanitized structured `local.lock.*` event to [AppLogger] when enabled.
   static void _logLockEvent(
     LogLevel level,
@@ -651,6 +738,23 @@ class HostFileLockManager<E extends Exception> {
         ? formatFailureMessage(details)
         : '$details: $path';
     return createException(message, cause: osException);
+  }
+
+  /// Applies POSIX `fchmod` [mode] to open [descriptor], tolerating non-POSIX
+  /// filesystem errnos and forwarding [formatFailureMessage] on hard errors.
+  void _posixFchmodBestEffort(
+    int descriptor,
+    int mode,
+    String path, {
+    String Function(String details)? formatFailureMessage,
+  }) {
+    final bindings = _PosixLockBindings.instance;
+    applyPosixFchmodBestEffort(
+      performFchmod: () => bindings.fchmod(descriptor, mode),
+      readErrno: bindings.readErrno,
+      path: path,
+      formatFailureMessage: formatFailureMessage,
+    );
   }
 
   /// Flushes [descriptor] to storage via `fsync`, retrying on `EINTR`.
@@ -909,6 +1013,27 @@ class HostFileLockManager<E extends Exception> {
     }
   }
 
+  /// Throws the domain exception for a terminal Win32 `MoveFileExW` failure.
+  Never _throwWindowsReplaceFailure({
+    required int errorCode,
+    required String? targetPath,
+    required String Function(String details)? formatFailureMessage,
+  }) {
+    final label = targetPath ?? 'target';
+    final details = 'MoveFileExW failed (Win32 error $errorCode)';
+    final message = formatFailureMessage != null
+        ? formatFailureMessage(details)
+        : 'Atomic target replacement failed (Win32 error $errorCode) for $label';
+    throw createException(
+      message,
+      cause: FileSystemException(
+        'MoveFileExW failed',
+        targetPath,
+        OSError('Win32 error $errorCode', errorCode),
+      ),
+    );
+  }
+
   /// Strips trailing `/` and `\` characters while preserving POSIX `/` and Windows drive roots.
   static String _trimTrailingSeparators(String path) {
     final minLength = _windowsDrivePattern.hasMatch(path) ? 3 : 1;
@@ -1148,7 +1273,12 @@ class HostFileLockManager<E extends Exception> {
     );
     var descriptorClosed = false;
     try {
-      _posixChmod(tempPath, _posixFileMode0600);
+      _posixFchmodBestEffort(
+        descriptor,
+        _posixFileMode0600,
+        tempPath,
+        formatFailureMessage: formatFailureMessage,
+      );
       _posixWriteAll(
         descriptor,
         bytes,
@@ -1228,6 +1358,7 @@ class HostFileLockManager<E extends Exception> {
       performMove: () => _win32TryMoveReplace(tempPath, targetPath),
       cleanupTemp: () => _win32UnlinkQuietly(tempPath),
       targetPath: targetPath,
+      formatFailureMessage: formatFailureMessage,
     );
   }
 }
@@ -1239,6 +1370,7 @@ class _PosixLockBindings {
     required this.chmod,
     required this.close,
     required this.errnoPointer,
+    required this.fchmod,
     required this.flock,
     required this.free,
     required this.fsync,
@@ -1268,6 +1400,11 @@ class _PosixLockBindings {
           .lookupFunction<Pointer<Int32> Function(), Pointer<Int32> Function()>(
             Platform.isAndroid ? '__errno' : '__errno_location',
           ),
+      fchmod: libc
+          .lookupFunction<
+            Int32 Function(Int32, Uint32),
+            int Function(int, int)
+          >('fchmod'),
       flock: libc
           .lookupFunction<Int32 Function(Int32, Int32), int Function(int, int)>(
             'flock',
@@ -1326,6 +1463,9 @@ class _PosixLockBindings {
 
   /// Thread-local POSIX `errno` address accessor.
   final Pointer<Int32> Function() errnoPointer;
+
+  /// POSIX `fchmod(int, mode_t)` function.
+  final int Function(int, int) fchmod;
 
   /// POSIX `flock(int, int)` function.
   final int Function(int, int) flock;

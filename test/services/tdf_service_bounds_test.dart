@@ -19,6 +19,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/services/tdf_parser.dart';
@@ -482,7 +483,8 @@ void main() {
         expectedLine: 5,
       );
 
-      // 2. Malformed/quoted identifier at depth 2 -> InvalidIdentifier:
+      // 2. Malformed/quoted directive identifier at depth 2 -> InvalidIdentifier;
+      // nested block header with invalid identifier at depth 2 -> LimitExceeded (MAX_NESTING_DEPTH checked before InvalidIdentifier):
       expectTdfError(
         'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    "day" mon\n  }\n}',
         TdfErrorKind.invalidIdentifier,
@@ -490,7 +492,7 @@ void main() {
       );
       expectTdfError(
         'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  condition {\n    123bad {\n    }\n  }\n}',
-        TdfErrorKind.invalidIdentifier,
+        TdfErrorKind.limitExceeded,
         expectedLine: 5,
       );
 
@@ -1152,6 +1154,757 @@ void main() {
             TdfErrorKind.limitExceeded,
           ),
         ),
+      );
+    });
+
+    test('enforces Step-4 validation precedence: UnknownLabelReference > UnknownLocationReference > InvalidQueueMembership > CircularDependency (TDF-VAL-001)', () {
+      // Invalid queue membership (unknown task) beats circular dependency:
+      expectTdfError(
+        'queue {\n'
+        '  modified 2026-11-01 00:00:00\n'
+        '  task 999999OkD2\n'
+        '}\n'
+        'task 000001OkD2 {\n'
+        '  name "T1"\n'
+        '  created 2026-11-01\n'
+        '  blocked 000002OkD2\n'
+        '}\n'
+        'task 000002OkD2 {\n'
+        '  name "T2"\n'
+        '  created 2026-11-01\n'
+        '  blocked 000001OkD2\n'
+        '}\n',
+        TdfErrorKind.invalidQueueMembership,
+        expectedLine: 3,
+      );
+
+      // Invalid queue membership (completed task) beats self-loop circular dependency:
+      expectTdfError(
+        'queue {\n'
+        '  modified 2026-11-01 00:00:00\n'
+        '  task 000001OkD2\n'
+        '}\n'
+        'task 000001OkD2 {\n'
+        '  name "Done & Self-Blocked"\n'
+        '  created 2026-11-01\n'
+        '  finished 2026-11-01 10:00\n'
+        '  completions 1\n'
+        '  blocked 000001OkD2\n'
+        '}\n',
+        TdfErrorKind.invalidQueueMembership,
+        expectedLine: 3,
+      );
+
+      // UnknownLocationReference beats InvalidQueueMembership and CircularDependency:
+      expectTdfError(
+        'queue {\n'
+        '  modified 2026-11-01 00:00:00\n'
+        '  task 999999OkD2\n'
+        '}\n'
+        'task 000001OkD2 {\n'
+        '  name "Bad Loc"\n'
+        '  created 2026-11-01\n'
+        '  blocked 000001OkD2\n'
+        '  condition location missinOkD2\n'
+        '}\n',
+        TdfErrorKind.unknownLocationReference,
+        expectedLine: 9,
+      );
+
+      // UnknownLabelReference beats UnknownLocationReference, InvalidQueueMembership, and CircularDependency:
+      expectTdfError(
+        'queue {\n'
+        '  modified 2026-11-01 00:00:00\n'
+        '  task 999999OkD2\n'
+        '}\n'
+        'task 000001OkD2 {\n'
+        '  name "Bad Label"\n'
+        '  created 2026-11-01\n'
+        '  labels missinOkD2\n'
+        '  blocked 000001OkD2\n'
+        '  condition location missinOkD2\n'
+        '}\n',
+        TdfErrorKind.unknownLabelReference,
+        expectedLine: 8,
+      );
+    });
+
+    test('enforces MAX_ARGS_PER_STMT before scanning the 65th argument while preserving 64-arg statements and brace precedence (TDF-VAL-001, TDF-VAL-002)', () {
+      final args63 = List<String>.generate(
+        63,
+        (i) => '${i.toString().padLeft(6, '0')}OkD2',
+      ).join(' ');
+      final args64 = List<String>.generate(
+        64,
+        (i) => '${i.toString().padLeft(6, '0')}OkD2',
+      ).join(' ');
+      final args65 = List<String>.generate(
+        65,
+        (i) => '${i.toString().padLeft(6, '0')}OkD2',
+      ).join(' ');
+
+      // 64-arg directives scan cleanly (labels and blocked):
+      final labelDefs64 = List<String>.generate(
+        64,
+        (i) => 'label ${i.toString().padLeft(6, '0')}OkD2 {\n  name "L$i"\n}',
+      ).join('\n');
+      final board64Labels = tdfService.parse(
+        'tdf 0.8.0\n$labelDefs64\ntask 999999OkD2 {\n  name "T"\n  created 2026-11-01\n  labels $args64\n  blocked $args64\n}\n',
+      );
+      expect(board64Labels.someday.single.labelIds.length, equals(64));
+      expect(board64Labels.someday.single.dependencies.length, equals(64));
+
+      // 64-arg block header scans cleanly (fails later at unknownBlockType, not limitExceeded):
+      expectTdfError(
+        'foo $args64 {\n}',
+        TdfErrorKind.unknownBlockType,
+        expectedLine: 1,
+      );
+
+      // 64th arg with attached '{' fails with InvalidBlockHeader:
+      expectTdfError(
+        'foo $args63 000063OkD2{\n}',
+        TdfErrorKind.invalidBlockHeader,
+        expectedLine: 1,
+      );
+
+      // 64-arg block header with trailing token after '{' fails with UnexpectedToken:
+      expectTdfError(
+        'task $args64 { extra\n}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 1,
+      );
+
+      // 65th arg with attached '{' MUST fail with LimitExceeded BEFORE scanning arg #65:
+      expectTdfError(
+        'task 999999OkD2 {\n  name "T"\n  created 2026-11-01\n  labels $args64 000064OkD2{\n}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 4,
+      );
+
+      // 65-arg block header with trailing token after '{' MUST fail with LimitExceeded BEFORE scanning arg #65:
+      expectTdfError(
+        'task $args65 { extra\n}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 1,
+      );
+
+      // 65th arg as an unterminated quoted string MUST fail with LimitExceeded BEFORE scanning the string:
+      expectTdfError(
+        'task 999999OkD2 {\n  name "T"\n  created 2026-11-01\n  labels $args64 "unterminated\n}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 4,
+      );
+    });
+
+    test('enforces MAX_STMTS_PER_BLOCK, MAX_NESTING_DEPTH, and MAX_BLOCKS_PER_DOC before InvalidIdentifier (TDF-VAL-001, TDF-VAL-002)', () {
+      // Depth-2 nested block header with invalid identifier -> LimitExceeded (not InvalidIdentifier):
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n    123 {\n    }\n  }\n}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 5,
+      );
+
+      // 1025th statement with invalid identifier inside ordinary block -> LimitExceeded (not InvalidIdentifier):
+      final steps1024 = List<String>.filled(
+        1024,
+        '    step false "Step"',
+      ).join('\n');
+      expectTdfError(
+        'task 000001OkD2 {\n  name "T"\n  created 2026-11-01\n  subtasks {\n$steps1024\n    123 "x"\n  }\n}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 1029,
+      );
+
+      // 4097th block with invalid identifier -> LimitExceeded (not InvalidIdentifier):
+      final blocks4096 = List<String>.generate(
+        4096,
+        (i) => 'label ${i.toString().padLeft(6, '0')}OkD2 {\n  name "L"\n}',
+      ).join('\n');
+      expectRawTdfError(
+        'tdf 0.8.0\n$blocks4096\n123 {\n}\n',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 12290,
+      );
+    });
+
+    test('validates subtasks header arguments before DuplicateDirective on repeated subtasks blocks (TDF-VAL-001)', () {
+      for (final badHeader in <String>[
+        'subtasks urgent {',
+        'subtasks "auto-finish" {',
+        'subtasks auto-finish extra {',
+      ]) {
+        expectTdfError(
+          'task 000001OkD2 {\n'
+          '  name "T"\n'
+          '  created 2026-11-01\n'
+          '  subtasks {\n'
+          '    step false "First"\n'
+          '  }\n'
+          '  $badHeader\n'
+          '    step false "Second"\n'
+          '  }\n'
+          '}',
+          TdfErrorKind.invalidBlockHeader,
+          expectedLine: 7,
+        );
+      }
+
+      // Valid second subtasks header still fails with DuplicateDirective:
+      expectTdfError(
+        'task 000001OkD2 {\n'
+        '  name "T"\n'
+        '  created 2026-11-01\n'
+        '  subtasks {\n'
+        '    step false "First"\n'
+        '  }\n'
+        '  subtasks auto-finish {\n'
+        '    step false "Second"\n'
+        '  }\n'
+        '}',
+        TdfErrorKind.duplicateDirective,
+        expectedLine: 7,
+      );
+    });
+
+    test('validates deleted record arity and primitives (Step 3) before DuplicateIdentifier (Step 4) (TDF-VAL-001)', () {
+      // Duplicate deleted label ID with invalid timestamp -> InvalidTimestamp (not DuplicateIdentifier):
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  label 000001OkD2 2026-11-01 12:00:00\n'
+        '  label 000001OkD2 not-a-date\n'
+        '}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 4,
+      );
+
+      // Duplicate deleted location ID with invalid timestamp -> InvalidTimestamp (not DuplicateIdentifier):
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  location 000001OkD2 2026-11-01 12:00:00\n'
+        '  location 000001OkD2 1900-02-29\n'
+        '}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 4,
+      );
+
+      // Duplicate deleted task ID with extra trailing args -> UnexpectedToken:
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  task 000001OkD2 2026-11-01 12:00:00\n'
+        '  task 000001OkD2 2026-11-01 5 extra\n'
+        '}',
+        TdfErrorKind.unexpectedToken,
+        expectedLine: 4,
+      );
+
+      // Duplicate deleted task ID with invalid timestamp -> InvalidTimestamp:
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  task 000001OkD2 2026-11-01 12:00:00\n'
+        '  task 000001OkD2 1900-02-29\n'
+        '}',
+        TdfErrorKind.invalidTimestamp,
+        expectedLine: 4,
+      );
+
+      // Duplicate deleted task ID with invalid completion checkpoint -> InvalidNumber:
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  task 000001OkD2 2026-11-01 12:00:00\n'
+        '  task 000001OkD2 2026-11-01 abc\n'
+        '}',
+        TdfErrorKind.invalidNumber,
+        expectedLine: 4,
+      );
+
+      // Duplicate deleted task ID with overflow completion checkpoint -> LimitExceeded:
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  task 000001OkD2 2026-11-01 12:00:00\n'
+        '  task 000001OkD2 2026-11-01 9007199254740992\n'
+        '}',
+        TdfErrorKind.limitExceeded,
+        expectedLine: 4,
+      );
+
+      // Valid duplicate deleted records still fail with DuplicateIdentifier:
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  task 000001OkD2 2026-11-01 12:00:00\n'
+        '  task 000001OkD2 2026-11-02 12:00:00\n'
+        '}',
+        TdfErrorKind.duplicateIdentifier,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  label 000001OkD2 2026-11-01 12:00:00\n'
+        '  label 000001OkD2 2026-11-02 12:00:00\n'
+        '}',
+        TdfErrorKind.duplicateIdentifier,
+        expectedLine: 4,
+      );
+      expectTdfError(
+        'deleted {\n'
+        '  generation 1\n'
+        '  location 000001OkD2 2026-11-01 12:00:00\n'
+        '  location 000001OkD2 2026-11-02 12:00:00\n'
+        '}',
+        TdfErrorKind.duplicateIdentifier,
+        expectedLine: 4,
+      );
+    });
+
+    test('enforces MAX_TEXT_LENGTH, MAX_NOTE_LENGTH, MAX_URI_LENGTH, MAX_NUMBER_LENGTH, and DayTaskCondition MAX_ARGS_PER_STMT during TdfSerializer.serialize (TDF-SER-001, TDF-VAL-002)', () {
+      void expectSerializeLimitExceeded(TaskBoard board, String reason) {
+        expect(
+          () => tdfService.serialize(board),
+          throwsA(
+            isA<TdfException>().having(
+              (error) => error.kind,
+              'kind',
+              TdfErrorKind.limitExceeded,
+            ),
+          ),
+          reason: reason,
+        );
+      }
+
+      final text500 = '\u{1F680}' * 500;
+      final text501 = '\u{1F680}' * 501;
+      final note2000 = '\u{1F680}' * 2000;
+      final note2001 = '\u{1F680}' * 2001;
+      final uri2048 = 'https://example.com/${'\u{1F680}' * 2028}';
+      final uri2049 = 'https://example.com/${'\u{1F680}' * 2029}';
+      final num24 = '${'0' * 21}150';
+      final num25 = '${'0' * 22}150';
+
+      // Exact N acceptance using supplementary plane scalars (2 UTF-16 code units per scalar):
+      final exactBoundaryBoard = TaskBoard(
+        labels: <TdfLabel>[
+          TdfLabel(
+            id: '000001OkD2',
+            name: text500,
+            note: note2000,
+            links: <TaskLink>[TaskLink(title: text500, uri: uri2048)],
+            conditions: <TaskCondition>[
+              DayTaskCondition(
+                weekdays: const <int>[1],
+                dayTokens: List<String>.filled(63, 'mon'),
+              ),
+            ],
+          ),
+        ],
+        locations: <TdfLocation>[
+          TdfLocation(
+            id: '000002OkD2',
+            name: text500,
+            note: note2000,
+            source: text500,
+            latitude: 1.5,
+            longitude: 2.5,
+            radius: 150,
+            rawLatitudeText: num24,
+            rawLongitudeText: num24,
+            rawRadiusText: num24,
+          ),
+        ],
+        someday: <TaskItem>[
+          TaskItem(
+            id: '000003OkD2',
+            title: text500,
+            note: note2000,
+            createdAt: fixedDate,
+            dueAt: fixedDate,
+            dueNote: note2000,
+            suspendedAt: fixedDate,
+            suspendedNote: note2000,
+            origin: TaskOrigin(namespace: text500, externalKey: text500),
+            links: <TaskLink>[TaskLink(title: text500, uri: uri2048)],
+            history: <TaskHistoryEntry>[
+              TaskHistoryEntry(timestampUtc: fixedDate, text: text500),
+            ],
+            subtasks: <SubtaskItem>[
+              SubtaskItem(title: text500, isCompleted: false),
+            ],
+            conditions: <TaskCondition>[
+              DayTaskCondition(
+                weekdays: const <int>[1],
+                dayTokens: List<String>.filled(64, 'mon'),
+              ),
+              const TimeWindowTaskCondition(
+                startMinutes: 480,
+                endMinutes: 720,
+                startToken: '08:00',
+                endToken: '12:00',
+              ),
+            ],
+          ),
+        ],
+      );
+      expect(tdfService.serialize(exactBoundaryBoard), isNotEmpty);
+
+      // MAX_TEXT_LENGTH (501 scalars) rejections across all <text> fields:
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(id: '000001OkD2', title: text501, createdAt: fixedDate),
+          ],
+        ),
+        'Task title > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          labels: <TdfLabel>[TdfLabel(id: '000001OkD2', name: text501)],
+        ),
+        'Label name > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: '000001OkD2',
+              name: text501,
+              latitude: 0,
+              longitude: 0,
+              radius: 10,
+            ),
+          ],
+        ),
+        'Location name > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: '000001OkD2',
+              name: 'Loc',
+              source: text501,
+              latitude: 0,
+              longitude: 0,
+              radius: 10,
+            ),
+          ],
+        ),
+        'Location source > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              origin: TaskOrigin(namespace: text501, externalKey: 'k'),
+            ),
+          ],
+        ),
+        'Task origin namespace > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              origin: TaskOrigin(namespace: 'ns', externalKey: text501),
+            ),
+          ],
+        ),
+        'Task origin externalKey > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              links: <TaskLink>[
+                TaskLink(title: text501, uri: 'https://example.com'),
+              ],
+            ),
+          ],
+        ),
+        'Task link title > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          labels: <TdfLabel>[
+            TdfLabel(
+              id: '000001OkD2',
+              name: 'L',
+              links: <TaskLink>[
+                TaskLink(title: text501, uri: 'https://example.com'),
+              ],
+            ),
+          ],
+        ),
+        'Label link title > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              history: <TaskHistoryEntry>[
+                TaskHistoryEntry(timestampUtc: fixedDate, text: text501),
+              ],
+            ),
+          ],
+        ),
+        'Task history text > 500 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              subtasks: <SubtaskItem>[
+                SubtaskItem(title: text501, isCompleted: false),
+              ],
+            ),
+          ],
+        ),
+        'Subtask title > 500 scalars must fail on serialize',
+      );
+
+      // MAX_NOTE_LENGTH (2001 scalars) rejections across all <note> fields:
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              note: note2001,
+              createdAt: fixedDate,
+            ),
+          ],
+        ),
+        'Task note > 2000 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          labels: <TdfLabel>[
+            TdfLabel(id: '000001OkD2', name: 'L', note: note2001),
+          ],
+        ),
+        'Label note > 2000 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: '000001OkD2',
+              name: 'Loc',
+              note: note2001,
+              latitude: 0,
+              longitude: 0,
+              radius: 10,
+            ),
+          ],
+        ),
+        'Location note > 2000 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              dueAt: fixedDate,
+              dueNote: note2001,
+            ),
+          ],
+        ),
+        'Task dueNote > 2000 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              suspendedAt: fixedDate,
+              suspendedNote: note2001,
+            ),
+          ],
+        ),
+        'Task suspendedNote > 2000 scalars must fail on serialize',
+      );
+
+      // MAX_URI_LENGTH (2049 scalars) rejections:
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              links: <TaskLink>[TaskLink(title: 'Link', uri: uri2049)],
+            ),
+          ],
+        ),
+        'Task link URI > 2048 scalars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          labels: <TdfLabel>[
+            TdfLabel(
+              id: '000001OkD2',
+              name: 'L',
+              links: <TaskLink>[TaskLink(title: 'Link', uri: uri2049)],
+            ),
+          ],
+        ),
+        'Label link URI > 2048 scalars must fail on serialize',
+      );
+
+      // MAX_NUMBER_LENGTH (25 chars) rejections on location coordinates & radius:
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: '000001OkD2',
+              name: 'Loc',
+              latitude: 0,
+              longitude: 0,
+              radius: 10,
+              rawLatitudeText: num25,
+            ),
+          ],
+        ),
+        'Location latitude > 24 chars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: '000001OkD2',
+              name: 'Loc',
+              latitude: 0,
+              longitude: 0,
+              radius: 10,
+              rawLongitudeText: num25,
+            ),
+          ],
+        ),
+        'Location longitude > 24 chars must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: '000001OkD2',
+              name: 'Loc',
+              latitude: 0,
+              longitude: 0,
+              radius: 10,
+              rawRadiusText: num25,
+            ),
+          ],
+        ),
+        'Location radius > 24 chars must fail on serialize',
+      );
+
+      // DayTaskCondition MAX_ARGS_PER_STMT rejections (inline 64 tokens = 65 args; block 65 tokens = 65 args):
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              conditions: <TaskCondition>[
+                DayTaskCondition(
+                  weekdays: const <int>[1],
+                  dayTokens: List<String>.filled(64, 'mon'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        'Inline task condition day with 64 tokens (65 args) must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          labels: <TdfLabel>[
+            TdfLabel(
+              id: '000001OkD2',
+              name: 'L',
+              conditions: <TaskCondition>[
+                DayTaskCondition(
+                  weekdays: const <int>[1],
+                  dayTokens: List<String>.filled(64, 'mon'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        'Inline label condition day with 64 tokens (65 args) must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          someday: <TaskItem>[
+            TaskItem(
+              id: '000001OkD2',
+              title: 'T',
+              createdAt: fixedDate,
+              conditions: <TaskCondition>[
+                DayTaskCondition(
+                  weekdays: const <int>[1],
+                  dayTokens: List<String>.filled(65, 'mon'),
+                ),
+                const TimeWindowTaskCondition(
+                  startMinutes: 480,
+                  endMinutes: 720,
+                  startToken: '08:00',
+                  endToken: '12:00',
+                ),
+              ],
+            ),
+          ],
+        ),
+        'Block task condition day with 65 tokens must fail on serialize',
+      );
+      expectSerializeLimitExceeded(
+        TaskBoard(
+          labels: <TdfLabel>[
+            TdfLabel(
+              id: '000001OkD2',
+              name: 'L',
+              conditions: <TaskCondition>[
+                DayTaskCondition(
+                  weekdays: const <int>[1],
+                  dayTokens: List<String>.filled(65, 'mon'),
+                ),
+                const TimeWindowTaskCondition(
+                  startMinutes: 480,
+                  endMinutes: 720,
+                  startToken: '08:00',
+                  endToken: '12:00',
+                ),
+              ],
+            ),
+          ],
+        ),
+        'Block label condition day with 65 tokens must fail on serialize',
       );
     });
   });

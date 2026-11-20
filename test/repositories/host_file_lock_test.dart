@@ -614,6 +614,363 @@ void main() {
       expect(nonTransientCalls, equals(1));
       expect(nonTransientCleanedUp, isTrue);
     });
+
+    test('replaceTargetWithSharingRetry formats terminal Win32 failure messages via formatFailureMessage and preserves fallback when omitted', () async {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      String formatLocalized(String details) =>
+          'Fehler beim Schreiben der lokalen TDF-Datei ($details).';
+
+      // 1. Immediate non-transient Win32 error uses formatFailureMessage.
+      var cleanedUpImmediate = false;
+      await expectLater(
+        () => manager.replaceTargetWithSharingRetry(
+          performMove: () => 112,
+          cleanupTemp: () {
+            cleanedUpImmediate = true;
+          },
+          targetPath: r'C:\vault\tasks.tdf',
+          formatFailureMessage: formatLocalized,
+        ),
+        throwsA(
+          isA<LocalFileException>()
+              .having(
+                (error) => error.message,
+                'message',
+                allOf(
+                  startsWith('Fehler beim Schreiben der lokalen TDF-Datei ('),
+                  contains('Win32 error 112'),
+                ),
+              )
+              .having(
+                (error) => error.cause,
+                'cause',
+                isA<FileSystemException>().having(
+                  (cause) => cause.osError?.errorCode,
+                  'osError.errorCode',
+                  equals(112),
+                ),
+              ),
+        ),
+        reason: 'Terminal non-transient Win32 MoveFileExW errors must pass details to formatFailureMessage',
+      );
+      expect(cleanedUpImmediate, isTrue);
+
+      // 2. Exhausted transient sharing retries also format through formatFailureMessage.
+      var cleanedUpExhausted = false;
+      await expectLater(
+        () => manager.replaceTargetWithSharingRetry(
+          performMove: () => 32,
+          cleanupTemp: () {
+            cleanedUpExhausted = true;
+          },
+          delay: (_) async {},
+          targetPath: r'C:\vault\tasks.tdf',
+          formatFailureMessage: formatLocalized,
+        ),
+        throwsA(
+          isA<LocalFileException>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              startsWith('Fehler beim Schreiben der lokalen TDF-Datei ('),
+              contains('Win32 error 32'),
+            ),
+          ),
+        ),
+        reason: 'Exhausted Win32 sharing retries must pass details to formatFailureMessage',
+      );
+      expect(cleanedUpExhausted, isTrue);
+
+      // 3. Unexpected thrown error from performMove also formats via formatFailureMessage.
+      var cleanedUpThrown = false;
+      await expectLater(
+        () => manager.replaceTargetWithSharingRetry(
+          performMove: () => throw StateError('unexpected move failure'),
+          cleanupTemp: () {
+            cleanedUpThrown = true;
+          },
+          targetPath: r'C:\vault\tasks.tdf',
+          formatFailureMessage: formatLocalized,
+        ),
+        throwsA(
+          isA<LocalFileException>().having(
+            (error) => error.message,
+            'message',
+            allOf(
+              startsWith('Fehler beim Schreiben der lokalen TDF-Datei ('),
+              contains('unexpected move failure'),
+            ),
+          ),
+        ),
+      );
+      expect(cleanedUpThrown, isTrue);
+
+      // 4. Omitting formatFailureMessage preserves the default fallback message.
+      await expectLater(
+        () => manager.replaceTargetWithSharingRetry(
+          performMove: () => 112,
+          cleanupTemp: () {},
+          targetPath: r'C:\vault\tasks.tdf',
+        ),
+        throwsA(
+          isA<LocalFileException>().having(
+            (error) => error.message,
+            'message',
+            equals(
+              r'Atomic target replacement failed (Win32 error 112) for C:\vault\tasks.tdf',
+            ),
+          ),
+        ),
+      );
+    });
+
+    test('classifies non-POSIX fchmod errnos vs hard I/O errors and tolerates non-POSIX mounts with debug logging while forwarding formatFailureMessage on hard failures', () {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      AppLogger.setMinimumLevel(LogLevel.debug);
+
+      const tolerableErrnos = <int>[1, 22, 38, 95];
+      for (final code in tolerableErrnos) {
+        expect(
+          HostFileLockManager.isTolerablePosixFchmodErrno(code),
+          isTrue,
+          reason: 'Non-POSIX filesystem errno $code must be tolerated',
+        );
+      }
+
+      const hardErrnos = <int>[-1, 0, 4, 5, 9, 13, 30];
+      for (final code in hardErrnos) {
+        expect(
+          HostFileLockManager.isTolerablePosixFchmodErrno(code),
+          isFalse,
+          reason: 'Hard or non-tolerable errno $code must not be ignored',
+        );
+      }
+
+      // 1. Retries EINTR (4) and succeeds when fchmod subsequently returns 0.
+      var eintrCalls = 0;
+      manager.applyPosixFchmodBestEffort(
+        performFchmod: () {
+          eintrCalls++;
+          return eintrCalls == 1 ? -1 : 0;
+        },
+        readErrno: () => 4,
+        path: '/mnt/storage/.tasks.tdf.tmp.abc',
+      );
+      expect(eintrCalls, equals(2));
+      expect(AppLogger.fullLogText, isNot(contains('local.fchmod.skipped')));
+
+      // 2. Non-POSIX mount errnos (EPERM, EINVAL, ENOSYS, EOPNOTSUPP) log debug event and succeed.
+      for (final code in tolerableErrnos) {
+        AppLogger.resetForTesting();
+        AppLogger.setEnabled(true, persistToDisk: false);
+        AppLogger.setMinimumLevel(LogLevel.debug);
+        manager.applyPosixFchmodBestEffort(
+          performFchmod: () => -1,
+          readErrno: () => code,
+          path: '/storage/emulated/0/Documents/.tasks.tdf.tmp.abc',
+        );
+        final logs = AppLogger.fullLogText;
+        expect(
+          logs,
+          contains('local.fchmod.skipped'),
+          reason: 'Tolerated fchmod errno $code must emit debug log event',
+        );
+        expect(
+          logs,
+          contains('errno=$code'),
+          reason: 'Tolerated fchmod log must include errno=$code',
+        );
+        expect(
+          logs,
+          isNot(contains('/storage/emulated/0')),
+          reason: 'Tolerated fchmod log must not expose raw file paths',
+        );
+      }
+
+      // 3. Hard I/O errors (EIO=5, EBADF=9, EACCES=13, EROFS=30) throw and forward formatFailureMessage.
+      for (final code in const <int>[5, 9, 13, 30]) {
+        expect(
+          () => manager.applyPosixFchmodBestEffort(
+            performFchmod: () => -1,
+            readErrno: () => code,
+            path: '/mnt/usb/.tasks.tdf.tmp.abc',
+            formatFailureMessage: (details) => 'Localized save error: $details',
+          ),
+          throwsA(
+            isA<LocalFileException>()
+                .having(
+                  (error) => error.message,
+                  'message',
+                  equals('Localized save error: fchmod failed (errno $code)'),
+                )
+                .having(
+                  (error) => error.cause,
+                  'cause',
+                  isA<FileSystemException>().having(
+                    (cause) => cause.osError?.errorCode,
+                    'osError.errorCode',
+                    equals(code),
+                  ),
+                ),
+          ),
+          reason:
+              'Hard fchmod errno $code must throw formatted LocalFileException',
+        );
+      }
+    });
+
+    test('acquirePosixDescriptorLock closes descriptor on fchmod or flock failure and transfers ownership only on acquisition', () async {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      AppLogger.setMinimumLevel(LogLevel.debug);
+
+      // 1. Failure during applyPermissions (e.g. fchmod EIO) must close the opened descriptor.
+      final closedOnPermFailure = <int>[];
+      var releaseCalledOnPermFailure = false;
+      var tryLockCalledOnPermFailure = false;
+      await expectLater(
+        () => manager.acquirePosixDescriptorLock(
+          descriptor: 42,
+          applyPermissions: () => manager.applyPosixFchmodBestEffort(
+            performFchmod: () => -1,
+            readErrno: () => 5,
+            path: '/tmp/tdf-locks/tdf-test.lock',
+          ),
+          tryLock: () {
+            tryLockCalledOnPermFailure = true;
+            return true;
+          },
+          closeDescriptor: closedOnPermFailure.add,
+          releaseAndClose: (_) {
+            releaseCalledOnPermFailure = true;
+          },
+          lockFilePath: '/tmp/tdf-locks/tdf-test.lock',
+          targetHash: 'abcdef0123456789',
+          stopwatch: Stopwatch()..start(),
+        ),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Hard fchmod failure during lock acquisition must rethrow',
+      );
+      expect(
+        closedOnPermFailure,
+        equals(const <int>[42]),
+        reason:
+            'Descriptor must be closed when fchmod throws to prevent FD leak',
+      );
+      expect(tryLockCalledOnPermFailure, isFalse);
+      expect(releaseCalledOnPermFailure, isFalse);
+
+      // 2. Failure during tryLock must also close the opened descriptor.
+      final closedOnFlockFailure = <int>[];
+      await expectLater(
+        () => manager.acquirePosixDescriptorLock(
+          descriptor: 77,
+          applyPermissions: () {},
+          tryLock: () => throw const LocalFileException('flock failed'),
+          closeDescriptor: closedOnFlockFailure.add,
+          releaseAndClose: (_) {},
+          lockFilePath: '/tmp/tdf-locks/tdf-test.lock',
+          targetHash: 'abcdef0123456789',
+          stopwatch: Stopwatch()..start(),
+        ),
+        throwsA(isA<LocalFileException>()),
+      );
+      expect(
+        closedOnFlockFailure,
+        equals(const <int>[77]),
+        reason: 'Descriptor must be closed when flock throws',
+      );
+
+      // 3. Tolerated non-POSIX fchmod (EOPNOTSUPP=95) proceeds to lock and transfers FD to releaser.
+      final closedOnSuccess = <int>[];
+      final releasedOnSuccess = <int>[];
+      final release = await manager.acquirePosixDescriptorLock(
+        descriptor: 99,
+        applyPermissions: () => manager.applyPosixFchmodBestEffort(
+          performFchmod: () => -1,
+          readErrno: () => 95,
+          path: '/tmp/tdf-locks/tdf-test.lock',
+        ),
+        tryLock: () => true,
+        closeDescriptor: closedOnSuccess.add,
+        releaseAndClose: releasedOnSuccess.add,
+        lockFilePath: '/tmp/tdf-locks/tdf-test.lock',
+        targetHash: 'abcdef0123456789',
+        stopwatch: Stopwatch()..start(),
+      );
+      expect(
+        closedOnSuccess,
+        isEmpty,
+        reason: 'Acquired descriptor must not be closed prematurely',
+      );
+      expect(releasedOnSuccess, isEmpty);
+      release();
+      expect(releasedOnSuccess, equals(const <int>[99]));
+    });
+
+    test('real POSIX fchmod enforces 0600 permissions on lock and atomic target files without leaking file descriptors', () async {
+      if (!Platform.isLinux) {
+        return;
+      }
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      final targetPath =
+          '${workspaceDir.path}${Platform.pathSeparator}fchmod_real.tdf';
+      final lockFilePath = manager.resolveLockFilePath(targetPath);
+
+      // Pre-create lock directory and lock file with overly permissive 0644 mode.
+      lockDir.createSync(recursive: true);
+      Process.runSync('chmod', <String>['0700', lockDir.path]);
+      File(lockFilePath).writeAsStringSync('', flush: true);
+      Process.runSync('chmod', <String>['0644', lockFilePath]);
+      expect(File(lockFilePath).statSync().mode & 0x1FF, equals(0x1A4));
+
+      final fdDir = Directory('/proc/self/fd');
+      final fdCountBefore = fdDir.existsSync() ? fdDir.listSync().length : -1;
+
+      for (var i = 0; i < 8; i++) {
+        await manager.withExclusiveLock(targetPath, () async {
+          await manager.writeAtomically(
+            targetPath,
+            utf8.encode('tdf 0.8.0\n# write $i\n'),
+          );
+        });
+      }
+
+      expect(
+        File(lockFilePath).statSync().mode & 0x1FF,
+        equals(0x180),
+        reason: 'Descriptor-based fchmod must tighten existing 0644 lock file to 0600',
+      );
+      expect(
+        File(targetPath).statSync().mode & 0x1FF,
+        equals(0x180),
+        reason: 'Descriptor-based fchmod must set atomic target file to 0600',
+      );
+      expect(
+        File(targetPath).readAsStringSync(),
+        equals('tdf 0.8.0\n# write 7\n'),
+      );
+
+      if (fdCountBefore >= 0) {
+        final fdCountAfter = fdDir.listSync().length;
+        expect(
+          fdCountAfter,
+          lessThanOrEqualTo(fdCountBefore),
+          reason: 'Repeated lock and atomic write cycles must not leak open file descriptors',
+        );
+      }
+    });
   });
 }
 

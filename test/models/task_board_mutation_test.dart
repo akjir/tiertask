@@ -1528,5 +1528,304 @@ label officeOkD2 {
             'Recording 4097th tombstone must throw TdfException(limitExceeded)',
       );
     });
+
+    test('deleteLabel evicts queued scoped tasks in one queue.modified tick and preserves isPriority on unqueued or completed tasks', () {
+      final t0 = DateTime.utc(2026, 7, 1, 10, 0, 0);
+      final t1 = t0.add(const Duration(seconds: 10));
+      const scopedLabel = TdfLabel(
+        id: 'lblScpDel1',
+        name: 'Private',
+        isScoped: true,
+      );
+      final queuedA = TaskItem(
+        id: 'scpQ000001',
+        title: 'Queued Scoped A',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScpDel1'],
+      );
+      final queuedB = TaskItem(
+        id: 'scpQ000002',
+        title: 'Queued Scoped B',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScpDel1'],
+      );
+      final unqueuedSomeday = TaskItem(
+        id: 'scpSome001',
+        title: 'Unqueued Someday Scoped',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScpDel1'],
+      );
+      final completedScoped = TaskItem(
+        id: 'scpDone001',
+        title: 'Completed Scoped',
+        isCompleted: true,
+        completions: 1,
+        isPriority: true,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblScpDel1'],
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[queuedA, queuedB, unqueuedSomeday, completedScoped],
+        labels: const <TdfLabel>[scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t1,
+          taskIds: const <String>['scpQ000001', 'scpQ000002'],
+        ),
+        evaluationTime: t1,
+      );
+
+      final afterDelete = board.deleteLabel('lblScpDel1', currentDate: t1);
+      expect(afterDelete.queueTaskIds, isEmpty);
+      expect(
+        afterDelete.queueBlock.modifiedAt,
+        equals(t1.add(const Duration(seconds: 1))),
+        reason: 'Evicting multiple tasks from queue during deleteLabel must advance queue.modified at most once (+1s, not +Ns)',
+      );
+      expect(afterDelete.findTask('scpQ000001')!.isPriority, isFalse);
+      expect(afterDelete.findTask('scpQ000002')!.isPriority, isFalse);
+      expect(
+        afterDelete.findTask('scpSome001')!.isPriority,
+        isTrue,
+        reason: 'Unqueued Someday task losing its sole scoped label must retain isPriority',
+      );
+      expect(
+        afterDelete.findTask('scpDone001')!.isPriority,
+        isTrue,
+        reason: 'Completed task losing its sole scoped label must retain isPriority',
+      );
+    });
+
+    test('updateTask enforces maxTdfCompletions on completion transition and maxTdfArgsPerStmt on dependencies', () {
+      final t0 = DateTime.utc(2026, 7, 2, 10, 0, 0);
+      final t1 = t0.add(const Duration(minutes: 1));
+      final maxOpen = TaskItem(
+        id: 'maxComp001',
+        title: 'Max Completions Open',
+        completions: maxTdfCompletions,
+        createdAt: t0,
+        modifiedAt: t0,
+        subtasksAutoFinish: true,
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Last Step', isCompleted: false),
+        ],
+      );
+      final maxDone = TaskItem(
+        id: 'maxDone001',
+        title: 'Max Completions Done',
+        isCompleted: true,
+        completions: maxTdfCompletions,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[maxOpen, maxDone],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['maxComp001'],
+        ),
+        evaluationTime: t0,
+      );
+
+      expect(
+        () => board.updateTask(
+          'maxComp001',
+          targetTier: TaskTier.completed,
+          currentDate: t1,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Completing an open task at maxTdfCompletions via targetTier must throw LimitExceeded',
+      );
+      expect(
+        () => board.updateTask(
+          'maxComp001',
+          subtasks: const <SubtaskItem>[
+            SubtaskItem(title: 'Last Step', isCompleted: true),
+          ],
+          currentDate: t1,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Auto-finishing an open task at maxTdfCompletions via updateTask must throw LimitExceeded',
+      );
+
+      // Editing an already-Completed task at maxTdfCompletions must still succeed:
+      final editedDone = board.updateTask(
+        'maxDone001',
+        note: 'Still completed at max',
+        currentDate: t1,
+      );
+      expect(
+        editedDone.findTask('maxDone001')!.completions,
+        equals(maxTdfCompletions),
+      );
+
+      // _armDeps enforces maxTdfArgsPerStmt (64 allowed, 65 throws LimitExceeded):
+      final sixtyFourIds = <String>[
+        for (var i = 0; i < maxTdfArgsPerStmt; i++)
+          'dep${i.toString().padLeft(4, '0')}Ok1',
+      ];
+      final sixtyFiveIds = <String>[...sixtyFourIds, 'dep0064Ok1'];
+      final sixtyFiveDeps = <TdfTaskDependency>[
+        for (final id in sixtyFiveIds)
+          TdfTaskDependency(taskId: id, requiredCompletion: 1),
+      ];
+
+      final atLimit = board.addTask(
+        'Exactly 64 Deps',
+        id: 'depLim6401',
+        blockedByTaskIds: sixtyFourIds,
+        currentDate: t1,
+      );
+      expect(
+        atLimit.findTask('depLim6401')!.dependencies.length,
+        equals(maxTdfArgsPerStmt),
+      );
+      expect(
+        () => board.addTask(
+          'Over 64 Blocked Ids',
+          blockedByTaskIds: sixtyFiveIds,
+          currentDate: t1,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+      expect(
+        () => board.addTask(
+          'Over 64 Explicit Deps',
+          dependencies: sixtyFiveDeps,
+          currentDate: t1,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+    });
+
+    test('addLabel and addLocation populate modifiedAt when currentDate and modifiedAt are omitted', () {
+      final afterAdd = TaskBoard.empty()
+          .addLabel('Default Stamp Label', id: 'lblDefStmp')
+          .addLocation(
+            'Default Stamp Location',
+            id: 'locDefStmp',
+            latitude: 52.52,
+            longitude: 13.405,
+            radius: 150,
+          );
+      expect(
+        afterAdd.findLabel('lblDefStmp')!.modifiedAt,
+        isNotNull,
+        reason: 'addLabel must initialize modifiedAt even when currentDate and modifiedAt are omitted',
+      );
+      expect(
+        afterAdd.findLocation('locDefStmp')!.modifiedAt,
+        isNotNull,
+        reason: 'addLocation must initialize modifiedAt even when currentDate and modifiedAt are omitted',
+      );
+    });
+
+    test('deleteLocation aggregates multiple LocationTaskCondition objects without emitting mixed location any + concrete id', () {
+      final t0 = DateTime.utc(2026, 7, 3, 10, 0, 0);
+      final t1 = t0.add(const Duration(minutes: 1));
+      const locA = TdfLocation(
+        id: 'locDelA001',
+        name: 'Site A',
+        latitude: 52.5,
+        longitude: 13.4,
+        radius: 100,
+      );
+      const locB = TdfLocation(
+        id: 'locKeepB01',
+        name: 'Site B',
+        latitude: 52.6,
+        longitude: 13.5,
+        radius: 100,
+      );
+      const locLabel = TdfLabel(
+        id: 'lblLoc0001',
+        name: 'Field',
+        conditions: <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locKeepB01']),
+        ],
+      );
+      final multiLocTask = TaskItem(
+        id: 'tskMultiL1',
+        title: 'Task With Multiple Location Rules',
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblLoc0001'],
+        conditions: const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locDelA001']),
+          LocationTaskCondition(locationIds: <String>['locKeepB01']),
+        ],
+      );
+      final allDeletedLocTask = TaskItem(
+        id: 'tskAllDel1',
+        title: 'Task With Duplicate Deleted Location Rules',
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblLoc0001'],
+        conditions: const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locDelA001']),
+          LocationTaskCondition(locationIds: <String>['locDelA001']),
+        ],
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[multiLocTask, allDeletedLocTask],
+        labels: const <TdfLabel>[locLabel],
+        locations: const <TdfLocation>[locA, locB],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['tskMultiL1', 'tskAllDel1'],
+        ),
+        evaluationTime: t0,
+      );
+
+      final afterDelete = board.deleteLocation('locDelA001', currentDate: t1);
+      final updatedMulti = afterDelete.findTask('tskMultiL1')!;
+      expect(
+        updatedMulti.conditions,
+        equals(const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['locKeepB01']),
+        ]),
+        reason: 'Surviving location ID in a second LocationTaskCondition must suppress GroupResetTaskCondition(location)',
+      );
+      final updatedAllDel = afterDelete.findTask('tskAllDel1')!;
+      expect(
+        updatedAllDel.conditions,
+        equals(const <TaskCondition>[
+          GroupResetTaskCondition(targetGroup: ConditionGroup.location),
+        ]),
+        reason: 'When all LocationTaskCondition objects become empty, emit exactly one location any reset',
+      );
+    });
   });
 }

@@ -71,6 +71,7 @@ final clockProvider = Provider<DateTime Function()>((ref) {
 final diagnosticsEnabledProvider = Provider<bool>((ref) {
   final clock = ref.watch(clockProvider);
   final baseDirectoryPath = ref.watch(localStorageDirectoryPathProvider);
+  final buildProfile = ref.watch(appBuildProfileProvider);
   final configAsync = ref.watch(webDavConfigProvider);
   final workspaceAsync = ref.watch(activeWorkspaceProvider);
   final versionAsync = ref.watch(appVersionProvider);
@@ -91,13 +92,17 @@ final diagnosticsEnabledProvider = Provider<bool>((ref) {
     utcNow: clock().toUtc(),
     platform: metadata.platform,
     workspaceId: metadata.workspaceId,
+    buildProfile: buildProfile,
   );
   final resolvedBaseDir =
-      baseDirectoryPath ?? LocalFileRepository.resolveDefaultDirectoryPath();
+      baseDirectoryPath ??
+      LocalFileRepository.resolveDefaultDirectoryPath(
+        buildProfile: buildProfile,
+      );
   if (resolvedConfig.diagnosticsEnabled || AppLogger.isEnabled) {
     AppLogger.setEnabled(
       resolvedConfig.diagnosticsEnabled,
-      sink: const LocalFileLogSink(),
+      sink: LocalFileLogSink(buildProfile: buildProfile),
       logFilePath: logFilePath,
       baseDirectoryPath: resolvedBaseDir,
       secretToRedact: resolvedConfig.password,
@@ -167,10 +172,12 @@ final linkLauncherRepositoryProvider = Provider<LinkLauncherRepository>((ref) {
 final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
   final config = resolveCurrentConfig(ref);
   final baseDirectoryPath = ref.watch(localStorageDirectoryPathProvider);
+  final buildProfile = ref.watch(appBuildProfileProvider);
   final inMemoryStore = ref.watch(inMemoryLocalStoreProvider);
   return LocalFileRepository(
     config: config,
     baseDirectoryPath: baseDirectoryPath,
+    buildProfile: buildProfile,
     inMemoryStore: inMemoryStore,
   );
 });
@@ -229,15 +236,18 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
       newConfig.language.resolveLocale(PlatformDispatcher.instance.locale),
     );
     final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final buildProfile = ref.read(appBuildProfileProvider);
     final inMemoryStore = ref.read(inMemoryLocalStoreProvider);
     final sourceRepo = LocalFileRepository(
       config: current,
       baseDirectoryPath: baseDirectoryPath,
+      buildProfile: buildProfile,
       inMemoryStore: inMemoryStore,
     );
     final targetRepo = LocalFileRepository(
       config: newConfig,
       baseDirectoryPath: baseDirectoryPath,
+      buildProfile: buildProfile,
       inMemoryStore: inMemoryStore,
     );
 
@@ -409,6 +419,7 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   /// Synchronizes [AppLogger] state, path, and metadata for [config].
   void _syncLoggerForConfig(WebDavConfig config) {
     final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final buildProfile = ref.read(appBuildProfileProvider);
     final clock = ref.read(clockProvider);
     final activeWorkspace = ref.read(activeWorkspaceProvider).asData?.value;
     final appVersion = ref.read(appVersionProvider).asData?.value ?? '0.2.3';
@@ -423,15 +434,19 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
       utcNow: clock().toUtc(),
       platform: metadata.platform,
       workspaceId: metadata.workspaceId,
+      buildProfile: buildProfile,
     );
     final resolvedBaseDir =
-        baseDirectoryPath ?? LocalFileRepository.resolveDefaultDirectoryPath();
+        baseDirectoryPath ??
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: buildProfile,
+        );
     if (!config.diagnosticsEnabled && !AppLogger.isEnabled) {
       return;
     }
     AppLogger.setEnabled(
       config.diagnosticsEnabled,
-      sink: const LocalFileLogSink(),
+      sink: LocalFileLogSink(buildProfile: buildProfile),
       logFilePath: logFilePath,
       baseDirectoryPath: resolvedBaseDir,
       secretToRedact: config.password,

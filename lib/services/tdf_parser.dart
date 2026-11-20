@@ -316,10 +316,10 @@ abstract final class TdfBlockParser {
       );
     }
     final isBlockHeader = openBraceCount == 1;
-    final statementTokens = isBlockHeader
-        ? tokens.sublist(0, tokens.length - 1)
-        : tokens;
-    if (statementTokens.length > maxTdfArgsPerStmt + 1) {
+    final statementTokenCount = isBlockHeader
+        ? tokens.length - 1
+        : tokens.length;
+    if (statementTokenCount > maxTdfArgsPerStmt + 1) {
       TdfDirectiveParser.fail(
         TdfErrorKind.limitExceeded,
         line,
@@ -330,14 +330,15 @@ abstract final class TdfBlockParser {
       _handleVersionHeader(state, line, tokens, isBlockHeader: isBlockHeader);
       return;
     }
-    if (statementTokens.isEmpty) {
+    if (statementTokenCount == 0) {
       TdfDirectiveParser.fail(
         TdfErrorKind.invalidBlockHeader,
         line,
         'Standalone "{" without block type.',
       );
     }
-    final nameToken = statementTokens[0];
+    _ensureStructuralBounds(state, line, isBlockHeader: isBlockHeader);
+    final nameToken = tokens[0];
     if (!nameToken.isBare || !TdfScanner.isValidIdentifier(nameToken.value)) {
       TdfDirectiveParser.fail(
         TdfErrorKind.invalidIdentifier,
@@ -345,8 +346,8 @@ abstract final class TdfBlockParser {
         'Invalid block or directive identifier.',
       );
     }
-    final args = statementTokens.sublist(1);
-    _recordOrdinaryChildStatement(state, line);
+    final args = tokens.sublist(1, statementTokenCount);
+    _recordOrdinaryChildStatement(state);
     if (isBlockHeader) {
       _openBlock(state, line, nameToken.value, args);
     } else {
@@ -687,6 +688,44 @@ abstract final class TdfBlockParser {
     ));
   }
 
+  /// Enforces `MAX_STMTS_PER_BLOCK`, `MAX_NESTING_DEPTH`, and `MAX_BLOCKS_PER_DOC` before identifier validation and argument slicing (`TDF-VAL-001`, `TDF-VAL-002`).
+  static void _ensureStructuralBounds(
+    TdfParserState state,
+    int line, {
+    required bool isBlockHeader,
+  }) {
+    if (state.blockStack.isNotEmpty) {
+      final parent = state.blockStack.last;
+      if (parent is! TdfDeletedBuilder &&
+          parent is! TdfQueueBuilder &&
+          parent is! TdfConditionBuilder &&
+          parent.statementCount >= maxTdfStmtsPerBlock) {
+        TdfDirectiveParser.fail(
+          TdfErrorKind.limitExceeded,
+          line,
+          'Block exceeds maximum of $maxTdfStmtsPerBlock direct child statements.',
+        );
+      }
+    }
+    if (!isBlockHeader) {
+      return;
+    }
+    if (state.blockStack.length >= maxTdfNestingDepth) {
+      TdfDirectiveParser.fail(
+        TdfErrorKind.limitExceeded,
+        line,
+        'Block nesting exceeds maximum depth of $maxTdfNestingDepth.',
+      );
+    }
+    if (state.totalBlockCount >= maxTdfBlocksPerDoc) {
+      TdfDirectiveParser.fail(
+        TdfErrorKind.limitExceeded,
+        line,
+        'Document exceeds maximum of $maxTdfBlocksPerDoc blocks.',
+      );
+    }
+  }
+
   /// Validates the mandatory initial `tdf 0.8.0` header (`TDF-COMPAT-001`, `TDF-ENT-001`).
   static void _handleVersionHeader(
     TdfParserState state,
@@ -726,20 +765,6 @@ abstract final class TdfBlockParser {
     String blockType,
     List<TdfScannedToken> args,
   ) {
-    if (state.blockStack.length >= maxTdfNestingDepth) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Block nesting exceeds maximum depth of $maxTdfNestingDepth.',
-      );
-    }
-    if (state.totalBlockCount >= maxTdfBlocksPerDoc) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Document exceeds maximum of $maxTdfBlocksPerDoc blocks.',
-      );
-    }
     state.totalBlockCount++;
 
     if (state.blockStack.isEmpty) {
@@ -961,13 +986,6 @@ abstract final class TdfBlockParser {
     int line,
     List<TdfScannedToken> args,
   ) {
-    if (parent.hasSubtasksBlock) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.duplicateDirective,
-        line,
-        'Task "${parent.id}" has multiple "subtasks" blocks.',
-      );
-    }
     var autoFinish = false;
     if (args.length == 1) {
       if (!args[0].isBare || args[0].value != 'auto-finish') {
@@ -983,6 +1001,13 @@ abstract final class TdfBlockParser {
         TdfErrorKind.invalidBlockHeader,
         line,
         'Too many arguments in subtasks block header.',
+      );
+    }
+    if (parent.hasSubtasksBlock) {
+      TdfDirectiveParser.fail(
+        TdfErrorKind.duplicateDirective,
+        line,
+        'Task "${parent.id}" has multiple "subtasks" blocks.',
       );
     }
     parent.hasSubtasksBlock = true;
@@ -1032,8 +1057,8 @@ abstract final class TdfBlockParser {
     state.blockStack.add(TdfTaskBuilder(idToken.value, isPriority, line));
   }
 
-  /// Enforces `MAX_STMTS_PER_BLOCK = 1024` on ordinary enclosing blocks (`task`, `label`, `location`, `subtasks`).
-  static void _recordOrdinaryChildStatement(TdfParserState state, int line) {
+  /// Records one direct child statement on ordinary enclosing blocks (`task`, `label`, `location`, `subtasks`).
+  static void _recordOrdinaryChildStatement(TdfParserState state) {
     if (state.blockStack.isEmpty) {
       return;
     }
@@ -1042,13 +1067,6 @@ abstract final class TdfBlockParser {
         parent is TdfQueueBuilder ||
         parent is TdfConditionBuilder) {
       return;
-    }
-    if (parent.statementCount >= maxTdfStmtsPerBlock) {
-      TdfDirectiveParser.fail(
-        TdfErrorKind.limitExceeded,
-        line,
-        'Block exceeds maximum of $maxTdfStmtsPerBlock direct child statements.',
-      );
     }
     parent.statementCount++;
   }
@@ -1109,8 +1127,8 @@ abstract final class TdfBlockParser {
     }
     _validateLabelReferences(state);
     _validateLocationReferences(state);
-    _validateDependencies(state);
     _validateQueueMembership(state);
+    _validateDependencies(state);
     return state;
   }
 

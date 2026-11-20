@@ -24,6 +24,7 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -3126,6 +3127,592 @@ task doneRest02 {
       );
     },
   );
+
+  testWidgets(
+    'TaskEditorSuspendedField date picker preserves :SS seconds, rejects invalid separators/seconds, extracts HH:MM:SS in time picker, and preserves dueAnchor, isDuePassive, and autumn-fold instants',
+    (WidgetTester tester) async {
+      // 1. Direct picker behavior for valid :SS, tab separator, malformed suffixes, and time picker with :SS:
+      String? pickedResult;
+      String currentInput = '2026-11-11 12:30:45';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => Column(
+                children: [
+                  TextButton(
+                    key: const ValueKey('pick_date_btn'),
+                    onPressed: () async {
+                      pickedResult =
+                          await TaskEditorSuspendedField.pickSuspendedDate(
+                            context: context,
+                            currentText: currentInput,
+                            fallbackDate: DateTime.utc(2026, 11, 11),
+                          );
+                    },
+                    child: const Text('Pick Date'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('pick_time_btn'),
+                    onPressed: () async {
+                      pickedResult =
+                          await TaskEditorSuspendedField.pickSuspendedTime(
+                            context: context,
+                            currentText: currentInput,
+                            fallbackDate: DateTime.utc(2026, 11, 11),
+                          );
+                    },
+                    child: const Text('Pick Time'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final dateCases = <(String input, String expected, String reason)>[
+        (
+          '2026-11-11 12:30:45',
+          '2026-11-11 12:30:45',
+          'Space-separated HH:MM:SS suffix must be preserved verbatim',
+        ),
+        (
+          '2026-11-11\t12:30:45',
+          '2026-11-11 12:30:45',
+          'Tab-separated HH:MM:SS suffix must be preserved verbatim',
+        ),
+        (
+          '2026-11-11 12:30:99',
+          '2026-11-11',
+          'Out-of-range seconds (:99) must be rejected instead of truncated to 12:30',
+        ),
+        (
+          '2026-11-1112:30',
+          '2026-11-11',
+          'Missing ASCII whitespace separator at index 10 must be rejected',
+        ),
+        (
+          '2026-11-11 12:30 extra',
+          '2026-11-11',
+          'Trailing garbage after HH:MM must be rejected',
+        ),
+      ];
+      for (final (input, expected, reason) in dateCases) {
+        currentInput = input;
+        pickedResult = null;
+        await tester.tap(find.byKey(const ValueKey('pick_date_btn')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        expect(pickedResult, equals(expected), reason: reason);
+      }
+
+      // Time picker with HH:MM:SS must initialize TimeOfDay to 14:35 (not 09:00 fallback):
+      currentInput = '2026-11-11 14:35:45';
+      pickedResult = null;
+      await tester.tap(find.byKey(const ValueKey('pick_time_btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        pickedResult,
+        equals('2026-11-11 14:35'),
+        reason: 'Time picker must parse hour/minute from HH:MM:SS instead of falling back to 09:00',
+      );
+
+      // 2. End-to-end EditTaskScreen: confirming same date on :SS due/suspended preserves dueAnchor, isDuePassive, and autumn-fold UTC instant:
+      const resolvedConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 120,
+      );
+      final taskWithSeconds = TaskItem(
+        id: 'secPresv01',
+        title: 'Seconds Precision Task',
+        createdAt: DateTime.utc(2026, 2, 1, 8, 0),
+        modifiedAt: DateTime.utc(2026, 2, 1, 8, 0),
+        dueAt: DateTime.utc(2026, 2, 28, 16, 15, 45),
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 15, 45),
+        isDuePassive: true,
+        suspendedAt: DateTime.utc(2026, 10, 25, 1, 30, 45),
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[taskWithSeconds],
+        evaluationTime: DateTime.utc(2026, 2, 10, 12, 0),
+      );
+      final container = await pumpLeafWidget(
+        tester,
+        Builder(
+          builder: (context) => ElevatedButton(
+            key: const ValueKey('open_sec_editor'),
+            onPressed: () =>
+                openEditTaskScreen(context, initialTask: taskWithSeconds),
+            child: const Text('Open'),
+          ),
+        ),
+        board: board,
+        config: resolvedConfig,
+        clock: () => DateTime.utc(2026, 2, 10, 12, 0),
+      );
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open_sec_editor');
+
+      // Confirm due date picker on same date:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_due_date_picker_button')),
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_due_input')),
+            )
+            .controller
+            ?.text,
+        equals('2026-02-28 18:15:45'),
+        reason: 'Confirming due date picker must preserve :45 seconds',
+      );
+      expect(
+        tester
+            .widget<Switch>(
+              find.byKey(
+                const ValueKey('task_editor_due_auto_prioritize_switch'),
+              ),
+            )
+            .value,
+        isFalse,
+        reason: 'Confirming unchanged due date must not reset isDuePassive',
+      );
+
+      // Confirm suspended date picker on same date:
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('task_editor_suspended_date_picker_button')),
+      );
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(const ValueKey('task_editor_suspended_input')),
+            )
+            .controller
+            ?.text,
+        equals('2026-10-25 03:30:45'),
+        reason: 'Confirming suspended date picker must preserve :45 seconds',
+      );
+
+      await _tapKey(tester, 'task_editor_save_button');
+      final saved = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('secPresv01')!;
+      expect(saved.dueAt, equals(DateTime.utc(2026, 2, 28, 16, 15, 45)));
+      expect(
+        saved.dueAnchor,
+        equals(TdfLocalDateTime(2026, 1, 31, 18, 15, 45)),
+        reason:
+            'Clamped 31st dueAnchor must survive same-date picker confirmation',
+      );
+      expect(saved.isDuePassive, isTrue);
+      expect(saved.suspendedAt, equals(DateTime.utc(2026, 10, 25, 1, 30, 45)));
+    },
+  );
+
+  testWidgets(
+    'TaskEditorSuspendedField date picker clamps out-of-bounds fallback and input dates to 2000-01-01..2100-12-31 without AssertionError',
+    (WidgetTester tester) async {
+      String? pickedResult;
+      String currentInput = '';
+      DateTime currentFallback = DateTime.utc(1999, 12, 31);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                key: const ValueKey('pick_clamped_date_btn'),
+                onPressed: () async {
+                  pickedResult =
+                      await TaskEditorSuspendedField.pickSuspendedDate(
+                        context: context,
+                        currentText: currentInput,
+                        fallbackDate: currentFallback,
+                      );
+                },
+                child: const Text('Pick Date'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final cases =
+          <(String input, DateTime fallback, String expected, String reason)>[
+            (
+              '',
+              DateTime.utc(1999, 12, 31),
+              '2000-01-01',
+              'Fallback 1999-12-31 must clamp to 2000-01-01 without AssertionError',
+            ),
+            (
+              '0001-01-01 12:00:30',
+              DateTime.utc(1, 1, 1),
+              '2000-01-01 12:00:30',
+              'Year 0001 input and fallback must clamp to 2000-01-01 while preserving :30',
+            ),
+            (
+              '',
+              DateTime.utc(2101, 1, 1),
+              '2100-12-31',
+              'Fallback 2101-01-01 must clamp to 2100-12-31 without AssertionError',
+            ),
+            (
+              '9999-12-31',
+              DateTime.utc(9999, 12, 31),
+              '2100-12-31',
+              'Year 9999 input and fallback must clamp to 2100-12-31 without AssertionError',
+            ),
+          ];
+      for (final (input, fallback, expected, reason) in cases) {
+        currentInput = input;
+        currentFallback = fallback;
+        pickedResult = null;
+        await tester.tap(find.byKey(const ValueKey('pick_clamped_date_btn')));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull, reason: reason);
+        await tester.tap(find.text('OK'));
+        await tester.pumpAndSettle();
+        expect(pickedResult, equals(expected), reason: reason);
+      }
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen updates _initial*Text baselines when webDavConfigProvider resolves even after the user already edited due, suspended, or history timestamp inputs',
+    (WidgetTester tester) async {
+      final configCompleter = Completer<WebDavConfig>();
+      final originalDueUtc = DateTime.utc(2026, 2, 28, 16, 0);
+      final originalSuspendedUtc = DateTime.utc(2026, 3, 5, 10, 0);
+      final originalHistoryUtc = DateTime.utc(2026, 2, 10, 8, 0);
+      // Guarantee resolvedConfig has a distinct UTC offset from const WebDavConfig() on any host TZ:
+      final fallbackDueWall = const WebDavConfig().toLocalWallClock(
+        originalDueUtc,
+      );
+      final hostOffsetMinutes = fallbackDueWall
+          .difference(originalDueUtc)
+          .inMinutes;
+      final distinctOffsetMinutes = hostOffsetMinutes == 300 ? -300 : 300;
+      final resolvedConfig = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: distinctOffsetMinutes,
+      );
+      final task = TaskItem(
+        id: 'staleInit1',
+        title: 'Pre-Edit Async Config Task',
+        createdAt: DateTime.utc(2026, 2, 1, 8, 0),
+        modifiedAt: DateTime.utc(2026, 2, 1, 8, 0),
+        dueAt: originalDueUtc,
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 0),
+        suspendedAt: originalSuspendedUtc,
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: originalHistoryUtc,
+            text: 'Baseline history entry',
+          ),
+        ],
+      );
+      final initialBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[task],
+        evaluationTime: DateTime.utc(2026, 2, 10, 12, 0),
+      );
+      final fakeNotifier = FakeTaskNotifier(initialBoard);
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(resolvedConfig),
+          ),
+          webDavConfigProvider.overrideWith(
+            () => _CompleterWebDavConfigNotifier(configCompleter.future),
+          ),
+          taskNotifierProvider.overrideWith(() => fakeNotifier),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 2, 10, 12, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: Scaffold(
+              body: Builder(
+                builder: (context) => ElevatedButton(
+                  key: const ValueKey('open_stale_init_editor'),
+                  onPressed: () =>
+                      openEditTaskScreen(context, initialTask: task),
+                  child: const Text('Open Editor'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await _tapKey(tester, 'open_stale_init_editor');
+
+      // Capture fallback texts formatted before webDavConfigProvider resolves:
+      final dueFinder = find.byKey(const ValueKey('task_editor_due_input'));
+      final suspendedFinder = find.byKey(
+        const ValueKey('task_editor_suspended_input'),
+      );
+      final historyTsFinder = find.byKey(
+        const ValueKey('editor_history_timestamp_input'),
+      );
+      await _tapVisible(
+        tester,
+        find.byKey(const ValueKey('editor_edit_history_0')),
+      );
+      final fallbackDueText = tester
+          .widget<TextField>(dueFinder)
+          .controller!
+          .text;
+      final fallbackSuspendedText = tester
+          .widget<TextField>(suspendedFinder)
+          .controller!
+          .text;
+      final fallbackHistoryText = tester
+          .widget<TextField>(historyTsFinder)
+          .controller!
+          .text;
+
+      // User edits all three fields BEFORE webDavConfigProvider completes:
+      await _enterVisibleText(tester, dueFinder, '2026-04-01 09:00');
+      await _enterVisibleText(tester, suspendedFinder, '2026-04-02 09:00');
+      await _enterVisibleText(tester, historyTsFinder, '2026-04-03 09:00');
+
+      // Now webDavConfigProvider resolves to resolvedConfig:
+      configCompleter.complete(resolvedConfig);
+      await tester.pumpAndSettle();
+
+      // In-progress user edits must remain intact (not overwritten):
+      expect(
+        tester.widget<TextField>(dueFinder).controller?.text,
+        equals('2026-04-01 09:00'),
+      );
+      expect(
+        tester.widget<TextField>(suspendedFinder).controller?.text,
+        equals('2026-04-02 09:00'),
+      );
+      expect(
+        tester.widget<TextField>(historyTsFinder).controller?.text,
+        equals('2026-04-03 09:00'),
+      );
+
+      // User now enters the old fallback strings intending workspace-local time under resolvedConfig:
+      await _enterVisibleText(tester, dueFinder, fallbackDueText);
+      await _enterVisibleText(tester, suspendedFinder, fallbackSuspendedText);
+      await _enterVisibleText(tester, historyTsFinder, fallbackHistoryText);
+      await _tapKey(tester, 'task_editor_save_button');
+
+      final expectedDueUtc =
+          TaskEditorSuspendedField.tryParseLocalDateTimeInput(
+            fallbackDueText,
+            resolvedConfig,
+          )!.resolvedUtc;
+      final expectedSuspendedUtc =
+          TaskEditorSuspendedField.tryParseLocalDateTimeInput(
+            fallbackSuspendedText,
+            resolvedConfig,
+          )!.resolvedUtc;
+      final expectedHistoryUtc =
+          TaskEditorSuspendedField.tryParseLocalDateTimeInput(
+            fallbackHistoryText,
+            resolvedConfig,
+          )!.resolvedUtc;
+      expect(expectedDueUtc, isNot(equals(originalDueUtc)));
+      expect(expectedSuspendedUtc, isNot(equals(originalSuspendedUtc)));
+      expect(expectedHistoryUtc, isNot(equals(originalHistoryUtc)));
+
+      final saved = container
+          .read(taskNotifierProvider)
+          .requireValue
+          .findTask('staleInit1')!;
+      expect(
+        saved.dueAt,
+        equals(expectedDueUtc),
+        reason: 'Updated _initialDueText must prevent false-positive unchanged match on old fallback text',
+      );
+      expect(
+        saved.suspendedAt,
+        equals(expectedSuspendedUtc),
+        reason: 'Updated _initialSuspendedText must prevent false-positive unchanged match on old fallback text',
+      );
+      expect(
+        saved.history.single.timestampUtc,
+        equals(expectedHistoryUtc),
+        reason: 'Updated _editingHistoryInitialTimestampText must prevent false-positive unchanged match on old fallback text',
+      );
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen._submit routes TdfContextException, FormatException, unexpectedToken, and limitExceeded persistence rejections to accurate inline errors',
+    (WidgetTester tester) async {
+      AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 15, 12, 0));
+      AppLogger.setEnabled(
+        true,
+        persistToDisk: false,
+        minimumLevel: LogLevel.debug,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      const config = WebDavConfig(
+        language: AppLanguage.english,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+        diagnosticsEnabled: true,
+      );
+      final throwingNotifier = _ThrowingTaskNotifier(TaskBoard.empty());
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => FakeLocalFileRepository(
+              config: config,
+              initialTdf: 'tdf ${TdfService.supportedVersion}\n',
+            ),
+          ),
+          taskNotifierProvider.overrideWith(() => throwingNotifier),
+          clockProvider.overrideWithValue(
+            () => DateTime.utc(2026, 11, 15, 12, 0),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(taskNotifierProvider.future);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            home: EditTaskScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const ValueKey('task_editor_title_input')),
+        'Persist Failure Target',
+      );
+      await tester.pump();
+
+      // 1. TdfContextException (timeZoneContextRequired) must NOT report note-too-long:
+      throwingNotifier.errorToThrow = const TdfContextException(
+        kind: TdfContextOutcomeKind.timeZoneContextRequired,
+        message: 'Time zone rules unavailable.',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(find.byKey(const ValueKey('edit_task_screen')), findsOneWidget);
+      expect(
+        find.text('Note must not exceed 2,000 characters.'),
+        findsNothing,
+        reason: 'TdfContextException must never be misreported as schedulingNoteErrorTooLong',
+      );
+      expect(
+        find.text('Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).'),
+        findsOneWidget,
+      );
+      expect(AppLogger.fullLogText, contains('timeZoneContextRequired'));
+
+      // 2. FormatException must NOT report note-too-long:
+      throwingNotifier.errorToThrow = const FormatException('InvalidTimestamp');
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(find.byKey(const ValueKey('edit_task_screen')), findsOneWidget);
+      expect(
+        find.text('Note must not exceed 2,000 characters.'),
+        findsNothing,
+        reason: 'FormatException must never be misreported as schedulingNoteErrorTooLong',
+      );
+      expect(
+        find.text('Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).'),
+        findsOneWidget,
+      );
+      expect(AppLogger.fullLogText, contains('FormatException'));
+
+      // 3. TdfException(unexpectedToken) must report invalid control characters, not note-too-long:
+      throwingNotifier.errorToThrow = const TdfException(
+        kind: TdfErrorKind.unexpectedToken,
+        line: 1,
+        message: 'Illegal control character.',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(find.byKey(const ValueKey('edit_task_screen')), findsOneWidget);
+      expect(
+        find.text('Note must not exceed 2,000 characters.'),
+        findsNothing,
+        reason: 'unexpectedToken must map to schedulingNoteErrorInvalid',
+      );
+      expect(
+        find.text('Note contains unsupported control characters.'),
+        findsOneWidget,
+      );
+
+      // 4. TdfException(limitExceeded) with < 500 history entries still reports schedulingNoteErrorTooLong:
+      throwingNotifier.errorToThrow = const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'note exceeds maximum of 2000 characters.',
+      );
+      await _tapKey(tester, 'task_editor_save_button');
+      expect(find.byKey(const ValueKey('edit_task_screen')), findsOneWidget);
+      expect(
+        find.text('Note must not exceed 2,000 characters.'),
+        findsOneWidget,
+      );
+    },
+  );
+}
+
+class _ThrowingTaskNotifier extends FakeTaskNotifier {
+  _ThrowingTaskNotifier(super.initialBoard);
+
+  Object? errorToThrow;
+
+  @override
+  Future<void> pushToRemote(
+    TaskBoard board, {
+    TaskBoard? fallbackBoard,
+    Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    int? mutationEpoch,
+  }) async {
+    if (errorToThrow case final error?) {
+      if (fallbackBoard case final previous?) {
+        state = AsyncData(previous);
+      }
+      throw error;
+    }
+    await super.pushToRemote(
+      board,
+      fallbackBoard: fallbackBoard,
+      taskConflictResolutions: taskConflictResolutions,
+      mutationEpoch: mutationEpoch,
+    );
+  }
 }
 
 class _CompleterWebDavConfigNotifier extends WebDavConfigNotifier {

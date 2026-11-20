@@ -21,6 +21,7 @@ import 'dart:ui';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/app_build_profile.dart';
 import '../models/webdav_config.dart';
 import '../services/app_logger.dart';
 import '../services/sha256_service.dart';
@@ -48,14 +49,18 @@ class LocalFileException implements Exception {
 
 /// Repository-layer [AppLogSink] implementation backed by [LocalFileRepository] static log helpers.
 class LocalFileLogSink implements AppLogSink {
-  /// Creates a const [LocalFileLogSink].
-  const LocalFileLogSink();
+  /// Creates a const [LocalFileLogSink] with an optional [buildProfile].
+  const LocalFileLogSink({this.buildProfile});
+
+  /// Optional build storage profile overriding [AppBuildProfile.current].
+  final AppBuildProfile? buildProfile;
 
   @override
   String defaultLogFilePath({String? baseDirectoryPath, String? fileName}) =>
       LocalFileRepository.defaultLogFilePath(
         baseDirectoryPath: baseDirectoryPath,
         fileName: fileName,
+        buildProfile: buildProfile,
       );
 
   @override
@@ -105,6 +110,7 @@ class LocalFileRepository {
   LocalFileRepository({
     required this.config,
     this.baseDirectoryPath,
+    this.buildProfile,
     this.hostLockDirectoryOverride,
     this.inMemoryStore,
     this.lockAcquireTimeout = HostFileLockManager.defaultLockAcquireTimeout,
@@ -127,6 +133,9 @@ class LocalFileRepository {
 
   /// Optional base directory path where relative local file names are stored.
   final String? baseDirectoryPath;
+
+  /// Optional build storage profile overriding [AppBuildProfile.current].
+  final AppBuildProfile? buildProfile;
 
   /// Active configuration containing the local file name or path and locale setting.
   final WebDavConfig config;
@@ -183,9 +192,11 @@ class LocalFileRepository {
   static String defaultLogFilePath({
     String? baseDirectoryPath,
     String? fileName,
+    AppBuildProfile? buildProfile,
   }) => _operations.defaultLogFilePath(
     baseDirectoryPath: baseDirectoryPath,
     fileName: fileName,
+    buildProfile: buildProfile,
   );
 
   /// Synchronously deletes the diagnostic log file at [path] if it exists.
@@ -435,8 +446,15 @@ class LocalFileRepository {
   }
 
   /// Resolves the platform-appropriate user data directory for relative local file names.
-  static String resolveDefaultDirectoryPath() =>
-      _operations.resolveDefaultDirectoryPath();
+  static String resolveDefaultDirectoryPath({
+    AppBuildProfile? buildProfile,
+    Map<String, String>? environment,
+    bool? isWindows,
+  }) => _operations.resolveDefaultDirectoryPath(
+    buildProfile: buildProfile,
+    environment: environment,
+    isWindows: isWindows,
+  );
 
   /// Resolves the parent directory path of [resolveFilePath].
   String resolveDirectoryPath() =>
@@ -447,6 +465,7 @@ class LocalFileRepository {
     config.localFilePath,
     baseDirectoryPath,
     _messages,
+    buildProfile: buildProfile,
   );
 
   /// Resolves the full dated diagnostic log file path for [workspaceId] and [utcNow].
@@ -455,6 +474,7 @@ class LocalFileRepository {
     required DateTime utcNow,
     required String platform,
     required String workspaceId,
+    AppBuildProfile? buildProfile,
   }) {
     final fileName = AppLogger.formatLogFileName(
       utcNow: utcNow,
@@ -464,6 +484,7 @@ class LocalFileRepository {
     return defaultLogFilePath(
       baseDirectoryPath: baseDirectoryPath,
       fileName: fileName,
+      buildProfile: buildProfile,
     );
   }
 

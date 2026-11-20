@@ -19,6 +19,7 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/webdav_config.dart';
 import '../../providers/config_providers.dart';
+import '../../providers/workspace_providers.dart';
 import '../../repositories/local_file_repository.dart';
 import 'local_tdf_file_dialogs.dart';
 import 'settings_preference_cards.dart';
@@ -183,9 +184,11 @@ class LocalStorageSection extends StatelessWidget {
     bool renameOnly = false,
   }) async {
     final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
+    final buildProfile = ref.read(appBuildProfileProvider);
     final repository = LocalFileRepository(
       config: config,
       baseDirectoryPath: baseDirectoryPath,
+      buildProfile: buildProfile,
     );
     final currentDirectory = repository.tryResolveDirectoryPath();
     final currentName = repository.extractFileName();

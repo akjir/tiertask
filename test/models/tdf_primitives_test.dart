@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
+import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
@@ -1357,6 +1358,51 @@ void main() {
         isNull,
         reason: 'newSuspended (2026-12-14 23:00 UTC) <= now (2026-12-15 09:00 UTC) must omit suspended immediately',
       );
+    });
+
+    test('encodes Base62 entity ID time segment using floor(nowUtcMilliseconds / 1000) across pre-epoch sub-second timestamps (TDF-ID-001)', () {
+      final vectors = <({int epochMs, String expectedTime})>[
+        (epochMs: -1001, expectedTime: 'zzzy'),
+        (epochMs: -1000, expectedTime: 'zzzz'),
+        (epochMs: -999, expectedTime: 'zzzz'),
+        (epochMs: -500, expectedTime: 'zzzz'),
+        (epochMs: -1, expectedTime: 'zzzz'),
+        (epochMs: 0, expectedTime: '0000'),
+        (epochMs: 500, expectedTime: '0000'),
+        (epochMs: 999, expectedTime: '0000'),
+        (epochMs: 1000, expectedTime: '0001'),
+      ];
+
+      for (final vector in vectors) {
+        final timestamp = DateTime.fromMillisecondsSinceEpoch(
+          vector.epochMs,
+          isUtc: true,
+        );
+        expect(
+          encodeTdfBase62Time(timestamp),
+          equals(vector.expectedTime),
+          reason:
+              'encodeTdfBase62Time(${vector.epochMs}ms) must floor to ${vector.expectedTime}',
+        );
+        expect(
+          generateTaskId(timestamp: timestamp).substring(6),
+          equals(vector.expectedTime),
+          reason:
+              'generateTaskId(${vector.epochMs}ms) suffix must equal ${vector.expectedTime}',
+        );
+        expect(
+          generateLabelId(timestamp: timestamp).substring(6),
+          equals(vector.expectedTime),
+          reason:
+              'generateLabelId(${vector.epochMs}ms) suffix must equal ${vector.expectedTime}',
+        );
+        expect(
+          generateLocationId(timestamp: timestamp).substring(6),
+          equals(vector.expectedTime),
+          reason:
+              'generateLocationId(${vector.epochMs}ms) suffix must equal ${vector.expectedTime}',
+        );
+      }
     });
   });
 }

@@ -141,16 +141,7 @@ class TdfScanner {
       if (cursor >= lineEnd || source.codeUnitAt(cursor) == 0x23) {
         break;
       }
-      if (tokens.length >= maxTdfArgsPerStmt + 3) {
-        if (_containsBraceToken(tokens)) {
-          fail(
-            TdfErrorKind.unexpectedToken,
-            line,
-            'Non-comment tokens after brace.',
-          );
-        }
-        fail(TdfErrorKind.limitExceeded, line, 'Too many statement arguments.');
-      }
+      _ensureTokenCapacityBeforeScan(source, cursor, line, tokens);
       cursor = _scanNextToken(source, cursor, lineEnd, line, tokens);
     }
     return tokens;
@@ -188,6 +179,30 @@ class TdfScanner {
       }
     }
     return false;
+  }
+
+  /// Enforces `MAX_ARGS_PER_STMT = 64` before scanning the next token at [cursor] (`TDF-VAL-001`, `TDF-VAL-002`).
+  static void _ensureTokenCapacityBeforeScan(
+    String source,
+    int cursor,
+    int line,
+    List<TdfScannedToken> tokens,
+  ) {
+    if (tokens.length < maxTdfArgsPerStmt + 1) {
+      return;
+    }
+    if (_containsBraceToken(tokens)) {
+      fail(
+        TdfErrorKind.unexpectedToken,
+        line,
+        'Non-comment tokens after brace.',
+      );
+    }
+    if (tokens.length == maxTdfArgsPerStmt + 1 &&
+        source.codeUnitAt(cursor) == 0x7B) {
+      return;
+    }
+    fail(TdfErrorKind.limitExceeded, line, 'Too many statement arguments.');
   }
 
   /// Checks whether [codeUnit] is an ASCII alphanumeric, underscore, or hyphen (`[a-zA-Z0-9_-]`).

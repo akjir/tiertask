@@ -868,6 +868,7 @@ abstract final class TdfDirectiveParser {
         'Invalid <label-id> "${idToken.value}" in deleted block.',
       );
     }
+    final deletedAt = parseUtcTimestamp(args.sublist(1), line);
     if (!fields.deletedLabelIds.add(idToken.value)) {
       fail(
         TdfErrorKind.duplicateIdentifier,
@@ -875,7 +876,6 @@ abstract final class TdfDirectiveParser {
         'Duplicate deleted label ID "${idToken.value}".',
       );
     }
-    final deletedAt = parseUtcTimestamp(args.sublist(1), line);
     fields.labelEntries.add((
       record: TdfDeletedLabelRecord(
         labelId: idToken.value,
@@ -914,6 +914,7 @@ abstract final class TdfDirectiveParser {
         'Invalid <location-id> "${idToken.value}" in deleted block.',
       );
     }
+    final deletedAt = parseUtcTimestamp(args.sublist(1), line);
     if (!fields.deletedLocationIds.add(idToken.value)) {
       fail(
         TdfErrorKind.duplicateIdentifier,
@@ -921,7 +922,6 @@ abstract final class TdfDirectiveParser {
         'Duplicate deleted location ID "${idToken.value}".',
       );
     }
-    final deletedAt = parseUtcTimestamp(args.sublist(1), line);
     fields.locationEntries.add((
       record: TdfDeletedLocationRecord(
         locationId: idToken.value,
@@ -953,13 +953,6 @@ abstract final class TdfDirectiveParser {
         'Invalid <task-id> "${idToken.value}" in deleted block.',
       );
     }
-    if (!fields.deletedTaskIds.add(idToken.value)) {
-      fail(
-        TdfErrorKind.duplicateIdentifier,
-        line,
-        'Duplicate deleted task ID "${idToken.value}".',
-      );
-    }
     final timestampArgCount = (args.length >= 3 && args[2].value.contains(':'))
         ? 2
         : 1;
@@ -981,6 +974,13 @@ abstract final class TdfDirectiveParser {
             'completion checkpoint',
           )
         : 0;
+    if (!fields.deletedTaskIds.add(idToken.value)) {
+      fail(
+        TdfErrorKind.duplicateIdentifier,
+        line,
+        'Duplicate deleted task ID "${idToken.value}".',
+      );
+    }
     fields.taskEntries.add((
       record: TdfDeletedTaskRecord(
         taskId: idToken.value,

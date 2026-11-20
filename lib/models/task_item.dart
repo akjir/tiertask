@@ -244,9 +244,7 @@ class TaskRepeatRule {
         message: 'Time zone context is required for Mode 2 recurrence.',
       );
     }
-    final anchor =
-        oldAnchor ??
-        TdfLocalDateTime.fromWallClock(timeZone.toLocalWallClock(oldDue));
+    final anchor = _resolveMode2Anchor(oldAnchor, oldDue, timeZone);
     final referenceUtc = oldDue.isAfter(nowUtc) ? oldDue : nowUtc;
     final nextDue = unit == RepeatUnit.months
         ? _advanceMonthlyMode2Due(
@@ -296,7 +294,16 @@ class TaskRepeatRule {
     required DateTime completedAtUtc,
     required TdfTimeZoneContext timeZone,
   }) {
+    if (!timeZone.isAvailable) {
+      throw const TdfContextException(
+        kind: TdfContextOutcomeKind.timeZoneContextRequired,
+        message: 'Time zone context is required for Mode 1 recurrence.',
+      );
+    }
     final normalizedCompletionUtc = TaskItem.normalizeTimestamp(completedAtUtc);
+    if (!TdfCalendar.isWithinTimestampBounds(normalizedCompletionUtc)) {
+      _throwInvalidRecurrenceTimestamp();
+    }
     final localNow = timeZone.toLocalWallClock(normalizedCompletionUtc);
     final targetLocal = switch (unit) {
       RepeatUnit.days => _addDays(
@@ -321,7 +328,8 @@ class TaskRepeatRule {
         clock.second,
       ),
     };
-    final resolvedUtc = timeZone.resolveLocalToUtc(
+    final resolvedUtc = _resolveLocalOrThrowTdf(
+      timeZone,
       targetLocal.year,
       targetLocal.month,
       targetLocal.day,
@@ -330,7 +338,7 @@ class TaskRepeatRule {
       targetLocal.second,
     );
     if (!resolvedUtc.isAfter(normalizedCompletionUtc)) {
-      throw const FormatException('InvalidTimestamp');
+      _throwInvalidRecurrenceTimestamp();
     }
     return resolvedUtc;
   }
@@ -575,8 +583,36 @@ class TaskRepeatRule {
   ) {
     try {
       return timeZone.resolveLocalToUtc(year, month, day, hour, minute, second);
-    } on FormatException {
-      _throwInvalidRecurrenceTimestamp();
+    } on FormatException catch (_, stackTrace) {
+      Error.throwWithStackTrace(
+        const TdfException(
+          kind: TdfErrorKind.invalidTimestamp,
+          line: 1,
+          message: 'Resolved recurring timestamp exceeds 0001..9999 UTC range.',
+        ),
+        stackTrace,
+      );
+    }
+  }
+
+  /// Resolves the Mode 2 local wall-clock anchor from [oldAnchor] or [oldDue] via [timeZone], mapping out-of-bounds [FormatException] to [TdfException].
+  static TdfLocalDateTime _resolveMode2Anchor(
+    TdfLocalDateTime? oldAnchor,
+    DateTime oldDue,
+    TdfTimeZoneContext timeZone,
+  ) {
+    if (oldAnchor != null) return oldAnchor;
+    try {
+      return TdfLocalDateTime.fromWallClock(timeZone.toLocalWallClock(oldDue));
+    } on FormatException catch (_, stackTrace) {
+      Error.throwWithStackTrace(
+        const TdfException(
+          kind: TdfErrorKind.invalidTimestamp,
+          line: 1,
+          message: 'Mode 2 recurrence local anchor exceeds 0001..9999 range.',
+        ),
+        stackTrace,
+      );
     }
   }
 
@@ -906,11 +942,15 @@ class TaskItem {
 
   /// Computes a strictly advancing UTC modification timestamp (`max(normalize(now), normalize(previous) + 1s)`).
   ///
-  /// Throws [FormatException] (`InvalidTimestamp`) if the resulting timestamp exceeds `9999-12-31 23:59:59` UTC.
+  /// Throws [TdfException] (`invalidTimestamp`) if the resulting timestamp is outside `0001..9999` UTC.
   static DateTime nextModifiedTimestamp(DateTime now, DateTime? previous) {
     final normalizedNow = normalizeTimestamp(now);
     if (!TdfCalendar.isWithinTimestampBounds(normalizedNow)) {
-      throw const FormatException('InvalidTimestamp');
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Modified timestamp is outside 0001..9999 UTC.',
+      );
     }
     if (previous == null) {
       return normalizedNow;
@@ -921,7 +961,11 @@ class TaskItem {
     }
     final advanced = normalizedPrevious.add(const Duration(seconds: 1));
     if (!TdfCalendar.isWithinTimestampBounds(advanced)) {
-      throw const FormatException('InvalidTimestamp');
+      throw const TdfException(
+        kind: TdfErrorKind.invalidTimestamp,
+        line: 1,
+        message: 'Modified timestamp exceeds 9999-12-31 23:59:59 UTC.',
+      );
     }
     return advanced;
   }

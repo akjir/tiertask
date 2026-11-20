@@ -66,10 +66,12 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
     final locale = ref.watch(appLocaleProvider);
     final appThemeMode = ref.watch(appThemeModeProvider);
     final appThemeSet = ref.watch(appThemeProvider);
+    final buildProfile = ref.watch(appBuildProfileProvider);
 
     return MaterialApp(
-      title: 'TierTask',
-      onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
+      title: buildProfile.formatWindowTitle('TierTask'),
+      onGenerateTitle: (context) =>
+          buildProfile.formatWindowTitle(AppLocalizations.of(context).appTitle),
       debugShowCheckedModeBanner: false,
       locale: locale,
       localizationsDelegates: const [
@@ -80,6 +82,7 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
       themeMode: _toFlutterThemeMode(appThemeMode),
       theme: appThemeSet.light.toThemeData(),
       darkTheme: appThemeSet.dark.toThemeData(),
+      builder: buildProfile.isDev ? _wrapWithDevBanner : null,
       home: const HomeScreen(),
     );
   }
@@ -109,6 +112,25 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
       AppThemeMode.light => ThemeMode.light,
       AppThemeMode.dark => ThemeMode.dark,
     };
+  }
+
+  /// Wraps [child] with a non-blocking corner `DEV` banner for development builds.
+  Widget _wrapWithDevBanner(BuildContext context, Widget? child) {
+    final content = child ?? const SizedBox.shrink();
+    final colorScheme = Theme.of(context).colorScheme;
+    return Banner(
+      key: const ValueKey<String>('dev_build_banner'),
+      message: 'DEV',
+      location: BannerLocation.topEnd,
+      color: colorScheme.tertiary,
+      textStyle: TextStyle(
+        color: colorScheme.onTertiary,
+        fontSize: 10,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.0,
+      ),
+      child: content,
+    );
   }
 }
 

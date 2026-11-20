@@ -402,7 +402,7 @@ class TaskBoardUndo {
       clearDueAt: snapshotTask.dueAt == null,
       dueAnchor: snapshotTask.dueAnchor,
       clearDueAnchor: snapshotTask.dueAnchor == null,
-      isDuePassive: wasCompleted ? false : snapshotTask.isDuePassive,
+      isDuePassive: snapshotTask.isDuePassive,
       dueNote: snapshotTask.dueNote,
       clearDueNote: snapshotTask.dueNote == null,
       dependencies: wasCompleted
@@ -859,18 +859,18 @@ class TaskBoardUndo {
       }
       return false;
     }
-    final oldAnchor =
-        entry.snapshotTask.dueAnchor ??
-        TdfLocalDateTime.fromWallClock(zone.toLocalWallClock(snapshotDue));
-    if (currentAnchor.hour != oldAnchor.hour ||
-        currentAnchor.minute != oldAnchor.minute ||
-        currentAnchor.second != oldAnchor.second) {
-      return true;
-    }
-    if (currentAnchor == oldAnchor) {
-      return false;
-    }
     try {
+      final oldAnchor =
+          entry.snapshotTask.dueAnchor ??
+          TdfLocalDateTime.fromWallClock(zone.toLocalWallClock(snapshotDue));
+      if (currentAnchor.hour != oldAnchor.hour ||
+          currentAnchor.minute != oldAnchor.minute ||
+          currentAnchor.second != oldAnchor.second) {
+        return true;
+      }
+      if (currentAnchor == oldAnchor) {
+        return false;
+      }
       final resolvedUtc = zone.resolveLocalToUtc(
         currentAnchor.year,
         currentAnchor.month,
@@ -1248,49 +1248,45 @@ class TaskBoardUndo {
       labelsWithLocationRules.contains,
     );
     final sanitized = <TaskCondition>[];
+    final survivingLocationIds = <String>[];
+    var sawIdLocationRule = false;
+    var hasLegacyLocationRule = false;
     for (final rule in conditions) {
-      _sanitizeSingleConditionRule(
-        rule,
-        hasInheritedLocationRule,
-        validLocationIds,
-        sanitized,
+      if (rule is! LocationTaskCondition) {
+        sanitized.add(rule);
+        continue;
+      }
+      if (rule.locationIds.isEmpty) {
+        hasLegacyLocationRule = true;
+        sanitized.add(rule);
+        continue;
+      }
+      sawIdLocationRule = true;
+      survivingLocationIds.addAll(
+        rule.locationIds.where(validLocationIds.contains),
       );
     }
+    if (!sawIdLocationRule) {
+      return listEquals(sanitized, conditions) ? conditions : sanitized;
+    }
+    if (survivingLocationIds.isNotEmpty) {
+      sanitized.add(LocationTaskCondition.fromIds(survivingLocationIds));
+    } else if (!hasLegacyLocationRule && hasInheritedLocationRule) {
+      const locationReset = GroupResetTaskCondition(
+        targetGroup: ConditionGroup.location,
+      );
+      if (!sanitized.contains(locationReset)) {
+        sanitized.add(locationReset);
+      }
+    }
     return listEquals(sanitized, conditions) ? conditions : sanitized;
-  }
-
-  /// Filters a single [rule] against [validLocationIds] and appends surviving or reset rules to [output].
-  static void _sanitizeSingleConditionRule(
-    TaskCondition rule,
-    bool hasInheritedLocationRule,
-    Set<String> validLocationIds,
-    List<TaskCondition> output,
-  ) {
-    if (rule is! LocationTaskCondition || rule.locationIds.isEmpty) {
-      output.add(rule);
-      return;
-    }
-    final retainedIds = <String>[
-      for (final id in rule.locationIds)
-        if (validLocationIds.contains(id)) id,
-    ];
-    if (retainedIds.isNotEmpty) {
-      output.add(LocationTaskCondition.fromIds(retainedIds));
-      return;
-    }
-    const locationReset = GroupResetTaskCondition(
-      targetGroup: ConditionGroup.location,
-    );
-    if (hasInheritedLocationRule && !output.contains(locationReset)) {
-      output.add(locationReset);
-    }
   }
 
   /// Computes `TaskItem.nextModifiedTimestamp(now, previous)` without throwing when `9999-12-31 23:59:59` is exceeded.
   static DateTime? _tryNextTimestamp(DateTime now, DateTime? previous) {
     try {
       return TaskItem.nextModifiedTimestamp(now, previous);
-    } on FormatException {
+    } on TdfException {
       return null;
     }
   }

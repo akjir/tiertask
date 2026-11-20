@@ -666,7 +666,7 @@ class TaskEditorSuspendedField extends StatelessWidget {
     return TaskItem.formatTdfTimestamp(configuration.toLocalWallClock(instant));
   }
 
-  /// Opens a Material 3 date picker and returns the updated `YYYY-MM-DD` (or `YYYY-MM-DD HH:MM`) text.
+  /// Opens a Material 3 date picker and returns the updated `YYYY-MM-DD` (or `YYYY-MM-DD HH:MM[:SS]`) text.
   static Future<String?> pickSuspendedDate({
     required BuildContext context,
     required String currentText,
@@ -823,29 +823,29 @@ class TaskEditorSuspendedField extends StatelessWidget {
     return TaskItem.tryParseIsoDate(candidate) != null ? candidate : null;
   }
 
-  /// Parses [rawTime] (`HH:MM`) into a [TimeOfDay], or returns [fallback] if invalid.
+  /// Parses [rawTime] (`HH:MM` or `HH:MM:SS`) into a [TimeOfDay], or returns [fallback] if invalid.
   static TimeOfDay _extractTimeOfDay(String rawTime, TimeOfDay fallback) {
-    final minutes = TaskItem.tryParseTimeMinutes(rawTime.trim());
-    if (minutes == null) {
+    final parsed = TaskItem.tryParseTdfTimestamp('2000-01-01', rawTime.trim());
+    if (parsed == null) {
       return fallback;
     }
-    return TimeOfDay(hour: minutes ~/ 60, minute: minutes % 60);
+    return TimeOfDay(hour: parsed.hour, minute: parsed.minute);
   }
 
-  /// Extracts a valid `HH:MM` suffix from a `YYYY-MM-DD HH:MM` timestamp string, or `null`.
+  /// Extracts a valid `HH:MM` or `HH:MM:SS` suffix from [rawInput], or `null`.
   static String? _extractTimeSuffix(String rawInput) {
     final trimmed = rawInput.trim();
     if (trimmed.length <= 10) {
       return null;
     }
-    final remainder = trimmed.substring(10).trim();
-    if (remainder.length >= 5) {
-      final hhMm = remainder.substring(0, 5);
-      if (TaskItem.tryParseTimeMinutes(hhMm) != null) {
-        return hhMm;
-      }
+    final separator = trimmed.codeUnitAt(10);
+    if (separator != 0x20 && separator != 0x09) {
+      return null;
     }
-    return null;
+    final remainder = trimmed.substring(10).trim();
+    return TaskItem.tryParseTdfTimestamp('2000-01-01', remainder) != null
+        ? remainder
+        : null;
   }
 
   /// Formats [time] as a zero-padded 24-hour `HH:MM` string.
@@ -855,17 +855,22 @@ class TaskEditorSuspendedField extends StatelessWidget {
     return '$hour:$minute';
   }
 
-  /// Resolves the initial [DateTime] for the suspended date picker from [rawInput] or [fallback].
+  /// Resolves the initial [DateTime] within `2000-01-01..2100-12-31` for the suspended date picker from [rawInput] or [fallback].
   static DateTime _resolveInitialSuspendedDate(
     String rawInput,
     DateTime fallback,
   ) {
-    final datePart = _extractDatePart(rawInput);
-    if (datePart != null) {
+    if (_extractDatePart(rawInput) case final datePart?) {
       final parsed = TaskItem.tryParseIsoDate(datePart);
       if (parsed != null && parsed.year >= 2000 && parsed.year <= 2100) {
         return parsed;
       }
+    }
+    if (fallback.year < 2000) {
+      return DateTime.utc(2000);
+    }
+    if (fallback.year > 2100) {
+      return DateTime.utc(2100, 12, 31);
     }
     return DateTime.utc(fallback.year, fallback.month, fallback.day);
   }

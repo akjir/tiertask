@@ -157,6 +157,82 @@ class TaskBoardReconciler {
     }
   }
 
+  /// Computes label IDs resolved for explicit `Delete` or recovery `discard` so they do not trigger newly-introduced location reference conflicts (`TDF-DEL-002`).
+  static Set<String> computeExplicitlyDeletedLabelIds(
+    (TaskBoard, TaskBoard, TaskBoard?) boards,
+    Map<String, TdfDeletedLabelRecord> initialDeletedLabels,
+    (int?, bool, DateTime) options, {
+    Map<String, TdfDeletionResolution> resolutions = const {},
+    Map<String, TdfBoundDeletionDecision> boundDecisions = const {},
+    Map<String, TdfRecoveryResolution> recoveryResolutions = const {},
+    Set<String> freshlyRecoveredIds = const <String>{},
+  }) {
+    final (primary, secondary, baseline) = boards;
+    final primaryMap = _indexById(primary.labels, (label) => label.id);
+    final secondaryMap = _indexById(secondary.labels, (label) => label.id);
+    final baselineMap = baseline != null
+        ? _indexById(baseline.labels, (label) => label.id)
+        : null;
+    final context = _reconcileContext(boards, options);
+    final allIds = <String>{...primaryMap.keys, ...secondaryMap.keys};
+    final result = <String>{};
+    for (final id in allIds) {
+      if (_isLabelExplicitlyDeletedOrDiscarded(
+        id: id,
+        primaryLabel: primaryMap[id],
+        secondaryLabel: secondaryMap[id],
+        baselineLabel: baselineMap?[id],
+        initialDeleted: initialDeletedLabels,
+        context: context,
+        resolutions: resolutions,
+        boundDecisions: boundDecisions,
+        recoveryResolutions: recoveryResolutions,
+        freshlyRecoveredIds: freshlyRecoveredIds,
+      )) {
+        result.add(id);
+      }
+    }
+    return result;
+  }
+
+  /// Computes task IDs resolved for explicit `Delete` or recovery `discard` so they do not trigger newly-introduced label or location reference conflicts (`TDF-DEL-002`).
+  static Set<String> computeExplicitlyDeletedTaskIds(
+    (TaskBoard, TaskBoard, TaskBoard?) boards,
+    Map<String, TdfDeletedTaskRecord> initialDeletedTasks,
+    (int?, bool, DateTime) options, {
+    Map<String, TdfDeletionResolution> resolutions = const {},
+    Map<String, TdfBoundDeletionDecision> boundDecisions = const {},
+    Map<String, TdfRecoveryResolution> recoveryResolutions = const {},
+    Set<String> freshlyRecoveredIds = const <String>{},
+  }) {
+    final (primary, secondary, baseline) = boards;
+    final primaryMap = _indexById(primary.allTasks, (task) => task.id);
+    final secondaryMap = _indexById(secondary.allTasks, (task) => task.id);
+    final baselineMap = baseline != null
+        ? _indexById(baseline.allTasks, (task) => task.id)
+        : null;
+    final context = _reconcileContext(boards, options);
+    final allIds = <String>{...primaryMap.keys, ...secondaryMap.keys};
+    final result = <String>{};
+    for (final id in allIds) {
+      if (_isTaskExplicitlyDeletedOrDiscarded(
+        id: id,
+        primaryTask: primaryMap[id],
+        secondaryTask: secondaryMap[id],
+        baselineTask: baselineMap?[id],
+        initialDeleted: initialDeletedTasks,
+        context: context,
+        resolutions: resolutions,
+        boundDecisions: boundDecisions,
+        recoveryResolutions: recoveryResolutions,
+        freshlyRecoveredIds: freshlyRecoveredIds,
+      )) {
+        result.add(id);
+      }
+    }
+    return result;
+  }
+
   /// Computes newly introduced label references $A_L(T) \cup A_R(T)$ across live and conflict-retained tasks (`TDF-DEL-002`).
   static Set<String> computeNewlyReferencedLabelIds(
     (TaskBoard, TaskBoard, TaskBoard?) boards,
@@ -684,7 +760,11 @@ class TaskBoardReconciler {
   }) {
     final liveById = <String, TaskItem>{};
     final twoSidedHeadersById = <String, TaskItem>{};
-    final deletedIds = <String>{...initialDeleted.keys};
+    final deletedIds = <String>{
+      for (final id in initialDeleted.keys)
+        if (!allTaskIds.contains(id)) id,
+    };
+    var pendingCandidates = <_PreviewDeleteCandidate>[];
 
     for (final id in allTaskIds) {
       _processSinglePreviewTask(
@@ -701,7 +781,21 @@ class TaskBoardReconciler {
         liveById: liveById,
         twoSidedHeadersById: twoSidedHeadersById,
         deletedIds: deletedIds,
+        pendingCandidates: pendingCandidates,
       );
+    }
+
+    while (pendingCandidates.isNotEmpty) {
+      final pass = _promoteUnchangedPreviewCandidates(
+        pendingCandidates,
+        liveById: liveById,
+        deletedIds: deletedIds,
+        nowUtc: context.now,
+      );
+      if (!pass.promotedAny) {
+        break;
+      }
+      pendingCandidates = pass.remaining;
     }
 
     return (
@@ -963,6 +1057,49 @@ class TaskBoardReconciler {
     String Function(T item) idOf,
   ) => <String, T>{for (final item in items) idOf(item): item};
 
+  /// Returns whether one-sided label [id] is resolved to explicit `Delete` or recovery `discard`.
+  static bool _isLabelExplicitlyDeletedOrDiscarded({
+    required String id,
+    required TdfLabel? primaryLabel,
+    required TdfLabel? secondaryLabel,
+    required TdfLabel? baselineLabel,
+    required Map<String, TdfDeletedLabelRecord> initialDeleted,
+    required _ReconcileContext context,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required Map<String, TdfBoundDeletionDecision> boundDecisions,
+    required Map<String, TdfRecoveryResolution> recoveryResolutions,
+    required Set<String> freshlyRecoveredIds,
+  }) {
+    if (primaryLabel != null && secondaryLabel != null) {
+      return false;
+    }
+    final surviving = primaryLabel ?? secondaryLabel;
+    if (surviving == null || freshlyRecoveredIds.contains(id)) {
+      return false;
+    }
+    final isStale = primaryLabel != null
+        ? context.primaryRefresh
+        : context.secondaryRefresh;
+    var record = initialDeleted[id];
+    if (record == null && baselineLabel != null && !isStale) {
+      final synthAt = TaskItem.nextModifiedTimestamp(
+        context.now,
+        baselineLabel.effectiveModifiedAt,
+      );
+      record = TdfDeletedLabelRecord(labelId: id, deletedAt: synthAt);
+    }
+    if (record != null) {
+      return _resolveEffectiveLabelDecision(
+            surviving,
+            record,
+            resolutions,
+            boundDecisions,
+          ) ==
+          TdfDeletionResolution.delete;
+    }
+    return isStale && recoveryResolutions[id] == TdfRecoveryResolution.discard;
+  }
+
   /// Returns whether [label] is identical to [baseLabel] in payload and effective revision.
   static bool _isLabelUnchangedFromBaseline(
     TdfLabel label,
@@ -978,6 +1115,53 @@ class TaskBoardReconciler {
   ) =>
       location.effectiveModifiedAt == baseLocation.effectiveModifiedAt &&
       TdfPayloadComparison.compareLocationPayloads(location, baseLocation) == 0;
+
+  /// Returns whether one-sided task [id] is resolved to explicit `Delete` or recovery `discard`.
+  static bool _isTaskExplicitlyDeletedOrDiscarded({
+    required String id,
+    required TaskItem? primaryTask,
+    required TaskItem? secondaryTask,
+    required TaskItem? baselineTask,
+    required Map<String, TdfDeletedTaskRecord> initialDeleted,
+    required _ReconcileContext context,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required Map<String, TdfBoundDeletionDecision> boundDecisions,
+    required Map<String, TdfRecoveryResolution> recoveryResolutions,
+    required Set<String> freshlyRecoveredIds,
+  }) {
+    if (primaryTask != null && secondaryTask != null) {
+      return false;
+    }
+    final surviving = primaryTask ?? secondaryTask;
+    if (surviving == null || freshlyRecoveredIds.contains(id)) {
+      return false;
+    }
+    final isStale = primaryTask != null
+        ? context.primaryRefresh
+        : context.secondaryRefresh;
+    var record = initialDeleted[id];
+    if (record == null && baselineTask != null && !isStale) {
+      final synthAt = TaskItem.nextModifiedTimestamp(
+        context.now,
+        baselineTask.effectiveModifiedAt,
+      );
+      record = TdfDeletedTaskRecord(
+        taskId: id,
+        deletedAt: synthAt,
+        completionsCheckpoint: baselineTask.completions,
+      );
+    }
+    if (record != null) {
+      return _resolveEffectiveTaskDecision(
+            surviving,
+            record,
+            resolutions,
+            boundDecisions,
+          ) ==
+          TdfDeletionResolution.delete;
+    }
+    return isStale && recoveryResolutions[id] == TdfRecoveryResolution.discard;
+  }
 
   /// Returns whether [task] is unchanged relative to [baseTask] (ignoring `TDF-CLEAN-001` automatic block-cleanup-only changes).
   static bool _isTaskUnchangedFromBaseline(
@@ -1092,7 +1276,7 @@ class TaskBoardReconciler {
     return maxFirstSecond >= third ? maxFirstSecond : third;
   }
 
-  /// Classifies a single task [id] into [liveById], [twoSidedHeadersById], or [deletedIds] for prerequisite previewing.
+  /// Classifies a single task [id] into [liveById], [twoSidedHeadersById], [deletedIds], or [pendingCandidates] for prerequisite previewing.
   static void _processSinglePreviewTask({
     required String id,
     required TaskItem? primaryTask,
@@ -1107,6 +1291,7 @@ class TaskBoardReconciler {
     required Map<String, TaskItem> liveById,
     required Map<String, TaskItem> twoSidedHeadersById,
     required Set<String> deletedIds,
+    required List<_PreviewDeleteCandidate> pendingCandidates,
   }) {
     if (primaryTask != null && secondaryTask != null) {
       final header = TdfPayloadComparison.previewMergedTaskPrerequisiteHeader(
@@ -1149,7 +1334,6 @@ class TaskBoardReconciler {
         boundDecisions,
       );
       if (decision == TdfDeletionResolution.undelete) {
-        deletedIds.remove(id);
         final maxComp = _max3Int(
           surviving.completions,
           baselineTask?.completions ?? 0,
@@ -1158,18 +1342,68 @@ class TaskBoardReconciler {
         liveById[id] = surviving.copyWith(completions: maxComp);
         return;
       }
-      deletedIds.add(id);
+      if (decision == TdfDeletionResolution.delete) {
+        deletedIds.add(id);
+        return;
+      }
+      liveById[id] = surviving;
+      if (baselineTask != null) {
+        pendingCandidates.add((
+          id: id,
+          surviving: surviving,
+          baselineTask: baselineTask,
+        ));
+      }
       return;
     }
     if (baselineTask != null) {
-      deletedIds.add(id);
+      if (recoveryResolutions[id] == TdfRecoveryResolution.discard) {
+        deletedIds.add(id);
+        return;
+      }
+      liveById[id] = surviving;
+      pendingCandidates.add((
+        id: id,
+        surviving: surviving,
+        baselineTask: baselineTask,
+      ));
       return;
     }
     if (!isStale) {
       liveById[id] = surviving;
     } else if (recoveryResolutions[id] == TdfRecoveryResolution.discard) {
       deletedIds.add(id);
+    } else {
+      liveById[id] = surviving;
     }
+  }
+
+  /// Promotes unchanged one-sided deletion candidates into [deletedIds] and removes them from [liveById] (`TDF-DEL-002`).
+  static ({List<_PreviewDeleteCandidate> remaining, bool promotedAny})
+  _promoteUnchangedPreviewCandidates(
+    List<_PreviewDeleteCandidate> candidates, {
+    required Map<String, TaskItem> liveById,
+    required Set<String> deletedIds,
+    required DateTime nowUtc,
+  }) {
+    final remaining = <_PreviewDeleteCandidate>[];
+    var promotedAny = false;
+    for (final candidate in candidates) {
+      if (_isTaskUnchangedFromBaseline(
+        candidate.surviving,
+        candidate.baselineTask,
+        previewLiveTasksById: liveById,
+        previewDeletedTaskIds: deletedIds,
+        nowUtc: nowUtc,
+      )) {
+        liveById.remove(candidate.id);
+        deletedIds.add(candidate.id);
+        promotedAny = true;
+      } else {
+        remaining.add(candidate);
+      }
+    }
+    return (remaining: remaining, promotedAny: promotedAny);
   }
 
   /// Precomputes symmetric generation refresh flags and [now] for entity reconciliation.
@@ -2024,6 +2258,13 @@ typedef _LocationAccumulator = ({
   List<String> ambiguous,
   Set<String> discarded,
   Set<String> explicitlyDeleted,
+});
+
+/// One-sided deletion candidate pending baseline-cleanup unchanged verification during prerequisite preview.
+typedef _PreviewDeleteCandidate = ({
+  String id,
+  TaskItem surviving,
+  TaskItem baselineTask,
 });
 
 /// Precomputed symmetric generation refresh flags and evaluation instant.

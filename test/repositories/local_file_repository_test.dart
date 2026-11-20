@@ -18,6 +18,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/repositories/local_file_operations.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
@@ -1281,6 +1282,124 @@ void main() {
         nonExistentLockDir.existsSync(),
         isFalse,
         reason: 'Hermetic inMemoryStore lock must not create host lock directory or files on disk',
+      );
+    });
+  });
+
+  group('LocalFileRepository Build Profile Isolation', () {
+    test('separates release (tiertask) and dev (tiertask-dev) default directories across Linux, Windows, and temp fallback', () {
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.release,
+          environment: const <String, String>{
+            'XDG_DATA_HOME': '/home/alice/.local/custom-share',
+          },
+          isWindows: false,
+        ),
+        equals('/home/alice/.local/custom-share/tiertask'),
+        reason: 'Release profile must preserve XDG_DATA_HOME/tiertask',
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.dev,
+          environment: const <String, String>{
+            'XDG_DATA_HOME': '/home/alice/.local/custom-share',
+          },
+          isWindows: false,
+        ),
+        equals('/home/alice/.local/custom-share/tiertask-dev'),
+        reason: 'Dev profile must isolate under XDG_DATA_HOME/tiertask-dev',
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.release,
+          environment: const <String, String>{'HOME': '/home/alice'},
+          isWindows: false,
+        ),
+        equals('/home/alice/.local/share/tiertask'),
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.dev,
+          environment: const <String, String>{'HOME': '/home/alice'},
+          isWindows: false,
+        ),
+        equals('/home/alice/.local/share/tiertask-dev'),
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.release,
+          environment: const <String, String>{
+            'APPDATA': r'C:\Users\Alice\AppData\Roaming',
+          },
+          isWindows: true,
+        ),
+        equals(r'C:\Users\Alice\AppData\Roaming\tiertask'),
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.dev,
+          environment: const <String, String>{
+            'APPDATA': r'C:\Users\Alice\AppData\Roaming',
+          },
+          isWindows: true,
+        ),
+        equals(r'C:\Users\Alice\AppData\Roaming\tiertask-dev'),
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.release,
+          environment: const <String, String>{},
+          isWindows: false,
+        ),
+        equals(Directory.systemTemp.path),
+        reason: 'Release fallback without HOME/XDG must remain unchanged',
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.dev,
+          environment: const <String, String>{},
+          isWindows: false,
+        ),
+        endsWith('/tiertask-dev'),
+        reason: 'Dev fallback without HOME/XDG must still isolate into tiertask-dev',
+      );
+    });
+
+    test('isolates relative .tdf and log paths by buildProfile', () {
+      final releaseRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        buildProfile: AppBuildProfile.release,
+      );
+      final devRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        buildProfile: AppBuildProfile.dev,
+      );
+      expect(
+        releaseRepo.resolveFilePath(),
+        isNot(equals(devRepo.resolveFilePath())),
+        reason: 'Release and dev relative .tdf paths must never collide',
+      );
+      expect(
+        devRepo.resolveDirectoryPath(),
+        endsWith('tiertask-dev'),
+        reason: 'Dev relative .tdf must resolve inside tiertask-dev',
+      );
+      final releaseLog = LocalFileRepository.defaultLogFilePath(
+        buildProfile: AppBuildProfile.release,
+      );
+      final devLog = LocalFileRepository.defaultLogFilePath(
+        buildProfile: AppBuildProfile.dev,
+      );
+      expect(
+        releaseLog,
+        isNot(equals(devLog)),
+        reason: 'Release and dev default log paths must never collide',
+      );
+      expect(
+        devLog,
+        contains('tiertask-dev'),
+        reason: 'Dev log file must resolve inside tiertask-dev',
       );
     });
   });
