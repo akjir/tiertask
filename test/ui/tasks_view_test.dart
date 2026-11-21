@@ -300,7 +300,7 @@ void main() {
           isTrue,
         );
         expect(find.text('Open as draft'), findsOneWidget);
-        expect(find.text('+ Add'), findsOneWidget);
+        expect(find.text('Add'), findsOneWidget);
       },
     );
   });
@@ -377,13 +377,18 @@ void main() {
         expect(pills[0].label, equals('Ops'));
         expect(pills[0].variant, equals(UiPillVariant.tag));
         expect(pills[1].label, startsWith('Overdue:'));
+        expect(pills[1].variant, equals(UiPillVariant.meta));
         expect(pills[1].tone, equals(UiPillTone.danger));
         expect(pills[2].label, equals('Priority'));
+        expect(pills[2].variant, equals(UiPillVariant.meta));
         expect(pills[2].tone, equals(UiPillTone.accent));
         expect(pills[3].label, equals('Suspended indefinitely'));
+        expect(pills[3].variant, equals(UiPillVariant.meta));
         expect(pills[4].label, equals('0/1 prerequisites'));
+        expect(pills[4].variant, equals(UiPillVariant.meta));
         // 9 total secondary badges -> 3 visible + "+6 more".
         expect(pills[5].label, equals('+6 more'));
+        expect(pills[5].variant, equals(UiPillVariant.meta));
 
         // Clicking the label chip navigates to Labels manager preserving returnContext.
         await tester.tap(
@@ -455,8 +460,10 @@ void main() {
 
         expect(pills.length, equals(2));
         expect(pills[0].label, equals('Focus'));
+        expect(pills[0].variant, equals(UiPillVariant.meta));
         expect(pills[0].tone, equals(UiPillTone.soft));
         expect(pills[1].label, startsWith('Due:'));
+        expect(pills[1].variant, equals(UiPillVariant.meta));
       },
     );
   });
@@ -1135,7 +1142,7 @@ void main() {
 
         // Duplicate title triggers danger notice and preserves typed input.
         await tester.enterText(composerField, 'Existing Task');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
         expect(
           tester.widget<TextField>(composerField).controller?.text,
@@ -1148,7 +1155,7 @@ void main() {
 
         // Unique title adds task, clears input, does NOT switch away from Completed tier or expand task.
         await tester.enterText(composerField, 'New Feature Spec');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         expect(
@@ -1180,6 +1187,407 @@ void main() {
         expect(
           find.byKey(const ValueKey<String>('quick_add_label_chip_lbl_dev')),
           findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'Quick-Add renders New task placeholder, 40px + Add button, footer Open as draft, and below-box placement hint across widths and locales',
+      (tester) async {
+        final board = _buildBoard();
+        const widths = <double>[721.0, 960.0, 1280.0];
+
+        for (final width in widths) {
+          final size = Size(width, 844.0);
+          _setViewport(tester, size);
+          await pumpLeafWidget(
+            tester,
+            const _TasksHarness(),
+            board: board,
+            nowUtc: _fixedNowUtc,
+            surfaceSize: size,
+          );
+
+          final composerFinder = find.byKey(
+            const ValueKey<String>('tasks_quick_add_composer'),
+          );
+          final textField = tester.widget<TextField>(
+            find.descendant(
+              of: composerFinder,
+              matching: find.byType(TextField),
+            ),
+          );
+          expect(
+            textField.decoration?.hintText,
+            equals('New task...'),
+            reason: 'Quick-Add placeholder must read New task... at $width',
+          );
+
+          final submitButtonFinder = find.descendant(
+            of: composerFinder,
+            matching: find.ancestor(
+              of: find.text('Add'),
+              matching: find.byType(UiButton),
+            ),
+          );
+          final submitButton = tester.widget<UiButton>(submitButtonFinder);
+          expect(submitButton.variant, equals(UiButtonVariant.primary));
+          expect(submitButton.density, equals(UiButtonDensity.standard));
+          expect(submitButton.leadingIcon, equals(Icons.add_rounded));
+          expect(
+            tester.getSize(submitButtonFinder).height,
+            greaterThanOrEqualTo(UiSpacingTokens.standard.touchTarget),
+            reason: 'Quick-Add submit button must be 40px tall at $width',
+          );
+
+          final labelsPill = tester.widget<UiPill>(
+            find.byKey(const ValueKey<String>('quick_add_labels_trigger')),
+          );
+          expect(labelsPill.variant, equals(UiPillVariant.addField));
+          expect(labelsPill.label, equals('+ Labels'));
+
+          final draftButtonFinder = find.descendant(
+            of: composerFinder,
+            matching: find.ancestor(
+              of: find.text('Open as draft'),
+              matching: find.byType(UiButton),
+            ),
+          );
+          final draftButton = tester.widget<UiButton>(draftButtonFinder);
+          expect(draftButton.variant, equals(UiButtonVariant.text));
+          expect(draftButton.leadingIcon, equals(Icons.tune_rounded));
+
+          final cardFinder = find.descendant(
+            of: composerFinder,
+            matching: find.byKey(
+              const ValueKey<String>('ui_quick_composer_card'),
+            ),
+          );
+          final hintFinder = find.text(
+            'Append at the end of the active queue.',
+          );
+          expect(
+            tester.getTopLeft(hintFinder).dy,
+            greaterThanOrEqualTo(tester.getBottomLeft(cardFinder).dy),
+            reason:
+                'Placement hint must sit strictly below the bordered card at $width',
+          );
+        }
+
+        // German locale uses localized New task... placeholder and Hinzufügen button.
+        const desktopSize = Size(1280.0, 844.0);
+        _setViewport(tester, desktopSize);
+        await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+          locale: const Locale('de'),
+          surfaceSize: desktopSize,
+        );
+        final germanField = tester.widget<TextField>(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('tasks_quick_add_composer')),
+            matching: find.byType(TextField),
+          ),
+        );
+        expect(
+          germanField.decoration?.hintText,
+          equals('Neue Aufgabe...'),
+          reason: 'German Quick-Add placeholder must read Neue Aufgabe...',
+        );
+        expect(find.text('Hinzufügen'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Quick-Add placement combobox uses vertical mode, stays inline across desktop EN/DE widths, stretches on compact, and opens upward from bottom dock',
+      (tester) async {
+        final board = _buildBoard();
+        const desktopWidths = <double>[721.0, 960.0, 1280.0];
+
+        for (final locale in const <Locale>[Locale('en'), Locale('de')]) {
+          final isGerman = locale.languageCode == 'de';
+          final expectedQueue = isGerman ? 'Warteschlange' : 'Queue';
+          final expectedPriority = isGerman ? 'Priorität' : 'Priority';
+          final expectedSomeday = isGerman ? 'Irgendwann' : 'Someday';
+          final expectedAdd = isGerman ? 'Hinzufügen' : 'Add';
+          // In Ahem test metrics, UiQuickComposer's pre-existing compact action Row
+          // ("Als Entwurf öffnen" + "Hinzufügen") requires >430px; verify EN at 390/720
+          // and DE at 720 compact plus 721/960/1280 desktop.
+          final compactWidths = isGerman
+              ? const <double>[720.0]
+              : const <double>[390.0, 720.0];
+
+          for (final width in desktopWidths) {
+            final size = Size(width, 844.0);
+            _setViewport(tester, size);
+            await pumpLeafWidget(
+              tester,
+              _TasksHarness(constrainToWidth: width - 244.0),
+              board: board,
+              nowUtc: _fixedNowUtc,
+              locale: locale,
+              surfaceSize: size,
+            );
+
+            expect(
+              tester.takeException(),
+              isNull,
+              reason:
+                  'Desktop width $width (${locale.languageCode}) must render with zero overflow',
+            );
+
+            final placementFinder = find.byKey(
+              const ValueKey<String>('quick_add_placement_control'),
+            );
+            final placementControl = tester
+                .widget<UiSegmentedControl<TaskPlacementOption>>(
+                  placementFinder,
+                );
+            expect(
+              placementControl.mode,
+              equals(UiSegmentedControlMode.vertical),
+              reason: 'Quick-Add placement selector must use vertical combobox mode',
+            );
+
+            // Closed state shows only selected label, keeping inline row compact.
+            expect(
+              find.descendant(
+                of: placementFinder,
+                matching: find.text(expectedQueue),
+              ),
+              findsOneWidget,
+            );
+            expect(
+              find.descendant(
+                of: placementFinder,
+                matching: find.text(expectedPriority),
+              ),
+              findsNothing,
+            );
+            expect(
+              find.descendant(
+                of: placementFinder,
+                matching: find.text(expectedSomeday),
+              ),
+              findsNothing,
+            );
+
+            // Placement trigger sits inline on the same horizontal row as + Add.
+            final addFinder = find.widgetWithText(UiButton, expectedAdd);
+            final triggerRect = tester.getRect(placementFinder);
+            final addRect = tester.getRect(addFinder);
+            expect(
+              (triggerRect.center.dy - addRect.center.dy).abs(),
+              lessThan(4.0),
+              reason:
+                  'Desktop width $width (${locale.languageCode}) must keep placement dropdown inline with Add button',
+            );
+            expect(
+              triggerRect.right,
+              lessThanOrEqualTo(addRect.left),
+              reason:
+                  'Placement trigger must appear left of the Add button without overlap at $width',
+            );
+          }
+
+          for (final width in compactWidths) {
+            final size = Size(width, 844.0);
+            _setViewport(tester, size);
+            await pumpLeafWidget(
+              tester,
+              const _TasksHarness(),
+              board: board,
+              nowUtc: _fixedNowUtc,
+              locale: locale,
+              surfaceSize: size,
+            );
+
+            final compactTrigger = isGerman ? '+ Neue Aufgabe' : '+ New task';
+            await tester.tap(find.text(compactTrigger));
+            await tester.pumpAndSettle();
+
+            expect(
+              tester.takeException(),
+              isNull,
+              reason:
+                  'Compact width $width (${locale.languageCode}) must render expanded composer with zero overflow',
+            );
+
+            final placementFinder = find.byKey(
+              const ValueKey<String>('quick_add_placement_control'),
+            );
+            final cardFinder = find.byKey(
+              const ValueKey<String>('ui_quick_composer_card'),
+            );
+            expect(
+              tester.getSize(placementFinder).width,
+              greaterThan(tester.getSize(cardFinder).width - 40.0),
+              reason:
+                  'Compact width $width (${locale.languageCode}) must stretch placement dropdown full width',
+            );
+          }
+        }
+
+        // Verify upward popup from bottom dock and switching to Priority and Someday.
+        const desktopSize = Size(1280.0, 844.0);
+        _setViewport(tester, desktopSize);
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(constrainToWidth: 1280.0 - 244.0),
+          board: board,
+          nowUtc: _fixedNowUtc,
+          surfaceSize: desktopSize,
+        );
+
+        final placementFinder = find.byKey(
+          const ValueKey<String>('quick_add_placement_control'),
+        );
+        final triggerRect = tester.getRect(placementFinder);
+
+        await tester.tap(placementFinder);
+        await tester.pumpAndSettle();
+
+        final followerFinder = find.byType(CompositedTransformFollower);
+        expect(followerFinder, findsOneWidget);
+        final popupSurfaceFinder = find.descendant(
+          of: followerFinder,
+          matching: find.byType(FadeTransition),
+        );
+        final popupRect = tester.getRect(popupSurfaceFinder);
+        expect(
+          popupRect.bottom,
+          lessThanOrEqualTo(triggerRect.top),
+          reason: 'Bottom-docked Quick-Add placement menu must open upward above trigger',
+        );
+
+        await tester.tap(
+          find.descendant(of: followerFinder, matching: find.text('Priority')),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.descendant(of: placementFinder, matching: find.text('Priority')),
+          findsOneWidget,
+        );
+
+        final composerField = find.descendant(
+          of: find.byKey(const ValueKey<String>('tasks_quick_add_composer')),
+          matching: find.byType(TextField),
+        );
+        await tester.enterText(composerField, 'Urgent Fix');
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
+        await tester.pumpAndSettle();
+
+        final urgentTask = container
+            .read(taskNotifierProvider)
+            .value
+            ?.allTasks
+            .where((item) => item.title == 'Urgent Fix')
+            .firstOrNull;
+        expect(urgentTask?.isPriority, isTrue);
+
+        // Switch placement to Someday via upward menu and submit a Someday task.
+        await tester.tap(placementFinder);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: find.byType(CompositedTransformFollower),
+            matching: find.text('Someday'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.enterText(composerField, 'Future Idea');
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
+        await tester.pumpAndSettle();
+
+        final savedBoard = container.read(taskNotifierProvider).value;
+        expect(
+          savedBoard?.someday.any((item) => item.title == 'Future Idea'),
+          isTrue,
+        );
+      },
+    );
+
+    testWidgets(
+      'Quick-Add placement switch preserves focused full width on compact and stable placement hint across frames under alwaysTraditional',
+      (tester) async {
+        final previousStrategy = FocusManager.instance.highlightStrategy;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(() {
+          FocusManager.instance.highlightStrategy = previousStrategy;
+        });
+
+        final board = _buildBoard();
+        const compactSize = Size(390.0, 844.0);
+        _setViewport(tester, compactSize);
+        await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+          surfaceSize: compactSize,
+        );
+
+        await tester.tap(find.text('+ New task'));
+        await tester.pumpAndSettle();
+
+        final placementFinder = find.byKey(
+          const ValueKey<String>('quick_add_placement_control'),
+        );
+        final triggerContainerFinder = find.descendant(
+          of: placementFinder,
+          matching: find.ancestor(
+            of: find.descendant(
+              of: placementFinder,
+              matching: find.byIcon(Icons.keyboard_arrow_down_rounded),
+            ),
+            matching: find.byType(AnimatedContainer),
+          ),
+        );
+        final fullControlWidth = tester.getSize(placementFinder).width;
+        expect(
+          tester.getSize(triggerContainerFinder).width,
+          closeTo(fullControlWidth, 0.1),
+          reason: 'Unfocused compact vertical trigger must fill tight composer width',
+        );
+
+        // Open upward dropdown, verify focused trigger keeps full width, and select Priority.
+        await tester.tap(placementFinder);
+        await tester.pump();
+        expect(
+          tester.getSize(triggerContainerFinder).width,
+          closeTo(fullControlWidth, 0.1),
+          reason: 'Focused compact vertical trigger must not collapse inside focus ring',
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.descendant(
+            of: find.byType(CompositedTransformFollower),
+            matching: find.text('Priority'),
+          ),
+        );
+        for (var i = 0; i < 16; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          expect(
+            find.text('Prioritize ahead of regular tasks in Focus or Ready.'),
+            findsOneWidget,
+            reason: 'Priority hint must stay stable on frame $i',
+          );
+          expect(
+            find.text('Append at the end of the active queue.'),
+            findsNothing,
+            reason: 'Queue hint must not reappear on frame $i',
+          );
+        }
+        expect(
+          tester.getSize(triggerContainerFinder).width,
+          closeTo(fullControlWidth, 0.1),
+          reason: 'Focused trigger must retain full width after selection restores focus',
         );
       },
     );

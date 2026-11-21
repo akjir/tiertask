@@ -211,7 +211,7 @@ class _LocationsComposerSlot extends StatelessWidget {
       isCollapsibleOnCompact: false,
       maxLength: _maxLocationNameLength,
       placeholder: localizations.quickCreateLocationHint,
-      submitLabel: '+ ${localizations.actionAdd}',
+      submitLabel: localizations.actionAdd,
       expandDraftLabel: localizations.actionOpenAsDraft,
       enabled: !isBusy,
       onExpandDraft: onExpandDraft,

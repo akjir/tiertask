@@ -31,7 +31,7 @@
   "subtaskInputHint": "Unteraufgabe hinzufügen...",
   "tooltipAddSubtask": "Unteraufgabe hinzufügen",
   "tooltipRemoveSubtask": "Unteraufgabe entfernen",
-  "quickAddHint": "Neue Aufgabe in {heading} hinzufügen...",
+  "quickAddHint": "Neue Aufgabe...",
   "actionAdd": "Hinzufügen",
   "actionCancel": "Abbrechen",
   "actionSave": "Speichern",

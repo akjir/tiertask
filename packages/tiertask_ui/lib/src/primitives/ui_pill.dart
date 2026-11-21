@@ -50,7 +50,7 @@ enum UiPillTone {
   /// Soft accent tint with borderless edge.
   soft,
 
-  /// Accent-tinted surface with `1px` `accent` border.
+  /// Accent-tinted surface (`1px` `accent` border on badges; borderless at rest on `meta` pills).
   accent,
 
   /// Warning surface triple (`warningBg` / `warningBorder` / `warning`).
@@ -202,12 +202,13 @@ class _UiPillState extends State<UiPill> {
       );
     }
 
-    if (_showFocusRing && isInteractive) {
-      final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
-      decorated = Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          decorated,
+    final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
+    decorated = Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        decorated,
+        if (_showFocusRing && isInteractive)
           Positioned.fill(
             left: -ringInset,
             top: -ringInset,
@@ -225,9 +226,8 @@ class _UiPillState extends State<UiPill> {
               ),
             ),
           ),
-        ],
-      );
-    }
+      ],
+    );
 
     Widget result = decorated;
     if (isInteractive) {
@@ -289,6 +289,23 @@ class _UiPillState extends State<UiPill> {
     return accessible;
   }
 
+  /// Resolves font weight honoring selected state and semantic `.meta-pill` emphasis.
+  FontWeight? _resolveFontWeight(FontWeight? baseWeight) {
+    if (widget.isSelected) {
+      return FontWeight.w600;
+    }
+    if (widget.variant != UiPillVariant.meta) {
+      return baseWeight;
+    }
+    return switch (widget.tone) {
+      UiPillTone.accent ||
+      UiPillTone.warning ||
+      UiPillTone.danger ||
+      UiPillTone.success => FontWeight.w600,
+      UiPillTone.neutral || UiPillTone.soft => FontWeight.w400,
+    };
+  }
+
   /// Resolves minimum vertical height for the pill variant.
   double _resolveMinHeight(UiThemeTokens tokens) {
     return switch (widget.variant) {
@@ -299,6 +316,46 @@ class _UiPillState extends State<UiPill> {
       UiPillVariant.tag || UiPillVariant.meta => 24.0,
       UiPillVariant.badge => 22.0,
     };
+  }
+
+  /// Resolves neutral fill and border with automatic `UiSurfaceScope` re-elevation (`U-SURFACE-003`).
+  _UiPillPalette _resolveNeutralPalette(
+    UiThemeTokens tokens, {
+    required UiSurfaceLevel surfaceLevel,
+    required bool hovered,
+  }) {
+    final colors = tokens.colors;
+    final restingFill = widget.variant == UiPillVariant.count
+        ? colors.panel
+        : (surfaceLevel == UiSurfaceLevel.insetWell ? colors.panel : colors.bg);
+    if (widget.variant == UiPillVariant.meta) {
+      return _UiPillPalette(
+        background: restingFill,
+        border: hovered ? colors.accent : Colors.transparent,
+        foreground: hovered ? colors.ink : colors.muted,
+      );
+    }
+    if (hovered) {
+      return _UiPillPalette(
+        background: colors.soft,
+        border: colors.accent,
+        foreground: colors.accent,
+      );
+    }
+    final restingForeground = switch (widget.variant) {
+      UiPillVariant.count ||
+      UiPillVariant.tag ||
+      UiPillVariant.splitChip ||
+      UiPillVariant.selectable => colors.ink,
+      UiPillVariant.badge ||
+      UiPillVariant.meta ||
+      UiPillVariant.addField => colors.muted,
+    };
+    return _UiPillPalette(
+      background: restingFill,
+      border: colors.line,
+      foreground: restingForeground,
+    );
   }
 
   /// Resolves internal padding by variant.
@@ -341,15 +398,18 @@ class _UiPillState extends State<UiPill> {
         foreground: colors.accent,
       );
     }
+    final isMeta = widget.variant == UiPillVariant.meta;
     return switch (widget.tone) {
       UiPillTone.soft => _UiPillPalette(
         background: colors.soft,
-        border: Colors.transparent,
+        border: isMeta && hovered ? colors.accent : Colors.transparent,
         foreground: colors.accent,
       ),
       UiPillTone.accent => _UiPillPalette(
         background: colors.soft,
-        border: colors.accent,
+        border: isMeta
+            ? (hovered ? colors.accent : Colors.transparent)
+            : colors.accent,
         foreground: colors.accent,
       ),
       UiPillTone.warning => _UiPillPalette(
@@ -373,39 +433,6 @@ class _UiPillState extends State<UiPill> {
         hovered: hovered,
       ),
     };
-  }
-
-  /// Resolves neutral fill and border with automatic `UiSurfaceScope` re-elevation (`U-SURFACE-003`).
-  _UiPillPalette _resolveNeutralPalette(
-    UiThemeTokens tokens, {
-    required UiSurfaceLevel surfaceLevel,
-    required bool hovered,
-  }) {
-    final colors = tokens.colors;
-    final restingFill = widget.variant == UiPillVariant.count
-        ? colors.panel
-        : (surfaceLevel == UiSurfaceLevel.insetWell ? colors.panel : colors.bg);
-    if (hovered) {
-      return _UiPillPalette(
-        background: colors.soft,
-        border: colors.accent,
-        foreground: colors.accent,
-      );
-    }
-    final restingForeground = switch (widget.variant) {
-      UiPillVariant.count ||
-      UiPillVariant.tag ||
-      UiPillVariant.splitChip ||
-      UiPillVariant.selectable => colors.ink,
-      UiPillVariant.badge ||
-      UiPillVariant.meta ||
-      UiPillVariant.addField => colors.muted,
-    };
-    return _UiPillPalette(
-      background: restingFill,
-      border: colors.line,
-      foreground: restingForeground,
-    );
   }
 
   /// Resolves canonical corner radius per variant (`U-TOKEN-004`).
@@ -442,10 +469,8 @@ class _UiPillState extends State<UiPill> {
       UiPillVariant.selectable => typography.chip,
       UiPillVariant.count => typography.meta,
     };
-    final styled = base.copyWith(
-      color: foreground,
-      fontWeight: widget.isSelected ? FontWeight.w600 : base.fontWeight,
-    );
+    final fontWeight = _resolveFontWeight(base.fontWeight);
+    final styled = base.copyWith(color: foreground, fontWeight: fontWeight);
     return widget.isMono ? UiTypographyTokens.mono(styled) : styled;
   }
 }

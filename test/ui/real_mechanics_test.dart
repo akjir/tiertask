@@ -67,18 +67,20 @@ class _CompleterLocationRepository extends FakeLocationRepository {
   }
 }
 
-/// Delayed [InMemorySettingsRepository] supporting async startup recovery notices and injectable load failures.
+/// Delayed [InMemorySettingsRepository] supporting async startup recovery notices, gated saves, and injectable load failures.
 class _DelayedSettingsRepository extends InMemorySettingsRepository {
   _DelayedSettingsRepository({
     WebDavConfig initialConfig = const WebDavConfig(
       language: AppLanguage.english,
     ),
     required this.onLoad,
+    this.onSave,
     SettingsRecoveryNotice? recoveryNotice,
   }) : _pendingNotice = recoveryNotice,
        super(initialConfig);
 
   final Future<void> Function() onLoad;
+  final Future<void> Function()? onSave;
   SettingsRecoveryNotice? _emittedNotice;
   SettingsRecoveryNotice? _pendingNotice;
 
@@ -88,6 +90,14 @@ class _DelayedSettingsRepository extends InMemorySettingsRepository {
     _emittedNotice = _pendingNotice;
     _pendingNotice = null;
     return super.loadActiveWorkspace();
+  }
+
+  @override
+  Future<void> saveConfig(WebDavConfig config) async {
+    if (onSave case final gate?) {
+      await gate();
+    }
+    return super.saveConfig(config);
   }
 
   @override
@@ -978,16 +988,30 @@ void main() {
           matching: find.byType(EditableText),
         );
         await tester.enterText(quickAddInput, 'Later Someday Idea');
+        final placementControl = find.byKey(
+          const ValueKey<String>('quick_add_placement_control'),
+        );
+        final placementTriggerRect = tester.getRect(placementControl);
+        await tester.tap(placementControl);
+        await tester.pumpAndSettle();
+        final popupSurface = find.descendant(
+          of: find.byType(CompositedTransformFollower),
+          matching: find.byType(FadeTransition),
+        );
+        expect(
+          tester.getRect(popupSurface).bottom,
+          lessThanOrEqualTo(placementTriggerRect.top),
+          reason:
+              'Quick-Add vertical placement popup must open upward from dock',
+        );
         await tester.tap(
           find.descendant(
-            of: find.byKey(
-              const ValueKey<String>('quick_add_placement_control'),
-            ),
+            of: find.byType(CompositedTransformFollower),
             matching: find.text('Someday'),
           ),
         );
-        await tester.pump();
-        await tester.tap(find.text('+ Add'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         expect(
@@ -1803,6 +1827,158 @@ task loc100OkD2 priority {
           find.text('Corrupt settings were backed up and reset to defaults.'),
           findsOneWidget,
           reason: 'Async-resolved workspace load must display localized persistent quarantine reset toast',
+        );
+      },
+    );
+
+    testWidgets(
+      'Logs -> Settings -> Palette segmented control switch transitions monotonically without AsyncLoading bounce, TaskNotifier resync, or element remounts',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        AppLogger.resetForTesting();
+        addTearDown(AppLogger.resetForTesting);
+
+        const initialConfig = WebDavConfig(
+          language: AppLanguage.english,
+          themePalette: AppThemePalette.calm,
+          themeMode: AppThemeMode.light,
+          storageMode: StorageMode.local,
+          localFilePath: 'tasks.tdf',
+          diagnosticsEnabled: true,
+          logLevel: LogLevel.debug,
+          logStorageMode: StorageMode.local,
+          timeZoneMode: AppTimeZoneMode.manual,
+          dueLeadWindow: DueLeadWindow.hours24,
+        );
+        Completer<void>? saveGate;
+        final settingsRepo = _DelayedSettingsRepository(
+          initialConfig: initialConfig,
+          onLoad: () async {},
+          onSave: () async {
+            if (saveGate case final gate?) {
+              await gate.future;
+            }
+          },
+        );
+        final localRepo = _ControllableLocalFileRepository(
+          config: initialConfig,
+          content: buildSeedTdf(),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepo),
+            localFileRepositoryProvider.overrideWith((ref) => localRepo),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Reproduce user flow: Logs -> Settings -> click Plum Umber.
+        container
+            .read(appShellControllerProvider.notifier)
+            .openView(ShellView.logs);
+        await tester.pumpAndSettle();
+        AppLogger.clear();
+        container
+            .read(appShellControllerProvider.notifier)
+            .openView(ShellView.settings);
+        await tester.pumpAndSettle();
+
+        final configTransitions = <AsyncValue<WebDavConfig>>[];
+        final taskTransitions = <AsyncValue<TaskBoard>>[];
+        final paletteTransitions = <AppThemePresetKey>[];
+        final configSub = container.listen(
+          webDavConfigProvider,
+          (_, next) => configTransitions.add(next),
+        );
+        final taskSub = container.listen(
+          taskNotifierProvider,
+          (_, next) => taskTransitions.add(next),
+        );
+        final settingsSub = container.listen(
+          settingsControllerProvider.select((model) => model.themePalette),
+          (_, next) => paletteTransitions.add(next),
+        );
+        addTearDown(() {
+          configSub.close();
+          taskSub.close();
+          settingsSub.close();
+        });
+
+        final paletteControl = find.byKey(
+          const ValueKey<String>('settings_theme_palette_control'),
+        );
+        final plumTabContainer = find
+            .descendant(
+              of: paletteControl,
+              matching: find.ancestor(
+                of: find.text('Plum Umber'),
+                matching: find.byType(AnimatedContainer),
+              ),
+            )
+            .first;
+        final plumElementBefore = tester.element(plumTabContainer);
+
+        saveGate = Completer<void>();
+        await tester.tap(
+          find.descendant(
+            of: paletteControl,
+            matching: find.text('Plum Umber'),
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+
+        expect(
+          tester
+              .widget<UiSegmentedControl<AppThemePresetKey>>(paletteControl)
+              .value,
+          equals(AppThemePresetKey.plumUmber),
+          reason: 'Mid-flight segmented control must hold Plum Umber without bouncing back',
+        );
+        expect(
+          tester.element(plumTabContainer),
+          same(plumElementBefore),
+          reason:
+              'Mid-flight segmented control must not remount segment elements',
+        );
+
+        saveGate.complete();
+        saveGate = null;
+        await tester.pumpAndSettle();
+
+        expect(
+          paletteTransitions,
+          equals(const <AppThemePresetKey>[AppThemePresetKey.plumUmber]),
+          reason: 'Palette selection must transition monotonically once from Calm to Plum Umber',
+        );
+        expect(
+          configTransitions.any((state) => state is AsyncLoading<WebDavConfig>),
+          isFalse,
+          reason: 'webDavConfigProvider must not bounce through AsyncLoading on palette update',
+        );
+        expect(
+          taskTransitions,
+          isEmpty,
+          reason: 'Palette update must not rebuild or re-sync TaskNotifier',
+        );
+        expect(
+          tester.element(plumTabContainer),
+          same(plumElementBefore),
+          reason: 'Post-save segmented control must preserve segment element identity',
+        );
+        expect(
+          AppLogger.fullLogText,
+          isNot(contains('domain.lead_window.reevaluated')),
+          reason: 'Palette update must not trigger spurious lead-window re-evaluation',
         );
       },
     );

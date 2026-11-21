@@ -224,7 +224,7 @@ void main() {
         );
 
         // Empty submission shows validation error without creating a label.
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
         expect(find.text('Please enter a label name.'), findsOneWidget);
         expect(
@@ -234,7 +234,7 @@ void main() {
 
         // First label gets preset #2196F3 and auto-expands.
         await tester.enterText(composerInput, 'Alpha');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         var labels =
@@ -275,7 +275,7 @@ void main() {
 
         // Case-insensitive duplicate keeps typed input, shows inline error, and emits danger toast.
         await tester.enterText(composerInput, 'alpha');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         expect(
@@ -311,7 +311,7 @@ void main() {
           matching: find.byType(TextField),
         );
         await tester.enterText(composerInput, 'InFlight');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pump();
 
         expect(
@@ -351,7 +351,7 @@ void main() {
           matching: find.byType(TextField),
         );
         await tester.enterText(composerInput, 'Transient');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         expect(
@@ -668,7 +668,11 @@ void main() {
         expect(find.byType(Switch), findsNothing);
 
         // Expanding Beta collapses Alpha (strict single-expand).
-        await tester.ensureVisible(find.text('Beta'));
+        await tester.scrollUntilVisible(
+          find.text('Beta'),
+          200.0,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Beta'));
         await tester.pumpAndSettle();

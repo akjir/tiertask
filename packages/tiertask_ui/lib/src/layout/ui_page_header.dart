@@ -197,12 +197,13 @@ class _UiInlineFilterButtonState extends State<_UiInlineFilterButton> {
       ),
     );
 
-    if (_showFocusRing && enabled) {
-      final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
-      content = Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          content,
+    final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
+    content = Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        content,
+        if (_showFocusRing && enabled)
           Positioned.fill(
             left: -ringInset,
             top: -ringInset,
@@ -220,9 +221,8 @@ class _UiInlineFilterButtonState extends State<_UiInlineFilterButton> {
               ),
             ),
           ),
-        ],
-      );
-    }
+      ],
+    );
 
     final interactive = Semantics(
       button: enabled,

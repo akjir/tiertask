@@ -1644,5 +1644,85 @@ void main() {
       expect(finalState.statusBanner, isNull);
       expect(finalState.isBusy, isFalse);
     });
+
+    test('applies optimistic preference update during suspended save, exposes preference busy operation, rolls back on failure, and ignores no-op re-selection', () async {
+      final saveGate = Completer<void>();
+      final configNotifier = _RecordingWebDavConfigNotifier(
+        initialConfig: configuredWebDav,
+      )..pendingUpdateCompleter = saveGate;
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(configuredWebDav),
+          ),
+          webDavConfigProvider.overrideWith(() => configNotifier),
+          appLocaleProvider.overrideWithValue(const Locale('en')),
+          diagnosticsEnabledProvider.overrideWithValue(false),
+          taskNotifierProvider.overrideWith(_RecordingTaskNotifier.new),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+      final sub = container.listen(settingsControllerProvider, (_, _) {});
+      addTearDown(sub.close);
+
+      final controller = container.read(settingsControllerProvider.notifier);
+
+      // No-op tap on already-selected palette performs zero persistence calls.
+      final noopResult = await controller.setThemePalette(
+        AppThemePresetKey.calm,
+      );
+      expect(noopResult, equals(const ActionSucceeded()));
+      expect(
+        configNotifier.calls,
+        isEmpty,
+        reason: 'Selecting the already-active palette must not persist or toggle busy state',
+      );
+
+      // Switching to Plum Umber updates themePalette optimistically while saving.
+      final pendingPalette = controller.setThemePalette(
+        AppThemePresetKey.plumUmber,
+      );
+      final midFlight = container.read(settingsControllerProvider);
+      expect(
+        midFlight.themePalette,
+        equals(AppThemePresetKey.plumUmber),
+        reason: 'Preference click must optimistically show the chosen value immediately without flashing back',
+      );
+      expect(midFlight.isBusy, isTrue);
+      expect(midFlight.busyOperation, equals(SettingsBusyOperation.preference));
+      expect(
+        midFlight.isPreferenceControlDisabled,
+        isFalse,
+        reason: 'Short preference auto-saves must not visually dim/disable preference controls',
+      );
+
+      saveGate.complete();
+      final saveResult = await pendingPalette;
+      expect(saveResult, equals(const ActionSucceeded()));
+      final settled = container.read(settingsControllerProvider);
+      expect(settled.themePalette, equals(AppThemePresetKey.plumUmber));
+      expect(settled.isBusy, isFalse);
+      expect(settled.busyOperation, equals(SettingsBusyOperation.idle));
+
+      // On persistence failure, optimistic preference rolls back cleanly with a danger banner.
+      configNotifier
+        ..pendingUpdateCompleter = null
+        ..updateErrorToThrow = const WorkspaceException(
+          WorkspaceErrorKind.invalidFilePath,
+          'disk full',
+        );
+      final failedResult = await controller.setThemeMode(ShellThemeMode.dark);
+      expect(failedResult, isA<ActionPersistFailed>());
+      final afterFailure = container.read(settingsControllerProvider);
+      expect(
+        afterFailure.themeMode,
+        equals(ShellThemeMode.system),
+        reason: 'Failed preference persistence must roll back optimistic themeMode to previous value',
+      );
+      expect(afterFailure.isBusy, isFalse);
+      expect(afterFailure.statusBanner?.tone, equals(BannerTone.danger));
+    });
   });
 }

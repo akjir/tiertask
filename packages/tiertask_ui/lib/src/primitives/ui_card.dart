@@ -835,17 +835,17 @@ class _UiExpandableHeader extends StatelessWidget {
       titleRegion = titleEditor ?? const SizedBox.shrink();
     } else {
       final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
-      Widget titleBox = Container(
-        constraints: const BoxConstraints(minHeight: 28.0),
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.symmetric(vertical: 2.0),
-        child: Text(title, style: titleStyle),
-      );
-      if (showFocusRing) {
-        titleBox = Stack(
-          clipBehavior: Clip.none,
-          children: <Widget>[
-            titleBox,
+      final titleBox = Stack(
+        fit: StackFit.passthrough,
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          Container(
+            constraints: const BoxConstraints(minHeight: 28.0),
+            alignment: Alignment.centerLeft,
+            padding: const EdgeInsets.symmetric(vertical: 2.0),
+            child: Text(title, style: titleStyle),
+          ),
+          if (showFocusRing)
             Positioned.fill(
               left: -ringInset,
               top: -ringInset,
@@ -863,9 +863,8 @@ class _UiExpandableHeader extends StatelessWidget {
                 ),
               ),
             ),
-          ],
-        );
-      }
+        ],
+      );
       titleRegion = Semantics(
         button: true,
         expanded: isExpanded,

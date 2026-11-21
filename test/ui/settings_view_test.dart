@@ -1124,5 +1124,92 @@ void main() {
         expect(syncedUrl, equals('https://client.example.org'));
       },
     );
+
+    testWidgets(
+      'switching palette updates segmented control optimistically without remounting, dimming, or spinning Test & Sync',
+      (tester) async {
+        final settingsRepository = _ControlledSettingsRepository(
+          configuredBoth,
+        );
+        final spyTaskNotifier = _SpySettingsTaskNotifier();
+
+        await pumpLeafWidget(
+          tester,
+          const _SettingsTestFrame(),
+          settingsRepository: settingsRepository,
+          taskNotifierFactory: () => spyTaskNotifier,
+        );
+
+        final paletteControl = find.byKey(
+          const ValueKey<String>('settings_theme_palette_control'),
+        );
+        final testSyncFinder = find.byKey(
+          const ValueKey<String>('settings_dock_test_sync_button'),
+        );
+        final plumTabContainer = find
+            .descendant(
+              of: paletteControl,
+              matching: find.ancestor(
+                of: find.text(localizations.themePalettePlumUmber),
+                matching: find.byType(AnimatedContainer),
+              ),
+            )
+            .first;
+        final plumElementBefore = tester.element(plumTabContainer);
+
+        final saveGate = Completer<void>();
+        settingsRepository.saveGate = saveGate;
+
+        await tester.tap(
+          find.descendant(
+            of: paletteControl,
+            matching: find.text(localizations.themePalettePlumUmber),
+          ),
+        );
+        await tester.pump();
+
+        // Mid-flight: control must immediately show Plum Umber, stay enabled, keep element identity, and never spin Test & Sync.
+        final midFlightControl = tester
+            .widget<UiSegmentedControl<AppThemePresetKey>>(paletteControl);
+        expect(
+          midFlightControl.value,
+          equals(AppThemePresetKey.plumUmber),
+          reason: 'Palette segmented control must update optimistically on frame 0 without snapping back to Calm',
+        );
+        expect(
+          midFlightControl.enabled,
+          isTrue,
+          reason: 'Preference auto-save must not dim preference segmented controls mid-save',
+        );
+        expect(
+          tester.element(plumTabContainer),
+          same(plumElementBefore),
+          reason:
+              'Preference switch must never remount segment AnimatedContainer',
+        );
+        expect(
+          tester.widget<UiButton>(testSyncFinder).isLoading,
+          isFalse,
+          reason: 'Preference auto-save must never display a loading spinner on Test Connection & Sync',
+        );
+
+        saveGate.complete();
+        settingsRepository.saveGate = null;
+        await tester.pumpAndSettle();
+
+        expect(
+          tester
+              .widget<UiSegmentedControl<AppThemePresetKey>>(paletteControl)
+              .value,
+          equals(AppThemePresetKey.plumUmber),
+        );
+        expect(
+          tester.element(plumTabContainer),
+          same(plumElementBefore),
+          reason:
+              'Settled preference switch must keep the same segment element',
+        );
+      },
+    );
   });
 }

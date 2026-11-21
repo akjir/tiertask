@@ -124,14 +124,9 @@
   "@tooltipRemoveSubtask": {
     "description": "Tooltip for the button that removes a subtask from the list."
   },
-  "quickAddHint": "Add new task to {heading}...",
+  "quickAddHint": "New task...",
   "@quickAddHint": {
-    "description": "Placeholder hint inside the quick-add text field for the selected tier.",
-    "placeholders": {
-      "heading": {
-        "type": "String"
-      }
-    }
+    "description": "Placeholder text for the Quick-Add task title input"
   },
   "actionAdd": "Add",
   "@actionAdd": {

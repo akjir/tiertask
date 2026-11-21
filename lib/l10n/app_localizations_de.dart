@@ -107,9 +107,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tooltipRemoveSubtask => 'Unteraufgabe entfernen';
 
   @override
-  String quickAddHint(String heading) {
-    return 'Neue Aufgabe in $heading hinzufügen...';
-  }
+  String get quickAddHint => 'Neue Aufgabe...';
 
   @override
   String get actionAdd => 'Hinzufügen';

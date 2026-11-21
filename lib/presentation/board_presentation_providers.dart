@@ -46,22 +46,33 @@ final evaluatedBoardProvider = Provider.autoDispose
           (state) => state.status == LocationStatus.found ? state.fix : null,
         ),
       );
-      final configuration = ref.watch(
-        webDavConfigProvider.select(
-          (asyncConfiguration) =>
-              asyncConfiguration.asData?.value ?? const WebDavConfig(),
-        ),
+      final evaluationConfig = ref.watch(
+        webDavConfigProvider.select((asyncConfiguration) {
+          final config =
+              asyncConfiguration.asData?.value ?? const WebDavConfig();
+          return (
+            dueLeadWindow: config.dueLeadWindow,
+            manualTimeZoneOffsetMinutes: config.manualTimeZoneOffsetMinutes,
+            timeZoneMode: config.timeZoneMode,
+          );
+        }),
       );
       final clock = ref.watch(clockProvider);
       return boardAsync.whenData((board) {
         final evaluationTime = clock().toUtc();
+        final timeZoneConfig = WebDavConfig(
+          timeZoneMode: evaluationConfig.timeZoneMode,
+          manualTimeZoneOffsetMinutes:
+              evaluationConfig.manualTimeZoneOffsetMinutes,
+          dueLeadWindow: evaluationConfig.dueLeadWindow,
+        );
         return board.evaluateForContext(
           activeLabelId: activeLabelId,
           currentLatitude: activeFix?.latitude,
           currentLongitude: activeFix?.longitude,
           evaluationTime: evaluationTime,
-          localEvaluationTime: configuration.toLocalWallClock(evaluationTime),
-          dueLeadWindow: configuration.dueLeadWindow.duration,
+          localEvaluationTime: timeZoneConfig.toLocalWallClock(evaluationTime),
+          dueLeadWindow: evaluationConfig.dueLeadWindow.duration,
         );
       });
     });

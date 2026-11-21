@@ -278,6 +278,33 @@ class _PrimitivesGallerySectionState extends State<PrimitivesGallerySection> {
                     ],
                     onChanged: (next) => setState(() => _placement = next),
                   ),
+                  SizedBox(height: tokens.spacing.space2),
+                  Wrap(
+                    spacing: 8.0,
+                    runSpacing: 8.0,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      Text(
+                        'Vertical mode',
+                        style: tokens.typography.meta.copyWith(
+                          color: tokens.colors.muted,
+                        ),
+                      ),
+                      UiSegmentedControl<String>(
+                        mode: UiSegmentedControlMode.vertical,
+                        value: _placement,
+                        segments: const <UiSegment<String>>[
+                          UiSegment<String>(value: 'queue', label: 'Queue'),
+                          UiSegment<String>(
+                            value: 'priority',
+                            label: 'Priority',
+                          ),
+                          UiSegment<String>(value: 'someday', label: 'Someday'),
+                        ],
+                        onChanged: (next) => setState(() => _placement = next),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -561,7 +588,7 @@ class _CompositesGallerySectionState extends State<CompositesGallerySection> {
           controller: _quickCreateController,
           placeholder: 'Inline entity quick-create (max 120 chars)',
           maxLength: 120,
-          submitLabel: '+ Add',
+          submitLabel: 'Add',
           expandDraftLabel: 'Open as draft',
           isCollapsibleOnCompact: false,
           onSubmit: () => _quickCreateController.clear(),

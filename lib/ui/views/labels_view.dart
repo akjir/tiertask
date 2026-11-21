@@ -131,7 +131,7 @@ class _LabelQuickCreateBar extends StatelessWidget {
           isCollapsibleOnCompact: false,
           maxLength: _maxSingleLineLength,
           placeholder: localizations.quickCreateLabelHint,
-          submitLabel: '+ ${localizations.actionAdd}',
+          submitLabel: localizations.actionAdd,
           expandDraftLabel: localizations.actionOpenAsDraft,
           enabled: enabled,
           onExpandDraft: onExpandDraft,

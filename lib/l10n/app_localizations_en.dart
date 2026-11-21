@@ -105,9 +105,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipRemoveSubtask => 'Remove subtask';
 
   @override
-  String quickAddHint(String heading) {
-    return 'Add new task to $heading...';
-  }
+  String get quickAddHint => 'New task...';
 
   @override
   String get actionAdd => 'Add';

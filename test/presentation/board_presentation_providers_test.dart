@@ -47,6 +47,10 @@ class _StubWebDavConfigNotifier extends WebDavConfigNotifier {
 
   @override
   Future<WebDavConfig> build() async => _config;
+
+  void setConfig(WebDavConfig next) {
+    state = AsyncData<WebDavConfig>(next);
+  }
 }
 
 class _StubLocationNotifier extends LocationNotifier {
@@ -415,6 +419,77 @@ void main() {
             .value
             ?.findTierOfTask('t_sus'),
         equals(TaskTier.focus),
+      );
+    });
+
+    test('evaluatedBoardProvider skips re-evaluation for theme, language, and diagnostics config changes', () async {
+      final now = DateTime.utc(2026, 11, 21, 9);
+      final board = TaskBoard.empty().addTask(
+        'Task 1',
+        id: 't_eval_001',
+        currentDate: now,
+      );
+      final configNotifier = _StubWebDavConfigNotifier(
+        const WebDavConfig(
+          themePalette: AppThemePalette.calm,
+          themeMode: AppThemeMode.light,
+          language: AppLanguage.english,
+          dueLeadWindow: DueLeadWindow.hours24,
+          timeZoneMode: AppTimeZoneMode.manual,
+        ),
+      );
+      var clockCalls = 0;
+      final container = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() {
+            clockCalls++;
+            return now;
+          }),
+          taskNotifierProvider.overrideWith(() => _StubTaskNotifier(board)),
+          webDavConfigProvider.overrideWith(() => configNotifier),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      await container.read(webDavConfigProvider.future);
+      final sub = container.listen(evaluatedBoardProvider(null), (_, _) {});
+      addTearDown(sub.close);
+
+      final baselineClockCalls = clockCalls;
+      configNotifier.setConfig(
+        const WebDavConfig(
+          themePalette: AppThemePalette.plumUmber,
+          themeMode: AppThemeMode.dark,
+          language: AppLanguage.german,
+          diagnosticsEnabled: true,
+          dueLeadWindow: DueLeadWindow.hours24,
+          timeZoneMode: AppTimeZoneMode.manual,
+        ),
+      );
+      container.read(evaluatedBoardProvider(null));
+      expect(
+        clockCalls,
+        equals(baselineClockCalls),
+        reason: 'Non-evaluation preference updates must not recompute evaluatedBoardProvider',
+      );
+
+      configNotifier.setConfig(
+        const WebDavConfig(
+          themePalette: AppThemePalette.plumUmber,
+          themeMode: AppThemeMode.dark,
+          language: AppLanguage.german,
+          diagnosticsEnabled: true,
+          dueLeadWindow: DueLeadWindow.days7,
+          timeZoneMode: AppTimeZoneMode.manual,
+        ),
+      );
+      container.read(evaluatedBoardProvider(null));
+      expect(
+        clockCalls,
+        greaterThan(baselineClockCalls),
+        reason:
+            'Updating dueLeadWindow must re-evaluate evaluatedBoardProvider',
       );
     });
   });

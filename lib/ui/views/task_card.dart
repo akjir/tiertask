@@ -375,7 +375,7 @@ class _TaskCollapsedBadgePill extends StatelessWidget {
     return UiPill(
       label: badge.label,
       icon: UiIconMapper.badgeIcon(badge.iconKey),
-      variant: UiPillVariant.badge,
+      variant: UiPillVariant.meta,
       tone: UiIconMapper.pillTone(badge.tone),
       onPressed: onPressed,
     );
@@ -463,7 +463,7 @@ class _TaskCollapsedMetadataStrip extends ConsumerWidget {
             label: localizations.badgeMoreIndicators(
               '${task.overflowSecondaryCount}',
             ),
-            variant: UiPillVariant.badge,
+            variant: UiPillVariant.meta,
             onPressed: () => _toggleExpand(ref),
           ),
       ],

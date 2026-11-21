@@ -240,9 +240,21 @@ class BoundaryTickNotifier extends Notifier<int> {
 /// Manages the persisted [WebDavConfig] state for the currently active workspace.
 class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   @override
-  Future<WebDavConfig> build() async {
-    final activeWorkspace = await ref.watch(activeWorkspaceProvider.future);
-    return activeWorkspace.config;
+  FutureOr<WebDavConfig> build() {
+    ref.listen<AsyncValue<AppWorkspace>>(
+      activeWorkspaceProvider,
+      _handleActiveWorkspaceChanged,
+    );
+    final workspaceAsync = ref.read(activeWorkspaceProvider);
+    return switch (workspaceAsync) {
+      AsyncData<AppWorkspace>(:final value) => value.config,
+      AsyncError<AppWorkspace>(:final error, :final stackTrace) =>
+        Error.throwWithStackTrace(error, stackTrace),
+      AsyncLoading<AppWorkspace>() =>
+        ref
+            .read(activeWorkspaceProvider.future)
+            .then((workspace) => workspace.config),
+    };
   }
 
   /// Moves the local `.tdf` file when its resolved path changes and persists [newConfig] atomically.
@@ -309,8 +321,10 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     await ref
         .read(activeWorkspaceProvider.notifier)
         .updateActiveConfig(newConfig);
-    state = AsyncData(newConfig);
-    _syncLoggerForConfig(newConfig);
+    if (ref.mounted) {
+      state = AsyncData(newConfig);
+      _syncLoggerForConfig(newConfig);
+    }
     AppLogger.event(
       LogLevel.info,
       LogTag.lifecycle,
@@ -426,6 +440,25 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(timeZoneMode: timeZoneMode);
     await updateConfig(updated);
+  }
+
+  /// Synchronizes [state] reactively when [activeWorkspaceProvider] changes without bouncing through `AsyncLoading` on config saves.
+  void _handleActiveWorkspaceChanged(
+    AsyncValue<AppWorkspace>? previous,
+    AsyncValue<AppWorkspace> next,
+  ) {
+    switch (next) {
+      case AsyncData<AppWorkspace>(:final value):
+        if (state.asData?.value != value.config) {
+          state = AsyncData<WebDavConfig>(value.config);
+        }
+      case AsyncError<AppWorkspace>(:final error, :final stackTrace):
+        state = AsyncError<WebDavConfig>(error, stackTrace);
+      case AsyncLoading<AppWorkspace>():
+        if (previous?.hasValue ?? false) {
+          state = const AsyncLoading<WebDavConfig>();
+        }
+    }
   }
 
   /// Synchronizes [AppLogger] state, path, and metadata for [config].

@@ -342,5 +342,65 @@ void main() {
         }
       },
     );
+
+    testWidgets(
+      'preserves tight parent width and AnimatedContainer identity when focused under alwaysTraditional',
+      (tester) async {
+        final previousStrategy = FocusManager.instance.highlightStrategy;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(() {
+          FocusManager.instance.highlightStrategy = previousStrategy;
+        });
+
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+
+        await pumpUiWidget(
+          tester,
+          Center(
+            child: SizedBox(
+              width: 220.0,
+              child: UiButton(
+                key: const ValueKey<String>('tight_focus_btn'),
+                label: 'Save',
+                focusNode: focusNode,
+                onPressed: () {},
+              ),
+            ),
+          ),
+        );
+
+        final containerFinder = find.descendant(
+          of: find.byKey(const ValueKey<String>('tight_focus_btn')),
+          matching: find.byType(AnimatedContainer),
+        );
+        final elementBefore = tester.element(containerFinder);
+        expect(tester.getSize(containerFinder).width, closeTo(220.0, 0.1));
+
+        focusNode.requestFocus();
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('tight_focus_btn')),
+            matching: find.byType(Positioned),
+          ),
+          findsOneWidget,
+          reason: 'Focus ring must be visible under alwaysTraditional',
+        );
+        expect(
+          tester.element(containerFinder),
+          same(elementBefore),
+          reason: 'Focus ring toggle must not remount button AnimatedContainer',
+        );
+        expect(
+          tester.getSize(containerFinder).width,
+          closeTo(220.0, 0.1),
+          reason: 'Focused button in tight parent must keep full 220px width inside focus ring',
+        );
+      },
+    );
   });
 }

@@ -79,5 +79,66 @@ void main() {
       );
       expect(disabledOpacity.opacity, equals(0.48));
     });
+
+    testWidgets(
+      'preserves tight parent width when focused under alwaysTraditional',
+      (tester) async {
+        final previousStrategy = FocusManager.instance.highlightStrategy;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(() {
+          FocusManager.instance.highlightStrategy = previousStrategy;
+        });
+
+        final focusNode = FocusNode();
+        addTearDown(focusNode.dispose);
+
+        await pumpUiWidget(
+          tester,
+          Center(
+            child: SizedBox(
+              width: 260.0,
+              child: UiToggleRow(
+                key: const ValueKey<String>('tight_focus_toggle'),
+                label: 'Auto-finish',
+                value: false,
+                focusNode: focusNode,
+                onChanged: (_) {},
+              ),
+            ),
+          ),
+        );
+
+        final paddingFinder = find.descendant(
+          of: find.byKey(const ValueKey<String>('tight_focus_toggle')),
+          matching: find.byType(Padding),
+        );
+        final elementBefore = tester.element(paddingFinder.first);
+        expect(tester.getSize(paddingFinder.first).width, closeTo(260.0, 0.1));
+
+        focusNode.requestFocus();
+        await tester.pump();
+        await tester.pump();
+
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('tight_focus_toggle')),
+            matching: find.byType(Positioned),
+          ),
+          findsOneWidget,
+          reason: 'Focus ring must be visible under alwaysTraditional',
+        );
+        expect(
+          tester.element(paddingFinder.first),
+          same(elementBefore),
+          reason: 'Focus ring toggle must not remount UiToggleRow interior',
+        );
+        expect(
+          tester.getSize(paddingFinder.first).width,
+          closeTo(260.0, 0.1),
+          reason: 'Focused UiToggleRow must preserve full 260px width inside focus ring',
+        );
+      },
+    );
   });
 }

@@ -370,8 +370,8 @@ class _TierTaskUiGalleryAppState extends State<TierTaskUiGalleryApp> {
           : null,
       bottomDock: UiQuickComposer(
         controller: _composerController,
-        placeholder: 'Add a task to preview docked composer',
-        submitLabel: '+ Add',
+        placeholder: 'New task...',
+        submitLabel: 'Add',
         expandDraftLabel: 'Open as draft',
         compactTriggerLabel: '+ New task',
         compactCloseTooltip: 'Close composer',

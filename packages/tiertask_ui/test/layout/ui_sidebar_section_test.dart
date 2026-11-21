@@ -182,5 +182,79 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'preserves full sidebar row width when focused under alwaysTraditional',
+      (tester) async {
+        final previousStrategy = FocusManager.instance.highlightStrategy;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(() {
+          FocusManager.instance.highlightStrategy = previousStrategy;
+        });
+
+        await pumpUiWidget(
+          tester,
+          Center(
+            child: SizedBox(
+              width: 244.0,
+              child: UiSidebarSection(
+                title: 'Tasks',
+                items: <UiSidebarNavItem>[
+                  UiSidebarNavItem(
+                    id: 'focus',
+                    label: 'Focus',
+                    icon: Icons.bolt_outlined,
+                    countLabel: '3',
+                    isSelected: true,
+                    onTap: () {},
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+
+        final rowContainerFinder = find.descendant(
+          of: find.byType(UiSidebarSection),
+          matching: find.byType(AnimatedContainer),
+        );
+        final elementBefore = tester.element(rowContainerFinder.first);
+        final initialWidth = tester.getSize(rowContainerFinder.first).width;
+        expect(initialWidth, closeTo(244.0, 0.1));
+
+        final detector = tester.widget<FocusableActionDetector>(
+          find.ancestor(
+            of: find.text('Focus'),
+            matching: find.byType(FocusableActionDetector),
+          ),
+        );
+        // Trigger focus on the first sidebar item via descendant context.
+        Focus.of(tester.element(find.text('Focus'))).requestFocus();
+        await tester.pump();
+        await tester.pump();
+        expect(detector.enabled, isTrue);
+
+        expect(
+          find.descendant(
+            of: find.byType(UiSidebarSection),
+            matching: find.byType(Positioned),
+          ),
+          findsOneWidget,
+          reason:
+              'Sidebar nav focus ring must be visible under alwaysTraditional',
+        );
+        expect(
+          tester.element(rowContainerFinder.first),
+          same(elementBefore),
+          reason: 'Sidebar item focus ring must not remount AnimatedContainer',
+        );
+        expect(
+          tester.getSize(rowContainerFinder.first).width,
+          closeTo(initialWidth, 0.1),
+          reason: 'Focused sidebar nav row must keep full 244px width inside focus ring',
+        );
+      },
+    );
   });
 }

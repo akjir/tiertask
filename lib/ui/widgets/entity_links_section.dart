@@ -79,7 +79,11 @@ class EntityLinksSection extends ConsumerStatefulWidget {
 /// Wraps [child] with the canonical `1px` offset `accent` keyboard focus ring (`U-A11Y-001`).
 class _EntityFocusRingBox extends StatelessWidget {
   /// Creates an [_EntityFocusRingBox].
-  const _EntityFocusRingBox({required this.radius, required this.child});
+  const _EntityFocusRingBox({
+    required this.visible,
+    required this.radius,
+    required this.child,
+  });
 
   /// Focusable surface widget.
   final Widget child;
@@ -87,32 +91,37 @@ class _EntityFocusRingBox extends StatelessWidget {
   /// Base corner radius of [child].
   final double radius;
 
+  /// Whether the outer `1px` `accent` keyboard focus ring is currently painted.
+  final bool visible;
+
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
 
     return Stack(
+      fit: StackFit.passthrough,
       clipBehavior: Clip.none,
       children: <Widget>[
         child,
-        Positioned.fill(
-          left: -ringInset,
-          top: -ringInset,
-          right: -ringInset,
-          bottom: -ringInset,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(radius + ringInset),
-                border: Border.all(
-                  color: tokens.colors.accent,
-                  width: tokens.focus.ringWidth,
+        if (visible)
+          Positioned.fill(
+            left: -ringInset,
+            top: -ringInset,
+            right: -ringInset,
+            bottom: -ringInset,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(radius + ringInset),
+                  border: Border.all(
+                    color: tokens.colors.accent,
+                    width: tokens.focus.ringWidth,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }
@@ -981,9 +990,10 @@ class _EntityReadOnlyLinkSurface extends StatelessWidget {
       ),
     );
 
-    if (!showFocusRing) {
-      return card;
-    }
-    return _EntityFocusRingBox(radius: radius, child: card);
+    return _EntityFocusRingBox(
+      visible: showFocusRing,
+      radius: radius,
+      child: card,
+    );
   }
 }

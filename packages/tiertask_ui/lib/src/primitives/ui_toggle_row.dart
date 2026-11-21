@@ -138,12 +138,13 @@ class _UiToggleRowState extends State<UiToggleRow> {
       ),
     );
 
-    if (_showFocusRing && isInteractive) {
-      final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
-      row = Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          row,
+    final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
+    row = Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        row,
+        if (_showFocusRing && isInteractive)
           Positioned.fill(
             left: -ringInset,
             top: -ringInset,
@@ -161,9 +162,8 @@ class _UiToggleRowState extends State<UiToggleRow> {
               ),
             ),
           ),
-        ],
-      );
-    }
+      ],
+    );
 
     return Semantics(
       checked: widget.value,

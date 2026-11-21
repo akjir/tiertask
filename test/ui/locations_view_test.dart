@@ -106,7 +106,7 @@ void main() {
         expect(find.text('0'), findsOneWidget);
         expect(find.text('No locations created yet.'), findsOneWidget);
         expect(find.text('Quick-create a new location...'), findsOneWidget);
-        expect(find.text('+ Add'), findsOneWidget);
+        expect(find.widgetWithText(UiButton, 'Add'), findsOneWidget);
         expect(find.text('Open as draft'), findsOneWidget);
         expect(find.text('Back to tasks'), findsNothing);
         expect(find.text('Back to search'), findsNothing);
@@ -131,7 +131,7 @@ void main() {
           ),
         );
 
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         expect(
@@ -150,7 +150,7 @@ void main() {
           matching: find.byType(TextField),
         );
         await tester.enterText(composerInput, 'Erfurt Office');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         final locations =
@@ -921,12 +921,12 @@ void main() {
         );
 
         await tester.enterText(composerInput, 'Compact Site');
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pump();
 
         expect(spyNotifier.addLocationCallCount, equals(1));
 
-        await tester.tap(find.text('+ Add'));
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pump();
         expect(
           spyNotifier.addLocationCallCount,

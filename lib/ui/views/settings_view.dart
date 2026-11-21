@@ -38,6 +38,7 @@ class SettingsActionDock extends ConsumerWidget {
     final dockState = ref.watch(
       settingsControllerProvider.select(
         (model) => (
+          busyOperation: model.busyOperation,
           canTestConnectionAndSync: model.canTestConnectionAndSync,
           isBusy: model.isBusy,
           isWebDavDirty: model.isWebDavDirty,
@@ -60,9 +61,11 @@ class SettingsActionDock extends ConsumerWidget {
             canSave: !dockState.isBusy && usesWebDav,
             canTestConnectionAndSync: dockState.canTestConnectionAndSync,
             isDirty: dockState.isWebDavDirty,
-            isSaving: dockState.isBusy && dockState.isWebDavDirty,
+            isSaving:
+                dockState.busyOperation == SettingsBusyOperation.saveWebDav,
             isTestingSync:
-                dockState.isBusy && !dockState.isWebDavDirty && usesWebDav,
+                dockState.busyOperation ==
+                SettingsBusyOperation.testConnectionAndSync,
             onSave: () => _handleSave(context, ref),
             onTestAndSync: () => _handleTestAndSync(context, ref),
           ),
@@ -115,7 +118,10 @@ class _AppearanceCard extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, themeMode: model.themeMode),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          themeMode: model.themeMode,
+        ),
       ),
     );
 
@@ -127,7 +133,7 @@ class _AppearanceCard extends ConsumerWidget {
       child: UiSegmentedControl<ShellThemeMode>(
         key: const ValueKey<String>('settings_theme_mode_control'),
         value: slice.themeMode,
-        enabled: !slice.isBusy,
+        enabled: !slice.isDisabled,
         semanticLabel: localizations.themeSectionTitle,
         segments: _themeModeSegments(localizations),
         onChanged: (next) => _commitThemeMode(context, ref, next),
@@ -160,7 +166,10 @@ class _ColorPaletteCard extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, themePalette: model.themePalette),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          themePalette: model.themePalette,
+        ),
       ),
     );
 
@@ -172,7 +181,7 @@ class _ColorPaletteCard extends ConsumerWidget {
       child: UiSegmentedControl<AppThemePresetKey>(
         key: const ValueKey<String>('settings_theme_palette_control'),
         value: slice.themePalette,
-        enabled: !slice.isBusy,
+        enabled: !slice.isDisabled,
         semanticLabel: localizations.themePaletteSectionTitle,
         segments: _themePaletteSegments(localizations),
         onChanged: (next) => _commitPalette(context, ref, next),
@@ -205,7 +214,10 @@ class _DeadlinePrioritizationCard extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (dueLeadWindow: model.dueLeadWindow, isBusy: model.isBusy),
+        (model) => (
+          dueLeadWindow: model.dueLeadWindow,
+          isDisabled: model.isPreferenceControlDisabled,
+        ),
       ),
     );
 
@@ -220,7 +232,7 @@ class _DeadlinePrioritizationCard extends ConsumerWidget {
         label: localizations.dueLeadWindowLabel,
         selectValue: slice.dueLeadWindow.name,
         selectOptions: _dueLeadOptions(localizations),
-        enabled: !slice.isBusy,
+        enabled: !slice.isDisabled,
         onSelectChanged: (raw) => _commitDueLead(context, ref, raw),
       ),
     );
@@ -254,7 +266,7 @@ class _DiagnosticsCard extends ConsumerWidget {
       settingsControllerProvider.select(
         (model) => (
           diagnosticsEnabled: model.diagnosticsEnabled,
-          isBusy: model.isBusy,
+          isDisabled: model.isPreferenceControlDisabled,
         ),
       ),
     );
@@ -272,7 +284,7 @@ class _DiagnosticsCard extends ConsumerWidget {
             label: localizations.diagnosticsSectionTitle,
             description: localizations.diagnosticsSectionDescription,
             value: slice.diagnosticsEnabled,
-            enabled: !slice.isBusy,
+            enabled: !slice.isDisabled,
             onChanged: (enabled) => _commitDiagnostics(context, ref, enabled),
           ),
           if (slice.diagnosticsEnabled) ...<Widget>[
@@ -376,7 +388,10 @@ class _DiagnosticsLogLevelSelect extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, logLevel: model.logLevel),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          logLevel: model.logLevel,
+        ),
       ),
     );
 
@@ -386,7 +401,7 @@ class _DiagnosticsLogLevelSelect extends ConsumerWidget {
       label: localizations.logLevelLabel,
       selectValue: slice.logLevel.name,
       selectOptions: _logLevelOptions(localizations),
-      enabled: !slice.isBusy,
+      enabled: !slice.isDisabled,
       onSelectChanged: (raw) => _commitLogLevel(context, ref, raw),
     );
   }
@@ -416,7 +431,10 @@ class _DiagnosticsLogStorageSelect extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, logStorageMode: model.logStorageMode),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          logStorageMode: model.logStorageMode,
+        ),
       ),
     );
 
@@ -426,7 +444,7 @@ class _DiagnosticsLogStorageSelect extends ConsumerWidget {
       label: localizations.logStorageLabel,
       selectValue: slice.logStorageMode.name,
       selectOptions: _logStorageOptions(localizations),
-      enabled: !slice.isBusy,
+      enabled: !slice.isDisabled,
       onSelectChanged: (raw) => _commitLogStorageMode(context, ref, raw),
     );
   }
@@ -456,8 +474,10 @@ class _ForegroundLocationCard extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) =>
-            (isBusy: model.isBusy, locationEnabled: model.locationEnabled),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          locationEnabled: model.locationEnabled,
+        ),
       ),
     );
 
@@ -469,7 +489,7 @@ class _ForegroundLocationCard extends ConsumerWidget {
       child: UiSegmentedControl<bool>(
         key: const ValueKey<String>('settings_location_control'),
         value: slice.locationEnabled,
-        enabled: !slice.isBusy,
+        enabled: !slice.isDisabled,
         semanticLabel: localizations.locationSectionTitle,
         segments: _locationSegments(localizations),
         onChanged: (next) => _commitLocationEnabled(context, ref, next),
@@ -498,7 +518,10 @@ class _LanguageCard extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, language: model.language),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          language: model.language,
+        ),
       ),
     );
 
@@ -510,7 +533,7 @@ class _LanguageCard extends ConsumerWidget {
       child: UiSegmentedControl<ShellLanguageOption>(
         key: const ValueKey<String>('settings_language_control'),
         value: slice.language,
-        enabled: !slice.isBusy,
+        enabled: !slice.isDisabled,
         semanticLabel: localizations.languageSectionTitle,
         segments: _languageSegments(localizations),
         onChanged: (next) => _commitLanguage(context, ref, next),
@@ -755,7 +778,7 @@ class _LocalStorageCardBody extends ConsumerWidget {
     final slice = ref.watch(
       settingsControllerProvider.select(
         (model) => (
-          isBusy: model.isBusy,
+          isDisabled: model.isPreferenceControlDisabled,
           localWatchEnabled: model.localWatchEnabled,
           resolvedLocalPath: model.resolvedLocalPath,
         ),
@@ -780,7 +803,7 @@ class _LocalStorageCardBody extends ConsumerWidget {
           label: localizations.localWatchLabel,
           description: localizations.localWatchDescription,
           value: slice.localWatchEnabled,
-          enabled: !slice.isBusy,
+          enabled: !slice.isDisabled,
           onChanged: (enabled) => _commitLocalWatch(context, ref, enabled),
         ),
       ],
@@ -1225,7 +1248,10 @@ class _StorageModeCard extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, storageMode: model.storageMode),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          storageMode: model.storageMode,
+        ),
       ),
     );
 
@@ -1237,7 +1263,7 @@ class _StorageModeCard extends ConsumerWidget {
       child: UiSegmentedControl<ShellStorageMode>(
         key: const ValueKey<String>('settings_storage_mode_control'),
         value: slice.storageMode,
-        enabled: !slice.isBusy,
+        enabled: !slice.isDisabled,
         semanticLabel: localizations.storageModeSectionTitle,
         segments: _storageModeSegments(localizations),
         onChanged: (next) => _commitStorageMode(context, ref, next),
@@ -1271,7 +1297,10 @@ class _TimeZoneCard extends ConsumerWidget {
     final tokens = UiThemeTokens.of(context);
     final slice = ref.watch(
       settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, timeZoneMode: model.timeZoneMode),
+        (model) => (
+          isDisabled: model.isPreferenceControlDisabled,
+          timeZoneMode: model.timeZoneMode,
+        ),
       ),
     );
 
@@ -1287,7 +1316,7 @@ class _TimeZoneCard extends ConsumerWidget {
           UiSegmentedControl<ShellTimeZoneMode>(
             key: const ValueKey<String>('settings_timezone_mode_control'),
             value: slice.timeZoneMode,
-            enabled: !slice.isBusy,
+            enabled: !slice.isDisabled,
             semanticLabel: localizations.timeZoneSectionTitle,
             segments: _timeZoneModeSegments(localizations),
             onChanged: (next) => _commitTimeZoneMode(context, ref, next),
@@ -1327,7 +1356,7 @@ class _TimeZoneOffsetSelect extends ConsumerWidget {
     final slice = ref.watch(
       settingsControllerProvider.select(
         (model) => (
-          isBusy: model.isBusy,
+          isDisabled: model.isPreferenceControlDisabled,
           manualOffsetMinutes: model.manualTimeZoneOffsetMinutes,
           supportedUtcOffsets: model.supportedUtcOffsets,
         ),
@@ -1340,7 +1369,7 @@ class _TimeZoneOffsetSelect extends ConsumerWidget {
       label: localizations.timeZoneOffsetLabel,
       selectValue: '${slice.manualOffsetMinutes}',
       selectOptions: _utcOffsetOptions(slice.supportedUtcOffsets),
-      enabled: !slice.isBusy,
+      enabled: !slice.isDisabled,
       onSelectChanged: (raw) => _commitUtcOffset(context, ref, raw),
     );
   }

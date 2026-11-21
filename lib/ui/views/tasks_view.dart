@@ -34,14 +34,8 @@ import '../widgets/entity_label_picker.dart';
 import 'task_card.dart';
 import 'task_draft_card.dart';
 
-/// Minimum composer width in pixels to keep Quick-Add placement controls inline on desktop.
-const double _inlineDesktopComposerMinWidth = 760.0;
-
 /// Maximum single-line task title length allowed by `TDF 0.8.0` (`maxTdfTextLength`).
 const int _maxTaskTitleLength = 500;
-
-/// Width of the horizontal placement segmented control on spacious desktop composer rows.
-const double _placementWidthExpanded = 252.0;
 
 /// Duration used for smooth `Scrollable.ensureVisible` entity card reveals (`U-LAYOUT-007`).
 const Duration _revealDuration = Duration(milliseconds: 220);
@@ -226,16 +220,16 @@ class _FileReadDiagnosticsCard extends StatelessWidget {
   }
 }
 
-/// Adaptive wrapper hosting [_QuickAddComposerSurface] and switching narrow desktop widths to a stacked footer.
-class _QuickAddAdaptiveComposer extends StatelessWidget {
-  /// Creates a [_QuickAddAdaptiveComposer].
-  const _QuickAddAdaptiveComposer({
+/// Renders the design-system [UiQuickComposer] bound to shell expansion and popover handlers.
+class _QuickAddComposerSurface extends ConsumerWidget {
+  /// Creates a [_QuickAddComposerSurface].
+  const _QuickAddComposerSurface({
     required this.session,
-    required this.placementHint,
-    required this.isCompact,
     required this.compactComposerOpen,
     required this.isBusy,
+    required this.isCompact,
     required this.isPopoverOpen,
+    required this.modeHint,
     required this.popoverContent,
   });
 
@@ -251,81 +245,8 @@ class _QuickAddAdaptiveComposer extends StatelessWidget {
   /// Whether the desktop label picker popover is open.
   final bool isPopoverOpen;
 
-  /// Localized helper caption describing the active placement.
-  final String placementHint;
-
-  /// Optional upward desktop popover content.
-  final Widget? popoverContent;
-
-  /// Active Quick-Add draft session and callbacks.
-  final _QuickAddSession session;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final stackDesktopControls =
-            !isCompact && constraints.maxWidth < _inlineDesktopComposerMinWidth;
-        return _QuickAddComposerSurface(
-          session: session,
-          compactComposerOpen: compactComposerOpen,
-          isBusy: isBusy,
-          isPopoverOpen: isPopoverOpen,
-          modeHint: stackDesktopControls ? null : placementHint,
-          modeWidget: stackDesktopControls
-              ? null
-              : _QuickAddPlacementControl(
-                  isFullWidth: isCompact,
-                  placement: session.placement,
-                  enabled: !isBusy,
-                  onChanged: session.onPlacementChanged,
-                ),
-          draftChips: _QuickAddFooterSlot(
-            session: session,
-            stackDesktopControls: stackDesktopControls,
-            placementHint: placementHint,
-            isCompact: isCompact,
-            isBusy: isBusy,
-            isPopoverOpen: isPopoverOpen,
-          ),
-          popoverContent: popoverContent,
-        );
-      },
-    );
-  }
-}
-
-/// Renders the design-system [UiQuickComposer] bound to shell expansion and popover handlers.
-class _QuickAddComposerSurface extends ConsumerWidget {
-  /// Creates a [_QuickAddComposerSurface].
-  const _QuickAddComposerSurface({
-    required this.session,
-    required this.compactComposerOpen,
-    required this.isBusy,
-    required this.isPopoverOpen,
-    required this.modeHint,
-    required this.modeWidget,
-    required this.draftChips,
-    required this.popoverContent,
-  });
-
-  /// Whether compact Quick-Add is expanded.
-  final bool compactComposerOpen;
-
-  /// Footer slot hosting label chips and optional stacked placement controls.
-  final Widget draftChips;
-
-  /// Whether a task mutation is currently in flight.
-  final bool isBusy;
-
-  /// Whether the desktop label picker popover is open.
-  final bool isPopoverOpen;
-
-  /// Optional inline placement helper caption.
-  final String? modeHint;
-
-  /// Optional inline placement segmented control.
-  final Widget? modeWidget;
+  /// Helper caption describing the active placement rendered below the composer card.
+  final String modeHint;
 
   /// Optional upward desktop popover content.
   final Widget? popoverContent;
@@ -342,8 +263,8 @@ class _QuickAddComposerSurface extends ConsumerWidget {
       key: const ValueKey<String>('tasks_quick_add_composer'),
       controller: session.titleController,
       focusNode: session.titleFocusNode,
-      placeholder: localizations.quickAddHint(session.viewModel.headerTitle),
-      submitLabel: '+ ${localizations.actionAdd}',
+      placeholder: localizations.quickAddHint,
+      submitLabel: localizations.actionAdd,
       maxLength: _maxTaskTitleLength,
       enabled: !isBusy,
       expandDraftLabel: localizations.actionOpenAsDraft,
@@ -352,9 +273,18 @@ class _QuickAddComposerSurface extends ConsumerWidget {
       onCompactExpandedChanged: shellNotifier.setCompactComposerOpen,
       compactTriggerLabel: '+ ${localizations.actionNewTaskCompact}',
       compactCloseTooltip: localizations.actionCancel,
-      modeWidget: modeWidget,
+      modeWidget: _QuickAddPlacementControl(
+        placement: session.placement,
+        enabled: !isBusy,
+        onChanged: session.onPlacementChanged,
+      ),
       modeHint: modeHint,
-      draftChips: draftChips,
+      draftChips: _QuickAddFooterSlot(
+        session: session,
+        isCompact: isCompact,
+        isBusy: isBusy,
+        isPopoverOpen: isPopoverOpen,
+      ),
       isPopoverOpen: isPopoverOpen,
       onDismissPopover: () => shellNotifier.setLabelPickerOpen(false),
       popoverContent: popoverContent,
@@ -431,13 +361,11 @@ class _QuickAddDraftLabelsBar extends StatelessWidget {
   }
 }
 
-/// Footer slot rendering [_QuickAddDraftLabelsBar] inline or wrapped inside [_QuickAddNarrowFooter].
+/// Footer slot wiring [_QuickAddDraftLabelsBar] to desktop popover or compact label sheet triggers.
 class _QuickAddFooterSlot extends ConsumerWidget {
   /// Creates a [_QuickAddFooterSlot].
   const _QuickAddFooterSlot({
     required this.session,
-    required this.stackDesktopControls,
-    required this.placementHint,
     required this.isCompact,
     required this.isBusy,
     required this.isPopoverOpen,
@@ -452,33 +380,17 @@ class _QuickAddFooterSlot extends ConsumerWidget {
   /// Whether the desktop label picker popover is open.
   final bool isPopoverOpen;
 
-  /// Localized helper caption describing the active placement.
-  final String placementHint;
-
   /// Active Quick-Add draft session and callbacks.
   final _QuickAddSession session;
 
-  /// Whether narrow desktop width stacks placement controls into the footer.
-  final bool stackDesktopControls;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final labelsBar = _QuickAddDraftLabelsBar(
+    return _QuickAddDraftLabelsBar(
       selectedLabels: session.selectedLabels,
       isPickerOpen: isPopoverOpen,
       isBusy: isBusy,
       onRemoveLabel: session.onToggleDraftLabel,
       onOpenPicker: () => _handleOpenPicker(ref),
-    );
-    if (!stackDesktopControls) {
-      return labelsBar;
-    }
-    return _QuickAddNarrowFooter(
-      placement: session.placement,
-      placementHint: placementHint,
-      enabled: !isBusy,
-      onPlacementChanged: session.onPlacementChanged,
-      labelsBar: labelsBar,
     );
   }
 
@@ -592,66 +504,10 @@ class _QuickAddLabelPopoverHeader extends StatelessWidget {
   }
 }
 
-/// Stacked placement, wrapping hint, and label chips footer used on narrow desktop widths (`< 760px`).
-class _QuickAddNarrowFooter extends StatelessWidget {
-  /// Creates a [_QuickAddNarrowFooter].
-  const _QuickAddNarrowFooter({
-    required this.placement,
-    required this.placementHint,
-    required this.enabled,
-    required this.onPlacementChanged,
-    required this.labelsBar,
-  });
-
-  /// Whether interaction is enabled.
-  final bool enabled;
-
-  /// Draft label chips and `+ Labels` trigger bar.
-  final Widget labelsBar;
-
-  /// Callback notified when placement changes.
-  final ValueChanged<TaskPlacementOption> onPlacementChanged;
-
-  /// Active placement selection.
-  final TaskPlacementOption placement;
-
-  /// Localized helper caption describing [placement].
-  final String placementHint;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _QuickAddPlacementControl(
-          isFullWidth: true,
-          placement: placement,
-          enabled: enabled,
-          onChanged: onPlacementChanged,
-        ),
-        const SizedBox(height: 6.0),
-        Text(
-          placementHint,
-          style: tokens.typography.eyebrow.copyWith(
-            color: tokens.colors.muted,
-            fontWeight: FontWeight.w400,
-            letterSpacing: 0.0,
-          ),
-        ),
-        const SizedBox(height: 6.0),
-        labelsBar,
-      ],
-    );
-  }
-}
-
-/// Adaptive placement segmented selector sized safely for compact, narrow desktop, and wide desktop rows.
+/// Vertical combobox placement selector sizing intrinsically on desktop rows and stretching on compact (`U-CARD-006`).
 class _QuickAddPlacementControl extends StatelessWidget {
   /// Creates a [_QuickAddPlacementControl].
   const _QuickAddPlacementControl({
-    required this.isFullWidth,
     required this.placement,
     required this.enabled,
     required this.onChanged,
@@ -659,9 +515,6 @@ class _QuickAddPlacementControl extends StatelessWidget {
 
   /// Whether interaction is enabled.
   final bool enabled;
-
-  /// Whether the control stretches to fill its parent width instead of using a fixed inline width.
-  final bool isFullWidth;
 
   /// Callback notified when placement changes.
   final ValueChanged<TaskPlacementOption> onChanged;
@@ -672,8 +525,9 @@ class _QuickAddPlacementControl extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final control = UiSegmentedControl<TaskPlacementOption>(
+    return UiSegmentedControl<TaskPlacementOption>(
       key: const ValueKey<String>('quick_add_placement_control'),
+      mode: UiSegmentedControlMode.vertical,
       segments: <UiSegment<TaskPlacementOption>>[
         UiSegment<TaskPlacementOption>(
           value: TaskPlacementOption.queue,
@@ -693,10 +547,6 @@ class _QuickAddPlacementControl extends StatelessWidget {
       semanticLabel: localizations.inlinePlacementSectionTitle,
       onChanged: onChanged,
     );
-
-    return isFullWidth
-        ? control
-        : SizedBox(width: _placementWidthExpanded, child: control);
   }
 }
 
@@ -1131,7 +981,7 @@ class _TasksPageHeaderSection extends ConsumerWidget {
   }
 }
 
-/// Watches composer shell and busy selectors to build [_QuickAddAdaptiveComposer] for [TasksQuickAddDock].
+/// Watches composer shell and busy selectors to build [_QuickAddComposerSurface] for [TasksQuickAddDock].
 class _TasksQuickAddDockBody extends ConsumerWidget {
   /// Creates a [_TasksQuickAddDockBody].
   const _TasksQuickAddDockBody({required this.session});
@@ -1158,9 +1008,9 @@ class _TasksQuickAddDockBody extends ConsumerWidget {
     final isPopoverOpen =
         !isCompact && shellState.labelPickerOpen && !shellState.hasInlineEdit;
 
-    return _QuickAddAdaptiveComposer(
+    return _QuickAddComposerSurface(
       session: session,
-      placementHint: _quickAddPlacementHint(session.placement, localizations),
+      modeHint: _quickAddPlacementHint(session.placement, localizations),
       isCompact: isCompact,
       compactComposerOpen: shellState.compactComposerOpen,
       isBusy: isBusy,

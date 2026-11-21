@@ -551,30 +551,29 @@ class _UiButtonSurface extends StatelessWidget {
       ),
     );
 
-    if (!showFocusRing) {
-      return box;
-    }
     return Stack(
+      fit: StackFit.passthrough,
       clipBehavior: Clip.none,
       children: <Widget>[
         box,
-        Positioned.fill(
-          left: -ringInset,
-          top: -ringInset,
-          right: -ringInset,
-          bottom: -ringInset,
-          child: IgnorePointer(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(radius + ringInset),
-                border: Border.all(
-                  color: tokens.colors.accent,
-                  width: tokens.focus.ringWidth,
+        if (showFocusRing)
+          Positioned.fill(
+            left: -ringInset,
+            top: -ringInset,
+            right: -ringInset,
+            bottom: -ringInset,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(radius + ringInset),
+                  border: Border.all(
+                    color: tokens.colors.accent,
+                    width: tokens.focus.ringWidth,
+                  ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }

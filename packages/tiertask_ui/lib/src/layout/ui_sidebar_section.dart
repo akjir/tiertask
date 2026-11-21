@@ -644,12 +644,13 @@ class _UiSidebarNavRowState extends State<_UiSidebarNavRow> {
       ),
     );
 
-    if (_showFocusRing) {
-      final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
-      primaryButton = Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          primaryButton,
+    final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
+    primaryButton = Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        primaryButton,
+        if (_showFocusRing)
           Positioned.fill(
             left: -ringInset,
             top: -ringInset,
@@ -669,9 +670,8 @@ class _UiSidebarNavRowState extends State<_UiSidebarNavRow> {
               ),
             ),
           ),
-        ],
-      );
-    }
+      ],
+    );
 
     final clickablePrimary = Semantics(
       button: true,

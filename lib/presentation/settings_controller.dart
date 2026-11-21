@@ -43,6 +43,24 @@ final settingsControllerProvider =
       SettingsController.new,
     );
 
+/// Distinguishes the active in-flight asynchronous operation inside [SettingsController].
+enum SettingsBusyOperation {
+  /// No asynchronous settings operation is running.
+  idle,
+
+  /// An auto-saved preference toggle or selector is persisting to `settings.json`.
+  preference,
+
+  /// Explicit WebDAV draft credentials are being validated and persisted.
+  saveWebDav,
+
+  /// WebDAV connectivity and synchronization are actively running.
+  testConnectionAndSync,
+
+  /// A local or remote `.tdf` file move, rename, select, or wipe is running.
+  storageOperation,
+}
+
 /// Immutable top status banner displayed inside the Settings view.
 @immutable
 class SettingsStatusBannerViewModel {
@@ -85,12 +103,12 @@ class SettingsController extends Notifier<SettingsViewModel> {
 
   String _activeLogFileName = '';
   String? _activeWorkspaceId;
+  SettingsBusyOperation _busyOperation = SettingsBusyOperation.idle;
   String _draftFilePath = WebDavConfig.defaultFileName;
   String _draftPassword = '';
   String _draftServerUrl = '';
   String _draftUsername = '';
   String? _filePathError;
-  bool _isBusy = false;
   bool _isWebDavDirty = false;
   String? _passwordError;
   WebDavConfig _persistedConfig = const WebDavConfig();
@@ -106,6 +124,9 @@ class SettingsController extends Notifier<SettingsViewModel> {
       _usernameError != null ||
       _passwordError != null ||
       _filePathError != null;
+
+  /// Whether any asynchronous settings save, file, wipe, or sync operation is in flight.
+  bool get _isBusy => _busyOperation != SettingsBusyOperation.idle;
 
   @override
   SettingsViewModel build() {
@@ -174,6 +195,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
     final previousConfig = _persistedConfig;
     WebDavConfig? movedConfig;
     return _runGuardedAction(
+      operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localDirectoryMovedBanner,
       action: () async {
@@ -234,6 +256,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
     final candidateConfig = previousConfig.copyWith(localFilePath: targetPath);
 
     return _runGuardedAction(
+      operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localFileRenamedBanner,
       action: () async {
@@ -270,6 +293,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
     final previousConfig = _persistedConfig;
     final candidateConfig = _buildCandidateWebDavConfig(previousConfig);
     return _runGuardedAction(
+      operation: SettingsBusyOperation.saveWebDav,
       localizations: localizations,
       successMessage: localizations.credentialsSavedBanner,
       action: () async {
@@ -308,6 +332,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
     final previousConfig = _persistedConfig;
     WebDavConfig? selectedConfig;
     return _runGuardedAction(
+      operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localFileSelectedBanner,
       action: () async {
@@ -492,6 +517,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
     }
 
     return _runGuardedAction(
+      operation: SettingsBusyOperation.testConnectionAndSync,
       localizations: localizations,
       successMessage: localizations.connectionSuccessBanner,
       action: () async {
@@ -585,6 +611,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
       createBackup: createBackup,
     );
     return _runGuardedAction(
+      operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localFileWipedBanner,
       action: () async {
@@ -624,6 +651,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
       createBackup: createBackup,
     );
     return _runGuardedAction(
+      operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.remoteFileWipedBanner,
       action: () async {
@@ -718,6 +746,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
       canTestConnectionAndSync:
           storageMode != ShellStorageMode.local && !_isBusy,
       isBusy: _isBusy,
+      busyOperation: _busyOperation,
       serverUrlError: _serverUrlError,
       usernameError: _usernameError,
       passwordError: _passwordError,
@@ -788,7 +817,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
 
   /// Resets all transient draft, busy, validation, and banner state for a newly active workspace.
   void _resetTransientState(WebDavConfig persistedConfig) {
-    _isBusy = false;
+    _busyOperation = SettingsBusyOperation.idle;
     _isWebDavDirty = false;
     _clearValidationErrors();
     _statusBanner = null;
@@ -823,6 +852,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
 
   /// Executes an asynchronous storage [action] with busy guarding, workspace liveness checks, and banner reporting.
   Future<ActionResult> _runGuardedAction({
+    required SettingsBusyOperation operation,
     required AppLocalizations localizations,
     required String successMessage,
     required Future<bool> Function() action,
@@ -830,7 +860,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
     VoidCallback? onFailure,
   }) async {
     final workspaceId = _activeWorkspaceId;
-    _isBusy = true;
+    _busyOperation = operation;
     _statusBanner = null;
     state = _buildCurrentViewModel();
     try {
@@ -838,7 +868,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
       if (!ref.mounted || _activeWorkspaceId != workspaceId) {
         return const ActionSucceeded();
       }
-      _isBusy = false;
+      _busyOperation = SettingsBusyOperation.idle;
       if (!completed) {
         state = _buildCurrentViewModel();
         return const ActionSucceeded();
@@ -856,7 +886,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
         return ActionPersistFailed(message: message);
       }
       onFailure?.call();
-      _isBusy = false;
+      _busyOperation = SettingsBusyOperation.idle;
       _statusBanner = SettingsStatusBannerViewModel(
         tone: BannerTone.danger,
         message: message,
@@ -866,18 +896,19 @@ class SettingsController extends Notifier<SettingsViewModel> {
     }
   }
 
-  /// Persists an auto-saved preference transition to [nextConfig], rolling back on failure with a danger banner.
+  /// Persists an auto-saved preference transition to [nextConfig] optimistically, rolling back on failure with a danger banner.
   Future<ActionResult> _savePreference({
     required WebDavConfig nextConfig,
     Locale? locale,
   }) async {
-    if (_isBusy) {
+    if (_isBusy || nextConfig == _persistedConfig) {
       return const ActionSucceeded();
     }
     final previousConfig = _persistedConfig;
     final workspaceId = _activeWorkspaceId;
     final localizations = _resolveLocalizations(locale);
-    _isBusy = true;
+    _persistedConfig = nextConfig;
+    _busyOperation = SettingsBusyOperation.preference;
     _statusBanner = null;
     state = _buildCurrentViewModel();
 
@@ -892,7 +923,7 @@ class SettingsController extends Notifier<SettingsViewModel> {
       if (!ref.mounted || _activeWorkspaceId != workspaceId) {
         return const ActionSucceeded();
       }
-      _isBusy = false;
+      _busyOperation = SettingsBusyOperation.idle;
       switch (result) {
         case SettingsPreferenceSaved(:final effectiveConfig):
           _persistedConfig = effectiveConfig;
@@ -902,6 +933,10 @@ class SettingsController extends Notifier<SettingsViewModel> {
           state = _buildCurrentViewModel();
           return const ActionSucceeded();
         case SettingsPreferenceSaveFailed(:final localizedMessage):
+          _persistedConfig = previousConfig;
+          if (!_isWebDavDirty) {
+            _hydrateDraftFromConfig(previousConfig);
+          }
           _statusBanner = SettingsStatusBannerViewModel(
             tone: BannerTone.danger,
             message: localizedMessage,
@@ -914,7 +949,11 @@ class SettingsController extends Notifier<SettingsViewModel> {
       if (!ref.mounted || _activeWorkspaceId != workspaceId) {
         return ActionPersistFailed(message: message);
       }
-      _isBusy = false;
+      _persistedConfig = previousConfig;
+      if (!_isWebDavDirty) {
+        _hydrateDraftFromConfig(previousConfig);
+      }
+      _busyOperation = SettingsBusyOperation.idle;
       _statusBanner = SettingsStatusBannerViewModel(
         tone: BannerTone.danger,
         message: message,
@@ -1028,6 +1067,7 @@ class SettingsViewModel {
     required this.isWebDavConfigured,
     required this.canTestConnectionAndSync,
     required this.isBusy,
+    this.busyOperation = SettingsBusyOperation.idle,
     this.serverUrlError,
     this.usernameError,
     this.passwordError,
@@ -1039,6 +1079,9 @@ class SettingsViewModel {
 
   /// Live dated diagnostic log filename (`tiertask_<date>_<platform>_<workspace>.log`).
   final String activeLogFileName;
+
+  /// Active asynchronous operation currently executing inside [SettingsController].
+  final SettingsBusyOperation busyOperation;
 
   /// Whether WebDAV connection testing and synchronization is currently actionable.
   final bool canTestConnectionAndSync;
@@ -1139,6 +1182,10 @@ class SettingsViewModel {
   /// Display name of the currently active workspace.
   final String workspaceName;
 
+  /// Whether auto-saved preference controls should visually disable (true only for non-preference blocking actions).
+  bool get isPreferenceControlDisabled =>
+      isBusy && busyOperation != SettingsBusyOperation.preference;
+
   /// Returns a copy of this [SettingsViewModel] with selectively updated fields.
   SettingsViewModel copyWith({
     String? workspaceName,
@@ -1170,6 +1217,7 @@ class SettingsViewModel {
     bool? isWebDavConfigured,
     bool? canTestConnectionAndSync,
     bool? isBusy,
+    SettingsBusyOperation? busyOperation,
     String? serverUrlError,
     bool clearServerUrlError = false,
     String? usernameError,
@@ -1215,6 +1263,7 @@ class SettingsViewModel {
       canTestConnectionAndSync:
           canTestConnectionAndSync ?? this.canTestConnectionAndSync,
       isBusy: isBusy ?? this.isBusy,
+      busyOperation: busyOperation ?? this.busyOperation,
       serverUrlError: clearServerUrlError
           ? null
           : (serverUrlError ?? this.serverUrlError),
@@ -1266,6 +1315,7 @@ class SettingsViewModel {
         other.isWebDavConfigured == isWebDavConfigured &&
         other.canTestConnectionAndSync == canTestConnectionAndSync &&
         other.isBusy == isBusy &&
+        other.busyOperation == busyOperation &&
         other.serverUrlError == serverUrlError &&
         other.usernameError == usernameError &&
         other.passwordError == passwordError &&
@@ -1304,6 +1354,7 @@ class SettingsViewModel {
     isWebDavConfigured,
     canTestConnectionAndSync,
     isBusy,
+    busyOperation,
     serverUrlError,
     usernameError,
     passwordError,

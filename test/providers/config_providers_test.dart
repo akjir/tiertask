@@ -553,6 +553,59 @@ void main() {
         }
       }
     });
+
+    test('WebDavConfigNotifier updates preferences synchronously without dropping through AsyncLoading', () async {
+      final settingsRepository = InMemorySettingsRepository(
+        const WebDavConfig(
+          language: AppLanguage.english,
+          themePalette: AppThemePalette.calm,
+          themeMode: AppThemeMode.light,
+          storageMode: StorageMode.both,
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+          localFilePath: 'tasks.tdf',
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+
+      final emissions = <AsyncValue<WebDavConfig>>[];
+      final subscription = container.listen<AsyncValue<WebDavConfig>>(
+        webDavConfigProvider,
+        (_, next) => emissions.add(next),
+      );
+      addTearDown(subscription.close);
+
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateThemePalette(AppThemePalette.plumUmber);
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateThemeMode(AppThemeMode.dark);
+      await container
+          .read(webDavConfigProvider.notifier)
+          .updateLanguage(AppLanguage.german);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        emissions.any((state) => state is AsyncLoading<WebDavConfig>),
+        isFalse,
+        reason: 'Preference updates must never drop webDavConfigProvider through AsyncLoading (asData == null)',
+      );
+      final current = container.read(webDavConfigProvider).requireValue;
+      expect(current.themePalette, equals(AppThemePalette.plumUmber));
+      expect(current.themeMode, equals(AppThemeMode.dark));
+      expect(current.language, equals(AppLanguage.german));
+    });
   });
 }
 

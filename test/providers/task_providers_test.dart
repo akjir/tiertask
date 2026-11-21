@@ -3531,6 +3531,156 @@ void main() {
       );
       expect(container.read(syncStateProvider).errorMessage, isNotNull);
     });
+
+    test('non-storage preference updates do not rebuild TaskNotifier, trigger sync, or fire spurious lead-window re-evaluations', () async {
+      AppLogger.resetForTesting();
+      addTearDown(AppLogger.resetForTesting);
+
+      final currentTime = DateTime.utc(2026, 11, 21, 12, 0);
+      const initialConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        serverUrl: 'https://cloud.example.com',
+        username: 'alice',
+        password: 'secret',
+        filePath: 'tasks.tdf',
+        localFilePath: 'tasks.tdf',
+        language: AppLanguage.english,
+        themeMode: AppThemeMode.light,
+        themePalette: AppThemePalette.calm,
+        locationEnabled: false,
+        timeZoneMode: AppTimeZoneMode.manual,
+        manualTimeZoneOffsetMinutes: 0,
+        diagnosticsEnabled: true,
+        logLevel: LogLevel.debug,
+        logStorageMode: StorageMode.local,
+        localWatchEnabled: true,
+        dueLeadWindow: DueLeadWindow.hours24,
+      );
+      final settingsRepo = InMemorySettingsRepository(initialConfig);
+      final seedBoard = TaskBoard.empty().addTask(
+        'Anchored Task',
+        id: 'anchor0001',
+        currentDate: currentTime,
+      );
+      final seedTdf = const TdfService().serialize(seedBoard);
+      final localFiles = <String, String>{'tasks.tdf': seedTdf};
+      final remoteFiles = <String, String>{
+        initialConfig.resolveEndpointUri()!.path: seedTdf,
+      };
+      var remoteFetchCount = 0;
+      var localReadCount = 0;
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          clockProvider.overrideWithValue(() => currentTime),
+          localFileRepositoryProvider.overrideWith(
+            (ref) => _GateableWatchLocalRepository(
+              config: resolveCurrentConfig(ref),
+              maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+              getStore: () => localFiles['tasks.tdf'] ?? '',
+              setStore: (value) => localFiles['tasks.tdf'] = value,
+              onReadTdfWithDigest: () async {
+                localReadCount++;
+              },
+            ),
+          ),
+          webDavRepositoryProvider.overrideWith(
+            (ref) => _GatedCountingWebDavRepository(
+              config: resolveCurrentConfig(ref),
+              remoteFiles: remoteFiles,
+              onFetch: () async {
+                remoteFetchCount++;
+              },
+              onSave: () {},
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+      await container.read(taskNotifierProvider.future);
+
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
+      AppLogger.clear();
+
+      var sawTaskLoading = false;
+      final sub = container.listen<AsyncValue<TaskBoard>>(
+        taskNotifierProvider,
+        (_, next) {
+          if (next is AsyncLoading<TaskBoard>) {
+            sawTaskLoading = true;
+          }
+        },
+      );
+      addTearDown(sub.close);
+
+      final baselineRemoteFetches = remoteFetchCount;
+      final baselineLocalReads = localReadCount;
+      final configNotifier = container.read(webDavConfigProvider.notifier);
+
+      await configNotifier.updateThemePalette(AppThemePalette.plumUmber);
+      await configNotifier.updateThemeMode(AppThemeMode.dark);
+      await configNotifier.updateLanguage(AppLanguage.german);
+      await configNotifier.updateLocationEnabled(true);
+      await configNotifier.updateTimeZoneMode(AppTimeZoneMode.automatic);
+      await configNotifier.updateManualTimeZoneOffsetMinutes(120);
+      await configNotifier.updateLogLevel(LogLevel.info);
+      await configNotifier.updateLocalWatchEnabled(false);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        sawTaskLoading,
+        isFalse,
+        reason: 'Non-storage preference updates must not emit AsyncLoading on taskNotifierProvider',
+      );
+      expect(
+        remoteFetchCount,
+        equals(baselineRemoteFetches),
+        reason:
+            'Non-storage preference updates must trigger zero WebDAV fetches',
+      );
+      expect(
+        localReadCount,
+        equals(baselineLocalReads),
+        reason: 'Non-storage preference updates must trigger zero local TDF reloads',
+      );
+      expect(
+        AppLogger.fullLogText,
+        isNot(contains('domain.lead_window.reevaluated')),
+        reason: 'Unchanged dueLeadWindow must not trigger spurious domain.lead_window.reevaluated',
+      );
+
+      // Storage-binding changes must still rebuild TaskNotifier and re-sync.
+      await configNotifier.updateStorageMode(StorageMode.local);
+      await Future<void>.delayed(Duration.zero);
+      await container.read(taskNotifierProvider.future);
+      expect(
+        sawTaskLoading,
+        isTrue,
+        reason: 'Changing storageMode must rebuild TaskNotifier through AsyncLoading',
+      );
+      await configNotifier.updateStorageMode(StorageMode.both);
+      await Future<void>.delayed(Duration.zero);
+      await container.read(taskNotifierProvider.future);
+      expect(
+        remoteFetchCount,
+        greaterThan(baselineRemoteFetches),
+        reason:
+            'Re-enabling WebDAV storageMode must trigger a remote sync fetch',
+      );
+      expect(
+        localReadCount,
+        greaterThan(baselineLocalReads),
+        reason: 'Re-enabling both storageMode must reload local TDF storage',
+      );
+    });
   });
 }
 

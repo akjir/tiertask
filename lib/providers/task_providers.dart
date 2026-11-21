@@ -98,11 +98,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _lastFailedWatchDigest = null;
     _lastSelfWipeDigest = null;
     state = const AsyncLoading();
-    final selectedConfig = await ref.watch(
+    final storageBinding = await ref.watch(
       webDavConfigProvider.selectAsync(
-        (value) => value.copyWith(
-          localWatchEnabled: true,
-          dueLeadWindow: DueLeadWindow.hours24,
+        (value) => (
+          filePath: value.filePath,
+          localFilePath: value.localFilePath,
+          password: value.password,
+          serverUrl: value.serverUrl,
+          storageMode: value.storageMode,
+          username: value.username,
         ),
       ),
     );
@@ -110,7 +114,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       activeWorkspaceProvider.select((value) => value.asData?.value.id),
     );
     final config =
-        ref.read(webDavConfigProvider).asData?.value ?? selectedConfig;
+        ref.read(webDavConfigProvider).asData?.value ??
+        WebDavConfig(
+          filePath: storageBinding.filePath,
+          localFilePath: storageBinding.localFilePath,
+          password: storageBinding.password,
+          serverUrl: storageBinding.serverUrl,
+          storageMode: storageBinding.storageMode,
+          username: storageBinding.username,
+        );
     _syncUndoWorkspaceId(activeWorkspaceId);
     if (!config.hasActiveStorage) {
       return TaskBoard.empty();
@@ -1621,7 +1633,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DueLeadWindow? previous,
     DueLeadWindow? next,
   ) {
-    if (next == null || previous == next) {
+    if (previous == null || next == null || previous == next) {
       return;
     }
     if (ref.read(activeWorkspaceProvider).asData?.value.id !=

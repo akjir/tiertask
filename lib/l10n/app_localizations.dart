@@ -284,11 +284,11 @@ abstract class AppLocalizations {
   /// **'Remove subtask'**
   String get tooltipRemoveSubtask;
 
-  /// Placeholder hint inside the quick-add text field for the selected tier.
+  /// Placeholder text for the Quick-Add task title input
   ///
   /// In en, this message translates to:
-  /// **'Add new task to {heading}...'**
-  String quickAddHint(String heading);
+  /// **'New task...'**
+  String get quickAddHint;
 
   /// Button label to add a new task.
   ///
