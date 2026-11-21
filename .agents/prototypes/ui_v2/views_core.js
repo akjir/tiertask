@@ -3287,6 +3287,8 @@
   function renderManagerView(kind, state, workspace, evalRes) {
     const lang = state.lang;
     const isLabels = kind === 'labels';
+    const hasDraft =
+      state.entityDraft?.kind === (isLabels ? 'label' : 'location');
     const items = [
       ...(isLabels ? workspace.labels : workspace.locations),
     ].sort((a, b) => a.name.localeCompare(b.name));
@@ -3304,7 +3306,12 @@
         <span class="limit">${items.length}</span>
       </div>
 
-      <form class="quick-create-card" data-form="quick-create-${kind}">
+      ${
+        hasDraft
+          ? isLabels
+            ? renderLabelDraftCard(state)
+            : renderLocationDraftCard(state)
+          : `<form class="quick-create-card" data-form="quick-create-${kind}">
         <input name="name" placeholder="${escapeHtml(t(lang, isLabels ? 'placeholderQuickLabel' : 'placeholderQuickLocation'))}" autocomplete="off" maxlength="120" required>
         <div class="quick-create-actions">
           <button type="button" class="text-button" data-quick-create-expand="${kind}">
@@ -3314,9 +3321,8 @@
             ${renderIcon('plus', 'icon-sm')}<span>${escapeHtml(t(lang, 'actionAdd'))}</span>
           </button>
         </div>
-      </form>
-
-      ${isLabels ? renderLabelDraftCard(state) : renderLocationDraftCard(state)}
+      </form>`
+      }
 
       <div class="tasks">
         ${

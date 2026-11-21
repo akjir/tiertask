@@ -441,7 +441,8 @@
       state.view === 'tasks' &&
       !state.searchOpen &&
       state.simState !== 'file_read_full' &&
-      state.simState !== 'loading'
+      state.simState !== 'loading' &&
+      state.entityDraft?.kind !== 'task'
     );
   }
 
@@ -951,6 +952,36 @@
     } else {
       state.showUndoAction = false;
     }
+  }
+
+  function announceCreatedTask(ws, task) {
+    const lang = state.lang;
+    const evalRes = evaluateBoard(ws, evalContext());
+    const targetTier = evalRes.tierOfTask.get(task.id);
+    if (targetTier === undefined) {
+      const scopedLbl = ws.labels.find(
+        (lbl) => lbl.scoped && task.labels.includes(lbl.id),
+      );
+      setNotice(
+        scopedLbl
+          ? t(lang, 'msgTaskMovedScoped', { label: scopedLbl.name })
+          : t(lang, 'msgSavedTask'),
+      );
+      return;
+    }
+    if (
+      state.view === 'tasks' &&
+      !state.searchOpen &&
+      targetTier !== state.tier
+    ) {
+      setNotice(
+        t(lang, 'msgTaskMovedTier', {
+          tier: tierName(lang, targetTier),
+        }),
+      );
+      return;
+    }
+    setNotice(t(lang, 'msgSavedTask'));
   }
 
   function saveLabelInlineEdit(ws, edit, nowIso) {
@@ -1674,24 +1705,7 @@
 
       state.entityDraft = null;
       state.entityDraftLabelPicker = null;
-      const evalRes = evaluateBoard(ws, evalContext());
-      const targetTier = evalRes.tierOfTask.get(newTask.id);
-      if (targetTier !== undefined) {
-        state.tier = targetTier;
-        state.expandedEntity = { kind: 'task', id: newTask.id };
-        state.justExpandedKey = `task:${newTask.id}`;
-        state.scrollToEntityKey = `task:${newTask.id}`;
-        setNotice(t(lang, 'msgSavedTask'));
-      } else {
-        const scopedLbl = ws.labels.find(
-          (lbl) => lbl.scoped && newTask.labels.includes(lbl.id),
-        );
-        setNotice(
-          scopedLbl
-            ? t(lang, 'msgTaskMovedScoped', { label: scopedLbl.name })
-            : t(lang, 'msgSavedTask'),
-        );
-      }
+      announceCreatedTask(ws, newTask);
       logEvent('info', 'domain', 'task.draft_created', { id: newTask.id });
       render();
       return;
@@ -1848,7 +1862,7 @@
     };
     state.draftLabelPicker = null;
     state.mobileQuickAddOpen = false;
-    setNotice(t(lang, 'msgSavedTask'));
+    announceCreatedTask(ws, newTask);
     logEvent('info', 'domain', 'task.quick_added', { id: newTask.id, mode });
     render();
   }
