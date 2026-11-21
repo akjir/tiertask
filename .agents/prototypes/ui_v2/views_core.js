@@ -1307,9 +1307,40 @@
         );
       }
 
+      if (task.note) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
+        );
+      }
+
+      if (task.links?.length) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, task.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: task.links.length }))}</button>`,
+        );
+      }
+
+      if (task.subtasks?.length) {
+        const doneCount = task.subtasks.filter((s) => s.done).length;
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-xs')}${escapeHtml(t(lang, 'badgeSteps', { done: doneCount, total: task.subtasks.length }))}</button>`,
+        );
+      }
+
+      if (task.history?.length) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('history', 'icon-xs')}${escapeHtml(t(lang, 'badgeHistory', { count: task.history.length }))}</button>`,
+        );
+      }
+
       if (task.priority && !isCompleted) {
         badges.push(
           `<button type="button" class="meta-pill is-interactive tone-accent" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('zap', 'icon-xs')}${escapeHtml(t(lang, 'badgePriority'))}</button>`,
+        );
+      }
+
+      if (task.repeat) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('repeat', 'icon-xs')}${escapeHtml(formatRepeatSummary(task, lang))}</button>`,
         );
       }
 
@@ -1334,37 +1365,6 @@
       if (condEval && condEval.rules.length > 0) {
         badges.push(
           `<button type="button" class="meta-pill is-interactive ${condEval.satisfied ? '' : 'tone-warning'}" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('sliders', 'icon-xs')}${escapeHtml(t(lang, 'badgeConditions'))}</button>`,
-        );
-      }
-
-      if (task.repeat) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('repeat', 'icon-xs')}${escapeHtml(formatRepeatSummary(task, lang))}</button>`,
-        );
-      }
-
-      if (task.subtasks?.length) {
-        const doneCount = task.subtasks.filter((s) => s.done).length;
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-xs')}${escapeHtml(t(lang, 'badgeSteps', { done: doneCount, total: task.subtasks.length }))}</button>`,
-        );
-      }
-
-      if (task.note) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
-        );
-      }
-
-      if (task.links?.length) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, task.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: task.links.length }))}</button>`,
-        );
-      }
-
-      if (task.history?.length) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('history', 'icon-xs')}${escapeHtml(t(lang, 'badgeHistory', { count: task.history.length }))}</button>`,
         );
       }
 
