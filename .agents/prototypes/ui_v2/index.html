@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="de" data-theme="calm" data-mode="light">
+<html lang="en" data-theme="calm" data-mode="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,31 +9,60 @@
 </head>
 <body>
   <div id="tt2">
-    <div class="preview" role="toolbar" aria-label="Vorschau-Einstellungen">
-      <span class="preview-group-label">Ansicht</span>
+    <div class="preview" role="toolbar" aria-label="Preview Controls">
+      <span class="preview-group-label" data-preview-label="view">View</span>
       <button type="button" data-device="desktop" aria-pressed="true">Desktop</button>
-      <button type="button" data-device="mobile" aria-pressed="false">Mobil</button>
+      <button type="button" data-device="mobile" aria-pressed="false">Mobile</button>
 
       <span class="preview-divider" aria-hidden="true"></span>
 
-      <span class="preview-group-label">Theme</span>
+      <span class="preview-group-label" data-preview-label="theme">Theme</span>
       <button type="button" data-theme-preset="calm" aria-pressed="true">Calm</button>
       <button type="button" data-theme-preset="plum-umber" aria-pressed="false">Plum Umber</button>
 
       <span class="preview-divider" aria-hidden="true"></span>
 
-      <span class="preview-group-label">Modus</span>
-      <button type="button" data-color-mode="light" aria-pressed="true">Hell</button>
-      <button type="button" data-color-mode="dark" aria-pressed="false">Dunkel</button>
+      <span class="preview-group-label" data-preview-label="mode">Mode</span>
+      <button type="button" data-color-mode="light" aria-pressed="false">Light</button>
+      <button type="button" data-color-mode="dark" aria-pressed="true">Dark</button>
 
-      <span class="preview-note">Prototyp · Offline Blueprint für packages/tiertask_ui</span>
+      <span class="preview-divider" aria-hidden="true"></span>
+
+      <span class="preview-group-label" data-preview-label="lang">Language</span>
+      <button type="button" data-lang="de" aria-pressed="false">DE</button>
+      <button type="button" data-lang="en" aria-pressed="true">EN</button>
+
+      <span class="preview-divider" aria-hidden="true"></span>
+
+      <label class="preview-sim-label">
+        <span data-preview-label="sim">Simulator</span>
+        <select data-sim-state aria-label="State Simulator">
+          <option value="normal">Normal (Synced)</option>
+          <option value="syncing">Syncing ...</option>
+          <option value="sync_error">Sync Error (Network)</option>
+          <option value="file_read_banner">File Read Banner (Local Corrupt, Remote OK)</option>
+          <option value="file_read_full">Full-Screen File Read Error (Local &amp; Remote)</option>
+          <option value="conflict_deletion">Deletion Conflict (TDF-DEL-003)</option>
+          <option value="conflict_recovery">Recovery Required (TDF-REC-002)</option>
+          <option value="generation_rollback">Generation Rollback Blocked</option>
+          <option value="settings_backup">Notice: Settings Recovered from Backup</option>
+          <option value="settings_quarantine">Notice: Settings Reset After Quarantine</option>
+        </select>
+      </label>
+
+      <span class="preview-note">TDF 0.8.0 Blueprint · packages/tiertask_ui</span>
     </div>
 
     <div class="stage">
-      <div class="app" aria-label="TierTask mit Labels, Orten und Schnelleingabe"></div>
+      <div class="app" aria-label="TierTask Adaptive Application Prototype"></div>
     </div>
   </div>
 
+  <script src="icons.js"></script>
+  <script src="i18n.js"></script>
+  <script src="tdf_engine.js"></script>
+  <script src="views_core.js"></script>
+  <script src="views_secondary.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

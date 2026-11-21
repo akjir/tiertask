@@ -7,6 +7,7 @@
 :root {
   /* Typography */
   --font-sans: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
   --font-size-page-title: 28px;
   --font-size-brand: 18px;
   --font-size-card-title: 15px;
@@ -24,11 +25,11 @@
   --space-6: 24px;
   --touch-target: 40px;
   --touch-target-mobile: 44px;
-  --sidebar-width: 220px;
-  --chrome-height: 66px;
+  --sidebar-width: 244px;
+  --chrome-height: 62px;
 
   /* Radii & Borders */
-  --radius-tag: 5px;
+  --radius-tag: 6px;
   --radius-sm: 7px;
   --radius-md: 8px;
   --radius-row: 11px;
@@ -55,8 +56,15 @@
   --soft: #e0eff7;
   --on-accent: #ffffff;
   --danger: #a12a2a;
-  --danger-border: #b94242;
-  --scrim: rgba(0, 0, 0, 0.44);
+  --danger-bg: #fdecec;
+  --danger-border: #d99b9b;
+  --warning: #8a4b00;
+  --warning-bg: #fff3df;
+  --warning-border: #dfb87a;
+  --success: #17633b;
+  --success-bg: #e6f5ec;
+  --success-border: #9bd1b2;
+  --scrim: rgba(16, 28, 36, 0.46);
 }
 
 :root[data-theme="calm"][data-mode="dark"] {
@@ -71,8 +79,15 @@
   --soft: #1c4255;
   --on-accent: #132a36;
   --danger: #ffc0c0;
-  --danger-border: #ebaaaa;
-  --scrim: rgba(0, 0, 0, 0.56);
+  --danger-bg: #472529;
+  --danger-border: #8d4b52;
+  --warning: #f5c26b;
+  --warning-bg: #3b2f1d;
+  --warning-border: #785b2c;
+  --success: #8be0ad;
+  --success-bg: #1a3b2c;
+  --success-border: #387556;
+  --scrim: rgba(7, 13, 17, 0.62);
 }
 
 /* --------------------------------------------------------------------------
@@ -90,8 +105,15 @@
   --soft: #f0e7f8;
   --on-accent: #ffffff;
   --danger: #a12a2a;
-  --danger-border: #b94242;
-  --scrim: rgba(24, 16, 15, 0.46);
+  --danger-bg: #fcebeb;
+  --danger-border: #d99b9b;
+  --warning: #8a4b00;
+  --warning-bg: #fdf1df;
+  --warning-border: #dfb87a;
+  --success: #17633b;
+  --success-bg: #e6f4ec;
+  --success-border: #9bd1b2;
+  --scrim: rgba(24, 16, 15, 0.48);
 }
 
 :root[data-theme="plum-umber"][data-mode="dark"] {
@@ -106,6 +128,13 @@
   --soft: #362945;
   --on-accent: #1e1429;
   --danger: #ffb8b8;
-  --danger-border: #ebaaaa;
-  --scrim: rgba(12, 8, 8, 0.6);
+  --danger-bg: #4a2326;
+  --danger-border: #8d494e;
+  --warning: #f5c26b;
+  --warning-bg: #3e2e1d;
+  --warning-border: #7a5c2c;
+  --success: #8be0ad;
+  --success-bg: #1d3a2a;
+  --success-border: #3b7454;
+  --scrim: rgba(12, 8, 8, 0.64);
 }
