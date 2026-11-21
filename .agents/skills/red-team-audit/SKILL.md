@@ -17,7 +17,7 @@ Audit **every file in an isolated context window**:
 3. **Full Project (`/red` or `/red all`):** Enumerate all hand-written `.dart` files under `lib/` (excluding `lib/l10n/app_localizations*.dart`) and dispatch one `research` subagent per file in waves (wait for each wave to finish before starting the next):
    - **Wave 1 (Models, Services, L10n):** `lib/models/*`, `lib/services/*`, `lib/l10n/tier_localization_extension.dart`
    - **Wave 2 (Repositories & Providers):** `lib/repositories/*`, `lib/providers/*`
-   - **Wave 3 (Entry & UI):** `lib/main.dart`, `lib/ui/**`
+   - **Wave 3 (Entry & UI):** `lib/main.dart`, `lib/presentation/**`, `lib/ui/**`, `lib/ui_v2/**`, `packages/tiertask_ui/lib/**` (as present)
 
 ## 2. Five-Pillar Audit (Per-File Subagent Instructions)
 Assume the assigned `.dart` file is flawed. Check every pillar strictly against `AGENTS.md`:
@@ -43,7 +43,7 @@ Assume the assigned `.dart` file is flawed. Check every pillar strictly against 
 ### 2.4 Readability & Layout
 1. **7-Part Layout & Member Order (`P-LICENSE-HEADER`, `P-DIRECTIVES-ORDER`, `P-CLASS-COHESION`, `AGENTS.md` Section 2):** GPL-3.0 header + blank line, `///` doc, 3-group alphabetized imports, alphabetized constants/providers, cohesive types with strict member order, alphabetized top-level functions, `dart format` + trailing commas.
 2. **Flatness & Modularity (`P-VERTICAL-CLARITY`, `P-FILE-SIZE`, `P-FLAT-CONTROL-FLOW`, `P-FLATTEN-BUILD`, `P-NO-NESTED-LOOPS`, `P-LOOP-MODULARITY`, `P-FUNCTIONAL-COMBINATORS`):** Nested loops; multi-arm `switch`/deep `if/else` in loops; indentation $> 3$; loop bodies $\ge 25$L; `build()`/dispatchers $\ge 40$L; helper methods returning `Widget` instead of `StatelessWidget` classes; dense combinator chains; forbidden `part`/`part of`/`export`. Never flag file line counts or `_private` method counts.
-3. **Naming & Docs (`P-NO-ABBREV-VARS`, `P-FN-DOCS`, `P-LANG-RULES`):** Abbreviated variables; ambiguous `bool` params instead of enums/sealed types; missing `///` on production items or redundant `///` on `test()` blocks; non-English/emoji/filler prose.
+3. **Naming, Docs & UI Design System (`P-NO-ABBREV-VARS`, `P-FN-DOCS`, `P-LANG-RULES`, `P-UI-DESIGN-SYSTEM`):** Abbreviated variables; ambiguous `bool` params instead of enums/sealed types; missing `///` on production items or redundant `///` on `test()` blocks; non-English/emoji/filler prose; in `packages/tiertask_ui/`, `lib/ui_v2/`, or redesigned `lib/ui/`, violations of `spec/UI_DESIGN_SYSTEM.md` (hardcoded colors bypassing `UiThemeTokens`, unapproved drop shadows, missing `1px` focus-visible rings or accessible labels, broken `720`/`820` breakpoints, floating notices overlapping bottom docks, sliding switches, or bespoke one-off widgets bypassing the shared 17-widget catalog).
 
 ### 2.5 Code Efficiency
 1. **Dead Code & Ignores (`P-NO-DEAD-CODE`, `P-NO-IGNORE`):** Unused symbols/params/imports or `// ignore:` / `// ignore_for_file:`.

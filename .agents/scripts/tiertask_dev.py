@@ -504,7 +504,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
     md_targets: list[Path] = []
     spec_dir = root / "spec"
     if spec_dir.exists():
-        md_targets.extend(sorted(spec_dir.glob("TDF_SPEC*.md")))
+        md_targets.extend(sorted(spec_dir.glob("*.md")))
     md_targets.extend([root / "TDF_SPEC.md", root / "ARCHITECTURE.md"])
     for md in md_targets:
         if not md.exists():

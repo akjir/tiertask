@@ -225,6 +225,11 @@ tiertask/
         spec_matches = tiertask_dev.find_in_repo(self.root, "Scope")
         self.assertTrue(any("spec/TDF_SPEC_0.6.0.md" in m for m in spec_matches))
 
+        ui_spec = self.root / "spec" / "UI_DESIGN_SYSTEM.md"
+        ui_spec.write_text("# UI Design System\n\n## 2. Surface Hierarchy\n", encoding="utf-8")
+        ui_spec_matches = tiertask_dev.find_in_repo(self.root, "Surface Hierarchy", layer="spec")
+        self.assertTrue(any("spec/UI_DESIGN_SYSTEM.md" in m for m in ui_spec_matches))
+
     def test_deps_computes_transitive_reverse_dependencies(self) -> None:
         info = tiertask_dev.compute_dependencies(self.root, "lib/models/sample_model.dart")
         self.assertIn("lib/ui/sample_screen.dart", info["reverse_lib"])

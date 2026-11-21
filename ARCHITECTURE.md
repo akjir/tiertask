@@ -39,6 +39,7 @@ tiertask/
 ├── linux/
 ├── spec/
 │   ├── TDF_SPEC_0.8.0.md
+│   ├── UI_DESIGN_SYSTEM.md
 │   └── conformance/
 ├── windows/
 ├── lib/
@@ -245,6 +246,7 @@ tiertask/
 | `l10n.yaml` | Flutter `gen-l10n` configuration pointing to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`. |
 | `pubspec.yaml` | Package metadata and dependencies (`flutter`, `flutter_localizations`, `flutter_riverpod`, `flutter_secure_storage`, `intl`, `material_ui`). |
 | `spec/TDF_SPEC_0.8.0.md` | Normative standalone specification for the TierTask Data Format (`.tdf`) `0.8.0` lexical grammar, blocks, directives, schedule anchors, 6-tier derivation pipeline, mutations, multi-stage sync, host locking, and error bounds. |
+| `spec/UI_DESIGN_SYSTEM.md` | Normative UI design system and interaction specification (`P-UI-DESIGN-SYSTEM`) codifying tokens, WCAG AA presets, surface hierarchy, breakpoints, 17-widget catalog contracts, expandable entity cards, workflows, keyboard shortcuts, and accessibility rules. |
 
 ## Localization
 

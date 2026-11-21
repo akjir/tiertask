@@ -1,6 +1,6 @@
 ---
 name: update-documentation
-description: Maintains README.md, ARCHITECTURE.md, AGENTS.md, and spec/TDF_SPEC_0.8.0.md. Activate when editing docs or when platforms, tiers, TDF schemas, sync flows, architecture, or requirements change.
+description: Maintains README.md, ARCHITECTURE.md, AGENTS.md, spec/TDF_SPEC_0.8.0.md, and spec/UI_DESIGN_SYSTEM.md. Activate when editing docs or when platforms, tiers, TDF schemas, UI design guidelines, sync flows, architecture, or requirements change.
 ---
 
 # Updating Documentation
@@ -8,6 +8,7 @@ description: Maintains README.md, ARCHITECTURE.md, AGENTS.md, and spec/TDF_SPEC_
 ## 1. Single Source of Truth Boundaries
 - **`README.md` (Entry Point):** Keep `< 130` lines. Update ONLY for top-level features, supported platforms (`Linux`, `Android`, `Windows`), tier definitions, `.tdf` overview, requirements, build/install commands, or doc links. Never copy Dart class/method inventories, `lib/` paths, widget keys, full TDF grammar/error tables, or test matrices into `README.md`.
 - **`spec/TDF_SPEC_0.8.0.md` (Format Spec):** Authoritative standalone `.tdf` format, grammar, bounds, 6-tier derivation, mutation, and sync spec. Never add Dart/Flutter paths or `AGENTS.md` rule IDs (see **`tdf-spec-workflow`**).
+- **`spec/UI_DESIGN_SYSTEM.md` (UI Design System Spec):** Authoritative visual tokens, surface hierarchy, breakpoints, 17-widget catalog contract, expandable entity cards, interaction flows, keyboard shortcuts, and accessibility guidelines (`P-UI-DESIGN-SYSTEM`, **`ui-design-system`**). Keep synchronized whenever UI tokens, component contracts, or UX guidelines evolve.
 - **`ARCHITECTURE.md` (Architecture & Inventory):** Authoritative layer table, DAG/UDF note, directory tree, public per-file responsibilities, and end-to-end execution/sync flow.
 - **`AGENTS.md` (Agent Rules):** Authoritative engineering, TDD, layout, logging, and testing (`P-*`, `M-*`) rules. Keep well below `24,000` bytes (per-file rule cap) so Antigravity never truncates always-on rules.
 

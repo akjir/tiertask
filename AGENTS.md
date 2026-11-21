@@ -1,7 +1,7 @@
 # TierTask AI Agent Rules
 
 > [!IMPORTANT]
-> Update this file, [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`spec/TDF_SPEC_0.8.0.md`](spec/TDF_SPEC_0.8.0.md) when the architecture, directory structure, file names, or TierTask Data Format (`TDF`) schema change. Keep this file well below the `24,000`-byte per-file rule limit so no rules truncate.
+> Update this file, [`ARCHITECTURE.md`](ARCHITECTURE.md), [`spec/TDF_SPEC_0.8.0.md`](spec/TDF_SPEC_0.8.0.md), and [`spec/UI_DESIGN_SYSTEM.md`](spec/UI_DESIGN_SYSTEM.md) when the architecture, directory structure, file names, TierTask Data Format (`TDF`) schema, or UI design guidelines change. Keep this file well below the `24,000`-byte per-file rule limit so no rules truncate.
 
 ## 1. Core Principles, Scope & Workflow
 - **Test-Driven Development (`P-TDD-FIRST`):** Develop every feature, domain rule, parser routine, notifier, repository method, widget, and bug fix with strict Red-Green-Refactor TDD:
@@ -66,6 +66,7 @@ Place core logic in `snake_case.dart` leaf files named after their primary class
   - Enforce strict TLS validation (never bypass via `badCertificateCallback`), reject non-HTTP(S) schemes and URL userinfo, keep Android `usesCleartextTraffic="false"` and `allowBackup="false"`, avoid `runtimeType.toString()` branching, and build releases with `--obfuscate --split-debug-info=<dir>`.
 - **Exhaustiveness & Rebuild Scoping (`P-EXHAUSTIVE-SWITCH`, `P-MASK-SAFE`, `P-SELECT-REBUILDS`):** Use exhaustive Dart 3 `switch` over `enum`/`sealed class` without redundant `default:`. Replace chained booleans (`isLoading`, `isError`, `isSuccess`) with one `enum`/`sealed class`. Scope `ref.watch` via `.select(...)` and localize `StatefulWidget` state to leaf widgets.
 - **Flat Flow & Widget Modularity (`P-FLAT-CONTROL-FLOW`, `P-FLATTEN-BUILD`):** Keep business logic indentation $\le 3$ levels using pattern matching and early guards (`return`/`continue`/`break`). Keep `build()` and action dispatchers $< 40$ lines; extract UI subtrees into private `StatelessWidget`/`ConsumerWidget` classes rather than helper methods returning `Widget`.
+- **UI Design System (`P-UI-DESIGN-SYSTEM`):** All work on `packages/tiertask_ui/`, `lib/ui_v2/`, redesigned `lib/ui/`, themes, or UI proposals (`TEP-015` Phases 2–4) MUST activate the **`ui-design-system`** skill and enforce [`spec/UI_DESIGN_SYSTEM.md`](spec/UI_DESIGN_SYSTEM.md) (flat `1px` borders, surface alternation, WCAG AA `>= 4.5:1` `Calm`/`Plum Umber` tokens, 17-widget reuse cap, breakpoints `<=720 / 721..820 / >820`, docked composer/actions decoupled from floating notices, inline active-label filter, unified single-expand entity cards, non-jumping task creation, `1px` focus rings, keyboard/a11y parity).
 - **Analyzer & Resource Disposal (`P-NO-IGNORE`, `P-DISPOSE-RESOURCES`):** Never use `// ignore:` or `// ignore_for_file:`. Dispose every `TextEditingController`, `FocusNode`, `ScrollController`, `AnimationController`, `StreamSubscription`, and `HttpClient`; check `if (!mounted) return;` before using `BuildContext` or `setState` across `await`.
 
 ## 4. Memory, Parsing & Performance
@@ -88,8 +89,8 @@ Place core logic in `snake_case.dart` leaf files named after their primary class
 - **Parallel Subagent Isolation (`P-SUBAGENT-ISOLATION`):** Partition concurrent write subagents into strictly disjoint file `Write Set`s. Subagents run only `flutter analyze --no-pub` and `flutter test --no-pub --no-test-assets <assigned_tests>`; run `tiertask_dev.py arch --sync-tree` and `verify --full --fix` once at the wave barrier.
 - **Skills & Proposals:**
   - **`tep` (`.agents/skills/tep/SKILL.md`):** Create a TEP in `.agents/proposals/` ONLY on explicit `/tep` or user confirmation; never for minor UI tweaks or bug fixes. Proactively recommend a TEP for high-complexity/cross-layer changes or any `spec/TDF_SPEC_0.8.0.md` change (during `/plan`, still write the full plan and add a `> [!IMPORTANT]` TEP recommendation).
-  - **`spec-verification-loop` (`/verify-spec <path>`, `/tep <path>`):** Run for auditing or finalizing specs (`spec/TDF_SPEC_0.8.0.md`, `ARCHITECTURE.md`, `README.md`) and TEPs.
-  - **`tiertask-dev-workflow`, `tdf-spec-workflow`, `update-documentation`, `changelog-updater`:** Follow for TDD cycles, TDF changes, doc sync, and user-facing `CHANGELOG.md` updates (never modify `CHANGELOG.md` when fixing unreleased code).
+  - **`spec-verification-loop` (`/verify-spec <path>`, `/tep <path>`):** Run for auditing or finalizing specs (`spec/TDF_SPEC_0.8.0.md`, `spec/UI_DESIGN_SYSTEM.md`, `ARCHITECTURE.md`, `README.md`) and TEPs.
+  - **`tiertask-dev-workflow`, `tdf-spec-workflow`, `ui-design-system`, `update-documentation`, `changelog-updater`:** Follow for TDD cycles, TDF changes, UI design-system compliance (`spec/UI_DESIGN_SYSTEM.md`), doc sync, and user-facing `CHANGELOG.md` updates (never modify `CHANGELOG.md` when fixing unreleased code).
 - **CLI Automation (`python3 .agents/scripts/tiertask_dev.py`):** Use `outline`, `find <q1> [...]`, `deps`, `l10n`, `arch`, `scaffold`, `log [path] [--level] [--tag] [--event] [--summary]`, and `verify --fast --fix` / `--full --fix` (format, static `AGENTS.md`/`P-ACYCLIC-DAG`/`l10n`/`arch` checks, `flutter analyze`, `flutter test`).
 
 ## 6. Diagnostic Logging & Instrumentation Policy
