@@ -27,6 +27,7 @@ import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/presentation/app_shell_controller.dart';
 import 'package:tiertask/presentation/ui_v2_shell_models.dart';
 import 'package:tiertask/providers/sync_providers.dart';
+import 'package:tiertask/repositories/window_control_repository.dart';
 import 'package:tiertask/ui_v2/tier_task_shell_screen.dart';
 import 'package:tiertask_ui/tiertask_ui.dart';
 
@@ -483,6 +484,114 @@ void main() {
         );
         expect(drawerWorkspace.leadingIcon, equals(Icons.grid_view_outlined));
         expect(drawerWorkspace.trailingIcon, equals(Icons.unfold_more_rounded));
+      },
+    );
+
+    testWidgets(
+      'shows desktop close button beside sync and handles chrome drag/maximize on desktop, while omitting both on Android',
+      (tester) async {
+        final fakeWindowControls = FakeWindowControlRepository();
+
+        // Desktop expanded and compact widths both show close button beside sync.
+        for (final size in const <Size>[Size(1280, 860), Size(390, 844)]) {
+          await pumpV2Widget(
+            tester,
+            const TierTaskShellScreen(),
+            board: createSampleBoard(),
+            config: const WebDavConfig(
+              language: AppLanguage.english,
+              storageMode: StorageMode.both,
+              serverUrl: 'https://cloud.example.com',
+              username: 'alice',
+              password: 'secret',
+            ),
+            supportsDesktopWindowControls: true,
+            windowControlRepository: fakeWindowControls,
+            surfaceSize: size,
+          );
+
+          final syncFinder = find.byKey(
+            const ValueKey<String>('chrome_sync_button'),
+          );
+          final closeFinder = find.byKey(
+            const ValueKey<String>('chrome_close_window_button'),
+          );
+          expect(
+            closeFinder,
+            findsOneWidget,
+            reason:
+                'Desktop size $size must show the window close button in top chrome',
+          );
+          expect(
+            tester.getTopLeft(closeFinder).dx,
+            greaterThan(tester.getTopRight(syncFinder).dx),
+            reason:
+                'Desktop size $size must place window close button strictly to the right of sync button',
+          );
+          final closeButton = tester.widget<UiButton>(closeFinder);
+          expect(closeButton.variant, equals(UiButtonVariant.icon));
+          expect(closeButton.density, equals(UiButtonDensity.standard));
+          expect(closeButton.leadingIcon, equals(Icons.close_rounded));
+          expect(closeButton.isDangerHover, isTrue);
+          expect(closeButton.tooltip, equals('Close TierTask'));
+        }
+
+        // Desktop interactions: tap close, drag empty chrome, double-tap empty chrome.
+        await pumpV2Widget(
+          tester,
+          const TierTaskShellScreen(),
+          board: createSampleBoard(),
+          config: const WebDavConfig(language: AppLanguage.german),
+          locale: const Locale('de'),
+          supportsDesktopWindowControls: true,
+          windowControlRepository: fakeWindowControls,
+          surfaceSize: const Size(1280, 860),
+        );
+        expect(
+          find.byTooltip('TierTask schließen'),
+          findsOneWidget,
+          reason: 'German locale must localize desktop close button tooltip',
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('chrome_close_window_button')),
+        );
+        await tester.pump();
+        expect(fakeWindowControls.closeWindowCount, equals(1));
+
+        const emptyChromeCenter = Offset(640, 31);
+        await tester.dragFrom(emptyChromeCenter, const Offset(36, 10));
+        await tester.pumpAndSettle();
+        expect(fakeWindowControls.startDraggingCount, equals(1));
+
+        await tester.tapAt(emptyChromeCenter);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tapAt(emptyChromeCenter);
+        await tester.pumpAndSettle();
+        expect(fakeWindowControls.toggleMaximizeCount, equals(1));
+
+        // Android hides close button and chrome drag region at both phone and tablet sizes.
+        for (final size in const <Size>[Size(390, 844), Size(1280, 860)]) {
+          await pumpV2Widget(
+            tester,
+            const TierTaskShellScreen(),
+            board: createSampleBoard(),
+            supportsDesktopWindowControls: false,
+            windowControlRepository: fakeWindowControls,
+            surfaceSize: size,
+          );
+          expect(
+            find.byKey(const ValueKey<String>('chrome_close_window_button')),
+            findsNothing,
+            reason:
+                'Android size $size must omit the desktop window close button',
+          );
+          expect(
+            find.byKey(const ValueKey<String>('ui_top_chrome_drag_region')),
+            findsNothing,
+            reason: 'Android size $size must omit desktop chrome drag gestures',
+          );
+        }
       },
     );
   });

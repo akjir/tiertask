@@ -100,6 +100,7 @@ final boardChromeViewModelProvider = Provider<BoardChromeViewModel>((ref) {
     syncState: syncState,
   );
   final syncStatusLabel = _formatSyncStatusLabel(syncStatusKind, localizations);
+  final showWindowControls = ref.watch(supportsDesktopWindowControlsProvider);
 
   return BoardChromeViewModel(
     isDevBuild: buildProfile.isDev,
@@ -108,6 +109,7 @@ final boardChromeViewModelProvider = Provider<BoardChromeViewModel>((ref) {
     locationEnabled: locationEnabled,
     locationStatusKind: _mapLocationStatus(locationStatus),
     locationTooltip: localizations.tooltipLocationStatus,
+    showWindowControls: showWindowControls,
     syncStatusKind: syncStatusKind,
     syncStatusLabel: syncStatusLabel,
     hasWebDav: storageMode.usesWebDav,
@@ -625,6 +627,7 @@ class BoardChromeViewModel {
     required this.locationEnabled,
     required this.locationStatusKind,
     required this.locationTooltip,
+    required this.showWindowControls,
     required this.syncStatusKind,
     required this.syncStatusLabel,
     required this.hasWebDav,
@@ -660,6 +663,9 @@ class BoardChromeViewModel {
   /// Localized tooltip for the chrome Location Status button.
   final String locationTooltip;
 
+  /// Whether custom frameless desktop window controls and chrome drag/maximize actions are enabled (`true` on Linux/Windows, `false` on Android).
+  final bool showWindowControls;
+
   /// Current synchronization status category.
   final ShellSyncStatusKind syncStatusKind;
 
@@ -679,6 +685,7 @@ class BoardChromeViewModel {
         other.locationEnabled == locationEnabled &&
         other.locationStatusKind == locationStatusKind &&
         other.locationTooltip == locationTooltip &&
+        other.showWindowControls == showWindowControls &&
         other.syncStatusKind == syncStatusKind &&
         other.syncStatusLabel == syncStatusLabel &&
         other.hasWebDav == hasWebDav &&
@@ -695,6 +702,7 @@ class BoardChromeViewModel {
     locationEnabled,
     locationStatusKind,
     locationTooltip,
+    showWindowControls,
     syncStatusKind,
     syncStatusLabel,
     hasWebDav,

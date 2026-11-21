@@ -3026,5 +3026,9 @@
         "type": "String"
       }
     }
+  },
+  "tooltipCloseApp": "Close TierTask",
+  "@tooltipCloseApp": {
+    "description": "Tooltip for the desktop top chrome window close button"
   }
 }

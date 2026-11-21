@@ -2,9 +2,6 @@
 
 #include <flutter_linux/flutter_linux.h>
 #include <gio/gio.h>
-#ifdef GDK_WINDOWING_X11
-#include <gdk/gdkx.h>
-#endif
 
 #include "flutter/generated_plugin_registrant.h"
 #include "generated_version.h"
@@ -16,7 +13,13 @@ struct _MyApplication {
   FlMethodChannel* directory_picker_channel;
   FlMethodChannel* link_launcher_channel;
   FlMethodChannel* location_channel;
+  FlMethodChannel* window_controls_channel;
+  GtkGesture* window_press_gesture;
   GtkWindow* main_window;
+  gint last_button_press_x_root;
+  gint last_button_press_y_root;
+  guint32 last_button_press_time;
+  gboolean has_last_button_press;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -397,6 +400,157 @@ static void on_location_method_call(FlMethodChannel* channel,
   fl_method_call_respond(method_call, response, nullptr);
 }
 
+// Resolves the resize edge when (x, y) lies inside the frameless border strip.
+static gboolean hit_test_resize_edge(GtkWindow* window,
+                                     gdouble x,
+                                     gdouble y,
+                                     GdkWindowEdge* out_edge) {
+  constexpr gdouble kResizeBorder = 5.0;
+  constexpr gdouble kCornerSize = 12.0;
+
+  const gint width = gtk_widget_get_allocated_width(GTK_WIDGET(window));
+  const gint height = gtk_widget_get_allocated_height(GTK_WIDGET(window));
+  if (width <= 0 || height <= 0) {
+    return FALSE;
+  }
+
+  const gboolean near_left = x < kResizeBorder;
+  const gboolean near_right = x >= width - kResizeBorder;
+  const gboolean near_top = y < kResizeBorder;
+  const gboolean near_bottom = y >= height - kResizeBorder;
+  if (!near_left && !near_right && !near_top && !near_bottom) {
+    return FALSE;
+  }
+
+  const gboolean corner_left = x < kCornerSize;
+  const gboolean corner_right = x >= width - kCornerSize;
+  const gboolean corner_top = y < kCornerSize;
+  const gboolean corner_bottom = y >= height - kCornerSize;
+
+  if ((near_top && corner_left) || (near_left && corner_top)) {
+    *out_edge = GDK_WINDOW_EDGE_NORTH_WEST;
+  } else if ((near_top && corner_right) || (near_right && corner_top)) {
+    *out_edge = GDK_WINDOW_EDGE_NORTH_EAST;
+  } else if ((near_bottom && corner_left) || (near_left && corner_bottom)) {
+    *out_edge = GDK_WINDOW_EDGE_SOUTH_WEST;
+  } else if ((near_bottom && corner_right) || (near_right && corner_bottom)) {
+    *out_edge = GDK_WINDOW_EDGE_SOUTH_EAST;
+  } else if (near_top) {
+    *out_edge = GDK_WINDOW_EDGE_NORTH;
+  } else if (near_bottom) {
+    *out_edge = GDK_WINDOW_EDGE_SOUTH;
+  } else if (near_left) {
+    *out_edge = GDK_WINDOW_EDGE_WEST;
+  } else {
+    *out_edge = GDK_WINDOW_EDGE_EAST;
+  }
+  return TRUE;
+}
+
+// Captures primary pointer presses on the toplevel window before FlView to
+// record the Wayland/X11 event timestamp and handle frameless edge resizing.
+static void on_window_gesture_pressed(GtkGestureMultiPress* gesture,
+                                      gint n_press,
+                                      gdouble x,
+                                      gdouble y,
+                                      gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  GdkEvent* event = gtk_get_current_event();
+  if (event == nullptr) {
+    return;
+  }
+
+  if (event->type == GDK_BUTTON_PRESS) {
+    const GdkEventButton* button_event = &event->button;
+    self->last_button_press_x_root = static_cast<gint>(button_event->x_root);
+    self->last_button_press_y_root = static_cast<gint>(button_event->y_root);
+    self->last_button_press_time = button_event->time;
+    self->has_last_button_press = TRUE;
+
+    if (n_press == 1 && button_event->button == GDK_BUTTON_PRIMARY &&
+        self->main_window != nullptr &&
+        !gtk_window_is_maximized(self->main_window)) {
+      GdkWindow* gdk_window =
+          gtk_widget_get_window(GTK_WIDGET(self->main_window));
+      const gboolean is_fullscreen =
+          gdk_window != nullptr &&
+          (gdk_window_get_state(gdk_window) & GDK_WINDOW_STATE_FULLSCREEN) != 0;
+      GdkWindowEdge edge = GDK_WINDOW_EDGE_EAST;
+      if (!is_fullscreen &&
+          hit_test_resize_edge(self->main_window, x, y, &edge)) {
+        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+        gtk_window_begin_resize_drag(
+            self->main_window, edge, static_cast<gint>(button_event->button),
+            static_cast<gint>(button_event->x_root),
+            static_cast<gint>(button_event->y_root), button_event->time);
+      }
+    }
+  }
+  gdk_event_free(event);
+}
+
+// Handles custom desktop chrome commands on de.akjir.tiertask/window_controls.
+static void on_window_controls_method_call(FlMethodChannel* channel,
+                                           FlMethodCall* method_call,
+                                           gpointer user_data) {
+  (void)channel;
+  MyApplication* self = MY_APPLICATION(user_data);
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+
+  if (g_strcmp0(method, "closeWindow") == 0) {
+    if (self->main_window != nullptr) {
+      gtk_window_close(self->main_window);
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(self->main_window != nullptr);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else if (g_strcmp0(method, "startDragging") == 0) {
+    gboolean started = FALSE;
+    if (self->main_window != nullptr) {
+      GdkWindow* gdk_window =
+          gtk_widget_get_window(GTK_WIDGET(self->main_window));
+      GdkDisplay* display =
+          gdk_window != nullptr ? gdk_window_get_display(gdk_window) : nullptr;
+      GdkSeat* seat =
+          display != nullptr ? gdk_display_get_default_seat(display) : nullptr;
+      GdkDevice* pointer =
+          seat != nullptr ? gdk_seat_get_pointer(seat) : nullptr;
+      if (gdk_window != nullptr && pointer != nullptr) {
+        GdkModifierType modifiers = static_cast<GdkModifierType>(0);
+        gdk_window_get_device_position(gdk_window, pointer, nullptr, nullptr,
+                                       &modifiers);
+        if ((modifiers & GDK_BUTTON1_MASK) != 0) {
+          gint root_x = self->last_button_press_x_root;
+          gint root_y = self->last_button_press_y_root;
+          gdk_device_get_position(pointer, nullptr, &root_x, &root_y);
+          const guint32 timestamp = self->has_last_button_press
+                                        ? self->last_button_press_time
+                                        : GDK_CURRENT_TIME;
+          gtk_window_begin_move_drag(self->main_window, GDK_BUTTON_PRIMARY,
+                                     root_x, root_y, timestamp);
+          started = TRUE;
+        }
+      }
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(started);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else if (g_strcmp0(method, "toggleMaximize") == 0) {
+    if (self->main_window != nullptr) {
+      if (gtk_window_is_maximized(self->main_window)) {
+        gtk_window_unmaximize(self->main_window);
+      } else {
+        gtk_window_maximize(self->main_window);
+      }
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(self->main_window != nullptr);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
 // Locates Flutter 3.50's Wayland subsurface renderer widget inside FlView.
 static GtkWidget* find_subsurface_renderer(FlView* view) {
   if (view == nullptr || !GTK_IS_CONTAINER(view)) {
@@ -468,6 +622,14 @@ static void on_wayland_scale_factor_notify(GObject* object,
   sync_wayland_subsurface_scale(FL_VIEW(user_data));
 }
 
+// Clears main_window if GTK destroys the toplevel before GObject::dispose.
+static void on_main_window_destroy(GtkWidget* widget, gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (GTK_WIDGET(self->main_window) == widget) {
+    self->main_window = nullptr;
+  }
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   (void)self;
@@ -481,30 +643,10 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
-#ifdef GDK_WINDOWING_X11
-  GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
-    const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
-  }
-#endif
-  if (use_header_bar) {
-    GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
-    gtk_widget_show(GTK_WIDGET(header_bar));
-    gtk_header_bar_set_title(header_bar, "TierTask");
-    gtk_header_bar_set_show_close_button(header_bar, TRUE);
-    gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  }
+  // Disable native GTK/WM decorations so TierTask renders its own frameless
+  // desktop chrome bar with drag, double-click maximize, and close controls.
+  gtk_window_set_decorated(window, FALSE);
+  gtk_window_set_resizable(window, TRUE);
   gtk_window_set_title(window, "TierTask");
 
   g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
@@ -552,6 +694,16 @@ static void my_application_activate(GApplication* application) {
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   self->main_window = window;
+  g_signal_connect(window, "destroy", G_CALLBACK(on_main_window_destroy), self);
+  g_clear_object(&self->window_press_gesture);
+  self->window_press_gesture = gtk_gesture_multi_press_new(GTK_WIDGET(window));
+  gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(self->window_press_gesture),
+                                GDK_BUTTON_PRIMARY);
+  gtk_event_controller_set_propagation_phase(
+      GTK_EVENT_CONTROLLER(self->window_press_gesture), GTK_PHASE_CAPTURE);
+  g_signal_connect(self->window_press_gesture, "pressed",
+                   G_CALLBACK(on_window_gesture_pressed), self);
+
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   FlBinaryMessenger* messenger =
       fl_engine_get_binary_messenger(fl_view_get_engine(view));
@@ -572,6 +724,11 @@ static void my_application_activate(GApplication* application) {
       messenger, "de.akjir.tiertask/location", FL_METHOD_CODEC(codec));
   fl_method_channel_set_method_call_handler(
       self->location_channel, on_location_method_call, self, nullptr);
+  self->window_controls_channel = fl_method_channel_new(
+      messenger, "de.akjir.tiertask/window_controls", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(
+      self->window_controls_channel, on_window_controls_method_call, self,
+      nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -622,6 +779,8 @@ static void my_application_dispose(GObject* object) {
   g_clear_object(&self->directory_picker_channel);
   g_clear_object(&self->link_launcher_channel);
   g_clear_object(&self->location_channel);
+  g_clear_object(&self->window_controls_channel);
+  g_clear_object(&self->window_press_gesture);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }

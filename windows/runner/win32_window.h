@@ -84,8 +84,20 @@ class Win32Window {
                                   WPARAM const wparam,
                                   LPARAM const lparam) noexcept;
 
+  // Subclass proc on |child_content_| allowing top-edge frameless resize hits
+  // to pass through to the parent top-level window.
+  static LRESULT CALLBACK ChildContentSubclassProc(HWND hwnd,
+                                                   UINT message,
+                                                   WPARAM wparam,
+                                                   LPARAM lparam,
+                                                   UINT_PTR subclass_id,
+                                                   DWORD_PTR ref_data);
+
   // Retrieves a class instance pointer for |window|
   static Win32Window* GetThisFromHandle(HWND const window) noexcept;
+
+  // Returns the DPI-scaled top resize border height in physical pixels.
+  int GetTopResizeBorderHeight() const;
 
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);

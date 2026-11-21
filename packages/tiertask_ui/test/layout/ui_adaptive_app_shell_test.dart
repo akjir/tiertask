@@ -325,5 +325,114 @@ void main() {
         expect(find.text('DEV'), findsNothing);
       },
     );
+
+    testWidgets(
+      'supports desktop chrome drag and double-tap on empty chrome area without delaying interactive buttons',
+      (tester) async {
+        var dragCount = 0;
+        var doubleTapCount = 0;
+        var syncTapCount = 0;
+        var closeTapCount = 0;
+
+        await pumpUiWidget(
+          tester,
+          UiAdaptiveAppShell(
+            brand: const Text('TierTask'),
+            workspaceTrigger: const Text('Work'),
+            trailingActions: <Widget>[
+              UiButton(
+                key: const ValueKey<String>('test_sync_button'),
+                label: 'Synced',
+                variant: UiButtonVariant.secondary,
+                density: UiButtonDensity.chrome,
+                onPressed: () => syncTapCount++,
+              ),
+              UiButton(
+                key: const ValueKey<String>('test_close_button'),
+                leadingIcon: Icons.close_rounded,
+                variant: UiButtonVariant.icon,
+                density: UiButtonDensity.standard,
+                isDangerHover: true,
+                tooltip: 'Close TierTask',
+                onPressed: () => closeTapCount++,
+              ),
+            ],
+            onChromeDragStart: () => dragCount++,
+            onChromeDoubleTap: () => doubleTapCount++,
+            sidebarBody: const SizedBox.shrink(),
+            body: const Text('Main'),
+          ),
+          surfaceSize: const Size(1280, 800),
+          wrapInScaffold: false,
+        );
+
+        final dragRegionFinder = find.byKey(
+          const ValueKey<String>('ui_top_chrome_drag_region'),
+        );
+        expect(dragRegionFinder, findsOneWidget);
+
+        // Single-tapping interactive buttons fires immediately without waiting for double-tap timeout.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('test_sync_button')),
+        );
+        await tester.pump();
+        expect(
+          syncTapCount,
+          equals(1),
+          reason: 'Sync button tap must fire immediately on single pump',
+        );
+        await tester.tap(
+          find.byKey(const ValueKey<String>('test_close_button')),
+        );
+        await tester.pump();
+        expect(
+          closeTapCount,
+          equals(1),
+          reason: 'Close button tap must fire immediately on single pump',
+        );
+        expect(dragCount, equals(0));
+        expect(doubleTapCount, equals(0));
+
+        // Dragging empty top-bar spacer starts native window move.
+        const emptyChromeCenter = Offset(640, 31);
+        await tester.dragFrom(emptyChromeCenter, const Offset(40, 12));
+        await tester.pumpAndSettle();
+        expect(
+          dragCount,
+          equals(1),
+          reason:
+              'Dragging empty top chrome space must invoke onChromeDragStart',
+        );
+        expect(doubleTapCount, equals(0));
+
+        // Double-tapping empty top-bar spacer toggles maximize/restore.
+        await tester.tapAt(emptyChromeCenter);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tapAt(emptyChromeCenter);
+        await tester.pumpAndSettle();
+        expect(
+          doubleTapCount,
+          equals(1),
+          reason: 'Double-tapping empty top chrome space must invoke onChromeDoubleTap',
+        );
+
+        // Omitting desktop callbacks omits the drag region completely (e.g. Android).
+        await pumpUiWidget(
+          tester,
+          const UiAdaptiveAppShell(
+            brand: Text('TierTask'),
+            sidebarBody: SizedBox.shrink(),
+            body: Text('Main'),
+          ),
+          surfaceSize: const Size(1280, 800),
+          wrapInScaffold: false,
+        );
+        expect(
+          dragRegionFinder,
+          findsNothing,
+          reason: 'Top chrome drag region must not mount when drag/double-tap callbacks are absent',
+        );
+      },
+    );
   });
 }

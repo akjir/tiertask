@@ -2204,4 +2204,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String versionFooterLabel(String version) {
     return 'Version $version';
   }
+
+  @override
+  String get tooltipCloseApp => 'Close TierTask';
 }

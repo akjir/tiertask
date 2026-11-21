@@ -46,6 +46,10 @@ class FlutterWindow : public Win32Window {
   // Channel for querying the Windows Location API.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       location_channel_;
+
+  // Channel for custom desktop window drag, maximize, and close commands.
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      window_controls_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

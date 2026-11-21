@@ -27,6 +27,7 @@ import '../repositories/app_version_repository.dart';
 import '../repositories/link_launcher_repository.dart';
 import '../repositories/local_file_repository.dart';
 import '../repositories/webdav_repository.dart';
+import '../repositories/window_control_repository.dart';
 import '../services/app_logger.dart';
 import '../services/tdf_service.dart';
 import 'workspace_providers.dart';
@@ -188,6 +189,12 @@ final localStorageDirectoryPathProvider = Provider<String?>((ref) {
   return null;
 });
 
+/// Whether the host platform uses custom desktop window chrome (`true` on Linux and Windows, `false` on Android).
+final supportsDesktopWindowControlsProvider = Provider<bool>((ref) {
+  return defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.windows;
+});
+
 /// Whether the host platform supports changing the local `.tdf` directory via a native picker (`true` on Linux and Windows, `false` on Android).
 final supportsDirectoryPickerProvider = Provider<bool>((ref) {
   return defaultTargetPlatform == TargetPlatform.linux ||
@@ -210,6 +217,13 @@ final webDavConfigProvider =
 final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
   final config = resolveCurrentConfig(ref);
   return WebDavRepository(config: config);
+});
+
+/// Provides the [WindowControlRepository] driving frameless desktop window commands.
+final windowControlRepositoryProvider = Provider<WindowControlRepository>((
+  ref,
+) {
+  return const PlatformWindowControlRepository();
 });
 
 /// Monotonic state notifier backing [boundaryTickProvider].

@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Changed the application layout to an adaptive desktop sidebar and compact mobile drawer shell with docked action bars.
+- Changed desktop windows on Linux and Windows to borderless custom chrome with draggable top-bar controls and a close button beside the sync control.
 - Changed task, label, and location management to unified expandable cards with inline section editing and live updates.
 - Changed built-in color palettes from Slate and Navy to Calm (default) and Plum Umber in Light and Dark modes, migrating saved palettes automatically.
 - Changed the development build indicator from a corner banner ribbon to an inline pill in the top bar.

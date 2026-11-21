@@ -36,6 +36,8 @@ class UiAdaptiveAppShell extends StatelessWidget {
     this.isSearchOpen = false,
     this.trailingActions = const <Widget>[],
     this.isDrawerOpen = false,
+    this.onChromeDragStart,
+    this.onChromeDoubleTap,
     this.onToggleDrawer,
     this.menuOpenTooltip,
     this.menuCloseTooltip,
@@ -75,6 +77,12 @@ class UiAdaptiveAppShell extends StatelessWidget {
 
   /// Optional compact-only clickable active-label chip replacing [brand] when `!isSearchOpen`.
   final Widget? mobileActiveFilter;
+
+  /// Optional callback invoked when the user double-taps empty top chrome space (e.g. desktop maximize/restore).
+  final VoidCallback? onChromeDoubleTap;
+
+  /// Optional callback invoked when the user begins dragging empty top chrome space (e.g. desktop window move).
+  final VoidCallback? onChromeDragStart;
 
   /// Callback toggling the compact slide-over drawer.
   final VoidCallback? onToggleDrawer;
@@ -127,6 +135,8 @@ class UiAdaptiveAppShell extends StatelessWidget {
                 isSearchOpen: isSearchOpen,
                 trailingActions: trailingActions,
                 isDrawerOpen: isDrawerOpen,
+                onChromeDragStart: onChromeDragStart,
+                onChromeDoubleTap: onChromeDoubleTap,
                 onToggleDrawer: onToggleDrawer,
                 menuOpenTooltip: menuOpenTooltip,
                 menuCloseTooltip: menuCloseTooltip,
@@ -168,6 +178,8 @@ class _UiTopChromeBar extends StatelessWidget {
     required this.isSearchOpen,
     required this.trailingActions,
     required this.isDrawerOpen,
+    required this.onChromeDragStart,
+    required this.onChromeDoubleTap,
     required this.onToggleDrawer,
     required this.menuOpenTooltip,
     required this.menuCloseTooltip,
@@ -194,6 +206,12 @@ class _UiTopChromeBar extends StatelessWidget {
   /// Compact active-label replacement for [brand].
   final Widget? mobileActiveFilter;
 
+  /// Optional callback invoked when double-tapping empty top chrome space.
+  final VoidCallback? onChromeDoubleTap;
+
+  /// Optional callback invoked when dragging empty top chrome space.
+  final VoidCallback? onChromeDragStart;
+
   /// Drawer toggle callback.
   final VoidCallback? onToggleDrawer;
 
@@ -214,10 +232,10 @@ class _UiTopChromeBar extends StatelessWidget {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
     final isCompact = viewport == UiViewportClass.compact;
+    final hasWindowGestures =
+        onChromeDragStart != null || onChromeDoubleTap != null;
 
-    return Container(
-      constraints: BoxConstraints(minHeight: tokens.spacing.chromeHeight),
-      padding: tokens.spacing.chromePadding(viewport),
+    return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.panel,
         border: Border(
@@ -227,7 +245,27 @@ class _UiTopChromeBar extends StatelessWidget {
           ),
         ),
       ),
-      child: isCompact ? _buildCompactRow(tokens) : _buildDesktopRow(tokens),
+      child: Stack(
+        alignment: Alignment.centerLeft,
+        children: <Widget>[
+          if (hasWindowGestures)
+            Positioned.fill(
+              child: _UiChromeDragLayer(
+                onDragStart: onChromeDragStart,
+                onDoubleTap: onChromeDoubleTap,
+              ),
+            ),
+          ConstrainedBox(
+            constraints: BoxConstraints(minHeight: tokens.spacing.chromeHeight),
+            child: Padding(
+              padding: tokens.spacing.chromePadding(viewport),
+              child: isCompact
+                  ? _buildCompactRow(tokens)
+                  : _buildDesktopRow(tokens),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -303,6 +341,32 @@ class _UiTopChromeBar extends StatelessWidget {
           action,
         ],
       ],
+    );
+  }
+}
+
+/// Full-bleed background gesture surface capturing empty-bar drags and double-taps behind interactive controls.
+class _UiChromeDragLayer extends StatelessWidget {
+  /// Creates a [_UiChromeDragLayer].
+  const _UiChromeDragLayer({
+    required this.onDragStart,
+    required this.onDoubleTap,
+  });
+
+  /// Callback invoked on double-tap of empty top chrome space.
+  final VoidCallback? onDoubleTap;
+
+  /// Callback invoked when dragging starts on empty top chrome space.
+  final VoidCallback? onDragStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final startDrag = onDragStart;
+    return GestureDetector(
+      key: const ValueKey<String>('ui_top_chrome_drag_region'),
+      behavior: HitTestBehavior.opaque,
+      onPanStart: startDrag == null ? null : (_) => startDrag(),
+      onDoubleTap: onDoubleTap,
     );
   }
 }

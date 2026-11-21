@@ -472,6 +472,48 @@ bool FlutterWindow::OnCreate() {
         }
       });
 
+  window_controls_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "de.akjir.tiertask/window_controls",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_controls_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto& method = call.method_name();
+        HWND hwnd = GetHandle();
+        if (method == "closeWindow") {
+          if (hwnd != nullptr) {
+            PostMessage(hwnd, WM_CLOSE, 0, 0);
+          }
+          result->Success(flutter::EncodableValue(hwnd != nullptr));
+        } else if (method == "startDragging") {
+          if (hwnd != nullptr) {
+            const int primary_button =
+                GetSystemMetrics(SM_SWAPBUTTON) != 0 ? VK_RBUTTON : VK_LBUTTON;
+            if ((GetAsyncKeyState(primary_button) & 0x8000) != 0) {
+              POINT cursor{};
+              GetCursorPos(&cursor);
+              result->Success(flutter::EncodableValue(true));
+              ReleaseCapture();
+              PostMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION,
+                          MAKELPARAM(static_cast<WORD>(cursor.x),
+                                     static_cast<WORD>(cursor.y)));
+              return;
+            }
+          }
+          result->Success(flutter::EncodableValue(false));
+        } else if (method == "toggleMaximize") {
+          if (hwnd != nullptr) {
+            ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+          }
+          result->Success(flutter::EncodableValue(hwnd != nullptr));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -489,6 +531,7 @@ void FlutterWindow::OnDestroy() {
   directory_picker_channel_ = nullptr;
   link_launcher_channel_ = nullptr;
   location_channel_ = nullptr;
+  window_controls_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

@@ -17,6 +17,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -130,21 +131,32 @@ void main() {
       }
     });
 
-    test('Linux, Windows, and Android platform runners and manifests display TierTask as the taskbar and window title', () {
+    test('Linux, Windows, and Android platform runners and manifests display TierTask as the taskbar and window title and configure frameless desktop chrome', () {
       final linuxRunner = File('linux/runner/my_application.cc')
           .readAsStringSync();
-      expect(
-        linuxRunner,
-        contains('gtk_header_bar_set_title(header_bar, "TierTask");'),
-      );
+      expect(linuxRunner, contains('gtk_window_set_decorated(window, FALSE);'));
+      expect(linuxRunner, isNot(contains('gtk_header_bar_new')));
       expect(
         linuxRunner,
         contains('gtk_window_set_title(window, "TierTask");'),
       );
       expect(linuxRunner, contains('g_set_application_name("TierTask");'));
+      expect(linuxRunner, contains('"de.akjir.tiertask/window_controls"'));
 
       final windowsMain = File('windows/runner/main.cpp').readAsStringSync();
       expect(windowsMain, contains('window.Create(L"TierTask", origin, size)'));
+
+      final windowsWindow = File('windows/runner/win32_window.cpp')
+          .readAsStringSync();
+      expect(windowsWindow, contains('case WM_NCCALCSIZE:'));
+      expect(windowsWindow, contains('DwmExtendFrameIntoClientArea'));
+
+      final windowsFlutterWindow = File('windows/runner/flutter_window.cpp')
+          .readAsStringSync();
+      expect(
+        windowsFlutterWindow,
+        contains('"de.akjir.tiertask/window_controls"'),
+      );
 
       final windowsResource = File('windows/runner/Runner.rc')
           .readAsStringSync();
@@ -516,6 +528,30 @@ void main() {
         isTrue,
         reason: 'Moved file must be rolled back to conflictPath when workspace validation fails',
       );
+    });
+
+    test('supportsDesktopWindowControlsProvider is true on Linux and Windows and false on Android', () {
+      const cases = <(TargetPlatform, bool)>[
+        (TargetPlatform.linux, true),
+        (TargetPlatform.windows, true),
+        (TargetPlatform.android, false),
+      ];
+
+      for (final (platform, expected) in cases) {
+        debugDefaultTargetPlatformOverride = platform;
+        final container = ProviderContainer();
+        try {
+          expect(
+            container.read(supportsDesktopWindowControlsProvider),
+            equals(expected),
+            reason:
+                'Platform $platform desktop window controls support must be $expected',
+          );
+        } finally {
+          container.dispose();
+          debugDefaultTargetPlatformOverride = null;
+        }
+      }
     });
   });
 }

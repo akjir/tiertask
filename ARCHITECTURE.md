@@ -97,6 +97,7 @@ tiertask/
 │   │   ├── task_v2_controller.dart
 │   │   ├── ui_telemetry.dart
 │   │   ├── ui_v2_shell_models.dart
+│   │   ├── window_control_controller.dart
 │   │   └── workspace_v2_controller.dart
 │   ├── providers/
 │   │   ├── config_providers.dart
@@ -113,7 +114,8 @@ tiertask/
 │   │   ├── local_file_repository.dart
 │   │   ├── location_repository.dart
 │   │   ├── settings_repository.dart
-│   │   └── webdav_repository.dart
+│   │   ├── webdav_repository.dart
+│   │   └── window_control_repository.dart
 │   ├── services/
 │   │   ├── app_logger.dart
 │   │   ├── base64_service.dart
@@ -285,6 +287,7 @@ tiertask/
     │   ├── task_info_controller_test.dart
     │   ├── task_v2_controller_test.dart
     │   ├── ui_telemetry_test.dart
+    │   ├── window_control_controller_test.dart
     │   └── workspace_v2_controller_test.dart
     ├── providers/
     │   ├── config_providers_test.dart
@@ -299,7 +302,8 @@ tiertask/
     │   ├── local_file_repository_test.dart
     │   ├── location_repository_test.dart
     │   ├── settings_repository_test.dart
-    │   └── webdav_repository_test.dart
+    │   ├── webdav_repository_test.dart
+    │   └── window_control_repository_test.dart
     ├── services/
     │   ├── app_logger_test.dart
     │   ├── base64_service_test.dart
@@ -427,12 +431,13 @@ tiertask/
 | `lib/repositories/location_repository.dart` | Abstract `LocationRepository`, `PlatformLocationRepository`, and `FakeLocationRepository` isolating native `de.akjir.tiertask/location` `MethodChannel` queries, 100-meter Haversine displacement-gated HTTPS reverse geocoding, bounded Nominatim forward geocoding (`searchLocations`), and 30-minute cached HTTPS GeoIP desktop fallback. |
 | `lib/repositories/settings_repository.dart` | Abstract `SettingsRepository`, `SecureSettingsRepository` (split host-local `settings.json` with `HostFileLockManager` locking, atomic writes, `.bak` rotation, quarantine, Android `Context.filesDir` resolution, deprecated one-time `TTW\x02` migration, and per-workspace `FlutterSecureStorage` WebDAV passwords and `TTS\x04` sync baselines), and `InMemorySettingsRepository`. |
 | `lib/repositories/webdav_repository.dart` | Native `dart:io` `HttpClient` WebDAV repository (`WebDavRepository`, `WebDavErrorKind`, `WebDavException`) executing authenticated conditional HTTP `GET` (`fetchTdf` with `If-None-Match`, `If-Modified-Since`, and `304 Not Modified` handling), conditional `PUT` (`saveTdf` with strong `ETag` `If-Match` and tri-state `_cachedExists` `If-None-Match: *` initial-creation preconditions plus `412 Precondition Failed` cache invalidation, and `saveLog`), `DELETE` (`deleteLog`), and remote file wipe/re-initialization (`wipeTdf` with optional `.bak` / `.bak.001`+ backups). |
+| `lib/repositories/window_control_repository.dart` | Abstract `WindowControlRepository`, `PlatformWindowControlRepository`, and `FakeWindowControlRepository` isolating native `de.akjir.tiertask/window_controls` `MethodChannel` commands for closing, dragging, and maximizing frameless desktop windows on Linux and Windows. |
 
 ## State Providers
 
 | File | Function |
 | :--- | :--- |
-| `lib/providers/config_providers.dart` | Defines `settingsRepositoryProvider`, `localFileRepositoryProvider`, `webDavRepositoryProvider`, `webDavConfigProvider` (`WebDavConfigNotifier`, including `updateDueLeadWindow`), `boundaryTickProvider` (`BoundaryTickNotifier`), `appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `diagnosticsEnabledProvider`, `appVersionRepositoryProvider`, `appFullVersionProvider`, and `linkLauncherRepositoryProvider`. |
+| `lib/providers/config_providers.dart` | Defines `settingsRepositoryProvider`, `localFileRepositoryProvider`, `webDavRepositoryProvider`, `webDavConfigProvider` (`WebDavConfigNotifier`, including `updateDueLeadWindow`), `boundaryTickProvider` (`BoundaryTickNotifier`), `appLocaleProvider`, `appThemeModeProvider`, `appThemePaletteProvider`, `diagnosticsEnabledProvider`, `appVersionRepositoryProvider`, `appVersionProvider`, `linkLauncherRepositoryProvider`, `supportsDesktopWindowControlsProvider`, and `windowControlRepositoryProvider`. |
 | `lib/providers/local_file_watch_providers.dart` | Defines `LocalFileWatchTarget`, `LocalFileWatcherNotifier`, `localFileWatchDebounceProvider`, `localFileWatchTargetProvider`, and `localFileWatcherProvider` for scoped parent-directory `.tdf` watching, `350 ms` trailing-edge debouncing, missing-directory rebinding, and `AppLifecycleState.resumed` catch-up reconciliation. |
 | `lib/providers/location_providers.dart` | Defines `locationEnabledProvider`, `locationRepositoryProvider`, `locationStateProvider`, and `LocationNotifier` managing foreground-only location determination with startup/enable triggers, 5-minute app-resume cooldown, 15-minute passive foreground refresh, and manual refresh (`refreshLocation`). |
 | `lib/providers/sync_providers.dart` | Defines `SyncState`, `syncStateProvider` (`SyncStateNotifier`), `StorageFileReadException`, `UnsupportedTdfVersionException`, and the stateless multi-stage `tdf 0.8.0` synchronization pipeline (`TaskSyncPipeline`) coordinating stage-fair merges, host-locked local and WebDAV `HTTP 412` CAS retries, 30-day pruning, per-file local/remote readability diagnostics, and conflict/recovery banners. |
@@ -461,6 +466,7 @@ tiertask/
 | `lib/presentation/task_v2_controller.dart` | Owns model-free task intents for non-jumping Quick-Add, drafts, live controls, history journal, and single-section inline editors. |
 | `lib/presentation/ui_telemetry.dart` | Presentation-layer diagnostic telemetry facade (`UiTelemetry`) emitting redacted structured `LogTag.ui` events to `AppLogger` while keeping `lib/ui/` free of direct `lib/services/` imports. |
 | `lib/presentation/ui_v2_shell_models.dart` | Defines immutable model-free presentation enums, shell state, return context, floating notice, and action outcome types for adaptive UI v2. |
+| `lib/presentation/window_control_controller.dart` | Provides `windowControlControllerProvider` and `WindowControlController` mediating desktop-only custom chrome drag, maximize/restore, and close commands between `lib/ui_v2/` and `WindowControlRepository`. |
 | `lib/presentation/workspace_v2_controller.dart` | Projects workspace rows and owns model-free workspace switching, creation, renaming, and deletion intents. |
 
 ## User Interface

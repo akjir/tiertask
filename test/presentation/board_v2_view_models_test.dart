@@ -180,6 +180,7 @@ void main() {
           taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
           appBuildProfileProvider.overrideWithValue(AppBuildProfile.dev),
           appVersionProvider.overrideWith((ref) async => 'v0.4.0+4.abc1234'),
+          supportsDesktopWindowControlsProvider.overrideWithValue(true),
           locationRepositoryProvider.overrideWithValue(
             FakeLocationRepository(
               initialFix: const LocationFix(
@@ -201,6 +202,7 @@ void main() {
       final chrome = container.read(boardChromeViewModelProvider);
       expect(chrome.isDevBuild, isTrue);
       expect(chrome.locationEnabled, isTrue);
+      expect(chrome.showWindowControls, isTrue);
       expect(chrome.syncStatusKind, equals(ShellSyncStatusKind.synced));
 
       // Conflict state switches chrome indicator to conflict.

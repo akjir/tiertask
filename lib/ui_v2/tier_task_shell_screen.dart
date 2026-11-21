@@ -27,6 +27,7 @@ import '../presentation/board_v2_view_models.dart';
 import '../presentation/floating_notice_controller.dart';
 import '../presentation/sync_v2_controller.dart';
 import '../presentation/ui_v2_shell_models.dart';
+import '../presentation/window_control_controller.dart';
 import 'dialogs/app_modals.dart';
 import 'ui_v2_icon_mapper.dart';
 import 'views/labels_view.dart';
@@ -144,7 +145,21 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
                 ref.read(appShellControllerProvider.notifier).closeSearch(),
           ),
           isSearchOpen: shell.searchOpen,
-          trailingActions: _buildTrailingActions(chrome, isCompact),
+          trailingActions: _buildTrailingActions(
+            chrome,
+            isCompact,
+            localizations,
+          ),
+          onChromeDragStart: chrome.showWindowControls
+              ? () => unawaited(
+                  ref.read(windowControlControllerProvider).startDragging(),
+                )
+              : null,
+          onChromeDoubleTap: chrome.showWindowControls
+              ? () => unawaited(
+                  ref.read(windowControlControllerProvider).toggleMaximize(),
+                )
+              : null,
           isDrawerOpen: shell.compactDrawerOpen,
           onToggleDrawer: () => ref
               .read(appShellControllerProvider.notifier)
@@ -174,10 +189,11 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
     );
   }
 
-  /// Builds trailing chrome controls (conditional Location Status + Sync status).
+  /// Builds trailing chrome controls (Location Status, Sync status, and desktop-only window close button).
   List<Widget> _buildTrailingActions(
     BoardChromeViewModel chrome,
     bool isCompact,
+    AppLocalizations localizations,
   ) {
     return <Widget>[
       if (chrome.locationEnabled)
@@ -203,6 +219,18 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
         tooltip: chrome.syncStatusLabel,
         onPressed: () => unawaited(_handleSyncChromeTap(chrome)),
       ),
+      if (chrome.showWindowControls)
+        UiButton(
+          key: const ValueKey<String>('chrome_close_window_button'),
+          variant: UiButtonVariant.icon,
+          density: UiButtonDensity.standard,
+          leadingIcon: Icons.close_rounded,
+          isDangerHover: true,
+          tooltip: localizations.tooltipCloseApp,
+          onPressed: () => unawaited(
+            ref.read(windowControlControllerProvider).closeWindow(),
+          ),
+        ),
     ];
   }
 

@@ -1,7 +1,11 @@
 #include "win32_window.h"
 
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <windowsx.h>
+
+#include <algorithm>
 
 #include "resource.h"
 
@@ -17,6 +21,7 @@ namespace {
 #endif
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+constexpr UINT_PTR kChildContentSubclassId = 1;
 
 /// Registry key for app theme preference.
 ///
@@ -30,11 +35,35 @@ constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme"
 static int g_active_window_count = 0;
 
 using EnableNonClientDpiScaling = BOOL __stdcall(HWND hwnd);
+using GetSystemMetricsForDpiFn = int __stdcall(int index, UINT dpi);
 
 // Scale helper to convert logical scaler values to physical using passed in
 // scale factor
 int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
+}
+
+// Returns the active monitor DPI for |hwnd|, falling back to 96 DPI.
+UINT GetDpiForWindowSafe(HWND hwnd) {
+  HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  if (monitor == nullptr) {
+    return 96;
+  }
+  const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+  return dpi > 0 ? dpi : 96;
+}
+
+// Queries a DPI-aware Win32 system metric, falling back to scaled GetSystemMetrics.
+int GetSystemMetricsForDpiSafe(int index, UINT dpi) {
+  HMODULE user32_module = GetModuleHandleA("User32.dll");
+  if (user32_module != nullptr) {
+    auto get_metrics_for_dpi = reinterpret_cast<GetSystemMetricsForDpiFn*>(
+        GetProcAddress(user32_module, "GetSystemMetricsForDpi"));
+    if (get_metrics_for_dpi != nullptr) {
+      return get_metrics_for_dpi(index, dpi);
+    }
+  }
+  return Scale(GetSystemMetrics(index), dpi / 96.0);
 }
 
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
@@ -146,6 +175,14 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  // Remove the native title bar while preserving DWM shadow, Windows 11 rounded
+  // corners, Aero Snap, and invisible resize handles.
+  MARGINS margins = {0, 0, 1, 0};
+  DwmExtendFrameIntoClientArea(window, &margins);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+               SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
+                   SWP_NOACTIVATE);
+
   return OnCreate();
 }
 
@@ -179,6 +216,51 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_NCCALCSIZE: {
+      if (wparam != 0) {
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        const LONG original_top = params->rgrc[0].top;
+        const LRESULT result = DefWindowProc(hwnd, message, wparam, lparam);
+        if (result != 0) {
+          return result;
+        }
+        params->rgrc[0].top = original_top;
+        if (IsZoomed(hwnd)) {
+          const UINT dpi = GetDpiForWindowSafe(hwnd);
+          const int top_inset =
+              GetSystemMetricsForDpiSafe(SM_CYFRAME, dpi) +
+              GetSystemMetricsForDpiSafe(SM_CXPADDEDBORDER, dpi);
+          params->rgrc[0].top += top_inset;
+        }
+        return 0;
+      }
+      break;
+    }
+
+    case WM_NCHITTEST: {
+      const LRESULT default_hit = DefWindowProc(hwnd, message, wparam, lparam);
+      if (default_hit != HTCLIENT) {
+        return default_hit;
+      }
+      if (!IsZoomed(hwnd)) {
+        POINT cursor_pos = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+        ScreenToClient(hwnd, &cursor_pos);
+        const int top_border = GetTopResizeBorderHeight();
+        if (cursor_pos.y >= 0 && cursor_pos.y < top_border) {
+          RECT client_rect = GetClientArea();
+          const int corner_width = top_border * 2;
+          if (cursor_pos.x < corner_width) {
+            return HTTOPLEFT;
+          }
+          if (cursor_pos.x >= client_rect.right - corner_width) {
+            return HTTOPRIGHT;
+          }
+          return HTTOP;
+        }
+      }
+      return HTCLIENT;
+    }
+
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -222,6 +304,14 @@ Win32Window::MessageHandler(HWND hwnd,
 }
 
 void Win32Window::Destroy() {
+  if (child_content_ != nullptr) {
+    if (IsWindow(child_content_)) {
+      RemoveWindowSubclass(child_content_, ChildContentSubclassProc,
+                           kChildContentSubclassId);
+    }
+    child_content_ = nullptr;
+  }
+
   OnDestroy();
 
   if (window_handle_) {
@@ -233,14 +323,54 @@ void Win32Window::Destroy() {
   }
 }
 
+// static
+LRESULT CALLBACK Win32Window::ChildContentSubclassProc(HWND hwnd,
+                                                       UINT message,
+                                                       WPARAM wparam,
+                                                       LPARAM lparam,
+                                                       UINT_PTR subclass_id,
+                                                       DWORD_PTR ref_data) {
+  if (message == WM_NCHITTEST) {
+    auto* self = reinterpret_cast<Win32Window*>(ref_data);
+    if (self != nullptr && self->window_handle_ != nullptr &&
+        !IsZoomed(self->window_handle_)) {
+      POINT cursor_pos = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      ScreenToClient(self->window_handle_, &cursor_pos);
+      const int top_border = self->GetTopResizeBorderHeight();
+      if (cursor_pos.y >= 0 && cursor_pos.y < top_border) {
+        return HTTRANSPARENT;
+      }
+    }
+  } else if (message == WM_NCDESTROY) {
+    auto* self = reinterpret_cast<Win32Window*>(ref_data);
+    if (self != nullptr && self->child_content_ == hwnd) {
+      self->child_content_ = nullptr;
+    }
+    RemoveWindowSubclass(hwnd, ChildContentSubclassProc, subclass_id);
+  }
+  return DefSubclassProc(hwnd, message, wparam, lparam);
+}
+
 Win32Window* Win32Window::GetThisFromHandle(HWND const window) noexcept {
   return reinterpret_cast<Win32Window*>(
       GetWindowLongPtr(window, GWLP_USERDATA));
 }
 
+int Win32Window::GetTopResizeBorderHeight() const {
+  const UINT dpi =
+      window_handle_ != nullptr ? GetDpiForWindowSafe(window_handle_) : 96;
+  return std::max(4, Scale(5, dpi / 96.0));
+}
+
 void Win32Window::SetChildContent(HWND content) {
+  if (child_content_ != nullptr && IsWindow(child_content_)) {
+    RemoveWindowSubclass(child_content_, ChildContentSubclassProc,
+                         kChildContentSubclassId);
+  }
   child_content_ = content;
   SetParent(content, window_handle_);
+  SetWindowSubclass(content, ChildContentSubclassProc, kChildContentSubclassId,
+                    reinterpret_cast<DWORD_PTR>(this));
   RECT frame = GetClientArea();
 
   MoveWindow(content, frame.left, frame.top, frame.right - frame.left,

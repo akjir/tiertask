@@ -3943,6 +3943,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Version {version}'**
   String versionFooterLabel(String version);
+
+  /// Tooltip for the desktop top chrome window close button
+  ///
+  /// In en, this message translates to:
+  /// **'Close TierTask'**
+  String get tooltipCloseApp;
 }
 
 class _AppLocalizationsDelegate

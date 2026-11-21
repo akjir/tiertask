@@ -2240,4 +2240,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String versionFooterLabel(String version) {
     return 'Version $version';
   }
+
+  @override
+  String get tooltipCloseApp => 'TierTask schließen';
 }

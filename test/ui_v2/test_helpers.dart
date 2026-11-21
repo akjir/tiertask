@@ -30,6 +30,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/repositories/window_control_repository.dart';
 import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../ui/test_helpers.dart';
@@ -51,10 +52,12 @@ Future<ProviderContainer> pumpV2Widget(
   ThemeMode themeMode = ThemeMode.light,
   Locale locale = const Locale('en'),
   bool supportsNativeDirectoryPicker = true,
+  bool supportsDesktopWindowControls = true,
   AppBuildProfile buildProfile = AppBuildProfile.release,
   LocationFix? locationFix,
   LocationRepository? locationRepository,
   LinkLauncherRepository? linkLauncherRepository,
+  WindowControlRepository? windowControlRepository,
   bool settle = true,
 }) async {
   tester.view.physicalSize = surfaceSize;
@@ -83,6 +86,12 @@ Future<ProviderContainer> pumpV2Widget(
       clockProvider.overrideWithValue(() => effectiveNow),
       supportsDirectoryPickerProvider.overrideWithValue(
         supportsNativeDirectoryPicker,
+      ),
+      supportsDesktopWindowControlsProvider.overrideWithValue(
+        supportsDesktopWindowControls,
+      ),
+      windowControlRepositoryProvider.overrideWithValue(
+        windowControlRepository ?? FakeWindowControlRepository(),
       ),
       appBuildProfileProvider.overrideWithValue(buildProfile),
       appVersionProvider.overrideWith((ref) async => 'v0.4.0+4.abc1234'),

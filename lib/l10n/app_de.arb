@@ -640,5 +640,6 @@
   "entityKindTaskBadge": "AUFGABE",
   "entityKindLabelBadge": "LABEL",
   "entityKindLocationBadge": "ORT",
-  "versionFooterLabel": "Version {version}"
+  "versionFooterLabel": "Version {version}",
+  "tooltipCloseApp": "TierTask schließen"
 }
