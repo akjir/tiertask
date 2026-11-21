@@ -29,6 +29,20 @@
     'circle-check',
   ];
 
+  function findActiveTaskLabel(state, workspace) {
+    if (state.view !== 'tasks' || !state.label) return null;
+    return workspace.labels.find((item) => item.id === state.label) || null;
+  }
+
+  function buildActiveLabelTooltip(label, lang) {
+    const scopeSuffix = label.scoped ? ` (${t(lang, 'scopedQueue')})` : '';
+    return `${label.name}${scopeSuffix} · ${t(lang, 'activeFilterClear')}`;
+  }
+
+  function buildActiveLabelAriaLabel(label, lang) {
+    return `${t(lang, 'activeFilterLabel')}: ${label.name}. ${t(lang, 'activeFilterClear')}`;
+  }
+
   function tierName(lang, index) {
     return t(lang, `tier${index}`);
   }
@@ -77,16 +91,25 @@
           ? 'refresh-cw'
           : 'locate-off';
 
+    const activeTaskLabel = findActiveTaskLabel(state, workspace);
+    const mobileActiveLabelHtml = activeTaskLabel
+      ? `<button type="button" class="brand-btn mobile-active-label-btn" data-clear-active-label title="${escapeHtml(buildActiveLabelTooltip(activeTaskLabel, lang))}" aria-label="${escapeHtml(buildActiveLabelAriaLabel(activeTaskLabel, lang))}">
+          ${renderAppLogo()}
+          <span class="mobile-active-label-name">${escapeHtml(activeTaskLabel.name)}</span>
+        </button>`
+      : '';
+
     return `
       <header class="chrome ${state.searchOpen ? 'is-searching' : ''}">
         <button type="button" class="menu" data-menu aria-label="${escapeHtml(t(lang, state.drawer ? 'menuClose' : 'menuOpen'))}" aria-expanded="${state.drawer}">
           ${renderIcon(state.drawer ? 'x' : 'menu')}
         </button>
-        <button type="button" class="brand-btn" data-view="tasks" aria-label="${escapeHtml(t(lang, 'appTitle'))}">
+        <button type="button" class="brand-btn ${activeTaskLabel ? 'has-mobile-label-filter' : ''}" data-view="tasks" aria-label="${escapeHtml(t(lang, 'appTitle'))}">
           ${renderAppLogo()}
           <span>TierTask</span>
           ${state.isDevBuild ? `<span class="dev-badge">${escapeHtml(t(lang, 'devBadgeLabel'))}</span>` : ''}
         </button>
+        ${mobileActiveLabelHtml}
         <button type="button" class="workspace-pill" data-open-modal="workspaces" title="${escapeHtml(t(lang, 'workspacesTitle'))}">
           ${renderIcon('workspaces', 'icon-sm')}
           <span>${escapeHtml(workspace.name)}</span>
@@ -542,23 +565,21 @@
     `;
   }
 
-  function renderActiveLabelBar(state, workspace) {
+  function renderHeadingActiveLabel(state, workspace, { showOnMobile = false } = {}) {
     if (!state.label) return '';
     const lang = state.lang;
     const activeLabel = workspace.labels.find((item) => item.id === state.label);
     if (!activeLabel) return '';
     return `
-      <div class="active-label-bar" role="region" aria-label="${escapeHtml(t(lang, 'activeFilterLabel'))}">
-        <button type="button" class="active-label-bar-main" data-open-managed="labels:${escapeHtml(activeLabel.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
-          <span class="dot" style="--label-color:${escapeHtml(activeLabel.color || '#00648b')}"></span>
-          <span>${escapeHtml(activeLabel.name)}</span>
-          ${activeLabel.scoped ? `<span class="pill-badge tone-accent">${escapeHtml(t(lang, 'scopedQueue'))}</span>` : ''}
-          ${renderIcon('info', 'icon-xs')}
-        </button>
-        <button type="button" class="icon-button compact" data-clear-active-label title="${escapeHtml(t(lang, 'activeFilterClear'))}" aria-label="${escapeHtml(t(lang, 'activeFilterClear'))}">
-          ${renderIcon('x', 'icon-xs')}
-        </button>
-      </div>
+      <button
+        type="button"
+        class="heading-active-label ${showOnMobile ? 'is-mobile-visible' : ''}"
+        data-clear-active-label
+        title="${escapeHtml(buildActiveLabelTooltip(activeLabel, lang))}"
+        aria-label="${escapeHtml(buildActiveLabelAriaLabel(activeLabel, lang))}"
+      >
+        <span class="heading-active-label-text">${escapeHtml(activeLabel.name)}</span>
+      </button>
     `;
   }
 
@@ -2762,9 +2783,11 @@
 
   function renderTaskView(state, workspace, evalRes) {
     const lang = state.lang;
-    const activeLabelBarHtml = renderActiveLabelBar(state, workspace);
 
     if (state.searchOpen) {
+      const searchActiveLabelHtml = renderHeadingActiveLabel(state, workspace, {
+        showOnMobile: true,
+      });
       const query = state.searchQuery.trim().toLowerCase();
       const matches = [];
       for (let tierIdx = 0; tierIdx < 6; tierIdx += 1) {
@@ -2775,13 +2798,13 @@
         }
       }
       return `
-        ${activeLabelBarHtml}
-        <div class="heading">
-          <div>
+        <div class="heading heading-with-filter">
+          <div class="heading-top">
             <h2>${escapeHtml(t(lang, 'searchTitle'))}</h2>
-            <div class="subtitle">${escapeHtml(t(lang, 'searchSubtitle'))}</div>
+            ${searchActiveLabelHtml}
+            <span class="limit">${matches.length}</span>
           </div>
-          <span class="limit">${matches.length}</span>
+          <div class="subtitle">${escapeHtml(t(lang, 'searchSubtitle'))}</div>
         </div>
         <div class="tasks">
           ${
@@ -2797,6 +2820,7 @@
       `;
     }
 
+    const tierActiveLabelHtml = renderHeadingActiveLabel(state, workspace);
     const queue = evalRes.tiers[state.tier];
     const limitSuffix =
       state.tier === 0 ? ' / 3' : state.tier === 1 ? ' / 5' : '';
@@ -2814,14 +2838,13 @@
         </select>
       </label>
 
-      ${activeLabelBarHtml}
-
-      <div class="heading">
-        <div>
+      <div class="heading heading-with-filter">
+        <div class="heading-top">
           <h2>${escapeHtml(tierName(lang, state.tier))}</h2>
-          <div class="subtitle">${escapeHtml(t(lang, `tier${state.tier}Sub`))}</div>
+          ${tierActiveLabelHtml}
+          <span class="limit">${queue.length}${limitSuffix}</span>
         </div>
-        <span class="limit">${queue.length}${limitSuffix}</span>
+        <div class="subtitle">${escapeHtml(t(lang, `tier${state.tier}Sub`))}</div>
       </div>
 
       ${renderTaskDraftCard(state, workspace, evalRes)}

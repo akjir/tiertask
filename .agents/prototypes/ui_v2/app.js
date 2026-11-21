@@ -2102,6 +2102,7 @@
     }
     if (has('clear-active-label')) {
       state.label = '';
+      state.drawer = false;
       state.draft.labels = [];
       state.draftLabelPicker = null;
       if (!state.searchOpen) {
