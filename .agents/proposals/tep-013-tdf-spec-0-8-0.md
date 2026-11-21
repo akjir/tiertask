@@ -1,10 +1,10 @@
 ---
 id: TEP-013
 title: TDF Specification 0.8.0 Standalone Baseline, Canonical Runtime, Synchronization Hardening, and Conformance Suite
-status: review
+status: completed
 type: spec
 created: 2026-11-16
-updated: 2026-11-17
+updated: 2026-11-22
 ---
 
 # TEP-013: TDF Specification 0.8.0 Standalone Baseline, Canonical Runtime, Synchronization Hardening, and Conformance Suite
@@ -202,12 +202,16 @@ Execute strict Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR`) partition
   - [x] Update `AGENTS.md`, `ARCHITECTURE.md` (`tiertask_dev.py arch --sync-tree --audit`), `README.md`, `CHANGELOG.md`, `.agents/scripts/tiertask_dev.py`, `.agents/skills/*`, and superseding notes in `TEP-003`, `TEP-004`, and `TEP-006`.
 - [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` until formatting, analyzer (`--fatal-infos --fatal-warnings`), architecture audit, and all tests pass with zero warnings.
 - [x] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, and record delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 * **2026-11-16:** Completed `/grill-me` design interview resolving all 8 architectural, UI, persistence, OS-locking, time-zone, and legacy-cleanup decisions (`DECISION-01`–`DECISION-08`); drafted `TEP-013` at `status: planned` and executed `spec-verification-loop`.
 * **2026-11-16:** Refined 8 pre-TDD edge cases (`DECISION-09`–`DECISION-16`): non-blocking `LOCK_NB`/`LOCKFILE_FAIL_IMMEDIATELY` host locking with bounded backoff timeout, target-symlink hashing, and Windows `MoveFileExW` sharing retries; symmetric `loopL.deleted.generation > R.deleted.generation` Stage 3 refresh classification; `dueAnchor` coupling across `_compareDue`, occurrence merges, `TdfBoundDeletionDecision`, and `restoreTask`; epoch-second binary-search gap resolution and pre-`1601` / `0001`–`9999` safety in `TdfTimeZoneContext.systemLocal()`; wave-aligned legacy symbol/`TTS\x04` removal and scoped per-wave verification; synchronous `ref.listenManual` controller + initial-snapshot updates and unedited `history` UTC preservation (`task_editor_history_section.dart`); tri-state `bool? _cachedExists` in `WebDavRepository`; and atomic per-target `WorkspaceSyncState` invalidation with canonical serializer texts plus `_undoStack` clearing on conflict/recovery resolution. Re-verified via `spec-verification-loop` (`CONVERGED (PASS)`).
 * **2026-11-17:** Completed Waves 1–4 via strict Red-Green-Refactor TDD across `lib/{l10n,models,services,repositories,providers,ui}`, built the 93-rule `spec/conformance/v0.8.0/` fixture suite, removed all legacy `< 0.8.0` migration/parser/serializer artifacts, synchronized `AGENTS.md`, `ARCHITECTURE.md`, `README.md`, `CHANGELOG.md`, skills, and superseded proposal notes, verified `python3 .agents/scripts/tiertask_dev.py verify --full --fix` green (`389/389` tests passing, `0` analyzer/static/architecture/l10n issues), and transitioned `TEP-013` to `status: review`.
+* **2026-11-22:** User approved and closed proposal (`status: completed`).
 
 ### 3.3 Delivered Artifacts
-*(Pending implementation and user approval)*
+* Standalone `TDF 0.8.0` specification (`spec/TDF_SPEC_0.8.0.md`) and 93-rule conformance fixture suite (`spec/conformance/v0.8.0/`).
+* Canonical `tdf 0.8.0` parser, serializer, `Sha256Service`, DST-aware `TdfTimeZoneContext`, local schedule anchors (`dueAnchor`), and `(Y_cur, M_cur)` monthly recurrence across `lib/models/` and `lib/services/`.
+* Host-local cooperative `dart:ffi` file locking (`lib/repositories/host_file_lock.dart`), atomic local publication, tri-state WebDAV `If-Match`/`If-None-Match: *` conditional `PUT`, and `TTS\x04` per-target sync baselines across `lib/repositories/` and `lib/providers/`.
+* Full `tdf 0.8.0` unit, conformance, repository, and synchronization test suites under `test/`.

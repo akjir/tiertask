@@ -1,10 +1,10 @@
 ---
 id: TEP-015
 title: Decoupled Presentation Architecture, Dedicated UI Component Library, and Adaptive Desktop/Mobile Redesign Roadmap
-status: planned
+status: completed
 type: architecture
 created: 2026-11-21
-updated: 2026-11-21
+updated: 2026-11-22
 ---
 
 # TEP-015: Decoupled Presentation Architecture, Dedicated UI Component Library, and Adaptive Desktop/Mobile Redesign Roadmap
@@ -169,8 +169,8 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 - [x] Complete **Design Gate** in `.agents/prototypes/ui_v2/` covering all production TierTask `0.8.0` parity views and mobile/desktop interactions, and codify derivable guidelines into [`spec/UI_DESIGN_SYSTEM.md`](../../spec/UI_DESIGN_SYSTEM.md) and `.agents/skills/ui-design-system/SKILL.md`.
 - [x] Author and complete **Phase 2 Child TEP** ([`TEP-017`](tep-017-dedicated-ui-component-library.md): `packages/tiertask_ui/` Component Library, Themes, Gallery App, and Tooling Integration).
 - [x] Author and complete **Phase 3 Child TEP** ([`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md): Adaptive Shell & Feature Screens Cutover under Strict ViewModel Contract).
-- [ ] Author and complete **Phase 4 Child TEP** ([`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md): Legacy UI Retirement, Global Strict Architecture Lock, and Finalization, currently in `review`).
-- [ ] After all four child TEPs reach `completed`, set `TEP-015` to `review`, update `BOARD.md`, and request final approval.
+- [x] Author and complete **Phase 4 Child TEP** ([`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md): Legacy UI Retirement, Global Strict Architecture Lock, and Finalization).
+- [x] After all four child TEPs reach `completed`, set `TEP-015` to `completed`, update `BOARD.md`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 - **2026-11-21:** Completed interactive architecture interview (`/grill-me`) and drafted umbrella `TEP-015`. Locked in: standalone `packages/tiertask_ui/` package with `example/` gallery, dedicated `lib/presentation/` DAG layer, strict ViewModel contract for new `lib/ui/`, pragmatic Phase 1 transition avoiding throwaway legacy rewrites, `Calm` (default) + `Plum Umber` extensible themes with verified WCAG AA contrast, modular offline prototype under `.agents/prototypes/ui_v2/`, and mandatory per-phase child TEPs created just-in-time.
@@ -184,6 +184,8 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 - **2026-11-21:** Implemented Phase 3 child proposal [`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md) (`status: review`): delivered the model-free v2 presentation layer, `Calm` and `Plum Umber` palette migration, strict Rank `7` `lib/ui_v2/` adaptive shell and feature views, unconditional `lib/main.dart` cutover, and `M-REAL-MECHANICS-TESTS` suite awaiting final user approval.
 - **2026-11-21:** Completed Phase 3 child proposal [`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md) (`status: completed`) following user approval and created Phase 4 child proposal [`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md) (`status: concept`).
 - **2026-11-21:** Implemented Phase 4 child proposal [`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md) (`status: review`): retired all legacy UI/test files and `81` unused ARB keys, structured `lib/presentation/` (`21` leaves) and `lib/ui/` (`27` leaves, zero Riverpod providers, all `build()` methods `< 40` lines), locked global strict Rank `7` enforcement and dead-ARB auditing in `tiertask_dev.py`, and synchronized documentation and skills awaiting user approval.
+- **2026-11-22:** User approved and closed umbrella proposal (`status: completed`) alongside Phase 4 [`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md).
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+- Design system specification [`spec/UI_DESIGN_SYSTEM.md`](../../spec/UI_DESIGN_SYSTEM.md), offline prototype `.agents/prototypes/ui_v2/`, and `.agents/skills/ui-design-system/SKILL.md`.
+- Completed execution phases: [`TEP-016`](tep-016-presentation-layer-decoupling.md), [`TEP-017`](tep-017-dedicated-ui-component-library.md), [`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md), and [`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md).

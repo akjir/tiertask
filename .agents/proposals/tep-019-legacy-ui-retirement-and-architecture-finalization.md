@@ -1,10 +1,10 @@
 ---
 id: TEP-019
 title: Phase 4 Legacy UI Retirement, Responsibility-Based Structuring, Global Strict Architecture Lock, and Finalization
-status: review
+status: completed
 type: architecture
 created: 2026-11-21
-updated: 2026-11-21
+updated: 2026-11-22
 ---
 
 # TEP-019: Phase 4 Legacy UI Retirement, Responsibility-Based Structuring, Global Strict Architecture Lock, and Finalization
@@ -314,11 +314,15 @@ Execute Red-Green-Refactor TDD (`P-TDD-FIRST`) across Python tooling tests and D
   - [x] Synchronize `ARCHITECTURE.md` (including `tiertask_dev.py arch --sync-tree`, top sync callout, `AppThemePalette.calm`, `tier_localization_extension.dart`, all layer tables, and Execution Flow), `AGENTS.md`, `README.md`, `spec/UI_DESIGN_SYSTEM.md`, `.agents/skills/ui-design-system/SKILL.md`, `.agents/skills/red-team-audit/SKILL.md`, and `.agents/skills/update-documentation/SKILL.md`; verify `CHANGELOG.md` requires no internal-refactor additions.
   - [x] Update Parts 1 and 2 where implementation refined shared helpers, run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and `python3 -m unittest discover -s .agents/scripts/tests -p 'test_*.py'`.
   - [x] Set `status: review`, update `BOARD.md` and `TEP-015`, and request user approval.
-  - [ ] After user approval, set `status: completed`, update `BOARD.md`, list delivered artifacts in Part 3.3, and advance umbrella `TEP-015` to `review`.
+  - [x] After user approval, set `status: completed`, update `BOARD.md`, list delivered artifacts in Part 3.3, and advance umbrella `TEP-015` to `completed`.
 
 ### 3.2 Work Log & Decisions
 - **2026-11-21:** Audited repository state after `TEP-018` completion (`35` legacy `lib/ui/` files / `22,373` lines, `24` legacy `test/ui/` files / `21,357` lines, `81` unused ARB keys across `app_en.arb`/`app_de.arb`, dead Phase 1 presentation and `tierSectionTitle` l10n code, `2` misplaced Riverpod `NotifierProvider`s in `resolution_views.dart`, `6` transitional `.v2.`/`_v2` log events, `5` non-redundant behavioral parity scenarios including `2` error/startup regressions, and `2` missing providers in `_FORBIDDEN_UI_PROVIDERS`). Drafted and verified `TEP-019` (`status: concept`) incorporating full responsibility-based `lib/ui/` (`27` leaves) and `lib/presentation/` (`21` leaves) structuring, `P-FLATTEN-BUILD` compliance, comment/collision-safe `audit_l10n`, and complete `TEP-015` fulfillment.
 - **2026-11-21:** Completed Waves 1 through 6 and advanced `TEP-019` to `status: review`. Closed both error/startup parity gaps (`WorkspaceException` localization + `activeWorkspaceProvider` retry invalidation; early and async `FloatingNoticeController` recovery consumption) and ported all `5` legacy behavioral scenarios into `test/ui/real_mechanics_test.dart`; deleted all `35` legacy `lib/ui/` files and `23` legacy `test/ui/` suites; finalized `lib/presentation/` (`21` leaves, `17` mirror suites) and promoted `lib/ui/` (`27` leaves, `11` test files, `409` `build()` methods all `<= 39` lines, zero Riverpod providers, zero `lib/ui_v2/` or `test/ui_v2/`); pruned `tierSectionTitle`, added `test/l10n/tier_localization_extension_test.dart`, and deleted all `81` retired ARB keys (`642` -> `561`, updating both `sectionReadyTasks` and `sectionLabels` smoke checks in `config_providers_test.dart`); locked global Rank `7` UI whitelist, no-provider-in-UI check, transitional dir bans, and comment/collision-safe `audit_l10n` in `tiertask_dev.py`; synchronized all docs and skills. Full verification gate passed: `19/19` Python tooling tests, `597` root tests, `57` `tiertask_ui` tests, `1` `example` test, `0` analyzer issues, `0` DAG cycles, `L10N audit OK`, and `ARCHITECTURE.md audit OK`.
+- **2026-11-22:** User approved and closed proposal (`status: completed`).
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+- Retired all `35` legacy `lib/ui/` files, `23` legacy `test/ui/` suites, and `81` unused ARB keys.
+- Structured `lib/presentation/` (`21` leaves) and `lib/ui/` (`27` leaves) with `P-FLATTEN-BUILD` compliance and consolidated `test/ui/test_helpers.dart`.
+- Ported all `5` legacy end-to-end integration scenarios into `test/ui/real_mechanics_test.dart`.
+- Locked global Rank `7` UI enforcement and comment/collision-safe `audit_l10n` in `.agents/scripts/tiertask_dev.py` with full documentation synchronization.
