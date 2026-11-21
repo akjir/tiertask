@@ -35,23 +35,23 @@
   const SIMULATED_LOCATIONS = {
     office: {
       status: 'found',
-      placeName: 'Dresden · Büro',
-      latitude: 51.0504,
-      longitude: 13.7373,
+      placeName: 'Riverdale · Office',
+      latitude: 47.1204,
+      longitude: 8.5173,
       source: 'gps',
     },
     home: {
       status: 'found',
-      placeName: 'Dresden Süd · Zuhause',
-      latitude: 51.0312,
-      longitude: 13.729,
+      placeName: 'Southside · Home',
+      latitude: 47.1012,
+      longitude: 8.509,
       source: 'system',
     },
     away: {
       status: 'found',
-      placeName: 'Leipzig Zentrum',
-      latitude: 51.3397,
-      longitude: 12.3731,
+      placeName: 'Harborview Transit',
+      latitude: 47.4197,
+      longitude: 7.8231,
       source: 'internet',
     },
     unavailable: {
@@ -144,7 +144,7 @@
     return {
       storageMode: 'local',
       localFilePath: 'tasks.tdf',
-      localDirectory: '/home/stefan/.local/share/tiertask',
+      localDirectory: '/home/demo/.local/share/tiertask',
       localWatchEnabled: true,
       serverUrl: '',
       username: '',
@@ -164,7 +164,328 @@
     };
   }
 
+  function createStressTestLabels() {
+    const specs = [
+      ['Directory Services', '#1E88E5', false],
+      ['Archival', '#78909C', false],
+      ['Automation', '#00ACC1', false],
+      ['Backup & Recovery', '#43A047', false],
+      ['CI/CD Pipelines', '#8E24AA', false],
+      ['Cloud Migration', '#3949AB', true],
+      ['Compliance Audits', '#D81B60', false],
+      ['DNS', '#00897B', false],
+      ['Documentation', '#5E35B1', false],
+      ['Endpoint Security', '#E53935', false],
+      ['Firewall & VPN', '#F4511E', false],
+      ['Hardware Inventory', '#6D4C41', false],
+      ['Service Desk Escalations', '#FB8C00', false],
+      ['Incident Response', '#C62828', true],
+      ['Container Cluster', '#039BE5', false],
+      ['Client Northstar Labs', '#EC407A', false],
+      ['Client Cobalt Logistics', '#AB47BC', false],
+      ['Client Solis Energy', '#26A69A', false],
+      ['Licenses & Contracts', '#7CB342', false],
+      ['Server Fleet', '#558B2F', false],
+      ['Mail & Messaging', '#0288D1', false],
+      ['Monitoring & Alerts', '#FFA000', false],
+      ['Core Networking', '#00838F', false],
+      ['Team Onboarding', '#29B6F6', false],
+      ['Patch Management', '#66BB6A', false],
+      ['Project Ledger ERP Replacement', '#5C6BC0', true],
+      ['Project Harbor Grid Modernization', '#26C6DA', true],
+      ['Q4 Release Readiness', '#FF7043', true],
+      ['Storage Arrays', '#8D6E63', false],
+      ['Voice & Telephony', '#9CCC65', false],
+    ];
+
+    return specs.map(([name, color, scoped], idx) => {
+      const num = String(idx + 1).padStart(2, '0');
+      const day = String((idx % 18) + 1).padStart(2, '0');
+      return {
+        id: `LblStr00${num}`,
+        name,
+        color,
+        scoped,
+        note:
+          idx % 3 === 0
+            ? `Standard context and operational guidelines for ${name}.`
+            : '',
+        links:
+          idx % 4 === 0
+            ? [
+                {
+                  title: `${name} Runbook`,
+                  uri: `https://docs.example.com/labels/str-${num}`,
+                },
+              ]
+            : [],
+        conditions:
+          idx === 13
+            ? {
+                days: [1, 2, 3, 4, 5],
+                times: [{ start: '07:00', end: '19:00' }],
+                locationIds: [],
+              }
+            : { days: [], times: [], locationIds: [] },
+        modifiedAt: `2026-11-${day}T09:${String((idx * 2) % 60).padStart(2, '0')}:00Z`,
+      };
+    });
+  }
+
+  function createStressTestTasks() {
+    const activeSpecs = [
+      ['Inspect database replication lag on primary cluster', ['LblStr0004', 'LblStr0022'], '2026-11-24T11:00:00Z', true],
+      ['Plan DNSSEC key rollover for primary domain', ['LblStr0008', 'LblStr0023'], '2026-11-25T15:00:00Z', false],
+      ['Rotate SAML signing certificate on identity gateway', ['LblStr0001', 'LblStr0010'], '2026-11-26T09:30:00Z', true],
+      ['Migrate infrastructure state locking to object storage', ['LblStr0003', 'LblStr0005'], null, false],
+      ['Streamline alert routing rules for weekend shifts', ['LblStr0022', 'LblInfra03'], '2026-11-27T14:00:00Z', false],
+      ['Rotate VPN peer keys for field engineering laptops', ['LblStr0011', 'LblStr0010'], '2026-11-28T16:00:00Z', true],
+      ['Collect quarterly access review evidence for audit', ['LblStr0007', 'LblStr0009'], '2026-11-30T17:00:00Z', true],
+      ['Upgrade container base images to latest LTS release', ['LblStr0005', 'LblStr0020', 'LblStr0025'], null, false],
+      ['Verify mail transport rules for staging domain', ['LblStr0021', 'LblStr0016'], '2026-12-01T10:00:00Z', false],
+      ['Review storage controller firmware compatibility matrix', ['LblStr0029', 'LblStr0012'], null, false],
+      ['Consolidate telemetry dashboards for monthly SLA review', ['LblStr0022', 'LblStr0017'], '2026-12-02T12:00:00Z', false],
+      ['Extend configuration playbook for automated kernel updates', ['LblStr0003', 'LblStr0020', 'LblStr0025'], null, false],
+      ['Reconcile asset ledger for returned workstation leases', ['LblStr0012', 'LblStr0019'], '2026-12-03T16:00:00Z', false],
+      ['Refine service desk macros for credential recovery', ['LblStr0013', 'LblStr0009'], null, false],
+      ['Test voice trunk failover with backup carrier', ['LblStr0030', 'LblStr0018'], '2026-12-04T09:00:00Z', true],
+      ['Validate workstation bootstrap script for new hires', ['LblStr0024', 'LblStr0003'], null, false],
+      ['Upgrade cluster ingress controller to latest minor version', ['LblStr0015', 'LblStr0025'], '2026-12-05T13:00:00Z', true],
+      ['Confirm archive retention policy with finance team', ['LblStr0002', 'LblStr0007'], null, false],
+      ['Analyze 30-day DMARC aggregate mail reports', ['LblStr0021', 'LblStr0008', 'LblStr0010'], '2026-12-06T11:00:00Z', false],
+      ['Verify core switch configuration backups in repository', ['LblStr0023', 'LblStr0004'], null, false],
+      ['Review battery maintenance contract for server room UPS', ['LblStr0019', 'LblStr0012'], '2026-12-08T15:00:00Z', false],
+      ['Benchmark client portal latency under peak load', ['LblStr0016', 'LblStr0017', 'LblStr0022'], null, false],
+    ];
+
+    const scopedSpecs = [
+      ['Approve cloud landing zone network peering topology', ['LblStr0006', 'LblStr0023'], '2026-11-29T14:00:00Z'],
+      ['Update tabletop incident drill playbook for security team', ['LblStr0014', 'LblStr0010'], '2026-11-26T16:00:00Z'],
+      ['Run dry-run migration for Ledger ERP cost centers', ['LblStr0026', 'LblStr0009'], '2026-12-02T10:00:00Z'],
+      ['Measure fiber handoff attenuation for Harbor Grid sites', ['LblStr0027', 'LblStr0023'], '2026-12-04T11:30:00Z'],
+      ['Sign off Q4 release launch checklist with product leads', ['LblStr0028', 'LblStr0005'], '2026-12-07T09:00:00Z'],
+    ];
+
+    const blockedSpecs = [
+      {
+        title: 'Run redundant switch failover test at Data Center',
+        labels: ['LblStr0023', 'LblInfra03'],
+        conds: { placesMode: 'custom', locationIds: ['LocDcSite2'] },
+        note: 'Physical uplink failover check directly at Rack B4.',
+      },
+      {
+        title: 'Submit annual license renewal after budget sign-off',
+        labels: ['LblStr0019', 'LblStr0007'],
+        suspendedMode: 'until',
+        suspendedAt: '2026-12-10T08:00:00Z',
+        suspendedNote: 'Waiting on executive budget sign-off after Q4 planning.',
+      },
+      {
+        title: 'Decommission legacy file host after security review',
+        labels: ['LblStr0029', 'LblStr0002'],
+        blockedBy: [{ taskId: 'TskSecAud3', requiredCompletion: 1 }],
+        note: 'Must wait until North Campus firewall review finishes.',
+      },
+      {
+        title: 'Prepare automated evening patch window for compute fleet',
+        labels: ['LblStr0025', 'LblStr0020'],
+        conds: {
+          daysMode: 'custom',
+          days: [2, 4],
+          timeMode: 'custom',
+          times: [{ start: '18:00', end: '21:00' }],
+        },
+        note: 'Allowed only on Tuesday and Thursday evening windows.',
+      },
+      {
+        title: 'Return retired edge router once carrier confirms disconnect',
+        labels: ['LblStr0011', 'LblStr0012'],
+        suspendedMode: 'forever',
+        suspendedNote: 'Waiting for return shipping label from carrier.',
+      },
+    ];
+
+    const somedaySpecs = [
+      ['Draft dual-stack IPv6 architecture for guest Wi-Fi', ['LblStr0023', 'LblStr0008']],
+      ['Migrate internal handbook to static site pipeline', ['LblStr0009', 'LblStr0005']],
+      ['Track four-week power draw baseline on lab rack servers', ['LblStr0012', 'LblStr0022']],
+      ['Record onboarding walkthrough clips for ticket portal', ['LblStr0013', 'LblStr0024']],
+    ];
+
+    const completedSpecs = [
+      ['Documented edge router BGP prefix filters', ['LblStr0023', 'LblStr0009'], '2026-11-18T15:20:00Z'],
+      ['Completed quarterly privileged account access audit', ['LblStr0001', 'LblStr0007'], '2026-11-17T11:45:00Z'],
+      ['Verified emergency restore drill for knowledge base', ['LblStr0004', 'LblStr0020'], '2026-11-15T14:10:00Z'],
+      ['Provisioned desk handsets for front reception', ['LblStr0030', 'LblStr0024'], '2026-11-14T16:30:00Z'],
+    ];
+
+    const tasks = [];
+    const queueIds = [];
+    let seq = 1;
+
+    const makeBaseTask = (title, labels, extra = {}) => {
+      const id = `TskStr${String(seq).padStart(4, '0')}`;
+      const day = String(((seq - 1) % 19) + 1).padStart(2, '0');
+      const hour = String(8 + (seq % 9)).padStart(2, '0');
+      seq += 1;
+      return {
+        id,
+        title,
+        note: '',
+        labels,
+        priority: false,
+        dueAt: null,
+        dueAnchor: null,
+        duePassive: false,
+        dueNote: '',
+        suspendedMode: 'none',
+        suspendedAt: null,
+        suspendedNote: '',
+        repeat: null,
+        completions: 0,
+        subtasksAutoFinish: false,
+        subtasks: [],
+        links: [],
+        history: [],
+        blockedBy: [],
+        conditions: {
+          ignoreLabels: false,
+          daysMode: 'inherit',
+          days: [],
+          timeMode: 'inherit',
+          times: [],
+          placesMode: 'inherit',
+          locationIds: [],
+        },
+        createdAt: `2026-11-${day}T${hour}:00:00Z`,
+        modifiedAt: `2026-11-${day}T${hour}:15:00Z`,
+        finishedAt: null,
+        ...extra,
+      };
+    };
+
+    activeSpecs.forEach(([title, labels, dueAt, rich], idx) => {
+      const task = makeBaseTask(title, labels, {
+        dueAt,
+        duePassive: dueAt ? idx % 3 === 1 : false,
+        dueNote: dueAt && rich ? 'Coordinate timing before the scheduled maintenance window.' : '',
+        note:
+          rich || idx % 2 === 0
+            ? `Operational checklist #${idx + 1}: Technical verification and notes for "${title}".`
+            : '',
+        repeat:
+          idx % 6 === 0
+            ? { count: idx === 0 ? 2 : 4, unit: 'weeks', leadDays: dueAt ? 2 : 0 }
+            : null,
+        subtasksAutoFinish: rich && idx % 4 === 0,
+        subtasks: rich
+          ? [
+              { text: 'Check prerequisites and telemetry logs', done: true },
+              { text: 'Validate change in staging environment', done: idx % 2 === 0 },
+              { text: 'Record final result in operations handbook', done: false },
+            ]
+          : idx % 3 === 0
+            ? [
+                { text: 'Complete initial inventory check', done: false },
+                { text: 'Collect peer sign-off', done: false },
+              ]
+            : [],
+        links: rich
+          ? [
+              {
+                title: 'Operations Runbook',
+                uri: `https://docs.example.com/ops/task-${idx + 1}`,
+              },
+              {
+                title: 'Change Request',
+                uri: `https://tickets.example.com/browse/OPS-${400 + idx}`,
+              },
+            ]
+          : idx % 5 === 0
+            ? [
+                {
+                  title: 'Monitoring Dashboard',
+                  uri: `https://monitor.example.com/dash/${idx + 1}`,
+                },
+              ]
+            : [],
+        history: rich
+          ? [
+              {
+                timestampUtc: '2026-11-19T10:15:00Z',
+                text: 'Started initial review and logged dependencies.',
+              },
+            ]
+          : [],
+      });
+      tasks.push(task);
+      queueIds.push(task.id);
+    });
+
+    scopedSpecs.forEach(([title, labels, dueAt], idx) => {
+      const task = makeBaseTask(title, labels, {
+        dueAt,
+        note: `Dedicated project queue item (${idx + 1}/5).`,
+        subtasks: [
+          { text: 'Prepare review checklist', done: true },
+          { text: 'Document final sign-off', done: false },
+        ],
+      });
+      tasks.push(task);
+      queueIds.push(task.id);
+    });
+
+    blockedSpecs.forEach((spec) => {
+      const task = makeBaseTask(spec.title, spec.labels, {
+        note: spec.note || '',
+        suspendedMode: spec.suspendedMode || 'none',
+        suspendedAt: spec.suspendedAt || null,
+        suspendedNote: spec.suspendedNote || '',
+        blockedBy: spec.blockedBy || [],
+        conditions: {
+          ignoreLabels: false,
+          daysMode: spec.conds?.daysMode || 'inherit',
+          days: spec.conds?.days || [],
+          timeMode: spec.conds?.timeMode || 'inherit',
+          times: spec.conds?.times || [],
+          placesMode: spec.conds?.placesMode || 'inherit',
+          locationIds: spec.conds?.locationIds || [],
+        },
+      });
+      tasks.push(task);
+      queueIds.push(task.id);
+    });
+
+    somedaySpecs.forEach(([title, labels]) => {
+      tasks.push(
+        makeBaseTask(title, labels, {
+          note: 'Backlog idea parked outside the active pull queue.',
+        }),
+      );
+    });
+
+    completedSpecs.forEach(([title, labels, finishedAt]) => {
+      tasks.push(
+        makeBaseTask(title, labels, {
+          completions: 1,
+          finishedAt,
+          modifiedAt: finishedAt,
+          history: [
+            {
+              timestampUtc: finishedAt,
+              text: 'Completed and verified.',
+            },
+          ],
+        }),
+      );
+    });
+
+    return { tasks, queueIds };
+  }
+
   function createSeedWorkspaces() {
+    const stressLabels = createStressTestLabels();
+    const stressTasks = createStressTestTasks();
     return [
       {
         id: 'ws_work',
@@ -173,13 +494,13 @@
           storageMode: 'both',
           localFilePath: 'work.tdf',
           serverUrl: 'https://cloud.example.com',
-          username: 'stefan',
+          username: 'demo',
           password: 'app-password-demo',
           filePath: 'TierTask/work.tdf',
           diagnosticsEnabled: true,
           logStorageMode: 'both',
         }),
-        localFiles: ['work.tdf', 'privat.tdf', 'archive_2025.tdf'],
+        localFiles: ['work.tdf', 'personal.tdf', 'archive_2025.tdf'],
         deleted: {
           generation: 3,
           tasks: [{ id: '9zOldTsk01', deletedAt: '2026-11-12T08:15:00Z' }],
@@ -189,42 +510,42 @@
         locations: [
           {
             id: 'LocOffice1',
-            name: 'Büro',
+            name: 'Office',
             sourceType: 'gps',
             source: 'gps',
-            latitude: 51.0504,
-            longitude: 13.7373,
+            latitude: 47.1204,
+            longitude: 8.5173,
             radius: 150,
-            note: 'Hauptstandort Dresden, 3. OG.',
+            note: 'North Campus headquarters, Floor 4.',
             modifiedAt: '2026-11-01T08:00:00Z',
           },
           {
-            id: 'LocDcDres2',
-            name: 'Rechenzentrum',
+            id: 'LocDcSite2',
+            name: 'Data Center',
             sourceType: 'plusCode',
-            source: '9F3H3Q62+RP',
-            latitude: 51.0621,
-            longitude: 13.7518,
+            source: '8FVC4G92+RP',
+            latitude: 47.1321,
+            longitude: 8.5318,
             radius: 250,
-            note: 'Zutrittskarte und VPN-Token mitnehmen.',
+            note: 'Bring access badge and hardware token.',
             modifiedAt: '2026-11-03T11:20:00Z',
           },
         ],
         labels: [
           {
-            id: 'LblAwo3cx1',
-            name: 'Projekt AWO 3cx',
+            id: 'LblOrbVoi1',
+            name: 'Project Orbit VoIP',
             color: '#2196F3',
             scoped: true,
-            note: 'Einführung und Migration der 3CX-Telefonanlage bei AWO.\nAnsprechpartner: Jan Müller (IT) & Bereichsleitung.',
+            note: 'Rollout and migration of the Orbit voice platform.\nContacts: Alex Rivera (IT) and Department Operations.',
             links: [
               {
-                title: '3CX Migrations-Runbook',
-                uri: 'https://docs.example.com/awo/3cx-runbook',
+                title: 'Orbit VoIP Migration Runbook',
+                uri: 'https://docs.example.com/orbit/voip-runbook',
               },
               {
-                title: 'Ticketboard AWO',
-                uri: 'https://tickets.example.com/projects/awo-3cx',
+                title: 'Orbit Ticket Board',
+                uri: 'https://tickets.example.com/projects/orbit-voip',
               },
             ],
             conditions: {
@@ -235,15 +556,15 @@
             modifiedAt: '2026-11-10T09:00:00Z',
           },
           {
-            id: 'LblGewSac2',
-            name: 'Kunde GEW Sachsen',
+            id: 'LblVspCli2',
+            name: 'Client Vespera Systems',
             color: '#E91E63',
             scoped: false,
-            note: 'Laufende Betreuung und monatliche Wartungsfenster.',
+            note: 'Ongoing managed services and monthly maintenance windows.',
             links: [
               {
-                title: 'Wartungsplan GEW',
-                uri: 'https://wiki.example.com/gew/maintenance',
+                title: 'Vespera Maintenance Schedule',
+                uri: 'https://wiki.example.com/vespera/maintenance',
               },
             ],
             conditions: {
@@ -255,10 +576,10 @@
           },
           {
             id: 'LblInfra03',
-            name: 'Infrastruktur',
+            name: 'Infrastructure',
             color: '#4CAF50',
             scoped: false,
-            note: 'Interne Server, Backups und Monitoring.',
+            note: 'Internal servers, backups, and monitoring.',
             links: [],
             conditions: {
               days: [],
@@ -267,10 +588,11 @@
             },
             modifiedAt: '2026-11-02T07:45:00Z',
           },
+          ...stressLabels,
         ],
         queue: [
           'TskBkup001',
-          'TskGewRpt2',
+          'TskVspRpt2',
           'TskSecAud3',
           'TskPrxCfg4',
           'TskTlsRen5',
@@ -282,28 +604,29 @@
           'TskWkDay10',
           'TskSusp011',
           'TskBlkd012',
-          'TskAwo0001',
-          'TskAwo0002',
-          'TskAwo0003',
-          'TskAwo0004',
-          'TskAwo0005',
-          'TskAwo0006',
-          'TskAwo0007',
-          'TskAwo0008',
-          'TskAwo0009',
-          'TskAwo0010',
+          'TskOrb0001',
+          'TskOrb0002',
+          'TskOrb0003',
+          'TskOrb0004',
+          'TskOrb0005',
+          'TskOrb0006',
+          'TskOrb0007',
+          'TskOrb0008',
+          'TskOrb0009',
+          'TskOrb0010',
+          ...stressTasks.queueIds,
         ],
         tasks: [
           {
             id: 'TskBkup001',
-            title: 'Offsite-Backup-Prüfsummen verifizieren',
-            note: 'SHA-256 Prüfsummen der letzten monatlichen Snapshots gegen das Inventar abgleichen.',
+            title: 'Verify offsite backup checksums',
+            note: 'Compare SHA-256 checksums of the latest monthly snapshots against the inventory ledger.',
             labels: ['LblInfra03'],
             priority: true,
             dueAt: '2026-11-20T16:00:00Z',
             dueAnchor: '2026-11-20 17:00:00',
             duePassive: false,
-            dueNote: 'Vor dem monatlichen Revisionsbericht zwingend dokumentieren.',
+            dueNote: 'Must be documented before the monthly compliance report.',
             suspendedMode: 'none',
             suspendedAt: null,
             suspendedNote: '',
@@ -311,9 +634,9 @@
             completions: 4,
             subtasksAutoFinish: true,
             subtasks: [
-              { text: 'Snapshot-Hash abrufen', done: true },
-              { text: 'Wiederherstellungstest in Sandbox', done: true },
-              { text: 'Prüfprotokoll im Wiki ablegen', done: false },
+              { text: 'Fetch latest snapshot hash', done: true },
+              { text: 'Run restore check in sandbox', done: true },
+              { text: 'Archive verification report in wiki', done: false },
             ],
             links: [
               {
@@ -328,11 +651,11 @@
             history: [
               {
                 timestampUtc: '2026-10-20T14:12:00Z',
-                text: 'Oktober-Snapshot erfolgreich verifiziert (0 Abweichungen).',
+                text: 'October snapshot verified cleanly (0 mismatches).',
               },
               {
                 timestampUtc: '2026-11-21T08:40:00Z',
-                text: 'Hash-Download gestartet und Sandbox-VM vorbereitet.',
+                text: 'Started hash download and prepared sandbox VM.',
               },
             ],
             blockedBy: [],
@@ -350,15 +673,15 @@
             finishedAt: null,
           },
           {
-            id: 'TskGewRpt2',
-            title: 'Monatsbericht für GEW Sachsen abstimmen',
-            note: 'SLA-Kennzahlen und Ticket-Auswertung aus dem letzten Quartal zusammenfassen.',
-            labels: ['LblGewSac2'],
+            id: 'TskVspRpt2',
+            title: 'Finalize monthly report for Vespera Systems',
+            note: 'Summarize SLA metrics and ticket response stats from the last quarter.',
+            labels: ['LblVspCli2'],
             priority: false,
             dueAt: '2026-11-21T16:30:00Z',
             dueAnchor: '2026-11-21 18:30:00',
             duePassive: false,
-            dueNote: 'Versand spätestens heute bis 17:30 Uhr.',
+            dueNote: 'Deliver no later than 17:30 today.',
             suspendedMode: 'none',
             suspendedAt: null,
             suspendedNote: '',
@@ -366,19 +689,19 @@
             completions: 0,
             subtasksAutoFinish: false,
             subtasks: [
-              { text: 'SLA-CSV exportieren', done: true },
-              { text: 'PDF prüfen und freigeben', done: false },
+              { text: 'Export SLA CSV dataset', done: true },
+              { text: 'Review and approve final PDF', done: false },
             ],
             links: [
               {
-                title: 'GEW Berichtsvorlage',
-                uri: 'https://cloud.example.com/s/gew-template',
+                title: 'Vespera Report Template',
+                uri: 'https://cloud.example.com/s/vespera-template',
               },
             ],
             history: [
               {
                 timestampUtc: '2026-11-20T15:00:00Z',
-                text: 'Rohdaten aus Ticketsystem exportiert.',
+                text: 'Exported raw metrics from the ticket tracker.',
               },
             ],
             blockedBy: [],
@@ -397,8 +720,8 @@
           },
           {
             id: 'TskSecAud3',
-            title: 'Firewall-Regelsatz für Standort Nord prüfen',
-            note: 'Eingehende Ports auf Minimalprinzip reduzieren.',
+            title: 'Review firewall ruleset for North Campus',
+            note: 'Reduce inbound ports to least-privilege allowlists.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -430,14 +753,14 @@
           },
           {
             id: 'TskPrxCfg4',
-            title: 'Reverse-Proxy-Header für WebDAV-Endpunkt testen',
-            note: 'ETag- und If-Match-Weitergabe unter Last prüfen.',
+            title: 'Test reverse proxy headers for WebDAV endpoint',
+            note: 'Verify ETag and If-Match forwarding under concurrent load.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: '2026-11-21T17:00:00Z',
             dueAnchor: null,
             duePassive: true,
-            dueNote: 'Nur interner Richtwert (Auto-Priorität deaktiviert).',
+            dueNote: 'Internal target date only (auto-priority disabled).',
             suspendedMode: 'none',
             suspendedAt: null,
             suspendedNote: '',
@@ -463,7 +786,7 @@
           },
           {
             id: 'TskTlsRen5',
-            title: 'TLS-Zertifikatskette auf Mail-Relay erneuern',
+            title: 'Renew TLS certificate chain on mail relay',
             note: '',
             labels: ['LblInfra03'],
             priority: false,
@@ -496,7 +819,7 @@
           },
           {
             id: 'TskMonAlert',
-            title: 'Alerting-Schwellwerte für Festplattenbelegung justieren',
+            title: 'Tune disk usage alerting thresholds',
             note: '',
             labels: ['LblInfra03'],
             priority: false,
@@ -529,9 +852,9 @@
           },
           {
             id: 'TskDocNet7',
-            title: 'Netzwerkplan für GEW aktualisieren',
+            title: 'Update network diagram for Vespera Systems',
             note: '',
-            labels: ['LblGewSac2'],
+            labels: ['LblVspCli2'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -562,9 +885,9 @@
           },
           {
             id: 'TskLicChk8',
-            title: 'Lizenzlaufzeiten für Q1 inventarisieren',
+            title: 'Audit software license renewals for Q1',
             note: '',
-            labels: ['LblGewSac2'],
+            labels: ['LblVspCli2'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -595,8 +918,8 @@
           },
           {
             id: 'TskPlan009',
-            title: 'Übergabedokumentation für Bereitschaftsdienst ergänzen',
-            note: 'Rufbereitschafts-Kontakte und Notfall-Skripte verlinken.',
+            title: 'Expand on-call handoff documentation',
+            note: 'Link escalation contacts and emergency recovery scripts.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -628,8 +951,8 @@
           },
           {
             id: 'TskDcRack9',
-            title: 'Patchpanel im Rack B beschriften',
-            note: 'Nur vor Ort im Rechenzentrum durchführbar.',
+            title: 'Label patch panel in Rack B',
+            note: 'Requires physical access on site at the Data Center.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -653,7 +976,7 @@
               timeMode: 'inherit',
               times: [],
               placesMode: 'custom',
-              locationIds: ['LocDcDres2'],
+              locationIds: ['LocDcSite2'],
             },
             createdAt: '2026-11-18T12:00:00Z',
             modifiedAt: '2026-11-18T12:00:00Z',
@@ -661,8 +984,8 @@
           },
           {
             id: 'TskWkDay10',
-            title: 'Telefonische Abstimmung mit Lieferant (Mo–Fr)',
-            note: 'Liefertermin für Ersatz-Switches erfragen.',
+            title: 'Call hardware supplier on shipment ETA (Mon-Fri)',
+            note: 'Confirm delivery schedule for replacement switches.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -694,9 +1017,9 @@
           },
           {
             id: 'TskSusp011',
-            title: 'Quartals-Budgetprüfung mit Buchhaltung',
+            title: 'Quarterly budget review with finance team',
             note: '',
-            labels: ['LblGewSac2'],
+            labels: ['LblVspCli2'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -704,7 +1027,7 @@
             dueNote: '',
             suspendedMode: 'until',
             suspendedAt: '2026-11-24T08:00:00Z',
-            suspendedNote: 'Wartet auf Monatsabschluss-Freigabe am Dienstagmorgen.',
+            suspendedNote: 'Waiting for month-end close sign-off on Tuesday morning.',
             repeat: null,
             completions: 0,
             subtasksAutoFinish: false,
@@ -727,8 +1050,8 @@
           },
           {
             id: 'TskBlkd012',
-            title: 'Revisionsbericht an Geschäftsleitung senden',
-            note: 'Sobald das Offsite-Backup verifiziert wurde.',
+            title: 'Send audit summary to leadership',
+            note: 'Ready to send once offsite backup verification finishes.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -760,8 +1083,8 @@
           },
           {
             id: 'TskSome013',
-            title: 'Evaluierung automatischer Ansible-Playbooks für Updates',
-            note: 'Langfristige Automatisierungsidee.',
+            title: 'Evaluate automated update playbooks',
+            note: 'Long-term automation improvement idea.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -793,8 +1116,8 @@
           },
           {
             id: 'TskDone014',
-            title: 'VPN-Zugangsdaten für neuen Kollegen eingerichtet',
-            note: 'WireGuard-Profil per sicherem Kanal übermittelt.',
+            title: 'Provision VPN credentials for new teammate',
+            note: 'Delivered profile via encrypted channel.',
             labels: ['LblInfra03'],
             priority: false,
             dueAt: null,
@@ -808,14 +1131,14 @@
             completions: 1,
             subtasksAutoFinish: false,
             subtasks: [
-              { text: 'Schlüsselpaar generieren', done: true },
-              { text: 'Zugriffstest bestätigen', done: true },
+              { text: 'Generate key pair', done: true },
+              { text: 'Confirm connectivity test', done: true },
             ],
             links: [],
             history: [
               {
                 timestampUtc: '2026-11-19T14:20:00Z',
-                text: 'Verbindungstest erfolgreich abgeschlossen.',
+                text: 'Connection test completed cleanly.',
               },
             ],
             blockedBy: [],
@@ -832,17 +1155,17 @@
             modifiedAt: '2026-11-19T14:20:00Z',
             finishedAt: '2026-11-19T14:20:00Z',
           },
-          // Scoped queue tasks (Projekt AWO 3cx)
+          // Scoped queue tasks (Project Orbit VoIP)
           {
-            id: 'TskAwo0001',
-            title: 'AWO Projekt Kontakt & Zeitplan fixieren',
-            note: 'Finalen Umstellungstermin mit Bereichsleitung abstimmen.',
-            labels: ['LblAwo3cx1'],
+            id: 'TskOrb0001',
+            title: 'Confirm Orbit project contacts and cutover schedule',
+            note: 'Lock in the final migration window with operations leads.',
+            labels: ['LblOrbVoi1'],
             priority: true,
             dueAt: '2026-11-10T09:00:00Z',
             dueAnchor: null,
             duePassive: false,
-            dueNote: 'Überfällig: Bitte zuerst eskalieren.',
+            dueNote: 'Overdue: follow up first.',
             suspendedMode: 'none',
             suspendedAt: null,
             suspendedNote: '',
@@ -852,14 +1175,14 @@
             subtasks: [],
             links: [
               {
-                title: 'Kontaktliste AWO',
-                uri: 'https://docs.example.com/awo/contacts',
+                title: 'Orbit Contact Directory',
+                uri: 'https://docs.example.com/orbit/contacts',
               },
             ],
             history: [
               {
                 timestampUtc: '2026-11-11T09:00:00Z',
-                text: 'Erinnerungs-Mail an Bereichsleitung gesendet.',
+                text: 'Sent follow-up message to operations lead.',
               },
             ],
             blockedBy: [],
@@ -877,10 +1200,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0002',
-            title: '3CX AWO: Bereichsleitung informieren und Jens ankündigen',
+            id: 'TskOrb0002',
+            title: 'Orbit VoIP: brief department leads and introduce Samira',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -893,8 +1216,8 @@
             completions: 0,
             subtasksAutoFinish: true,
             subtasks: [
-              { text: 'Information vorbereiten', done: true },
-              { text: 'Termin abstimmen', done: false },
+              { text: 'Prepare rollout summary', done: true },
+              { text: 'Confirm briefing slot', done: false },
             ],
             links: [],
             history: [],
@@ -913,10 +1236,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0003',
-            title: '3CX AWO: MIT-Testaufbau mit Jan Müller durchführen',
+            id: 'TskOrb0003',
+            title: 'Orbit VoIP: run lab test setup with Alex Rivera',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -929,8 +1252,8 @@
             completions: 0,
             subtasksAutoFinish: false,
             subtasks: [
-              { text: 'Testaufbau vorbereiten', done: false },
-              { text: 'Ergebnis dokumentieren', done: false },
+              { text: 'Configure test bench handsets', done: false },
+              { text: 'Document call quality metrics', done: false },
             ],
             links: [],
             history: [],
@@ -949,10 +1272,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0004',
-            title: 'Dokumentation für die Übergabe vorbereiten',
+            id: 'TskOrb0004',
+            title: 'Prepare handover documentation for Orbit VoIP',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -982,10 +1305,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0005',
-            title: 'Telefonvorlagen und Rufgruppen prüfen',
+            id: 'TskOrb0005',
+            title: 'Verify phone templates and ring groups',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1015,10 +1338,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0006',
-            title: 'Rückfragen zur Einrichtung sammeln',
+            id: 'TskOrb0006',
+            title: 'Collect open setup questions from pilot users',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1048,10 +1371,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0007',
-            title: 'Abschlussgespräch vorbereiten',
+            id: 'TskOrb0007',
+            title: 'Prepare project closeout review',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1081,10 +1404,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0008',
-            title: 'Rollout-Checkliste prüfen',
+            id: 'TskOrb0008',
+            title: 'Review Orbit rollout checklist',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1114,10 +1437,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0009',
-            title: 'Dokumentation archivieren',
+            id: 'TskOrb0009',
+            title: 'Archive VoIP migration documentation',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1147,10 +1470,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0010',
-            title: 'Rückmeldung vom Kunden zu Rufnummernportierung abwarten',
+            id: 'TskOrb0010',
+            title: 'Await client sign-off on number porting',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1158,7 +1481,7 @@
             dueNote: '',
             suspendedMode: 'forever',
             suspendedAt: null,
-            suspendedNote: 'Wartet auf unterschriebenes Portierungsformular.',
+            suspendedNote: 'Waiting for signed number porting authorization.',
             repeat: null,
             completions: 0,
             subtasksAutoFinish: false,
@@ -1180,10 +1503,10 @@
             finishedAt: null,
           },
           {
-            id: 'TskAwo0011',
-            title: 'Schulungsunterlagen überarbeiten',
+            id: 'TskOrb0011',
+            title: 'Revise end-user phone training slides',
             note: '',
-            labels: ['LblAwo3cx1'],
+            labels: ['LblOrbVoi1'],
             priority: false,
             dueAt: null,
             dueAnchor: null,
@@ -1212,38 +1535,39 @@
             modifiedAt: '2026-11-09T12:00:00Z',
             finishedAt: null,
           },
+          ...stressTasks.tasks,
         ],
       },
       {
-        id: 'ws_privat',
-        name: 'Privat',
+        id: 'ws_personal',
+        name: 'Personal',
         config: defaultConfig({
           storageMode: 'local',
-          localFilePath: 'privat.tdf',
+          localFilePath: 'personal.tdf',
           diagnosticsEnabled: false,
         }),
-        localFiles: ['work.tdf', 'privat.tdf'],
+        localFiles: ['work.tdf', 'personal.tdf'],
         deleted: { generation: 0, tasks: [], labels: [], locations: [] },
         locations: [
           {
             id: 'LocHome001',
-            name: 'Zuhause',
+            name: 'Home',
             sourceType: 'address',
-            source: 'Musterstraße 12, 01219 Dresden',
-            latitude: 51.0312,
-            longitude: 13.729,
+            source: '42 Maple Lane, 4105 Riverdale',
+            latitude: 47.1012,
+            longitude: 8.509,
             radius: 100,
-            note: 'Wohnung Dresden Süd.',
+            note: 'Southside apartment.',
             modifiedAt: '2026-11-01T10:00:00Z',
           },
         ],
         labels: [
           {
             id: 'LblHouse01',
-            name: 'Haushalt',
+            name: 'Household',
             color: '#00BCD4',
             scoped: false,
-            note: 'Einkäufe und wöchentliche Erledigungen.',
+            note: 'Groceries and weekly home errands.',
             links: [],
             conditions: { days: [], times: [], locationIds: [] },
             modifiedAt: '2026-11-01T10:00:00Z',
@@ -1253,7 +1577,7 @@
         tasks: [
           {
             id: 'TskPrv0001',
-            title: 'Arbeitszimmer aufräumen und Kabel sortieren',
+            title: 'Tidy home office and sort cables',
             note: '',
             labels: ['LblHouse01'],
             priority: false,
@@ -1268,8 +1592,8 @@
             completions: 0,
             subtasksAutoFinish: true,
             subtasks: [
-              { text: 'Schreibtisch abwischen', done: true },
-              { text: 'Netzteile beschriften', done: false },
+              { text: 'Clear desk surface', done: true },
+              { text: 'Label power adapters', done: false },
             ],
             links: [],
             history: [],
@@ -1289,7 +1613,7 @@
           },
           {
             id: 'TskPrv0002',
-            title: 'Winterreifen-Reifendruck kontrollieren',
+            title: 'Check winter tire pressure',
             note: '',
             labels: ['LblHouse01'],
             priority: true,
@@ -1331,12 +1655,12 @@
       `@meta file=tiertask_2026-11-21_linux_${workspaceId}.log level=INFO tz=UTC+01:00`,
       '2026-11-21T10:25:01Z [INFO] [LIFECYCLE] app.start | build=0.4.0+a1b2c3d platform=linux',
       `2026-11-21T10:25:01Z [INFO] [STORAGE] settings.loaded | workspaces=2 active=${workspaceId}`,
-      '2026-11-21T10:25:02Z [DEBUG] [TDF] tdf.parse | version=0.8.0 tasks=25 labels=3 locations=2',
+      '2026-11-21T10:25:02Z [DEBUG] [TDF] tdf.parse | version=0.8.0 tasks=66 labels=33 locations=2',
       '2026-11-21T10:25:02Z [INFO] [SYNC] sync.complete | stage=3 etag="9f2c8b1" local_converged=true',
       '2026-11-21T10:26:14Z [INFO] [STORAGE] watch.attached | mode=parent_dir debounce_ms=350',
       '2026-11-21T10:28:40Z [WARN] [SYNC] webdav.retry | status=412 attempt=1 action=cas_rebase',
       '2026-11-21T10:28:41Z [INFO] [SYNC] sync.converged | generation=3 pruned=0',
-      '2026-11-21T10:29:15Z [DEBUG] [DOMAIN] eval.summary | focus=3 ready=5 planned=1 blocked=4 someday=1 completed=1',
+      '2026-11-21T10:29:15Z [DEBUG] [DOMAIN] eval.summary | focus=3 ready=5 planned=23 blocked=9 someday=5 completed=5',
     ];
   }
 
@@ -1981,32 +2305,37 @@
         ok: true,
         candidates: [
           {
-            displayName: `Plus Code ${query.toUpperCase()} · Dresden`,
-            latitude: 51.0621,
-            longitude: 13.7518,
+            displayName: `Plus Code ${query.toUpperCase()} · Riverdale`,
+            latitude: 47.1321,
+            longitude: 8.5318,
           },
         ],
       };
     }
     const lower = query.toLowerCase();
-    if (lower.includes('markt') || lower.includes('dresden') || lower.includes('haupt')) {
+    if (
+      lower.includes('market') ||
+      lower.includes('riverdale') ||
+      lower.includes('main') ||
+      lower.includes('central')
+    ) {
       return {
         ok: true,
         candidates: [
           {
-            displayName: `${query}, Altstadt, 01067 Dresden, Deutschland`,
-            latitude: 51.050407,
-            longitude: 13.737262,
+            displayName: `${query}, Old Town, 4100 Riverdale`,
+            latitude: 47.120407,
+            longitude: 8.517262,
           },
           {
-            displayName: `${query}, Neustadt, 01097 Dresden, Deutschland`,
-            latitude: 51.06689,
-            longitude: 13.75241,
+            displayName: `${query}, Northgate, 4109 Riverdale`,
+            latitude: 47.13689,
+            longitude: 8.53241,
           },
           {
-            displayName: `${query}, Blasewitz, 01309 Dresden, Deutschland`,
-            latitude: 51.04912,
-            longitude: 13.80544,
+            displayName: `${query}, Eastbridge, 4130 Riverdale`,
+            latitude: 47.11912,
+            longitude: 8.58544,
           },
         ],
       };
@@ -2015,9 +2344,9 @@
       ok: true,
       candidates: [
         {
-          displayName: `${query}, Sachsen, Deutschland`,
-          latitude: 51.05421,
-          longitude: 13.74188,
+          displayName: `${query}, Riverdale District`,
+          latitude: 47.12421,
+          longitude: 8.52188,
         },
       ],
     };

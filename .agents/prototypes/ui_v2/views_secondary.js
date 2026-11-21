@@ -10,7 +10,6 @@
     SUPPORTED_UTC_OFFSETS,
     resolveWebDavEndpoint,
     serializeTdf080,
-    formatConditionLine,
   } = window.TT2.engine;
 
   function renderSegmented(attrName, currentValue, options) {
@@ -468,104 +467,6 @@
      Modal Dialogs
      ========================================================================== */
 
-  function renderLabelHubModal(state, workspace) {
-    const lang = state.lang;
-    const label = workspace.labels.find((l) => l.id === state.modal.labelId);
-    if (!label) return '';
-    const c = label.conditions || {};
-    const rules = [];
-    if (c.days?.length) rules.push({ type: 'days', days: c.days });
-    if (c.times?.length) rules.push({ type: 'times', times: c.times });
-    if (c.locationIds?.length) {
-      rules.push({ type: 'locations', locationIds: c.locationIds });
-    }
-    const hasContent =
-      Boolean(label.note) ||
-      Boolean(label.links?.length) ||
-      rules.length > 0;
-
-    return `
-      <div class="modal-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(t(lang, 'labelHub'))}">
-        <div class="modal-header">
-          <div class="modal-header-text">
-            <span class="eyebrow">${escapeHtml(t(lang, 'labelHub'))}</span>
-            <div class="hub-title-row">
-              <span class="dot dot-lg" style="--label-color:${escapeHtml(label.color || '#00648b')}"></span>
-              <h3>${escapeHtml(label.name)}</h3>
-              ${label.scoped ? `<span class="pill-badge tone-soft">${escapeHtml(t(lang, 'labelScopedBadge'))}</span>` : ''}
-            </div>
-          </div>
-          <button type="button" class="icon-button compact" data-close-modal aria-label="${escapeHtml(t(lang, 'actionClose'))}">
-            ${renderIcon('x')}
-          </button>
-        </div>
-
-        <div class="modal-body">
-          ${
-            !hasContent
-              ? `<div class="info-card"><span class="info-sub">${escapeHtml(t(lang, 'labelHubEmpty'))}</span></div>`
-              : ''
-          }
-          ${
-            label.note
-              ? `<div class="info-card">
-                  <div class="info-card-head">
-                    ${renderIcon('file-text', 'icon-sm')}
-                    <strong>${escapeHtml(t(lang, 'taskInfoNoteTitle'))}</strong>
-                    <button type="button" class="icon-button compact ml-auto" data-copy-note="${escapeHtml(label.note)}" title="${escapeHtml(t(lang, 'actionCopy'))}">
-                      ${renderIcon('copy', 'icon-xs')}
-                    </button>
-                  </div>
-                  <p class="info-note">${escapeHtml(label.note)}</p>
-                </div>`
-              : ''
-          }
-          ${
-            label.links?.length
-              ? `<div class="info-card">
-                  <div class="info-card-head">${renderIcon('link', 'icon-sm')}<strong>${escapeHtml(t(lang, 'taskInfoLinksTitle'))}</strong></div>
-                  <div class="hub-links-list">
-                    ${label.links
-                      .map(
-                        (link) => `
-                      <button type="button" class="hub-link-row" data-open-uri="${escapeHtml(link.uri)}">
-                        <span>
-                          <strong>${escapeHtml(link.title)}</strong>
-                          <small class="mono-sm">${escapeHtml(link.uri)}</small>
-                        </span>
-                        ${renderIcon('external-link', 'icon-sm')}
-                      </button>`,
-                      )
-                      .join('')}
-                  </div>
-                </div>`
-              : ''
-          }
-          ${
-            rules.length
-              ? `<div class="info-card">
-                  <div class="info-card-head">${renderIcon('sliders', 'icon-sm')}<strong>${escapeHtml(t(lang, 'taskInfoConditionsTitle'))}</strong></div>
-                  <ul class="info-simple-list">
-                    ${rules
-                      .map(
-                        (rule) =>
-                          `<li>${escapeHtml(formatConditionLine(rule, workspace.locations, lang))}</li>`,
-                      )
-                      .join('')}
-                  </ul>
-                </div>`
-              : ''
-          }
-        </div>
-
-        <div class="modal-footer">
-          <button type="button" class="secondary" data-edit-label="${escapeHtml(label.id)}">${escapeHtml(t(lang, 'actionEdit'))}</button>
-          <button type="button" class="primary" data-close-modal>${escapeHtml(t(lang, 'actionClose'))}</button>
-        </div>
-      </div>
-    `;
-  }
-
   function renderWorkspacesModal(state) {
     const lang = state.lang;
     const modal = state.modal;
@@ -914,9 +815,6 @@
     if (!state.modal) return '';
     let inner = '';
     switch (state.modal.type) {
-      case 'label-hub':
-        inner = renderLabelHubModal(state, workspace);
-        break;
       case 'workspaces':
         inner = renderWorkspacesModal(state);
         break;

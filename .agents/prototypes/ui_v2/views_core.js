@@ -171,9 +171,24 @@
           ${renderIcon('layers')}
           <span class="nav-label-name">${escapeHtml(t(lang, 'allTasks'))}</span>
         </button>
-        ${sortedLabels
-          .map(
-            (label) => `
+        ${(() => {
+          const showFilter = sortedLabels.length > 8;
+          const sidebarQuery = showFilter
+            ? String(state.sidebarLabelFilter || '').trim().toLowerCase()
+            : '';
+          const visibleLabels = sidebarQuery
+            ? sortedLabels.filter((lbl) =>
+                lbl.name.toLowerCase().includes(sidebarQuery),
+              )
+            : sortedLabels;
+          const rowsHtml = visibleLabels.length
+            ? visibleLabels
+                .map((label) => {
+                  const isExpandedInManage =
+                    state.view === 'labels' &&
+                    state.expandedEntity?.kind === 'label' &&
+                    state.expandedEntity?.id === label.id;
+                  return `
           <div class="nav-label-row ${state.view === 'tasks' && state.label === label.id ? 'is-current' : ''}">
             <button class="nav-row nav-label-select" type="button" data-label="${escapeHtml(label.id)}" ${
               state.view === 'tasks' && state.label === label.id
@@ -187,12 +202,28 @@
               </span>
               <span class="count">${evalRes.openCountByLabel.get(label.id) || 0}</span>
             </button>
-            <button type="button" class="icon-button compact nav-hub-btn" data-open-label-hub="${escapeHtml(label.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}" aria-label="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
+            <button type="button" class="icon-button compact nav-hub-btn ${isExpandedInManage ? 'is-accent' : ''}" data-open-managed="labels:${escapeHtml(label.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}" aria-label="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
               ${renderIcon('info', 'icon-sm')}
             </button>
-          </div>`,
-          )
-          .join('')}
+          </div>`;
+                })
+                .join('')
+            : `<div class="sidebar-filter-empty">${escapeHtml(t(lang, 'sidebarFilterLabelsEmpty'))}</div>`;
+
+          if (!showFilter) return rowsHtml;
+          return `
+            <div class="sidebar-filter-wrap">
+              ${renderIcon('search', 'icon-xs')}
+              <input type="search" data-sidebar-label-filter value="${escapeHtml(state.sidebarLabelFilter || '')}" placeholder="${escapeHtml(t(lang, 'sidebarFilterLabelsPlaceholder'))}" autocomplete="off" aria-label="${escapeHtml(t(lang, 'sidebarFilterLabelsPlaceholder'))}">
+              ${
+                state.sidebarLabelFilter
+                  ? `<button type="button" class="icon-button compact sidebar-filter-clear" data-clear-sidebar-label-filter aria-label="${escapeHtml(t(lang, 'searchClear'))}">${renderIcon('x', 'icon-xs')}</button>`
+                  : ''
+              }
+            </div>
+            <div class="sidebar-label-list">${rowsHtml}</div>
+          `;
+        })()}
       </section>
 
       <section>
@@ -201,14 +232,19 @@
           <button class="text-button" type="button" data-view="locations">${escapeHtml(t(lang, 'manage'))}</button>
         </div>
         ${sortedLocations
-          .map(
-            (loc) => `
-          <button type="button" class="nav-row" data-edit-location="${escapeHtml(loc.id)}">
+          .map((loc) => {
+            const isExpandedInManage =
+              state.view === 'locations' &&
+              state.expandedEntity?.kind === 'location' &&
+              state.expandedEntity?.id === loc.id;
+            return `
+          <button type="button" class="nav-row nav-entity-row" data-open-managed="locations:${escapeHtml(loc.id)}" title="${escapeHtml(t(lang, 'locationHubOpenTooltip'))}" ${isExpandedInManage ? 'aria-current="page"' : ''}>
             ${renderIcon('map-pin')}
             <span class="nav-label-name">${escapeHtml(loc.name)}</span>
             <span class="count">${evalRes.openCountByLocation.get(loc.id) || 0}</span>
-          </button>`,
-          )
+            <span class="nav-hub-hint" aria-hidden="true">${renderIcon('info', 'icon-sm')}</span>
+          </button>`;
+          })
           .join('')}
       </section>
 
@@ -398,6 +434,16 @@
     `;
   }
 
+  function formatRadiusMeters(radius) {
+    const num = Number(radius);
+    if (!Number.isFinite(num)) return '0 m';
+    if (num >= 1000) {
+      const km = (num / 1000).toFixed(2).replace(/\.?0+$/, '');
+      return `${km} km`;
+    }
+    return `${num} m`;
+  }
+
   function renderInlineEditActions(lang, error, clearAttr, clearLabel) {
     return `
       ${error ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(error)}</div>` : ''}
@@ -415,60 +461,295 @@
     `;
   }
 
-  function renderTaskSlidePanel(task, state, workspace, evalRes, isAnimating) {
-    const lang = state.lang;
-    const offset = resolveOffsetMinutes(workspace.config);
-    const isCompleted = Boolean(task.finishedAt);
-    const inQueue = workspace.queue.includes(task.id);
-    const currentMode = task.priority
-      ? 'priority'
-      : !inQueue && !isCompleted
-        ? 'someday'
-        : 'queue';
+  function renderInlineEditBtn(kind, id, section, lang, extraClass = 'ml-auto') {
+    return `<button type="button" class="icon-button compact${extraClass ? ` ${extraClass}` : ''}" data-ie-open="${section}" data-ie-kind="${kind}" data-ie-id="${escapeHtml(id)}" title="${escapeHtml(t(lang, 'actionEdit'))}" aria-label="${escapeHtml(t(lang, 'actionEdit'))}">${renderIcon('pencil', 'icon-xs')}</button>`;
+  }
 
-    const edit =
-      state.inlineEdit && state.inlineEdit.taskId === task.id
-        ? state.inlineEdit
-        : null;
-    const editing = edit ? edit.section : null;
-    const draft = edit ? edit.draft : null;
-    const err = edit ? edit.error : '';
+  function renderAddFieldChip(kind, id, section, iconName, labelText) {
+    return `<button type="button" class="add-field-chip" data-ie-open="${section}" data-ie-kind="${kind}" data-ie-id="${escapeHtml(id)}">${renderIcon(iconName, 'icon-xs')}<span>${escapeHtml(labelText)}</span></button>`;
+  }
 
-    const labelsById = new Map(workspace.labels.map((l) => [l.id, l]));
-    const taskLabels = (task.labels || [])
-      .map((id) => labelsById.get(id))
-      .filter(Boolean);
+  function renderEntityToggleItem({
+    managedView,
+    id,
+    label,
+    sublabel = '',
+    leadingHtml,
+    active,
+    toggleAttrs,
+    infoTooltip,
+  }) {
+    return `
+      <div class="label-toggle-item ${active ? 'is-selected' : ''}">
+        <button type="button" class="label-toggle-btn" ${toggleAttrs} aria-pressed="${active}">
+          ${leadingHtml}
+          <span>${escapeHtml(label)}</span>
+          ${sublabel ? `<span class="label-toggle-sub">${escapeHtml(sublabel)}</span>` : ''}
+          ${active ? renderIcon('check', 'icon-xs') : ''}
+        </button>
+        <button type="button" class="label-toggle-hub" data-open-managed="${managedView}:${escapeHtml(id)}" title="${escapeHtml(infoTooltip)}" aria-label="${escapeHtml(infoTooltip)}">
+          ${renderIcon('info', 'icon-xs')}
+        </button>
+      </div>
+    `;
+  }
+
+  function filterPickerLabels(workspace, rawQuery, scopeFilter = 'all') {
     const sortedLabels = [...workspace.labels].sort((a, b) =>
       a.name.localeCompare(b.name),
     );
-    const depEval = evalRes.dependencyDetailsByTask.get(task.id);
-    const condEval = evalRes.conditionDetailsByTask.get(task.id);
-    const suspendedActive = isTaskSuspendedActive(task, state.nowMs);
-    const overdue = isTaskOverdue(task, state.nowMs);
-    const withinLead = isTaskWithinDueLeadWindow(
-      task,
-      state.nowMs,
-      workspace.config.dueLeadWindow,
-    );
-    const c = task.conditions || {};
-    const hasCustomTaskConds = Boolean(
-      c.ignoreLabels ||
-        (c.daysMode && c.daysMode !== 'inherit') ||
-        (c.timeMode && c.timeMode !== 'inherit') ||
-        (c.placesMode && c.placesMode !== 'inherit'),
-    );
-    const hasConditions =
-      (condEval && condEval.rules.length > 0) || hasCustomTaskConds;
+    let scopedCount = 0;
+    let globalCount = 0;
+    for (const lbl of sortedLabels) {
+      if (lbl.scoped) scopedCount += 1;
+      else globalCount += 1;
+    }
+    const hasBothScopes = scopedCount > 0 && globalCount > 0;
+    const effectiveScope = hasBothScopes ? scopeFilter : 'all';
+    const trimmedQuery = String(rawQuery || '').trim();
+    const normalizedQuery = trimmedQuery.toLowerCase();
 
-    const editBtn = (section) =>
-      `<button type="button" class="icon-button compact ml-auto" data-ie-open="${section}" data-ie-task="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionEdit'))}" aria-label="${escapeHtml(t(lang, 'actionEdit'))}">${renderIcon('pencil', 'icon-xs')}</button>`;
+    const filtered = sortedLabels.filter((lbl) => {
+      if (effectiveScope === 'scoped' && !lbl.scoped) return false;
+      if (effectiveScope === 'global' && lbl.scoped) return false;
+      if (normalizedQuery && !lbl.name.toLowerCase().includes(normalizedQuery)) {
+        return false;
+      }
+      return true;
+    });
 
-    const editHistIdx = state.editingHistoryIndex;
-    const sections = [];
+    const canCreate =
+      trimmedQuery.length > 0 &&
+      trimmedQuery.length <= 120 &&
+      !sortedLabels.some((lbl) => lbl.name.toLowerCase() === normalizedQuery);
 
-    // 2. Note
-    if (editing === 'note') {
-      sections.push(`
+    return {
+      sortedLabels,
+      filtered,
+      totalCount: sortedLabels.length,
+      scopedCount,
+      globalCount,
+      hasBothScopes,
+      effectiveScope,
+      trimmedQuery,
+      canCreate,
+    };
+  }
+
+  function renderAssignedLabelChips({
+    labels,
+    targetKind,
+    taskId = '',
+    lang,
+    showAddButton = false,
+    compact = false,
+  }) {
+    const chipsHtml = labels
+      .map((lbl) => {
+        const removeTitle = t(lang, 'labelPickerRemoveTooltip', {
+          name: lbl.name,
+        });
+        if (targetKind === 'task') {
+          return `
+            <div class="assigned-label-chip ${compact ? 'is-compact' : ''}">
+              <button type="button" class="assigned-label-chip-main" data-open-managed="labels:${escapeHtml(lbl.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
+                <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
+                <span>${escapeHtml(lbl.name)}</span>
+              </button>
+              <button type="button" class="assigned-label-chip-remove" data-direct-toggle-label="${escapeHtml(lbl.id)}" data-task-id="${escapeHtml(taskId)}" title="${escapeHtml(removeTitle)}" aria-label="${escapeHtml(removeTitle)}">
+                ${renderIcon('x', 'icon-xs')}
+              </button>
+            </div>
+          `;
+        }
+        return `
+          <div class="assigned-label-chip ${compact ? 'is-compact' : ''}">
+            <span class="assigned-label-chip-main is-static">
+              <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
+              <span>${escapeHtml(lbl.name)}</span>
+            </span>
+            <button type="button" class="assigned-label-chip-remove" data-draft-toggle-label="${escapeHtml(lbl.id)}" title="${escapeHtml(removeTitle)}" aria-label="${escapeHtml(removeTitle)}">
+              ${renderIcon('x', 'icon-xs')}
+            </button>
+          </div>
+        `;
+      })
+      .join('');
+
+    const addBtnHtml = showAddButton
+      ? `<button type="button" class="add-field-chip" data-open-task-label-picker="${escapeHtml(taskId)}">${renderIcon('plus', 'icon-xs')}<span>${escapeHtml(t(lang, 'actionAdd'))}</span></button>`
+      : '';
+
+    return `<div class="assigned-label-chips">${chipsHtml}${addBtnHtml}</div>`;
+  }
+
+  function renderLabelPickerBody({
+    mode,
+    taskId = '',
+    selectedIds,
+    pickerState,
+    workspace,
+    evalRes,
+    lang,
+    showSelectedStrip = true,
+  }) {
+    const query = pickerState.query || '';
+    const {
+      sortedLabels,
+      filtered,
+      totalCount,
+      scopedCount,
+      globalCount,
+      hasBothScopes,
+      effectiveScope,
+      trimmedQuery,
+      canCreate,
+    } = filterPickerLabels(workspace, query, pickerState.scopeFilter || 'all');
+
+    const selectedSet = new Set(selectedIds);
+    const selectedLabels = sortedLabels.filter((lbl) => selectedSet.has(lbl.id));
+    const totalSelectable = filtered.length + (canCreate ? 1 : 0);
+    const rawActiveIndex = pickerState.activeIndex;
+    const activeIndex =
+      totalSelectable > 0 && rawActiveIndex >= 0
+        ? Math.min(rawActiveIndex, totalSelectable - 1)
+        : -1;
+
+    const selectedStripHtml =
+      showSelectedStrip && selectedLabels.length
+        ? renderAssignedLabelChips({
+            labels: selectedLabels,
+            targetKind: mode,
+            taskId,
+            lang,
+            compact: true,
+          })
+        : '';
+
+    const filterTabsHtml = hasBothScopes
+      ? `<div class="label-picker-filters" role="group" aria-label="${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}">
+          <button type="button" class="lp-filter-pill" data-lp-scope="${mode}:all" aria-pressed="${effectiveScope === 'all'}">${escapeHtml(t(lang, 'labelPickerFilterAll', { count: totalCount }))}</button>
+          <button type="button" class="lp-filter-pill" data-lp-scope="${mode}:scoped" aria-pressed="${effectiveScope === 'scoped'}">${escapeHtml(t(lang, 'labelPickerFilterScoped', { count: scopedCount }))}</button>
+          <button type="button" class="lp-filter-pill" data-lp-scope="${mode}:global" aria-pressed="${effectiveScope === 'global'}">${escapeHtml(t(lang, 'labelPickerFilterGlobal', { count: globalCount }))}</button>
+        </div>`
+      : '';
+
+    const rowsHtml = filtered
+      .map((lbl, idx) => {
+        const active = selectedSet.has(lbl.id);
+        const highlighted = idx === activeIndex;
+        const openCount = evalRes.openCountByLabel.get(lbl.id) || 0;
+        const toggleAttrs =
+          mode === 'task'
+            ? `data-direct-toggle-label="${escapeHtml(lbl.id)}" data-task-id="${escapeHtml(taskId)}"`
+            : `data-draft-toggle-label="${escapeHtml(lbl.id)}"`;
+        return `
+          <div class="label-picker-row ${active ? 'is-selected' : ''} ${highlighted ? 'is-highlighted' : ''}" data-lp-row-idx="${idx}">
+            <button type="button" class="label-picker-row-main" ${toggleAttrs} role="option" aria-selected="${active}">
+              <span class="lp-check ${active ? 'is-checked' : ''}">${active ? renderIcon('check', 'icon-xs') : ''}</span>
+              <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
+              <span class="lp-row-name">${escapeHtml(lbl.name)}</span>
+              ${lbl.scoped ? `<span class="lp-scoped-badge">${escapeHtml(t(lang, 'scopedQueue'))}</span>` : ''}
+              <span class="lp-row-count">${escapeHtml(t(lang, 'labelPickerOpenCount', { count: openCount }))}</span>
+            </button>
+            <button type="button" class="icon-button compact label-picker-row-info" data-open-managed="labels:${escapeHtml(lbl.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}" aria-label="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
+              ${renderIcon('info', 'icon-xs')}
+            </button>
+          </div>
+        `;
+      })
+      .join('');
+
+    const emptyHtml =
+      !filtered.length && !canCreate
+        ? `<div class="label-picker-empty">${escapeHtml(t(lang, totalCount ? 'labelPickerNoMatches' : 'labelPickerEmptyHint'))}</div>`
+        : '';
+
+    const createHtml = canCreate
+      ? `<button type="button" class="label-picker-create ${activeIndex === filtered.length ? 'is-highlighted' : ''}" data-lp-create="${mode}" data-lp-row-idx="${filtered.length}">
+          ${renderIcon('plus', 'icon-xs')}
+          <span>${escapeHtml(t(lang, 'labelPickerCreateAction', { name: trimmedQuery }))}</span>
+        </button>`
+      : '';
+
+    return `
+      <div class="label-picker-body">
+        ${selectedStripHtml}
+        <div class="label-picker-search">
+          ${renderIcon('search', 'icon-xs')}
+          <input type="search" data-lp-search="${mode}" value="${escapeHtml(query)}" placeholder="${escapeHtml(t(lang, 'labelPickerSearchPlaceholder'))}" maxlength="120" autocomplete="off" aria-label="${escapeHtml(t(lang, 'labelPickerSearchPlaceholder'))}">
+          ${
+            query
+              ? `<button type="button" class="icon-button compact lp-clear-btn" data-lp-clear="${mode}" aria-label="${escapeHtml(t(lang, 'searchClear'))}">${renderIcon('x', 'icon-xs')}</button>`
+              : ''
+          }
+        </div>
+        ${filterTabsHtml}
+        <div class="label-picker-list" role="listbox" aria-multiselectable="true" aria-label="${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}">
+          ${rowsHtml}
+          ${emptyHtml}
+          ${createHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderMobileLabelPickerSheet(state, workspace, evalRes) {
+    if (!state.isCompact) return '';
+    const lang = state.lang;
+    let mode = null;
+    let taskId = '';
+    let selectedIds = [];
+    let pickerState = null;
+
+    if (state.taskLabelPicker) {
+      const task = workspace.tasks.find(
+        (item) => item.id === state.taskLabelPicker.taskId,
+      );
+      if (task) {
+        mode = 'task';
+        taskId = task.id;
+        selectedIds = task.labels || [];
+        pickerState = state.taskLabelPicker;
+      }
+    } else if (state.draftLabelPicker) {
+      mode = 'draft';
+      selectedIds = state.draft.labels || [];
+      pickerState = state.draftLabelPicker;
+    }
+
+    if (!mode || !pickerState) return '';
+
+    return `
+      <div class="sheet-backdrop" data-sheet-backdrop>
+        <div class="bottom-sheet" role="dialog" aria-modal="true" aria-label="${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}">
+          <div class="bottom-sheet-handle" aria-hidden="true"><span></span></div>
+          <div class="bottom-sheet-head">
+            ${renderIcon('tags', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
+            <span class="info-sub">${selectedIds.length}</span>
+            <button type="button" class="secondary compact ml-auto" data-close-label-sheet>${escapeHtml(t(lang, 'actionDone'))}</button>
+          </div>
+          <div class="bottom-sheet-body">
+            ${renderLabelPickerBody({
+              mode,
+              taskId,
+              selectedIds,
+              pickerState,
+              workspace,
+              evalRes,
+              lang,
+              showSelectedStrip: true,
+            })}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderNoteSection({ kind, id, note, isEditing, draft, error, lang }) {
+    if (isEditing) {
+      return `
         <div class="info-card is-editing">
           <div class="info-card-head">
             ${renderIcon('file-text', 'icon-sm')}
@@ -480,37 +761,36 @@
             </label>
             ${renderInlineEditActions(
               lang,
-              err,
-              task.note ? 'data-ie-clear="note"' : '',
+              error,
+              note ? 'data-ie-clear="note"' : '',
               t(lang, 'inlineClear'),
             )}
           </div>
         </div>
-      `);
-    } else if (task.note) {
-      sections.push(`
-        <div class="info-card">
-          <div class="info-card-head">
-            ${renderIcon('file-text', 'icon-sm')}
-            <strong>${escapeHtml(t(lang, 'taskInfoNoteTitle'))}</strong>
-            <div class="info-head-actions ml-auto">
-              <button type="button" class="icon-button compact" data-copy-note="${escapeHtml(task.note)}" title="${escapeHtml(t(lang, 'actionCopy'))}">
-                ${renderIcon('copy', 'icon-xs')}
-              </button>
-              <button type="button" class="icon-button compact" data-ie-open="note" data-ie-task="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionEdit'))}">
-                ${renderIcon('pencil', 'icon-xs')}
-              </button>
-            </div>
-          </div>
-          <p class="info-note">${escapeHtml(task.note)}</p>
-        </div>
-      `);
+      `;
     }
+    if (!note) return '';
+    return `
+      <div class="info-card">
+        <div class="info-card-head">
+          ${renderIcon('file-text', 'icon-sm')}
+          <strong>${escapeHtml(t(lang, 'taskInfoNoteTitle'))}</strong>
+          <div class="info-head-actions ml-auto">
+            <button type="button" class="icon-button compact" data-copy-note="${escapeHtml(note)}" title="${escapeHtml(t(lang, 'actionCopy'))}">
+              ${renderIcon('copy', 'icon-xs')}
+            </button>
+            ${renderInlineEditBtn(kind, id, 'note', lang, '')}
+          </div>
+        </div>
+        <p class="info-note">${escapeHtml(note)}</p>
+      </div>
+    `;
+  }
 
-    // 3. Links
-    if (editing === 'links') {
+  function renderLinksSection({ kind, id, links, isEditing, draft, error, lang }) {
+    if (isEditing) {
       const editingLinkIdx = draft.editingLinkIndex;
-      sections.push(`
+      return `
         <div class="info-card is-editing">
           <div class="info-card-head">
             ${renderIcon('link', 'icon-sm')}
@@ -557,38 +837,358 @@
             </div>
             ${renderInlineEditActions(
               lang,
-              err,
-              task.links?.length ? 'data-ie-clear="links"' : '',
+              error,
+              links?.length ? 'data-ie-clear="links"' : '',
               t(lang, 'inlineClear'),
             )}
           </div>
         </div>
-      `);
-    } else if (task.links?.length) {
-      sections.push(`
-        <div class="info-card">
-          <div class="info-card-head">
-            ${renderIcon('link', 'icon-sm')}
-            <strong>${escapeHtml(t(lang, 'taskInfoLinksTitle'))}</strong>
-            ${editBtn('links')}
-          </div>
-          <div class="hub-links-list">
-            ${task.links
-              .map(
-                (link) => `
-              <button type="button" class="hub-link-row" data-open-uri="${escapeHtml(link.uri)}">
-                <span>
-                  <strong>${escapeHtml(link.title)}</strong>
-                  <small class="mono-sm">${escapeHtml(link.uri)}</small>
-                </span>
-                ${renderIcon('external-link', 'icon-sm')}
-              </button>`,
-              )
-              .join('')}
-          </div>
-        </div>
-      `);
+      `;
     }
+    if (!links?.length) return '';
+    return `
+      <div class="info-card">
+        <div class="info-card-head">
+          ${renderIcon('link', 'icon-sm')}
+          <strong>${escapeHtml(t(lang, 'taskInfoLinksTitle'))}</strong>
+          ${renderInlineEditBtn(kind, id, 'links', lang)}
+        </div>
+        <div class="hub-links-list">
+          ${links
+            .map(
+              (link) => `
+            <button type="button" class="hub-link-row" data-open-uri="${escapeHtml(link.uri)}">
+              <span>
+                <strong>${escapeHtml(link.title)}</strong>
+                <small class="mono-sm">${escapeHtml(link.uri)}</small>
+              </span>
+              ${renderIcon('external-link', 'icon-sm')}
+            </button>`,
+            )
+            .join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderConditionsReadRules(rules, workspace, lang, showStatusPrefix) {
+    return `
+      <ul class="info-simple-list">
+        ${rules
+          .map((rule) => {
+            const prefix = showStatusPrefix ? (rule.satisfied ? '✓ ' : '✕ ') : '';
+            if (rule.type === 'locations') {
+              const locChips = rule.locationIds
+                .map((locId) => {
+                  const loc = workspace.locations.find((item) => item.id === locId);
+                  const locLabel = loc ? loc.name : locId;
+                  return `<button type="button" class="inline-loc-chip" data-open-managed="locations:${escapeHtml(locId)}" title="${escapeHtml(t(lang, 'locationHubOpenTooltip'))}">${renderIcon('map-pin', 'icon-xs')}<span>${escapeHtml(locLabel)}</span>${renderIcon('info', 'icon-xs')}</button>`;
+                })
+                .join('');
+              return `<li>${prefix}${escapeHtml(t(lang, 'condLocations'))}:<span class="cond-loc-links">${locChips}</span></li>`;
+            }
+            return `<li>${prefix}${escapeHtml(formatConditionLine(rule, workspace.locations, lang))}</li>`;
+          })
+          .join('')}
+      </ul>
+    `;
+  }
+
+  function renderConditionsEditorBody({
+    draft,
+    workspace,
+    lang,
+    includeModes,
+    suspendedActive = false,
+  }) {
+    const weekdays =
+      window.TT2.i18n.strings[window.TT2.i18n.resolveLang(lang)].weekdays;
+    const sortedLocations = [...workspace.locations].sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+    const condModeSelect = (label, key) => `
+      <label class="field">${escapeHtml(label)}
+        <select data-ie="${key}">
+          <option value="inherit" ${draft[key] === 'inherit' ? 'selected' : ''}>${escapeHtml(t(lang, 'condInherit'))}</option>
+          <option value="any" ${draft[key] === 'any' ? 'selected' : ''}>${escapeHtml(t(lang, 'condAny'))}</option>
+          <option value="custom" ${draft[key] === 'custom' ? 'selected' : ''}>${escapeHtml(t(lang, 'condCustom'))}</option>
+        </select>
+      </label>
+    `;
+
+    const showDays = !includeModes || draft.daysMode === 'custom';
+    const showTimes = !includeModes || draft.timeMode === 'custom';
+    const showPlaces = !includeModes || draft.placesMode === 'custom';
+
+    const daysPicker = `
+      <div class="day-pills">
+        ${weekdays
+          .map(
+            (day, i) => `
+          <label>
+            <input type="checkbox" data-ie-day="${i + 1}" ${draft.days.includes(i + 1) ? 'checked' : ''}>
+            <span>${day}</span>
+          </label>`,
+          )
+          .join('')}
+      </div>
+    `;
+
+    const timesPicker = `
+      <div>
+        ${draft.times
+          .map(
+            (tw, idx) => `
+          <div class="edit-list-row">
+            <span>${escapeHtml(tw.start)} - ${escapeHtml(tw.end)}</span>
+            <button type="button" class="remove-item" data-ie-remove-time="${idx}">${escapeHtml(t(lang, 'actionRemove'))}</button>
+          </div>`,
+          )
+          .join('')}
+        <div class="field-grid">
+          <label class="field">${escapeHtml(t(lang, 'condFrom'))}<input type="time" data-ie-time-start></label>
+          <label class="field">${escapeHtml(t(lang, 'condTo'))}<input type="time" data-ie-time-end></label>
+        </div>
+        <button type="button" class="secondary compact mt-8" data-ie-add-time>${escapeHtml(t(lang, 'actionAddTime'))}</button>
+      </div>
+    `;
+
+    const locationsPicker = sortedLocations.length
+      ? `<div class="label-toggle-grid">
+          ${sortedLocations
+            .map((loc) =>
+              renderEntityToggleItem({
+                managedView: 'locations',
+                id: loc.id,
+                label: loc.name,
+                sublabel: formatRadiusMeters(loc.radius),
+                leadingHtml: renderIcon('map-pin', 'icon-xs'),
+                active: draft.locationIds.includes(loc.id),
+                toggleAttrs: `data-ie-toggle-place="${escapeHtml(loc.id)}"`,
+                infoTooltip: t(lang, 'locationHubOpenTooltip'),
+              }),
+            )
+            .join('')}
+        </div>`
+      : `<div class="info-sub">${escapeHtml(t(lang, 'emptyLocations'))}</div>`;
+
+    return `
+      ${
+        includeModes && suspendedActive
+          ? `<div class="inline-warning-box">${renderIcon('alert-triangle', 'icon-sm')}<span>${escapeHtml(t(lang, 'suspendedDisablesConditions'))}</span></div>`
+          : ''
+      }
+      <div class="${includeModes && suspendedActive ? 'is-dimmed-disabled' : ''}">
+        ${
+          includeModes
+            ? `<label class="check-field compact-check">
+                <input type="checkbox" data-ie="ignoreLabels" ${draft.ignoreLabels ? 'checked' : ''}>
+                <span>${escapeHtml(t(lang, 'fieldIgnoreLabels'))}<small>${escapeHtml(t(lang, 'fieldIgnoreLabelsDesc'))}</small></span>
+              </label>
+              <div class="edit-divider"></div>`
+            : `<small class="info-sub">${escapeHtml(t(lang, 'descLabelConditions'))}</small>
+              <div class="edit-divider"></div>`
+        }
+        ${
+          includeModes
+            ? condModeSelect(t(lang, 'condDays'), 'daysMode')
+            : `<div class="field-label-sm">${escapeHtml(t(lang, 'condDays'))}</div>`
+        }
+        ${showDays ? daysPicker : ''}
+        <div class="edit-divider"></div>
+        ${
+          includeModes
+            ? condModeSelect(t(lang, 'condTimes'), 'timeMode')
+            : `<div class="field-label-sm">${escapeHtml(t(lang, 'condTimes'))}</div>`
+        }
+        ${showTimes ? timesPicker : ''}
+        <div class="edit-divider"></div>
+        ${
+          includeModes
+            ? condModeSelect(t(lang, 'condLocations'), 'placesMode')
+            : `<div class="field-label-sm">${escapeHtml(t(lang, 'condLocations'))}</div>`
+        }
+        ${showPlaces ? locationsPicker : ''}
+      </div>
+    `;
+  }
+
+  function renderEntitySlideShell({
+    kind,
+    id,
+    isAnimating,
+    regionLabel,
+    metaExtraHtml = '',
+    deleteConfirmText,
+    isConfirmingDelete,
+    sectionsHtml,
+    addChipsHtml,
+    lang,
+  }) {
+    const key = `${kind}:${id}`;
+    return `
+      <div class="task-slide-panel ${isAnimating ? '' : 'is-open'}" data-slide-panel="${escapeHtml(key)}" role="region" aria-label="${escapeHtml(regionLabel)}">
+        <div class="task-slide-inner">
+          <div class="task-slide-meta-bar">
+            <code class="mono-sm">${escapeHtml(t(lang, 'taskInfoIdLabel', { id }))}</code>
+            <button type="button" class="icon-button compact" data-copy-id="${escapeHtml(id)}" data-copy-kind="${kind}" title="${escapeHtml(t(lang, 'actionCopy'))}">
+              ${renderIcon('copy', 'icon-xs')}
+            </button>
+            ${metaExtraHtml}
+            ${
+              isConfirmingDelete
+                ? `<div class="inline-delete-confirm ml-auto">
+                    <span>${escapeHtml(deleteConfirmText)}</span>
+                    <button type="button" class="secondary compact" data-inline-del-no>${escapeHtml(t(lang, 'actionKeep'))}</button>
+                    <button type="button" class="danger compact" data-inline-del-yes="${escapeHtml(key)}">${escapeHtml(t(lang, 'actionConfirmDelete'))}</button>
+                  </div>`
+                : `<button type="button" class="icon-button compact is-danger-hover ml-auto" data-inline-del-ask="${escapeHtml(key)}" title="${escapeHtml(t(lang, 'actionDelete'))}" aria-label="${escapeHtml(t(lang, 'actionDelete'))}">
+                    ${renderIcon('trash', 'icon-xs')}
+                  </button>`
+            }
+          </div>
+          <div class="task-slide-sections">
+            ${sectionsHtml}
+          </div>
+          ${
+            addChipsHtml
+              ? `<div class="task-add-fields-bar">${addChipsHtml}</div>`
+              : ''
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  function renderEntityCard({
+    kind,
+    id,
+    extraCardClass = '',
+    isExpanded,
+    isEditingTitle,
+    title,
+    titleField,
+    titleMaxLength,
+    titleAriaLabel,
+    titleEditDraft,
+    titleEditError,
+    leadingHtml,
+    extraActionsHtml = '',
+    collapsedMetadataHtml = '',
+    slidePanelHtml = '',
+    lang,
+  }) {
+    const key = `${kind}:${id}`;
+    return `
+      <article class="task ${extraCardClass} ${isExpanded ? 'is-expanded' : ''}" data-entity-card="${escapeHtml(key)}">
+        <div class="task-top">
+          ${leadingHtml}
+          ${
+            isEditingTitle
+              ? `<div class="inline-title-edit">
+                  <div class="inline-title-edit-row">
+                    <input type="text" data-ie="${titleField}" value="${escapeHtml(titleEditDraft)}" maxlength="${titleMaxLength}" aria-label="${escapeHtml(titleAriaLabel)}">
+                    <button type="button" class="primary compact" data-ie-save>${escapeHtml(t(lang, 'actionSave'))}</button>
+                    <button type="button" class="secondary compact" data-ie-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
+                  </div>
+                  ${titleEditError ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(titleEditError)}</div>` : ''}
+                </div>`
+              : `<button type="button" class="task-title" data-toggle-entity="${escapeHtml(key)}" aria-expanded="${isExpanded}">
+                  ${escapeHtml(title)}
+                </button>
+                <div class="task-actions">
+                  ${
+                    isExpanded
+                      ? `<button type="button" class="icon-button compact" data-ie-open="${titleField}" data-ie-kind="${kind}" data-ie-id="${escapeHtml(id)}" title="${escapeHtml(titleAriaLabel)}" aria-label="${escapeHtml(titleAriaLabel)}">
+                          ${renderIcon('pencil', 'icon-sm')}
+                        </button>`
+                      : ''
+                  }
+                  ${extraActionsHtml}
+                </div>`
+          }
+        </div>
+        ${!isExpanded ? collapsedMetadataHtml : ''}
+        ${isExpanded ? slidePanelHtml : ''}
+      </article>
+    `;
+  }
+
+  function renderTaskSlidePanel(task, state, workspace, evalRes, isAnimating) {
+    const lang = state.lang;
+    const offset = resolveOffsetMinutes(workspace.config);
+    const isCompleted = Boolean(task.finishedAt);
+    const inQueue = workspace.queue.includes(task.id);
+    const currentMode = task.priority
+      ? 'priority'
+      : !inQueue && !isCompleted
+        ? 'someday'
+        : 'queue';
+
+    const edit =
+      state.inlineEdit &&
+      state.inlineEdit.kind === 'task' &&
+      state.inlineEdit.id === task.id
+        ? state.inlineEdit
+        : null;
+    const editing = edit ? edit.section : null;
+    const draft = edit ? edit.draft : null;
+    const err = edit ? edit.error : '';
+
+    const labelsById = new Map(workspace.labels.map((l) => [l.id, l]));
+    const taskLabels = (task.labels || [])
+      .map((id) => labelsById.get(id))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const isTaskLabelPickerOpen = state.taskLabelPicker?.taskId === task.id;
+    const showInlineLabelPicker = isTaskLabelPickerOpen && !state.isCompact;
+    const depEval = evalRes.dependencyDetailsByTask.get(task.id);
+    const condEval = evalRes.conditionDetailsByTask.get(task.id);
+    const suspendedActive = isTaskSuspendedActive(task, state.nowMs);
+    const overdue = isTaskOverdue(task, state.nowMs);
+    const withinLead = isTaskWithinDueLeadWindow(
+      task,
+      state.nowMs,
+      workspace.config.dueLeadWindow,
+    );
+    const c = task.conditions || {};
+    const hasCustomTaskConds = Boolean(
+      c.ignoreLabels ||
+        (c.daysMode && c.daysMode !== 'inherit') ||
+        (c.timeMode && c.timeMode !== 'inherit') ||
+        (c.placesMode && c.placesMode !== 'inherit'),
+    );
+    const hasConditions =
+      (condEval && condEval.rules.length > 0) || hasCustomTaskConds;
+
+    const editBtn = (section) => renderInlineEditBtn('task', task.id, section, lang);
+
+    const editHistIdx = state.editingHistoryIndex;
+    const sections = [];
+
+    // 2. Note (shared)
+    const noteHtml = renderNoteSection({
+      kind: 'task',
+      id: task.id,
+      note: task.note,
+      isEditing: editing === 'note',
+      draft,
+      error: err,
+      lang,
+    });
+    if (noteHtml) sections.push(noteHtml);
+
+    // 3. Links (shared)
+    const linksHtml = renderLinksSection({
+      kind: 'task',
+      id: task.id,
+      links: task.links,
+      isEditing: editing === 'links',
+      draft,
+      error: err,
+      lang,
+    });
+    if (linksHtml) sections.push(linksHtml);
 
     // 4. Subtasks
     if (editing === 'subtasks') {
@@ -644,9 +1244,7 @@
             ${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-sm')}
             <strong>${escapeHtml(t(lang, 'taskInfoSubtasksTitle'))}</strong>
             <span class="info-sub ml-auto">${escapeHtml(t(lang, 'taskInfoSubtasksProgress', { completed: done, total: task.subtasks.length }))}</span>
-            <button type="button" class="icon-button compact" data-ie-open="subtasks" data-ie-task="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionEdit'))}">
-              ${renderIcon('pencil', 'icon-xs')}
-            </button>
+            ${renderInlineEditBtn('task', task.id, 'subtasks', lang, '')}
           </div>
           <div class="progress-bar"><span style="width:${pct}%"></span></div>
           ${task.subtasksAutoFinish ? `<small class="info-sub">${escapeHtml(t(lang, 'taskInfoAutoFinishActive'))}</small>` : ''}
@@ -706,39 +1304,46 @@
       </div>
     `);
 
-    // 6. Labels (direct 1-click toggle)
-    sections.push(`
-      <div class="info-card">
-        <div class="info-card-head">
-          ${renderIcon('tags', 'icon-sm')}
-          <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
-          <span class="info-sub ml-auto">${taskLabels.length}</span>
+    // 6. Labels (assigned chips + on-demand searchable picker; empty collapses to + Labels chip)
+    if (showInlineLabelPicker) {
+      sections.push(`
+        <div class="info-card is-editing label-picker-card">
+          <div class="info-card-head">
+            ${renderIcon('tags', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
+            <span class="info-sub">${taskLabels.length}</span>
+            <button type="button" class="secondary compact ml-auto" data-close-task-label-picker>${escapeHtml(t(lang, 'actionDone'))}</button>
+          </div>
+          ${renderLabelPickerBody({
+            mode: 'task',
+            taskId: task.id,
+            selectedIds: task.labels || [],
+            pickerState: state.taskLabelPicker,
+            workspace,
+            evalRes,
+            lang,
+            showSelectedStrip: true,
+          })}
         </div>
-        ${
-          sortedLabels.length
-            ? `<div class="label-toggle-grid">
-                ${sortedLabels
-                  .map((lbl) => {
-                    const active = (task.labels || []).includes(lbl.id);
-                    return `
-                      <div class="label-toggle-item ${active ? 'is-selected' : ''}">
-                        <button type="button" class="label-toggle-btn" data-direct-toggle-label="${escapeHtml(lbl.id)}" data-task-id="${escapeHtml(task.id)}" aria-pressed="${active}">
-                          <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
-                          <span>${escapeHtml(lbl.name)}</span>
-                          ${active ? renderIcon('check', 'icon-xs') : ''}
-                        </button>
-                        <button type="button" class="label-toggle-hub" data-open-label-hub="${escapeHtml(lbl.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}" aria-label="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
-                          ${renderIcon('info', 'icon-xs')}
-                        </button>
-                      </div>
-                    `;
-                  })
-                  .join('')}
-              </div>`
-            : `<div class="info-sub">${escapeHtml(t(lang, 'inlineLabelsEmpty'))}</div>`
-        }
-      </div>
-    `);
+      `);
+    } else if (taskLabels.length) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('tags', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
+            <span class="info-sub ml-auto">${taskLabels.length}</span>
+          </div>
+          ${renderAssignedLabelChips({
+            labels: taskLabels,
+            targetKind: 'task',
+            taskId: task.id,
+            lang,
+            showAddButton: true,
+          })}
+        </div>
+      `);
+    }
 
     // 7. Due
     if (editing === 'due') {
@@ -1034,20 +1639,8 @@
       `);
     }
 
-    // 12. Activation Conditions
+    // 12. Activation Conditions (shared)
     if (editing === 'conditions') {
-      const weekdays =
-        window.TT2.i18n.strings[window.TT2.i18n.resolveLang(lang)].weekdays;
-      const condModeSelect = (label, key) => `
-        <label class="field">${escapeHtml(label)}
-          <select data-ie="${key}">
-            <option value="inherit" ${draft[key] === 'inherit' ? 'selected' : ''}>${escapeHtml(t(lang, 'condInherit'))}</option>
-            <option value="any" ${draft[key] === 'any' ? 'selected' : ''}>${escapeHtml(t(lang, 'condAny'))}</option>
-            <option value="custom" ${draft[key] === 'custom' ? 'selected' : ''}>${escapeHtml(t(lang, 'condCustom'))}</option>
-          </select>
-        </label>
-      `;
-
       sections.push(`
         <div class="info-card is-editing">
           <div class="info-card-head">
@@ -1055,77 +1648,13 @@
             <strong>${escapeHtml(t(lang, 'taskInfoConditionsTitle'))}</strong>
           </div>
           <div class="inline-edit-body">
-            ${
-              suspendedActive
-                ? `<div class="inline-warning-box">${renderIcon('alert-triangle', 'icon-sm')}<span>${escapeHtml(t(lang, 'suspendedDisablesConditions'))}</span></div>`
-                : ''
-            }
-            <div class="${suspendedActive ? 'is-dimmed-disabled' : ''}">
-              <label class="check-field compact-check">
-                <input type="checkbox" data-ie="ignoreLabels" ${draft.ignoreLabels ? 'checked' : ''}>
-                <span>${escapeHtml(t(lang, 'fieldIgnoreLabels'))}<small>${escapeHtml(t(lang, 'fieldIgnoreLabelsDesc'))}</small></span>
-              </label>
-              <div class="edit-divider"></div>
-              ${condModeSelect(t(lang, 'condDays'), 'daysMode')}
-              ${
-                draft.daysMode === 'custom'
-                  ? `<div class="day-pills">
-                      ${weekdays
-                        .map(
-                          (day, i) => `
-                        <label>
-                          <input type="checkbox" data-ie-day="${i + 1}" ${draft.days.includes(i + 1) ? 'checked' : ''}>
-                          <span>${day}</span>
-                        </label>`,
-                        )
-                        .join('')}
-                    </div>`
-                  : ''
-              }
-              <div class="edit-divider"></div>
-              ${condModeSelect(t(lang, 'condTimes'), 'timeMode')}
-              ${
-                draft.timeMode === 'custom'
-                  ? `<div>
-                      ${draft.times
-                        .map(
-                          (tw, idx) => `
-                        <div class="edit-list-row">
-                          <span>${escapeHtml(tw.start)} - ${escapeHtml(tw.end)}</span>
-                          <button type="button" class="remove-item" data-ie-remove-time="${idx}">${escapeHtml(t(lang, 'actionRemove'))}</button>
-                        </div>`,
-                        )
-                        .join('')}
-                      <div class="field-grid">
-                        <label class="field">${escapeHtml(t(lang, 'condFrom'))}<input type="time" data-ie-time-start></label>
-                        <label class="field">${escapeHtml(t(lang, 'condTo'))}<input type="time" data-ie-time-end></label>
-                      </div>
-                      <button type="button" class="secondary compact" data-ie-add-time>${escapeHtml(t(lang, 'actionAddTime'))}</button>
-                    </div>`
-                  : ''
-              }
-              <div class="edit-divider"></div>
-              ${condModeSelect(t(lang, 'condLocations'), 'placesMode')}
-              ${
-                draft.placesMode === 'custom'
-                  ? `<div>
-                      ${
-                        workspace.locations.length
-                          ? workspace.locations
-                              .map(
-                                (loc) => `
-                            <label class="prereq-row">
-                              <input type="checkbox" data-ie-place="${escapeHtml(loc.id)}" ${draft.locationIds.includes(loc.id) ? 'checked' : ''}>
-                              <span>${escapeHtml(loc.name)}<small>${loc.radius} m</small></span>
-                            </label>`,
-                              )
-                              .join('')
-                          : `<div class="info-sub">${escapeHtml(t(lang, 'emptyLocations'))}</div>`
-                      }
-                    </div>`
-                  : ''
-              }
-            </div>
+            ${renderConditionsEditorBody({
+              draft,
+              workspace,
+              lang,
+              includeModes: true,
+              suspendedActive,
+            })}
             ${renderInlineEditActions(
               lang,
               err,
@@ -1152,14 +1681,7 @@
           </div>
           ${
             condEval && condEval.rules.length > 0
-              ? `<ul class="info-simple-list">
-                  ${condEval.rules
-                    .map(
-                      (rule) =>
-                        `<li>${rule.satisfied ? '✓ ' : '✕ '}${escapeHtml(formatConditionLine(rule, workspace.locations, lang))}</li>`,
-                    )
-                    .join('')}
-                </ul>`
+              ? renderConditionsReadRules(condEval.rules, workspace, lang, true)
               : `<small class="info-sub">${escapeHtml(t(lang, 'fieldIgnoreLabels'))}</small>`
           }
         </div>
@@ -1170,22 +1692,27 @@
     const addChips = [];
     if (!task.note && editing !== 'note') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="note" data-ie-task="${escapeHtml(task.id)}">${renderIcon('file-text', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddNote'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'note', 'file-text', t(lang, 'inlineAddNote')),
       );
     }
     if (!task.links?.length && editing !== 'links') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="links" data-ie-task="${escapeHtml(task.id)}">${renderIcon('link', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddLinks'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'links', 'link', t(lang, 'inlineAddLinks')),
       );
     }
     if (!task.subtasks?.length && editing !== 'subtasks') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="subtasks" data-ie-task="${escapeHtml(task.id)}">${renderIcon('list-checks', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddSubtasks'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'subtasks', 'list-checks', t(lang, 'inlineAddSubtasks')),
+      );
+    }
+    if (!taskLabels.length && !showInlineLabelPicker) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-open-task-label-picker="${escapeHtml(task.id)}">${renderIcon('tags', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddLabels'))}</span></button>`,
       );
     }
     if (!task.dueAt && editing !== 'due') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="due" data-ie-task="${escapeHtml(task.id)}">${renderIcon('calendar-days', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddDue'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'due', 'calendar-days', t(lang, 'inlineAddDue')),
       );
     }
     if (!isCompleted && currentMode === 'queue') {
@@ -1198,70 +1725,51 @@
     }
     if (!task.repeat && editing !== 'repeat') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="repeat" data-ie-task="${escapeHtml(task.id)}">${renderIcon('repeat', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddRepeat'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'repeat', 'repeat', t(lang, 'inlineAddRepeat')),
       );
     }
     if (!suspendedActive && !isCompleted && editing !== 'suspended') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="suspended" data-ie-task="${escapeHtml(task.id)}">${renderIcon('pause-circle', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddSuspend'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'suspended', 'pause-circle', t(lang, 'inlineAddSuspend')),
       );
     }
     if ((!depEval || depEval.total === 0) && editing !== 'prereqs') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="prereqs" data-ie-task="${escapeHtml(task.id)}">${renderIcon('lock', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddPrereqs'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'prereqs', 'lock', t(lang, 'inlineAddPrereqs')),
       );
     }
     if (!hasConditions && editing !== 'conditions') {
       addChips.push(
-        `<button type="button" class="add-field-chip" data-ie-open="conditions" data-ie-task="${escapeHtml(task.id)}">${renderIcon('sliders', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddConditions'))}</span></button>`,
+        renderAddFieldChip('task', task.id, 'conditions', 'sliders', t(lang, 'inlineAddConditions')),
       );
     }
 
-    const confirmingDelete = state.inlineDeleteConfirmTaskId === task.id;
-
-    return `
-      <div class="task-slide-panel ${isAnimating ? '' : 'is-open'}" data-slide-panel="${escapeHtml(task.id)}" role="region" aria-label="${escapeHtml(t(lang, 'taskInfoTitle'))}">
-        <div class="task-slide-inner">
-          <div class="task-slide-meta-bar">
-            <code class="mono-sm">${escapeHtml(t(lang, 'taskInfoIdLabel', { id: task.id }))}</code>
-            <button type="button" class="icon-button compact" data-copy-id="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionCopy'))}">
-              ${renderIcon('copy', 'icon-xs')}
-            </button>
-            ${
-              confirmingDelete
-                ? `<div class="inline-delete-confirm ml-auto">
-                    <span>${escapeHtml(t(lang, 'inlineDeleteConfirm'))}</span>
-                    <button type="button" class="secondary compact" data-inline-del-no>${escapeHtml(t(lang, 'actionKeep'))}</button>
-                    <button type="button" class="danger compact" data-inline-del-yes="${escapeHtml(task.id)}">${escapeHtml(t(lang, 'actionConfirmDelete'))}</button>
-                  </div>`
-                : `<button type="button" class="icon-button compact is-danger-hover ml-auto" data-inline-del-ask="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionDelete'))}" aria-label="${escapeHtml(t(lang, 'actionDelete'))}">
-                    ${renderIcon('trash', 'icon-xs')}
-                  </button>`
-            }
-          </div>
-          <div class="task-slide-sections">
-            ${sections.join('')}
-          </div>
-          ${
-            addChips.length
-              ? `<div class="task-add-fields-bar">${addChips.join('')}</div>`
-              : ''
-          }
-        </div>
-      </div>
-    `;
+    return renderEntitySlideShell({
+      kind: 'task',
+      id: task.id,
+      isAnimating,
+      regionLabel: t(lang, 'taskInfoTitle'),
+      deleteConfirmText: t(lang, 'inlineDeleteConfirm'),
+      isConfirmingDelete: state.inlineDeleteConfirmKey === `task:${task.id}`,
+      sectionsHtml: sections.join(''),
+      addChipsHtml: addChips.join(''),
+      lang,
+    });
   }
 
   function renderTaskCard(task, tierIdx, state, workspace, evalRes, showTierBadge = false) {
     const lang = state.lang;
     const offset = resolveOffsetMinutes(workspace.config);
     const isCompleted = Boolean(task.finishedAt);
-    const isExpanded = state.expandedTaskId === task.id;
-    const isAnimating = state.justExpandedTaskId === task.id;
+    const key = `task:${task.id}`;
+    const isExpanded =
+      state.expandedEntity?.kind === 'task' && state.expandedEntity?.id === task.id;
+    const isAnimating = state.justExpandedKey === key;
     const canDowngrade = !isCompleted && tierIdx <= 2;
     const isEditingTitle =
       isExpanded &&
-      state.inlineEdit?.taskId === task.id &&
+      state.inlineEdit?.kind === 'task' &&
+      state.inlineEdit?.id === task.id &&
       state.inlineEdit?.section === 'title';
 
     let metadataHtml = '';
@@ -1282,6 +1790,7 @@
       const condEval = evalRes.conditionDetailsByTask.get(task.id);
 
       const badges = [];
+      const toggleAttr = `data-toggle-entity="${escapeHtml(key)}"`;
 
       if (showTierBadge) {
         badges.push(
@@ -1303,44 +1812,44 @@
             ? t(lang, 'badgeOverduePrefix', { date: dateStr })
             : t(lang, 'badgeDuePrefix', { date: dateStr });
         badges.push(
-          `<button type="button" class="meta-pill is-interactive ${dueTone}" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('calendar-days', 'icon-xs')}${escapeHtml(dueText)}</button>`,
+          `<button type="button" class="meta-pill is-interactive ${dueTone}" ${toggleAttr}>${renderIcon('calendar-days', 'icon-xs')}${escapeHtml(dueText)}</button>`,
         );
       }
 
       if (task.note) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
         );
       }
 
       if (task.links?.length) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, task.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: task.links.length }))}</button>`,
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, task.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: task.links.length }))}</button>`,
         );
       }
 
       if (task.subtasks?.length) {
         const doneCount = task.subtasks.filter((s) => s.done).length;
         badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-xs')}${escapeHtml(t(lang, 'badgeSteps', { done: doneCount, total: task.subtasks.length }))}</button>`,
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-xs')}${escapeHtml(t(lang, 'badgeSteps', { done: doneCount, total: task.subtasks.length }))}</button>`,
         );
       }
 
       if (task.history?.length) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('history', 'icon-xs')}${escapeHtml(t(lang, 'badgeHistory', { count: task.history.length }))}</button>`,
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('history', 'icon-xs')}${escapeHtml(t(lang, 'badgeHistory', { count: task.history.length }))}</button>`,
         );
       }
 
       if (task.priority && !isCompleted) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive tone-accent" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('zap', 'icon-xs')}${escapeHtml(t(lang, 'badgePriority'))}</button>`,
+          `<button type="button" class="meta-pill is-interactive tone-accent" ${toggleAttr}>${renderIcon('zap', 'icon-xs')}${escapeHtml(t(lang, 'badgePriority'))}</button>`,
         );
       }
 
       if (task.repeat) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('repeat', 'icon-xs')}${escapeHtml(formatRepeatSummary(task, lang))}</button>`,
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('repeat', 'icon-xs')}${escapeHtml(formatRepeatSummary(task, lang))}</button>`,
         );
       }
 
@@ -1352,19 +1861,19 @@
                 date: formatLocalDate(task.suspendedAt, offset),
               });
         badges.push(
-          `<button type="button" class="meta-pill is-interactive tone-warning" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('pause-circle', 'icon-xs')}${escapeHtml(suspText)}</button>`,
+          `<button type="button" class="meta-pill is-interactive tone-warning" ${toggleAttr}>${renderIcon('pause-circle', 'icon-xs')}${escapeHtml(suspText)}</button>`,
         );
       }
 
       if (depEval && !depEval.satisfied) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive tone-warning" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('lock', 'icon-xs')}${escapeHtml(t(lang, 'badgeBlockedBy', { done: depEval.satisfiedCount, total: depEval.total }))}</button>`,
+          `<button type="button" class="meta-pill is-interactive tone-warning" ${toggleAttr}>${renderIcon('lock', 'icon-xs')}${escapeHtml(t(lang, 'badgeBlockedBy', { done: depEval.satisfiedCount, total: depEval.total }))}</button>`,
         );
       }
 
       if (condEval && condEval.rules.length > 0) {
         badges.push(
-          `<button type="button" class="meta-pill is-interactive ${condEval.satisfied ? '' : 'tone-warning'}" data-toggle-task="${escapeHtml(task.id)}">${renderIcon('sliders', 'icon-xs')}${escapeHtml(t(lang, 'badgeConditions'))}</button>`,
+          `<button type="button" class="meta-pill is-interactive ${condEval.satisfied ? '' : 'tone-warning'}" ${toggleAttr}>${renderIcon('sliders', 'icon-xs')}${escapeHtml(t(lang, 'badgeConditions'))}</button>`,
         );
       }
 
@@ -1373,7 +1882,7 @@
           ${taskLabels
             .map(
               (lbl) => `
-            <button type="button" class="tag-chip" data-open-label-hub="${escapeHtml(lbl.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
+            <button type="button" class="tag-chip" data-open-managed="labels:${escapeHtml(lbl.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
               <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
               <span>${escapeHtml(lbl.name)}</span>
             </button>`,
@@ -1384,50 +1893,37 @@
       }
     }
 
-    return `
-      <article class="task ${isCompleted ? 'is-completed' : ''} ${isExpanded ? 'is-expanded' : ''}">
-        <div class="task-top">
-          <button type="button" class="complete" data-complete="${escapeHtml(task.id)}" aria-label="${escapeHtml(task.title)} ${escapeHtml(t(lang, isCompleted ? 'actionRestore' : 'actionComplete'))}">
-            <span class="circle ${isCompleted ? 'is-checked' : ''}">${isCompleted ? renderIcon('check', 'icon-xs') : ''}</span>
-          </button>
-          ${
-            isEditingTitle
-              ? `<div class="inline-title-edit">
-                  <div class="inline-title-edit-row">
-                    <input type="text" data-ie="title" value="${escapeHtml(state.inlineEdit.draft.title)}" maxlength="300" aria-label="${escapeHtml(t(lang, 'inlineEditTitle'))}">
-                    <button type="button" class="primary compact" data-ie-save>${escapeHtml(t(lang, 'actionSave'))}</button>
-                    <button type="button" class="secondary compact" data-ie-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
-                  </div>
-                  ${state.inlineEdit.error ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(state.inlineEdit.error)}</div>` : ''}
-                </div>`
-              : `<button type="button" class="task-title" data-toggle-task="${escapeHtml(task.id)}" aria-expanded="${isExpanded}">
-                  ${escapeHtml(task.title)}
-                </button>
-                <div class="task-actions">
-                  ${
-                    isExpanded
-                      ? `<button type="button" class="icon-button compact" data-ie-open="title" data-ie-task="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'inlineEditTitle'))}" aria-label="${escapeHtml(t(lang, 'inlineEditTitle'))}">
-                          ${renderIcon('pencil', 'icon-sm')}
-                        </button>`
-                      : ''
-                  }
-                  ${
-                    canDowngrade
-                      ? `<button type="button" class="icon-button compact" data-downgrade="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionDowngrade'))}" aria-label="${escapeHtml(t(lang, 'actionDowngrade'))}">
-                          ${renderIcon('chevron-right', 'icon-sm')}
-                        </button>`
-                      : ''
-                  }
-                </div>`
-          }
-        </div>
-        ${metadataHtml}
-        ${isExpanded ? renderTaskSlidePanel(task, state, workspace, evalRes, isAnimating) : ''}
-      </article>
-    `;
+    return renderEntityCard({
+      kind: 'task',
+      id: task.id,
+      extraCardClass: isCompleted ? 'is-completed' : '',
+      isExpanded,
+      isEditingTitle,
+      title: task.title,
+      titleField: 'title',
+      titleMaxLength: 300,
+      titleAriaLabel: t(lang, 'inlineEditTitle'),
+      titleEditDraft: isEditingTitle ? state.inlineEdit.draft.title : '',
+      titleEditError: isEditingTitle ? state.inlineEdit.error : '',
+      leadingHtml: `
+        <button type="button" class="complete" data-complete="${escapeHtml(task.id)}" aria-label="${escapeHtml(task.title)} ${escapeHtml(t(lang, isCompleted ? 'actionRestore' : 'actionComplete'))}">
+          <span class="circle ${isCompleted ? 'is-checked' : ''}">${isCompleted ? renderIcon('check', 'icon-xs') : ''}</span>
+        </button>
+      `,
+      extraActionsHtml: canDowngrade
+        ? `<button type="button" class="icon-button compact" data-downgrade="${escapeHtml(task.id)}" title="${escapeHtml(t(lang, 'actionDowngrade'))}" aria-label="${escapeHtml(t(lang, 'actionDowngrade'))}">
+            ${renderIcon('chevron-right', 'icon-sm')}
+          </button>`
+        : '',
+      collapsedMetadataHtml: metadataHtml,
+      slidePanelHtml: isExpanded
+        ? renderTaskSlidePanel(task, state, workspace, evalRes, isAnimating)
+        : '',
+      lang,
+    });
   }
 
-  function renderQuickComposer(state, workspace) {
+  function renderQuickComposer(state, workspace, evalRes) {
     const lang = state.lang;
     const draft = state.draft;
     const modeHintText =
@@ -1436,9 +1932,13 @@
         : draft.mode === 'someday'
           ? t(lang, 'hintSomeday')
           : t(lang, 'hintQueue');
-    const sortedLabels = [...workspace.labels].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    const labelsById = new Map(workspace.labels.map((l) => [l.id, l]));
+    const draftLabels = (draft.labels || [])
+      .map((id) => labelsById.get(id))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const isDraftPickerOpen = Boolean(state.draftLabelPicker);
+    const showDesktopPopover = isDraftPickerOpen && !state.isCompact;
 
     return `
       <div class="composer ${state.mobileQuickAddOpen ? 'mobile-expanded' : ''}">
@@ -1448,6 +1948,27 @@
         </button>
 
         <div class="composer-box">
+          ${
+            showDesktopPopover
+              ? `<div class="composer-label-popover" role="dialog" aria-label="${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}">
+                  <div class="composer-popover-head">
+                    ${renderIcon('tags', 'icon-sm')}
+                    <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
+                    <span class="info-sub">${draftLabels.length}</span>
+                    <button type="button" class="secondary compact ml-auto" data-close-draft-label-picker>${escapeHtml(t(lang, 'actionDone'))}</button>
+                  </div>
+                  ${renderLabelPickerBody({
+                    mode: 'draft',
+                    selectedIds: draft.labels || [],
+                    pickerState: state.draftLabelPicker,
+                    workspace,
+                    evalRes,
+                    lang,
+                    showSelectedStrip: false,
+                  })}
+                </div>`
+              : ''
+          }
           <form data-form="quick-task">
             <div class="entry-row">
               <input name="title" data-draft="title" value="${escapeHtml(draft.title)}" aria-label="${escapeHtml(t(lang, 'quickAddPlaceholder'))}" placeholder="${escapeHtml(t(lang, 'quickAddPlaceholder'))}" autocomplete="off" required>
@@ -1467,21 +1988,22 @@
             </div>
 
             <div class="composer-footer-row">
-              <details class="label-picker">
-                <summary>${renderIcon('tags', 'icon-sm')}<span data-label-summary>${escapeHtml(t(lang, 'quickAddLabelsSummary', { count: draft.labels.length }))}</span></summary>
-                <div class="label-checks">
-                  ${sortedLabels
-                    .map(
-                      (label) => `
-                    <label>
-                      <input type="checkbox" data-draft-label="${escapeHtml(label.id)}" ${draft.labels.includes(label.id) ? 'checked' : ''}>
-                      <span class="dot" style="--label-color:${escapeHtml(label.color || '#00648b')}"></span>
-                      <span>${escapeHtml(label.name)}</span>
-                    </label>`,
-                    )
-                    .join('')}
-                </div>
-              </details>
+              <div class="composer-labels-bar">
+                ${
+                  draftLabels.length
+                    ? renderAssignedLabelChips({
+                        labels: draftLabels,
+                        targetKind: 'draft',
+                        lang,
+                        compact: true,
+                      })
+                    : ''
+                }
+                <button type="button" class="add-field-chip composer-label-trigger ${isDraftPickerOpen ? 'is-active' : ''}" data-toggle-draft-label-picker aria-expanded="${isDraftPickerOpen}">
+                  ${renderIcon(draftLabels.length ? 'plus' : 'tags', 'icon-xs')}
+                  <span>${escapeHtml(t(lang, draftLabels.length ? 'actionAdd' : 'inlineAddLabels'))}</span>
+                </button>
+              </div>
               <button type="button" class="text-button" data-quick-add-expand>
                 ${renderIcon('sliders', 'icon-xs')} ${escapeHtml(t(lang, 'quickAddAdvanced'))}
               </button>
@@ -1567,8 +2089,429 @@
       </div>
 
       ${renderNotice(state)}
-      ${renderQuickComposer(state, workspace)}
+      ${renderQuickComposer(state, workspace, evalRes)}
     `;
+  }
+
+  function renderLabelSlidePanel(label, state, workspace, openCount, isAnimating) {
+    const lang = state.lang;
+    const edit =
+      state.inlineEdit &&
+      state.inlineEdit.kind === 'label' &&
+      state.inlineEdit.id === label.id
+        ? state.inlineEdit
+        : null;
+    const editing = edit ? edit.section : null;
+    const draft = edit ? edit.draft : null;
+    const err = edit ? edit.error : '';
+
+    const c = label.conditions || {};
+    const rules = [];
+    if (c.days?.length) rules.push({ type: 'days', days: c.days });
+    if (c.times?.length) rules.push({ type: 'times', times: c.times });
+    if (c.locationIds?.length) {
+      rules.push({ type: 'locations', locationIds: c.locationIds });
+    }
+    const hasConditions = rules.length > 0;
+    const editBtn = (section) => renderInlineEditBtn('label', label.id, section, lang);
+
+    const sections = [];
+
+    // 1. Note (shared)
+    const noteHtml = renderNoteSection({
+      kind: 'label',
+      id: label.id,
+      note: label.note,
+      isEditing: editing === 'note',
+      draft,
+      error: err,
+      lang,
+    });
+    if (noteHtml) sections.push(noteHtml);
+
+    // 2. Links (shared)
+    const linksHtml = renderLinksSection({
+      kind: 'label',
+      id: label.id,
+      links: label.links,
+      isEditing: editing === 'links',
+      draft,
+      error: err,
+      lang,
+    });
+    if (linksHtml) sections.push(linksHtml);
+
+    // 3. Color
+    if (editing === 'color') {
+      sections.push(`
+        <div class="info-card is-editing">
+          <div class="info-card-head">
+            ${renderIcon('palette', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'labelInfoColorTitle'))}</strong>
+          </div>
+          <div class="inline-edit-body">
+            <div class="color-input-row">
+              <span class="color-swatch-preview" style="background:${escapeHtml(draft.color || '#2196F3')}"></span>
+              <input data-ie="color" value="${escapeHtml(draft.color)}" placeholder="#2196F3" maxlength="7" aria-label="${escapeHtml(t(lang, 'fieldColorHex'))}">
+              <button type="button" class="secondary compact" data-open-color-picker>${renderIcon('palette', 'icon-xs')}${escapeHtml(t(lang, 'actionCustomColor'))}</button>
+            </div>
+            <div class="color-presets">
+              ${LABEL_COLOR_PRESETS.map(
+                (hex) => `
+                <button type="button" class="color-preset-chip ${String(draft.color).toUpperCase() === hex ? 'is-selected' : ''}" data-ie-color-preset="${hex}">
+                  <span class="dot" style="--label-color:${hex}"></span>
+                  <span>${hex}</span>
+                </button>`,
+              ).join('')}
+            </div>
+            ${renderInlineEditActions(lang, err, '', '')}
+          </div>
+        </div>
+      `);
+    } else {
+      const hex = (label.color || '#2196F3').toUpperCase();
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('palette', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'labelInfoColorTitle'))}</strong>
+            ${editBtn('color')}
+          </div>
+          <div class="inline-color-read">
+            <span class="dot dot-lg" style="--label-color:${escapeHtml(hex)}"></span>
+            <code class="mono-sm">${escapeHtml(hex)}</code>
+          </div>
+        </div>
+      `);
+    }
+
+    // 4. Board Scope (direct 1-click toggle, matching Task placement)
+    sections.push(`
+      <div class="info-card">
+        <div class="info-card-head">
+          ${renderIcon('layers', 'icon-sm')}
+          <strong>${escapeHtml(t(lang, 'labelInfoScopeTitle'))}</strong>
+        </div>
+        <div class="segmented" role="group" aria-label="${escapeHtml(t(lang, 'labelInfoScopeTitle'))}">
+          <button type="button" data-direct-label-scope="false" data-label-id="${escapeHtml(label.id)}" aria-pressed="${!label.scoped}">${escapeHtml(t(lang, 'globalContext'))}</button>
+          <button type="button" data-direct-label-scope="true" data-label-id="${escapeHtml(label.id)}" aria-pressed="${Boolean(label.scoped)}">${escapeHtml(t(lang, 'scopedQueue'))}</button>
+        </div>
+        <small class="info-sub">${escapeHtml(t(lang, 'labelScopedDesc'))}</small>
+      </div>
+    `);
+
+    // 5. Activation Conditions (shared)
+    if (editing === 'conditions') {
+      sections.push(`
+        <div class="info-card is-editing">
+          <div class="info-card-head">
+            ${renderIcon('sliders', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoConditionsTitle'))}</strong>
+          </div>
+          <div class="inline-edit-body">
+            ${renderConditionsEditorBody({
+              draft,
+              workspace,
+              lang,
+              includeModes: false,
+            })}
+            ${renderInlineEditActions(
+              lang,
+              err,
+              hasConditions ? 'data-ie-clear="conditions"' : '',
+              t(lang, 'inlineClear'),
+            )}
+          </div>
+        </div>
+      `);
+    } else if (hasConditions) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('sliders', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoConditionsTitle'))}</strong>
+            ${editBtn('conditions')}
+          </div>
+          ${renderConditionsReadRules(rules, workspace, lang, false)}
+        </div>
+      `);
+    }
+
+    // 6. Unset fields bar (shared)
+    const addChips = [];
+    if (!label.note && editing !== 'note') {
+      addChips.push(
+        renderAddFieldChip('label', label.id, 'note', 'file-text', t(lang, 'inlineAddNote')),
+      );
+    }
+    if (!label.links?.length && editing !== 'links') {
+      addChips.push(
+        renderAddFieldChip('label', label.id, 'links', 'link', t(lang, 'inlineAddLinks')),
+      );
+    }
+    if (!hasConditions && editing !== 'conditions') {
+      addChips.push(
+        renderAddFieldChip('label', label.id, 'conditions', 'sliders', t(lang, 'inlineAddConditions')),
+      );
+    }
+
+    return renderEntitySlideShell({
+      kind: 'label',
+      id: label.id,
+      isAnimating,
+      regionLabel: t(lang, 'labelInfoTitle'),
+      metaExtraHtml: `<span class="meta-pill tone-soft">${escapeHtml(t(lang, 'openTasksCount', { count: openCount }))}</span>`,
+      deleteConfirmText: t(lang, 'inlineDeleteLabelConfirm'),
+      isConfirmingDelete: state.inlineDeleteConfirmKey === `label:${label.id}`,
+      sectionsHtml: sections.join(''),
+      addChipsHtml: addChips.join(''),
+      lang,
+    });
+  }
+
+  function renderLabelCard(label, state, workspace, evalRes) {
+    const lang = state.lang;
+    const key = `label:${label.id}`;
+    const openCount = evalRes.openCountByLabel.get(label.id) || 0;
+    const isExpanded =
+      state.expandedEntity?.kind === 'label' && state.expandedEntity?.id === label.id;
+    const isAnimating = state.justExpandedKey === key;
+    const isEditingName =
+      isExpanded &&
+      state.inlineEdit?.kind === 'label' &&
+      state.inlineEdit?.id === label.id &&
+      state.inlineEdit?.section === 'name';
+
+    let metadataHtml = '';
+    if (!isExpanded) {
+      const toggleAttr = `data-toggle-entity="${escapeHtml(key)}"`;
+      const c = label.conditions || {};
+      const hasConditions = Boolean(
+        c.days?.length || c.times?.length || c.locationIds?.length,
+      );
+      const badges = [
+        `<button type="button" class="meta-pill is-interactive ${label.scoped ? 'tone-accent' : ''}" ${toggleAttr}>${renderIcon('layers', 'icon-xs')}${escapeHtml(t(lang, label.scoped ? 'scopedQueue' : 'globalContext'))}</button>`,
+        `<button type="button" class="meta-pill is-interactive tone-soft" ${toggleAttr}>${escapeHtml(t(lang, 'openTasksCount', { count: openCount }))}</button>`,
+      ];
+      if (label.note) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
+        );
+      }
+      if (label.links?.length) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, label.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: label.links.length }))}</button>`,
+        );
+      }
+      if (hasConditions) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('sliders', 'icon-xs')}${escapeHtml(t(lang, 'badgeConditions'))}</button>`,
+        );
+      }
+      metadataHtml = `<div class="metadata">${badges.join('')}</div>`;
+    }
+
+    return renderEntityCard({
+      kind: 'label',
+      id: label.id,
+      isExpanded,
+      isEditingTitle: isEditingName,
+      title: label.name,
+      titleField: 'name',
+      titleMaxLength: 120,
+      titleAriaLabel: t(lang, 'inlineEditName'),
+      titleEditDraft: isEditingName ? state.inlineEdit.draft.name : '',
+      titleEditError: isEditingName ? state.inlineEdit.error : '',
+      leadingHtml: `
+        <button type="button" class="entity-lead" data-toggle-entity="${escapeHtml(key)}" aria-expanded="${isExpanded}" aria-label="${escapeHtml(label.name)}">
+          <span class="dot dot-lg" style="--label-color:${escapeHtml(label.color || '#00648b')}"></span>
+        </button>
+      `,
+      collapsedMetadataHtml: metadataHtml,
+      slidePanelHtml: isExpanded
+        ? renderLabelSlidePanel(label, state, workspace, openCount, isAnimating)
+        : '',
+      lang,
+    });
+  }
+
+  function locationSourceLabel(sourceType, lang) {
+    if (sourceType === 'address') return t(lang, 'sourceAddress');
+    if (sourceType === 'plusCode') return t(lang, 'sourcePlusCode');
+    return t(lang, 'sourceGps');
+  }
+
+  function renderLocationSlidePanel(loc, state, openCount, isAnimating) {
+    const lang = state.lang;
+    const edit =
+      state.inlineEdit &&
+      state.inlineEdit.kind === 'location' &&
+      state.inlineEdit.id === loc.id
+        ? state.inlineEdit
+        : null;
+    const editing = edit ? edit.section : null;
+    const draft = edit ? edit.draft : null;
+    const err = edit ? edit.error : '';
+
+    const editBtn = (section) =>
+      renderInlineEditBtn('location', loc.id, section, lang);
+
+    const sections = [];
+
+    // 1. Note (shared)
+    const noteHtml = renderNoteSection({
+      kind: 'location',
+      id: loc.id,
+      note: loc.note,
+      isEditing: editing === 'note',
+      draft,
+      error: err,
+      lang,
+    });
+    if (noteHtml) sections.push(noteHtml);
+
+    // 2. Coordinates, Source & Radius
+    if (editing === 'coordinates') {
+      const isGps = draft.sourceType === 'gps';
+      sections.push(`
+        <div class="info-card is-editing">
+          <div class="info-card-head">
+            ${renderIcon('locate', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'locInfoCoordsTitle'))}</strong>
+          </div>
+          <div class="inline-edit-body">
+            <div class="field-grid">
+              <label class="field">${escapeHtml(t(lang, 'fieldSourceType'))}
+                <select data-ie="sourceType">
+                  <option value="gps" ${draft.sourceType === 'gps' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourceGps'))}</option>
+                  <option value="address" ${draft.sourceType === 'address' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourceAddress'))}</option>
+                  <option value="plusCode" ${draft.sourceType === 'plusCode' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourcePlusCode'))}</option>
+                </select>
+              </label>
+              <label class="field">${escapeHtml(t(lang, 'fieldRadius'))}
+                <input data-ie="radiusText" value="${escapeHtml(draft.radiusText)}" placeholder="150m">
+              </label>
+            </div>
+            ${
+              !isGps
+                ? `<label class="field">${escapeHtml(t(lang, draft.sourceType === 'address' ? 'sourceAddress' : 'sourcePlusCode'))}
+                    <input data-ie="source" value="${escapeHtml(draft.source)}" placeholder="${escapeHtml(t(lang, draft.sourceType === 'address' ? 'placeholderAddress' : 'placeholderPlusCode'))}">
+                  </label>`
+                : ''
+            }
+            <div class="field-grid">
+              <label class="field">${escapeHtml(t(lang, 'fieldLat'))}
+                <input data-ie="latitude" type="number" step="any" min="-90" max="90" value="${escapeHtml(draft.latitude)}" ${!isGps ? 'readonly' : ''}>
+              </label>
+              <label class="field">${escapeHtml(t(lang, 'fieldLon'))}
+                <input data-ie="longitude" type="number" step="any" min="-180" max="180" value="${escapeHtml(draft.longitude)}" ${!isGps ? 'readonly' : ''}>
+              </label>
+            </div>
+            <div class="inline-btn-row">
+              <button type="button" class="secondary compact" data-ie-use-gps ${!isGps ? 'disabled' : ''}>
+                ${renderIcon('locate', 'icon-xs')}${escapeHtml(t(lang, 'actionUseGps'))}
+              </button>
+              <button type="button" class="secondary compact" data-ie-resolve ${isGps ? 'disabled' : ''}>
+                ${renderIcon('search', 'icon-xs')}${escapeHtml(t(lang, 'actionResolveSource'))}
+              </button>
+            </div>
+            ${renderInlineEditActions(lang, err, '', '')}
+          </div>
+        </div>
+      `);
+    } else {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('locate', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'locInfoCoordsTitle'))}</strong>
+            <span class="pill-badge">${escapeHtml(locationSourceLabel(loc.sourceType, lang))}</span>
+            ${editBtn('coordinates')}
+          </div>
+          ${
+            loc.sourceType !== 'gps' && loc.source
+              ? `<div>${escapeHtml(loc.source)}</div>`
+              : ''
+          }
+          <code class="mono-sm">${Number(loc.latitude).toFixed(6)}, ${Number(loc.longitude).toFixed(6)}</code>
+          <small class="info-sub">${escapeHtml(t(lang, 'locInfoRadius', { radius: formatRadiusMeters(loc.radius) }))}</small>
+        </div>
+      `);
+    }
+
+    // 3. Unset fields bar (shared)
+    const addChips = [];
+    if (!loc.note && editing !== 'note') {
+      addChips.push(
+        renderAddFieldChip('location', loc.id, 'note', 'file-text', t(lang, 'inlineAddNote')),
+      );
+    }
+
+    return renderEntitySlideShell({
+      kind: 'location',
+      id: loc.id,
+      isAnimating,
+      regionLabel: t(lang, 'locationInfoTitle'),
+      metaExtraHtml: `<span class="meta-pill tone-soft">${escapeHtml(t(lang, 'openTasksCount', { count: openCount }))}</span>`,
+      deleteConfirmText: t(lang, 'inlineDeleteLocationConfirm'),
+      isConfirmingDelete: state.inlineDeleteConfirmKey === `location:${loc.id}`,
+      sectionsHtml: sections.join(''),
+      addChipsHtml: addChips.join(''),
+      lang,
+    });
+  }
+
+  function renderLocationCard(loc, state, evalRes) {
+    const lang = state.lang;
+    const key = `location:${loc.id}`;
+    const openCount = evalRes.openCountByLocation.get(loc.id) || 0;
+    const isExpanded =
+      state.expandedEntity?.kind === 'location' && state.expandedEntity?.id === loc.id;
+    const isAnimating = state.justExpandedKey === key;
+    const isEditingName =
+      isExpanded &&
+      state.inlineEdit?.kind === 'location' &&
+      state.inlineEdit?.id === loc.id &&
+      state.inlineEdit?.section === 'name';
+
+    let metadataHtml = '';
+    if (!isExpanded) {
+      const toggleAttr = `data-toggle-entity="${escapeHtml(key)}"`;
+      const badges = [
+        `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('locate', 'icon-xs')}${escapeHtml(locationSourceLabel(loc.sourceType, lang))}</button>`,
+        `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${Number(loc.latitude).toFixed(4)}, ${Number(loc.longitude).toFixed(4)} · ${escapeHtml(formatRadiusMeters(loc.radius))}</button>`,
+        `<button type="button" class="meta-pill is-interactive tone-soft" ${toggleAttr}>${escapeHtml(t(lang, 'openTasksCount', { count: openCount }))}</button>`,
+      ];
+      if (loc.note) {
+        badges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
+        );
+      }
+      metadataHtml = `<div class="metadata">${badges.join('')}</div>`;
+    }
+
+    return renderEntityCard({
+      kind: 'location',
+      id: loc.id,
+      isExpanded,
+      isEditingTitle: isEditingName,
+      title: loc.name,
+      titleField: 'name',
+      titleMaxLength: 120,
+      titleAriaLabel: t(lang, 'inlineEditName'),
+      titleEditDraft: isEditingName ? state.inlineEdit.draft.name : '',
+      titleEditError: isEditingName ? state.inlineEdit.error : '',
+      leadingHtml: `
+        <button type="button" class="entity-lead" data-toggle-entity="${escapeHtml(key)}" aria-expanded="${isExpanded}" aria-label="${escapeHtml(loc.name)}">
+          ${renderIcon('map-pin')}
+        </button>
+      `,
+      collapsedMetadataHtml: metadataHtml,
+      slidePanelHtml: isExpanded
+        ? renderLocationSlidePanel(loc, state, openCount, isAnimating)
+        : '',
+      lang,
+    });
   }
 
   function renderManagerView(kind, state, workspace, evalRes) {
@@ -1585,68 +2528,32 @@
           <h2>${escapeHtml(t(lang, isLabels ? 'sectionLabels' : 'sectionLocations'))}</h2>
           <div class="subtitle">${escapeHtml(t(lang, isLabels ? 'labelsManagerSub' : 'locationsManagerSub'))}</div>
         </div>
-        <button type="button" class="primary" data-new="${kind}">${renderIcon('plus', 'icon-sm')}${escapeHtml(t(lang, 'actionNew'))}</button>
+        <span class="limit">${items.length}</span>
       </div>
 
       <form class="quick-create-card" data-form="quick-create-${kind}">
-        <input name="name" placeholder="${escapeHtml(t(lang, isLabels ? 'placeholderQuickLabel' : 'placeholderQuickLocation'))}" autocomplete="off" required>
-        <button type="submit" class="secondary">${renderIcon('plus', 'icon-sm')}${escapeHtml(t(lang, 'actionAdd'))}</button>
+        <input name="name" placeholder="${escapeHtml(t(lang, isLabels ? 'placeholderQuickLabel' : 'placeholderQuickLocation'))}" autocomplete="off" maxlength="120" required>
+        <div class="quick-create-actions">
+          <button type="button" class="text-button" data-quick-create-expand="${kind}">
+            ${renderIcon('sliders', 'icon-xs')} ${escapeHtml(t(lang, 'quickAddAdvanced'))}
+          </button>
+          <button type="submit" class="primary">
+            ${renderIcon('plus', 'icon-sm')}<span>${escapeHtml(t(lang, 'actionAdd'))}</span>
+          </button>
+        </div>
       </form>
 
       ${renderNotice(state)}
 
-      <div class="manager-list">
+      <div class="tasks">
         ${
           items.length
             ? items
-                .map((item) => {
-                  const openCount = isLabels
-                    ? evalRes.openCountByLabel.get(item.id) || 0
-                    : evalRes.openCountByLocation.get(item.id) || 0;
-                  const confirming = state.managerDeleteConfirm === item.id;
-                  return `
-                    <div class="manager-card">
-                      <div class="manager-row">
-                        <button type="button" class="manager-row-main" data-edit-${isLabels ? 'label' : 'location'}="${escapeHtml(item.id)}">
-                          ${
-                            isLabels
-                              ? `<span class="dot dot-lg" style="--label-color:${escapeHtml(item.color || '#00648b')}"></span>`
-                              : renderIcon('map-pin')
-                          }
-                          <span class="manager-row-text">
-                            <strong>${escapeHtml(item.name)}</strong>
-                            <small>${
-                              isLabels
-                                ? `${escapeHtml(t(lang, item.scoped ? 'scopedQueue' : 'globalContext'))}${item.links?.length ? ` · ${item.links.length} Links` : ''}`
-                                : `${escapeHtml(item.sourceType.toUpperCase())} · ${Number(item.latitude).toFixed(4)}, ${Number(item.longitude).toFixed(4)} · ${item.radius} m`
-                            }</small>
-                          </span>
-                          <span class="pill-badge">${escapeHtml(t(lang, 'openTasksCount', { count: openCount }))}</span>
-                        </button>
-                        <div class="manager-row-actions">
-                          ${
-                            isLabels
-                              ? `<button type="button" class="icon-button compact" data-open-label-hub="${escapeHtml(item.id)}" title="${escapeHtml(t(lang, 'labelHub'))}">${renderIcon('info', 'icon-sm')}</button>`
-                              : ''
-                          }
-                          <button type="button" class="icon-button compact" data-edit-${isLabels ? 'label' : 'location'}="${escapeHtml(item.id)}" title="${escapeHtml(t(lang, 'actionEdit'))}">${renderIcon('pencil', 'icon-sm')}</button>
-                          <button type="button" class="icon-button compact is-danger-hover" data-manager-ask-delete="${escapeHtml(item.id)}" title="${escapeHtml(t(lang, 'actionDelete'))}">${renderIcon('trash', 'icon-sm')}</button>
-                        </div>
-                      </div>
-                      ${
-                        confirming
-                          ? `<div class="inline-confirm-bar">
-                              <span>${escapeHtml(t(lang, isLabels ? 'deleteLabelQuestion' : 'deleteLocationQuestion', { name: item.name }))}</span>
-                              <div class="inline-confirm-actions">
-                                <button type="button" class="secondary compact" data-manager-cancel-delete>${escapeHtml(t(lang, 'actionCancel'))}</button>
-                                <button type="button" class="danger compact" data-manager-confirm-delete="${kind}:${escapeHtml(item.id)}">${escapeHtml(t(lang, 'actionDelete'))}</button>
-                              </div>
-                            </div>`
-                          : ''
-                      }
-                    </div>
-                  `;
-                })
+                .map((item) =>
+                  isLabels
+                    ? renderLabelCard(item, state, workspace, evalRes)
+                    : renderLocationCard(item, state, evalRes),
+                )
                 .join('')
             : `<div class="empty">${escapeHtml(t(lang, isLabels ? 'emptyLabels' : 'emptyLocations'))}</div>`
         }
@@ -1654,257 +2561,10 @@
     `;
   }
 
-  function renderLinksEditorCard(links, editState, lang, prefix) {
-    const editingIdx = editState.editingLinkIndex;
-    return `
-      <section class="edit-card">
-        <h3>${renderIcon('link', 'icon-sm')} ${escapeHtml(t(lang, 'cardLinks'))} <span class="edit-counter">${links.length} / 20</span></h3>
-        ${
-          links.length
-            ? links
-                .map(
-                  (link, index) => `
-                <div class="record ${editingIdx === index ? 'is-editing' : ''}">
-                  <div class="record-text">
-                    <strong>${escapeHtml(link.title)}</strong>
-                    <span class="mono-sm">${escapeHtml(link.uri)}</span>
-                  </div>
-                  <div class="record-actions">
-                    <button type="button" class="icon-button compact" data-${prefix}-link-up="${index}" ${index === 0 ? 'disabled' : ''} title="${escapeHtml(t(lang, 'actionUp'))}">${renderIcon('arrow-up', 'icon-xs')}</button>
-                    <button type="button" class="icon-button compact" data-${prefix}-link-down="${index}" ${index === links.length - 1 ? 'disabled' : ''} title="${escapeHtml(t(lang, 'actionDown'))}">${renderIcon('arrow-down', 'icon-xs')}</button>
-                    <button type="button" class="icon-button compact" data-open-uri="${escapeHtml(link.uri)}" title="${escapeHtml(t(lang, 'actionOpen'))}">${renderIcon('external-link', 'icon-xs')}</button>
-                    <button type="button" class="icon-button compact" data-${prefix}-link-edit="${index}" title="${escapeHtml(t(lang, 'actionEdit'))}">${renderIcon('pencil', 'icon-xs')}</button>
-                    <button type="button" class="icon-button compact is-danger-hover" data-${prefix}-link-remove="${index}" title="${escapeHtml(t(lang, 'actionRemove'))}">${renderIcon('trash', 'icon-xs')}</button>
-                  </div>
-                </div>`,
-                )
-                .join('')
-            : `<div class="edit-empty">${escapeHtml(t(lang, 'emptyLinks'))}</div>`
-        }
-        <label class="field">${escapeHtml(t(lang, 'fieldLinkTitle'))}
-          <input data-${prefix}-link-title value="${escapeHtml(editState.linkTitleDraft || '')}" placeholder="${escapeHtml(t(lang, 'placeholderLinkTitle'))}">
-        </label>
-        <label class="field">${escapeHtml(t(lang, 'fieldLinkUri'))}
-          <input data-${prefix}-link-uri value="${escapeHtml(editState.linkUriDraft || '')}" placeholder="${escapeHtml(t(lang, 'placeholderLinkUri'))}">
-        </label>
-        <div class="inline-btn-row">
-          <button type="button" class="secondary" data-${prefix}-link-submit>${escapeHtml(t(lang, editingIdx !== null && editingIdx !== undefined ? 'actionSaveLink' : 'actionAddLink'))}</button>
-          ${
-            editingIdx !== null && editingIdx !== undefined
-              ? `<button type="button" class="text-button" data-${prefix}-link-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>`
-              : ''
-          }
-        </div>
-      </section>
-    `;
-  }
-
-  function renderLabelEditor(state, workspace) {
-    const lang = state.lang;
-    const item = state.labelEdit;
-    const weekdays = window.TT2.i18n.strings[window.TT2.i18n.resolveLang(lang)].weekdays;
-
-    return `
-      <button type="button" class="back" data-view="labels">${renderIcon('arrow-left', 'icon-sm')}${escapeHtml(t(lang, 'actionBackLabels'))}</button>
-      <div class="heading">
-        <div>
-          <h2>${escapeHtml(t(lang, item.id ? 'labelEditorEdit' : 'labelEditorNew'))}</h2>
-          <div class="subtitle">${escapeHtml(t(lang, 'labelEditorSub'))}</div>
-        </div>
-      </div>
-
-      <form class="task-editor" data-form="label-editor">
-        <div class="edit-grid">
-          <div class="edit-column">
-            <section class="edit-card">
-              <h3>${escapeHtml(t(lang, 'sectionLabels'))}</h3>
-              <label class="field">${escapeHtml(t(lang, 'fieldName'))}
-                <input data-le="name" value="${escapeHtml(item.name)}" required maxlength="120">
-              </label>
-              <label class="field">${escapeHtml(t(lang, 'fieldNote'))}
-                <textarea data-le="note" rows="3">${escapeHtml(item.note)}</textarea>
-              </label>
-              <label class="check-field">
-                <input type="checkbox" data-le="scoped" ${item.scoped ? 'checked' : ''}>
-                <span>${escapeHtml(t(lang, 'labelScopedTitle'))}<small>${escapeHtml(t(lang, 'labelScopedDesc'))}</small></span>
-              </label>
-            </section>
-
-            <section class="edit-card">
-              <h3>${renderIcon('palette', 'icon-sm')} ${escapeHtml(t(lang, 'fieldColorHex'))}</h3>
-              <div class="color-input-row">
-                <span class="color-swatch-preview" style="background:${escapeHtml(item.color || '#2196F3')}"></span>
-                <input data-le="color" value="${escapeHtml(item.color)}" placeholder="#2196F3" maxlength="7">
-                <button type="button" class="secondary" data-open-color-picker>${renderIcon('palette', 'icon-sm')}${escapeHtml(t(lang, 'actionCustomColor'))}</button>
-              </div>
-              <div class="color-presets">
-                ${LABEL_COLOR_PRESETS.map(
-                  (hex) => `
-                  <button type="button" class="color-preset-chip ${String(item.color).toUpperCase() === hex ? 'is-selected' : ''}" data-le-preset="${hex}">
-                    <span class="dot" style="--label-color:${hex}"></span>
-                    <span>${hex}</span>
-                  </button>`,
-                ).join('')}
-              </div>
-            </section>
-
-            ${renderLinksEditorCard(item.links, item, lang, 'le')}
-          </div>
-
-          <div class="edit-column">
-            <section class="edit-card">
-              <h3>${renderIcon('sliders', 'icon-sm')} ${escapeHtml(t(lang, 'cardConditions'))}</h3>
-              <p class="edit-description">${escapeHtml(t(lang, 'descLabelConditions'))}</p>
-
-              <div class="field-label-sm">${escapeHtml(t(lang, 'condDays'))}</div>
-              <div class="day-pills">
-                ${weekdays
-                  .map(
-                    (day, i) => `
-                  <label>
-                    <input type="checkbox" data-le-day="${i + 1}" ${item.conditions.days.includes(i + 1) ? 'checked' : ''}>
-                    <span>${day}</span>
-                  </label>`,
-                  )
-                  .join('')}
-              </div>
-
-              <div class="edit-divider"></div>
-
-              <div class="field-label-sm">${escapeHtml(t(lang, 'condTimes'))}</div>
-              ${item.conditions.times
-                .map(
-                  (tw, index) => `
-                <div class="edit-list-row">
-                  <span>${escapeHtml(tw.start)} – ${escapeHtml(tw.end)}</span>
-                  <button type="button" class="remove-item" data-le-remove-time="${index}">${escapeHtml(t(lang, 'actionRemove'))}</button>
-                </div>`,
-                )
-                .join('')}
-              <div class="field-grid">
-                <label class="field">${escapeHtml(t(lang, 'condFrom'))}<input type="time" data-le-time-start></label>
-                <label class="field">${escapeHtml(t(lang, 'condTo'))}<input type="time" data-le-time-end></label>
-              </div>
-              <button type="button" class="secondary" data-le-add-time>${escapeHtml(t(lang, 'actionAddTime'))}</button>
-
-              <div class="edit-divider"></div>
-
-              <div class="field-label-sm">${escapeHtml(t(lang, 'condLocations'))}</div>
-              ${
-                workspace.locations.length
-                  ? workspace.locations
-                      .map(
-                        (loc) => `
-                    <label class="prereq-row">
-                      <input type="checkbox" data-le-place="${escapeHtml(loc.id)}" ${item.conditions.locationIds.includes(loc.id) ? 'checked' : ''}>
-                      <span>${escapeHtml(loc.name)}<small>${loc.radius} m</small></span>
-                    </label>`,
-                      )
-                      .join('')
-                  : `<div class="edit-empty">${escapeHtml(t(lang, 'emptyLocations'))}</div>`
-              }
-            </section>
-          </div>
-        </div>
-
-        <div class="edit-error" role="status">${escapeHtml(state.editorError)}</div>
-
-        <div class="task-editor-actions">
-          <span></span>
-          <div>
-            <button type="button" class="secondary" data-view="labels">${escapeHtml(t(lang, 'actionCancel'))}</button>
-            <button type="button" class="primary" data-save-label>${escapeHtml(t(lang, 'actionSave'))}</button>
-          </div>
-        </div>
-      </form>
-    `;
-  }
-
-  function renderLocationEditor(state) {
-    const lang = state.lang;
-    const item = state.locationEdit;
-    const isGps = item.sourceType === 'gps';
-
-    return `
-      <button type="button" class="back" data-view="locations">${renderIcon('arrow-left', 'icon-sm')}${escapeHtml(t(lang, 'actionBackLocations'))}</button>
-      <div class="heading">
-        <div>
-          <h2>${escapeHtml(t(lang, item.id ? 'locationEditorEdit' : 'locationEditorNew'))}</h2>
-          <div class="subtitle">${escapeHtml(t(lang, 'locationEditorSub'))}</div>
-        </div>
-      </div>
-
-      <form class="task-editor" data-form="location-editor">
-        <div class="edit-grid equal">
-          <section class="edit-card">
-            <h3>${renderIcon('map-pin', 'icon-sm')} ${escapeHtml(t(lang, 'sectionLocations'))}</h3>
-            <label class="field">${escapeHtml(t(lang, 'fieldName'))}
-              <input data-loce="name" value="${escapeHtml(item.name)}" required maxlength="120">
-            </label>
-            <label class="field">${escapeHtml(t(lang, 'fieldNote'))}
-              <textarea data-loce="note" rows="4">${escapeHtml(item.note)}</textarea>
-            </label>
-          </section>
-
-          <section class="edit-card">
-            <h3>${renderIcon('locate', 'icon-sm')} ${escapeHtml(t(lang, 'fieldSourceType'))}</h3>
-            <div class="field-grid">
-              <label class="field">${escapeHtml(t(lang, 'fieldSourceType'))}
-                <select data-loce="sourceType">
-                  <option value="gps" ${item.sourceType === 'gps' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourceGps'))}</option>
-                  <option value="address" ${item.sourceType === 'address' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourceAddress'))}</option>
-                  <option value="plusCode" ${item.sourceType === 'plusCode' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourcePlusCode'))}</option>
-                </select>
-              </label>
-              <label class="field">${escapeHtml(t(lang, 'fieldRadius'))}
-                <input data-loce="radiusText" value="${escapeHtml(item.radiusText)}" placeholder="150m">
-              </label>
-            </div>
-
-            ${
-              !isGps
-                ? `<label class="field">${escapeHtml(t(lang, item.sourceType === 'address' ? 'sourceAddress' : 'sourcePlusCode'))}
-                    <input data-loce="source" value="${escapeHtml(item.source)}" placeholder="${escapeHtml(t(lang, item.sourceType === 'address' ? 'placeholderAddress' : 'placeholderPlusCode'))}">
-                  </label>`
-                : ''
-            }
-
-            <div class="field-grid">
-              <label class="field">${escapeHtml(t(lang, 'fieldLat'))}
-                <input data-loce="latitude" type="number" step="any" min="-90" max="90" value="${escapeHtml(item.latitude)}" ${!isGps ? 'readonly' : ''}>
-              </label>
-              <label class="field">${escapeHtml(t(lang, 'fieldLon'))}
-                <input data-loce="longitude" type="number" step="any" min="-180" max="180" value="${escapeHtml(item.longitude)}" ${!isGps ? 'readonly' : ''}>
-              </label>
-            </div>
-
-            <div class="inline-btn-row">
-              <button type="button" class="secondary" data-loce-use-gps ${!isGps ? 'disabled' : ''}>
-                ${renderIcon('locate', 'icon-sm')}${escapeHtml(t(lang, 'actionUseGps'))}
-              </button>
-              <button type="button" class="secondary" data-loce-resolve ${isGps ? 'disabled' : ''}>
-                ${renderIcon('search', 'icon-sm')}${escapeHtml(t(lang, 'actionResolveSource'))}
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <div class="edit-error" role="status">${escapeHtml(state.editorError)}</div>
-
-        <div class="task-editor-actions">
-          <span></span>
-          <div>
-            <button type="button" class="secondary" data-view="locations">${escapeHtml(t(lang, 'actionCancel'))}</button>
-            <button type="button" class="primary" data-save-location>${escapeHtml(t(lang, 'actionSave'))}</button>
-          </div>
-        </div>
-      </form>
-    `;
-  }
-
   window.TT2.viewsCore = {
     TIER_ICONS,
     tierName,
+    filterPickerLabels,
     renderChrome,
     renderSidebar,
     renderBanners,
@@ -1912,7 +2572,6 @@
     renderNotice,
     renderTaskView,
     renderManagerView,
-    renderLabelEditor,
-    renderLocationEditor,
+    renderMobileLabelPickerSheet,
   };
 })();
