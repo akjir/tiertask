@@ -709,9 +709,45 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
+  padding: 0 2px 0 8px;
   margin-bottom: 5px;
   gap: 8px;
+}
+
+#tt2 .sidebar-section.is-collapsed .section-head {
+  margin-bottom: 0;
+}
+
+#tt2 .section-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+#tt2 .section-head-count {
+  font-size: var(--font-size-eyebrow);
+  color: var(--muted);
+  opacity: 0.78;
+}
+
+#tt2 .section-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+#tt2 .section-head-btn {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+}
+
+#tt2 .section-head-btn.is-active {
+  background: var(--soft);
+  color: var(--accent);
 }
 
 #tt2 .nav-row {
@@ -810,7 +846,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 4px 0 6px;
+  margin: 2px 0 6px;
   padding: 0 6px 0 9px;
   min-height: 32px;
   border: var(--border-width) solid var(--line);
@@ -835,18 +871,24 @@ body {
   outline: none;
 }
 
+#tt2 .app .sidebar-filter-wrap input:focus-visible {
+  outline: none;
+}
+
+#tt2 .sidebar-filter-wrap input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 #tt2 .sidebar-filter-clear {
   min-width: 24px;
   min-height: 24px;
 }
 
-#tt2 .sidebar-label-list {
+#tt2 .sidebar-entity-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 256px;
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 #tt2 .sidebar-filter-empty {
@@ -2952,6 +2994,19 @@ body {
   display: flex;
 }
 
+#tt2 .stage.mobile .section-head {
+  padding: 0 0 0 8px;
+}
+
+#tt2 .stage.mobile .section-head-actions {
+  gap: 4px;
+}
+
+#tt2 .stage.mobile .section-head-btn {
+  min-width: 34px;
+  min-height: 34px;
+}
+
 #tt2 .stage.mobile .chrome.is-searching > :not(.chrome-search) {
   display: none;
 }
@@ -3090,6 +3145,19 @@ body {
 
   #tt2 .sidebar-ws-card {
     display: flex;
+  }
+
+  #tt2 .section-head {
+    padding: 0 0 0 8px;
+  }
+
+  #tt2 .section-head-actions {
+    gap: 4px;
+  }
+
+  #tt2 .section-head-btn {
+    min-width: 34px;
+    min-height: 34px;
   }
 
   #tt2 .chrome.is-searching > :not(.chrome-search) {

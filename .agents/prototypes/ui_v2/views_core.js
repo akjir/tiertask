@@ -119,6 +119,71 @@
     `;
   }
 
+  function renderSidebarSectionHeader({
+    kind,
+    title,
+    count,
+    collapsed,
+    filterOpen,
+    manageActive,
+    filterLabel,
+    manageLabel,
+    collapseLabel,
+    expandLabel,
+    activeDotHtml = '',
+  }) {
+    const toggleLabel = collapsed ? expandLabel : collapseLabel;
+    return `
+      <div class="section-head">
+        <span class="section-head-title">
+          <span class="eyebrow">${escapeHtml(title)}</span>
+          ${collapsed ? activeDotHtml : ''}
+          ${collapsed ? `<span class="section-head-count">${count}</span>` : ''}
+        </span>
+        <div class="section-head-actions">
+          <button
+            type="button"
+            class="icon-button section-head-btn ${filterOpen ? 'is-active' : ''}"
+            data-toggle-sidebar-filter="${kind}"
+            aria-pressed="${filterOpen}"
+            title="${escapeHtml(filterLabel)}"
+            aria-label="${escapeHtml(filterLabel)}"
+          >${renderIcon('filter', 'icon-xs')}</button>
+          <button
+            type="button"
+            class="icon-button section-head-btn ${manageActive ? 'is-active' : ''}"
+            data-view="${kind}"
+            ${manageActive ? 'aria-current="page"' : ''}
+            title="${escapeHtml(manageLabel)}"
+            aria-label="${escapeHtml(manageLabel)}"
+          >${renderIcon('pencil', 'icon-xs')}</button>
+          <button
+            type="button"
+            class="icon-button section-head-btn"
+            data-toggle-sidebar-section="${kind}"
+            aria-expanded="${!collapsed}"
+            title="${escapeHtml(toggleLabel)}"
+            aria-label="${escapeHtml(toggleLabel)}"
+          >${renderIcon(collapsed ? 'chevron-right' : 'chevron-down', 'icon-xs')}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderSidebarFilterBox(inputAttr, clearAttr, value, placeholder, lang) {
+    return `
+      <div class="sidebar-filter-wrap">
+        ${renderIcon('search', 'icon-xs')}
+        <input type="search" ${inputAttr} value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}" autocomplete="off" aria-label="${escapeHtml(placeholder)}">
+        ${
+          value
+            ? `<button type="button" class="icon-button compact sidebar-filter-clear" ${clearAttr} aria-label="${escapeHtml(t(lang, 'searchClear'))}">${renderIcon('x', 'icon-xs')}</button>`
+            : ''
+        }
+      </div>
+    `;
+  }
+
   function renderSidebar(state, workspace, evalRes) {
     const lang = state.lang;
     const cfg = workspace.config;
@@ -131,6 +196,84 @@
     const usesWebDav = cfg.storageMode === 'webdav' || cfg.storageMode === 'both';
     const activeFile =
       cfg.storageMode === 'webdav' ? cfg.filePath : cfg.localFilePath;
+
+    const labelsCollapsed = Boolean(state.sidebarLabelsCollapsed);
+    const labelsFilterOpen = !labelsCollapsed && Boolean(state.sidebarLabelFilterOpen);
+    const labelFilterValue = labelsFilterOpen
+      ? String(state.sidebarLabelFilter || '')
+      : '';
+    const labelQuery = labelFilterValue.trim().toLowerCase();
+    const visibleLabels = labelQuery
+      ? sortedLabels.filter((lbl) => lbl.name.toLowerCase().includes(labelQuery))
+      : sortedLabels;
+    const activeLabel =
+      state.view === 'tasks' && state.label
+        ? sortedLabels.find((lbl) => lbl.id === state.label)
+        : null;
+
+    const locationsCollapsed = Boolean(state.sidebarLocationsCollapsed);
+    const locationsFilterOpen =
+      !locationsCollapsed && Boolean(state.sidebarLocationFilterOpen);
+    const locationFilterValue = locationsFilterOpen
+      ? String(state.sidebarLocationFilter || '')
+      : '';
+    const locationQuery = locationFilterValue.trim().toLowerCase();
+    const visibleLocations = locationQuery
+      ? sortedLocations.filter((loc) =>
+          loc.name.toLowerCase().includes(locationQuery),
+        )
+      : sortedLocations;
+
+    const labelRowsHtml = visibleLabels.length
+      ? visibleLabels
+          .map((label) => {
+            const isExpandedInManage =
+              state.view === 'labels' &&
+              state.expandedEntity?.kind === 'label' &&
+              state.expandedEntity?.id === label.id;
+            return `
+          <div class="nav-label-row ${state.view === 'tasks' && state.label === label.id ? 'is-current' : ''}">
+            <button class="nav-row nav-label-select" type="button" data-label="${escapeHtml(label.id)}" ${
+              state.view === 'tasks' && state.label === label.id
+                ? 'aria-current="page"'
+                : ''
+            }>
+              <span class="dot" style="--label-color:${escapeHtml(label.color || '#00648b')}"></span>
+              <span class="nav-label-name">
+                ${escapeHtml(label.name)}
+                ${label.scoped ? `<span class="label-mode">${escapeHtml(t(lang, 'scopedQueue'))}</span>` : ''}
+              </span>
+              <span class="count">${evalRes.openCountByLabel.get(label.id) || 0}</span>
+            </button>
+            <button type="button" class="icon-button compact nav-hub-btn ${isExpandedInManage ? 'is-accent' : ''}" data-open-managed="labels:${escapeHtml(label.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}" aria-label="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
+              ${renderIcon('info', 'icon-sm')}
+            </button>
+          </div>`;
+          })
+          .join('')
+      : labelQuery
+        ? `<div class="sidebar-filter-empty">${escapeHtml(t(lang, 'sidebarFilterLabelsEmpty'))}</div>`
+        : '';
+
+    const locationRowsHtml = visibleLocations.length
+      ? visibleLocations
+          .map((loc) => {
+            const isExpandedInManage =
+              state.view === 'locations' &&
+              state.expandedEntity?.kind === 'location' &&
+              state.expandedEntity?.id === loc.id;
+            return `
+          <button type="button" class="nav-row nav-entity-row" data-open-managed="locations:${escapeHtml(loc.id)}" title="${escapeHtml(t(lang, 'locationHubOpenTooltip'))}" ${isExpandedInManage ? 'aria-current="page"' : ''}>
+            ${renderIcon('map-pin')}
+            <span class="nav-label-name">${escapeHtml(loc.name)}</span>
+            <span class="count">${evalRes.openCountByLocation.get(loc.id) || 0}</span>
+            <span class="nav-hub-hint" aria-hidden="true">${renderIcon('info', 'icon-sm')}</span>
+          </button>`;
+          })
+          .join('')
+      : locationQuery
+        ? `<div class="sidebar-filter-empty">${escapeHtml(t(lang, 'sidebarFilterLocationsEmpty'))}</div>`
+        : '';
 
     return `
       <button type="button" class="sidebar-ws-card" data-open-modal="workspaces">
@@ -160,92 +303,79 @@
           .join('')}
       </section>
 
-      <section>
-        <div class="section-head">
-          <span class="eyebrow">${escapeHtml(t(lang, 'sectionLabels'))}</span>
-          <button class="text-button" type="button" data-view="labels">${escapeHtml(t(lang, 'manage'))}</button>
-        </div>
-        <button type="button" class="nav-row" data-label="" ${
-          state.view === 'tasks' && !state.label ? 'aria-current="page"' : ''
-        }>
-          ${renderIcon('layers')}
-          <span class="nav-label-name">${escapeHtml(t(lang, 'allTasks'))}</span>
-        </button>
-        ${(() => {
-          const showFilter = sortedLabels.length > 8;
-          const sidebarQuery = showFilter
-            ? String(state.sidebarLabelFilter || '').trim().toLowerCase()
-            : '';
-          const visibleLabels = sidebarQuery
-            ? sortedLabels.filter((lbl) =>
-                lbl.name.toLowerCase().includes(sidebarQuery),
-              )
-            : sortedLabels;
-          const rowsHtml = visibleLabels.length
-            ? visibleLabels
-                .map((label) => {
-                  const isExpandedInManage =
-                    state.view === 'labels' &&
-                    state.expandedEntity?.kind === 'label' &&
-                    state.expandedEntity?.id === label.id;
-                  return `
-          <div class="nav-label-row ${state.view === 'tasks' && state.label === label.id ? 'is-current' : ''}">
-            <button class="nav-row nav-label-select" type="button" data-label="${escapeHtml(label.id)}" ${
-              state.view === 'tasks' && state.label === label.id
-                ? 'aria-current="page"'
-                : ''
-            }>
-              <span class="dot" style="--label-color:${escapeHtml(label.color || '#00648b')}"></span>
-              <span class="nav-label-name">
-                ${escapeHtml(label.name)}
-                ${label.scoped ? `<span class="label-mode">${escapeHtml(t(lang, 'scopedQueue'))}</span>` : ''}
-              </span>
-              <span class="count">${evalRes.openCountByLabel.get(label.id) || 0}</span>
-            </button>
-            <button type="button" class="icon-button compact nav-hub-btn ${isExpandedInManage ? 'is-accent' : ''}" data-open-managed="labels:${escapeHtml(label.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}" aria-label="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
-              ${renderIcon('info', 'icon-sm')}
-            </button>
-          </div>`;
-                })
-                .join('')
-            : `<div class="sidebar-filter-empty">${escapeHtml(t(lang, 'sidebarFilterLabelsEmpty'))}</div>`;
-
-          if (!showFilter) return rowsHtml;
-          return `
-            <div class="sidebar-filter-wrap">
-              ${renderIcon('search', 'icon-xs')}
-              <input type="search" data-sidebar-label-filter value="${escapeHtml(state.sidebarLabelFilter || '')}" placeholder="${escapeHtml(t(lang, 'sidebarFilterLabelsPlaceholder'))}" autocomplete="off" aria-label="${escapeHtml(t(lang, 'sidebarFilterLabelsPlaceholder'))}">
-              ${
-                state.sidebarLabelFilter
-                  ? `<button type="button" class="icon-button compact sidebar-filter-clear" data-clear-sidebar-label-filter aria-label="${escapeHtml(t(lang, 'searchClear'))}">${renderIcon('x', 'icon-xs')}</button>`
-                  : ''
-              }
-            </div>
-            <div class="sidebar-label-list">${rowsHtml}</div>
-          `;
-        })()}
+      <section class="sidebar-section ${labelsCollapsed ? 'is-collapsed' : ''}">
+        ${renderSidebarSectionHeader({
+          kind: 'labels',
+          title: t(lang, 'sectionLabels'),
+          count: sortedLabels.length,
+          collapsed: labelsCollapsed,
+          filterOpen: labelsFilterOpen,
+          manageActive: state.view === 'labels',
+          filterLabel: t(lang, 'sidebarFilterLabelsToggle'),
+          manageLabel: t(lang, 'sidebarManageLabels'),
+          collapseLabel: t(lang, 'sidebarCollapseLabels'),
+          expandLabel: t(lang, 'sidebarExpandLabels'),
+          activeDotHtml: activeLabel
+            ? `<span class="dot" style="--label-color:${escapeHtml(activeLabel.color || '#00648b')}" title="${escapeHtml(activeLabel.name)}"></span>`
+            : '',
+        })}
+        ${
+          labelsCollapsed
+            ? ''
+            : `
+          ${
+            labelsFilterOpen
+              ? renderSidebarFilterBox(
+                  'data-sidebar-label-filter',
+                  'data-clear-sidebar-label-filter',
+                  labelFilterValue,
+                  t(lang, 'sidebarFilterLabelsPlaceholder'),
+                  lang,
+                )
+              : ''
+          }
+          <button type="button" class="nav-row" data-label="" ${
+            state.view === 'tasks' && !state.label ? 'aria-current="page"' : ''
+          }>
+            ${renderIcon('layers')}
+            <span class="nav-label-name">${escapeHtml(t(lang, 'allTasks'))}</span>
+          </button>
+          <div class="sidebar-entity-list">${labelRowsHtml}</div>
+        `
+        }
       </section>
 
-      <section>
-        <div class="section-head">
-          <span class="eyebrow">${escapeHtml(t(lang, 'sectionLocations'))}</span>
-          <button class="text-button" type="button" data-view="locations">${escapeHtml(t(lang, 'manage'))}</button>
-        </div>
-        ${sortedLocations
-          .map((loc) => {
-            const isExpandedInManage =
-              state.view === 'locations' &&
-              state.expandedEntity?.kind === 'location' &&
-              state.expandedEntity?.id === loc.id;
-            return `
-          <button type="button" class="nav-row nav-entity-row" data-open-managed="locations:${escapeHtml(loc.id)}" title="${escapeHtml(t(lang, 'locationHubOpenTooltip'))}" ${isExpandedInManage ? 'aria-current="page"' : ''}>
-            ${renderIcon('map-pin')}
-            <span class="nav-label-name">${escapeHtml(loc.name)}</span>
-            <span class="count">${evalRes.openCountByLocation.get(loc.id) || 0}</span>
-            <span class="nav-hub-hint" aria-hidden="true">${renderIcon('info', 'icon-sm')}</span>
-          </button>`;
-          })
-          .join('')}
+      <section class="sidebar-section ${locationsCollapsed ? 'is-collapsed' : ''}">
+        ${renderSidebarSectionHeader({
+          kind: 'locations',
+          title: t(lang, 'sectionLocations'),
+          count: sortedLocations.length,
+          collapsed: locationsCollapsed,
+          filterOpen: locationsFilterOpen,
+          manageActive: state.view === 'locations',
+          filterLabel: t(lang, 'sidebarFilterLocationsToggle'),
+          manageLabel: t(lang, 'sidebarManageLocations'),
+          collapseLabel: t(lang, 'sidebarCollapseLocations'),
+          expandLabel: t(lang, 'sidebarExpandLocations'),
+        })}
+        ${
+          locationsCollapsed
+            ? ''
+            : `
+          ${
+            locationsFilterOpen
+              ? renderSidebarFilterBox(
+                  'data-sidebar-location-filter',
+                  'data-clear-sidebar-location-filter',
+                  locationFilterValue,
+                  t(lang, 'sidebarFilterLocationsPlaceholder'),
+                  lang,
+                )
+              : ''
+          }
+          <div class="sidebar-entity-list">${locationRowsHtml}</div>
+        `
+        }
       </section>
 
       <section class="sidebar-utils">

@@ -64,7 +64,12 @@
     searchQuery: '',
     mobileQuickAddOpen: false,
     isCompact: false,
+    sidebarLabelFilterOpen: false,
     sidebarLabelFilter: '',
+    sidebarLabelsCollapsed: false,
+    sidebarLocationFilterOpen: false,
+    sidebarLocationFilter: '',
+    sidebarLocationsCollapsed: false,
     taskLabelPicker: null,
     draftLabelPicker: null,
     expandedEntity: null,
@@ -338,8 +343,6 @@
     state.isCompact = isCompactViewport();
     const focusDesc = captureFocusDescriptor();
     const prevSidebarScroll = app.querySelector('.sidebar')?.scrollTop || 0;
-    const prevSidebarLabelScroll =
-      app.querySelector('.sidebar-label-list')?.scrollTop || 0;
     const prevMainScroll = app.querySelector('.main')?.scrollTop || 0;
     const prevPickerListScroll =
       app.querySelector('.label-picker-list')?.scrollTop || 0;
@@ -373,10 +376,6 @@
     const nextSidebar = app.querySelector('.sidebar');
     if (nextSidebar && lastSidebarWorkspaceId === state.activeWorkspaceId) {
       nextSidebar.scrollTop = prevSidebarScroll;
-    }
-    const nextSidebarLabels = app.querySelector('.sidebar-label-list');
-    if (nextSidebarLabels && lastSidebarWorkspaceId === state.activeWorkspaceId) {
-      nextSidebarLabels.scrollTop = prevSidebarLabelScroll;
     }
     lastSidebarWorkspaceId = state.activeWorkspaceId;
 
@@ -1505,7 +1504,10 @@
     state.searchQuery = '';
     state.drawer = false;
     state.modal = null;
+    state.sidebarLabelFilterOpen = false;
     state.sidebarLabelFilter = '';
+    state.sidebarLocationFilterOpen = false;
+    state.sidebarLocationFilter = '';
     state.draftLabelPicker = null;
     clearExpandedState();
     state.undoStack = [];
@@ -1603,10 +1605,65 @@
       render();
       return;
     }
+    if (has('toggle-sidebar-filter')) {
+      const kind = button.dataset.toggleSidebarFilter;
+      if (kind === 'labels') {
+        if (state.sidebarLabelsCollapsed || !state.sidebarLabelFilterOpen) {
+          state.sidebarLabelsCollapsed = false;
+          state.sidebarLabelFilterOpen = true;
+          render();
+          app.querySelector('[data-sidebar-label-filter]')?.focus();
+        } else {
+          state.sidebarLabelFilterOpen = false;
+          state.sidebarLabelFilter = '';
+          render();
+        }
+      } else if (kind === 'locations') {
+        if (
+          state.sidebarLocationsCollapsed ||
+          !state.sidebarLocationFilterOpen
+        ) {
+          state.sidebarLocationsCollapsed = false;
+          state.sidebarLocationFilterOpen = true;
+          render();
+          app.querySelector('[data-sidebar-location-filter]')?.focus();
+        } else {
+          state.sidebarLocationFilterOpen = false;
+          state.sidebarLocationFilter = '';
+          render();
+        }
+      }
+      return;
+    }
+    if (has('toggle-sidebar-section')) {
+      const kind = button.dataset.toggleSidebarSection;
+      if (kind === 'labels') {
+        state.sidebarLabelsCollapsed = !state.sidebarLabelsCollapsed;
+        if (state.sidebarLabelsCollapsed) {
+          state.sidebarLabelFilterOpen = false;
+          state.sidebarLabelFilter = '';
+        }
+        render();
+      } else if (kind === 'locations') {
+        state.sidebarLocationsCollapsed = !state.sidebarLocationsCollapsed;
+        if (state.sidebarLocationsCollapsed) {
+          state.sidebarLocationFilterOpen = false;
+          state.sidebarLocationFilter = '';
+        }
+        render();
+      }
+      return;
+    }
     if (has('clear-sidebar-label-filter')) {
       state.sidebarLabelFilter = '';
       render();
       app.querySelector('[data-sidebar-label-filter]')?.focus();
+      return;
+    }
+    if (has('clear-sidebar-location-filter')) {
+      state.sidebarLocationFilter = '';
+      render();
+      app.querySelector('[data-sidebar-location-filter]')?.focus();
       return;
     }
     if (has('toggle-search')) {
@@ -2635,6 +2692,11 @@
       render();
       return;
     }
+    if (el.hasAttribute('data-sidebar-location-filter')) {
+      state.sidebarLocationFilter = el.value;
+      render();
+      return;
+    }
     if (el.hasAttribute('data-lp-search')) {
       const mode = el.dataset.lpSearch;
       const picker =
@@ -2965,6 +3027,18 @@
     }
 
     if (event.key === 'Escape') {
+      if (event.target.hasAttribute('data-sidebar-label-filter')) {
+        state.sidebarLabelFilterOpen = false;
+        state.sidebarLabelFilter = '';
+        render();
+        return;
+      }
+      if (event.target.hasAttribute('data-sidebar-location-filter')) {
+        state.sidebarLocationFilterOpen = false;
+        state.sidebarLocationFilter = '';
+        render();
+        return;
+      }
       if (state.modal) {
         state.modal = null;
         render();
