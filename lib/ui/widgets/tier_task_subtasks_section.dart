@@ -22,8 +22,8 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
 import '../../models/tdf_metadata.dart';
-import '../../repositories/link_launcher_repository.dart';
-import '../../services/app_logger.dart';
+import '../../presentation/link_action_controller.dart';
+import '../../presentation/ui_telemetry.dart';
 
 /// Maximum number of individual status indicator icons rendered on a task pill before collapsing into a summary icon.
 const int maxVisibleTaskIndicators = 3;
@@ -505,10 +505,7 @@ void animateSubtaskSectionToggle(
   required bool isExpanded,
   required String taskId,
 }) {
-  AppLogger.debug(
-    LogTag.ui,
-    'Toggled task details task=$taskId expanded=$isExpanded',
-  );
+  UiTelemetry.logTaskDetailsToggled(taskId: taskId, isExpanded: isExpanded);
   if (isExpanded) {
     controller.forward();
   } else {
@@ -535,14 +532,7 @@ computeSubtaskExitStageTiming({
 
 /// Copies [taskId] to the system clipboard and displays a localized confirmation [SnackBar] on [context].
 Future<void> copyTaskIdToClipboard(BuildContext context, String taskId) async {
-  if (AppLogger.shouldLog(LogLevel.info)) {
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      'task.id.copied',
-      fields: {'task': taskId},
-    );
-  }
+  UiTelemetry.logTaskIdCopied(taskId);
   final localizations = AppLocalizations.of(context);
   await _copyTextToClipboardWithSnackBar(
     context,
@@ -553,14 +543,7 @@ Future<void> copyTaskIdToClipboard(BuildContext context, String taskId) async {
 
 /// Copies [note] to the system clipboard and displays a localized confirmation [SnackBar] on [context].
 Future<void> copyTaskNoteToClipboard(BuildContext context, String note) async {
-  if (AppLogger.shouldLog(LogLevel.info)) {
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      'task.note.copied',
-      fields: {'length': note.length},
-    );
-  }
+  UiTelemetry.logTaskNoteCopied(note.length);
   final localizations = AppLocalizations.of(context);
   await _copyTextToClipboardWithSnackBar(
     context,
@@ -569,22 +552,23 @@ Future<void> copyTaskNoteToClipboard(BuildContext context, String note) async {
   );
 }
 
-/// Opens [uri] via [repository] and shows a localized failure [SnackBar] on [context] if launching fails.
+/// Opens [uri] via [controller] and shows a localized failure [SnackBar] on [context] if launching fails.
 Future<void> openTaskResourceLink(
   BuildContext context,
-  LinkLauncherRepository repository,
+  LinkActionController controller,
   String uri,
 ) async {
-  try {
-    await repository.openLink(uri);
-  } on LinkLaunchException {
-    if (!context.mounted) {
+  switch (await controller.openLink(uri)) {
+    case LinkOpenOutcome.opened:
       return;
-    }
-    final localizations = AppLocalizations.of(context);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(localizations.errorOpenLinkFailed)));
+    case LinkOpenOutcome.failed:
+      if (!context.mounted) {
+        return;
+      }
+      final localizations = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(localizations.errorOpenLinkFailed)),
+      );
   }
 }
 

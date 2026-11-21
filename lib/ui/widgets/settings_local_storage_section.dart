@@ -17,10 +17,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/tdf_file_path.dart';
 import '../../models/webdav_config.dart';
-import '../../providers/config_providers.dart';
-import '../../providers/workspace_providers.dart';
-import '../../repositories/local_file_repository.dart';
+import '../../presentation/settings_controller.dart';
 import 'local_tdf_file_dialogs.dart';
 import 'settings_preference_cards.dart';
 
@@ -118,9 +117,6 @@ class LocalStorageSection extends StatelessWidget {
     this.onWipeLocalFile,
   });
 
-  /// Pattern matching POSIX (`/`) or Windows (`\`) path separators.
-  static final RegExp _pathSeparatorPattern = RegExp(r'[/\\]');
-
   /// Whether automatic external local `.tdf` file watching is enabled.
   final bool localWatchEnabled;
 
@@ -183,58 +179,29 @@ class LocalStorageSection extends StatelessWidget {
     bool moveDirectory = false,
     bool renameOnly = false,
   }) async {
-    final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
-    final buildProfile = ref.read(appBuildProfileProvider);
-    final repository = LocalFileRepository(
-      config: config,
-      baseDirectoryPath: baseDirectoryPath,
-      buildProfile: buildProfile,
-    );
-    final currentDirectory = repository.tryResolveDirectoryPath();
-    final currentName = repository.extractFileName();
+    final controller = ref.read(settingsControllerProvider);
     if (moveDirectory) {
-      final selectedDirectory = await ref.read(directoryPickerProvider)(
-        initialDirectory: currentDirectory,
-      );
-      if (selectedDirectory == null ||
-          selectedDirectory.trim().isEmpty ||
-          selectedDirectory == currentDirectory) {
-        return null;
-      }
-      return LocalFileRepository.combineDirectoryAndFileName(
-        selectedDirectory,
-        currentName,
-      );
+      return controller.pickLocalDirectory(config);
     }
-    if (!renameOnly && ref.read(supportsDirectoryPickerProvider)) {
-      return ref.read(filePickerProvider)(
-        initialDirectory: currentDirectory,
-        currentFileName: currentName,
-      );
+    if (!renameOnly && controller.supportsNativeDirectoryPicker) {
+      return controller.pickNativeLocalFile(config);
     }
+    final currentName = TdfFilePath.extractFileNameFromPath(
+      config.localFilePath,
+    );
     final chosenName = renameOnly
         ? await showRenameLocalTdfDialog(context, currentFileName: currentName)
         : await showSelectLocalTdfDialog(
             context,
             currentFileName: currentName,
-            existingFileNames: ref
-                .read(localFileRepositoryProvider)
-                .listTdfFileNamesInDirectory(),
+            existingFileNames: controller.listLocalTdfFileNames(),
           );
     if (chosenName == null ||
         chosenName.trim().isEmpty ||
         (renameOnly && chosenName == currentName)) {
       return null;
     }
-    final hasDirectory =
-        _pathSeparatorPattern.hasMatch(config.localFilePath) ||
-        baseDirectoryPath != null;
-    return (hasDirectory && currentDirectory != null)
-        ? LocalFileRepository.combineDirectoryAndFileName(
-            currentDirectory,
-            chosenName,
-          )
-        : chosenName;
+    return controller.resolveChosenLocalFileName(config, chosenName);
   }
 }
 

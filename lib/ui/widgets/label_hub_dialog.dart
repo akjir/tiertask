@@ -20,10 +20,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/tdf_location.dart';
 import '../../models/tdf_metadata.dart';
-import '../../providers/config_providers.dart';
+import '../../presentation/link_action_controller.dart';
+import '../../presentation/ui_telemetry.dart';
 import '../../providers/task_providers.dart';
-import '../../repositories/link_launcher_repository.dart';
-import '../../services/app_logger.dart';
 import '../edit_labels_screen.dart';
 
 /// Modal Context Hub dialog displaying a label's color, scope, note, links, and conditions.
@@ -269,7 +268,7 @@ class _LabelHubLinkRow extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     void launch() => _openLabelResourceLink(
       context,
-      ref.read(linkLauncherRepositoryProvider),
+      ref.read(linkActionControllerProvider),
       link.uri,
     );
     return Material(
@@ -579,14 +578,7 @@ Future<void> showLabelHubDialog(
   BuildContext context, {
   required String labelId,
 }) {
-  if (AppLogger.shouldLog(LogLevel.info)) {
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      'ui.label_hub.open',
-      fields: <String, Object?>{'id': labelId},
-    );
-  }
+  UiTelemetry.logLabelHubOpened(labelId);
   return showDialog<void>(
     context: context,
     builder: (_) => LabelHubDialog(labelId: labelId),
@@ -599,14 +591,7 @@ Future<void> _copyLabelNoteToClipboard(
   required String labelId,
   required String note,
 }) async {
-  if (AppLogger.shouldLog(LogLevel.info)) {
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      'label.note.copied',
-      fields: <String, Object?>{'id': labelId, 'length': note.length},
-    );
-  }
+  UiTelemetry.logLabelNoteCopied(labelId: labelId, length: note.length);
   final message = AppLocalizations.of(context).noteCopiedSnackBar;
   final messenger = ScaffoldMessenger.maybeOf(context);
   await Clipboard.setData(ClipboardData(text: note));
@@ -680,23 +665,24 @@ String _formatWeekdayName(int weekday, AppLocalizations localizations) {
   };
 }
 
-/// Launches [uri] via [repository] and displays an error [SnackBar] when launching fails.
+/// Launches [uri] via [controller] and displays an error [SnackBar] when launching fails.
 Future<void> _openLabelResourceLink(
   BuildContext context,
-  LinkLauncherRepository repository,
+  LinkActionController controller,
   String uri,
 ) async {
   final errorText = AppLocalizations.of(context).errorOpenLinkFailed;
   final messenger = ScaffoldMessenger.maybeOf(context);
-  try {
-    await repository.openLink(uri);
-  } on LinkLaunchException {
-    if (!context.mounted) {
+  switch (await controller.openLink(uri)) {
+    case LinkOpenOutcome.opened:
       return;
-    }
-    messenger
-      ?..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(errorText)));
+    case LinkOpenOutcome.failed:
+      if (!context.mounted) {
+        return;
+      }
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(errorText)));
   }
 }
 

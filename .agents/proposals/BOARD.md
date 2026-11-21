@@ -14,7 +14,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | TEP-013 | TDF Specification 0.8.0 Standalone Baseline, Canonical Runtime, Synchronization Hardening, and Conformance Suite | spec | review | [`tep-013-tdf-spec-0-8-0.md`](tep-013-tdf-spec-0-8-0.md) |
 | TEP-014 | Robust Versioned JSON Settings Persistence, Split Credential Storage, and Deprecated TTW v2 Migration Converter | architecture | review | [`tep-014-robust-json-settings-storage-and-ttw-v2-deprecation.md`](tep-014-robust-json-settings-storage-and-ttw-v2-deprecation.md) |
 | TEP-015 | Decoupled Presentation Architecture, Dedicated UI Component Library, and Adaptive Desktop/Mobile Redesign Roadmap | architecture | concept | [`tep-015-ui-architecture-and-design-system-roadmap.md`](tep-015-ui-architecture-and-design-system-roadmap.md) |
-| TEP-016 | Phase 1 Presentation Layer Decoupling and Strict UI Boundary | architecture | concept | [`tep-016-presentation-layer-decoupling.md`](tep-016-presentation-layer-decoupling.md) |
+| TEP-016 | Phase 1 Presentation Layer Decoupling and Strict UI Boundary | architecture | review | [`tep-016-presentation-layer-decoupling.md`](tep-016-presentation-layer-decoupling.md) |
 
 ### Completed Proposals
 

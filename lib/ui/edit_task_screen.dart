@@ -22,13 +22,13 @@ import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_metadata.dart';
-import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
+import '../presentation/link_action_controller.dart';
+import '../presentation/task_editor_controller.dart';
+import '../presentation/ui_telemetry.dart';
 import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
-import '../repositories/link_launcher_repository.dart';
-import '../services/app_logger.dart';
 import 'widgets/condition_editor_controller.dart';
 import 'widgets/task_editor_conditions_section.dart';
 import 'widgets/task_editor_history_section.dart';
@@ -559,22 +559,47 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
     final localizations = AppLocalizations.of(context);
-    final resolution = _tryResolvePendingHistoryEntries(
-      configuration,
-      localizations,
-    );
-    if (!resolution.hasPending) {
+    final hasPending =
+        _editingHistoryIndex != null ||
+        _historyTimestampController.text.trim().isNotEmpty ||
+        _historyTextController.text.isNotEmpty;
+    if (!hasPending) {
       setState(
         () => _historyErrorMessage = localizations.historyErrorTextEmpty,
       );
       return;
     }
-    if (resolution.error case final error?) {
-      setState(() => _historyErrorMessage = error);
+    final candidateResult = ref
+        .read(taskEditorControllerProvider)
+        .resolvePendingHistoryCandidate(
+          configuration: configuration,
+          localizations: localizations,
+          editingHistoryIndex: _editingHistoryIndex,
+          editingHistoryOriginalEntry: _editingHistoryOriginalEntry,
+          editingHistoryInitialTimestampText:
+              _editingHistoryInitialTimestampText,
+          rawTimestamp: _historyTimestampController.text,
+          rawText: _historyTextController.text,
+        );
+    final candidate = candidateResult.candidate;
+    if (candidate == null) {
+      setState(() => _historyErrorMessage = candidateResult.error);
+      return;
+    }
+    final activeIndex = _editingHistoryIndex;
+    final nextEntries = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
+      for (var i = 0; i < _historyEntries.length; i++)
+        if (i != activeIndex) _historyEntries[i],
+      candidate,
+    ]);
+    if (nextEntries.length > maxTdfHistoryPerTask) {
+      setState(
+        () => _historyErrorMessage = localizations.historyErrorMaxExceeded,
+      );
       return;
     }
     setState(() {
-      _historyEntries = List<TaskHistoryEntry>.of(resolution.entries);
+      _historyEntries = List<TaskHistoryEntry>.of(nextEntries);
       _resetHistoryEditInputs();
     });
   }
@@ -590,67 +615,19 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Assigns a timestamp-related persistence error to the most specific active scheduling field.
-  void _assignTimestampPersistError(
-    String timestampError, {
-    required bool includeRepeatLeadDays,
-    String? repeatLeadDaysError,
-  }) {
-    if (includeRepeatLeadDays &&
-        repeatLeadDaysError != null &&
-        _isRepeating &&
-        _hasDue) {
-      _repeatLeadDaysErrorMessage = repeatLeadDaysError;
-    } else if (_isSuspended) {
-      _suspendedErrorMessage = timestampError;
-    } else if (_hasDue) {
-      _dueErrorMessage = timestampError;
-    } else {
-      _errorMessage = timestampError;
+  /// Applies controller-reported field validation or persistence [errors] into widget state.
+  void _applyFieldErrors(TaskEditorFieldErrors errors) {
+    _errorMessage = errors.titleError;
+    _suspendedErrorMessage = errors.suspendedError;
+    _suspendedNoteErrorMessage = errors.suspendedNoteError;
+    _dueErrorMessage = errors.dueError;
+    _dueNoteErrorMessage = errors.dueNoteError;
+    _repeatErrorMessage = errors.repeatError;
+    _repeatLeadDaysErrorMessage = errors.repeatLeadDaysError;
+    _historyErrorMessage = errors.historyError;
+    if (errors.linkError != null) {
+      _linkErrorMessage = errors.linkError;
     }
-  }
-
-  /// Validates any pending link input, commits resolved pending history, and assembles [_ValidatedTaskDraft].
-  _ValidatedTaskDraft? _buildDraft({
-    required TaskBoard board,
-    required _ResolvedDueDraft due,
-    required String? dueNote,
-    required ({List<TaskHistoryEntry> entries, String? error, bool hasPending})
-    historyResolution,
-    required TaskRepeatRule? repeatRule,
-    required _ResolvedSuspendedDraft suspended,
-    required String? suspendedNote,
-  }) {
-    final hasPendingLink =
-        _linkTitleController.text.trim().isNotEmpty ||
-        _linkUriController.text.trim().isNotEmpty;
-    if (hasPendingLink && !_addLink()) return null;
-    if (historyResolution.hasPending) {
-      setState(() {
-        _historyEntries = List<TaskHistoryEntry>.of(historyResolution.entries);
-        _resetHistoryEditInputs();
-      });
-    }
-    final pendingSubtask = _subtaskController.text.trim();
-    return (
-      blockedByIds: TaskEditorBoardHelper.collectOrderedBlockedByIds(
-        board,
-        _blockedByIds,
-      ),
-      due: due,
-      dueNote: dueNote,
-      history: historyResolution.entries,
-      labelIds: TaskEditorBoardHelper.collectOrderedLabelIds(board, _labelIds),
-      links: _links,
-      repeatRule: repeatRule,
-      subtasks: <SubtaskItem>[
-        ..._subtasks,
-        if (pendingSubtask.isNotEmpty)
-          SubtaskItem(title: pendingSubtask, isCompleted: _isCompletedTask),
-      ],
-      suspended: suspended,
-      suspendedNote: suspendedNote,
-    );
   }
 
   /// Cancels an active draft history row edit and clears the history input fields.
@@ -675,15 +652,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       builder: (_) => _DeleteTaskConfirmDialog(taskTitle: existingTask.title),
     );
     if (!mounted || confirmed != true) return;
-    if (AppLogger.shouldLog(LogLevel.info)) {
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.ui,
-        'ui.delete_task.confirmed',
-        fields: <String, Object?>{'id': existingTask.id},
-      );
-    }
-    await ref.read(taskNotifierProvider.notifier).deleteTask(existingTask.id);
+    await ref.read(taskEditorControllerProvider).deleteTask(existingTask.id);
     if (!mounted) return;
     Navigator.of(context).pop();
   }
@@ -758,14 +727,23 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   void _handleDueChanged() {
     final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final candidateDue = _resolveCurrentEditorDueDraft(configuration);
-    final shouldResetAutoPrioritize =
-        !_didUserToggleAutoPrioritizeDue &&
-        !_autoPrioritizeDue &&
-        _hasDue &&
-        candidateDue.isValid &&
-        !candidateDue.isUnchanged &&
-        !_isSameDueState(candidateDue, _initialDueAt, _initialDueAnchor);
+    final controller = ref.read(taskEditorControllerProvider);
+    final candidateDue = controller.resolveDueDraft(
+      configuration: configuration,
+      hasDue: _hasDue,
+      rawDueText: _dueController.text,
+      initialDueAt: _initialDueAt,
+      initialDueAnchor: _initialDueAnchor,
+      initialDueText: _initialDueText,
+    );
+    final shouldResetAutoPrioritize = controller.shouldResetAutoPrioritizeDue(
+      didUserToggleAutoPrioritizeDue: _didUserToggleAutoPrioritizeDue,
+      autoPrioritizeDue: _autoPrioritizeDue,
+      hasDue: _hasDue,
+      candidateDue: candidateDue,
+      initialDueAt: _initialDueAt,
+      initialDueAnchor: _initialDueAnchor,
+    );
     if (_dueErrorMessage != null || shouldResetAutoPrioritize) {
       setState(() {
         _dueErrorMessage = null;
@@ -797,51 +775,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     setState(() {
       _lastCanAddLink = canAdd;
       _linkErrorMessage = null;
-    });
-  }
-
-  /// Routes synchronous domain persistence rejections to a visible inline field error without closing [EditTaskScreen].
-  void _handlePersistFailure(
-    String kindLabel,
-    TdfErrorKind? kind,
-    AppLocalizations localizations, {
-    TdfContextOutcomeKind? contextKind,
-  }) {
-    if (AppLogger.shouldLog(LogLevel.warn)) {
-      AppLogger.event(
-        LogLevel.warn,
-        LogTag.ui,
-        'ui.edit_task.persist_rejected',
-        fields: <String, Object?>{'kind': kindLabel},
-      );
-    }
-    if (!mounted) return;
-    setState(() {
-      if (contextKind == TdfContextOutcomeKind.timeZoneContextRequired) {
-        _assignTimestampPersistError(
-          localizations.taskSuspendedErrorInvalid,
-          includeRepeatLeadDays: false,
-        );
-      } else if (kind == TdfErrorKind.limitExceeded &&
-          _historyEntries.length >= maxTdfHistoryPerTask) {
-        _historyErrorMessage = localizations.historyErrorMaxExceeded;
-      } else if (kind == TdfErrorKind.limitExceeded) {
-        _errorMessage = localizations.schedulingNoteErrorTooLong;
-      } else if (kind == TdfErrorKind.invalidTimestamp) {
-        _assignTimestampPersistError(
-          localizations.taskSuspendedErrorInvalid,
-          includeRepeatLeadDays: true,
-          repeatLeadDaysError: localizations.repeatLeadDaysErrorInvalid,
-        );
-      } else if (kind == TdfErrorKind.unexpectedToken) {
-        _errorMessage = localizations.schedulingNoteErrorInvalid;
-      } else if (kind == TdfErrorKind.invalidUri) {
-        _linkErrorMessage = localizations.linkErrorInvalid;
-      } else if (kind == TdfErrorKind.emptyText) {
-        _errorMessage = localizations.taskNameErrorEmpty;
-      } else {
-        _errorMessage = localizations.taskSuspendedErrorInvalid;
-      }
     });
   }
 
@@ -888,151 +821,18 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     }
   }
 
-  /// Returns whether [candidate] matches both [initialDueAt] and [initialDueAnchor].
-  static bool _isSameDueState(
-    _ResolvedDueDraft candidate,
-    DateTime? initialDueAt,
-    TdfLocalDateTime? initialDueAnchor,
-  ) {
-    final resolvedDueAt = candidate.dueAt;
-    if (resolvedDueAt == null || initialDueAt == null) {
-      return false;
-    }
-    return TaskItem.normalizeTimestamp(resolvedDueAt) ==
-            TaskItem.normalizeTimestamp(initialDueAt) &&
-        candidate.dueAnchor == initialDueAnchor;
-  }
-
-  /// Emits redacted `AppLogger` telemetry after [draft] saves without logging raw note or history contents.
-  void _logTaskSaved(_ValidatedTaskDraft draft) {
-    if (!AppLogger.shouldLog(LogLevel.info)) return;
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      'ui.edit_task.saved',
-      fields: <String, Object?>{
-        'id': widget.initialTask?.id ?? 'new',
-        'is_suspended': _isSuspended,
-        'has_suspended_note': draft.suspendedNote != null,
-        'has_due': _hasDue,
-        'has_due_note': draft.dueNote != null,
-        'is_repeating': _isRepeating,
-        'lead_days': draft.repeatRule?.leadDays ?? 0,
-        'history_count': draft.history.length,
-      },
-    );
-  }
-
-  /// Emits redacted `AppLogger` telemetry when form validation rejects submission.
-  void _logValidationFailed({
-    required bool hasDueError,
-    required bool hasDueNoteError,
-    required bool hasHistoryError,
-    required bool hasLeadDaysError,
-    required bool hasRepeatError,
-    required bool hasSuspendedError,
-    required bool hasSuspendedNoteError,
-    required bool hasTitleError,
-  }) {
-    if (!AppLogger.shouldLog(LogLevel.warn)) return;
-    AppLogger.event(
-      LogLevel.warn,
-      LogTag.ui,
-      'ui.edit_task.validation_failed',
-      fields: <String, Object?>{
-        'title': hasTitleError,
-        'suspended': hasSuspendedError,
-        'suspended_note': hasSuspendedNoteError,
-        'due': hasDueError,
-        'due_note': hasDueNoteError,
-        'repeat': hasRepeatError,
-        'lead_days': hasLeadDaysError,
-        'history': hasHistoryError,
-      },
-    );
-  }
-
-  /// Opens [uri] via [linkLauncherRepositoryProvider] and displays a SnackBar if launching fails.
+  /// Opens [uri] via [linkActionControllerProvider] and displays a SnackBar if launching fails.
   Future<void> _openLink(String uri) async {
-    try {
-      await ref.read(linkLauncherRepositoryProvider).openLink(uri);
-    } on LinkLaunchException {
-      if (!mounted) return;
-      final text = AppLocalizations.of(context).errorOpenLinkFailed;
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(text)),
-      );
+    switch (await ref.read(linkActionControllerProvider).openLink(uri)) {
+      case LinkOpenOutcome.opened:
+        return;
+      case LinkOpenOutcome.failed:
+        if (!mounted) return;
+        final text = AppLocalizations.of(context).errorOpenLinkFailed;
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text(text)),
+        );
     }
-  }
-
-  /// Persists the validated [draft] through [TaskNotifier].
-  Future<void> _persistTask(_ValidatedTaskDraft draft) {
-    final note = _noteController.text.trim();
-    final notifier = ref.read(taskNotifierProvider.notifier);
-    if (widget.initialTask case final existingTask?) {
-      final isDuePassive = !_hasDue
-          ? false
-          : (_isCompletedTask && draft.due.isUnchanged
-                ? existingTask.isDuePassive
-                : !_autoPrioritizeDue);
-      final effectiveTargetTier =
-          (!_isCompletedTask && _mode == _initialEditorMode)
-          ? null
-          : _mode.targetTier;
-      return notifier.updateTask(
-        existingTask.id,
-        title: _titleController.text.trim(),
-        note: note,
-        targetTier: effectiveTargetTier,
-        isPriority: _mode == QuickAddMode.priority,
-        subtasksAutoFinish: _autoFinish,
-        subtasks: draft.subtasks,
-        labelIds: draft.labelIds,
-        dueAt: draft.due.dueLocalInput == null ? draft.due.dueAt : null,
-        dueLocalInput: draft.due.dueLocalInput,
-        dueAnchor: draft.due.dueLocalInput == null ? draft.due.dueAnchor : null,
-        isDuePassive: isDuePassive,
-        dueNote: draft.dueNote,
-        clearDueAt: !_hasDue,
-        clearDueAnchor:
-            !_hasDue ||
-            (draft.due.dueLocalInput == null && draft.due.dueAnchor == null),
-        clearDueNote: !_hasDue || draft.dueNote == null,
-        origin: existingTask.origin,
-        suspendedAt: draft.suspended.suspendedAt,
-        suspendedLocalInput: draft.suspended.suspendedLocalInput,
-        isSuspendedForever: _isSuspended ? draft.suspended.isForever : false,
-        suspendedNote: draft.suspendedNote,
-        clearSuspendedAt: !_isSuspended,
-        clearSuspendedNote: !_isSuspended || draft.suspendedNote == null,
-        repeatRule: draft.repeatRule,
-        clearRepeatRule: !_isRepeating,
-        blockedByTaskIds: draft.blockedByIds,
-        links: draft.links,
-        history: draft.history,
-        conditions: _conditionController.buildConditions(),
-      );
-    }
-    return notifier.addTask(
-      _titleController.text.trim(),
-      note: note.isEmpty ? null : note,
-      targetTier: _mode.targetTier,
-      isPriority: _mode == QuickAddMode.priority,
-      subtasksAutoFinish: _autoFinish,
-      subtasks: draft.subtasks,
-      labelIds: draft.labelIds,
-      dueLocalInput: draft.due.dueLocalInput,
-      isDuePassive: _hasDue && !_autoPrioritizeDue,
-      dueNote: draft.dueNote,
-      suspendedLocalInput: draft.suspended.suspendedLocalInput,
-      isSuspendedForever: draft.suspended.isForever,
-      suspendedNote: draft.suspendedNote,
-      repeatRule: draft.repeatRule,
-      blockedByTaskIds: draft.blockedByIds,
-      links: draft.links,
-      history: draft.history,
-      conditions: _conditionController.buildConditions(),
-    );
   }
 
   /// Opens the Material 3 date picker for [_dueController].
@@ -1054,9 +854,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   ) async {
     final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final now = configuration.toLocalWallClock(
-      ref.read(clockProvider)().toUtc(),
-    );
+    final now = ref
+        .read(taskEditorControllerProvider)
+        .currentLocalWallClock(configuration);
     final updated = await picker(
       context: context,
       currentText: _dueController.text,
@@ -1088,9 +888,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   ) async {
     final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final fallbackLocal = configuration.toLocalWallClock(
-      ref.read(clockProvider)().toUtc(),
-    );
+    final fallbackLocal = ref
+        .read(taskEditorControllerProvider)
+        .currentLocalWallClock(configuration);
     final updated = await picker(
       context: context,
       currentText: _historyTimestampController.text,
@@ -1122,9 +922,9 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
   ) async {
     final configuration =
         ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final now = configuration.toLocalWallClock(
-      ref.read(clockProvider)().toUtc(),
-    );
+    final now = ref
+        .read(taskEditorControllerProvider)
+        .currentLocalWallClock(configuration);
     final updated = await picker(
       context: context,
       currentText: _suspendedController.text,
@@ -1178,163 +978,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     _historyTextController.clear();
   }
 
-  /// Resolves the current `due` draft in [configuration]'s local wall-clock time, preserving [_initialDueAt] and [_initialDueAnchor] when unedited.
-  _ResolvedDueDraft _resolveCurrentEditorDueDraft(WebDavConfig configuration) {
-    if (!_hasDue) {
-      return (
-        dueAt: null,
-        dueLocalInput: null,
-        dueAnchor: null,
-        isUnchanged: false,
-        isValid: true,
-      );
-    }
-    final trimmed = _dueController.text.trim();
-    if (_initialDueAt case final initialDueAt?
-        when trimmed == _initialDueText) {
-      return (
-        dueAt: initialDueAt,
-        dueLocalInput: null,
-        dueAnchor: _initialDueAnchor,
-        isUnchanged: true,
-        isValid: true,
-      );
-    }
-    final parsed = TaskEditorSuspendedField.tryParseLocalDateTimeInput(
-      trimmed,
-      configuration,
-    );
-    if (parsed == null) {
-      return (
-        dueAt: null,
-        dueLocalInput: null,
-        dueAnchor: null,
-        isUnchanged: false,
-        isValid: false,
-      );
-    }
-    return (
-      dueAt: parsed.resolvedUtc,
-      dueLocalInput: parsed.localInput,
-      dueAnchor: parsed.localInput,
-      isUnchanged: false,
-      isValid: true,
-    );
-  }
-
-  /// Resolves the current `suspended` draft in [configuration]'s local wall-clock time, preserving [_initialSuspendedAt] when unedited.
-  _ResolvedSuspendedDraft _resolveCurrentEditorSuspendedDraft(
-    WebDavConfig configuration,
-  ) {
-    if (!_isSuspended) {
-      return (
-        suspendedAt: null,
-        suspendedLocalInput: null,
-        isForever: false,
-        isValid: true,
-      );
-    }
-    final trimmed = _suspendedController.text.trim();
-    if (trimmed.isEmpty) {
-      return (
-        suspendedAt: null,
-        suspendedLocalInput: null,
-        isForever: true,
-        isValid: true,
-      );
-    }
-    if (_initialSuspendedAt case final initialSuspendedAt?
-        when trimmed == _initialSuspendedText) {
-      return (
-        suspendedAt: initialSuspendedAt,
-        suspendedLocalInput: null,
-        isForever: false,
-        isValid: true,
-      );
-    }
-    final parsed = TaskEditorSuspendedField.tryParseLocalDateTimeInput(
-      trimmed,
-      configuration,
-    );
-    if (parsed == null) {
-      return (
-        suspendedAt: null,
-        suspendedLocalInput: null,
-        isForever: false,
-        isValid: false,
-      );
-    }
-    return (
-      suspendedAt: null,
-      suspendedLocalInput: parsed.localInput,
-      isForever: false,
-      isValid: true,
-    );
-  }
-
-  /// Validates the current pending history inputs into a single [TaskHistoryEntry] or localized error.
-  ({TaskHistoryEntry? candidate, String? error})
-  _resolvePendingHistoryCandidate(
-    WebDavConfig configuration,
-    AppLocalizations localizations,
-  ) {
-    final trimmedTimestamp = _historyTimestampController.text.trim();
-    final rawText = _historyTextController.text;
-    if (_editingHistoryIndex != null &&
-        _editingHistoryOriginalEntry != null &&
-        trimmedTimestamp == _editingHistoryInitialTimestampText &&
-        rawText == _editingHistoryOriginalEntry?.text) {
-      return (candidate: _editingHistoryOriginalEntry, error: null);
-    }
-    final nowUtc = ref.read(clockProvider)().toUtc();
-    final resolvedTimestampUtc =
-        TaskHistoryInputValidator.resolveEntryTimestampUtc(
-          configuration: configuration,
-          fallbackNowUtc: nowUtc,
-          preservedTimestampText: _editingHistoryInitialTimestampText,
-          preservedTimestampUtc: _editingHistoryOriginalEntry?.timestampUtc,
-          rawTimestamp: _historyTimestampController.text,
-        );
-    if (resolvedTimestampUtc == null) {
-      return (
-        candidate: null,
-        error: localizations.historyErrorTimestampInvalid,
-      );
-    }
-    final sanitizedText = TaskHistoryInputValidator.sanitizeSingleLineText(
-      rawText,
-    );
-    final textError = TaskHistoryInputValidator.validateText(
-      sanitizedText,
-      localizations,
-    );
-    if (textError != null) {
-      return (candidate: null, error: textError);
-    }
-    return (
-      candidate: TaskHistoryEntry(
-        timestampUtc: resolvedTimestampUtc,
-        text: sanitizedText,
-      ),
-      error: null,
-    );
-  }
-
-  /// Resolves an optional scheduling note, preserving [initialNote] verbatim when untouched.
-  static String? _resolveSchedulingNote({
-    required String? initialNote,
-    required bool isEnabled,
-    required String rawText,
-  }) {
-    if (!isEnabled) {
-      return null;
-    }
-    if (initialNote != null && rawText == initialNote) {
-      return initialNote;
-    }
-    return TaskEditorSchedulingNoteField.normalizeSchedulingNote(rawText);
-  }
-
   /// Updates the active [RepeatUnit] selection.
   void _selectRepeatUnit(RepeatUnit unit) {
     setState(() => _repeatUnit = unit);
@@ -1342,36 +985,86 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
   /// Validates the task inputs and saves the created or updated task.
   Future<void> _submit() async {
-    final board =
-        ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
-    final localizations = AppLocalizations.of(context);
-    final draft = _validateAndBuildDraft(board, localizations);
-    if (draft == null) return;
-    try {
-      await _persistTask(draft);
-    } on TdfException catch (error) {
-      _handlePersistFailure(error.kind.name, error.kind, localizations);
-      return;
-    } on TdfContextException catch (error) {
-      _handlePersistFailure(
-        error.kind.name,
-        null,
-        localizations,
-        contextKind: error.kind,
-      );
-      return;
-    } on FormatException {
-      _handlePersistFailure(
-        'FormatException',
-        TdfErrorKind.invalidTimestamp,
-        localizations,
-      );
+    final hasPendingLink =
+        _linkTitleController.text.trim().isNotEmpty ||
+        _linkUriController.text.trim().isNotEmpty;
+    if (hasPendingLink && !_addLink()) {
       return;
     }
-    _logTaskSaved(draft);
-    if (!mounted) return;
-    Navigator.of(context).pop();
-    widget.onSubmitted?.call();
+    final board =
+        ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+    final configuration =
+        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
+    final locale = Localizations.localeOf(context);
+    final result = await ref
+        .read(taskEditorControllerProvider)
+        .submitDraft(
+          TaskEditorDraftInput(
+            autoFinish: _autoFinish,
+            autoPrioritizeDue: _autoPrioritizeDue,
+            board: board,
+            conditions: _conditionController.buildConditions(),
+            configuration: configuration,
+            editingHistoryIndex: _editingHistoryIndex,
+            editingHistoryInitialTimestampText:
+                _editingHistoryInitialTimestampText,
+            editingHistoryOriginalEntry: _editingHistoryOriginalEntry,
+            existingTask: widget.initialTask,
+            hasDue: _hasDue,
+            historyEntries: _historyEntries,
+            initialDueAnchor: _initialDueAnchor,
+            initialDueAt: _initialDueAt,
+            initialDueNote: _initialDueNote,
+            initialDueText: _initialDueText,
+            initialEditorMode: _initialEditorMode,
+            initialSuspendedAt: _initialSuspendedAt,
+            initialSuspendedNote: _initialSuspendedNote,
+            initialSuspendedText: _initialSuspendedText,
+            isRepeating: _isRepeating,
+            isSuspended: _isSuspended,
+            links: _links,
+            mode: _mode,
+            pendingSubtaskText: _subtaskController.text,
+            rawDueNote: _dueNoteController.text,
+            rawDueText: _dueController.text,
+            rawHistoryText: _historyTextController.text,
+            rawHistoryTimestamp: _historyTimestampController.text,
+            rawNote: _noteController.text,
+            rawRepeatCount: _repeatCountController.text,
+            rawRepeatLeadDays: _repeatLeadDaysController.text,
+            rawSuspendedNote: _suspendedNoteController.text,
+            rawSuspendedText: _suspendedController.text,
+            rawTitle: _titleController.text,
+            repeatUnit: _repeatUnit,
+            selectedBlockedByIds: _blockedByIds,
+            selectedLabelIds: _labelIds,
+            subtasks: _subtasks,
+          ),
+          locale: locale,
+        );
+    if (!mounted) {
+      return;
+    }
+    switch (result) {
+      case TaskEditorSubmitted():
+        Navigator.of(context).pop();
+        widget.onSubmitted?.call();
+      case TaskEditorValidationFailed(:final errors):
+        setState(() => _applyFieldErrors(errors));
+      case TaskEditorPersistFailed(
+        :final errors,
+        :final committedHistoryEntries,
+      ):
+        setState(() {
+          if (committedHistoryEntries != null) {
+            _historyEntries = List<TaskHistoryEntry>.of(
+              committedHistoryEntries,
+            );
+            _resetHistoryEditInputs();
+          }
+          _applyFieldErrors(errors);
+        });
+    }
   }
 
   /// Updates [_autoPrioritizeDue] from explicit user interaction.
@@ -1457,163 +1150,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
     });
   }
 
-  /// Resolves any pending history inputs into a normalized entry list or localized validation error.
-  ({List<TaskHistoryEntry> entries, String? error, bool hasPending})
-  _tryResolvePendingHistoryEntries(
-    WebDavConfig configuration,
-    AppLocalizations localizations,
-  ) {
-    final hasPending =
-        _editingHistoryIndex != null ||
-        _historyTimestampController.text.trim().isNotEmpty ||
-        _historyTextController.text.isNotEmpty;
-    if (!hasPending) {
-      return (
-        entries: List<TaskHistoryEntry>.unmodifiable(_historyEntries),
-        error: null,
-        hasPending: false,
-      );
-    }
-    final candidateResult = _resolvePendingHistoryCandidate(
-      configuration,
-      localizations,
-    );
-    final candidate = candidateResult.candidate;
-    if (candidate == null) {
-      return (
-        entries: _historyEntries,
-        error: candidateResult.error,
-        hasPending: true,
-      );
-    }
-    final activeIndex = _editingHistoryIndex;
-    final nextEntries = TaskHistoryEntry.normalizeList(<TaskHistoryEntry>[
-      for (var i = 0; i < _historyEntries.length; i++)
-        if (i != activeIndex) _historyEntries[i],
-      candidate,
-    ]);
-    if (nextEntries.length > maxTdfHistoryPerTask) {
-      return (
-        entries: _historyEntries,
-        error: localizations.historyErrorMaxExceeded,
-        hasPending: true,
-      );
-    }
-    return (entries: nextEntries, error: null, hasPending: true);
-  }
-
   /// Applies [callback] inside [setState] to update form state.
   void _update(VoidCallback callback) => setState(callback);
-
-  /// Validates all form fields, updates per-field error messages on failure, or returns a [_ValidatedTaskDraft].
-  _ValidatedTaskDraft? _validateAndBuildDraft(
-    TaskBoard board,
-    AppLocalizations localizations,
-  ) {
-    final configuration =
-        ref.read(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final historyResolution = _tryResolvePendingHistoryEntries(
-      configuration,
-      localizations,
-    );
-    final titleError = TaskEditorBoardHelper.validateTitle(
-      board: board,
-      rawTitle: _titleController.text,
-      excludingTaskId: widget.initialTask?.id,
-      localizations: localizations,
-    );
-    final suspendedDraft = _resolveCurrentEditorSuspendedDraft(configuration);
-    final suspendedNote = _resolveSchedulingNote(
-      initialNote: _initialSuspendedNote,
-      isEnabled: _isSuspended,
-      rawText: _suspendedNoteController.text,
-    );
-    final suspendedNoteError =
-        TaskEditorSchedulingNoteField.validateSchedulingNote(
-          suspendedNote,
-          localizations,
-        );
-    final dueDraft = _resolveCurrentEditorDueDraft(configuration);
-    final dueNote = _resolveSchedulingNote(
-      initialNote: _initialDueNote,
-      isEnabled: _hasDue,
-      rawText: _dueNoteController.text,
-    );
-    final dueNoteError = TaskEditorSchedulingNoteField.validateSchedulingNote(
-      dueNote,
-      localizations,
-    );
-    final repeatCount = TaskEditorRepeatField.parseRepeatCount(
-      isRepeating: _isRepeating,
-      rawCount: _repeatCountController.text,
-    );
-    final leadDays = TaskEditorRepeatField.parseLeadDays(
-      hasDue: _hasDue,
-      isRepeating: _isRepeating,
-      rawLeadDays: _repeatLeadDaysController.text,
-    );
-    final hasSuspendedError = _isSuspended && !suspendedDraft.isValid;
-    final hasDueError = _hasDue && !dueDraft.isValid;
-    final hasRepeatError = _isRepeating && repeatCount == null;
-    final hasLeadDaysError = _isRepeating && _hasDue && leadDays == null;
-    final hasHistoryError = historyResolution.error != null;
-    if (titleError != null ||
-        hasSuspendedError ||
-        suspendedNoteError != null ||
-        hasDueError ||
-        dueNoteError != null ||
-        hasRepeatError ||
-        hasLeadDaysError ||
-        hasHistoryError) {
-      setState(() {
-        _errorMessage = titleError;
-        _suspendedErrorMessage = hasSuspendedError
-            ? localizations.taskSuspendedErrorInvalid
-            : null;
-        _suspendedNoteErrorMessage = suspendedNoteError;
-        _dueErrorMessage = hasDueError
-            ? localizations.taskSuspendedErrorInvalid
-            : null;
-        _dueNoteErrorMessage = dueNoteError;
-        _repeatErrorMessage = hasRepeatError
-            ? localizations.repeatErrorInvalid
-            : null;
-        _repeatLeadDaysErrorMessage = hasLeadDaysError
-            ? localizations.repeatLeadDaysErrorInvalid
-            : null;
-        _historyErrorMessage = historyResolution.error;
-      });
-      _logValidationFailed(
-        hasDueError: hasDueError,
-        hasDueNoteError: dueNoteError != null,
-        hasHistoryError: hasHistoryError,
-        hasLeadDaysError: hasLeadDaysError,
-        hasRepeatError: hasRepeatError,
-        hasSuspendedError: hasSuspendedError,
-        hasSuspendedNoteError: suspendedNoteError != null,
-        hasTitleError: titleError != null,
-      );
-      return null;
-    }
-    final repeatRule = TaskEditorRepeatField.parseRepeatRule(
-      existingClock:
-          widget.initialTask?.repeatRule?.clock ?? TdfRepeatClock.midnight,
-      hasDue: _hasDue,
-      isRepeating: _isRepeating,
-      rawCount: _repeatCountController.text,
-      rawLeadDays: _repeatLeadDaysController.text,
-      unit: _repeatUnit,
-    );
-    return _buildDraft(
-      board: board,
-      due: dueDraft,
-      dueNote: dueNote,
-      historyResolution: historyResolution,
-      repeatRule: repeatRule,
-      suspended: suspendedDraft,
-      suspendedNote: suspendedNote,
-    );
-  }
 }
 
 /// Labels, subtasks, and links sections wired to [_EditTaskScreenState].
@@ -1670,37 +1208,6 @@ class _EditTaskSubtasksAndLinksSection extends StatelessWidget {
   }
 }
 
-/// Resolved `due` draft state for [_EditTaskScreenState].
-typedef _ResolvedDueDraft = ({
-  DateTime? dueAt,
-  TdfLocalDateTime? dueLocalInput,
-  TdfLocalDateTime? dueAnchor,
-  bool isUnchanged,
-  bool isValid,
-});
-
-/// Resolved `suspended` draft state for [_EditTaskScreenState].
-typedef _ResolvedSuspendedDraft = ({
-  DateTime? suspendedAt,
-  TdfLocalDateTime? suspendedLocalInput,
-  bool isForever,
-  bool isValid,
-});
-
-/// Validated task collections and scheduling metadata passed to [_EditTaskScreenState._persistTask].
-typedef _ValidatedTaskDraft = ({
-  List<String> blockedByIds,
-  _ResolvedDueDraft due,
-  String? dueNote,
-  List<TaskHistoryEntry> history,
-  List<String> labelIds,
-  List<TaskLink> links,
-  TaskRepeatRule? repeatRule,
-  List<SubtaskItem> subtasks,
-  _ResolvedSuspendedDraft suspended,
-  String? suspendedNote,
-});
-
 /// Pushes [EditTaskScreen] onto the navigation stack for extended task creation or task editing.
 Future<void> openEditTaskScreen(
   BuildContext context, {
@@ -1710,9 +1217,10 @@ Future<void> openEditTaskScreen(
   Set<String> initialLabelIds = const <String>{},
   VoidCallback? onSubmitted,
 }) {
-  AppLogger.info(
-    LogTag.ui,
-    'Opened EditTaskScreen task=${initialTask?.id ?? "new"}',
+  UiTelemetry.logScreenOpened(
+    'EditTaskScreen',
+    entityKey: 'task',
+    entityId: initialTask?.id ?? 'new',
   );
   return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(

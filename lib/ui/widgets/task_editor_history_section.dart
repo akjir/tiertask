@@ -20,10 +20,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
-import '../../models/tdf_error.dart';
-import '../../models/tdf_sync_metadata.dart';
-import '../../models/tdf_timezone.dart';
 import '../../models/webdav_config.dart';
+import '../../presentation/task_editor_controller.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -268,107 +266,23 @@ class TaskHistoryInputValidator {
     String? preservedTimestampText,
     DateTime? preservedTimestampUtc,
     required String rawTimestamp,
-  }) {
-    final trimmed = rawTimestamp.trim();
-    if (trimmed.isEmpty) {
-      final normalizedFallback = TaskItem.normalizeTimestamp(fallbackNowUtc);
-      return TdfCalendar.isWithinTimestampBounds(normalizedFallback)
-          ? normalizedFallback
-          : null;
-    }
-    if (preservedTimestampUtc != null &&
-        preservedTimestampText != null &&
-        trimmed == preservedTimestampText) {
-      final normalizedPreserved = TaskItem.normalizeTimestamp(
-        preservedTimestampUtc,
-      );
-      return TdfCalendar.isWithinTimestampBounds(normalizedPreserved)
-          ? normalizedPreserved
-          : null;
-    }
-    final parsedLocal = TaskItem.tryParseTdfTimestampInput(trimmed);
-    if (parsedLocal == null) {
-      return null;
-    }
-    return _tryConvertLocalWallClockToUtc(configuration, parsedLocal);
-  }
+  }) => TaskEditorController.resolveHistoryTimestampUtc(
+    configuration: configuration,
+    fallbackNowUtc: fallbackNowUtc,
+    preservedTimestampText: preservedTimestampText,
+    preservedTimestampUtc: preservedTimestampUtc,
+    rawTimestamp: rawTimestamp,
+  );
 
   /// Trims outer ASCII whitespace and collapses internal CR/LF/TAB sequences into single spaces.
-  static String sanitizeSingleLineText(String rawText) {
-    var firstKeep = -1;
-    var lastKeep = -1;
-    for (var i = 0; i < rawText.length; i++) {
-      if (!_isAsciiTrimWhitespace(rawText.codeUnitAt(i))) {
-        firstKeep = firstKeep < 0 ? i : firstKeep;
-        lastKeep = i;
-      }
-    }
-    if (firstKeep < 0) {
-      return '';
-    }
-    var hasInternalBreak = false;
-    for (var i = firstKeep; i <= lastKeep; i++) {
-      if (_isInternalLineBreakOrTab(rawText.codeUnitAt(i))) {
-        hasInternalBreak = true;
-        break;
-      }
-    }
-    if (!hasInternalBreak) {
-      return firstKeep == 0 && lastKeep == rawText.length - 1
-          ? rawText
-          : rawText.substring(firstKeep, lastKeep + 1);
-    }
-    return _replaceInternalBreaksWithSpaces(rawText, firstKeep, lastKeep);
-  }
+  static String sanitizeSingleLineText(String rawText) =>
+      TaskEditorController.sanitizeHistoryText(rawText);
 
   /// Validates [sanitizedText] against TDF `0.8.0` single-line `<text>` bounds, returning a localized error or `null`.
   static String? validateText(
     String sanitizedText,
     AppLocalizations localizations,
-  ) {
-    final scalarCount = TdfCalendar.countUnicodeScalars(sanitizedText);
-    if (scalarCount == null) {
-      return localizations.historyErrorTextInvalid;
-    }
-    var hasGraphic = false;
-    for (var i = 0; i < sanitizedText.length; i++) {
-      final unit = sanitizedText.codeUnitAt(i);
-      if (unit <= 0x1F || unit == 0x7F) {
-        return localizations.historyErrorTextInvalid;
-      }
-      if (unit != 0x20) {
-        hasGraphic = true;
-      }
-    }
-    if (!hasGraphic) {
-      return localizations.historyErrorTextEmpty;
-    }
-    if (scalarCount > maxTdfTextLength) {
-      return localizations.historyErrorTextTooLong;
-    }
-    return null;
-  }
-
-  /// Converts [parsedLocal] via [configuration] (`TDF-CAL-001`), returning `null` on calendar or context errors.
-  static DateTime? _tryConvertLocalWallClockToUtc(
-    WebDavConfig configuration,
-    DateTime parsedLocal,
-  ) {
-    try {
-      final convertedUtc = TaskItem.normalizeTimestamp(
-        configuration.localWallClockToUtc(parsedLocal),
-      );
-      return TdfCalendar.isWithinTimestampBounds(convertedUtc)
-          ? convertedUtc
-          : null;
-    } on TdfException {
-      return null;
-    } on TdfContextException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
+  ) => TaskEditorController.validateHistoryText(sanitizedText, localizations);
 }
 
 /// Inline validation error label rendered below the history input fields in [TaskEditorHistorySection].
@@ -921,29 +835,4 @@ class _TaskEditorHistoryTimestampSuffix extends StatelessWidget {
       ],
     );
   }
-}
-
-/// Returns `true` when [unit] is ASCII trim whitespace (`TAB`, `LF`, `CR`, or `SPACE`).
-bool _isAsciiTrimWhitespace(int unit) =>
-    unit == 0x09 || unit == 0x0A || unit == 0x0D || unit == 0x20;
-
-/// Returns `true` when [unit] is `TAB`, `LF`, or `CR`.
-bool _isInternalLineBreakOrTab(int unit) =>
-    unit == 0x09 || unit == 0x0A || unit == 0x0D;
-
-/// Collapses `\r\n`, `\r`, `\n`, and `\t` inside `rawText[start..end]` into single `0x20` spaces.
-String _replaceInternalBreaksWithSpaces(String rawText, int start, int end) {
-  final buffer = StringBuffer();
-  for (var i = start; i <= end; i++) {
-    final unit = rawText.codeUnitAt(i);
-    if (unit == 0x0D && i < end && rawText.codeUnitAt(i + 1) == 0x0A) {
-      buffer.writeCharCode(0x20);
-      i++;
-    } else if (_isInternalLineBreakOrTab(unit)) {
-      buffer.writeCharCode(0x20);
-    } else {
-      buffer.writeCharCode(unit);
-    }
-  }
-  return buffer.toString();
 }

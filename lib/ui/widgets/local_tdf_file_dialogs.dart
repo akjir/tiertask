@@ -16,8 +16,8 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../repositories/local_file_repository.dart';
-import '../../services/app_logger.dart';
+import '../../models/tdf_file_path.dart';
+import '../../presentation/ui_telemetry.dart';
 import 'clearable_text_field.dart';
 
 /// Dialog for renaming the local `.tdf` file within its current directory.
@@ -126,15 +126,12 @@ class _RenameLocalTdfDialogState extends State<RenameLocalTdfDialog> {
   }
 
   /// Whether the entered file name is a valid single `.tdf` file name.
-  bool get _isValidInput =>
-      LocalFileRepository.isValidSingleFileName(_controller.text);
+  bool get _isValidInput => TdfFilePath.isValidSingleFileName(_controller.text);
 
   @override
   void initState() {
     super.initState();
-    final baseName = LocalFileRepository.extractFileBaseName(
-      widget.currentFileName,
-    );
+    final baseName = TdfFilePath.extractFileBaseName(widget.currentFileName);
     _controller = TextEditingController(text: baseName);
   }
 
@@ -182,10 +179,10 @@ class _RenameLocalTdfDialogState extends State<RenameLocalTdfDialog> {
     if (!_isValidInput) {
       return;
     }
-    final normalized = LocalFileRepository.ensureTdfExtension(_controller.text);
-    AppLogger.info(
-      LogTag.ui,
-      'Confirmed rename local TDF dialog from=${widget.currentFileName} to=$normalized',
+    final normalized = TdfFilePath.ensureTdfExtension(_controller.text);
+    UiTelemetry.logLocalTdfRenameConfirmed(
+      fromFileName: widget.currentFileName,
+      toFileName: normalized,
     );
     Navigator.of(context).pop(normalized);
   }
@@ -285,9 +282,7 @@ class _SelectExistingFilesList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final normalizedSelected = LocalFileRepository.ensureTdfExtension(
-      selectedText,
-    );
+    final normalizedSelected = TdfFilePath.ensureTdfExtension(selectedText);
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 180),
@@ -334,8 +329,7 @@ class _SelectLocalTdfDialogState extends State<SelectLocalTdfDialog> {
   }
 
   /// Whether the entered file name is a valid single `.tdf` file name.
-  bool get _isValidInput =>
-      LocalFileRepository.isValidSingleFileName(_controller.text);
+  bool get _isValidInput => TdfFilePath.isValidSingleFileName(_controller.text);
 
   @override
   void initState() {
@@ -388,11 +382,8 @@ class _SelectLocalTdfDialogState extends State<SelectLocalTdfDialog> {
     if (!_isValidInput) {
       return;
     }
-    final normalized = LocalFileRepository.ensureTdfExtension(_controller.text);
-    AppLogger.info(
-      LogTag.ui,
-      'Confirmed select local TDF dialog file=$normalized',
-    );
+    final normalized = TdfFilePath.ensureTdfExtension(_controller.text);
+    UiTelemetry.logLocalTdfSelectConfirmed(normalized);
     Navigator.of(context).pop(normalized);
   }
 

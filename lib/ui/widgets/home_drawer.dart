@@ -21,11 +21,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/app_workspace.dart';
 import '../../models/task_board.dart';
-import '../../models/tdf_error.dart';
 import '../../models/tdf_location.dart';
 import '../../models/tdf_metadata.dart';
-import '../../providers/config_providers.dart';
-import '../../repositories/app_version_repository.dart';
+import '../../presentation/board_presentation_providers.dart';
 import '../edit_locations_screen.dart';
 import 'app_logo.dart';
 import 'label_hub_dialog.dart';
@@ -551,10 +549,7 @@ class _DrawerVersionFooter extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final rawVersion =
-        ref.watch(appVersionProvider).asData?.value ??
-        AppVersionRepository.defaultFullVersion;
-    final parts = _splitVersionParts(rawVersion);
+    final versionViewModel = ref.watch(appVersionViewModelProvider);
     final theme = Theme.of(context);
     final baseColor = theme.colorScheme.onSurfaceVariant;
     final versionColor =
@@ -573,12 +568,12 @@ class _DrawerVersionFooter extends ConsumerWidget {
         TextSpan(
           children: [
             TextSpan(
-              text: parts.versionLabel,
+              text: versionViewModel.versionLabel,
               style: baseStyle?.copyWith(color: versionColor),
             ),
-            if (parts.buildSuffix.isNotEmpty)
+            if (versionViewModel.buildSuffix.isNotEmpty)
               TextSpan(
-                text: parts.buildSuffix,
+                text: versionViewModel.buildSuffix,
                 style: baseStyle?.copyWith(color: buildColor),
               ),
           ],
@@ -588,23 +583,6 @@ class _DrawerVersionFooter extends ConsumerWidget {
         overflow: TextOverflow.ellipsis,
       ),
     );
-  }
-
-  /// Splits [rawVersion] (`v0.1.0+<build>`) into `Version 0.1.0` and `+<build>`.
-  static ({String versionLabel, String buildSuffix}) _splitVersionParts(
-    String rawVersion,
-  ) {
-    final trimmed = rawVersion.trim();
-    final versionText = (trimmed.startsWith('v') || trimmed.startsWith('V'))
-        ? trimmed.substring(1)
-        : trimmed;
-    final plusIndex = versionText.indexOf('+');
-    return plusIndex < 0
-        ? (versionLabel: 'Version $versionText', buildSuffix: '')
-        : (
-            versionLabel: 'Version ${versionText.substring(0, plusIndex)}',
-            buildSuffix: versionText.substring(plusIndex),
-          );
   }
 }
 
@@ -618,13 +596,20 @@ class _TdfMarkdownDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
+    final previewResult = ref
+        .read(tdfPreviewControllerProvider)
+        .serializeBoard(board, locale: Localizations.localeOf(context));
+    final previewText = switch (previewResult) {
+      TdfPreviewSuccess(:final content) => content,
+      TdfPreviewLimitExceeded(:final localizedMessage) => localizedMessage,
+    };
     return AlertDialog(
       title: Text(localizations.markdownPreviewTitle),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(
           child: SelectableText(
-            _formatPreviewText(ref, board, localizations),
+            previewText,
             style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
           ),
         ),
@@ -636,19 +621,6 @@ class _TdfMarkdownDialog extends ConsumerWidget {
         ),
       ],
     );
-  }
-
-  /// Serializes [board] to `.tdf` text or returns a localized limit-exceeded fallback.
-  static String _formatPreviewText(
-    WidgetRef ref,
-    TaskBoard board,
-    AppLocalizations localizations,
-  ) {
-    try {
-      return ref.read(tdfServiceProvider).serialize(board);
-    } on TdfException {
-      return localizations.errorLocalFileTooLarge;
-    }
   }
 }
 

@@ -24,11 +24,11 @@ import '../../models/task_board.dart';
 import '../../models/task_item.dart';
 import '../../models/tdf_error.dart';
 import '../../models/tdf_metadata.dart';
-import '../../models/tdf_timezone.dart';
 import '../../models/webdav_config.dart';
+import '../../presentation/task_info_controller.dart';
+import '../../presentation/ui_telemetry.dart';
 import '../../providers/config_providers.dart';
 import '../../providers/task_providers.dart';
-import '../../services/app_logger.dart';
 import 'clearable_text_field.dart';
 import 'label_hub_dialog.dart';
 import 'task_editor_history_section.dart';
@@ -162,50 +162,39 @@ class _TaskInfoDialogState extends ConsumerState<TaskInfoDialog> {
 
   /// Validates and appends a single-line history entry stamped with the current UTC second.
   Future<void> _appendHistoryEntry(TaskItem currentTask) async {
-    if (_isMutatingHistory || !_isTaskOnBoard(currentTask.id)) {
+    final controller = ref.read(taskInfoControllerProvider);
+    if (_isMutatingHistory || !controller.isTaskOnBoard(currentTask.id)) {
       return;
     }
-    final localizations = AppLocalizations.of(context);
-    final sanitizedText = TaskHistoryInputValidator.sanitizeSingleLineText(
-      _appendController.text,
-    );
-    final textError = TaskHistoryInputValidator.validateText(
-      sanitizedText,
-      localizations,
-    );
-    if (textError != null) {
-      _setHistoryValidationError(
-        currentTask.id,
-        textError,
-        _validationReasonCode(sanitizedText),
+    final locale = Localizations.localeOf(context);
+    setState(() {
+      _isMutatingHistory = true;
+      _historyErrorMessage = null;
+    });
+    final TaskHistoryMutationResult result;
+    try {
+      result = await controller.appendHistoryEntry(
+        currentTask: currentTask,
+        rawText: _appendController.text,
+        locale: locale,
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutatingHistory = false);
+      }
+    }
+    if (!mounted) {
       return;
     }
-    final timestampUtc = TaskItem.normalizeTimestamp(
-      ref.read(clockProvider)().toUtc(),
-    );
-    if (!TdfCalendar.isWithinTimestampBounds(timestampUtc)) {
-      _setHistoryValidationError(
-        currentTask.id,
-        localizations.historyErrorTimestampInvalid,
-        'invalid_timestamp',
-      );
-      return;
+    switch (result) {
+      case TaskHistoryMutationCommitted():
+        _appendController.clear();
+      case TaskHistoryMutationFailed(:final localizedMessage):
+        setState(() => _historyErrorMessage = localizedMessage);
+      case TaskHistoryMutationUnchanged():
+      case TaskHistoryMutationNotApplied():
+        break;
     }
-    final candidate = TaskHistoryEntry(
-      timestampUtc: timestampUtc,
-      text: sanitizedText,
-    );
-    if (!currentTask.history.contains(candidate) &&
-        currentTask.history.length >= maxTdfHistoryPerTask) {
-      _setHistoryValidationError(
-        currentTask.id,
-        localizations.historyErrorMaxExceeded,
-        'max_exceeded',
-      );
-      return;
-    }
-    await _executeAppendMutation(currentTask.id, candidate, localizations);
   }
 
   /// Builds the tight-width scrollable dialog content column ending with [_TaskInfoHistoryCard].
@@ -270,15 +259,16 @@ class _TaskInfoDialogState extends ConsumerState<TaskInfoDialog> {
     }
   }
 
-  /// Removes [entry] from [currentTask] via [TaskNotifier.removeTaskHistoryEntry].
+  /// Removes [entry] from [currentTask] via [taskInfoControllerProvider].
   Future<void> _deleteHistoryEntry(
     TaskItem currentTask,
     TaskHistoryEntry entry,
   ) async {
-    if (_isMutatingHistory || !_isTaskOnBoard(currentTask.id)) {
+    final controller = ref.read(taskInfoControllerProvider);
+    if (_isMutatingHistory || !controller.isTaskOnBoard(currentTask.id)) {
       return;
     }
-    final localizations = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
     final wasEditingTarget = _editingEntry == entry;
     setState(() {
       _isMutatingHistory = true;
@@ -288,28 +278,13 @@ class _TaskInfoDialogState extends ConsumerState<TaskInfoDialog> {
         _editController.clear();
       }
     });
+    final TaskHistoryMutationResult result;
     try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .removeTaskHistoryEntry(
-            currentTask.id,
-            timestampUtc: entry.timestampUtc,
-            text: entry.text,
-          );
-    } on TdfException catch (error) {
-      _recordPersistRejection(
-        currentTask.id,
-        error.kind.name,
-        _formatMutationException(error.kind, localizations),
+      result = await controller.deleteHistoryEntry(
+        taskId: currentTask.id,
+        entry: entry,
+        locale: locale,
       );
-      return;
-    } on FormatException {
-      _recordPersistRejection(
-        currentTask.id,
-        'FormatException',
-        localizations.historyErrorTimestampInvalid,
-      );
-      return;
     } finally {
       if (mounted) {
         setState(() => _isMutatingHistory = false);
@@ -318,147 +293,14 @@ class _TaskInfoDialogState extends ConsumerState<TaskInfoDialog> {
     if (!mounted) {
       return;
     }
-    final postTask = ref
-        .read(taskNotifierProvider)
-        .asData
-        ?.value
-        .findTask(currentTask.id);
-    if (postTask != null && !postTask.history.contains(entry)) {
-      _logHistoryMutated(
-        'ui.task_info.history_removed',
-        currentTask.id,
-        postTask.history.length,
-      );
+    switch (result) {
+      case TaskHistoryMutationFailed(:final localizedMessage):
+        setState(() => _historyErrorMessage = localizedMessage);
+      case TaskHistoryMutationCommitted():
+      case TaskHistoryMutationUnchanged():
+      case TaskHistoryMutationNotApplied():
+        break;
     }
-  }
-
-  /// Persists [candidate] via [TaskNotifier.addTaskHistoryEntry] and clears [_appendController] on commit.
-  Future<void> _executeAppendMutation(
-    String taskId,
-    TaskHistoryEntry candidate,
-    AppLocalizations localizations,
-  ) async {
-    setState(() {
-      _isMutatingHistory = true;
-      _historyErrorMessage = null;
-    });
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .addTaskHistoryEntry(
-            taskId,
-            timestampUtc: candidate.timestampUtc,
-            text: candidate.text,
-          );
-    } on TdfException catch (error) {
-      _recordPersistRejection(
-        taskId,
-        error.kind.name,
-        _formatMutationException(error.kind, localizations),
-      );
-      return;
-    } on FormatException {
-      _recordPersistRejection(
-        taskId,
-        'FormatException',
-        localizations.historyErrorTimestampInvalid,
-      );
-      return;
-    } finally {
-      if (mounted) {
-        setState(() => _isMutatingHistory = false);
-      }
-    }
-    if (!mounted) {
-      return;
-    }
-    final postTask = ref
-        .read(taskNotifierProvider)
-        .asData
-        ?.value
-        .findTask(taskId);
-    if (postTask != null && postTask.history.contains(candidate)) {
-      _appendController.clear();
-      _logHistoryMutated(
-        'ui.task_info.history_added',
-        taskId,
-        postTask.history.length,
-      );
-    }
-  }
-
-  /// Persists [replacement] in place of [originalEntry] via [TaskNotifier.updateTaskHistoryEntry].
-  Future<void> _executeUpdateMutation(
-    String taskId,
-    TaskHistoryEntry originalEntry,
-    TaskHistoryEntry replacement,
-    AppLocalizations localizations,
-  ) async {
-    setState(() {
-      _isMutatingHistory = true;
-      _historyErrorMessage = null;
-    });
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .updateTaskHistoryEntry(
-            taskId,
-            oldTimestampUtc: originalEntry.timestampUtc,
-            oldText: originalEntry.text,
-            newTimestampUtc: replacement.timestampUtc,
-            newText: replacement.text,
-          );
-    } on TdfException catch (error) {
-      _recordPersistRejection(
-        taskId,
-        error.kind.name,
-        _formatMutationException(error.kind, localizations),
-      );
-      return;
-    } on FormatException {
-      _recordPersistRejection(
-        taskId,
-        'FormatException',
-        localizations.historyErrorTimestampInvalid,
-      );
-      return;
-    } finally {
-      if (mounted) {
-        setState(() => _isMutatingHistory = false);
-      }
-    }
-    if (!mounted) {
-      return;
-    }
-    final postTask = ref
-        .read(taskNotifierProvider)
-        .asData
-        ?.value
-        .findTask(taskId);
-    if (postTask != null && postTask.history.contains(replacement)) {
-      setState(() {
-        _editingEntry = null;
-        _editController.clear();
-      });
-      _logHistoryMutated(
-        'ui.task_info.history_updated',
-        taskId,
-        postTask.history.length,
-      );
-    }
-  }
-
-  /// Maps a domain [TdfErrorKind] into a localized inline history validation message.
-  static String _formatMutationException(
-    TdfErrorKind kind,
-    AppLocalizations localizations,
-  ) {
-    return switch (kind) {
-      TdfErrorKind.emptyText => localizations.historyErrorTextEmpty,
-      TdfErrorKind.limitExceeded => localizations.historyErrorMaxExceeded,
-      TdfErrorKind.unexpectedToken => localizations.historyErrorTextInvalid,
-      _ => localizations.historyErrorTimestampInvalid,
-    };
   }
 
   /// Clears stale inline edit state when an external board sync removes [widget.task] or [_editingEntry].
@@ -479,105 +321,45 @@ class _TaskInfoDialogState extends ConsumerState<TaskInfoDialog> {
     }
   }
 
-  /// Returns `true` when [taskId] is currently present on [taskNotifierProvider].
-  bool _isTaskOnBoard(String taskId) =>
-      ref.read(taskNotifierProvider).asData?.value.findTask(taskId) != null;
-
-  /// Emits a redacted `LogTag.ui` info event after a history mutation commits.
-  static void _logHistoryMutated(
-    String eventName,
-    String taskId,
-    int historyCount,
-  ) {
-    if (!AppLogger.shouldLog(LogLevel.info)) {
-      return;
-    }
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.ui,
-      eventName,
-      fields: <String, Object?>{'id': taskId, 'history_count': historyCount},
-    );
-  }
-
-  /// Records a domain persistence rejection in `AppLogger` and updates [_historyErrorMessage].
-  void _recordPersistRejection(
-    String taskId,
-    String kindLabel,
-    String message,
-  ) {
-    if (AppLogger.shouldLog(LogLevel.warn)) {
-      AppLogger.event(
-        LogLevel.warn,
-        LogTag.ui,
-        'ui.task_info.history_persist_rejected',
-        fields: <String, Object?>{'id': taskId, 'kind': kindLabel},
-      );
-    }
-    if (mounted) {
-      setState(() => _historyErrorMessage = message);
-    }
-  }
-
   /// Validates and saves the active inline `<text>` edit for [originalEntry], preserving `timestampUtc`.
   Future<void> _saveInlineEdit(
     TaskItem currentTask,
     TaskHistoryEntry originalEntry,
   ) async {
-    if (_isMutatingHistory || !_isTaskOnBoard(currentTask.id)) {
+    final controller = ref.read(taskInfoControllerProvider);
+    if (_isMutatingHistory || !controller.isTaskOnBoard(currentTask.id)) {
       return;
     }
-    if (_editController.text == originalEntry.text) {
-      _cancelInlineEdit();
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    final sanitizedText = TaskHistoryInputValidator.sanitizeSingleLineText(
-      _editController.text,
-    );
-    final textError = TaskHistoryInputValidator.validateText(
-      sanitizedText,
-      localizations,
-    );
-    if (textError != null) {
-      _setHistoryValidationError(
-        currentTask.id,
-        textError,
-        _validationReasonCode(sanitizedText),
+    final locale = Localizations.localeOf(context);
+    setState(() {
+      _isMutatingHistory = true;
+      _historyErrorMessage = null;
+    });
+    final TaskHistoryMutationResult result;
+    try {
+      result = await controller.updateHistoryEntry(
+        taskId: currentTask.id,
+        originalEntry: originalEntry,
+        rawText: _editController.text,
+        locale: locale,
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isMutatingHistory = false);
+      }
+    }
+    if (!mounted) {
       return;
     }
-    if (sanitizedText == originalEntry.text) {
-      _cancelInlineEdit();
-      return;
+    switch (result) {
+      case TaskHistoryMutationCommitted():
+      case TaskHistoryMutationUnchanged():
+        _cancelInlineEdit();
+      case TaskHistoryMutationFailed(:final localizedMessage):
+        setState(() => _historyErrorMessage = localizedMessage);
+      case TaskHistoryMutationNotApplied():
+        break;
     }
-    final replacement = TaskHistoryEntry(
-      timestampUtc: originalEntry.timestampUtc,
-      text: sanitizedText,
-    );
-    await _executeUpdateMutation(
-      currentTask.id,
-      originalEntry,
-      replacement,
-      localizations,
-    );
-  }
-
-  /// Sets [_historyErrorMessage] and logs a redacted `ui.task_info.history_validation_failed` warning.
-  void _setHistoryValidationError(
-    String taskId,
-    String message,
-    String reasonCode,
-  ) {
-    if (AppLogger.shouldLog(LogLevel.warn)) {
-      AppLogger.event(
-        LogLevel.warn,
-        LogTag.ui,
-        'ui.task_info.history_validation_failed',
-        fields: <String, Object?>{'id': taskId, 'reason': reasonCode},
-      );
-    }
-    setState(() => _historyErrorMessage = message);
   }
 
   /// Activates inline `<text>` editing for [entry].
@@ -590,24 +372,6 @@ class _TaskInfoDialogState extends ConsumerState<TaskInfoDialog> {
       _editingEntry = entry;
       _editController.text = entry.text;
     });
-  }
-
-  /// Classifies why [sanitizedText] failed validation without inspecting or logging sensitive content.
-  static String _validationReasonCode(String sanitizedText) {
-    final scalarCount = TdfCalendar.countUnicodeScalars(sanitizedText);
-    if (scalarCount == null) {
-      return 'unpaired_surrogate';
-    }
-    for (var i = 0; i < sanitizedText.length; i++) {
-      final unit = sanitizedText.codeUnitAt(i);
-      if (unit <= 0x1F || unit == 0x7F) {
-        return 'control_char';
-      }
-    }
-    if (sanitizedText.trim().isEmpty) {
-      return 'empty_text';
-    }
-    return 'text_too_long';
   }
 }
 
@@ -1437,7 +1201,7 @@ class _TaskInfoSectionsBuilder {
     final valueText = dueAt.isAfter(normalizedNow)
         ? localizations.taskInfoDueAt(
             timestamp,
-            _formatRemainingDuration(
+            TaskInfoController.formatRemainingDuration(
               dueAt.difference(normalizedNow),
               localizations,
             ),
@@ -1478,7 +1242,7 @@ class _TaskInfoSectionsBuilder {
       normalizedNow,
     );
     if (task.dueAnchor case final anchor?
-        when _differsFromWallClock(anchor, localDue)) {
+        when TaskInfoController.differsFromWallClock(anchor, localDue)) {
       return <String>[
         statusLine,
         localizations.taskInfoDueAnchorDetail(anchor.formatCompact()),
@@ -1649,7 +1413,7 @@ class _TaskInfoSectionsBuilder {
     final timestamp = TaskItem.formatTdfTimestamp(localSuspended);
     final valueText = localizations.taskInfoSuspendedUntil(
       timestamp,
-      _formatRemainingDuration(
+      TaskInfoController.formatRemainingDuration(
         suspendedAt.difference(TaskItem.normalizeTimestamp(nowUtc)),
         localizations,
       ),
@@ -1662,41 +1426,6 @@ class _TaskInfoSectionsBuilder {
       title: localizations.taskSuspendedLabel,
       value: valueText,
     );
-  }
-
-  /// Returns `true` when [anchor] differs in any `(year, month, day, hour, minute, second)` component from [localWallClock].
-  static bool _differsFromWallClock(
-    TdfLocalDateTime anchor,
-    DateTime localWallClock,
-  ) =>
-      anchor.year != localWallClock.year ||
-      anchor.month != localWallClock.month ||
-      anchor.day != localWallClock.day ||
-      anchor.hour != localWallClock.hour ||
-      anchor.minute != localWallClock.minute ||
-      anchor.second != localWallClock.second;
-
-  /// Formats a positive [difference] into days/hours, hours/minutes, or minutes remaining.
-  static String _formatRemainingDuration(
-    Duration difference,
-    AppLocalizations localizations,
-  ) {
-    if (difference.inDays >= 1) {
-      final remainingHours = difference.inHours % 24;
-      return localizations.taskInfoDurationDaysHours(
-        difference.inDays.toString(),
-        remainingHours.toString(),
-      );
-    }
-    if (difference.inHours >= 1) {
-      final remainingMinutes = difference.inMinutes % 60;
-      return localizations.taskInfoDurationHoursMinutes(
-        difference.inHours.toString(),
-        remainingMinutes.toString(),
-      );
-    }
-    final minutes = difference.inMinutes < 1 ? 1 : difference.inMinutes;
-    return localizations.taskInfoDurationMinutes(minutes.toString());
   }
 
   /// Resolves the localized label for [unit].
@@ -1753,9 +1482,9 @@ Future<void> showTaskInfoDialog(
   String? initialIndicatorKeyPrefix,
   required TaskItem task,
 }) {
-  AppLogger.info(
-    LogTag.ui,
-    'openTaskInfoDialog id=${task.id} indicator=${initialIndicatorKeyPrefix ?? "summary"}',
+  UiTelemetry.logTaskInfoDialogOpened(
+    taskId: task.id,
+    initialIndicatorKeyPrefix: initialIndicatorKeyPrefix,
   );
   return showDialog<void>(
     context: context,

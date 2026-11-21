@@ -17,7 +17,8 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/webdav_config.dart';
-import '../../services/app_logger.dart';
+import '../../presentation/log_viewer_controller.dart';
+import '../../presentation/settings_controller.dart';
 import 'log_viewer_dialog.dart';
 
 /// Card for configuring opt-in diagnostic logging, minimum log level, and log storage mode.
@@ -25,6 +26,7 @@ class DiagnosticsSelectionCard extends StatelessWidget {
   /// Creates a [DiagnosticsSelectionCard].
   const DiagnosticsSelectionCard({
     super.key,
+    required this.activeLogFileName,
     required this.diagnosticsEnabled,
     required this.selectedLogLevel,
     required this.selectedLogStorageMode,
@@ -33,20 +35,23 @@ class DiagnosticsSelectionCard extends StatelessWidget {
     required this.onLogStorageModeChanged,
   });
 
+  /// Active dated diagnostic log filename displayed when diagnostics are enabled.
+  final String activeLogFileName;
+
   /// Whether opt-in diagnostic logging is currently enabled.
   final bool diagnosticsEnabled;
 
   /// Callback invoked when the user toggles the diagnostic logging switch.
   final ValueChanged<bool> onDiagnosticsEnabledChanged;
 
-  /// Callback invoked when the user selects a new minimum [LogLevel].
-  final ValueChanged<LogLevel> onLogLevelChanged;
+  /// Callback invoked when the user selects a new minimum [DiagnosticLogLevel].
+  final ValueChanged<DiagnosticLogLevel> onLogLevelChanged;
 
   /// Callback invoked when the user selects a new log [StorageMode].
   final ValueChanged<StorageMode> onLogStorageModeChanged;
 
-  /// Currently selected minimum [LogLevel].
-  final LogLevel selectedLogLevel;
+  /// Currently selected minimum [DiagnosticLogLevel].
+  final DiagnosticLogLevel selectedLogLevel;
 
   /// Currently selected log [StorageMode].
   final StorageMode selectedLogStorageMode;
@@ -69,6 +74,7 @@ class DiagnosticsSelectionCard extends StatelessWidget {
           if (diagnosticsEnabled) ...[
             const SizedBox(height: 8),
             _DiagnosticsDetailsPanel(
+              activeLogFileName: activeLogFileName,
               selectedLogLevel: selectedLogLevel,
               selectedLogStorageMode: selectedLogStorageMode,
               onLogLevelChanged: onLogLevelChanged,
@@ -236,9 +242,13 @@ class SettingsPreferenceCards extends StatelessWidget {
   /// Creates [SettingsPreferenceCards].
   const SettingsPreferenceCards({
     super.key,
+    required this.activeLogFileName,
     required this.config,
     required this.onPreferenceChanged,
   });
+
+  /// Active dated diagnostic log filename displayed inside [DiagnosticsSelectionCard].
+  final String activeLogFileName;
 
   /// Current [WebDavConfig] holding the selected preference states.
   final WebDavConfig config;
@@ -287,13 +297,15 @@ class SettingsPreferenceCards extends StatelessWidget {
               onPreferenceChanged(config.copyWith(locationEnabled: value)),
         ),
         DiagnosticsSelectionCard(
+          activeLogFileName: activeLogFileName,
           diagnosticsEnabled: config.diagnosticsEnabled,
-          selectedLogLevel: config.logLevel,
+          selectedLogLevel: SettingsController.readLogLevel(config),
           selectedLogStorageMode: config.logStorageMode,
           onDiagnosticsEnabledChanged: (value) =>
               onPreferenceChanged(config.copyWith(diagnosticsEnabled: value)),
-          onLogLevelChanged: (value) =>
-              onPreferenceChanged(config.copyWith(logLevel: value)),
+          onLogLevelChanged: (value) => onPreferenceChanged(
+            SettingsController.withLogLevel(config, value),
+          ),
           onLogStorageModeChanged: (value) =>
               onPreferenceChanged(config.copyWith(logStorageMode: value)),
         ),
@@ -585,15 +597,17 @@ class TimeZoneSelectionCard extends StatelessWidget {
 /// Expanded controls for log level, log storage mode, and opening [LogViewerDialog].
 class _DiagnosticsDetailsPanel extends StatelessWidget {
   const _DiagnosticsDetailsPanel({
+    required this.activeLogFileName,
     required this.selectedLogLevel,
     required this.selectedLogStorageMode,
     required this.onLogLevelChanged,
     required this.onLogStorageModeChanged,
   });
 
-  final ValueChanged<LogLevel> onLogLevelChanged;
+  final String activeLogFileName;
+  final ValueChanged<DiagnosticLogLevel> onLogLevelChanged;
   final ValueChanged<StorageMode> onLogStorageModeChanged;
-  final LogLevel selectedLogLevel;
+  final DiagnosticLogLevel selectedLogLevel;
   final StorageMode selectedLogStorageMode;
 
   @override
@@ -614,7 +628,7 @@ class _DiagnosticsDetailsPanel extends StatelessWidget {
           selectedLogStorageMode: selectedLogStorageMode,
           onLogStorageModeChanged: onLogStorageModeChanged,
         ),
-        const _DiagnosticsLogFileRow(),
+        _DiagnosticsLogFileRow(activeLogFileName: activeLogFileName),
       ],
     );
   }
@@ -622,7 +636,9 @@ class _DiagnosticsDetailsPanel extends StatelessWidget {
 
 /// Displays the resolved log filename and a button to open [LogViewerDialog].
 class _DiagnosticsLogFileRow extends StatelessWidget {
-  const _DiagnosticsLogFileRow();
+  const _DiagnosticsLogFileRow({required this.activeLogFileName});
+
+  final String activeLogFileName;
 
   @override
   Widget build(BuildContext context) {
@@ -633,7 +649,7 @@ class _DiagnosticsLogFileRow extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: [
-        Text(localizations.logMetadataFile(AppLogger.activeLogFileName)),
+        Text(localizations.logMetadataFile(activeLogFileName)),
         OutlinedButton.icon(
           key: const ValueKey('settings_open_log_viewer_button'),
           onPressed: () => showLogViewerDialog(context),
@@ -645,38 +661,38 @@ class _DiagnosticsLogFileRow extends StatelessWidget {
   }
 }
 
-/// Segmented selector for minimum [LogLevel].
+/// Segmented selector for minimum [DiagnosticLogLevel].
 class _LogLevelSelector extends StatelessWidget {
   const _LogLevelSelector({
     required this.selectedLogLevel,
     required this.onLogLevelChanged,
   });
 
-  final ValueChanged<LogLevel> onLogLevelChanged;
-  final LogLevel selectedLogLevel;
+  final ValueChanged<DiagnosticLogLevel> onLogLevelChanged;
+  final DiagnosticLogLevel selectedLogLevel;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return _PreferenceSegmentedButton<LogLevel>(
+    return _PreferenceSegmentedButton<DiagnosticLogLevel>(
       buttonKey: const ValueKey('settings_log_level_segmented'),
       selectedValue: selectedLogLevel,
       onChanged: onLogLevelChanged,
       segments: [
-        ButtonSegment<LogLevel>(
-          value: LogLevel.debug,
+        ButtonSegment<DiagnosticLogLevel>(
+          value: DiagnosticLogLevel.debug,
           label: Text(localizations.logLevelDebug),
         ),
-        ButtonSegment<LogLevel>(
-          value: LogLevel.info,
+        ButtonSegment<DiagnosticLogLevel>(
+          value: DiagnosticLogLevel.info,
           label: Text(localizations.logLevelInfo),
         ),
-        ButtonSegment<LogLevel>(
-          value: LogLevel.warn,
+        ButtonSegment<DiagnosticLogLevel>(
+          value: DiagnosticLogLevel.warn,
           label: Text(localizations.logLevelWarn),
         ),
-        ButtonSegment<LogLevel>(
-          value: LogLevel.error,
+        ButtonSegment<DiagnosticLogLevel>(
+          value: DiagnosticLogLevel.error,
           label: Text(localizations.logLevelError),
         ),
       ],

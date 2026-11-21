@@ -1,7 +1,7 @@
 ---
 id: TEP-016
 title: Phase 1 Presentation Layer Decoupling and Strict UI Boundary
-status: concept
+status: review
 type: architecture
 created: 2026-11-21
 updated: 2026-11-21
@@ -202,9 +202,9 @@ Stateless `const UiTelemetry._()` helper gating all structured `LogTag.ui` event
   - `@immutable class DiagnosticLogViewModel`: holds `canSyncWebDav`, `errorCount`, `filteredLines` (`List.unmodifiable`), `hasEntries`, `headerSummary` (`'${AppLogger.activeLogFileName} • v${metadata.appVersion} (${metadata.platform}) • ${metadata.workspaceId} • ${AppLogger.minimumLevel.label}'`), `minimumLevel`, `selectedTag`, `totalEntries`, and `warningCount` with value `==` and `hashCode`.
   - `sealed class LogSyncResult` (`LogSyncSucceeded()`, `LogSyncFailed(String message)`).
 - `final activeLogFileNameProvider = NotifierProvider.autoDispose<ActiveLogFileNameNotifier, String>(ActiveLogFileNameNotifier.new);`
-  - Watches `diagnosticsEnabledProvider`, listens to `AppLogger.revision` (cleaned up in `ref.onDispose`), and exposes `AppLogger.activeLogFileName` for `SettingsScreen` / `SettingsPreferenceCards`.
+  - Watches `diagnosticsEnabledProvider`, listens to `AppLogger.revision` (coalescing state refreshes onto a disposal-guarded `scheduleMicrotask` to avoid Riverpod re-entrant provider mutation assertions when another provider logs during `build()`, with listener cleanup in `ref.onDispose`), and exposes `AppLogger.activeLogFileName` for `SettingsScreen` / `SettingsPreferenceCards`.
 - `final logViewerControllerProvider = NotifierProvider.autoDispose<LogViewerController, DiagnosticLogViewModel>(LogViewerController.new);`
-  - `build()` watches `webDavConfigProvider.select((c) => (c.asData?.value.logStorageMode.usesWebDav ?? false) && (c.asData?.value.isWebDavConfigured ?? false))`, attaches a listener to `AppLogger.revision` with `ref.onDispose`, and computes the initial `DiagnosticLogViewModel`.
+  - `build()` watches `webDavConfigProvider.select((c) => (c.asData?.value.logStorageMode.usesWebDav ?? false) && (c.asData?.value.isWebDavConfigured ?? false))`, attaches a listener to `AppLogger.revision` (coalescing updates onto a disposal-guarded `scheduleMicrotask`, with cleanup in `ref.onDispose`), and computes the initial `DiagnosticLogViewModel`. `clearLog()` refreshes `state` synchronously after `AppLogger.clear()`.
   - Methods: `void setMinimumLevel(DiagnosticLogLevel level)`, `void setSelectedTag(DiagnosticLogTag? tag)`, `void clearLog()`, `String readFullLogText()`, `Future<LogSyncResult> syncLogToWebDav()` (calls `webDavConfigProvider.notifier.syncLogToWebDavNow()`, returning `LogSyncSucceeded` or catching `Object error` into `LogSyncFailed(error.toString())` so `LogViewerDialog` switches exhaustively without raw `catch`).
   - Single-pass $O(N)$ line filtering and statistics calculation (ignoring `===` and `@meta ` header lines for entry/warning/error counts and classifying `DiagnosticLogSeverity` per line).
 
@@ -297,7 +297,7 @@ Stateless `const UiTelemetry._()` helper gating all structured `LogTag.ui` event
   - `DateTime currentLocalWallClock(WebDavConfig configuration)`
   - `ResolvedDueDraft resolveDueDraft(...)` and `bool shouldResetAutoPrioritizeDue(...)`
   - `ResolvedSuspendedDraft resolveSuspendedDraft(...)`
-  - `({TaskHistoryEntry? candidate, String? error}) resolvePendingHistoryCandidate(...)`
+  - `({TaskHistoryEntry? candidate, String? error}) resolvePendingHistoryCandidate(...)` (accepts nullable `String? editingHistoryInitialTimestampText` matching `TaskEditorDraftInput.editingHistoryInitialTimestampText` and `EditTaskScreen`)
   - `Future<TaskEditorSubmitResult> submitDraft(TaskEditorDraftInput input, {Locale? locale})`: validates all fields against `maxTdfNoteLength`, `maxTdfTextLength` (history text), `maxTdfHistoryPerTask`, `TaskRepeatRule.maxRepeatCount`, and Mode 2 `leadDays` (`0..3650`), emits redacted `ui.edit_task.validation_failed` on validation failure, persists via `TaskNotifier.addTask`/`updateTask`, catches `TdfException` / `TdfContextException` / `FormatException` to emit redacted `ui.edit_task.persist_rejected` and return `TaskEditorPersistFailed`, or emits redacted `ui.edit_task.saved` and returns `TaskEditorSubmitted`.
   - `Future<void> deleteTask(String taskId)`: emits redacted `ui.delete_task.confirmed` and calls `TaskNotifier.deleteTask(taskId)`.
 
@@ -372,21 +372,22 @@ Follow strict Red-Green-Refactor TDD (`P-TDD-FIRST`) with new unit test suites m
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` and `python3 -m unittest discover -s .agents/scripts/tests` to confirm a clean baseline.
-- [ ] Write failing unit tests for `TdfFilePath` (`test/models/tdf_file_path_test.dart`), implement `lib/models/tdf_file_path.dart`, and delegate matching pure path helpers in `lib/repositories/local_file_operations.dart`.
-- [ ] Write failing unit tests and implement foundational presentation modules (`ui_telemetry.dart`, `link_action_controller.dart`, `log_viewer_controller.dart`, `board_boundary_timer.dart`, `board_presentation_providers.dart`).
-- [ ] Write failing unit tests and implement screen/dialog controllers (`settings_controller.dart`, `location_editor_controller.dart`, `label_editor_controller.dart`, `task_editor_controller.dart`, `task_info_controller.dart`).
-- [ ] Synchronize `appLocaleProvider` in `test/ui/test_helpers.dart` (`pumpLeafWidget`) and migrate all `21` affected `lib/ui/` files onto `lib/models/tdf_file_path.dart` and `lib/presentation/*` with zero visual or behavioral regressions.
-- [ ] Write failing Python unit tests in `.agents/scripts/tests/test_tiertask_dev.py` and update `.agents/scripts/tiertask_dev.py` (Ranks `0..8`, `P-IO-ISOLATION`, Phase 1 `P-UDF-ARCHITECTURE` `lib/ui/` boundary checks, `## Presentation`, `--layer presentation`, and `app_hubs`).
-- [ ] Update Parts 1 and 2 if implementation reveals any required signature adjustments.
-- [ ] Synchronize `ARCHITECTURE.md` (`## Architectural Layers`, `## Presentation`, `## Directory Layout`) and `AGENTS.md` (Section 3 DAG order and `lib/ui/` boundary rule) per **`update-documentation`**.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and `python3 -m unittest discover -s .agents/scripts/tests` until all static checks, analyzer checks, Dart tests, and Python CLI tests pass with zero warnings.
-- [ ] Verify `CHANGELOG.md` requires no entry (internal architectural refactoring only, per **`changelog-updater`**).
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` and `python3 -m unittest discover -s .agents/scripts/tests` to confirm a clean baseline.
+- [x] Write failing unit tests for `TdfFilePath` (`test/models/tdf_file_path_test.dart`), implement `lib/models/tdf_file_path.dart`, and delegate matching pure path helpers in `lib/repositories/local_file_operations.dart`.
+- [x] Write failing unit tests and implement foundational presentation modules (`ui_telemetry.dart`, `link_action_controller.dart`, `log_viewer_controller.dart`, `board_boundary_timer.dart`, `board_presentation_providers.dart`).
+- [x] Write failing unit tests and implement screen/dialog controllers (`settings_controller.dart`, `location_editor_controller.dart`, `label_editor_controller.dart`, `task_editor_controller.dart`, `task_info_controller.dart`).
+- [x] Synchronize `appLocaleProvider` in `test/ui/test_helpers.dart` (`pumpLeafWidget`) and migrate all `21` affected `lib/ui/` files onto `lib/models/tdf_file_path.dart` and `lib/presentation/*` with zero visual or behavioral regressions.
+- [x] Write failing Python unit tests in `.agents/scripts/tests/test_tiertask_dev.py` and update `.agents/scripts/tiertask_dev.py` (Ranks `0..8`, `P-IO-ISOLATION`, Phase 1 `P-UDF-ARCHITECTURE` `lib/ui/` boundary checks, `## Presentation`, `--layer presentation`, and `app_hubs`).
+- [x] Update Parts 1 and 2 if implementation reveals any required signature adjustments.
+- [x] Synchronize `ARCHITECTURE.md` (`## Architectural Layers`, `## Presentation`, `## Directory Layout`) and `AGENTS.md` (Section 3 DAG order and `lib/ui/` boundary rule) per **`update-documentation`**.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and `python3 -m unittest discover -s .agents/scripts/tests` until all static checks, analyzer checks, Dart tests, and Python CLI tests pass with zero warnings.
+- [x] Verify `CHANGELOG.md` requires no entry (internal architectural refactoring only, per **`changelog-updater`**).
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
 - [ ] After user approval, set `status: completed`, update `BOARD.md`, mark Phase 1 complete in `TEP-015`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 - **2026-11-21:** Audited all `lib/ui/` imports and provider references against `TEP-015` Phase 1 exit gates (`10` repository-importing UI files, `12` service-importing UI files, `17` distinct files plus transitive repository/service provider usages) and drafted `TEP-016`. Decided to keep `LogLevel`/`LogTag` in Rank `0` `app_logger.dart` while exposing `DiagnosticLogLevel`/`DiagnosticLogTag` in `lib/presentation/log_viewer_controller.dart`, to enforce both direct import and transitive repository/service provider bans in `tiertask_dev.py`, and to synchronize `appLocaleProvider` inside `pumpLeafWidget` so German leaf tests remain consistent.
+- **2026-11-21:** Implemented all `11` new `lib/` modules (`lib/models/tdf_file_path.dart` and `10` Rank `6` `lib/presentation/*.dart` modules) with `11` mirroring Dart unit test suites, migrated all `21` affected `lib/ui/` files plus `lib/repositories/local_file_operations.dart` and `test/ui/test_helpers.dart`, enforced DAG Ranks `0..8`, extended `P-IO-ISOLATION` (`dart:io` and `dart:ffi` forbidden everywhere in `lib/` outside `lib/repositories/`), and Phase 1 `P-UDF-ARCHITECTURE` `lib/ui/` import/provider bans in `.agents/scripts/tiertask_dev.py` with Python tests in `.agents/scripts/tests/test_tiertask_dev.py`, and synchronized `ARCHITECTURE.md` and `AGENTS.md`. Resolved a Riverpod `3.5.0` re-entrancy failure in `ActiveLogFileNameNotifier` and `LogViewerController` (triggered when `diagnosticsEnabledProvider` or `evaluatedBoardProvider` logs synchronously inside `build()`) by coalescing `AppLogger.revision` listener updates onto a disposal-guarded `scheduleMicrotask` and codified a regression test in `test/presentation/log_viewer_controller_test.dart`. Aligned `.agents/scripts/tests/test_tiertask_dev.py` `sys.path` bootstrapping and mirror-test dependency expectations so `python3 -m unittest discover -s .agents/scripts/tests` runs cleanly from repository root. Verified `CHANGELOG.md` requires no entry (internal refactoring only). Passed `verify --full --fix` (`+513` Dart tests, `0` analyzer issues, `0` static/DAG/UI-boundary/L10N/ARCH issues) and `13/13` Python CLI tests; moved `TEP-016` to `review`.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*

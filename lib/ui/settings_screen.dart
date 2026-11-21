@@ -22,12 +22,13 @@ import '../l10n/app_localizations.dart';
 import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
 import '../models/storage_file_read_status.dart';
+import '../models/tdf_file_path.dart';
 import '../models/webdav_config.dart';
+import '../presentation/log_viewer_controller.dart';
+import '../presentation/settings_controller.dart';
 import '../providers/config_providers.dart';
 import '../providers/sync_providers.dart';
 import '../providers/task_providers.dart';
-import '../providers/workspace_providers.dart';
-import '../repositories/local_file_repository.dart';
 import 'widgets/file_read_status_info.dart';
 import 'widgets/settings_local_storage_section.dart';
 import 'widgets/settings_preference_cards.dart';
@@ -387,13 +388,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// Builds the scrollable preference and storage section card column for [currentConfig].
   Widget _buildFormColumn(WebDavConfig currentConfig) {
-    final canPickDirectory = ref.watch(supportsDirectoryPickerProvider);
+    final canPickDirectory = ref.watch(supportsNativeDirectoryPickerProvider);
+    final activeLogFileName = ref.watch(activeLogFileNameProvider);
     final storageMode = _preferences.storageMode;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: 10,
       children: [
         SettingsPreferenceCards(
+          activeLogFileName: activeLogFileName,
           config: currentConfig,
           onPreferenceChanged: _handlePreferenceChanged,
         ),
@@ -496,52 +499,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// Updates [_preferences], clears any status banner, and persists [updatedConfig] via [webDavConfigProvider].
+  /// Updates [_preferences], clears any status banner, and persists [updatedConfig] via [settingsControllerProvider].
   Future<void> _handlePreferenceChanged(WebDavConfig updatedConfig) async {
     final previousPreferences = _preferences;
-    final diagnosticsChanged =
-        updatedConfig.diagnosticsEnabled != _preferences.diagnosticsEnabled;
-    final dueLeadWindowChanged =
-        updatedConfig.dueLeadWindow != _preferences.dueLeadWindow;
-    final localWatchChanged =
-        updatedConfig.localWatchEnabled != _preferences.localWatchEnabled;
-    final logLevelChanged = updatedConfig.logLevel != _preferences.logLevel;
-    final logStorageChanged =
-        updatedConfig.logStorageMode != _preferences.logStorageMode;
+    final locale = Localizations.localeOf(context);
     _pendingPreferenceSaves++;
     setState(() {
       _preferences = updatedConfig;
       _clearStatusBanner();
     });
-    final notifier = ref.read(webDavConfigProvider.notifier);
     try {
-      if (diagnosticsChanged) {
-        await notifier.updateDiagnosticsEnabled(
-          updatedConfig.diagnosticsEnabled,
-        );
-      } else if (dueLeadWindowChanged) {
-        await notifier.updateDueLeadWindow(updatedConfig.dueLeadWindow);
-      } else if (localWatchChanged) {
-        await notifier.updateLocalWatchEnabled(updatedConfig.localWatchEnabled);
-      } else if (logLevelChanged) {
-        await notifier.updateLogLevel(updatedConfig.logLevel);
-      } else if (logStorageChanged) {
-        await notifier.updateLogStorageMode(updatedConfig.logStorageMode);
-      } else {
-        await notifier.updateConfig(updatedConfig);
-      }
-      _lastSyncedConfig =
-          ref.read(webDavConfigProvider).asData?.value ?? updatedConfig;
-    } on WorkspaceException catch (error) {
-      if (mounted) {
-        final localizations = AppLocalizations.of(context);
-        setState(() {
-          _preferences = _lastSyncedConfig ?? previousPreferences;
-        });
-        _showStatusBanner(
-          localizations.localizeWorkspaceError(error),
-          StatusBannerTone.error,
-        );
+      final result = await ref
+          .read(settingsControllerProvider)
+          .savePreferenceChange(
+            previous: previousPreferences,
+            next: updatedConfig,
+            locale: locale,
+          );
+      switch (result) {
+        case SettingsPreferenceSaved(:final effectiveConfig):
+          _lastSyncedConfig = effectiveConfig;
+        case SettingsPreferenceSaveFailed(:final localizedMessage):
+          if (mounted) {
+            setState(() {
+              _preferences = _lastSyncedConfig ?? previousPreferences;
+            });
+            _showStatusBanner(localizedMessage, StatusBannerTone.error);
+          }
       }
     } finally {
       _pendingPreferenceSaves--;
@@ -585,8 +569,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final dialogResult = await showWipeTdfDialog(
       context,
       target: isRemote ? WipeTdfTarget.remote : WipeTdfTarget.local,
-      fileName: LocalFileRepository.extractFileNameFromPath(targetPath),
-      expectedBaseName: LocalFileRepository.extractFileBaseName(targetPath),
+      fileName: TdfFilePath.extractFileNameFromPath(targetPath),
+      expectedBaseName: TdfFilePath.extractFileBaseName(targetPath),
     );
     if (!mounted || dialogResult == null) {
       return;
@@ -631,13 +615,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// Resolves the preview local file path for [config], or `null` if invalid.
-  String? _resolvePreviewLocalPath(WebDavConfig config) {
-    return LocalFileRepository(
-      config: config,
-      baseDirectoryPath: ref.read(localStorageDirectoryPathProvider),
-      buildProfile: ref.read(appBuildProfileProvider),
-    ).tryResolveFilePath();
-  }
+  String? _resolvePreviewLocalPath(WebDavConfig config) =>
+      ref.read(settingsControllerProvider).resolvePreviewLocalPath(config);
 
   /// Validates and persists the current settings without triggering a remote sync.
   Future<void> _saveOnly() async {

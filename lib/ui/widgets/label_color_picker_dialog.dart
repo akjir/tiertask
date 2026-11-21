@@ -19,7 +19,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/tdf_metadata.dart';
-import '../../services/app_logger.dart';
+import '../../presentation/ui_telemetry.dart';
 import '../app_theme.dart';
 
 /// Material 3 dialog presenting an interactive HSV color wheel and brightness slider for selecting a custom `#RRGGBB` label color.
@@ -334,7 +334,7 @@ class _LabelColorPickerDialogState extends State<LabelColorPickerDialog> {
   /// Logs and returns the selected `#RRGGBB` color string.
   void _handleConfirm() {
     final selectedHex = _formattedHex;
-    AppLogger.info(LogTag.ui, 'Selected custom label color hex=$selectedHex');
+    UiTelemetry.logLabelColorSelected(selectedHex);
     Navigator.of(context).pop(selectedHex);
   }
 
@@ -405,10 +405,7 @@ Future<String?> showLabelColorPickerDialog(
   BuildContext context, {
   String? initialHex,
 }) {
-  AppLogger.info(
-    LogTag.ui,
-    'Opened LabelColorPickerDialog initialHex=${initialHex ?? ''}',
-  );
+  UiTelemetry.logLabelColorPickerOpened(initialHex);
   return showDialog<String>(
     context: context,
     builder: (_) => LabelColorPickerDialog(initialHex: initialHex),

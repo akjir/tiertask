@@ -20,10 +20,9 @@ import '../l10n/app_localizations.dart';
 import '../models/location_state.dart';
 import '../models/task_board.dart';
 import '../models/tdf_location.dart';
-import '../providers/location_providers.dart';
+import '../presentation/location_editor_controller.dart';
+import '../presentation/ui_telemetry.dart';
 import '../providers/task_providers.dart';
-import '../services/app_logger.dart';
-import '../services/plus_code_service.dart';
 import 'app_theme.dart';
 import 'widgets/clearable_text_field.dart';
 import 'widgets/task_editor_sections.dart';
@@ -340,7 +339,9 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
   void initState() {
     super.initState();
     final location = widget.location;
-    _sourceType = PlusCodeService.classifySource(location.source);
+    _sourceType = ref
+        .read(locationEditorControllerProvider)
+        .classifySource(location.source);
     final initialSourceText = _sourceType == LocationSourceType.gps
         ? ''
         : (location.source?.trim() ?? '');
@@ -400,108 +401,54 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
     );
   }
 
-  /// Rounds [value] to at most 6 decimal places and formats it canonically.
-  static String _formatGpsCoordinate(double value) =>
-      TdfLocation.formatRoundedDouble(value, 6);
-
-  /// Checks whether [latitude] and [longitude] are finite WGS-84 coordinates.
-  static bool _isValidCoordinates(double latitude, double longitude) =>
-      !latitude.isNaN &&
-      !latitude.isInfinite &&
-      latitude >= -90.0 &&
-      latitude <= 90.0 &&
-      !longitude.isNaN &&
-      !longitude.isInfinite &&
-      longitude >= -180.0 &&
-      longitude <= 180.0;
-
-  /// Checks whether [radius] is a valid TDF location radius in meters (`0 < radius <= 100000`).
-  static bool _isValidRadius(double radius) =>
-      !radius.isNaN && !radius.isInfinite && radius > 0.0 && radius <= 100000.0;
-
-  /// Parses a radius input string (`150`, `150m`, or `0.5km`) into meters rounded to at most 2 decimal places.
-  static double? _parseRadiusInput(String rawRadius) {
-    final trimmed = rawRadius.trim();
-    if (trimmed.isEmpty) {
-      return null;
+  /// Applies a [LocationSourceResolutionResult], opening a disambiguation dialog when needed.
+  Future<bool> _applyResolutionResult(
+    LocationSourceResolutionResult result,
+    int generation,
+    Locale locale,
+  ) async {
+    final controller = ref.read(locationEditorControllerProvider);
+    switch (result) {
+      case LocationSourceNotNeeded():
+        return true;
+      case LocationSourceResolved(
+        :final latitude,
+        :final longitude,
+        :final normalizedSource,
+        :final sourceType,
+      ):
+        _applyResolvedCoordinates(
+          latitude: latitude,
+          longitude: longitude,
+          normalizedSource: normalizedSource,
+          sourceType: sourceType,
+        );
+        return true;
+      case LocationSourceResolutionError(:final localizedMessage):
+        setState(() => _coordinatesErrorMessage = localizedMessage);
+        return false;
+      case LocationSourceNeedsDisambiguation(
+        :final candidates,
+        :final sourceType,
+        :final shortPlusCode,
+        :final localityQuery,
+      ):
+        final selected = await showDialog<GeocodingCandidate>(
+          context: context,
+          builder: (_) => _LocationCandidateDialog(candidates: candidates),
+        );
+        if (selected == null || !mounted || generation != _resolveGeneration) {
+          return false;
+        }
+        final applied = controller.applyDisambiguatedCandidate(
+          candidate: selected,
+          sourceType: sourceType,
+          shortPlusCode: shortPlusCode,
+          localityQuery: localityQuery,
+          locale: locale,
+        );
+        return _applyResolutionResult(applied, generation, locale);
     }
-    var numericPart = trimmed;
-    var multiplier = 1.0;
-    if (trimmed.endsWith('km')) {
-      numericPart = trimmed.substring(0, trimmed.length - 2).trim();
-      multiplier = 1000.0;
-    } else if (trimmed.endsWith('m')) {
-      numericPart = trimmed.substring(0, trimmed.length - 1).trim();
-    }
-    final numeric = double.tryParse(numericPart);
-    if (numeric == null || numeric.isNaN || numeric.isInfinite) {
-      return null;
-    }
-    final meters = numeric * multiplier;
-    if (meters.isNaN || meters.isInfinite) {
-      return null;
-    }
-    final roundedMeters = double.tryParse(
-      TdfLocation.formatRoundedDouble(meters, 2),
-    );
-    return roundedMeters != null && _isValidRadius(roundedMeters)
-        ? roundedMeters
-        : null;
-  }
-
-  /// Decodes a full Plus Code and applies its center coordinates and formatted source string.
-  bool _applyFullPlusCode(String fullCode, String? localitySuffix) {
-    final area = PlusCodeService.decode(fullCode);
-    if (area == null) {
-      setState(() {
-        _coordinatesErrorMessage = AppLocalizations.of(context)
-            .locationResolveErrorInvalidPlusCode;
-      });
-      return false;
-    }
-    final formattedSource = PlusCodeService.truncateToMaxTextLength(
-      localitySuffix == null || localitySuffix.isEmpty
-          ? fullCode
-          : '$fullCode $localitySuffix',
-    );
-    _applyResolvedCoordinates(
-      latitude: area.latitudeCenter,
-      longitude: area.longitudeCenter,
-      normalizedSource: formattedSource,
-      sourceType: LocationSourceType.plusCode,
-    );
-    return true;
-  }
-
-  /// Recovers the full Plus Code nearest to [reference] for [shortCode] and applies its coordinates.
-  bool _applyRecoveredShortPlusCode({
-    required String shortCode,
-    required String localityQuery,
-    required GeocodingCandidate reference,
-  }) {
-    final fullCode = PlusCodeService.recoverNearest(
-      shortCode,
-      reference.latitude,
-      reference.longitude,
-    );
-    final area = fullCode == null ? null : PlusCodeService.decode(fullCode);
-    if (area == null) {
-      setState(() {
-        _coordinatesErrorMessage = AppLocalizations.of(context)
-            .locationResolveErrorInvalidPlusCode;
-      });
-      return false;
-    }
-    final formattedSource = PlusCodeService.truncateToMaxTextLength(
-      '$shortCode $localityQuery',
-    );
-    _applyResolvedCoordinates(
-      latitude: area.latitudeCenter,
-      longitude: area.longitudeCenter,
-      normalizedSource: formattedSource,
-      sourceType: LocationSourceType.plusCode,
-    );
-    return true;
   }
 
   /// Applies resolved [latitude], [longitude], and [normalizedSource] to the editor controllers and state.
@@ -511,9 +458,10 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
     required String normalizedSource,
     required LocationSourceType sourceType,
   }) {
+    final controller = ref.read(locationEditorControllerProvider);
     setState(() {
-      _latitudeController.text = _formatGpsCoordinate(latitude);
-      _longitudeController.text = _formatGpsCoordinate(longitude);
+      _latitudeController.text = controller.formatGpsCoordinate(latitude);
+      _longitudeController.text = controller.formatGpsCoordinate(longitude);
       _sourceController.text = normalizedSource;
       _resolvedSourceType = sourceType;
       _resolvedSourceText = normalizedSource;
@@ -567,100 +515,6 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
     });
   }
 
-  /// Resolves an address query via forward geocoding and disambiguates multiple candidates.
-  Future<bool> _resolveAddressInput(
-    String trimmedSource,
-    int generation,
-  ) async {
-    setState(() {
-      _isResolving = true;
-      _coordinatesErrorMessage = null;
-    });
-    try {
-      final candidates = await ref
-          .read(locationRepositoryProvider)
-          .searchLocations(trimmedSource);
-      if (!mounted || generation != _resolveGeneration) {
-        return false;
-      }
-      final selected = await _selectGeocodingCandidate(candidates, generation);
-      if (selected == null || !mounted || generation != _resolveGeneration) {
-        return false;
-      }
-      _applyResolvedCoordinates(
-        latitude: selected.latitude,
-        longitude: selected.longitude,
-        normalizedSource: selected.displayName,
-        sourceType: LocationSourceType.address,
-      );
-      return true;
-    } finally {
-      if (mounted && generation == _resolveGeneration) {
-        setState(() {
-          _isResolving = false;
-        });
-      }
-    }
-  }
-
-  /// Resolves a full or short Google Plus Code into WGS-84 coordinates.
-  Future<bool> _resolvePlusCodeInput(
-    String trimmedSource,
-    int generation,
-  ) async {
-    switch (PlusCodeService.parseInput(trimmedSource)) {
-      case InvalidPlusCodeInput():
-        setState(() {
-          _coordinatesErrorMessage = AppLocalizations.of(context)
-              .locationResolveErrorInvalidPlusCode;
-        });
-        return false;
-      case FullPlusCodeInput(:final fullCode, :final localitySuffix):
-        return _applyFullPlusCode(fullCode, localitySuffix);
-      case ShortPlusCodeInput(:final localityQuery, :final shortCode):
-        return _resolveShortPlusCode(
-          shortCode: shortCode,
-          localityQuery: localityQuery,
-          generation: generation,
-        );
-    }
-  }
-
-  /// Resolves a [shortCode] by geocoding [localityQuery] and recovering the nearest full Plus Code.
-  Future<bool> _resolveShortPlusCode({
-    required String shortCode,
-    required String localityQuery,
-    required int generation,
-  }) async {
-    setState(() {
-      _isResolving = true;
-      _coordinatesErrorMessage = null;
-    });
-    try {
-      final candidates = await ref
-          .read(locationRepositoryProvider)
-          .searchLocations(localityQuery);
-      if (!mounted || generation != _resolveGeneration) {
-        return false;
-      }
-      final selected = await _selectGeocodingCandidate(candidates, generation);
-      if (selected == null || !mounted || generation != _resolveGeneration) {
-        return false;
-      }
-      return _applyRecoveredShortPlusCode(
-        shortCode: shortCode,
-        localityQuery: localityQuery,
-        reference: selected,
-      );
-    } finally {
-      if (mounted && generation == _resolveGeneration) {
-        setState(() {
-          _isResolving = false;
-        });
-      }
-    }
-  }
-
   /// Resolves the current source input according to [_sourceType].
   Future<bool> _resolveSource() async {
     if (_sourceType == LocationSourceType.gps) {
@@ -669,60 +523,38 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
     if (_isResolving) {
       return false;
     }
-    final localizations = AppLocalizations.of(context);
-    final trimmedSource = _sourceController.text.trim();
-    if (trimmedSource.isEmpty ||
-        trimmedSource.length > PlusCodeService.maxInputLength) {
-      setState(() {
-        _coordinatesErrorMessage = _sourceType == LocationSourceType.plusCode
-            ? localizations.locationResolveErrorInvalidPlusCode
-            : localizations.locationResolveErrorNotFound;
-      });
-      return false;
-    }
+    final locale = Localizations.localeOf(context);
     final generation = ++_resolveGeneration;
-    return switch (_sourceType) {
-      LocationSourceType.gps => Future<bool>.value(true),
-      LocationSourceType.address => _resolveAddressInput(
-        trimmedSource,
-        generation,
-      ),
-      LocationSourceType.plusCode => _resolvePlusCodeInput(
-        trimmedSource,
-        generation,
-      ),
-    };
-  }
-
-  /// Returns a single [GeocodingCandidate] directly or prompts the user when multiple candidates exist.
-  Future<GeocodingCandidate?> _selectGeocodingCandidate(
-    List<GeocodingCandidate> candidates,
-    int generation,
-  ) async {
-    if (candidates.isEmpty) {
-      setState(() {
-        _coordinatesErrorMessage = AppLocalizations.of(context)
-            .locationResolveErrorNotFound;
-      });
-      return null;
+    setState(() {
+      _isResolving = true;
+      _coordinatesErrorMessage = null;
+    });
+    try {
+      final result = await ref
+          .read(locationEditorControllerProvider)
+          .resolveSource(
+            sourceType: _sourceType,
+            rawSource: _sourceController.text,
+            locale: locale,
+          );
+      if (!mounted || generation != _resolveGeneration) {
+        return false;
+      }
+      return await _applyResolutionResult(result, generation, locale);
+    } finally {
+      if (mounted && generation == _resolveGeneration) {
+        setState(() {
+          _isResolving = false;
+        });
+      }
     }
-    if (candidates.length == 1) {
-      return candidates.first;
-    }
-    final selected = await showDialog<GeocodingCandidate>(
-      context: context,
-      builder: (_) => _LocationCandidateDialog(candidates: candidates),
-    );
-    if (!mounted || generation != _resolveGeneration) {
-      return null;
-    }
-    return selected;
   }
 
   /// Validates the location inputs and persists the updated [TdfLocation].
   Future<void> _submit() async {
-    final trimmedName = _nameController.text.trim();
-    if (trimmedName.isEmpty) {
+    final controller = ref.read(locationEditorControllerProvider);
+    final locale = Localizations.localeOf(context);
+    if (_nameController.text.trim().isEmpty) {
       setState(() {
         _nameErrorMessage = AppLocalizations.of(context).locationNameErrorEmpty;
       });
@@ -731,27 +563,30 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
     if (!_isSourceResolved && (!await _resolveSource() || !mounted)) {
       return;
     }
-    final validated = _validateCoordinatesAndRadius();
-    if (validated == null) {
+    final validation = controller.validateDraft(
+      rawName: _nameController.text,
+      rawLatitude: _latitudeController.text,
+      rawLongitude: _longitudeController.text,
+      rawRadius: _radiusController.text,
+      sourceType: _sourceType,
+      rawSource: _sourceController.text,
+      rawNote: _noteController.text,
+      locale: locale,
+    );
+    final draft = validation.draft;
+    if (draft == null) {
+      switch (validation.errorKind) {
+        case LocationValidationErrorKind.emptyName:
+          setState(() => _nameErrorMessage = validation.errorMessage);
+        case LocationValidationErrorKind.invalidCoordinates:
+        case LocationValidationErrorKind.invalidRadius:
+          setState(() => _coordinatesErrorMessage = validation.errorMessage);
+        case null:
+          break;
+      }
       return;
     }
-    final trimmedNote = _noteController.text.trim();
-    final trimmedSource = _sourceType == LocationSourceType.gps
-        ? ''
-        : _sourceController.text.trim();
-    await ref
-        .read(taskNotifierProvider.notifier)
-        .updateLocation(
-          widget.location.id,
-          name: trimmedName,
-          latitude: validated.latitude,
-          longitude: validated.longitude,
-          radiusMeters: validated.radiusMeters,
-          source: trimmedSource.isEmpty ? null : trimmedSource,
-          clearSource: trimmedSource.isEmpty,
-          note: trimmedNote.isEmpty ? null : trimmedNote,
-          clearNote: trimmedNote.isEmpty,
-        );
+    await controller.saveLocation(locationId: widget.location.id, draft: draft);
     if (mounted) {
       Navigator.of(context).pop();
     }
@@ -759,53 +594,20 @@ class _EditLocationScreenState extends ConsumerState<EditLocationScreen> {
 
   /// Populates latitude and longitude from the current GPS fix rounded to at most 6 decimal places.
   Future<void> _useCurrentGpsPosition() async {
-    var fix = ref.read(locationStateProvider).fix;
-    if (fix == null || !fix.hasCoordinates) {
-      await ref.read(locationStateProvider.notifier).refreshLocation();
-      if (!mounted) {
-        return;
-      }
-      fix = ref.read(locationStateProvider).fix;
-    }
-    final latitude = fix?.latitude;
-    final longitude = fix?.longitude;
-    if (latitude == null || longitude == null) {
+    final controller = ref.read(locationEditorControllerProvider);
+    final coordinates = await controller.resolveCurrentGpsPosition();
+    if (!mounted || coordinates == null) {
       return;
     }
     setState(() {
-      _latitudeController.text = _formatGpsCoordinate(latitude);
-      _longitudeController.text = _formatGpsCoordinate(longitude);
+      _latitudeController.text = controller.formatGpsCoordinate(
+        coordinates.latitude,
+      );
+      _longitudeController.text = controller.formatGpsCoordinate(
+        coordinates.longitude,
+      );
       _coordinatesErrorMessage = null;
     });
-  }
-
-  /// Validates latitude, longitude, and radius inputs, setting [_coordinatesErrorMessage] when invalid.
-  ({double latitude, double longitude, double radiusMeters})?
-  _validateCoordinatesAndRadius() {
-    final localizations = AppLocalizations.of(context);
-    final latitude = double.tryParse(_latitudeController.text.trim());
-    final longitude = double.tryParse(_longitudeController.text.trim());
-    if (latitude == null ||
-        longitude == null ||
-        !_isValidCoordinates(latitude, longitude)) {
-      setState(() {
-        _coordinatesErrorMessage =
-            localizations.locationCoordinatesErrorInvalid;
-      });
-      return null;
-    }
-    final radiusMeters = _parseRadiusInput(_radiusController.text);
-    if (radiusMeters == null) {
-      setState(() {
-        _coordinatesErrorMessage = localizations.locationRadiusErrorInvalid;
-      });
-      return null;
-    }
-    return (
-      latitude: latitude,
-      longitude: longitude,
-      radiusMeters: radiusMeters,
-    );
   }
 }
 
@@ -912,9 +714,8 @@ class _EditLocationsScreenState extends ConsumerState<EditLocationsScreen> {
   }
 
   /// Deletes the location with [locationId].
-  Future<void> _deleteLocation(String locationId) async {
-    await ref.read(taskNotifierProvider.notifier).deleteLocation(locationId);
-  }
+  Future<void> _deleteLocation(String locationId) =>
+      ref.read(locationEditorControllerProvider).deleteLocation(locationId);
 
   /// Rebuilds when the create-location text transitions between empty and non-empty.
   void _handleCreateInputChanged() {
@@ -933,27 +734,9 @@ class _EditLocationsScreenState extends ConsumerState<EditLocationsScreen> {
       return;
     }
     _createController.clear();
-    final fix = ref.read(locationStateProvider).fix;
-    final rawLatitude = fix != null && fix.hasCoordinates ? fix.latitude : null;
-    final rawLongitude = fix != null && fix.hasCoordinates
-        ? fix.longitude
-        : null;
-    final latitude = rawLatitude != null
-        ? (double.tryParse(TdfLocation.formatRoundedDouble(rawLatitude, 6)) ??
-              0.0)
-        : 0.0;
-    final longitude = rawLongitude != null
-        ? (double.tryParse(TdfLocation.formatRoundedDouble(rawLongitude, 6)) ??
-              0.0)
-        : 0.0;
     await ref
-        .read(taskNotifierProvider.notifier)
-        .addLocation(
-          trimmed,
-          latitude: latitude,
-          longitude: longitude,
-          radiusMeters: 100.0,
-        );
+        .read(locationEditorControllerProvider)
+        .createLocationFromCurrentFix(trimmed);
   }
 }
 
@@ -1592,9 +1375,10 @@ Future<void> openEditLocationScreen(
   BuildContext context, {
   required TdfLocation location,
 }) {
-  AppLogger.info(
-    LogTag.ui,
-    'Opened EditLocationScreen location=${location.id}',
+  UiTelemetry.logScreenOpened(
+    'EditLocationScreen',
+    entityKey: 'location',
+    entityId: location.id,
   );
   return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(

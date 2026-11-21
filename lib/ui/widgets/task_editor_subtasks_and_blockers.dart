@@ -19,6 +19,7 @@ import '../../l10n/app_localizations.dart';
 import '../../models/task_board.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
+import '../../presentation/task_editor_controller.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -208,23 +209,16 @@ class TaskEditorBoardHelper {
   static List<String> collectOrderedBlockedByIds(
     TaskBoard board,
     Set<String> selectedBlockedByIds,
-  ) {
-    return <String>[
-      for (final task in board.allTasks)
-        if (selectedBlockedByIds.contains(task.id)) task.id,
-    ];
-  }
+  ) => TaskEditorController.collectOrderedBlockedByIds(
+    board,
+    selectedBlockedByIds,
+  );
 
   /// Collects selected label IDs in canonical board declaration order.
   static List<String> collectOrderedLabelIds(
     TaskBoard board,
     Set<String> selectedLabelIds,
-  ) {
-    return <String>[
-      for (final label in board.labels)
-        if (selectedLabelIds.contains(label.id)) label.id,
-    ];
-  }
+  ) => TaskEditorController.collectOrderedLabelIds(board, selectedLabelIds);
 
   /// Derives the initial [QuickAddMode] for an existing [task] on [board].
   static QuickAddMode resolveInitialMode(TaskItem task, TaskBoard board) {
@@ -248,19 +242,12 @@ class TaskEditorBoardHelper {
     required String rawTitle,
     required String? excludingTaskId,
     required AppLocalizations localizations,
-  }) {
-    final trimmed = rawTitle.trim();
-    if (trimmed.isEmpty) {
-      return localizations.taskNameErrorEmpty;
-    }
-    if (board.hasDuplicateTaskTitle(
-      trimmed,
-      excludingTaskId: excludingTaskId,
-    )) {
-      return localizations.taskNameErrorDuplicate;
-    }
-    return null;
-  }
+  }) => TaskEditorController.validateTaskTitle(
+    board: board,
+    rawTitle: rawTitle,
+    excludingTaskId: excludingTaskId,
+    localizations: localizations,
+  );
 }
 
 /// Subtasks editor card inside the task editor with `auto-finish` toggle, list, and input row.

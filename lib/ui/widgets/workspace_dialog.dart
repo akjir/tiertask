@@ -19,9 +19,9 @@ import 'package:material_ui/material_ui.dart';
 import '../../l10n/app_localizations.dart';
 import '../../l10n/tier_localization_extension.dart';
 import '../../models/app_workspace.dart';
+import '../../models/tdf_file_path.dart';
 import '../../models/webdav_config.dart';
 import '../../providers/workspace_providers.dart';
-import '../../repositories/local_file_repository.dart';
 import 'clearable_text_field.dart';
 import 'workspace_row_card.dart';
 
@@ -617,5 +617,5 @@ String _extractDisplayFileName(WebDavConfig config) {
   final rawPath = config.storageMode == StorageMode.webdav
       ? config.filePath
       : config.localFilePath;
-  return LocalFileRepository.extractFileNameFromPath(rawPath);
+  return TdfFilePath.extractFileNameFromPath(rawPath);
 }

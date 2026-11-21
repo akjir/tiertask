@@ -20,10 +20,10 @@ import '../l10n/app_localizations.dart';
 import '../models/task_board.dart';
 import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
-import '../providers/config_providers.dart';
+import '../presentation/label_editor_controller.dart';
+import '../presentation/link_action_controller.dart';
+import '../presentation/ui_telemetry.dart';
 import '../providers/task_providers.dart';
-import '../repositories/link_launcher_repository.dart';
-import '../services/app_logger.dart';
 import 'widgets/clearable_text_field.dart';
 import 'widgets/condition_editor_controller.dart';
 import 'widgets/label_color_picker_dialog.dart';
@@ -462,18 +462,19 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     });
   }
 
-  /// Opens [uri] via [linkLauncherRepositoryProvider] and shows an error [SnackBar] on failure.
+  /// Opens [uri] via [linkActionControllerProvider] and shows an error [SnackBar] on failure.
   Future<void> _openLink(String uri) async {
-    try {
-      await ref.read(linkLauncherRepositoryProvider).openLink(uri);
-    } on LinkLaunchException {
-      if (!mounted) {
+    switch (await ref.read(linkActionControllerProvider).openLink(uri)) {
+      case LinkOpenOutcome.opened:
         return;
-      }
-      final message = AppLocalizations.of(context).errorOpenLinkFailed;
-      _scaffoldMessengerKey.currentState?.showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      case LinkOpenOutcome.failed:
+        if (!mounted) {
+          return;
+        }
+        final message = AppLocalizations.of(context).errorOpenLinkFailed;
+        _scaffoldMessengerKey.currentState?.showSnackBar(
+          SnackBar(content: Text(message)),
+        );
     }
   }
 
@@ -525,16 +526,25 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
   Future<void> _submit() async {
     final board =
         ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
-    final localizations = AppLocalizations.of(context);
-    final nameError = _validateName(board, localizations);
-    if (nameError != null) {
-      setState(() => _nameErrorMessage = nameError);
-      return;
-    }
+    final controller = ref.read(labelEditorControllerProvider);
     final rawColor = _colorController.text.trim();
-    final normalizedColor = TdfColor.normalizeHex(rawColor);
-    if (rawColor.isNotEmpty && normalizedColor == null) {
-      setState(() => _colorErrorMessage = localizations.labelColorErrorInvalid);
+    final validation = controller.validateLabel(
+      board: board,
+      labelId: widget.label.id,
+      rawName: _nameController.text,
+      rawColor: rawColor,
+      locale: Localizations.localeOf(context),
+    );
+    if (!validation.isValid) {
+      switch (validation.errorKind) {
+        case LabelValidationErrorKind.emptyName:
+        case LabelValidationErrorKind.duplicateName:
+          setState(() => _nameErrorMessage = validation.errorMessage);
+        case LabelValidationErrorKind.invalidColor:
+          setState(() => _colorErrorMessage = validation.errorMessage);
+        case null:
+          break;
+      }
       return;
     }
     final hasPendingLink =
@@ -543,51 +553,21 @@ class _EditLabelScreenState extends ConsumerState<EditLabelScreen> {
     if ((_editingLinkIndex != null || hasPendingLink) && !_addOrUpdateLink()) {
       return;
     }
-    if (AppLogger.shouldLog(LogLevel.info)) {
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.ui,
-        'ui.label_editor.save',
-        fields: <String, Object?>{
-          'id': widget.label.id,
-          'links': _links.length,
-          'scoped': _isScoped,
-        },
-      );
-    }
     final trimmedNote = _noteController.text.trim();
-    await ref
-        .read(taskNotifierProvider.notifier)
-        .updateLabel(
-          widget.label.id,
-          name: _nameController.text.trim(),
-          color: normalizedColor,
-          clearColor: rawColor.isEmpty,
-          note: trimmedNote.isEmpty ? null : trimmedNote,
-          clearNote: trimmedNote.isEmpty,
-          isScoped: _isScoped,
-          links: List<TaskLink>.unmodifiable(_links),
-          conditions: _conditionController.buildConditions(),
-        );
+    await controller.saveLabel(
+      labelId: widget.label.id,
+      name: validation.trimmedName ?? _nameController.text.trim(),
+      normalizedColor: validation.normalizedColor,
+      clearColor: rawColor.isEmpty,
+      note: trimmedNote.isEmpty ? null : trimmedNote,
+      isScoped: _isScoped,
+      links: _links,
+      conditions: _conditionController.buildConditions(),
+    );
     if (!mounted) {
       return;
     }
     Navigator.of(context).pop();
-  }
-
-  /// Validates the entered label name against empty and duplicate constraints.
-  String? _validateName(TaskBoard board, AppLocalizations localizations) {
-    final trimmed = _nameController.text.trim();
-    if (trimmed.isEmpty) {
-      return localizations.labelNameErrorEmpty;
-    }
-    if (board.hasDuplicateLabelName(
-      trimmed,
-      excludingLabelId: widget.label.id,
-    )) {
-      return localizations.labelNameErrorDuplicate;
-    }
-    return null;
   }
 }
 
@@ -653,9 +633,8 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
   }
 
   /// Deletes the label with [labelId].
-  Future<void> _deleteLabel(String labelId) async {
-    await ref.read(taskNotifierProvider.notifier).deleteLabel(labelId);
-  }
+  Future<void> _deleteLabel(String labelId) =>
+      ref.read(labelEditorControllerProvider).deleteLabel(labelId);
 
   /// Rebuilds when the non-whitespace state of [_createController] changes.
   void _handleCreateInputChanged() {
@@ -675,7 +654,7 @@ class _EditLabelsScreenState extends ConsumerState<EditLabelsScreen> {
       return;
     }
     _createController.clear();
-    await ref.read(taskNotifierProvider.notifier).addLabel(trimmed);
+    await ref.read(labelEditorControllerProvider).addLabel(trimmed);
   }
 }
 
@@ -958,7 +937,11 @@ Future<void> openEditLabelScreen(
   BuildContext context, {
   required TdfLabel label,
 }) {
-  AppLogger.info(LogTag.ui, 'Opened EditLabelScreen label=${label.id}');
+  UiTelemetry.logScreenOpened(
+    'EditLabelScreen',
+    entityKey: 'label',
+    entityId: label.id,
+  );
   return Navigator.of(context).push<void>(
     MaterialPageRoute<void>(builder: (_) => EditLabelScreen(label: label)),
   );

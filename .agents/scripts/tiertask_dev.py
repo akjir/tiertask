@@ -67,6 +67,21 @@ _STRING_LITERAL_RE = re.compile(r"(['\"])((?:\\.|(?!\1).)*)\1")
 _VALUE_KEY_RE = re.compile(r"(?:ValueKey|Key)\(\s*['\"]([^'\"$]+)['\"]\s*\)")
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _IGNORE_COMMENT_RE = re.compile(r"//\s*ignore(?:_for_file)?:")
+_FORBIDDEN_UI_PROVIDERS = (
+    "appVersionRepositoryProvider",
+    "directoryPickerProvider",
+    "filePickerProvider",
+    "linkLauncherRepositoryProvider",
+    "localFileRepositoryProvider",
+    "locationRepositoryProvider",
+    "settingsRepositoryProvider",
+    "supportsDirectoryPickerProvider",
+    "tdfServiceProvider",
+    "webDavRepositoryProvider",
+)
+_FORBIDDEN_UI_PROVIDER_RE = re.compile(
+    r"\b(" + "|".join(_FORBIDDEN_UI_PROVIDERS) + r")\b"
+)
 _EMOJI_RE = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF]",
 )
@@ -754,6 +769,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
 
     app_hubs = {
         "lib/main.dart",
+        "lib/presentation/ui_telemetry.dart",
         "lib/ui/home_screen.dart",
         "lib/providers/config_providers.dart",
         "lib/providers/sync_providers.dart",
@@ -1044,6 +1060,8 @@ def _layer_section_for_path(rel_path: str) -> str:
         return "## Repositories"
     if rel_path.startswith("lib/providers/"):
         return "## State Providers"
+    if rel_path.startswith("lib/presentation/"):
+        return "## Presentation"
     return "## User Interface"
 
 
@@ -1189,7 +1207,7 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
 
 
 def _lib_layer_rank(rel_path: str) -> int | None:
-    """Returns the DAG architectural layer rank (0-7) for a non-generated lib/ Dart file."""
+    """Returns the DAG architectural layer rank (0-8) for a non-generated lib/ Dart file."""
     if not rel_path.startswith("lib/") or _is_generated_dart(rel_path):
         return None
     if rel_path == "lib/services/app_logger.dart":
@@ -1204,10 +1222,12 @@ def _lib_layer_rank(rel_path: str) -> int | None:
         return 4
     if rel_path.startswith("lib/providers/"):
         return 5
-    if rel_path.startswith("lib/ui/"):
+    if rel_path.startswith("lib/presentation/"):
         return 6
-    if rel_path == "lib/main.dart":
+    if rel_path.startswith("lib/ui/"):
         return 7
+    if rel_path == "lib/main.dart":
+        return 8
     return None
 
 
@@ -1276,6 +1296,11 @@ def _check_acyclic_dag(root: Path) -> list[str]:
                 issues.append(
                     f"P-ACYCLIC-DAG: Upward cross-layer import `{src} -> {dst}` (rank {src_rank} -> {dst_rank})"
                 )
+            if src.startswith("lib/ui/") and dst.startswith(("lib/repositories/", "lib/services/")):
+                issues.append(
+                    f"P-UDF-ARCHITECTURE: Forbidden direct import `{src} -> {dst}` "
+                    f"(lib/ui/ must not import repositories or services)"
+                )
 
     return issues
 
@@ -1311,13 +1336,18 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
                 issues.append(f"P-NO-IGNORE: Forbidden analyzer ignore directive in `{rel}:{idx}`")
             if _DART_FORBIDDEN_DIRECTIVE_RE.match(line):
                 issues.append(f"P-FILE-SIZE: Forbidden `export`/`part` directive in `{rel}:{idx}`")
-            if rel.startswith(("lib/models/", "lib/services/", "lib/ui/")):
-                m = _DART_IMPORT_RE.match(line)
-                if m and m.group(1) == "dart:io":
-                    issues.append(f"P-IO-ISOLATION: Forbidden `dart:io` import in `{rel}:{idx}`")
             if rel.startswith("lib/") and not rel.startswith("lib/repositories/"):
+                m = _DART_IMPORT_RE.match(line)
+                if m and m.group(1) in ("dart:io", "dart:ffi"):
+                    issues.append(f"P-IO-ISOLATION: Forbidden `{m.group(1)}` import in `{rel}:{idx}`")
                 if "HttpClient" in line and not line.strip().startswith("//"):
                     issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage outside repositories in `{rel}:{idx}`")
+            if rel.startswith("lib/ui/"):
+                code_part = line.split("//", 1)[0]
+                for provider_name in dict.fromkeys(_FORBIDDEN_UI_PROVIDER_RE.findall(code_part)):
+                    issues.append(
+                        f"P-UDF-ARCHITECTURE: Forbidden `{provider_name}` reference in `{rel}:{idx}`"
+                    )
 
     issues.extend(_check_acyclic_dag(root))
     issues.extend(audit_l10n(root))
@@ -1606,7 +1636,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_find = sub.add_parser("find", help="Locate symbols, ARB keys, test blocks, and spec sections.")
     p_find.add_argument("queries", nargs="+", help="One or more substrings to search for.")
-    p_find.add_argument("--layer", help="Optional layer filter (models, services, repositories, providers, ui, l10n, spec).")
+    p_find.add_argument(
+        "--layer",
+        help="Optional layer filter (models, services, repositories, providers, presentation, ui, l10n, spec).",
+    )
 
     p_deps = sub.add_parser("deps", help="Show direct imports and transitive reverse lib/ and test/ dependents.")
     p_deps.add_argument("target", help="Repository-relative Dart file path (e.g., lib/ui/settings_screen.dart).")

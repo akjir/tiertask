@@ -19,10 +19,9 @@ import '../../l10n/app_localizations.dart';
 import '../../l10n/tier_localization_extension.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
-import '../../models/tdf_error.dart';
-import '../../models/tdf_sync_metadata.dart';
 import '../../models/tdf_timezone.dart';
 import '../../models/webdav_config.dart';
+import '../../presentation/task_editor_controller.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -190,35 +189,20 @@ class TaskEditorRepeatField extends StatelessWidget {
     required bool hasDue,
     required bool isRepeating,
     required String rawLeadDays,
-  }) {
-    if (!isRepeating || !hasDue) {
-      return 0;
-    }
-    final trimmed = rawLeadDays.trim();
-    if (trimmed.isEmpty) {
-      return 0;
-    }
-    return _tryParseBoundedUnsignedInt(
-      trimmed,
-      min: 0,
-      max: TaskRepeatRule.maxRepeatCount,
-    );
-  }
+  }) => TaskEditorController.parseLeadDays(
+    hasDue: hasDue,
+    isRepeating: isRepeating,
+    rawLeadDays: rawLeadDays,
+  );
 
   /// Parses [rawCount] into a bounded integer in `1..3650` when [isRepeating] is enabled, or returns `null`.
   static int? parseRepeatCount({
     required bool isRepeating,
     required String rawCount,
-  }) {
-    if (!isRepeating) {
-      return null;
-    }
-    return _tryParseBoundedUnsignedInt(
-      rawCount.trim(),
-      min: 1,
-      max: TaskRepeatRule.maxRepeatCount,
-    );
-  }
+  }) => TaskEditorController.parseRepeatCount(
+    isRepeating: isRepeating,
+    rawCount: rawCount,
+  );
 
   /// Resolves the `repeat` rule when [isRepeating] is enabled, preserving [existingClock], or returns `null` when disabled or invalid.
   static TaskRepeatRule? parseRepeatRule({
@@ -228,26 +212,14 @@ class TaskEditorRepeatField extends StatelessWidget {
     required String rawCount,
     String rawLeadDays = '',
     required RepeatUnit unit,
-  }) {
-    final parsedCount = parseRepeatCount(
-      isRepeating: isRepeating,
-      rawCount: rawCount,
-    );
-    final parsedLeadDays = parseLeadDays(
-      hasDue: hasDue,
-      isRepeating: isRepeating,
-      rawLeadDays: rawLeadDays,
-    );
-    if (parsedCount == null || parsedLeadDays == null) {
-      return null;
-    }
-    return TaskRepeatRule(
-      count: parsedCount,
-      unit: unit,
-      clock: existingClock,
-      leadDays: parsedLeadDays,
-    );
-  }
+  }) => TaskEditorController.parseRepeatRule(
+    existingClock: existingClock,
+    hasDue: hasDue,
+    isRepeating: isRepeating,
+    rawCount: rawCount,
+    rawLeadDays: rawLeadDays,
+    unit: unit,
+  );
 
   /// Builds the numeric recurrence interval count text field.
   Widget _buildCountField(AppLocalizations localizations, AppTheme appTheme) {
@@ -530,45 +502,17 @@ class TaskEditorSchedulingNoteField extends StatelessWidget {
   }
 
   /// Normalizes user-edited [rawText], collapsing ASCII-whitespace-only strings to `null` and CR/CRLF line breaks to `\n`.
-  static String? normalizeSchedulingNote(String rawText) {
-    var hasGraphic = false;
-    var firstCrIndex = -1;
-    for (var i = 0; i < rawText.length; i++) {
-      final unit = rawText.codeUnitAt(i);
-      if (unit == 0x0D && firstCrIndex < 0) {
-        firstCrIndex = i;
-      }
-      if (unit != 0x09 && unit != 0x0A && unit != 0x0D && unit != 0x20) {
-        hasGraphic = true;
-      }
-    }
-    if (!hasGraphic) {
-      return null;
-    }
-    if (firstCrIndex < 0) {
-      return rawText;
-    }
-    return _collapseCrLineEndings(rawText, firstCrIndex);
-  }
+  static String? normalizeSchedulingNote(String rawText) =>
+      TaskEditorController.normalizeSchedulingNote(rawText);
 
   /// Validates [normalizedNote] against `<note>` control-character, surrogate, and `maxTdfNoteLength` (`2000`) bounds.
   static String? validateSchedulingNote(
     String? normalizedNote,
     AppLocalizations localizations,
-  ) {
-    if (normalizedNote == null) {
-      return null;
-    }
-    final scalarCount = TdfCalendar.countUnicodeScalars(normalizedNote);
-    if (scalarCount == null ||
-        _containsIllegalNoteControlChar(normalizedNote)) {
-      return localizations.schedulingNoteErrorInvalid;
-    }
-    if (scalarCount > maxTdfNoteLength) {
-      return localizations.schedulingNoteErrorTooLong;
-    }
-    return null;
-  }
+  ) => TaskEditorController.validateSchedulingNote(
+    normalizedNote,
+    localizations,
+  );
 }
 
 /// Optional `suspended` (or `due`) timestamp input field with modern date and time picker options.
@@ -648,23 +592,16 @@ class TaskEditorSuspendedField extends StatelessWidget {
   static String formatInitialText(
     DateTime? suspendedAt, [
     WebDavConfig configuration = const WebDavConfig(),
-  ]) {
-    if (suspendedAt == null || suspendedAt == TaskItem.defaultSuspendedAt) {
-      return '';
-    }
-    return formatLocalTimestamp(suspendedAt, configuration);
-  }
+  ]) => TaskEditorController.formatInitialSuspendedText(
+    suspendedAt,
+    configuration,
+  );
 
   /// Formats an optional UTC [instant] in [configuration]'s local wall-clock time, or `''` when `null`.
   static String formatLocalTimestamp(
     DateTime? instant,
     WebDavConfig configuration,
-  ) {
-    if (instant == null) {
-      return '';
-    }
-    return TaskItem.formatTdfTimestamp(configuration.toLocalWallClock(instant));
-  }
+  ) => TaskEditorController.formatLocalTimestamp(instant, configuration);
 
   /// Opens a Material 3 date picker and returns the updated `YYYY-MM-DD` (or `YYYY-MM-DD HH:MM[:SS]`) text.
   static Future<String?> pickSuspendedDate({
@@ -716,28 +653,8 @@ class TaskEditorSuspendedField extends StatelessWidget {
 
   /// Parses [rawText] as a local calendar timestamp and resolves its UTC instant under [configuration] (`TDF-CAL-001`), returning `null` if invalid.
   static ({TdfLocalDateTime localInput, DateTime resolvedUtc})?
-  tryParseLocalDateTimeInput(String rawText, WebDavConfig configuration) {
-    final parsedWallClock = TaskItem.tryParseTdfTimestampInput(rawText.trim());
-    if (parsedWallClock == null) {
-      return null;
-    }
-    try {
-      final localInput = TdfLocalDateTime.fromWallClock(parsedWallClock);
-      final resolvedUtc = TaskItem.normalizeTimestamp(
-        configuration.localWallClockToUtc(parsedWallClock),
-      );
-      if (!TdfCalendar.isWithinTimestampBounds(resolvedUtc)) {
-        return null;
-      }
-      return (localInput: localInput, resolvedUtc: resolvedUtc);
-    } on TdfException {
-      return null;
-    } on TdfContextException {
-      return null;
-    } on FormatException {
-      return null;
-    }
-  }
+  tryParseLocalDateTimeInput(String rawText, WebDavConfig configuration) =>
+      TaskEditorController.tryParseLocalDateTimeInput(rawText, configuration);
 
   /// Wraps a [showTimePicker] dialog in a 24-hour [MediaQuery] configuration.
   static Widget _build24HourTimePicker(BuildContext context, Widget? child) {
@@ -1159,57 +1076,4 @@ InputDecoration _buildSchedulingInputDecoration({
       borderSide: BorderSide(color: focusedColor, width: 1.6),
     ),
   );
-}
-
-/// Collapses `\r\n` and standalone `\r` sequences starting at [firstCrIndex] into `\n` in a single pass.
-String _collapseCrLineEndings(String rawText, int firstCrIndex) {
-  final buffer = StringBuffer(rawText.substring(0, firstCrIndex));
-  for (var i = firstCrIndex; i < rawText.length; i++) {
-    final unit = rawText.codeUnitAt(i);
-    if (unit == 0x0D) {
-      buffer.write('\n');
-      if (i + 1 < rawText.length && rawText.codeUnitAt(i + 1) == 0x0A) {
-        i++;
-      }
-      continue;
-    }
-    buffer.writeCharCode(unit);
-  }
-  return buffer.toString();
-}
-
-/// Returns whether [text] contains any control character disallowed by `<note>` (`0x00..0x1F` except `\t`, `\n`, `\r`, or `0x7F`).
-bool _containsIllegalNoteControlChar(String text) {
-  for (var i = 0; i < text.length; i++) {
-    final unit = text.codeUnitAt(i);
-    final isDisallowedLowControl =
-        unit <= 0x1F && unit != 0x09 && unit != 0x0A && unit != 0x0D;
-    if (isDisallowedLowControl || unit == 0x7F) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// Parses an unsigned ASCII decimal integer in `[min, max]` bounded by `maxTdfNumberLength`, or returns `null`.
-int? _tryParseBoundedUnsignedInt(
-  String trimmed, {
-  required int min,
-  required int max,
-}) {
-  if (trimmed.isEmpty || trimmed.length > maxTdfNumberLength) {
-    return null;
-  }
-  var value = 0;
-  for (var i = 0; i < trimmed.length; i++) {
-    final unit = trimmed.codeUnitAt(i);
-    if (unit < 0x30 || unit > 0x39) {
-      return null;
-    }
-    value = (value * 10) + (unit - 0x30);
-    if (value > max) {
-      return null;
-    }
-  }
-  return value >= min ? value : null;
 }

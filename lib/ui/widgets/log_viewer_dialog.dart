@@ -18,9 +18,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../models/webdav_config.dart';
-import '../../providers/config_providers.dart';
-import '../../services/app_logger.dart';
+import '../../presentation/log_viewer_controller.dart';
+import '../../presentation/ui_telemetry.dart';
 
 /// Type alias allowing the diagnostic log viewer to be referenced as [LogViewerScreen].
 typedef LogViewerScreen = LogViewerDialog;
@@ -39,39 +38,27 @@ class LogViewerDialog extends ConsumerStatefulWidget {
 class _LogDialogContent extends StatelessWidget {
   /// Creates a [_LogDialogContent].
   const _LogDialogContent({
-    required this.allLines,
-    required this.filteredLines,
     required this.horizontalController,
-    required this.minimumLevel,
     required this.onLevelChanged,
     required this.onTagChanged,
-    required this.selectedTag,
     required this.verticalController,
+    required this.viewModel,
   });
-
-  /// Unfiltered diagnostic log lines.
-  final List<String> allLines;
-
-  /// Log lines matching [minimumLevel] and [selectedTag].
-  final List<String> filteredLines;
 
   /// Horizontal scroll controller for long lines.
   final ScrollController horizontalController;
 
-  /// Currently selected minimum log level filter.
-  final LogLevel minimumLevel;
-
   /// Callback invoked when the minimum log level filter changes.
-  final ValueChanged<LogLevel> onLevelChanged;
+  final ValueChanged<DiagnosticLogLevel> onLevelChanged;
 
   /// Callback invoked when the subsystem tag filter changes.
-  final ValueChanged<LogTag?> onTagChanged;
-
-  /// Currently selected subsystem tag filter (`null` for all subsystems).
-  final LogTag? selectedTag;
+  final ValueChanged<DiagnosticLogTag?> onTagChanged;
 
   /// Vertical scroll controller for the log list.
   final ScrollController verticalController;
+
+  /// Live immutable snapshot of filtered log entries, metadata, and counters.
+  final DiagnosticLogViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -85,19 +72,19 @@ class _LogDialogContent extends StatelessWidget {
         children: [
           _LogMetadataCard(
             key: const ValueKey('log_viewer_metadata_card'),
-            lines: allLines,
+            viewModel: viewModel,
           ),
           _LogFilterBar(
-            minimumLevel: minimumLevel,
-            selectedTag: selectedTag,
+            minimumLevel: viewModel.minimumLevel,
+            selectedTag: viewModel.selectedTag,
             onLevelChanged: onLevelChanged,
             onTagChanged: onTagChanged,
           ),
           Expanded(
-            child: filteredLines.isEmpty
+            child: viewModel.filteredLines.isEmpty
                 ? Center(child: Text(localizations.emptyLogHint))
                 : _LogLinesView(
-                    lines: filteredLines,
+                    lines: viewModel.filteredLines,
                     verticalController: verticalController,
                     horizontalController: horizontalController,
                   ),
@@ -108,7 +95,7 @@ class _LogDialogContent extends StatelessWidget {
   }
 }
 
-/// Filter controls for minimum [LogLevel] and subsystem [LogTag] in [LogViewerDialog].
+/// Filter controls for minimum [DiagnosticLogLevel] and subsystem [DiagnosticLogTag] in [LogViewerDialog].
 class _LogFilterBar extends StatelessWidget {
   /// Creates a [_LogFilterBar].
   const _LogFilterBar({
@@ -118,17 +105,17 @@ class _LogFilterBar extends StatelessWidget {
     required this.selectedTag,
   });
 
-  /// Selected minimum [LogLevel] filter.
-  final LogLevel minimumLevel;
+  /// Selected minimum [DiagnosticLogLevel] filter.
+  final DiagnosticLogLevel minimumLevel;
 
-  /// Callback invoked when a new [LogLevel] is selected.
-  final ValueChanged<LogLevel> onLevelChanged;
+  /// Callback invoked when a new [DiagnosticLogLevel] is selected.
+  final ValueChanged<DiagnosticLogLevel> onLevelChanged;
 
-  /// Callback invoked when a new [LogTag] (or `null` for all) is selected.
-  final ValueChanged<LogTag?> onTagChanged;
+  /// Callback invoked when a new [DiagnosticLogTag] (or `null` for all) is selected.
+  final ValueChanged<DiagnosticLogTag?> onTagChanged;
 
-  /// Selected [LogTag] filter, or `null` for all subsystems.
-  final LogTag? selectedTag;
+  /// Selected [DiagnosticLogTag] filter, or `null` for all subsystems.
+  final DiagnosticLogTag? selectedTag;
 
   @override
   Widget build(BuildContext context) {
@@ -138,13 +125,13 @@ class _LogFilterBar extends StatelessWidget {
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        DropdownButton<LogLevel>(
+        DropdownButton<DiagnosticLogLevel>(
           key: const ValueKey('log_viewer_level_dropdown'),
           value: minimumLevel,
           isDense: true,
           items: [
-            for (final level in LogLevel.configurableLevels)
-              DropdownMenuItem<LogLevel>(
+            for (final level in DiagnosticLogLevel.configurableLevels)
+              DropdownMenuItem<DiagnosticLogLevel>(
                 value: level,
                 child: Text('${localizations.logLevelLabel}: ${level.label}'),
               ),
@@ -155,16 +142,19 @@ class _LogFilterBar extends StatelessWidget {
             }
           },
         ),
-        DropdownButton<LogTag?>(
+        DropdownButton<DiagnosticLogTag?>(
           key: const ValueKey('log_viewer_tag_dropdown'),
           value: selectedTag,
           isDense: true,
           items: [
-            DropdownMenuItem<LogTag?>(
+            DropdownMenuItem<DiagnosticLogTag?>(
               child: Text(localizations.logFilterAllTags),
             ),
-            for (final tag in LogTag.values)
-              DropdownMenuItem<LogTag?>(value: tag, child: Text(tag.label)),
+            for (final tag in DiagnosticLogTag.values)
+              DropdownMenuItem<DiagnosticLogTag?>(
+                value: tag,
+                child: Text(tag.label),
+              ),
           ],
           onChanged: onTagChanged,
         ),
@@ -173,19 +163,19 @@ class _LogFilterBar extends StatelessWidget {
   }
 }
 
-/// Renders a single monospace log line with semantic color accents for `[WARN]`, `[ERROR]`, and `[CRASH]`.
+/// Renders a single monospace log line with semantic color accents based on [DiagnosticLogSeverity].
 class _LogLineRow extends StatelessWidget {
   /// Creates a [_LogLineRow].
   const _LogLineRow({super.key, required this.line});
 
-  /// Formatted single-line diagnostic entry.
-  final String line;
+  /// Formatted single-line diagnostic view model.
+  final DiagnosticLogLineViewModel line;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final (textColor, backgroundColor, fontWeight) = _resolveLineStyle(
-      line,
+      line.severity,
       colorScheme,
     );
     return Container(
@@ -197,7 +187,7 @@ class _LogLineRow extends StatelessWidget {
             )
           : null,
       child: Text(
-        line,
+        line.text,
         softWrap: false,
         style: TextStyle(
           fontFamily: 'monospace',
@@ -209,33 +199,33 @@ class _LogLineRow extends StatelessWidget {
     );
   }
 
-  /// Resolves foreground color, subtle background tint, and font weight for [line].
+  /// Resolves foreground color, subtle background tint, and font weight for [severity].
   (Color, Color?, FontWeight) _resolveLineStyle(
-    String line,
+    DiagnosticLogSeverity severity,
     ColorScheme colorScheme,
   ) {
-    if (line.contains('[CRASH]') || line.contains('RECOVERED UNCLEAN EXIT')) {
-      return (
+    return switch (severity) {
+      DiagnosticLogSeverity.crash => (
         colorScheme.onErrorContainer,
         colorScheme.errorContainer.withValues(alpha: 0.75),
         FontWeight.w700,
-      );
-    }
-    if (line.contains('[ERROR]')) {
-      return (
+      ),
+      DiagnosticLogSeverity.error => (
         colorScheme.error,
         colorScheme.errorContainer.withValues(alpha: 0.3),
         FontWeight.w600,
-      );
-    }
-    if (line.contains('[WARN]') || line.contains('[WARN ')) {
-      return (
+      ),
+      DiagnosticLogSeverity.warn => (
         colorScheme.tertiary,
         colorScheme.tertiaryContainer.withValues(alpha: 0.35),
         FontWeight.w600,
-      );
-    }
-    return (colorScheme.onSurface, null, FontWeight.normal);
+      ),
+      DiagnosticLogSeverity.normal => (
+        colorScheme.onSurface,
+        null,
+        FontWeight.normal,
+      ),
+    };
   }
 }
 
@@ -251,8 +241,8 @@ class _LogLinesView extends StatelessWidget {
   /// Horizontal scroll controller for long lines and stack traces.
   final ScrollController horizontalController;
 
-  /// Snapshot of formatted log lines.
-  final List<String> lines;
+  /// Snapshot of filtered formatted log line view models.
+  final List<DiagnosticLogLineViewModel> lines;
 
   /// Vertical scroll controller for jumping to the bottommost entry.
   final ScrollController verticalController;
@@ -284,20 +274,15 @@ class _LogLinesView extends StatelessWidget {
 /// Compact summary card displaying active session metadata and entry/warning/error counts.
 class _LogMetadataCard extends StatelessWidget {
   /// Creates a [_LogMetadataCard].
-  const _LogMetadataCard({super.key, required this.lines});
+  const _LogMetadataCard({super.key, required this.viewModel});
 
-  /// Current log lines used to compute entry, warning, and error statistics.
-  final List<String> lines;
+  /// Live diagnostic view model carrying the formatted header summary and counts.
+  final DiagnosticLogViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final colorScheme = Theme.of(context).colorScheme;
-    final metadata = AppLogger.metadata;
-    final (entries, warnings, errors) = _computeStats(lines);
-    final headerSummary =
-        '${AppLogger.activeLogFileName} • v${metadata.appVersion} (${metadata.platform}) • '
-        '${metadata.workspaceId} • ${AppLogger.minimumLevel.label}';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -309,15 +294,15 @@ class _LogMetadataCard extends StatelessWidget {
         spacing: 2,
         children: [
           Text(
-            headerSummary,
+            viewModel.headerSummary,
             style: Theme.of(context).textTheme.bodySmall
                 ?.copyWith(fontFamily: 'monospace'),
           ),
           Text(
             localizations.logMetadataStats(
-              entries.toString(),
-              warnings.toString(),
-              errors.toString(),
+              viewModel.totalEntries.toString(),
+              viewModel.warningCount.toString(),
+              viewModel.errorCount.toString(),
             ),
             style: Theme.of(context).textTheme.labelSmall
                 ?.copyWith(color: colorScheme.onSurfaceVariant),
@@ -326,32 +311,11 @@ class _LogMetadataCard extends StatelessWidget {
       ),
     );
   }
-
-  /// Counts structured entries, warnings, and errors/crashes across [logLines].
-  (int, int, int) _computeStats(List<String> logLines) {
-    var entries = 0;
-    var warnings = 0;
-    var errors = 0;
-    for (final line in logLines) {
-      if (line.startsWith('===') || line.startsWith('@meta ')) {
-        continue;
-      }
-      entries++;
-      if (line.contains('[WARN]') || line.contains('[WARN ')) {
-        warnings++;
-      } else if (line.contains('[ERROR]') || line.contains('[CRASH]')) {
-        errors++;
-      }
-    }
-    return (entries, warnings, errors);
-  }
 }
 
-/// State for [LogViewerDialog] managing scroll controllers and level/tag filter state.
+/// State for [LogViewerDialog] owning only scroll controllers and delegating state to [logViewerControllerProvider].
 class _LogViewerDialogState extends ConsumerState<LogViewerDialog> {
   final ScrollController _horizontalController = ScrollController();
-  LogLevel _minimumLevel = LogLevel.debug;
-  LogTag? _selectedTag;
   final ScrollController _verticalController = ScrollController();
 
   @override
@@ -363,40 +327,25 @@ class _LogViewerDialogState extends ConsumerState<LogViewerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final config =
-        ref.watch(webDavConfigProvider).asData?.value ?? const WebDavConfig();
-    final canSyncWebDav =
-        config.logStorageMode.usesWebDav && config.isWebDavConfigured;
-    return ValueListenableBuilder<int>(
-      valueListenable: AppLogger.revision,
-      builder: (context, _, _) => _buildDialog(context, canSyncWebDav),
-    );
-  }
-
-  /// Builds the [AlertDialog] for the current log buffer and filter state.
-  Widget _buildDialog(BuildContext context, bool canSyncWebDav) {
     final localizations = AppLocalizations.of(context);
-    final allLines = AppLogger.lines;
-    final filteredLines = _filterLines(allLines);
+    final viewModel = ref.watch(logViewerControllerProvider);
+    final controller = ref.read(logViewerControllerProvider.notifier);
     return AlertDialog(
       title: _LogViewerHeader(
         title: localizations.diagnosticLogTitle,
-        hasEntries: allLines.isNotEmpty,
-        canSyncWebDav: canSyncWebDav,
+        hasEntries: viewModel.hasEntries,
+        canSyncWebDav: viewModel.canSyncWebDav,
         onSyncWebDav: () => _syncLogToWebDav(context),
         onCopyAll: () => _copyAll(context),
         onScrollToBottom: _scrollToBottom,
         onClearLog: () => _clearLog(context),
       ),
       content: _LogDialogContent(
-        allLines: allLines,
-        filteredLines: filteredLines,
         horizontalController: _horizontalController,
-        minimumLevel: _minimumLevel,
-        onLevelChanged: (level) => setState(() => _minimumLevel = level),
-        onTagChanged: (tag) => setState(() => _selectedTag = tag),
-        selectedTag: _selectedTag,
+        onLevelChanged: controller.setMinimumLevel,
+        onTagChanged: controller.setSelectedTag,
         verticalController: _verticalController,
+        viewModel: viewModel,
       ),
       actions: [
         TextButton(
@@ -410,7 +359,7 @@ class _LogViewerDialogState extends ConsumerState<LogViewerDialog> {
   /// Clears the in-memory log buffer and truncates the active log file.
   void _clearLog(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    AppLogger.clear();
+    ref.read(logViewerControllerProvider.notifier).clearLog();
     ScaffoldMessenger.maybeOf(context)
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(localizations.logClearedSnackBar)));
@@ -420,31 +369,16 @@ class _LogViewerDialogState extends ConsumerState<LogViewerDialog> {
   Future<void> _copyAll(BuildContext context) async {
     final localizations = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
-    await Clipboard.setData(ClipboardData(text: AppLogger.fullLogText));
+    final fullText = ref
+        .read(logViewerControllerProvider.notifier)
+        .readFullLogText();
+    await Clipboard.setData(ClipboardData(text: fullText));
     if (!mounted) {
       return;
     }
     messenger
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(localizations.logCopiedSnackBar)));
-  }
-
-  /// Filters [lines] according to [_minimumLevel] and [_selectedTag].
-  List<String> _filterLines(List<String> lines) {
-    if (_minimumLevel == LogLevel.debug && _selectedTag == null) {
-      return lines;
-    }
-    final filtered = <String>[];
-    for (final line in lines) {
-      if (AppLogger.matchesFilter(
-        line,
-        minimumLevel: _minimumLevel,
-        tag: _selectedTag,
-      )) {
-        filtered.add(line);
-      }
-    }
-    return filtered;
   }
 
   /// Scrolls the vertical log view directly to the bottommost entry.
@@ -459,24 +393,19 @@ class _LogViewerDialogState extends ConsumerState<LogViewerDialog> {
   Future<void> _syncLogToWebDav(BuildContext context) async {
     final localizations = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
-    try {
-      await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
-      if (!mounted) {
-        return;
-      }
-      messenger
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(content: Text(localizations.logSyncedSnackBar)),
-        );
-    } on Object catch (error) {
-      if (!mounted) {
-        return;
-      }
-      messenger
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(error.toString())));
+    final result = await ref
+        .read(logViewerControllerProvider.notifier)
+        .syncLogToWebDav();
+    if (!mounted) {
+      return;
     }
+    final snackBarMessage = switch (result) {
+      LogSyncSucceeded() => localizations.logSyncedSnackBar,
+      LogSyncFailed(:final message) => message,
+    };
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(snackBarMessage)));
   }
 }
 
@@ -550,14 +479,9 @@ class _LogViewerHeader extends StatelessWidget {
   }
 }
 
-/// Opens the [LogViewerDialog] modal and logs the navigation event under [LogTag.ui].
+/// Opens the [LogViewerDialog] modal and logs the navigation event via [UiTelemetry].
 Future<void> showLogViewerDialog(BuildContext context) {
-  AppLogger.event(
-    LogLevel.info,
-    LogTag.ui,
-    'ui.dialog.open',
-    fields: <String, Object?>{'dialog': 'log_viewer'},
-  );
+  UiTelemetry.logDialogOpened('log_viewer');
   return showDialog<void>(
     context: context,
     builder: (_) => const LogViewerDialog(),

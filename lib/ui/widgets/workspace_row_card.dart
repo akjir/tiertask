@@ -17,7 +17,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/app_workspace.dart';
-import '../../repositories/local_file_repository.dart';
+import '../../models/tdf_file_path.dart';
 import 'clearable_text_field.dart';
 
 /// Monospace `.tdf` filename subtitle with an optional leading storage mode icon.
@@ -541,9 +541,7 @@ class _WorkspaceRowMainContent extends StatelessWidget {
 
   /// Builds the tappable workspace selection area displaying the badge, title, and active pill.
   Widget _buildSelectArea(AppLocalizations localizations) {
-    final fileName = LocalFileRepository.extractFileNameFromPath(
-      summary.localFilePath,
-    );
+    final fileName = TdfFilePath.extractFileNameFromPath(summary.localFilePath);
     return InkWell(
       key: ValueKey('workspace_select_${summary.id}'),
       onTap: isBusy ? null : onSelect,

@@ -21,7 +21,7 @@ import 'package:flutter/foundation.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/app_build_profile.dart';
-import '../models/webdav_config.dart';
+import '../models/tdf_file_path.dart';
 import '../services/app_logger.dart';
 import 'host_file_lock.dart';
 
@@ -43,7 +43,11 @@ class LocalFileOperations<E extends Exception> {
 
   /// Combines [directoryPath] and [fileName] into a normalized local `.tdf` file path.
   String combineDirectoryAndFileName(String directoryPath, String fileName) =>
-      _joinDirectoryAndChild(directoryPath, extractFileNameFromPath(fileName));
+      TdfFilePath.combineDirectoryAndFileName(
+        directoryPath,
+        fileName,
+        separator: Platform.pathSeparator,
+      );
 
   /// Resolves the default filesystem path for [fileName] (or `tiertask.log`) inside [baseDirectoryPath] or the user data directory.
   String defaultLogFilePath({
@@ -152,49 +156,20 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
-  String ensureTdfExtension(String rawName) {
-    final trimmed = rawName.trim();
-    if (trimmed.isEmpty) return WebDavConfig.defaultFileName;
-    if (trimmed.length > 4 &&
-        trimmed.substring(trimmed.length - 4).toLowerCase() == '.tdf') {
-      return trimmed;
-    }
-    return '$trimmed.tdf';
-  }
+  String ensureTdfExtension(String rawName) =>
+      TdfFilePath.ensureTdfExtension(rawName);
 
   /// Extracts the parent directory portion from [rawPath], or an empty string when [rawPath] is a bare file name.
-  String extractDirectoryFromPath(String rawPath) {
-    final trimmed = trimTrailingSeparators(rawPath.trim());
-    if (trimmed.isEmpty) return '';
-    final lastSlash = trimmed.lastIndexOf('/');
-    final lastBackslash = trimmed.lastIndexOf(r'\');
-    final splitIndex = lastSlash > lastBackslash ? lastSlash : lastBackslash;
-    if (splitIndex < 0) return '';
-    if (splitIndex == 0) return '/';
-    if (splitIndex == 2 && _windowsDrivePattern.hasMatch(trimmed)) {
-      return trimmed.substring(0, 3);
-    }
-    return trimmed.substring(0, splitIndex);
-  }
+  String extractDirectoryFromPath(String rawPath) =>
+      TdfFilePath.extractDirectoryFromPath(rawPath);
 
   /// Extracts the base file name without a trailing `.tdf` extension from [rawPath].
-  String extractFileBaseName(String rawPath) {
-    final fileName = extractFileNameFromPath(rawPath);
-    if (fileName.length > 4 &&
-        fileName.substring(fileName.length - 4).toLowerCase() == '.tdf') {
-      return fileName.substring(0, fileName.length - 4);
-    }
-    return fileName;
-  }
+  String extractFileBaseName(String rawPath) =>
+      TdfFilePath.extractFileBaseName(rawPath);
 
-  /// Extracts the trailing file name segment from [rawPath], defaulting to [WebDavConfig.defaultFileName].
-  String extractFileNameFromPath(String rawPath) {
-    final parts = rawPath.trim().split(_pathSeparatorPattern);
-    for (var i = parts.length - 1; i >= 0; i--) {
-      if (parts[i].isNotEmpty) return parts[i];
-    }
-    return WebDavConfig.defaultFileName;
-  }
+  /// Extracts the trailing file name segment from [rawPath], defaulting to `tasks.tdf`.
+  String extractFileNameFromPath(String rawPath) =>
+      TdfFilePath.extractFileNameFromPath(rawPath);
 
   /// Formats the candidate backup path or URI suffix for [basePath] at [attemptIndex].
   String formatBackupPath(String basePath, int attemptIndex) =>
@@ -203,8 +178,7 @@ class LocalFileOperations<E extends Exception> {
       : '$basePath.bak.${attemptIndex.toString().padLeft(3, '0')}';
 
   /// Returns `true` if [rawPath] starts with a POSIX root `/` or Windows drive prefix.
-  bool isAbsolutePath(String rawPath) =>
-      rawPath.startsWith('/') || _windowsDrivePattern.hasMatch(rawPath);
+  bool isAbsolutePath(String rawPath) => TdfFilePath.isAbsolutePath(rawPath);
 
   /// Returns `true` when [event] is a create, modify, or move event targeting [targetFileName].
   bool isRelevantWatchEvent(
@@ -235,17 +209,8 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Returns `true` when [rawName] is a valid single `.tdf` file name or base name without path separators or control characters.
-  bool isValidSingleFileName(String rawName) {
-    final trimmed = rawName.trim();
-    return trimmed.isNotEmpty &&
-        trimmed != '.' &&
-        trimmed != '..' &&
-        trimmed.toLowerCase() != '.tdf' &&
-        !trimmed.contains('/') &&
-        !trimmed.contains(r'\') &&
-        !trimmed.contains(':') &&
-        !_hasControlCharacters(trimmed);
-  }
+  bool isValidSingleFileName(String rawName) =>
+      TdfFilePath.isValidSingleFileName(rawName);
 
   /// Maps a [FileSystemException] during a `.tdf` file move into a specific localized exception.
   E mapMoveFileSystemException(
@@ -516,16 +481,8 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Strips trailing `/` and `\` characters from [path], preserving POSIX and Windows drive roots.
-  String trimTrailingSeparators(String path) {
-    final minLength = _windowsDrivePattern.hasMatch(path) ? 3 : 1;
-    var end = path.length;
-    while (end > minLength &&
-        (path.codeUnitAt(end - 1) == 0x2F ||
-            path.codeUnitAt(end - 1) == 0x5C)) {
-      end--;
-    }
-    return path.substring(0, end);
-  }
+  String trimTrailingSeparators(String path) =>
+      TdfFilePath.trimTrailingSeparators(path);
 
   /// Validates that [rawName] is a single `.tdf` file name and returns it with a `.tdf` extension.
   String validateFileName(String rawName, AppLocalizations messages) {

@@ -210,6 +210,7 @@ Future<ProviderContainer> pumpLeafWidget(
       themeSet ?? AppThemeSet.forPalette(config.themePalette);
   final container = ProviderContainer(
     overrides: [
+      appLocaleProvider.overrideWithValue(locale),
       settingsRepositoryProvider.overrideWithValue(
         InMemorySettingsRepository(config),
       ),

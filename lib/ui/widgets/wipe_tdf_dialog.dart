@@ -16,7 +16,7 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../services/app_logger.dart';
+import '../../presentation/ui_telemetry.dart';
 import 'clearable_text_field.dart';
 
 /// Confirmation dialog requiring the user to enter the file name without `.tdf` before wiping a local or remote TDF file.
@@ -247,9 +247,10 @@ class _WipeTdfDialogState extends State<WipeTdfDialog> {
     if (!_isConfirmEnabled) {
       return;
     }
-    AppLogger.info(
-      LogTag.ui,
-      'Confirmed wipe TDF dialog target=${widget.target.name} file=${widget.fileName} createBackup=$_createBackup',
+    UiTelemetry.logWipeTdfConfirmed(
+      targetName: widget.target.name,
+      fileName: widget.fileName,
+      createBackup: _createBackup,
     );
     Navigator.of(context).pop(WipeTdfDialogResult(createBackup: _createBackup));
   }

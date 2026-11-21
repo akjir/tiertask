@@ -24,6 +24,7 @@ import '../../models/task_board.dart';
 import '../../models/task_item.dart';
 import '../../models/tdf_metadata.dart';
 import '../../models/webdav_config.dart';
+import '../../presentation/link_action_controller.dart';
 import '../../providers/config_providers.dart';
 import '../../providers/task_providers.dart';
 import '../app_theme.dart';
@@ -778,10 +779,10 @@ class _TierTaskPillState extends ConsumerState<TierTaskPill>
     }
   }
 
-  /// Opens [uri] via [linkLauncherRepositoryProvider].
+  /// Opens [uri] via [linkActionControllerProvider].
   Future<void> _handleOpenLink(String uri) => openTaskResourceLink(
     context,
-    ref.read(linkLauncherRepositoryProvider),
+    ref.read(linkActionControllerProvider),
     uri,
   );
 

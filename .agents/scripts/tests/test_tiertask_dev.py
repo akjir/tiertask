@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tiertask_dev
 
 
@@ -185,6 +187,11 @@ tiertask/
 | File | Function |
 | :--- | :--- |
 
+## Presentation
+
+| File | Function |
+| :--- | :--- |
+
 ## User Interface
 
 | File | Function |
@@ -222,7 +229,30 @@ tiertask/
         info = tiertask_dev.compute_dependencies(self.root, "lib/models/sample_model.dart")
         self.assertIn("lib/ui/sample_screen.dart", info["reverse_lib"])
         self.assertIn("test/models/sample_model_test.dart", info["reverse_tests"])
-        self.assertIn("test/ui/sample_screen_test.dart", info["reverse_tests"])
+
+        helper_model = self.root / "lib" / "models" / "unmirrored_helper.dart"
+        helper_model.write_text(
+            GPL_HEADER + "\nclass UnmirroredHelper {}\n",
+            encoding="utf-8",
+        )
+        ui_screen = self.root / "lib" / "ui" / "sample_screen.dart"
+        ui_screen.write_text(
+            GPL_HEADER
+            + "\nimport '../models/sample_model.dart';\n"
+            + "import '../models/unmirrored_helper.dart';\n\n"
+            + "class SampleScreen {\n"
+            + "  const SampleScreen(this.model, this.helper);\n"
+            + "  final SampleModel model;\n"
+            + "  final UnmirroredHelper helper;\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+        unmirrored_info = tiertask_dev.compute_dependencies(
+            self.root,
+            "lib/models/unmirrored_helper.dart",
+        )
+        self.assertIn("lib/ui/sample_screen.dart", unmirrored_info["reverse_lib"])
+        self.assertIn("test/ui/sample_screen_test.dart", unmirrored_info["reverse_tests"])
 
     def test_l10n_set_creates_placeholders_and_maintains_parity(self) -> None:
         tiertask_dev.update_l10n(
@@ -350,6 +380,157 @@ tiertask/
                 removes=[],
                 run_codegen=False,
             )
+
+    def test_layer_ranks_and_presentation_dag_boundaries(self) -> None:
+        expected_ranks = [
+            ("lib/services/app_logger.dart", 0),
+            ("lib/models/sample_model.dart", 1),
+            ("lib/l10n/tier_localization_extension.dart", 2),
+            ("lib/services/tdf_service.dart", 3),
+            ("lib/repositories/local_file_repository.dart", 4),
+            ("lib/providers/task_providers.dart", 5),
+            ("lib/presentation/settings_controller.dart", 6),
+            ("lib/ui/home_screen.dart", 7),
+            ("lib/main.dart", 8),
+        ]
+        for rel_path, expected in expected_ranks:
+            self.assertEqual(
+                tiertask_dev._lib_layer_rank(rel_path),
+                expected,
+                f"Unexpected rank for {rel_path}",
+            )
+
+        (self.root / "lib" / "services").mkdir(parents=True, exist_ok=True)
+        (self.root / "lib" / "repositories").mkdir(parents=True, exist_ok=True)
+        (self.root / "lib" / "providers").mkdir(parents=True, exist_ok=True)
+        (self.root / "lib" / "presentation").mkdir(parents=True, exist_ok=True)
+
+        (self.root / "lib" / "services" / "app_logger.dart").write_text(
+            GPL_HEADER + "\nclass AppLogger {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "services" / "tdf_service.dart").write_text(
+            GPL_HEADER + "\nclass TdfService {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "repositories" / "local_repo.dart").write_text(
+            GPL_HEADER + "\nimport 'dart:ffi';\nimport 'dart:io';\nclass LocalRepo {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "presentation" / "sample_controller.dart").write_text(
+            GPL_HEADER + "\nimport '../ui/sample_screen.dart';\nclass SampleController {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "providers" / "sample_provider.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../presentation/sample_controller.dart';\n"
+            + "class SampleProvider {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "ui" / "bad_ui.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../repositories/local_repo.dart';\n"
+            + "import '../services/app_logger.dart';\n"
+            + "import '../services/tdf_service.dart';\n"
+            + "class BadUi {}\n",
+            encoding="utf-8",
+        )
+
+        dag_issues = tiertask_dev._check_acyclic_dag(self.root)
+        joined = "\n".join(dag_issues)
+        self.assertIn("lib/presentation/sample_controller.dart -> lib/ui/sample_screen.dart", joined)
+        self.assertIn("lib/providers/sample_provider.dart -> lib/presentation/sample_controller.dart", joined)
+        self.assertIn("P-UDF-ARCHITECTURE", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/repositories/local_repo.dart", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/services/app_logger.dart", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/services/tdf_service.dart", joined)
+
+    def test_static_checks_enforce_extended_io_isolation_and_ui_provider_ban(self) -> None:
+        (self.root / "lib" / "presentation").mkdir(parents=True, exist_ok=True)
+        (self.root / "lib" / "providers").mkdir(parents=True, exist_ok=True)
+        (self.root / "lib" / "repositories").mkdir(parents=True, exist_ok=True)
+
+        (self.root / "lib" / "presentation" / "bad_pres.dart").write_text(
+            GPL_HEADER + "\nimport 'dart:io';\nimport 'dart:ffi';\nclass BadPres {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "providers" / "bad_prov.dart").write_text(
+            GPL_HEADER + "\nimport 'dart:io';\nimport 'dart:ffi';\nclass BadProv {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "repositories" / "good_repo.dart").write_text(
+            GPL_HEADER + "\nimport 'dart:io';\nimport 'dart:ffi';\nclass GoodRepo {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "ui" / "bad_providers_ui.dart").write_text(
+            GPL_HEADER
+            + "\n// Comment mentioning localFileRepositoryProvider is allowed.\n"
+            + "void bad(dynamic ref) {\n"
+            + "  ref.read(appVersionRepositoryProvider);\n"
+            + "  ref.read(directoryPickerProvider);\n"
+            + "  ref.read(filePickerProvider);\n"
+            + "  ref.read(linkLauncherRepositoryProvider);\n"
+            + "  ref.read(localFileRepositoryProvider);\n"
+            + "  ref.read(locationRepositoryProvider);\n"
+            + "  ref.read(settingsRepositoryProvider);\n"
+            + "  ref.read(supportsDirectoryPickerProvider);\n"
+            + "  ref.read(tdfServiceProvider);\n"
+            + "  ref.read(webDavRepositoryProvider);\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+
+        issues = tiertask_dev.run_static_checks(self.root, fix=False)
+        joined = "\n".join(issues)
+        io_issues = [i for i in issues if i.startswith("P-IO-ISOLATION:")]
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:io` import in `lib/presentation/bad_pres.dart", joined)
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:ffi` import in `lib/presentation/bad_pres.dart", joined)
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:io` import in `lib/providers/bad_prov.dart", joined)
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:ffi` import in `lib/providers/bad_prov.dart", joined)
+        self.assertFalse(any("lib/repositories/good_repo.dart" in i for i in io_issues))
+
+        for provider_name in (
+            "appVersionRepositoryProvider",
+            "directoryPickerProvider",
+            "filePickerProvider",
+            "linkLauncherRepositoryProvider",
+            "localFileRepositoryProvider",
+            "locationRepositoryProvider",
+            "settingsRepositoryProvider",
+            "supportsDirectoryPickerProvider",
+            "tdfServiceProvider",
+            "webDavRepositoryProvider",
+        ):
+            self.assertIn(
+                f"P-UDF-ARCHITECTURE: Forbidden `{provider_name}` reference in `lib/ui/bad_providers_ui.dart",
+                joined,
+            )
+        # Comment line (line 16) must not be flagged.
+        self.assertNotIn("lib/ui/bad_providers_ui.dart:16", joined)
+
+    def test_presentation_arch_section_and_find_layer(self) -> None:
+        self.assertEqual(
+            tiertask_dev._layer_section_for_path("lib/presentation/ui_telemetry.dart"),
+            "## Presentation",
+        )
+        tiertask_dev.scaffold_file(
+            self.root,
+            "lib/presentation/sample_controller.dart",
+            description="Presentation `SampleController`.",
+        )
+        (self.root / "lib" / "presentation" / "sample_controller.dart").write_text(
+            GPL_HEADER + "\nclass SampleController {}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
+        matches = tiertask_dev.find_in_repo(
+            self.root,
+            "SampleController",
+            layer="presentation",
+        )
+        self.assertTrue(
+            any("lib/presentation/sample_controller.dart" in m for m in matches)
+        )
 
 
 if __name__ == "__main__":
