@@ -234,5 +234,96 @@ void main() {
         expect(find.text('Task 0'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'places buildBadge after workspaceTrigger on desktop and beside brand on compact',
+      (tester) async {
+        // Desktop (> 720px): Brand -> Workspace -> Build Badge.
+        for (final width in const <double>[721.0, 820.0, 821.0, 1280.0]) {
+          await pumpUiWidget(
+            tester,
+            const UiAdaptiveAppShell(
+              brand: Text('TierTask'),
+              workspaceTrigger: Text('Work'),
+              buildBadge: Text('DEV'),
+              trailingActions: <Widget>[Text('Synced')],
+              sidebarBody: SizedBox.shrink(),
+              body: Text('Main'),
+            ),
+            surfaceSize: Size(width, 800),
+            wrapInScaffold: false,
+          );
+
+          final brandRight = tester.getTopRight(find.text('TierTask')).dx;
+          final workspaceRect = tester.getRect(find.text('Work'));
+          final badgeRect = tester.getRect(find.text('DEV'));
+          expect(
+            workspaceRect.left - brandRight,
+            greaterThanOrEqualTo(18.0),
+            reason:
+                'Width $width must maintain 18px chrome gap between brand and workspace pill',
+          );
+          expect(
+            badgeRect.left,
+            greaterThan(workspaceRect.right),
+            reason:
+                'Width $width must place buildBadge strictly to the right of workspaceTrigger',
+          );
+        }
+
+        // Compact (<= 720px): hidden workspaceTrigger, buildBadge beside brand when no active filter.
+        for (final width in const <double>[390.0, 720.0]) {
+          await pumpUiWidget(
+            tester,
+            const UiAdaptiveAppShell(
+              brand: Text('TierTask'),
+              workspaceTrigger: Text('Work'),
+              buildBadge: Text('DEV'),
+              trailingActions: <Widget>[Text('Synced')],
+              sidebarBody: SizedBox.shrink(),
+              body: Text('Main'),
+              menuOpenTooltip: 'Open menu',
+              menuCloseTooltip: 'Close menu',
+            ),
+            surfaceSize: Size(width, 800),
+            wrapInScaffold: false,
+          );
+          expect(
+            find.text('Work'),
+            findsNothing,
+            reason: 'Compact width $width hides desktop workspaceTrigger',
+          );
+          expect(
+            find.text('DEV'),
+            findsOneWidget,
+            reason: 'Compact width $width displays buildBadge beside brand',
+          );
+          expect(
+            tester.getTopLeft(find.text('DEV')).dx,
+            greaterThan(tester.getTopRight(find.text('TierTask')).dx),
+            reason: 'Compact width $width places buildBadge to right of brand',
+          );
+        }
+
+        // Compact with mobileActiveFilter hides buildBadge along with brand.
+        await pumpUiWidget(
+          tester,
+          const UiAdaptiveAppShell(
+            brand: Text('TierTask'),
+            mobileActiveFilter: Text('Filter: Work'),
+            workspaceTrigger: Text('Work'),
+            buildBadge: Text('DEV'),
+            sidebarBody: SizedBox.shrink(),
+            body: Text('Main'),
+            menuOpenTooltip: 'Open menu',
+            menuCloseTooltip: 'Close menu',
+          ),
+          surfaceSize: const Size(390, 800),
+          wrapInScaffold: false,
+        );
+        expect(find.text('Filter: Work'), findsOneWidget);
+        expect(find.text('DEV'), findsNothing);
+      },
+    );
   });
 }

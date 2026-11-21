@@ -31,6 +31,7 @@ class UiAdaptiveAppShell extends StatelessWidget {
     required this.body,
     this.mobileActiveFilter,
     this.workspaceTrigger,
+    this.buildBadge,
     this.searchWidget,
     this.isSearchOpen = false,
     this.trailingActions = const <Widget>[],
@@ -53,6 +54,9 @@ class UiAdaptiveAppShell extends StatelessWidget {
 
   /// Brand mark and wordmark rendered at the leading edge of the top chrome bar.
   final Widget brand;
+
+  /// Optional inline build profile badge (e.g. `DEV` pill) rendered after [workspaceTrigger] on desktop and beside [brand] on compact.
+  final Widget? buildBadge;
 
   /// Optional floating notice / Undo toast anchored inside the viewport stack above [bottomDock].
   final Widget? floatingNotice;
@@ -116,6 +120,7 @@ class UiAdaptiveAppShell extends StatelessWidget {
               _UiTopChromeBar(
                 viewport: viewport,
                 brand: brand,
+                buildBadge: buildBadge,
                 mobileActiveFilter: mobileActiveFilter,
                 workspaceTrigger: workspaceTrigger,
                 searchWidget: searchWidget,
@@ -156,6 +161,7 @@ class _UiTopChromeBar extends StatelessWidget {
   const _UiTopChromeBar({
     required this.viewport,
     required this.brand,
+    required this.buildBadge,
     required this.mobileActiveFilter,
     required this.workspaceTrigger,
     required this.searchWidget,
@@ -169,6 +175,9 @@ class _UiTopChromeBar extends StatelessWidget {
 
   /// Desktop/default brand widget.
   final Widget brand;
+
+  /// Optional inline build badge rendered after [workspaceTrigger] on desktop and beside [brand] on compact.
+  final Widget? buildBadge;
 
   /// Whether compact drawer is open.
   final bool isDrawerOpen;
@@ -241,12 +250,24 @@ class _UiTopChromeBar extends StatelessWidget {
           tooltip: isDrawerOpen ? menuCloseTooltip : menuOpenTooltip,
           onPressed: onToggleDrawer,
         ),
-        const SizedBox(width: 4.0),
+        const SizedBox(width: 6.0),
         if (mobileActiveFilter case final activeFilter?)
           Expanded(child: activeFilter)
         else
           Expanded(
-            child: Align(alignment: Alignment.centerLeft, child: brand),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Flexible(child: brand),
+                  if (buildBadge case final badge?) ...<Widget>[
+                    const SizedBox(width: 6.0),
+                    badge,
+                  ],
+                ],
+              ),
+            ),
           ),
         if (searchWidget case final search?) ...<Widget>[
           const SizedBox(width: 6.0),
@@ -266,15 +287,19 @@ class _UiTopChromeBar extends StatelessWidget {
       children: <Widget>[
         brand,
         if (workspaceTrigger case final workspace?) ...<Widget>[
-          const SizedBox(width: 10.0),
+          const SizedBox(width: 18.0),
           workspace,
         ],
+        if (buildBadge case final badge?) ...<Widget>[
+          const SizedBox(width: 10.0),
+          badge,
+        ],
         if (isSearchOpen && searchWidget != null) ...<Widget>[
-          const SizedBox(width: 12.0),
+          const SizedBox(width: 10.0),
           Expanded(child: searchWidget ?? const SizedBox.shrink()),
         ] else ...<Widget>[const Spacer(), ?searchWidget],
         for (final action in trailingActions) ...<Widget>[
-          const SizedBox(width: 8.0),
+          const SizedBox(width: 10.0),
           action,
         ],
       ],

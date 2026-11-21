@@ -76,7 +76,86 @@ void main() {
           isA<IconData>(),
           reason: 'Every ShellLocationStatusKind must resolve an icon',
         );
+        expect(
+          UiV2IconMapper.locationButtonTone(locationStatus),
+          isA<UiButtonTone>(),
+          reason: 'Every ShellLocationStatusKind must resolve a button tone',
+        );
       }
+      expect(
+        UiV2IconMapper.locationButtonTone(ShellLocationStatusKind.found),
+        equals(UiButtonTone.accent),
+        reason: 'Active GPS fix must tint chrome location button in accent',
+      );
+      expect(
+        UiV2IconMapper.locationButtonTone(ShellLocationStatusKind.searching),
+        equals(UiButtonTone.neutral),
+      );
+      expect(
+        UiV2IconMapper.locationButtonTone(ShellLocationStatusKind.unavailable),
+        equals(UiButtonTone.neutral),
+      );
+      expect(
+        UiV2IconMapper.locationButtonTone(ShellLocationStatusKind.disabled),
+        equals(UiButtonTone.neutral),
+      );
+      expect(
+        UiV2IconMapper.locationIcon(ShellLocationStatusKind.found),
+        equals(Icons.my_location_rounded),
+      );
+      expect(
+        UiV2IconMapper.locationIcon(ShellLocationStatusKind.searching),
+        equals(Icons.refresh_rounded),
+      );
+      expect(
+        UiV2IconMapper.locationIcon(ShellLocationStatusKind.unavailable),
+        equals(Icons.location_disabled_rounded),
+      );
+      expect(
+        UiV2IconMapper.locationIcon(ShellLocationStatusKind.disabled),
+        equals(Icons.location_disabled_rounded),
+      );
+
+      expect(
+        UiV2IconMapper.syncIcon(ShellSyncStatusKind.localOnly),
+        equals(Icons.folder_outlined),
+      );
+      expect(
+        UiV2IconMapper.syncIcon(ShellSyncStatusKind.synced),
+        equals(Icons.cloud_done_outlined),
+      );
+      expect(
+        UiV2IconMapper.syncIcon(ShellSyncStatusKind.syncing),
+        equals(Icons.refresh_rounded),
+      );
+      expect(
+        UiV2IconMapper.syncIcon(ShellSyncStatusKind.conflict),
+        equals(Icons.warning_amber_rounded),
+      );
+      expect(
+        UiV2IconMapper.syncIcon(ShellSyncStatusKind.error),
+        equals(Icons.cloud_off_outlined),
+      );
+      expect(
+        UiV2IconMapper.syncButtonTone(ShellSyncStatusKind.localOnly),
+        equals(UiButtonTone.muted),
+      );
+      expect(
+        UiV2IconMapper.syncButtonTone(ShellSyncStatusKind.synced),
+        equals(UiButtonTone.muted),
+      );
+      expect(
+        UiV2IconMapper.syncButtonTone(ShellSyncStatusKind.syncing),
+        equals(UiButtonTone.muted),
+      );
+      expect(
+        UiV2IconMapper.syncButtonTone(ShellSyncStatusKind.conflict),
+        equals(UiButtonTone.warning),
+      );
+      expect(
+        UiV2IconMapper.syncButtonTone(ShellSyncStatusKind.error),
+        equals(UiButtonTone.danger),
+      );
       for (final presetKey in AppThemePresetKey.values) {
         final preset = UiV2IconMapper.themePreset(presetKey);
         expect(

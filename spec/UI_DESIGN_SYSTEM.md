@@ -127,8 +127,8 @@ Use one canonical, non-overlapping viewport width partition (`UiBreakpoints`):
 - **`compact` (`<= 720`):** Hide the persistent rail and present the sidebar as a slide-over drawer (`width = min(300, 92% viewport)`) anchored below the `62px` top chrome bar over a translucent `scrim` backdrop. Selecting any navigation item or tapping the scrim closes the drawer.
 
 ### `U-LAYOUT-003` Top Chrome Bar & Compact Adaptations
-- **Desktop (`> 720`):** Left to right: Brand button (`UiAppLogo` + `TierTask` + optional `DEV` pill), Workspace switcher pill, flexible spacer, Global Search toggle/input, conditional Location Status icon button (shown only when `locationEnabled`), and Sync status button (icon + text label).
-- **Compact (`<= 720`):** Reveal leading `44x44px` menu toggle (swaps `menu`/`x` icons), hide Workspace pill (relocate Workspace card to the top of the drawer), collapse Sync button to icon-only, hide keyboard shortcut hints, and tighten horizontal chrome padding (`8px 10px`, gap `6px`).
+- **Desktop (`> 720`):** Left to right: Brand button (`UiAppLogo` + `TierTask`), Workspace switcher pill (`bg` fill, `workspaces` grid icon + name + `chevrons-up-down` icon), optional inline `DEV` pill, flexible spacer, Global Search toggle/input (`40px` hit target, `18px` icon), conditional Location Status icon button (`40px` hit target, `18px` icon, `accent` tint when fix found, shown only when `locationEnabled`), and Sync status button (`bg` fill, `muted` foreground in neutral states, icon + text label).
+- **Compact (`<= 720`):** Reveal leading `44x44px` menu toggle (swaps `menu`/`x` icons), hide Workspace pill (relocate Workspace card to the top of the drawer), display the optional `DEV` pill beside the `TierTask` brand wordmark when no compact active-label filter is shown, collapse Sync button to an icon-only bordered `bg` pill, hide keyboard shortcut hints, and tighten horizontal chrome padding (`8px 10px`, gap `6px`).
 - **Compact Search Mode:** When Global Search is open on `compact` viewports, hide all sibling chrome controls so the search input expands to `100%` of the top bar width.
 
 ### `U-LAYOUT-004` Inline Active-Label Filter Placement
@@ -158,7 +158,7 @@ Preserve independent scroll positions across in-scope state updates: sidebar scr
 Render the in-app TierTask mark exclusively as three left-aligned stepped horizontal bars in `accent` color on a `22x18` (or `22x22` square) reference grid: each bar is `4px` tall with `2px` corner radius and `3px` vertical gap; bar widths and opacities are `100%` at `1.0`, `75%` at `0.72`, and `50%` at `0.42`. Never revert to the retired squircle-and-checkmark icon inside the app chrome.
 
 ### `U-BRAND-002` Build Profile & Version Chrome
-- Display an inline `DEV` pill (`10px` bold mono, `warningBg`/`warning`/`warningBorder`, `radiusTag`) beside the `TierTask` brand wordmark whenever `AppBuildProfile.isDev` is true.
+- Display an inline `DEV` pill (`10px` bold mono, `warningBg`/`warning`/`warningBorder`, `radiusTag`) immediately after the Workspace switcher pill on desktop (`> 720px`) and beside the `TierTask` brand wordmark on compact (`<= 720px`) whenever `AppBuildProfile.isDev` is true.
 - Pin the monospace SemVer build string (`Version X.Y.Z` at full opacity + `+<hash>` at `0.65` opacity) to the bottom of the sidebar/drawer separated by a top `1px` `line` border.
 
 ### `U-BRAND-003` Offline Stroke Icon Standard

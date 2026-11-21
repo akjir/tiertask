@@ -240,30 +240,31 @@ class _TierTaskUiGalleryAppState extends State<TierTaskUiGalleryApp> {
               style: tokens.typography.brand.copyWith(color: colors.ink),
             ),
           ),
-          if (_showDevPill) ...<Widget>[
-            const SizedBox(width: 6.0),
-            const UiPill(
-              label: 'DEV',
-              variant: UiPillVariant.badge,
-              tone: UiPillTone.warning,
-              isMono: true,
-            ),
-          ],
         ],
       ),
       workspaceTrigger: UiButton(
         label: 'Gallery Workspace',
-        trailingIcon: Icons.expand_more_rounded,
+        leadingIcon: Icons.grid_view_outlined,
+        trailingIcon: Icons.unfold_more_rounded,
         variant: UiButtonVariant.secondary,
         density: UiButtonDensity.chrome,
         onPressed: () {},
       ),
+      buildBadge: _showDevPill
+          ? const UiPill(
+              label: 'DEV',
+              variant: UiPillVariant.badge,
+              tone: UiPillTone.warning,
+              isMono: true,
+            )
+          : null,
       trailingActions: <Widget>[
         UiButton(
           label: _viewport == _PreviewViewport.compact ? null : 'Synced',
           leadingIcon: Icons.cloud_done_outlined,
           variant: UiButtonVariant.secondary,
           density: UiButtonDensity.chrome,
+          tone: UiButtonTone.muted,
           tooltip: 'Sync status',
           onPressed: () => setState(() => _showFloatingToast = true),
         ),

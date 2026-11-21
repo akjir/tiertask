@@ -61,6 +61,9 @@ enum UiButtonTone {
   /// Default variant tinting.
   neutral,
 
+  /// Muted low-emphasis foreground on bordered secondary or chrome buttons.
+  muted,
+
   /// Accent-tinted foreground and active border.
   accent,
 
@@ -181,10 +184,15 @@ class _UiButtonState extends State<UiButton>
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
+    final surfaceLevel = UiSurfaceScope.of(context);
     final enabled = widget.onPressed != null;
     final height = _resolveHeight(tokens);
     final radius = widget.borderRadius ?? _resolveRadius(tokens);
-    final style = _resolveColors(tokens, enabled: enabled);
+    final style = _resolveColors(
+      tokens,
+      surfaceLevel: surfaceLevel,
+      enabled: enabled,
+    );
     final content = _UiButtonSurface(
       height: height,
       minWidth: widget.variant == UiButtonVariant.icon ? height : 0.0,
@@ -262,6 +270,7 @@ class _UiButtonState extends State<UiButton>
   /// Resolves foreground, background, and border colors for the current state.
   _UiButtonPalette _resolveColors(
     UiThemeTokens tokens, {
+    required UiSurfaceLevel surfaceLevel,
     required bool enabled,
   }) {
     final colors = tokens.colors;
@@ -287,6 +296,9 @@ class _UiButtonState extends State<UiButton>
         foreground: colors.danger,
       );
     }
+    final usesChromeInsetFill =
+        widget.density == UiButtonDensity.chrome &&
+        surfaceLevel != UiSurfaceLevel.insetWell;
     return switch (widget.variant) {
       UiButtonVariant.primary => _UiButtonPalette(
         background: colors.accent,
@@ -294,7 +306,9 @@ class _UiButtonState extends State<UiButton>
         foreground: colors.onAccent,
       ),
       UiButtonVariant.secondary => _UiButtonPalette(
-        background: hovered ? colors.soft : colors.panel,
+        background: hovered
+            ? colors.soft
+            : (usesChromeInsetFill ? colors.bg : colors.panel),
         border: hovered
             ? colors.accent
             : (widget.tone == UiButtonTone.accent
@@ -302,7 +316,7 @@ class _UiButtonState extends State<UiButton>
                   : colors.line),
         foreground: hovered || widget.tone == UiButtonTone.accent
             ? colors.accent
-            : colors.ink,
+            : (widget.tone == UiButtonTone.muted ? colors.muted : colors.ink),
       ),
       UiButtonVariant.text => _UiButtonPalette(
         background: hovered ? colors.soft : Colors.transparent,
@@ -328,6 +342,19 @@ class _UiButtonState extends State<UiButton>
     };
   }
 
+  /// Resolves label font weight matching variant and semantic tone.
+  FontWeight _resolveFontWeight() {
+    if (widget.variant == UiButtonVariant.primary ||
+        widget.tone == UiButtonTone.warning ||
+        widget.tone == UiButtonTone.danger) {
+      return FontWeight.w600;
+    }
+    if (widget.tone == UiButtonTone.muted) {
+      return FontWeight.w400;
+    }
+    return FontWeight.w500;
+  }
+
   /// Resolves minimum button height from [UiButtonDensity].
   double _resolveHeight(UiThemeTokens tokens) {
     final spacing = tokens.spacing;
@@ -344,6 +371,16 @@ class _UiButtonState extends State<UiButton>
   /// Resolves icon glyph dimension matching `U-BRAND-003`.
   double _resolveIconSize(UiThemeTokens tokens) {
     final spacing = tokens.spacing;
+    if (widget.variant == UiButtonVariant.icon) {
+      return switch (widget.density) {
+        UiButtonDensity.compact ||
+        UiButtonDensity.dense ||
+        UiButtonDensity.sidebarDesktop => spacing.iconXs,
+        UiButtonDensity.chrome => spacing.iconSm,
+        UiButtonDensity.standard ||
+        UiButtonDensity.mobileTouch => spacing.iconMd,
+      };
+    }
     return switch (widget.density) {
       UiButtonDensity.compact ||
       UiButtonDensity.dense ||
@@ -397,10 +434,7 @@ class _UiButtonState extends State<UiButton>
       UiButtonDensity.standard ||
       UiButtonDensity.mobileTouch => tokens.typography.control,
     };
-    final weight = widget.variant == UiButtonVariant.primary
-        ? FontWeight.w600
-        : FontWeight.w500;
-    return base.copyWith(color: foreground, fontWeight: weight);
+    return base.copyWith(color: foreground, fontWeight: _resolveFontWeight());
   }
 
   /// Starts, pauses, or updates the lazily allocated loading rotation animation controller.
@@ -610,7 +644,7 @@ class _UiButtonContent extends StatelessWidget {
             ),
           ),
         if (trailingIcon case final trailing?) ...<Widget>[
-          const SizedBox(width: 5.0),
+          const SizedBox(width: 6.0),
           ExcludeSemantics(
             child: Icon(trailing, size: iconSize, color: foregroundColor),
           ),

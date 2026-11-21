@@ -121,7 +121,6 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
         onKeyEvent: _handleRootKeyEvent,
         child: UiAdaptiveAppShell(
           brand: _ShellBrandButton(
-            isDevBuild: chrome.isDevBuild,
             onPressed: () => ref
                 .read(appShellControllerProvider.notifier)
                 .openView(ShellView.tasks),
@@ -131,6 +130,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
             workspaceName: chrome.activeWorkspaceName,
             onPressed: () => unawaited(showWorkspacesModal(context)),
           ),
+          buildBadge: chrome.isDevBuild ? const _ShellDevBadge() : null,
           searchWidget: _ShellSearchControl(
             isOpen: shell.searchOpen,
             isCompact: isCompact,
@@ -184,7 +184,8 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
         UiButton(
           key: const ValueKey<String>('chrome_location_button'),
           variant: UiButtonVariant.icon,
-          density: UiButtonDensity.chrome,
+          density: UiButtonDensity.standard,
+          tone: UiV2IconMapper.locationButtonTone(chrome.locationStatusKind),
           leadingIcon: UiV2IconMapper.locationIcon(chrome.locationStatusKind),
           isLoading:
               chrome.locationStatusKind == ShellLocationStatusKind.searching,
@@ -193,7 +194,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
         ),
       UiButton(
         key: const ValueKey<String>('chrome_sync_button'),
-        variant: isCompact ? UiButtonVariant.icon : UiButtonVariant.secondary,
+        variant: UiButtonVariant.secondary,
         density: UiButtonDensity.chrome,
         tone: UiV2IconMapper.syncButtonTone(chrome.syncStatusKind),
         leadingIcon: UiV2IconMapper.syncIcon(chrome.syncStatusKind),
@@ -443,13 +444,10 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
   }
 }
 
-/// Clickable brand button rendering `UiAppLogo`, `TierTask`, and optional inline `DEV` pill (`U-BRAND-001`..`002`).
+/// Clickable brand button rendering `UiAppLogo` and the `TierTask` wordmark (`U-BRAND-001`).
 class _ShellBrandButton extends StatelessWidget {
   /// Creates a [_ShellBrandButton].
-  const _ShellBrandButton({required this.isDevBuild, required this.onPressed});
-
-  /// Whether the inline `DEV` pill is shown beside the wordmark.
-  final bool isDevBuild;
+  const _ShellBrandButton({required this.onPressed});
 
   /// Callback returning to the primary Tasks view.
   final VoidCallback onPressed;
@@ -463,29 +461,43 @@ class _ShellBrandButton extends StatelessWidget {
       onTap: onPressed,
       borderRadius: BorderRadius.circular(tokens.radii.md),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+        padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4.0),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             const UiAppLogo(size: 22.0),
             const SizedBox(width: 9.0),
-            Text(
-              localizations.appTitle,
-              style: tokens.typography.brand.copyWith(color: tokens.colors.ink),
-            ),
-            if (isDevBuild) ...<Widget>[
-              const SizedBox(width: 7.0),
-              UiPill(
-                key: const ValueKey<String>('chrome_dev_pill'),
-                label: localizations.devBuildBadge,
-                variant: UiPillVariant.badge,
-                tone: UiPillTone.warning,
-                isMono: true,
+            Flexible(
+              child: Text(
+                localizations.appTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.typography.brand.copyWith(
+                  color: tokens.colors.ink,
+                ),
               ),
-            ],
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Inline warning-toned `DEV` build profile badge rendered beside the workspace selector (`U-BRAND-002`).
+class _ShellDevBadge extends StatelessWidget {
+  /// Creates a [_ShellDevBadge].
+  const _ShellDevBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return UiPill(
+      key: const ValueKey<String>('chrome_dev_pill'),
+      label: localizations.devBuildBadge,
+      variant: UiPillVariant.badge,
+      tone: UiPillTone.warning,
+      isMono: true,
     );
   }
 }
@@ -560,9 +572,9 @@ class _WorkspaceChromeTrigger extends StatelessWidget {
       key: const ValueKey<String>('chrome_workspace_button'),
       variant: UiButtonVariant.secondary,
       density: UiButtonDensity.chrome,
-      leadingIcon: Icons.folder_outlined,
+      leadingIcon: Icons.grid_view_outlined,
       label: workspaceName,
-      trailingIcon: Icons.keyboard_arrow_down_rounded,
+      trailingIcon: Icons.unfold_more_rounded,
       tooltip: localizations.tooltipManageWorkspaces,
       onPressed: onPressed,
     );
@@ -591,9 +603,9 @@ class _CompactDrawerWorkspaceCard extends StatelessWidget {
       variant: UiButtonVariant.secondary,
       density: UiButtonDensity.chrome,
       isFullWidth: true,
-      leadingIcon: Icons.folder_outlined,
+      leadingIcon: Icons.grid_view_outlined,
       label: workspaceName,
-      trailingIcon: Icons.keyboard_arrow_down_rounded,
+      trailingIcon: Icons.unfold_more_rounded,
       tooltip: localizations.tooltipManageWorkspaces,
       onPressed: onPressed,
     );
@@ -641,7 +653,7 @@ class _ShellSearchControl extends StatelessWidget {
       return UiButton(
         key: const ValueKey<String>('chrome_search_open_button'),
         variant: UiButtonVariant.icon,
-        density: UiButtonDensity.chrome,
+        density: UiButtonDensity.standard,
         leadingIcon: Icons.search_rounded,
         tooltip: localizations.tooltipSearch,
         onPressed: onOpen,

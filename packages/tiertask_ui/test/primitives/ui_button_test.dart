@@ -208,5 +208,139 @@ void main() {
         expect(rotationFinder, findsOneWidget);
       },
     );
+
+    testWidgets(
+      'uses bg surface alternation on chrome secondary buttons, muted tone styling, and 18px standard icon buttons across all presets',
+      (tester) async {
+        final presetTokens = <UiThemeTokens>[
+          UiThemePresets.calm.light,
+          UiThemePresets.calm.dark,
+          UiThemePresets.plumUmber.light,
+          UiThemePresets.plumUmber.dark,
+        ];
+
+        for (final tokens in presetTokens) {
+          await pumpUiWidget(
+            tester,
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                UiButton(
+                  key: const ValueKey<String>('chrome_workspace'),
+                  label: 'Work',
+                  leadingIcon: Icons.grid_view_outlined,
+                  trailingIcon: Icons.unfold_more_rounded,
+                  variant: UiButtonVariant.secondary,
+                  density: UiButtonDensity.chrome,
+                  onPressed: () {},
+                ),
+                UiButton(
+                  key: const ValueKey<String>('chrome_sync_muted'),
+                  label: 'Synced',
+                  leadingIcon: Icons.cloud_done_outlined,
+                  variant: UiButtonVariant.secondary,
+                  density: UiButtonDensity.chrome,
+                  tone: UiButtonTone.muted,
+                  onPressed: () {},
+                ),
+                UiSurfaceScope(
+                  level: UiSurfaceLevel.insetWell,
+                  child: UiButton(
+                    key: const ValueKey<String>('inset_chrome_btn'),
+                    label: 'Inset',
+                    variant: UiButtonVariant.secondary,
+                    density: UiButtonDensity.chrome,
+                    onPressed: () {},
+                  ),
+                ),
+                UiButton(
+                  key: const ValueKey<String>('standard_icon_accent'),
+                  leadingIcon: Icons.my_location_rounded,
+                  variant: UiButtonVariant.icon,
+                  density: UiButtonDensity.standard,
+                  tone: UiButtonTone.accent,
+                  onPressed: () {},
+                ),
+              ],
+            ),
+            tokens: tokens,
+          );
+          await tester.pumpAndSettle();
+
+          final workspaceContainer = tester.widget<AnimatedContainer>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('chrome_workspace')),
+              matching: find.byType(AnimatedContainer),
+            ),
+          );
+          final workspaceBox = workspaceContainer.decoration as BoxDecoration?;
+          expect(
+            workspaceBox?.color,
+            equals(tokens.colors.bg),
+            reason: 'Chrome secondary button must alternate to bg fill on panel chrome',
+          );
+          final workspaceText = tester.widget<Text>(find.text('Work'));
+          expect(
+            workspaceText.style?.color,
+            equals(tokens.colors.ink),
+            reason: 'Workspace chrome button label must use ink foreground',
+          );
+
+          final syncContainer = tester.widget<AnimatedContainer>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('chrome_sync_muted')),
+              matching: find.byType(AnimatedContainer),
+            ),
+          );
+          final syncBox = syncContainer.decoration as BoxDecoration?;
+          expect(
+            syncBox?.color,
+            equals(tokens.colors.bg),
+            reason: 'Muted chrome sync button must use bg fill',
+          );
+          final syncText = tester.widget<Text>(find.text('Synced'));
+          expect(
+            syncText.style?.color,
+            equals(tokens.colors.muted),
+            reason: 'Muted chrome sync button label must use muted foreground',
+          );
+          expect(
+            syncText.style?.fontWeight,
+            equals(FontWeight.w400),
+            reason: 'Muted chrome sync button label must use w400 weight',
+          );
+
+          final insetContainer = tester.widget<AnimatedContainer>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('inset_chrome_btn')),
+              matching: find.byType(AnimatedContainer),
+            ),
+          );
+          final insetBox = insetContainer.decoration as BoxDecoration?;
+          expect(
+            insetBox?.color,
+            equals(tokens.colors.panel),
+            reason: 'Chrome secondary button inside insetWell must re-elevate to panel',
+          );
+
+          final accentIcon = tester.widget<Icon>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('standard_icon_accent')),
+              matching: find.byType(Icon),
+            ),
+          );
+          expect(
+            accentIcon.size,
+            equals(tokens.spacing.iconMd),
+            reason: 'Standard icon button must render 18px iconMd glyph',
+          );
+          expect(
+            accentIcon.color,
+            equals(tokens.colors.accent),
+            reason: 'Accent icon button must render accent foreground color',
+          );
+        }
+      },
+    );
   });
 }

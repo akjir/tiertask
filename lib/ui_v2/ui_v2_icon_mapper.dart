@@ -66,13 +66,23 @@ class UiV2IconMapper {
     };
   }
 
+  /// Maps presentation [ShellLocationStatusKind] to its chrome [UiButtonTone].
+  static UiButtonTone locationButtonTone(ShellLocationStatusKind status) {
+    return switch (status) {
+      ShellLocationStatusKind.found => UiButtonTone.accent,
+      ShellLocationStatusKind.disabled ||
+      ShellLocationStatusKind.searching ||
+      ShellLocationStatusKind.unavailable => UiButtonTone.neutral,
+    };
+  }
+
   /// Maps presentation [ShellLocationStatusKind] to its outline [IconData].
   static IconData locationIcon(ShellLocationStatusKind status) {
     return switch (status) {
-      ShellLocationStatusKind.disabled => Icons.location_off_outlined,
-      ShellLocationStatusKind.searching => Icons.gps_not_fixed_rounded,
+      ShellLocationStatusKind.disabled ||
+      ShellLocationStatusKind.unavailable => Icons.location_disabled_rounded,
+      ShellLocationStatusKind.searching => Icons.refresh_rounded,
       ShellLocationStatusKind.found => Icons.my_location_rounded,
-      ShellLocationStatusKind.unavailable => Icons.location_searching_rounded,
     };
   }
 
@@ -103,7 +113,7 @@ class UiV2IconMapper {
     return switch (status) {
       ShellSyncStatusKind.localOnly ||
       ShellSyncStatusKind.synced ||
-      ShellSyncStatusKind.syncing => UiButtonTone.neutral,
+      ShellSyncStatusKind.syncing => UiButtonTone.muted,
       ShellSyncStatusKind.conflict => UiButtonTone.warning,
       ShellSyncStatusKind.error => UiButtonTone.danger,
     };
@@ -112,11 +122,11 @@ class UiV2IconMapper {
   /// Maps presentation [ShellSyncStatusKind] to its outline [IconData].
   static IconData syncIcon(ShellSyncStatusKind status) {
     return switch (status) {
-      ShellSyncStatusKind.localOnly => Icons.cloud_off_outlined,
+      ShellSyncStatusKind.localOnly => Icons.folder_outlined,
       ShellSyncStatusKind.synced => Icons.cloud_done_outlined,
-      ShellSyncStatusKind.syncing => Icons.sync_rounded,
+      ShellSyncStatusKind.syncing => Icons.refresh_rounded,
       ShellSyncStatusKind.conflict => Icons.warning_amber_rounded,
-      ShellSyncStatusKind.error => Icons.error_outline_rounded,
+      ShellSyncStatusKind.error => Icons.cloud_off_outlined,
     };
   }
 

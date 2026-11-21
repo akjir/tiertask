@@ -305,5 +305,185 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'matches prototype top chrome styling: DEV badge after workspace pill, bg chrome pills, workspaces/chevron icons, and accent GPS icon',
+      (tester) async {
+        await pumpV2Widget(
+          tester,
+          const TierTaskShellScreen(),
+          board: createSampleBoard(),
+          config: const WebDavConfig(
+            language: AppLanguage.english,
+            locationEnabled: true,
+            storageMode: StorageMode.both,
+            serverUrl: 'https://cloud.example.com',
+            username: 'alice',
+            password: 'secret',
+          ),
+          buildProfile: AppBuildProfile.dev,
+          themeMode: ThemeMode.dark,
+          locationFix: const LocationFix(
+            latitude: 47.1204,
+            longitude: 8.5173,
+            source: LocationSource.gps,
+            placeName: 'Riverdale',
+          ),
+          surfaceSize: const Size(1280, 860),
+        );
+
+        final tokens = UiThemePresets.calm.dark;
+        final brandRect = tester.getRect(
+          find.byKey(const ValueKey<String>('chrome_brand_button')),
+        );
+        final workspaceFinder = find.byKey(
+          const ValueKey<String>('chrome_workspace_button'),
+        );
+        final workspaceRect = tester.getRect(workspaceFinder);
+        final devRect = tester.getRect(
+          find.byKey(const ValueKey<String>('chrome_dev_pill')),
+        );
+
+        expect(
+          workspaceRect.left,
+          greaterThan(brandRect.right),
+          reason: 'Workspace selector must sit to the right of TierTask brand',
+        );
+        expect(
+          devRect.left,
+          greaterThan(workspaceRect.right),
+          reason: 'DEV pill must sit immediately after workspace selector',
+        );
+
+        final workspaceButton = tester.widget<UiButton>(workspaceFinder);
+        expect(
+          workspaceButton.leadingIcon,
+          equals(Icons.grid_view_outlined),
+          reason: 'Workspace pill must use 2x2 grid workspaces icon',
+        );
+        expect(
+          workspaceButton.trailingIcon,
+          equals(Icons.unfold_more_rounded),
+          reason: 'Workspace pill must use up-down double chevron icon',
+        );
+        final workspaceContainer = tester.widget<AnimatedContainer>(
+          find.descendant(
+            of: workspaceFinder,
+            matching: find.byType(AnimatedContainer),
+          ),
+        );
+        expect(
+          (workspaceContainer.decoration as BoxDecoration?)?.color,
+          equals(tokens.colors.bg),
+          reason: 'Workspace pill must fill with bg token against panel chrome',
+        );
+
+        final syncFinder = find.byKey(
+          const ValueKey<String>('chrome_sync_button'),
+        );
+        final syncButton = tester.widget<UiButton>(syncFinder);
+        expect(
+          syncButton.tone,
+          equals(UiButtonTone.muted),
+          reason: 'Synced chrome pill must use muted foreground tone',
+        );
+        final syncContainer = tester.widget<AnimatedContainer>(
+          find.descendant(
+            of: syncFinder,
+            matching: find.byType(AnimatedContainer),
+          ),
+        );
+        expect(
+          (syncContainer.decoration as BoxDecoration?)?.color,
+          equals(tokens.colors.bg),
+          reason: 'Synced chrome pill must fill with bg token',
+        );
+        final syncText = tester.widget<Text>(find.text('Synced'));
+        expect(syncText.style?.color, equals(tokens.colors.muted));
+
+        final locationFinder = find.byKey(
+          const ValueKey<String>('chrome_location_button'),
+        );
+        final locationButton = tester.widget<UiButton>(locationFinder);
+        expect(
+          locationButton.density,
+          equals(UiButtonDensity.standard),
+          reason: 'Chrome location icon button must use 40px standard density',
+        );
+        expect(
+          locationButton.tone,
+          equals(UiButtonTone.accent),
+          reason: 'Found GPS status must tint chrome location button accent',
+        );
+        final locationIcon = tester.widget<Icon>(
+          find.descendant(of: locationFinder, matching: find.byType(Icon)),
+        );
+        expect(locationIcon.size, equals(tokens.spacing.iconMd));
+        expect(locationIcon.color, equals(tokens.colors.accent));
+
+        final searchFinder = find.byKey(
+          const ValueKey<String>('chrome_search_open_button'),
+        );
+        final searchButton = tester.widget<UiButton>(searchFinder);
+        expect(searchButton.density, equals(UiButtonDensity.standard));
+        final searchIcon = tester.widget<Icon>(
+          find.descendant(of: searchFinder, matching: find.byType(Icon)),
+        );
+        expect(searchIcon.size, equals(tokens.spacing.iconMd));
+      },
+    );
+
+    testWidgets(
+      'preserves compact chrome sync bordered pill, compact DEV placement, and drawer workspace icons',
+      (tester) async {
+        await pumpV2Widget(
+          tester,
+          const TierTaskShellScreen(),
+          board: createSampleBoard(),
+          config: const WebDavConfig(
+            language: AppLanguage.english,
+            locationEnabled: true,
+            storageMode: StorageMode.both,
+            serverUrl: 'https://cloud.example.com',
+            username: 'alice',
+            password: 'secret',
+          ),
+          buildProfile: AppBuildProfile.dev,
+          themeMode: ThemeMode.dark,
+          surfaceSize: const Size(390, 844),
+        );
+
+        final tokens = UiThemePresets.calm.dark;
+        expect(
+          find.byKey(const ValueKey<String>('chrome_dev_pill')),
+          findsOneWidget,
+        );
+        final syncFinder = find.byKey(
+          const ValueKey<String>('chrome_sync_button'),
+        );
+        final syncButton = tester.widget<UiButton>(syncFinder);
+        expect(syncButton.variant, equals(UiButtonVariant.secondary));
+        expect(syncButton.label, isNull);
+        final syncContainer = tester.widget<AnimatedContainer>(
+          find.descendant(
+            of: syncFinder,
+            matching: find.byType(AnimatedContainer),
+          ),
+        );
+        expect(
+          (syncContainer.decoration as BoxDecoration?)?.color,
+          equals(tokens.colors.bg),
+        );
+
+        // Open compact drawer and check drawer workspace card icons.
+        await tester.tap(find.byTooltip('Open menu'));
+        await tester.pumpAndSettle();
+        final drawerWorkspace = tester.widget<UiButton>(
+          find.byKey(const ValueKey<String>('drawer_workspace_button')),
+        );
+        expect(drawerWorkspace.leadingIcon, equals(Icons.grid_view_outlined));
+        expect(drawerWorkspace.trailingIcon, equals(Icons.unfold_more_rounded));
+      },
+    );
   });
 }

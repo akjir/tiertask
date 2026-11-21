@@ -233,7 +233,7 @@ class _UiColorWheelState extends State<UiColorWheel> {
               label: widget.customButtonLabel,
               leadingIcon: Icons.palette_outlined,
               variant: UiButtonVariant.secondary,
-              density: UiButtonDensity.chrome,
+              density: UiButtonDensity.compact,
               onPressed: widget.enabled ? _openWheelModal : null,
             ),
           ],
