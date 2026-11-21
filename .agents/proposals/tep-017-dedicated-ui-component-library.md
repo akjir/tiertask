@@ -1,7 +1,7 @@
 ---
 id: TEP-017
 title: Phase 2 Dedicated UI Component Library (packages/tiertask_ui), Theme Presets, Gallery App, and Multi-Package Tooling
-status: concept
+status: completed
 type: architecture
 created: 2026-11-21
 updated: 2026-11-21
@@ -248,7 +248,7 @@ Non-input interactive primitives (`UiButton`, `UiPill`, `UiSegmentedControl`, `U
    - Kind specifics:
      - `text` / `multiline`: flat `1px` bordered `TextField` switching border to `accent` on focus, optional single clear button (`showClearButton: true`, `clearTooltip`).
      - `password`: built-in `eye`/`eye-off` visibility toggle (`showPasswordTooltip` / `hidePasswordTooltip`).
-     - `select`: flat `1px` bordered focus-aware container wrapping `DropdownButtonHideUnderline` + `DropdownButton<T>` (no Material underline; supports `40px` standard, `34px` inline filter, and `44px` / `radiusTierSelect (9px)` compact tier select via density/radius parameters).
+     - `select`: flat `1px` bordered focus-aware container wrapping `DropdownButtonHideUnderline` + `DropdownButton<String>` backed by `UiSelectOption` (no Material underline; keeps `UiField` non-generic under `strict-inference`; supports `40px` standard, `34px` inline filter, and `44px` / `radiusTierSelect (9px)` compact tier select via `height`/`borderRadius` parameters).
      - `dateTime`: tap-to-pick bordered display field with formatted value, calendar/clock icon, optional clear button, and `onTap` callback so Phase 3 invokes platform/localized date-time pickers with uniform chrome (`U-COMP-002`).
      - `search`: composite focus-within bordered container (`chrome-search`, sidebar filter, picker search) with leading search icon, borderless inner `TextField`, single clear `x` button, and optional compact height (`36px`/`32px`) (`U-A11Y-001`).
      - `readOnlyDisplay`: flat selectable monospace readout well (`bg` or `panel` via `UiSurfaceScope`).
@@ -349,24 +349,36 @@ Develop every module via strict Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-M
 ## Part 3: Implementation Record & Tasks
 
 ### 3.1 Task Breakdown
-- [ ] Review and finalize `TEP-017` and advance status from `concept` to `planned`.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
-- [ ] Extend `.agents/scripts/tiertask_dev.py` (with Red-Green TDD in `.agents/scripts/tests/test_tiertask_dev.py`) and root `analysis_options.yaml` for `packages/tiertask_ui/` and `packages/tiertask_ui/example/` multi-package support.
-- [ ] Scaffold `packages/tiertask_ui/` and `packages/tiertask_ui/example/` (`pubspec.yaml`, `analysis_options.yaml`, `lib/tiertask_ui.dart`, `test/test_helpers.dart`, minimal `example/linux/` runner) and run `flutter pub get` in both `packages/tiertask_ui/` and `packages/tiertask_ui/example/`.
-- [ ] Implement Layer 1 (`tokens/`: 7 files) with Red-Green-Refactor TDD tests (including automated WCAG AA contrast verification across all 17 pairs and breakpoint boundary tests).
-- [ ] Implement Layer 2 (`primitives/`: 8 widgets) with Red-Green-Refactor TDD widget tests across all variants, densities, tones, focus rings, input focus borders, and `UiSurfaceScope` surface alternation.
-- [ ] Implement Layer 3 (`layout/`: 4 adaptive layouts) with Red-Green-Refactor TDD widget tests across `390 / 720 / 721 / 760 / 820 / 821 / 1280` viewports.
-- [ ] Implement Layer 4 (`components/`: 5 composites) with Red-Green-Refactor TDD widget tests covering focus trapping, keyboard navigation, non-swallowing popovers, bottom-sheet hygiene, and HSV wheel interaction.
-- [ ] Build `packages/tiertask_ui/example/` runnable interactive gallery app and passing smoke tests.
-- [ ] Update Parts 1 and 2 if implementation refines any API detail.
-- [ ] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and `python3 -m unittest discover -s .agents/scripts/tests -v`.
-- [ ] Follow **`update-documentation`** to synchronize `ARCHITECTURE.md` and `AGENTS.md` (skip `CHANGELOG.md` because `packages/tiertask_ui/` is internal infrastructure not yet user-facing until Phase 3 cutover).
-- [ ] Set `status: review`, update `BOARD.md`, and request user approval.
-- [ ] After user approval, set `status: completed`, update `BOARD.md`, check off Phase 2 in `TEP-015`, and list delivered artifacts in Part 3.3.
+- [x] Review and finalize `TEP-017` and advance status from `concept` to `planned`.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --fast` to confirm a clean baseline.
+- [x] Extend `.agents/scripts/tiertask_dev.py` (with Red-Green TDD in `.agents/scripts/tests/test_tiertask_dev.py`) and root `analysis_options.yaml` for `packages/tiertask_ui/` and `packages/tiertask_ui/example/` multi-package support.
+- [x] Scaffold `packages/tiertask_ui/` and `packages/tiertask_ui/example/` (`pubspec.yaml`, `analysis_options.yaml`, `lib/tiertask_ui.dart`, `test/test_helpers.dart`, minimal `example/linux/` runner) and run `flutter pub get` in both `packages/tiertask_ui/` and `packages/tiertask_ui/example/`.
+- [x] Implement Layer 1 (`tokens/`: 7 files) with Red-Green-Refactor TDD tests (including automated WCAG AA contrast verification across all 17 pairs and breakpoint boundary tests).
+- [x] Implement Layer 2 (`primitives/`: 8 widgets) with Red-Green-Refactor TDD widget tests across all variants, densities, tones, focus rings, input focus borders, and `UiSurfaceScope` surface alternation.
+- [x] Implement Layer 3 (`layout/`: 4 adaptive layouts) with Red-Green-Refactor TDD widget tests across `390 / 720 / 721 / 760 / 820 / 821 / 1280` viewports.
+- [x] Implement Layer 4 (`components/`: 5 composites) with Red-Green-Refactor TDD widget tests covering focus trapping, keyboard navigation, non-swallowing popovers, bottom-sheet hygiene, and HSV wheel interaction.
+- [x] Build `packages/tiertask_ui/example/` runnable interactive gallery app and passing smoke tests.
+- [x] Update Parts 1 and 2 if implementation refines any API detail.
+- [x] Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` and `python3 -m unittest discover -s .agents/scripts/tests -v`.
+- [x] Follow **`update-documentation`** to synchronize `ARCHITECTURE.md` and `AGENTS.md` (skip `CHANGELOG.md` because `packages/tiertask_ui/` is internal infrastructure not yet user-facing until Phase 3 cutover).
+- [x] Set `status: review`, update `BOARD.md`, and request user approval.
+- [x] After user approval, set `status: completed`, update `BOARD.md`, check off Phase 2 in `TEP-015`, and list delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 - **2026-11-21:** Drafted Phase 2 child proposal `TEP-017` under [`TEP-015`](tep-015-ui-architecture-and-design-system-roadmap.md) aligned with [`spec/UI_DESIGN_SYSTEM.md`](../../spec/UI_DESIGN_SYSTEM.md) and the signed-off `.agents/prototypes/ui_v2/` concept.
 - **2026-11-21:** Completed `/spec-verification-loop` audit of `TEP-017`: locked strictly minimal 17-widget reuse catalog with full Phase 3 coverage matrix, moved `UiSurfaceScope` to Layer 1 (`ui_theme_tokens.dart`) with unconditional `UiCard.inset` surface re-elevation, aligned all token/primitive/layout/composite contracts with `spec/UI_DESIGN_SYSTEM.md` and `P-LAZY-LISTS`, and closed multi-package `tiertask_dev.py` tooling gaps.
+- **2026-11-21:** Implemented Phase 2 end to end with Red-Green-Refactor TDD: extended `.agents/scripts/tiertask_dev.py` (17 unit tests) and root `analysis_options.yaml`, built `packages/tiertask_ui/` (7 token leaves, 8 primitives, 4 layouts, 5 composites, 52 isolated tests covering all 68 WCAG AA contrast pairs and breakpoint/focus/keyboard invariants), built runnable `packages/tiertask_ui/example/` Linux gallery app with smoke tests, synchronized `ARCHITECTURE.md` and `AGENTS.md`, and advanced `TEP-017` to `review`. Kept `UiField` non-generic with `UiSelectOption` (`String` values) for clean `strict-inference` ergonomics.
+- **2026-11-21:** User approved `TEP-017`; finalized `status: completed`, moved entry to `Completed Proposals` in `BOARD.md`, and checked off Phase 2 in `TEP-015`.
 
 ### 3.3 Delivered Artifacts
-*(Complete upon approval)*
+- **Component Library Package (`packages/tiertask_ui/`):**
+  - Package configuration and public barrel: `packages/tiertask_ui/pubspec.yaml`, `packages/tiertask_ui/analysis_options.yaml`, `packages/tiertask_ui/lib/tiertask_ui.dart`.
+  - Layer 1 (`tokens/`): `ui_breakpoints.dart`, `ui_color_tokens.dart`, `ui_focus_tokens.dart`, `ui_radius_tokens.dart`, `ui_spacing_tokens.dart`, `ui_theme_tokens.dart`, `ui_typography_tokens.dart`.
+  - Layer 2 (`primitives/`): `ui_app_logo.dart`, `ui_banner.dart`, `ui_button.dart`, `ui_card.dart`, `ui_field.dart`, `ui_pill.dart`, `ui_segmented_control.dart`, `ui_toggle_row.dart`.
+  - Layer 3 (`layout/`): `ui_adaptive_app_shell.dart`, `ui_page_header.dart`, `ui_responsive_grid.dart`, `ui_sidebar_section.dart`.
+  - Layer 4 (`components/`): `ui_color_wheel.dart`, `ui_dialog_frame.dart`, `ui_ordered_item_list.dart`, `ui_quick_composer.dart`, `ui_searchable_picker.dart`.
+  - Isolated test suite (`packages/tiertask_ui/test/`): `test_helpers.dart` plus 20 mirrored unit/widget suites (`52` passing tests including all 68 WCAG AA contrast pairs).
+- **Interactive Gallery App (`packages/tiertask_ui/example/`):**
+  - `pubspec.yaml`, `analysis_options.yaml`, `linux/` desktop runner, `lib/main.dart`, `lib/gallery_sections.dart`, and `test/gallery_smoke_test.dart`.
+- **Multi-Package Tooling & Documentation:**
+  - `analysis_options.yaml` (`packages/**` exclude), `.agents/scripts/tiertask_dev.py`, `.agents/scripts/tests/test_tiertask_dev.py` (`17` passing tests), `ARCHITECTURE.md`, and `AGENTS.md`.

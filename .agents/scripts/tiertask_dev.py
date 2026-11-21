@@ -50,6 +50,11 @@ GPL_HEADER = "\n".join(GPL_HEADER_LINES) + "\n"
 
 MAX_ARCH_ROW_WORDS = 65
 STAMP_REL_PATH = Path(".dart_tool/tiertask_verify_stamp.json")
+UI_PACKAGE_REL = Path("packages/tiertask_ui")
+UI_EXAMPLE_REL = Path("packages/tiertask_ui/example")
+UI_BARREL_REL = "packages/tiertask_ui/lib/tiertask_ui.dart"
+_SKIP_TREE_DIRS = frozenset({"build", "ephemeral", "coverage", "__pycache__"})
+_COLLAPSED_PLATFORM_DIRS = frozenset({"android", "linux", "windows"})
 
 _MD_HEADING_RE = re.compile(r"^(#{1,4})\s+(.+?)\s*$")
 _DART_TYPE_RE = re.compile(
@@ -60,7 +65,10 @@ _DART_PROVIDER_RE = re.compile(
     r"^final\s+([A-Za-z_][A-Za-z0-9_]*Provider)\s*=",
 )
 _DART_IMPORT_RE = re.compile(r"^\s*import\s+['\"]([^'\"]+)['\"]")
+_DART_EXPORT_RE = re.compile(r"^\s*export\s+['\"]([^'\"]+)['\"]")
 _DART_FORBIDDEN_DIRECTIVE_RE = re.compile(r"^\s*(?:export\s+['\"]|part\s+['\"]|part\s+of\s+)")
+_DART_PART_DIRECTIVE_RE = re.compile(r"^\s*(?:part\s+['\"]|part\s+of\s+)")
+_PUBSPEC_FORBIDDEN_DEP_RE = re.compile(r"^\s{2,}(tiertask|flutter_riverpod)\s*:")
 _TRAILING_GENERIC_RE = re.compile(r"<[^>]*>$")
 _TEST_CALL_START_RE = re.compile(r"^(\s*)(group|test|testWidgets)\(\s*(.*)$")
 _STRING_LITERAL_RE = re.compile(r"(['\"])((?:\\.|(?!\1).)*)\1")
@@ -98,13 +106,33 @@ def _is_generated_dart(rel_path: str) -> bool:
     return name.startswith("app_localizations") and name.endswith(".dart")
 
 
+def _is_test_dart(rel_path: str) -> bool:
+    """Returns True for Dart test files across the root and UI subpackages."""
+    return (
+        rel_path.startswith("test/")
+        or rel_path.startswith("packages/tiertask_ui/test/")
+        or rel_path.startswith("packages/tiertask_ui/example/test/")
+    )
+
+
+def _dart_roots(root: Path) -> list[str]:
+    """Returns existing repo-relative Dart source/test root directories."""
+    candidates = (
+        "lib",
+        "test",
+        "packages/tiertask_ui/lib",
+        "packages/tiertask_ui/test",
+        "packages/tiertask_ui/example/lib",
+        "packages/tiertask_ui/example/test",
+    )
+    return [sub for sub in candidates if (root / sub).exists()]
+
+
 def _iter_dart_files(root: Path, include_generated: bool = False) -> list[Path]:
-    """Returns sorted Dart files under lib/ and test/."""
+    """Returns sorted Dart files under root and UI package source/test trees."""
     results: list[Path] = []
-    for sub in ("lib", "test"):
+    for sub in _dart_roots(root):
         base = root / sub
-        if not base.exists():
-            continue
         for p in sorted(base.rglob("*.dart")):
             rel = p.relative_to(root).as_posix()
             if not include_generated and _is_generated_dart(rel):
@@ -444,7 +472,7 @@ def outline_file(root: Path, file_path: Path) -> str:
     header = f"=== {rel} ({len(lines)} lines) ==="
     if file_path.suffix == ".md":
         entries = outline_markdown(lines)
-    elif rel.startswith("test/"):
+    elif _is_test_dart(rel):
         entries = outline_dart_test(lines)
     else:
         entries = outline_dart_lib(lines)
@@ -463,7 +491,7 @@ def outline_repo_overview(root: Path) -> str:
             flag = " [>750L]"
         else:
             flag = ""
-        if rel.startswith("test/"):
+        if _is_test_dart(rel):
             test_entries = outline_dart_test(lines)
             test_count = sum(1 for e in test_entries if ": test(" in e or ": testWidgets(" in e)
             preview = test_entries[0].strip().split(": ", 1)[-1] if test_entries else "helpers"
@@ -529,10 +557,13 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
 
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
-        if layer and not rel.startswith(f"lib/{layer}") and not rel.startswith(f"test/{layer}"):
+        if layer == "ui_pkg":
+            if not rel.startswith("packages/tiertask_ui/"):
+                continue
+        elif layer and not rel.startswith(f"lib/{layer}") and not rel.startswith(f"test/{layer}"):
             continue
         lines = p.read_text(encoding="utf-8").splitlines()
-        outlined = outline_dart_test(lines) if rel.startswith("test/") else outline_dart_lib(lines)
+        outlined = outline_dart_test(lines) if _is_test_dart(rel) else outline_dart_lib(lines)
         matched_outline = False
         current_type = ""
         for item in outlined:
@@ -558,11 +589,15 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
 
 
 def _resolve_dart_import(root: Path, source_file: Path, import_uri: str) -> str | None:
-    """Resolves a relative or package:tiertask/ import to a repo-relative POSIX path."""
+    """Resolves a relative, package:tiertask/, or package:tiertask_ui/ URI to a repo-relative POSIX path."""
     if import_uri.startswith("dart:"):
         return None
     if import_uri.startswith("package:tiertask/"):
         rel = "lib/" + import_uri[len("package:tiertask/") :]
+        candidate = root / rel
+        return rel if candidate.exists() else None
+    if import_uri.startswith("package:tiertask_ui/"):
+        rel = "packages/tiertask_ui/lib/" + import_uri[len("package:tiertask_ui/") :]
         candidate = root / rel
         return rel if candidate.exists() else None
     if import_uri.startswith("package:"):
@@ -576,15 +611,18 @@ def _resolve_dart_import(root: Path, source_file: Path, import_uri: str) -> str 
 
 
 def build_import_graph(root: Path) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Builds forward (file -> imported files) and reverse (file -> importers) graphs."""
+    """Builds forward (file -> imported/exported files) and reverse (file -> dependents) graphs."""
     forward: dict[str, set[str]] = {}
     reverse: dict[str, set[str]] = {}
     for p in _iter_dart_files(root, include_generated=True):
         rel = p.relative_to(root).as_posix()
         forward.setdefault(rel, set())
         reverse.setdefault(rel, set())
+        follow_exports = rel == UI_BARREL_REL
         for line in p.read_text(encoding="utf-8").splitlines():
             m = _DART_IMPORT_RE.match(line)
+            if not m and follow_exports:
+                m = _DART_EXPORT_RE.match(line)
             if not m:
                 continue
             target = _resolve_dart_import(root, p, m.group(1))
@@ -731,9 +769,18 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
 
 
 def _find_mirror_tests(root: Path, lib_rel: str) -> set[str]:
-    """Finds direct mirror or subsystem-mapped test files for a lib/ Dart file."""
+    """Finds direct mirror or subsystem-mapped test files for a lib/ or UI package Dart file."""
     matched: set[str] = set()
-    if not lib_rel.startswith("lib/") or not lib_rel.endswith(".dart"):
+    if not lib_rel.endswith(".dart"):
+        return matched
+    ui_src_prefix = "packages/tiertask_ui/lib/src/"
+    if lib_rel.startswith(ui_src_prefix):
+        sub_rel = lib_rel[len(ui_src_prefix) : -len(".dart")]
+        exact = f"packages/tiertask_ui/test/{sub_rel}_test.dart"
+        if (root / exact).exists():
+            matched.add(exact)
+        return matched
+    if not lib_rel.startswith("lib/"):
         return matched
     if lib_rel in _SUBSYSTEM_TEST_MAP:
         for cand_rel in _SUBSYSTEM_TEST_MAP[lib_rel]:
@@ -777,6 +824,8 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
         "lib/providers/workspace_providers.dart",
         "lib/services/app_logger.dart",
         "test/ui/test_helpers.dart",
+        UI_BARREL_REL,
+        "packages/tiertask_ui/test/test_helpers.dart",
     }
     is_pure_core = norm_target.startswith(("lib/models/", "lib/services/"))
     stop_at_hubs = norm_target not in app_hubs
@@ -805,7 +854,11 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
                 visited_all.add(dep)
                 queue_all.append(dep)
 
-    reverse_lib = sorted(f for f in visited_all if f.startswith("lib/"))
+    reverse_lib = sorted(
+        f
+        for f in visited_all
+        if f.startswith(("lib/", "packages/tiertask_ui/lib/", "packages/tiertask_ui/example/lib/"))
+    )
     mirror_tests = _find_mirror_tests(root, norm_target)
     if mirror_tests:
         return {
@@ -817,11 +870,11 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
 
     impacted_tests: set[str] = set()
     for direct_lib in visited_direct:
-        if not is_pure_core and direct_lib.startswith("lib/ui/"):
+        if not is_pure_core and direct_lib.startswith(("lib/ui/", "packages/tiertask_ui/lib/")):
             impacted_tests.update(_find_mirror_tests(root, direct_lib))
 
     for f in sorted(visited_all):
-        if not (f.startswith("test/") and f.endswith("_test.dart")):
+        if not (_is_test_dart(f) and f.endswith("_test.dart")):
             continue
         if f in visited_direct or not stop_at_hubs:
             impacted_tests.add(f)
@@ -832,6 +885,11 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
             test_text = (root / f).read_text(encoding="utf-8")
             if any(sym in test_text for sym in target_symbols):
                 impacted_tests.add(f)
+
+    if not impacted_tests and norm_target.startswith("packages/tiertask_ui/lib/"):
+        impacted_tests.update(
+            f for f in visited_all if _is_test_dart(f) and f.endswith("_test.dart")
+        )
 
     return {
         "target": [norm_target],
@@ -946,9 +1004,15 @@ def audit_l10n(root: Path) -> list[str]:
 
 
 def _render_dir_tree(base: Path, prefix: str = "") -> list[str]:
-    """Recursively renders an ASCII tree for a directory."""
+    """Recursively renders an ASCII tree for a directory, collapsing platform runners and skipping build artifacts."""
     entries = sorted(
-        [p for p in base.iterdir() if not p.name.startswith(".")],
+        [
+            p
+            for p in base.iterdir()
+            if not p.name.startswith(".")
+            and not (p.is_dir() and p.name in _SKIP_TREE_DIRS)
+            and not (p.is_file() and (p.name.endswith(".lock") or p.name == "devtools_options.yaml"))
+        ],
         key=lambda p: (p.is_dir(), p.name),
     )
     lines: list[str] = []
@@ -958,7 +1022,8 @@ def _render_dir_tree(base: Path, prefix: str = "") -> list[str]:
         child_prefix = prefix + ("    " if is_last else "│   ")
         if entry.is_dir():
             lines.append(f"{prefix}{connector}{entry.name}/")
-            lines.extend(_render_dir_tree(entry, child_prefix))
+            if entry.name not in _COLLAPSED_PLATFORM_DIRS:
+                lines.extend(_render_dir_tree(entry, child_prefix))
         else:
             lines.append(f"{prefix}{connector}{entry.name}")
     return lines
@@ -997,7 +1062,7 @@ def generate_architecture_tree(root: Path) -> str:
     ]
     existing_root_files = [f for f in root_files if (root / f).exists()]
     collapsed_dirs = [d for d in ("android", "assets", "linux", "spec", "windows") if (root / d).exists()]
-    expanded_dirs = [d for d in ("lib", "test") if (root / d).exists()]
+    expanded_dirs = [d for d in ("lib", "packages", "test") if (root / d).exists()]
 
     items: list[tuple[str, str]] = []
     for f in existing_root_files:
@@ -1050,6 +1115,8 @@ def _layer_section_for_path(rel_path: str) -> str:
     """Maps a repository-relative path to its section heading in ARCHITECTURE.md."""
     if "/" not in rel_path or rel_path.startswith("spec/"):
         return "## Root Files"
+    if rel_path.startswith("packages/tiertask_ui/lib/"):
+        return "## UI Component Library"
     if rel_path.startswith("lib/l10n/"):
         return "## Localization"
     if rel_path.startswith("lib/models/"):
@@ -1115,9 +1182,14 @@ def audit_architecture(root: Path) -> list[str]:
     if expected_tree not in content:
         issues.append("ARCH: Directory Layout ASCII tree is out of sync with disk (run `arch --sync-tree`)")
 
+    tracked_prefixes = ("lib/", "packages/tiertask_ui/lib/")
     table_files: dict[str, str] = {}
     for line in content.splitlines():
-        if line.startswith("| `lib/") or line.startswith("| `AGENTS.md`"):
+        if (
+            line.startswith("| `lib/")
+            or line.startswith("| `packages/tiertask_ui/lib/")
+            or line.startswith("| `AGENTS.md`")
+        ):
             parts = [p.strip() for p in line.split("|") if p.strip()]
             if len(parts) >= 2:
                 fpath = parts[0].strip("`")
@@ -1131,11 +1203,11 @@ def audit_architecture(root: Path) -> list[str]:
 
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
-        if rel.startswith("lib/") and rel not in table_files:
+        if rel.startswith(tracked_prefixes) and rel not in table_files:
             issues.append(f"ARCH: Missing layer table row for `{rel}` in ARCHITECTURE.md")
 
     for fpath in sorted(table_files):
-        if fpath.startswith("lib/") and not (root / fpath).exists():
+        if fpath.startswith(tracked_prefixes) and not (root / fpath).exists():
             issues.append(f"ARCH: Stale table row in ARCHITECTURE.md for non-existent file `{fpath}`")
 
     return issues
@@ -1153,7 +1225,7 @@ def scaffold_file(root: Path, rel_path: str, description: str | None = None) -> 
         if not existing.startswith("// TierTask\n"):
             target.write_text(GPL_HEADER + "\n" + existing, encoding="utf-8")
     sync_architecture_tree(root)
-    if norm_path.startswith("lib/"):
+    if norm_path.startswith(("lib/", "packages/tiertask_ui/lib/")):
         stem_class = "".join(part.capitalize() for part in Path(norm_path).stem.split("_"))
         final_desc = description or f"Defines `{stem_class}` component."
         set_architecture_row(root, norm_path, final_desc)
@@ -1231,13 +1303,28 @@ def _lib_layer_rank(rel_path: str) -> int | None:
     return None
 
 
-def _check_acyclic_dag(root: Path) -> list[str]:
-    """Enforces P-ACYCLIC-DAG via Tarjan SCC cycle detection and strict layer rank ordering."""
-    forward, _ = build_import_graph(root)
-    lib_nodes = sorted(
-        rel for rel in forward if rel.startswith("lib/") and not _is_generated_dart(rel)
-    )
-    lib_set = set(lib_nodes)
+def _ui_pkg_layer_rank(rel_path: str) -> int | None:
+    """Returns the internal DAG layer rank (0-4) for a packages/tiertask_ui/lib/ Dart file."""
+    if rel_path.startswith("packages/tiertask_ui/lib/src/tokens/"):
+        return 0
+    if rel_path.startswith("packages/tiertask_ui/lib/src/primitives/"):
+        return 1
+    if rel_path.startswith("packages/tiertask_ui/lib/src/layout/"):
+        return 2
+    if rel_path.startswith("packages/tiertask_ui/lib/src/components/"):
+        return 3
+    if rel_path == UI_BARREL_REL:
+        return 4
+    return None
+
+
+def _check_dag_subgraph(
+    forward: dict[str, set[str]],
+    nodes: list[str],
+    rank_fn: Any,
+) -> list[str]:
+    """Runs Tarjan SCC cycle detection and rank-order validation on a subgraph."""
+    node_set = set(nodes)
     issues: list[str] = []
 
     index_counter = 0
@@ -1256,7 +1343,7 @@ def _check_acyclic_dag(root: Path) -> list[str]:
         on_stack.add(node)
 
         for dst in sorted(forward.get(node, set())):
-            if dst not in lib_set:
+            if dst not in node_set:
                 continue
             if dst not in indices:
                 strongconnect(dst)
@@ -1274,7 +1361,7 @@ def _check_acyclic_dag(root: Path) -> list[str]:
                     break
             sccs.append(scc)
 
-    for node in lib_nodes:
+    for node in nodes:
         if node not in indices:
             strongconnect(node)
 
@@ -1284,14 +1371,14 @@ def _check_acyclic_dag(root: Path) -> list[str]:
                 f"P-ACYCLIC-DAG: Circular import cycle detected: {' <-> '.join(sorted(scc))}"
             )
 
-    for src in lib_nodes:
-        src_rank = _lib_layer_rank(src)
+    for src in nodes:
+        src_rank = rank_fn(src)
         if src_rank is None:
             continue
         for dst in sorted(forward.get(src, set())):
-            if dst not in lib_set:
+            if dst not in node_set:
                 continue
-            dst_rank = _lib_layer_rank(dst)
+            dst_rank = rank_fn(dst)
             if dst_rank is not None and src_rank < dst_rank:
                 issues.append(
                     f"P-ACYCLIC-DAG: Upward cross-layer import `{src} -> {dst}` (rank {src_rank} -> {dst_rank})"
@@ -1305,6 +1392,43 @@ def _check_acyclic_dag(root: Path) -> list[str]:
     return issues
 
 
+def _check_acyclic_dag(root: Path) -> list[str]:
+    """Enforces P-ACYCLIC-DAG across root lib/ and packages/tiertask_ui/lib/."""
+    forward, _ = build_import_graph(root)
+    issues: list[str] = []
+
+    lib_nodes = sorted(
+        rel for rel in forward if rel.startswith("lib/") and not _is_generated_dart(rel)
+    )
+    issues.extend(_check_dag_subgraph(forward, lib_nodes, _lib_layer_rank))
+
+    ui_nodes = sorted(
+        rel for rel in forward if rel.startswith("packages/tiertask_ui/lib/")
+    )
+    if ui_nodes:
+        issues.extend(_check_dag_subgraph(forward, ui_nodes, _ui_pkg_layer_rank))
+
+    return issues
+
+
+def _check_ui_package_pubspecs(root: Path) -> list[str]:
+    """Ensures packages/tiertask_ui pubspecs never depend on tiertask or flutter_riverpod."""
+    issues: list[str] = []
+    for rel_pkg in (UI_PACKAGE_REL, UI_EXAMPLE_REL):
+        pubspec_path = root / rel_pkg / "pubspec.yaml"
+        if not pubspec_path.exists():
+            continue
+        rel = pubspec_path.relative_to(root).as_posix()
+        for idx, line in enumerate(pubspec_path.read_text(encoding="utf-8").splitlines(), 1):
+            code_part = line.split("#", 1)[0]
+            m = _PUBSPEC_FORBIDDEN_DEP_RE.match(code_part)
+            if m:
+                issues.append(
+                    f"P-UI-ISOLATION: Forbidden `{m.group(1)}` dependency in `{rel}:{idx}`"
+                )
+    return issues
+
+
 def run_static_checks(root: Path, fix: bool = False) -> list[str]:
     """Runs fast static compliance checks for AGENTS.md rules, L10N, and ARCHITECTURE.md."""
     if fix:
@@ -1312,6 +1436,7 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
 
     issues: list[str] = []
     issues.extend(_check_markdown_rules(root, fix=fix))
+    issues.extend(_check_ui_package_pubspecs(root))
 
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
@@ -1330,11 +1455,18 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
             else:
                 issues.append(f"P-LICENSE-HEADER: Missing verbatim GPL-3.0 header in `{rel}`")
 
+        is_ui_pkg = rel.startswith("packages/tiertask_ui/")
+        is_ui_pkg_consumer = rel.startswith(
+            ("packages/tiertask_ui/test/", "packages/tiertask_ui/example/")
+        )
         lines = text.splitlines()
         for idx, line in enumerate(lines, 1):
             if _IGNORE_COMMENT_RE.search(line):
                 issues.append(f"P-NO-IGNORE: Forbidden analyzer ignore directive in `{rel}:{idx}`")
-            if _DART_FORBIDDEN_DIRECTIVE_RE.match(line):
+            if rel == UI_BARREL_REL:
+                if _DART_PART_DIRECTIVE_RE.match(line):
+                    issues.append(f"P-FILE-SIZE: Forbidden `part` directive in `{rel}:{idx}`")
+            elif _DART_FORBIDDEN_DIRECTIVE_RE.match(line):
                 issues.append(f"P-FILE-SIZE: Forbidden `export`/`part` directive in `{rel}:{idx}`")
             if rel.startswith("lib/") and not rel.startswith("lib/repositories/"):
                 m = _DART_IMPORT_RE.match(line)
@@ -1342,6 +1474,21 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
                     issues.append(f"P-IO-ISOLATION: Forbidden `{m.group(1)}` import in `{rel}:{idx}`")
                 if "HttpClient" in line and not line.strip().startswith("//"):
                     issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage outside repositories in `{rel}:{idx}`")
+            if is_ui_pkg:
+                dm = _DART_IMPORT_RE.match(line) or _DART_EXPORT_RE.match(line)
+                if dm:
+                    uri = dm.group(1)
+                    if uri in ("dart:io", "dart:ffi"):
+                        issues.append(f"P-IO-ISOLATION: Forbidden `{uri}` directive in `{rel}:{idx}`")
+                    if uri.startswith(("package:tiertask/", "package:flutter_riverpod/")):
+                        issues.append(f"P-UI-ISOLATION: Forbidden `{uri}` directive in `{rel}:{idx}`")
+                    if is_ui_pkg_consumer and uri.startswith("package:tiertask_ui/src/"):
+                        issues.append(
+                            f"P-FILE-SIZE: Forbidden internal import `{uri}` in `{rel}:{idx}` "
+                            f"(use package:tiertask_ui/tiertask_ui.dart)"
+                        )
+                if "HttpClient" in line and not line.strip().startswith("//"):
+                    issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage in `{rel}:{idx}`")
             if rel.startswith("lib/ui/"):
                 code_part = line.split("//", 1)[0]
                 for provider_name in dict.fromkeys(_FORBIDDEN_UI_PROVIDER_RE.findall(code_part)):
@@ -1358,17 +1505,27 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
 def compute_code_digest(root: Path) -> str:
     """Computes a SHA-256 digest over all code, test, ARB, and build configuration files."""
     hasher = hashlib.sha256()
-    candidates: list[Path] = []
-    for name in ("pubspec.yaml", "l10n.yaml", "analysis_options.yaml"):
+    candidates: set[Path] = set()
+    config_files = (
+        "pubspec.yaml",
+        "l10n.yaml",
+        "analysis_options.yaml",
+        "packages/tiertask_ui/pubspec.yaml",
+        "packages/tiertask_ui/analysis_options.yaml",
+        "packages/tiertask_ui/example/pubspec.yaml",
+        "packages/tiertask_ui/example/analysis_options.yaml",
+    )
+    for name in config_files:
         p = root / name
         if p.exists():
-            candidates.append(p)
+            candidates.add(p)
+    candidates.update(_iter_dart_files(root, include_generated=True))
     for sub in ("lib", "test", "linux", "windows", "android/app/src"):
         base = root / sub
         if base.exists():
             for p in sorted(base.rglob("*")):
                 if p.is_file() and p.suffix in (".dart", ".arb", ".cc", ".cpp", ".h", ".kt", ".cmake", ".kts"):
-                    candidates.append(p)
+                    candidates.add(p)
     for p in sorted(candidates):
         rel = p.relative_to(root).as_posix()
         hasher.update(rel.encode("utf-8"))
@@ -1398,24 +1555,89 @@ def _changed_files_from_git(root: Path) -> list[str]:
     return changed
 
 
+def _is_code_relevant_change(rel_path: str) -> bool:
+    """Returns True when a changed path affects code, tests, builds, or subpackages."""
+    norm = Path(rel_path).as_posix()
+    return norm.startswith(("lib/", "test/", "linux/", "windows/", "android/", "packages/")) or norm in (
+        "pubspec.yaml",
+        "l10n.yaml",
+        "analysis_options.yaml",
+    )
+
+
+def partition_tests_by_package(test_paths: list[str]) -> dict[Path, list[str]]:
+    """Partitions repo-relative test file paths by Flutter package root with package-relative paths."""
+    partitioned: dict[Path, list[str]] = {}
+    example_prefix = UI_EXAMPLE_REL.as_posix() + "/"
+    pkg_prefix = UI_PACKAGE_REL.as_posix() + "/"
+    for rel in sorted(dict.fromkeys(Path(p).as_posix() for p in test_paths)):
+        if rel.startswith(example_prefix):
+            partitioned.setdefault(UI_EXAMPLE_REL, []).append(rel[len(example_prefix) :])
+        elif rel.startswith(pkg_prefix):
+            partitioned.setdefault(UI_PACKAGE_REL, []).append(rel[len(pkg_prefix) :])
+        else:
+            partitioned.setdefault(Path("."), []).append(rel)
+    return partitioned
+
+
 def resolve_impacted_tests(root: Path, changed_files: list[str]) -> list[str]:
-    """Maps changed lib/ and test/ files to all impacted test/**/*_test.dart suites."""
+    """Maps changed root and UI subpackage files to all impacted *_test.dart suites."""
     impacted: set[str] = set()
+    example_prefix = UI_EXAMPLE_REL.as_posix() + "/"
+    ui_lib_prefix = "packages/tiertask_ui/lib/"
     for rel in changed_files:
         norm_rel = Path(rel).as_posix()
-        if norm_rel.startswith("test/") and norm_rel.endswith("_test.dart") and (root / norm_rel).exists():
+        if _is_test_dart(norm_rel) and norm_rel.endswith("_test.dart") and (root / norm_rel).exists():
             impacted.add(norm_rel)
-        elif norm_rel.startswith("lib/") and norm_rel.endswith(".dart") and (root / norm_rel).exists():
+        elif norm_rel.startswith(example_prefix):
+            example_test_dir = root / UI_EXAMPLE_REL / "test"
+            if example_test_dir.exists():
+                for cand in sorted(example_test_dir.rglob("*_test.dart")):
+                    impacted.add(cand.relative_to(root).as_posix())
+        elif (
+            norm_rel.startswith(("lib/", ui_lib_prefix))
+            and norm_rel.endswith(".dart")
+            and (root / norm_rel).exists()
+        ):
             mirrors = _find_mirror_tests(root, norm_rel)
             if mirrors:
                 impacted.update(mirrors)
             else:
                 deps = compute_dependencies(root, norm_rel)
                 impacted.update(deps["reverse_tests"])
-        elif norm_rel.startswith("test/") and norm_rel.endswith(".dart") and (root / norm_rel).exists():
+        elif _is_test_dart(norm_rel) and norm_rel.endswith(".dart") and (root / norm_rel).exists():
             deps = compute_dependencies(root, norm_rel)
             impacted.update(deps["reverse_tests"])
     return sorted(impacted)
+
+
+def _packages_to_analyze(root: Path, mode: str, changed: list[str], force: bool) -> list[Path]:
+    """Selects package roots requiring flutter analyze for fast or full verification."""
+    all_pkgs = [Path(".")]
+    for sub in (UI_PACKAGE_REL, UI_EXAMPLE_REL):
+        if (root / sub / "pubspec.yaml").exists():
+            all_pkgs.append(sub)
+    if mode == "full" or force:
+        return all_pkgs
+    selected: list[Path] = []
+    pkg_prefix = UI_PACKAGE_REL.as_posix() + "/"
+    example_prefix = UI_EXAMPLE_REL.as_posix() + "/"
+    root_changed = any(
+        _is_code_relevant_change(f) and not Path(f).as_posix().startswith("packages/")
+        for f in changed
+    )
+    ui_pkg_changed = any(
+        Path(f).as_posix().startswith(pkg_prefix) and not Path(f).as_posix().startswith(example_prefix)
+        for f in changed
+    )
+    ui_example_changed = any(Path(f).as_posix().startswith(example_prefix) for f in changed)
+    if root_changed:
+        selected.append(Path("."))
+    if ui_pkg_changed and (root / UI_PACKAGE_REL / "pubspec.yaml").exists():
+        selected.append(UI_PACKAGE_REL)
+    if (ui_pkg_changed or ui_example_changed) and (root / UI_EXAMPLE_REL / "pubspec.yaml").exists():
+        selected.append(UI_EXAMPLE_REL)
+    return selected or [Path(".")]
 
 
 def run_verify(
@@ -1425,7 +1647,7 @@ def run_verify(
     force: bool = False,
     targets: list[str] | None = None,
 ) -> int:
-    """Runs static checks, formatting, analyzer, and smart or cached test execution."""
+    """Runs static checks, formatting, analyzer, and smart or cached test execution across packages."""
     t0 = time.monotonic()
     issues = run_static_checks(root, fix=fix)
     if issues:
@@ -1437,10 +1659,11 @@ def run_verify(
     if fix and arb_changed:
         subprocess.run(["flutter", "gen-l10n"], cwd=root, check=True)
 
+    format_roots = _dart_roots(root)
     dart_changed = [f for f in changed if f.endswith(".dart") and (root / f).exists()]
     if fix:
         if mode == "full":
-            subprocess.run(["dart", "format", "lib", "test"], cwd=root, check=True)
+            subprocess.run(["dart", "format", *format_roots], cwd=root, check=True)
         elif dart_changed:
             subprocess.run(["dart", "format", *dart_changed], cwd=root, check=True)
 
@@ -1462,12 +1685,7 @@ def run_verify(
         )
         return 0
 
-    code_relevant_changes = [
-        f
-        for f in changed
-        if f.startswith(("lib/", "test/", "linux/", "windows/", "android/"))
-        or f in ("pubspec.yaml", "l10n.yaml", "analysis_options.yaml")
-    ]
+    code_relevant_changes = [f for f in changed if _is_code_relevant_change(f)]
     if not issues and not force and not code_relevant_changes and mode == "fast":
         dt = (time.monotonic() - t0) * 1000
         print(f"VERIFY OK ({dt:.0f}ms): Only documentation/agent files changed; static checks passed.")
@@ -1475,20 +1693,21 @@ def run_verify(
 
     if mode == "full":
         fmt_res = subprocess.run(
-            ["dart", "format", "--output=none", "--set-exit-if-changed", "lib", "test"],
+            ["dart", "format", "--output=none", "--set-exit-if-changed", *format_roots],
             cwd=root,
             check=False,
         )
         if fmt_res.returncode != 0:
             return fmt_res.returncode
 
-    ana_res = subprocess.run(
-        ["flutter", "analyze", "--no-pub", "--fatal-infos", "--fatal-warnings"],
-        cwd=root,
-        check=False,
-    )
-    if ana_res.returncode != 0:
-        return ana_res.returncode
+    for pkg_rel in _packages_to_analyze(root, mode, changed, force):
+        ana_res = subprocess.run(
+            ["flutter", "analyze", "--no-pub", "--fatal-infos", "--fatal-warnings"],
+            cwd=root / pkg_rel,
+            check=False,
+        )
+        if ana_res.returncode != 0:
+            return ana_res.returncode
 
     if mode == "fast":
         target_tests = resolve_impacted_tests(root, changed)
@@ -1498,29 +1717,47 @@ def run_verify(
             dt = time.monotonic() - t0
             print(f"VERIFY FAST OK ({dt:.2f}s): Analyzer and static checks passed (0 impacted test suites).")
             return 0
-        test_cmd = [
-            "flutter",
-            "test",
-            "--no-pub",
-            "--no-test-assets",
-            "-r",
-            "failures-only",
-            *target_tests,
-        ]
-        print(f"Running {len(target_tests)} impacted test suite(s): {', '.join(target_tests)}")
+        for pkg_rel, pkg_tests in partition_tests_by_package(target_tests).items():
+            print(
+                f"Running {len(pkg_tests)} impacted test suite(s) in {pkg_rel.as_posix()}: "
+                f"{', '.join(pkg_tests)}"
+            )
+            test_res = subprocess.run(
+                [
+                    "flutter",
+                    "test",
+                    "--no-pub",
+                    "--no-test-assets",
+                    "-r",
+                    "failures-only",
+                    *pkg_tests,
+                ],
+                cwd=root / pkg_rel,
+                check=False,
+            )
+            if test_res.returncode != 0:
+                return test_res.returncode
     else:
-        test_cmd = [
-            "flutter",
-            "test",
-            "--no-pub",
-            "--no-test-assets",
-            "-r",
-            "failures-only",
-        ]
+        test_pkgs = [Path(".")]
+        for sub in (UI_PACKAGE_REL, UI_EXAMPLE_REL):
+            if (root / sub / "test").exists():
+                test_pkgs.append(sub)
+        for pkg_rel in test_pkgs:
+            test_res = subprocess.run(
+                [
+                    "flutter",
+                    "test",
+                    "--no-pub",
+                    "--no-test-assets",
+                    "-r",
+                    "failures-only",
+                ],
+                cwd=root / pkg_rel,
+                check=False,
+            )
+            if test_res.returncode != 0:
+                return test_res.returncode
 
-    test_res = subprocess.run(test_cmd, cwd=root, check=False)
-    if test_res.returncode != 0:
-        return test_res.returncode
     if issues:
         return 1
 
@@ -1638,7 +1875,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_find.add_argument("queries", nargs="+", help="One or more substrings to search for.")
     p_find.add_argument(
         "--layer",
-        help="Optional layer filter (models, services, repositories, providers, presentation, ui, l10n, spec).",
+        help="Optional layer filter (models, services, repositories, providers, presentation, ui, ui_pkg, l10n, spec).",
     )
 
     p_deps = sub.add_parser("deps", help="Show direct imports and transitive reverse lib/ and test/ dependents.")

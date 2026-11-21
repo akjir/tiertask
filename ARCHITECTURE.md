@@ -13,6 +13,7 @@
 | Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), pure-Dart `dart:ffi` non-blocking host-local cooperative file locking and atomic temp-file publication (`HostFileLockManager`), local `.tdf` file and `tiertask.log` reads/writes (`LocalFileRepository`, `LocalFileOperations`, `LocalFileLogSink`), foreground location channel and bounded reverse/forward geocoding and GeoIP lookup (`MethodChannel` and `HttpClient`), and split host-local JSON settings (`settings.json` + `.bak` + quarantine) with per-workspace encrypted WebDAV passwords and `TTS\x04` sync baselines (`flutter_secure_storage`). |
 | Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) across `workspace_providers.dart`, `config_providers.dart`, `local_file_watch_providers.dart`, `location_providers.dart`, `sync_providers.dart`, and `task_providers.dart` coordinating single-active-workspace unload/load transitions, parent-directory `.tdf` file watching, foreground lifecycle-aware location determination, locale and theme resolution, domain mutations, conflict/recovery resolution, and multi-stage repository synchronization (`TaskSyncPipeline`). |
 | Presentation | `lib/presentation/` | Screen and dialog controllers, presentation view-models, redacted UI telemetry, and wall-clock boundary scheduling (`BoardBoundaryTimer`, `TdfPreviewController`, `evaluatedBoardProvider`, `LabelEditorController`, `LinkActionController`, `LocationEditorController`, `LogViewerController`, `SettingsController`, `TaskEditorController`, `TaskInfoController`, `UiTelemetry`) mediating between `lib/ui/` and lower layers so views remain free of repository and service dependencies. |
+| UI Component Library | `packages/tiertask_ui/` | Compiler-isolated local Flutter package (`tiertask_ui`) with zero `tiertask`, `flutter_riverpod`, `dart:io`, or `dart:ffi` dependencies, exporting Layer 1 design tokens (`Calm` default and `Plum Umber`, Light and Dark, automated WCAG AA contrast checking), 8 core primitives, 4 adaptive layouts, and 5 composites through one curated barrel (`lib/tiertask_ui.dart`) alongside a runnable `example/` gallery app. |
 | UI | `lib/ui/` | Localized Material 3 screens (`lib/ui/`) and modular leaf widgets (`lib/ui/widgets/`) for Linux, Android, and Windows delegating orchestration, validation, and external actions to `lib/presentation/`. |
 
 > [!NOTE]
@@ -151,6 +152,76 @@ tiertask/
 │           ├── wipe_tdf_dialog.dart
 │           ├── workspace_dialog.dart
 │           └── workspace_row_card.dart
+├── packages/
+│   └── tiertask_ui/
+│       ├── analysis_options.yaml
+│       ├── pubspec.yaml
+│       ├── example/
+│       │   ├── analysis_options.yaml
+│       │   ├── pubspec.yaml
+│       │   ├── lib/
+│       │   │   ├── gallery_sections.dart
+│       │   │   └── main.dart
+│       │   ├── linux/
+│       │   └── test/
+│       │       └── gallery_smoke_test.dart
+│       ├── lib/
+│       │   ├── tiertask_ui.dart
+│       │   └── src/
+│       │       ├── components/
+│       │       │   ├── ui_color_wheel.dart
+│       │       │   ├── ui_dialog_frame.dart
+│       │       │   ├── ui_ordered_item_list.dart
+│       │       │   ├── ui_quick_composer.dart
+│       │       │   └── ui_searchable_picker.dart
+│       │       ├── layout/
+│       │       │   ├── ui_adaptive_app_shell.dart
+│       │       │   ├── ui_page_header.dart
+│       │       │   ├── ui_responsive_grid.dart
+│       │       │   └── ui_sidebar_section.dart
+│       │       ├── primitives/
+│       │       │   ├── ui_app_logo.dart
+│       │       │   ├── ui_banner.dart
+│       │       │   ├── ui_button.dart
+│       │       │   ├── ui_card.dart
+│       │       │   ├── ui_field.dart
+│       │       │   ├── ui_pill.dart
+│       │       │   ├── ui_segmented_control.dart
+│       │       │   └── ui_toggle_row.dart
+│       │       └── tokens/
+│       │           ├── ui_breakpoints.dart
+│       │           ├── ui_color_tokens.dart
+│       │           ├── ui_focus_tokens.dart
+│       │           ├── ui_radius_tokens.dart
+│       │           ├── ui_spacing_tokens.dart
+│       │           ├── ui_theme_tokens.dart
+│       │           └── ui_typography_tokens.dart
+│       └── test/
+│           ├── test_helpers.dart
+│           ├── components/
+│           │   ├── ui_color_wheel_test.dart
+│           │   ├── ui_dialog_frame_test.dart
+│           │   ├── ui_ordered_item_list_test.dart
+│           │   ├── ui_quick_composer_test.dart
+│           │   └── ui_searchable_picker_test.dart
+│           ├── layout/
+│           │   ├── ui_adaptive_app_shell_test.dart
+│           │   ├── ui_page_header_test.dart
+│           │   ├── ui_responsive_grid_test.dart
+│           │   └── ui_sidebar_section_test.dart
+│           ├── primitives/
+│           │   ├── ui_app_logo_test.dart
+│           │   ├── ui_banner_test.dart
+│           │   ├── ui_button_test.dart
+│           │   ├── ui_card_test.dart
+│           │   ├── ui_field_test.dart
+│           │   ├── ui_pill_test.dart
+│           │   ├── ui_segmented_control_test.dart
+│           │   └── ui_toggle_row_test.dart
+│           └── tokens/
+│               ├── ui_breakpoints_test.dart
+│               ├── ui_color_tokens_test.dart
+│               └── ui_theme_tokens_test.dart
 └── test/
     ├── l10n/
     │   └── storage_file_read_localization_extension_test.dart
@@ -241,7 +312,7 @@ tiertask/
 | `ARCHITECTURE.md` | Architectural layer definitions, directory structure, file inventory, and TDF synchronization flow. |
 | `CHANGELOG.md` | User-facing change history following Keep a Changelog 1.1.0. |
 | `README.md` | Project overview, supported platforms (Linux, Android, Windows), build instructions, and `.tdf` tier reference. |
-| `analysis_options.yaml` | Dart analyzer configuration excluding `build/**`, `android/**`, `linux/**`, `windows/**`, and generated `lib/l10n/app_localizations*.dart` files. |
+| `analysis_options.yaml` | Dart analyzer configuration excluding `build/**`, `android/**`, `linux/**`, `windows/**`, `packages/**`, and generated `lib/l10n/app_localizations*.dart` files. |
 | `install.sh` | POSIX user-space Linux build and installation script installing the release bundle, executable symlink, icons, and desktop entry into `$HOME/.local`. |
 | `l10n.yaml` | Flutter `gen-l10n` configuration pointing to `lib/l10n/app_en.arb` and `lib/l10n/app_de.arb`. |
 | `pubspec.yaml` | Package metadata and dependencies (`flutter`, `flutter_localizations`, `flutter_riverpod`, `flutter_secure_storage`, `intl`, `material_ui`). |
@@ -379,6 +450,36 @@ tiertask/
 | `lib/ui/widgets/wipe_tdf_dialog.dart` | Confirmation dialog (`WipeTdfDialog`, `WipeTdfDialogResult`, `WipeTdfTarget`, `showWipeTdfDialog`) requiring exact filename confirmation and offering optional `.bak` / `.bak.001`+ backup creation before wiping a local or remote `.tdf` file. |
 | `lib/ui/widgets/workspace_dialog.dart` | Active workspace navigation drawer card (`DrawerWorkspaceCard`) and Material 3 workspace management dialog (`WorkspaceDialog`, `showWorkspaceDialog`) coordinating workspace switching, creation, renaming, and deletion. |
 | `lib/ui/widgets/workspace_row_card.dart` | Individual workspace list row card (`WorkspaceRowCard`) inside `WorkspaceDialog` rendering workspace metadata, storage mode badge, inline rename input, and delete confirmation controls. |
+
+## UI Component Library
+
+| File | Function |
+| :--- | :--- |
+| `packages/tiertask_ui/lib/tiertask_ui.dart` | Sole public barrel entrypoint for `package:tiertask_ui` exporting Layer 1 tokens, Layer 2 primitives, Layer 3 layouts, and Layer 4 composites. |
+| `packages/tiertask_ui/lib/src/tokens/ui_breakpoints.dart` | Defines `UiViewportClass` (`compact`, `medium`, `expanded`) and stateless `UiBreakpoints` width classification helpers (`<= 720`, `721..820`, `> 820`). |
+| `packages/tiertask_ui/lib/src/tokens/ui_color_tokens.dart` | Defines immutable 19-role `UiColorTokens`, `UiContrastPair`, `UiContrastFailure`, and stateless `UiContrastChecker` validating WCAG 2.1 AA (`>= 4.5:1`) contrast across all 17 normative pairs. |
+| `packages/tiertask_ui/lib/src/tokens/ui_focus_tokens.dart` | Defines immutable `UiFocusTokens` holding `1px` focus-ring geometry, transition durations, dimmed opacities, and the 5 allowlisted overlay shadows. |
+| `packages/tiertask_ui/lib/src/tokens/ui_radius_tokens.dart` | Defines immutable `UiRadiusTokens` holding corner radii (`2px` to `999px`) and canonical stroke widths (`1.0`, `1.7`, `2.5`). |
+| `packages/tiertask_ui/lib/src/tokens/ui_spacing_tokens.dart` | Defines immutable `UiSpacingTokens` holding the spacing ladder, touch-target densities (`26px` to `44px`), shell dimensions, canonical `EdgeInsets`, and icon sizes (`13/15/18/34px`). |
+| `packages/tiertask_ui/lib/src/tokens/ui_theme_tokens.dart` | Defines `UiSurfaceLevel`, `UiSurfaceScope` for automatic `bg`/`panel` alternation, `UiThemeTokens` (`ThemeExtension` + flat Material 3 `toThemeData`), `UiThemePreset`, and `UiThemePresets` (`Calm` and `Plum Umber`, Light and Dark). |
+| `packages/tiertask_ui/lib/src/tokens/ui_typography_tokens.dart` | Defines immutable `UiTypographyTokens` covering all 14 scale roles plus `mono` and `tabular` (`FontFeature.tabularFigures`) helpers. |
+| `packages/tiertask_ui/lib/src/primitives/ui_app_logo.dart` | Renders the minimal three-bar stepped TierTask accent brand mark (`UiAppLogo`, `UiLogoBarSpec`) via `CustomPaint` wrapped in `ExcludeSemantics`. |
+| `packages/tiertask_ui/lib/src/primitives/ui_banner.dart` | Renders unified feedback surfaces (`UiBanner`, `UiBannerVariant`, `UiBannerTone`) for status banners, `620px` floating toasts, inline warnings, inline delete confirmations, plain-text empty states, loading spinners, and full-screen errors. |
+| `packages/tiertask_ui/lib/src/primitives/ui_button.dart` | Renders flat interactive buttons (`UiButton`, `UiButtonVariant`, `UiButtonDensity`, `UiButtonTone`) with `1px` keyboard focus rings, active/loading states, danger hover, and `0.48` disabled opacity. |
+| `packages/tiertask_ui/lib/src/primitives/ui_card.dart` | Renders flat bordered cards (`UiCard`, `UiCardVariant`: `standard`, `inset` with unconditional `UiSurfaceScope.insetWell`, `draft`, and unified single-expand `expandable` entity accordions). |
+| `packages/tiertask_ui/lib/src/primitives/ui_field.dart` | Renders surface-aware flat `1px` inputs (`UiField`, `UiFieldKind`, `UiSelectOption`) for text, multiline, password reveal, flat select, date/time display, focus-within search, and monospace read-only wells. |
+| `packages/tiertask_ui/lib/src/primitives/ui_pill.dart` | Renders surface-aware pills (`UiPill`, `UiPillVariant`, `UiPillTone`) covering badges, tabular count capsules, color-dotted tags, split navigable/removable chips, dashed/direct add chips, and selectable toggles. |
+| `packages/tiertask_ui/lib/src/primitives/ui_segmented_control.dart` | Renders equal-width horizontal segmented controls (`UiSegmentedControl`, `UiSegment`) in a `bg` trough with `ArrowLeft`/`ArrowRight` keyboard stepping. |
+| `packages/tiertask_ui/lib/src/primitives/ui_toggle_row.dart` | Renders full-row checkbox controls (`UiToggleRow`) with optional muted descriptions and standard/dense target heights. |
+| `packages/tiertask_ui/lib/src/layout/ui_adaptive_app_shell.dart` | Coordinates the `62px` top chrome bar, persistent `244px` sidebar vs below-chrome compact slide-over drawer, lazy-list viewport stack with floating notices, and decoupled pinned bottom dock (`UiAdaptiveAppShell`). |
+| `packages/tiertask_ui/lib/src/layout/ui_page_header.dart` | Renders view headers (`UiPageHeader`) with optional back button, `28px` title, clickable inline active-label filter, tabular count capsule, trailing action cluster, and `58ch` subtitle. |
+| `packages/tiertask_ui/lib/src/layout/ui_responsive_grid.dart` | Renders equal-width top-aligned adaptive grids (`UiResponsiveGrid`, `UiGridPreset`) collapsing cleanly at `820px` and `720px` with zero horizontal overflow. |
+| `packages/tiertask_ui/lib/src/layout/ui_sidebar_section.dart` | Renders static and collapsible/filterable sidebar navigation groups (`UiSidebarSection`, `UiSidebarNavItem`) with collapsed summaries, 3 header icon actions, inline filtering, and split or single-button rows. |
+| `packages/tiertask_ui/lib/src/components/ui_color_wheel.dart` | Renders inline swatch, `#RRGGBB` input, 8 canonical preset chips, and a `ValueNotifier`-driven circular HSV wheel modal (`UiColorWheel`). |
+| `packages/tiertask_ui/lib/src/components/ui_dialog_frame.dart` | Renders three-part modal dialog frames (`UiDialogFrame`, `UiDialogSize`) and focus-trapped modal/compact bottom-sheet presenters (`showModal`, `showBottomSheet`) with `Tab` trapping, `Escape` dismissal, and focus restoration. |
+| `packages/tiertask_ui/lib/src/components/ui_ordered_item_list.dart` | Renders repeatable ordered lists (`UiOrderedItemList`) with deterministic keys, optional progress track, inline editing highlight, boundary-disabled reorder controls, edit/delete actions, and add/footer slots. |
+| `packages/tiertask_ui/lib/src/components/ui_quick_composer.dart` | Renders docked Task Quick-Add (with compact `+ New task` collapse and upward non-swallowing `TapRegion` desktop popover) and inline entity Quick-Create bars (`UiQuickComposer`). |
+| `packages/tiertask_ui/lib/src/components/ui_searchable_picker.dart` | Renders searchable multi-select and single-select pickers (`UiSearchablePicker`, `UiPickerSelectionMode`, `UiPickerOption`, `UiPickerScopeFilter`) with conditional scope pills, inline creation, cycle-disabled rows, keyboard navigation, and non-autofocus compact sheets. |
 
 ## Execution & Synchronization Flow
 

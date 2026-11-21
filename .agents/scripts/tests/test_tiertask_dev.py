@@ -537,6 +537,334 @@ tiertask/
             any("lib/presentation/sample_controller.dart" in m for m in matches)
         )
 
+    def _build_minimal_ui_package(self, root: Path) -> None:
+        ui_root = root / "packages" / "tiertask_ui"
+        for sub in (
+            "lib/src/tokens",
+            "lib/src/primitives",
+            "lib/src/layout",
+            "lib/src/components",
+            "test/tokens",
+            "test/primitives",
+            "example/lib",
+            "example/test",
+            "example/linux/runner",
+            "build/cache",
+            "example/build/linux",
+            "example/linux/flutter/ephemeral",
+        ):
+            (ui_root / sub).mkdir(parents=True, exist_ok=True)
+
+        (ui_root / "pubspec.yaml").write_text(
+            "name: tiertask_ui\npublish_to: none\ndependencies:\n  flutter:\n    sdk: flutter\n  material_ui: ^1.11.1\n",
+            encoding="utf-8",
+        )
+        (ui_root / "analysis_options.yaml").write_text(
+            "include: package:flutter_lints/flutter.yaml\n",
+            encoding="utf-8",
+        )
+        (ui_root / "pubspec.lock").write_text("# lockfile\n", encoding="utf-8")
+        (ui_root / "build" / "cache" / "artifact.dart").write_text("// ignore\n", encoding="utf-8")
+        (ui_root / "example" / "pubspec.yaml").write_text(
+            "name: tiertask_ui_example\npublish_to: none\ndependencies:\n  flutter:\n    sdk: flutter\n  tiertask_ui:\n    path: ..\n",
+            encoding="utf-8",
+        )
+        (ui_root / "example" / "analysis_options.yaml").write_text(
+            "include: package:flutter_lints/flutter.yaml\n",
+            encoding="utf-8",
+        )
+        (ui_root / "example" / "pubspec.lock").write_text("# lockfile\n", encoding="utf-8")
+        (ui_root / "example" / "linux" / "CMakeLists.txt").write_text("# cmake\n", encoding="utf-8")
+        (ui_root / "example" / "linux" / "runner" / "main.cc").write_text("// cc\n", encoding="utf-8")
+
+        (ui_root / "lib" / "src" / "tokens" / "ui_focus_tokens.dart").write_text(
+            GPL_HEADER + "\n/// Focus tokens.\nclass UiFocusTokens {}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "lib" / "src" / "tokens" / "ui_theme_tokens.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'ui_focus_tokens.dart';\n\n"
+            + "/// Theme tokens.\nclass UiThemeTokens {\n"
+            + "  /// Creates theme tokens.\n  const UiThemeTokens(this.focus);\n"
+            + "  /// Focus tokens.\n  final UiFocusTokens focus;\n}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "lib" / "src" / "primitives" / "ui_button.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../tokens/ui_theme_tokens.dart';\n\n"
+            + "/// Button primitive.\nclass UiButton {\n"
+            + "  /// Creates a button.\n  const UiButton(this.tokens);\n"
+            + "  /// Theme tokens.\n  final UiThemeTokens tokens;\n}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "lib" / "tiertask_ui.dart").write_text(
+            GPL_HEADER
+            + "\nexport 'src/primitives/ui_button.dart';\n"
+            + "export 'src/tokens/ui_focus_tokens.dart';\n"
+            + "export 'src/tokens/ui_theme_tokens.dart';\n",
+            encoding="utf-8",
+        )
+        (ui_root / "test" / "test_helpers.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:tiertask_ui/tiertask_ui.dart';\n\n"
+            + "UiThemeTokens defaultTokens() => const UiThemeTokens(UiFocusTokens());\n",
+            encoding="utf-8",
+        )
+        (ui_root / "test" / "tokens" / "ui_theme_tokens_test.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
+            + "import 'package:tiertask_ui/tiertask_ui.dart';\n"
+            + "import '../test_helpers.dart';\n\n"
+            + "void main() {\n"
+            + "  test('checks UiThemeTokens and UiFocusTokens', () {\n"
+            + "    expect(defaultTokens().focus, isA<UiFocusTokens>());\n"
+            + "  });\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "test" / "primitives" / "ui_button_test.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
+            + "import 'package:tiertask_ui/tiertask_ui.dart';\n"
+            + "import '../test_helpers.dart';\n\n"
+            + "void main() {\n"
+            + "  testWidgets('renders UiButton', (tester) async {\n"
+            + "    expect(UiButton(defaultTokens()), isNotNull);\n"
+            + "  });\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "example" / "lib" / "main.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:tiertask_ui/tiertask_ui.dart';\n\n"
+            + "void main() {\n"
+            + "  const UiButton(UiThemeTokens(UiFocusTokens()));\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "example" / "test" / "gallery_smoke_test.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
+            + "import 'package:tiertask_ui/tiertask_ui.dart';\n\n"
+            + "void main() {\n"
+            + "  testWidgets('gallery renders', (tester) async {\n"
+            + "    expect(const UiFocusTokens(), isNotNull);\n"
+            + "  });\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+
+        arch_path = root / "ARCHITECTURE.md"
+        arch_text = arch_path.read_text(encoding="utf-8")
+        arch_text += (
+            "\n## UI Component Library\n\n"
+            "| File | Function |\n"
+            "| :--- | :--- |\n"
+            "| `packages/tiertask_ui/lib/tiertask_ui.dart` | Public UI library barrel. |\n"
+            "| `packages/tiertask_ui/lib/src/tokens/ui_focus_tokens.dart` | Focus tokens. |\n"
+            "| `packages/tiertask_ui/lib/src/tokens/ui_theme_tokens.dart` | Theme tokens. |\n"
+            "| `packages/tiertask_ui/lib/src/primitives/ui_button.dart` | Button primitive. |\n"
+        )
+        arch_path.write_text(arch_text, encoding="utf-8")
+        tiertask_dev.sync_architecture_tree(root)
+
+    def test_ui_package_barrel_carveout_and_isolation_checks(self) -> None:
+        self._build_minimal_ui_package(self.root)
+        self.assertEqual(tiertask_dev.run_static_checks(self.root, fix=False), [])
+
+        ui_root = self.root / "packages" / "tiertask_ui"
+        # Nested export inside lib/src/ must be rejected.
+        (ui_root / "lib" / "src" / "primitives" / "bad_export.dart").write_text(
+            GPL_HEADER + "\nexport '../tokens/ui_focus_tokens.dart';\n",
+            encoding="utf-8",
+        )
+        # Forbidden domain, riverpod, io, ffi, and HttpClient references.
+        (ui_root / "lib" / "src" / "primitives" / "bad_isolation.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'dart:ffi';\n"
+            + "import 'dart:io';\n"
+            + "import 'package:flutter_riverpod/flutter_riverpod.dart';\n"
+            + "import 'package:tiertask/models/sample_model.dart';\n"
+            + "void bad() { HttpClient(); }\n",
+            encoding="utf-8",
+        )
+        # Forbidden package:tiertask_ui/src/ import in test/ and example/.
+        (ui_root / "test" / "primitives" / "ui_button_test.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:tiertask_ui/src/tokens/ui_focus_tokens.dart';\n"
+            + "void main() {}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "example" / "lib" / "main.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:tiertask_ui/src/primitives/ui_button.dart';\n"
+            + "void main() {}\n",
+            encoding="utf-8",
+        )
+        # Forbidden pubspec dependency in packages/tiertask_ui/pubspec.yaml.
+        (ui_root / "pubspec.yaml").write_text(
+            "name: tiertask_ui\ndependencies:\n  tiertask:\n    path: ../..\n  flutter_riverpod: ^3.5.0\n",
+            encoding="utf-8",
+        )
+
+        issues = tiertask_dev.run_static_checks(self.root, fix=False)
+        joined = "\n".join(issues)
+        self.assertIn("packages/tiertask_ui/lib/src/primitives/bad_export.dart", joined)
+        self.assertIn("P-FILE-SIZE", joined)
+        self.assertIn("packages/tiertask_ui/lib/src/primitives/bad_isolation.dart", joined)
+        self.assertIn("dart:io", joined)
+        self.assertIn("dart:ffi", joined)
+        self.assertIn("package:tiertask/", joined)
+        self.assertIn("package:flutter_riverpod/", joined)
+        self.assertIn("HttpClient", joined)
+        self.assertIn("packages/tiertask_ui/test/primitives/ui_button_test.dart", joined)
+        self.assertIn("packages/tiertask_ui/example/lib/main.dart", joined)
+        self.assertIn("packages/tiertask_ui/pubspec.yaml", joined)
+
+    def test_ui_package_internal_acyclic_dag(self) -> None:
+        self._build_minimal_ui_package(self.root)
+        ui_root = self.root / "packages" / "tiertask_ui"
+        # Upward import: tokens -> primitives and src -> tiertask_ui.dart.
+        (ui_root / "lib" / "src" / "tokens" / "ui_focus_tokens.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../primitives/ui_button.dart';\n"
+            + "import '../../tiertask_ui.dart';\n"
+            + "class UiFocusTokens {}\n",
+            encoding="utf-8",
+        )
+        # Cycle inside layout.
+        (ui_root / "lib" / "src" / "layout" / "a_layout.dart").write_text(
+            GPL_HEADER + "\nimport 'b_layout.dart';\nclass ALayout {}\n",
+            encoding="utf-8",
+        )
+        (ui_root / "lib" / "src" / "layout" / "b_layout.dart").write_text(
+            GPL_HEADER + "\nimport 'a_layout.dart';\nclass BLayout {}\n",
+            encoding="utf-8",
+        )
+
+        dag_issues = tiertask_dev._check_acyclic_dag(self.root)
+        joined = "\n".join(dag_issues)
+        self.assertIn("ui_focus_tokens.dart -> packages/tiertask_ui/lib/src/primitives/ui_button.dart", joined)
+        self.assertIn("ui_focus_tokens.dart -> packages/tiertask_ui/lib/tiertask_ui.dart", joined)
+        self.assertIn("a_layout.dart", joined)
+        self.assertIn("b_layout.dart", joined)
+
+    def test_ui_package_impacted_tests_partitioning_and_digest(self) -> None:
+        self._build_minimal_ui_package(self.root)
+        ui_root = self.root / "packages" / "tiertask_ui"
+
+        digest_before = tiertask_dev.compute_code_digest(self.root)
+        (ui_root / "pubspec.yaml").write_text(
+            (ui_root / "pubspec.yaml").read_text(encoding="utf-8") + "# tweak\n",
+            encoding="utf-8",
+        )
+        digest_after_pubspec = tiertask_dev.compute_code_digest(self.root)
+        self.assertNotEqual(digest_before, digest_after_pubspec)
+
+        (ui_root / "example" / "analysis_options.yaml").write_text(
+            "include: package:flutter_lints/flutter.yaml\n# tweak\n",
+            encoding="utf-8",
+        )
+        digest_after_example = tiertask_dev.compute_code_digest(self.root)
+        self.assertNotEqual(digest_after_pubspec, digest_after_example)
+
+        # Direct mirror resolution for UI primitive.
+        button_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["packages/tiertask_ui/lib/src/primitives/ui_button.dart"],
+        )
+        self.assertEqual(button_tests, ["packages/tiertask_ui/test/primitives/ui_button_test.dart"])
+
+        # Fallback resolution for unmirrored token sub-file.
+        focus_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["packages/tiertask_ui/lib/src/tokens/ui_focus_tokens.dart"],
+        )
+        self.assertIn("packages/tiertask_ui/test/tokens/ui_theme_tokens_test.dart", focus_tests)
+
+        # Barrel and test_helpers resolve dependent suites.
+        barrel_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["packages/tiertask_ui/lib/tiertask_ui.dart"],
+        )
+        self.assertIn("packages/tiertask_ui/test/primitives/ui_button_test.dart", barrel_tests)
+        self.assertIn("packages/tiertask_ui/test/tokens/ui_theme_tokens_test.dart", barrel_tests)
+
+        helper_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["packages/tiertask_ui/test/test_helpers.dart"],
+        )
+        self.assertIn("packages/tiertask_ui/test/primitives/ui_button_test.dart", helper_tests)
+
+        # Example changes resolve example/test suites.
+        example_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["packages/tiertask_ui/example/lib/main.dart"],
+        )
+        self.assertEqual(example_tests, ["packages/tiertask_ui/example/test/gallery_smoke_test.dart"])
+
+        # Partitioning produces package-relative paths per package root.
+        partitioned = tiertask_dev.partition_tests_by_package(
+            [
+                "test/models/sample_model_test.dart",
+                "packages/tiertask_ui/test/primitives/ui_button_test.dart",
+                "packages/tiertask_ui/example/test/gallery_smoke_test.dart",
+            ],
+        )
+        self.assertEqual(partitioned[Path(".")], ["test/models/sample_model_test.dart"])
+        self.assertEqual(
+            partitioned[Path("packages/tiertask_ui")],
+            ["test/primitives/ui_button_test.dart"],
+        )
+        self.assertEqual(
+            partitioned[Path("packages/tiertask_ui/example")],
+            ["test/gallery_smoke_test.dart"],
+        )
+        self.assertTrue(
+            tiertask_dev._is_code_relevant_change("packages/tiertask_ui/lib/src/primitives/ui_button.dart")
+        )
+
+    def test_ui_package_arch_outline_find_and_scaffold(self) -> None:
+        self._build_minimal_ui_package(self.root)
+        tree = tiertask_dev.generate_architecture_tree(self.root)
+        self.assertIn("packages/", tree)
+        self.assertIn("tiertask_ui/", tree)
+        self.assertIn("linux/", tree)
+        self.assertNotIn("CMakeLists.txt", tree)
+        self.assertNotIn("build/", tree)
+        self.assertNotIn("ephemeral/", tree)
+        self.assertNotIn("pubspec.lock", tree)
+
+        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
+
+        tiertask_dev.scaffold_file(
+            self.root,
+            "packages/tiertask_ui/lib/src/primitives/ui_pill.dart",
+            description="Defines `UiPill` badge and chip widget.",
+        )
+        self.assertTrue((self.root / "packages" / "tiertask_ui" / "lib" / "src" / "primitives" / "ui_pill.dart").exists())
+        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
+
+        # Outline classifies package tests as test files.
+        pkg_test_out = tiertask_dev.outline_file(
+            self.root,
+            self.root / "packages" / "tiertask_ui" / "test" / "primitives" / "ui_button_test.dart",
+        )
+        self.assertIn("testWidgets('renders UiButton')", pkg_test_out)
+        ex_test_out = tiertask_dev.outline_file(
+            self.root,
+            self.root / "packages" / "tiertask_ui" / "example" / "test" / "gallery_smoke_test.dart",
+        )
+        self.assertIn("testWidgets('gallery renders')", ex_test_out)
+
+        # Find includes packages/tiertask_ui/ when layer is None or ui_pkg.
+        all_matches = tiertask_dev.find_in_repo(self.root, "UiButton")
+        self.assertTrue(any("packages/tiertask_ui/lib/src/primitives/ui_button.dart" in m for m in all_matches))
+        pkg_matches = tiertask_dev.find_in_repo(self.root, "UiButton", layer="ui_pkg")
+        self.assertTrue(any("packages/tiertask_ui/lib/src/primitives/ui_button.dart" in m for m in pkg_matches))
+        other_matches = tiertask_dev.find_in_repo(self.root, "UiButton", layer="models")
+        self.assertEqual(other_matches, [])
+
 
 if __name__ == "__main__":
     unittest.main()

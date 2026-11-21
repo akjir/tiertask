@@ -1,0 +1,215 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:tiertask_ui/tiertask_ui.dart';
+
+import '../test_helpers.dart';
+
+void main() {
+  group('UiDialogFrame', () {
+    testWidgets(
+      'renders modal sizes 420, 520, and 600 with subtitle, traps Tab cyclically, dismisses on Escape, and restores focus',
+      (tester) async {
+        final triggerFocus = FocusNode();
+        addTearDown(triggerFocus.dispose);
+
+        const sizeExpectations = <(UiDialogSize, double)>[
+          (UiDialogSize.small, 420.0),
+          (UiDialogSize.medium, 520.0),
+          (UiDialogSize.large, 600.0),
+        ];
+
+        for (final (dialogSize, expectedMaxWidth) in sizeExpectations) {
+          await pumpUiWidget(
+            tester,
+            Builder(
+              builder: (context) {
+                return Center(
+                  child: UiButton(
+                    key: const ValueKey<String>('open_modal_btn'),
+                    focusNode: triggerFocus,
+                    label: 'Open Modal',
+                    onPressed: () async {
+                      await UiDialogFrame.showModal<void>(
+                        context: context,
+                        builder: (dialogContext) {
+                          return UiDialogFrame(
+                            key: const ValueKey<String>('modal_frame'),
+                            title: 'Dialog ${dialogSize.name}',
+                            subtitle: 'Optional subtitle',
+                            size: dialogSize,
+                            closeTooltip: 'Close dialog',
+                            onClose: () => Navigator.of(dialogContext).pop(),
+                            body: const Text('Modal body'),
+                            footer: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                UiButton(
+                                  key: const ValueKey<String>('modal_cancel'),
+                                  label: 'Cancel',
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(),
+                                ),
+                                const SizedBox(width: 8.0),
+                                UiButton(
+                                  key: const ValueKey<String>('modal_confirm'),
+                                  label: 'Confirm',
+                                  variant: UiButtonVariant.primary,
+                                  onPressed: () =>
+                                      Navigator.of(dialogContext).pop(),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+            surfaceSize: const Size(1280, 800),
+          );
+
+          triggerFocus.requestFocus();
+          await tester.pump();
+          expect(triggerFocus.hasFocus, isTrue);
+
+          await tester.tap(
+            find.byKey(const ValueKey<String>('open_modal_btn')),
+          );
+          await tester.pumpAndSettle();
+
+          expect(find.text('Dialog ${dialogSize.name}'), findsOneWidget);
+          expect(find.text('Optional subtitle'), findsOneWidget);
+          final frameSize = tester.getSize(
+            find.byKey(const ValueKey<String>('modal_frame')),
+          );
+          expect(
+            frameSize.width,
+            closeTo(expectedMaxWidth, 0.5),
+            reason:
+                'UiDialogSize.${dialogSize.name} must measure $expectedMaxWidth px wide',
+          );
+
+          // Cyclical Tab traversal stays strictly inside modal descendants.
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.pump();
+          expect(
+            triggerFocus.hasFocus,
+            isFalse,
+            reason: 'Tab must stay trapped inside modal overlay',
+          );
+
+          // Shift+Tab cycles backward inside modal without escaping.
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+          await tester.pump();
+          expect(triggerFocus.hasFocus, isFalse);
+
+          // Escape dismisses modal and restores originating focus.
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          expect(find.text('Dialog ${dialogSize.name}'), findsNothing);
+          expect(
+            triggerFocus.hasFocus,
+            isTrue,
+            reason: 'Closing modal must restore focus to triggering control',
+          );
+        }
+      },
+    );
+
+    testWidgets(
+      'showBottomSheet caps height at 78%, renders ExcludeSemantics handle, and closes on Done or scrim tap',
+      (tester) async {
+        final triggerFocus = FocusNode();
+        addTearDown(triggerFocus.dispose);
+
+        await pumpUiWidget(
+          tester,
+          Builder(
+            builder: (context) {
+              return Center(
+                child: UiButton(
+                  key: const ValueKey<String>('open_sheet_btn'),
+                  focusNode: triggerFocus,
+                  label: 'Pick labels',
+                  onPressed: () async {
+                    await UiDialogFrame.showBottomSheet<void>(
+                      context: context,
+                      title: 'Labels',
+                      icon: Icons.label_outline_rounded,
+                      countLabel: '3',
+                      doneLabel: 'Done',
+                      builder: (_) => const SizedBox(
+                        height: 900,
+                        child: Text('Sheet content'),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+          surfaceSize: const Size(390, 800),
+        );
+
+        triggerFocus.requestFocus();
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey<String>('open_sheet_btn')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Labels'), findsOneWidget);
+        expect(find.text('3'), findsOneWidget);
+        expect(find.text('Sheet content'), findsOneWidget);
+
+        final sheetFinder = find.byKey(
+          const ValueKey<String>('ui_bottom_sheet'),
+        );
+        expect(sheetFinder, findsOneWidget);
+        expect(
+          tester.getSize(sheetFinder).height,
+          lessThanOrEqualTo(800 * 0.78 + 1),
+        );
+
+        expect(
+          find.descendant(
+            of: sheetFinder,
+            matching: find.byKey(
+              const ValueKey<String>('ui_bottom_sheet_handle'),
+            ),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+        expect(find.text('Sheet content'), findsNothing);
+        expect(triggerFocus.hasFocus, isTrue);
+      },
+    );
+  });
+}

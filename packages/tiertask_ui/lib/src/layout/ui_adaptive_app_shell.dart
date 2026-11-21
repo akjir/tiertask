@@ -1,0 +1,560 @@
+// TierTask
+// Copyright (C) 2026  Stefan Stark
+//
+// This program is free software: you can redistribute it and/or modify it under
+// the terms of the GNU General Public License as published by the Free Software
+// Foundation, either version 3 of the License, or (at your option)
+// any later version.
+//
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+// FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License along with
+// this program.  If not, see <https://www.gnu.org/licenses/>.
+
+import 'dart:math' as math;
+
+import 'package:material_ui/material_ui.dart';
+
+import '../primitives/ui_button.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+
+/// Adaptive single-frame application shell coordinating chrome, sidebar/drawer, body + floating notice, and pinned bottom dock (`U-LAYOUT-001`..`005`).
+class UiAdaptiveAppShell extends StatelessWidget {
+  /// Creates a [UiAdaptiveAppShell].
+  const UiAdaptiveAppShell({
+    super.key,
+    required this.brand,
+    required this.sidebarBody,
+    required this.body,
+    this.mobileActiveFilter,
+    this.workspaceTrigger,
+    this.searchWidget,
+    this.isSearchOpen = false,
+    this.trailingActions = const <Widget>[],
+    this.isDrawerOpen = false,
+    this.onToggleDrawer,
+    this.menuOpenTooltip,
+    this.menuCloseTooltip,
+    this.sidebarHeader,
+    this.sidebarFooter,
+    this.sidebarScrollController,
+    this.floatingNotice,
+    this.bottomDock,
+  });
+
+  /// Primary main pane body (compatible with `CustomScrollView`, `ListView.builder`, or flex `Column`).
+  final Widget body;
+
+  /// Optional pinned bottom dock anchored strictly below the viewport and [floatingNotice].
+  final Widget? bottomDock;
+
+  /// Brand mark and wordmark rendered at the leading edge of the top chrome bar.
+  final Widget brand;
+
+  /// Optional floating notice / Undo toast anchored inside the viewport stack above [bottomDock].
+  final Widget? floatingNotice;
+
+  /// Whether the compact slide-over navigation drawer is currently open.
+  final bool isDrawerOpen;
+
+  /// Whether global search mode is active (expands search to 100% width on `compact`).
+  final bool isSearchOpen;
+
+  /// Accessible tooltip for the compact menu toggle while the drawer is open.
+  final String? menuCloseTooltip;
+
+  /// Accessible tooltip for the compact menu toggle while the drawer is closed.
+  final String? menuOpenTooltip;
+
+  /// Optional compact-only clickable active-label chip replacing [brand] when `!isSearchOpen`.
+  final Widget? mobileActiveFilter;
+
+  /// Callback toggling the compact slide-over drawer.
+  final VoidCallback? onToggleDrawer;
+
+  /// Optional global search trigger or active search box rendered in top chrome.
+  final Widget? searchWidget;
+
+  /// Scrollable sidebar navigation content.
+  final Widget sidebarBody;
+
+  /// Optional top-bordered pinned sidebar footer (e.g. SemVer build string).
+  final Widget? sidebarFooter;
+
+  /// Optional compact-only header placed at the top of the slide-over drawer (e.g. Workspace card).
+  final Widget? sidebarHeader;
+
+  /// Optional caller-owned [ScrollController] preserving sidebar scroll offset (`U-LAYOUT-007`).
+  final ScrollController? sidebarScrollController;
+
+  /// Trailing top chrome actions (location status, sync button).
+  final List<Widget> trailingActions;
+
+  /// Optional desktop workspace switcher pill hidden on `compact` viewports.
+  final Widget? workspaceTrigger;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final viewport = UiBreakpoints.classify(width);
+        final isCompact = viewport == UiViewportClass.compact;
+
+        return Material(
+          color: colors.bg,
+          child: Column(
+            children: <Widget>[
+              _UiTopChromeBar(
+                viewport: viewport,
+                brand: brand,
+                mobileActiveFilter: mobileActiveFilter,
+                workspaceTrigger: workspaceTrigger,
+                searchWidget: searchWidget,
+                isSearchOpen: isSearchOpen,
+                trailingActions: trailingActions,
+                isDrawerOpen: isDrawerOpen,
+                onToggleDrawer: onToggleDrawer,
+                menuOpenTooltip: menuOpenTooltip,
+                menuCloseTooltip: menuCloseTooltip,
+              ),
+              Expanded(
+                child: _UiShellBodyStack(
+                  viewport: viewport,
+                  availableWidth: width,
+                  isCompact: isCompact,
+                  isDrawerOpen: isDrawerOpen,
+                  onToggleDrawer: onToggleDrawer,
+                  sidebarHeader: sidebarHeader,
+                  sidebarBody: sidebarBody,
+                  sidebarFooter: sidebarFooter,
+                  sidebarScrollController: sidebarScrollController,
+                  body: body,
+                  floatingNotice: floatingNotice,
+                  bottomDock: bottomDock,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Top `62px` chrome bar with responsive compact search collapse and active-label brand swap (`U-LAYOUT-003`..`004`).
+class _UiTopChromeBar extends StatelessWidget {
+  /// Creates a [_UiTopChromeBar].
+  const _UiTopChromeBar({
+    required this.viewport,
+    required this.brand,
+    required this.mobileActiveFilter,
+    required this.workspaceTrigger,
+    required this.searchWidget,
+    required this.isSearchOpen,
+    required this.trailingActions,
+    required this.isDrawerOpen,
+    required this.onToggleDrawer,
+    required this.menuOpenTooltip,
+    required this.menuCloseTooltip,
+  });
+
+  /// Desktop/default brand widget.
+  final Widget brand;
+
+  /// Whether compact drawer is open.
+  final bool isDrawerOpen;
+
+  /// Whether global search is open.
+  final bool isSearchOpen;
+
+  /// Tooltip when drawer is open.
+  final String? menuCloseTooltip;
+
+  /// Tooltip when drawer is closed.
+  final String? menuOpenTooltip;
+
+  /// Compact active-label replacement for [brand].
+  final Widget? mobileActiveFilter;
+
+  /// Drawer toggle callback.
+  final VoidCallback? onToggleDrawer;
+
+  /// Search toggle or active search input.
+  final Widget? searchWidget;
+
+  /// Trailing actions row.
+  final List<Widget> trailingActions;
+
+  /// Current viewport breakpoint class.
+  final UiViewportClass viewport;
+
+  /// Desktop workspace pill.
+  final Widget? workspaceTrigger;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final isCompact = viewport == UiViewportClass.compact;
+
+    return Container(
+      constraints: BoxConstraints(minHeight: tokens.spacing.chromeHeight),
+      padding: tokens.spacing.chromePadding(viewport),
+      decoration: BoxDecoration(
+        color: colors.panel,
+        border: Border(
+          bottom: BorderSide(
+            color: colors.line,
+            width: tokens.radii.borderWidth,
+          ),
+        ),
+      ),
+      child: isCompact ? _buildCompactRow(tokens) : _buildDesktopRow(tokens),
+    );
+  }
+
+  /// Builds compact (`<= 720px`) chrome bar layout.
+  Widget _buildCompactRow(UiThemeTokens tokens) {
+    if (isSearchOpen && searchWidget != null) {
+      return Row(
+        children: <Widget>[
+          Expanded(child: searchWidget ?? const SizedBox.shrink()),
+        ],
+      );
+    }
+
+    return Row(
+      children: <Widget>[
+        UiButton(
+          leadingIcon: isDrawerOpen ? Icons.close_rounded : Icons.menu_rounded,
+          variant: UiButtonVariant.icon,
+          density: UiButtonDensity.mobileTouch,
+          tooltip: isDrawerOpen ? menuCloseTooltip : menuOpenTooltip,
+          onPressed: onToggleDrawer,
+        ),
+        const SizedBox(width: 4.0),
+        if (mobileActiveFilter case final activeFilter?)
+          Expanded(child: activeFilter)
+        else
+          Expanded(
+            child: Align(alignment: Alignment.centerLeft, child: brand),
+          ),
+        if (searchWidget case final search?) ...<Widget>[
+          const SizedBox(width: 6.0),
+          search,
+        ],
+        for (final action in trailingActions) ...<Widget>[
+          const SizedBox(width: 6.0),
+          action,
+        ],
+      ],
+    );
+  }
+
+  /// Builds desktop (`> 720px`) chrome bar layout.
+  Widget _buildDesktopRow(UiThemeTokens tokens) {
+    return Row(
+      children: <Widget>[
+        brand,
+        if (workspaceTrigger case final workspace?) ...<Widget>[
+          const SizedBox(width: 10.0),
+          workspace,
+        ],
+        if (isSearchOpen && searchWidget != null) ...<Widget>[
+          const SizedBox(width: 12.0),
+          Expanded(child: searchWidget ?? const SizedBox.shrink()),
+        ] else ...<Widget>[const Spacer(), ?searchWidget],
+        for (final action in trailingActions) ...<Widget>[
+          const SizedBox(width: 8.0),
+          action,
+        ],
+      ],
+    );
+  }
+}
+
+/// Below-chrome stack hosting persistent desktop sidebar or compact slide-over drawer + main column.
+class _UiShellBodyStack extends StatelessWidget {
+  /// Creates a [_UiShellBodyStack].
+  const _UiShellBodyStack({
+    required this.viewport,
+    required this.availableWidth,
+    required this.isCompact,
+    required this.isDrawerOpen,
+    required this.onToggleDrawer,
+    required this.sidebarHeader,
+    required this.sidebarBody,
+    required this.sidebarFooter,
+    required this.sidebarScrollController,
+    required this.body,
+    required this.floatingNotice,
+    required this.bottomDock,
+  });
+
+  /// Available shell width for computing compact drawer cap (`min(300, 92%)`).
+  final double availableWidth;
+
+  /// Main pane body.
+  final Widget body;
+
+  /// Optional pinned bottom dock.
+  final Widget? bottomDock;
+
+  /// Optional floating notice anchored above [bottomDock].
+  final Widget? floatingNotice;
+
+  /// Whether viewport is compact (`<= 720px`).
+  final bool isCompact;
+
+  /// Whether compact drawer is open.
+  final bool isDrawerOpen;
+
+  /// Drawer toggle callback (invoked on scrim tap).
+  final VoidCallback? onToggleDrawer;
+
+  /// Scrollable sidebar navigation body.
+  final Widget sidebarBody;
+
+  /// Pinned sidebar footer.
+  final Widget? sidebarFooter;
+
+  /// Compact-only sidebar top header.
+  final Widget? sidebarHeader;
+
+  /// Preserved sidebar scroll controller.
+  final ScrollController? sidebarScrollController;
+
+  /// Viewport class.
+  final UiViewportClass viewport;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final mainColumn = _UiMainColumn(
+      viewport: viewport,
+      body: body,
+      floatingNotice: floatingNotice,
+      bottomDock: bottomDock,
+    );
+
+    if (!isCompact) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          SizedBox(
+            width: tokens.spacing.sidebarWidth,
+            child: _UiSidebarContainer(
+              header: null,
+              body: sidebarBody,
+              footer: sidebarFooter,
+              scrollController: sidebarScrollController,
+            ),
+          ),
+          Expanded(child: mainColumn),
+        ],
+      );
+    }
+
+    final drawerWidth = math.min(
+      tokens.spacing.drawerMaxWidth,
+      availableWidth * 0.92,
+    );
+
+    return Stack(
+      children: <Widget>[
+        Positioned.fill(child: mainColumn),
+        if (isDrawerOpen) ...<Widget>[
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onToggleDrawer,
+              child: ColoredBox(color: colors.scrim),
+            ),
+          ),
+          Positioned(
+            left: 0.0,
+            top: 0.0,
+            bottom: 0.0,
+            width: drawerWidth,
+            child: Semantics(
+              scopesRoute: true,
+              explicitChildNodes: true,
+              child: _UiSidebarContainer(
+                header: sidebarHeader,
+                body: sidebarBody,
+                footer: sidebarFooter,
+                scrollController: sidebarScrollController,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Independent scrollable sidebar surface with optional compact header and pinned top-bordered footer.
+class _UiSidebarContainer extends StatelessWidget {
+  /// Creates a [_UiSidebarContainer].
+  const _UiSidebarContainer({
+    required this.header,
+    required this.body,
+    required this.footer,
+    required this.scrollController,
+  });
+
+  /// Scrollable navigation sections.
+  final Widget body;
+
+  /// Optional bottom-pinned footer.
+  final Widget? footer;
+
+  /// Optional compact header.
+  final Widget? header;
+
+  /// Optional scroll controller.
+  final ScrollController? scrollController;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.panel,
+        border: Border(
+          right: BorderSide(
+            color: colors.line,
+            width: tokens.radii.borderWidth,
+          ),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Expanded(
+            child: SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10.0,
+                vertical: 14.0,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  if (header case final topHeader?) ...<Widget>[
+                    topHeader,
+                    SizedBox(height: tokens.spacing.space3),
+                  ],
+                  body,
+                ],
+              ),
+            ),
+          ),
+          if (footer case final pinnedFooter?)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: colors.line,
+                    width: tokens.radii.borderWidth,
+                  ),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14.0,
+                  vertical: 10.0,
+                ),
+                child: pinnedFooter,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Main viewport stack decoupled strictly from the conditional pinned bottom dock (`U-LAYOUT-005`).
+class _UiMainColumn extends StatelessWidget {
+  /// Creates a [_UiMainColumn].
+  const _UiMainColumn({
+    required this.viewport,
+    required this.body,
+    required this.floatingNotice,
+    required this.bottomDock,
+  });
+
+  /// Main content body.
+  final Widget body;
+
+  /// Optional pinned bottom dock.
+  final Widget? bottomDock;
+
+  /// Optional floating bottom toast anchored inside the viewport region.
+  final Widget? floatingNotice;
+
+  /// Active viewport class.
+  final UiViewportClass viewport;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final isCompact = viewport == UiViewportClass.compact;
+    final noticeBottom = isCompact
+        ? tokens.spacing.floatingNoticeInsetCompact
+        : tokens.spacing.floatingNoticeInsetDesktop;
+    final noticeHorizontal = isCompact ? 14.0 : 26.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Expanded(
+          child: Stack(
+            children: <Widget>[
+              Positioned.fill(child: body),
+              if (floatingNotice case final notice?)
+                Positioned(
+                  left: noticeHorizontal,
+                  right: noticeHorizontal,
+                  bottom: noticeBottom,
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: notice,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (bottomDock case final dock?)
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.bg,
+              border: Border(
+                top: BorderSide(
+                  color: colors.line,
+                  width: tokens.radii.borderWidth,
+                ),
+              ),
+            ),
+            child: Padding(
+              padding: tokens.spacing.dockPadding(viewport),
+              child: dock,
+            ),
+          ),
+      ],
+    );
+  }
+}
