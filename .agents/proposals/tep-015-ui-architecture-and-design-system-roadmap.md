@@ -168,8 +168,8 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 - [x] Author and complete **Phase 1 Child TEP** ([`TEP-016`](tep-016-presentation-layer-decoupling.md): Presentation Layer Decoupling & Strict `repositories/`/`services/` Boundary).
 - [x] Complete **Design Gate** in `.agents/prototypes/ui_v2/` covering all production TierTask `0.8.0` parity views and mobile/desktop interactions, and codify derivable guidelines into [`spec/UI_DESIGN_SYSTEM.md`](../../spec/UI_DESIGN_SYSTEM.md) and `.agents/skills/ui-design-system/SKILL.md`.
 - [x] Author and complete **Phase 2 Child TEP** ([`TEP-017`](tep-017-dedicated-ui-component-library.md): `packages/tiertask_ui/` Component Library, Themes, Gallery App, and Tooling Integration).
-- [ ] Author and complete **Phase 3 Child TEP** ([`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md): Adaptive Shell & Feature Screens Cutover under Strict ViewModel Contract, currently in `review`).
-- [ ] Author and complete **Phase 4 Child TEP** (Legacy UI Retirement, Global Strict DAG Lock, and Documentation Synchronization).
+- [x] Author and complete **Phase 3 Child TEP** ([`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md): Adaptive Shell & Feature Screens Cutover under Strict ViewModel Contract).
+- [ ] Author and complete **Phase 4 Child TEP** ([`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md): Legacy UI Retirement, Global Strict Architecture Lock, and Finalization, currently in `concept`).
 - [ ] After all four child TEPs reach `completed`, set `TEP-015` to `review`, update `BOARD.md`, and request final approval.
 
 ### 3.2 Work Log & Decisions
@@ -182,6 +182,7 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 - **2026-11-21:** Advanced `TEP-015` status from `concept` to `planned` and created Phase 2 child proposal [`TEP-017`](tep-017-dedicated-ui-component-library.md).
 - **2026-11-21:** Completed Phase 2 child proposal [`TEP-017`](tep-017-dedicated-ui-component-library.md) (`status: completed`): delivered `packages/tiertask_ui/` (7 token leaves, 17 orthogonal widgets, 52 isolated tests verifying 68 WCAG AA pairs), runnable `packages/tiertask_ui/example/` gallery app, and multi-package `tiertask_dev.py` verification.
 - **2026-11-21:** Implemented Phase 3 child proposal [`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md) (`status: review`): delivered the model-free v2 presentation layer, `Calm` and `Plum Umber` palette migration, strict Rank `7` `lib/ui_v2/` adaptive shell and feature views, unconditional `lib/main.dart` cutover, and `M-REAL-MECHANICS-TESTS` suite awaiting final user approval.
+- **2026-11-21:** Completed Phase 3 child proposal [`TEP-018`](tep-018-adaptive-ui-shell-and-feature-cutover.md) (`status: completed`) following user approval and created Phase 4 child proposal [`TEP-019`](tep-019-legacy-ui-retirement-and-architecture-finalization.md) (`status: concept`).
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*
