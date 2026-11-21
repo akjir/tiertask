@@ -34,14 +34,21 @@
 
       <span class="preview-divider" aria-hidden="true"></span>
 
+      <span class="preview-group-label" data-preview-label="build">Build</span>
+      <button type="button" data-dev-build aria-pressed="false">DEV</button>
+
+      <span class="preview-divider" aria-hidden="true"></span>
+
       <label class="preview-sim-label">
         <span data-preview-label="sim">Simulator</span>
         <select data-sim-state aria-label="State Simulator">
           <option value="normal">Normal (Synced)</option>
+          <option value="loading">Initial Loading</option>
           <option value="syncing">Syncing ...</option>
           <option value="sync_error">Sync Error (Network)</option>
           <option value="file_read_banner">File Read Banner (Local Corrupt, Remote OK)</option>
           <option value="file_read_full">Full-Screen File Read Error (Local &amp; Remote)</option>
+          <option value="raw_tdf_limit">Raw TDF Limit Exceeded</option>
           <option value="conflict_deletion">Deletion Conflict (TDF-DEL-003)</option>
           <option value="conflict_recovery">Recovery Required (TDF-REC-002)</option>
           <option value="generation_rollback">Generation Rollback Blocked</option>

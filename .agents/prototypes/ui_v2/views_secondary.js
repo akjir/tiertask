@@ -56,7 +56,10 @@
 
       <div class="settings-grid">
         <section class="edit-card">
-          <h3>${renderIcon('sliders', 'icon-sm')} ${escapeHtml(t(lang, 'setLangTitle'))}</h3>
+          <div class="settings-card-head">
+            <h3>${renderIcon('sliders', 'icon-sm')} ${escapeHtml(t(lang, 'setLangTitle'))}</h3>
+            <span class="pill-badge">${escapeHtml(t(lang, 'setAutoSavedBadge'))}</span>
+          </div>
           <p class="edit-description">${escapeHtml(t(lang, 'setLangDesc'))}</p>
           ${renderSegmented('language', cfg.language, [
             ['system', t(lang, 'setLangSystem')],
@@ -85,7 +88,10 @@
         </section>
 
         <section class="edit-card">
-          <h3>${renderIcon('clock', 'icon-sm')} ${escapeHtml(t(lang, 'setTzTitle'))}</h3>
+          <div class="settings-card-head">
+            <h3>${renderIcon('clock', 'icon-sm')} ${escapeHtml(t(lang, 'setTzTitle'))}</h3>
+            <span class="pill-badge">${escapeHtml(t(lang, 'setAutoSavedBadge'))}</span>
+          </div>
           <p class="edit-description">${escapeHtml(t(lang, 'setTzDesc'))}</p>
           ${renderSegmented('timeZoneMode', cfg.timeZoneMode, [
             ['automatic', t(lang, 'setTzAuto')],
@@ -121,7 +127,10 @@
         </section>
 
         <section class="edit-card">
-          <h3>${renderIcon('locate', 'icon-sm')} ${escapeHtml(t(lang, 'setLocTitle'))}</h3>
+          <div class="settings-card-head">
+            <h3>${renderIcon('locate', 'icon-sm')} ${escapeHtml(t(lang, 'setLocTitle'))}</h3>
+            <span class="pill-badge">${escapeHtml(t(lang, 'setAutoSavedBadge'))}</span>
+          </div>
           <p class="edit-description">${escapeHtml(t(lang, 'setLocDesc'))}</p>
           ${renderSegmented('locationEnabled', String(cfg.locationEnabled), [
             ['false', t(lang, 'setLocOff')],
@@ -164,7 +173,10 @@
         </section>
 
         <section class="edit-card">
-          <h3>${renderIcon('layers', 'icon-sm')} ${escapeHtml(t(lang, 'setStorageModeTitle'))}</h3>
+          <div class="settings-card-head">
+            <h3>${renderIcon('layers', 'icon-sm')} ${escapeHtml(t(lang, 'setStorageModeTitle'))}</h3>
+            <span class="pill-badge">${escapeHtml(t(lang, 'setAutoSavedBadge'))}</span>
+          </div>
           <p class="edit-description">${escapeHtml(t(lang, 'setStorageModeDesc'))}</p>
           ${renderSegmented('storageMode', cfg.storageMode, [
             ['local', t(lang, 'storageLocal')],
@@ -183,7 +195,7 @@
                 </div>
                 <div class="local-actions-grid">
                   <button type="button" class="secondary compact" data-open-modal="select-local">${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'actionSelect'))}</button>
-                  <button type="button" class="secondary compact" data-move-local>${renderIcon('folder-input', 'icon-xs')}${escapeHtml(t(lang, 'actionMove'))}</button>
+                  <button type="button" class="secondary compact" data-move-local ${state.isCompact ? `disabled title="${escapeHtml(t(lang, 'setMoveDesktopOnlyHint'))}"` : ''}>${renderIcon('folder-input', 'icon-xs')}${escapeHtml(t(lang, 'actionMove'))}</button>
                   <button type="button" class="secondary compact" data-open-modal="rename-local">${renderIcon('pencil', 'icon-xs')}${escapeHtml(t(lang, 'actionRename'))}</button>
                   <button type="button" class="danger compact" data-open-wipe="local">${renderIcon('trash', 'icon-xs')}${escapeHtml(t(lang, 'actionDelete'))}</button>
                 </div>
@@ -197,14 +209,23 @@
           ${
             usesWebDav
               ? `<div class="edit-divider"></div>
-                <h3>${renderIcon('cloud', 'icon-sm')} ${escapeHtml(t(lang, 'setWebDavTitle'))}</h3>
+                <div class="settings-card-head">
+                  <h3>${renderIcon('cloud', 'icon-sm')} ${escapeHtml(t(lang, 'setWebDavTitle'))}</h3>
+                  ${
+                    state.settingsDirty
+                      ? `<span class="pill-badge tone-warning">${escapeHtml(t(lang, 'setUnsavedWebDavBadge'))}</span>`
+                      : ''
+                  }
+                </div>
                 <p class="edit-description">${escapeHtml(t(lang, 'setWebDavDesc'))}</p>
                 <label class="field">${escapeHtml(t(lang, 'setWebDavUrl'))}
                   <input type="url" data-set-field="serverUrl" value="${escapeHtml(cfg.serverUrl)}" placeholder="https://cloud.example.com">
+                  ${state.settingsErrors?.serverUrl ? `<span class="field-error">${escapeHtml(state.settingsErrors.serverUrl)}</span>` : ''}
                 </label>
                 <div class="field-grid">
                   <label class="field">${escapeHtml(t(lang, 'setWebDavUser'))}
                     <input type="text" data-set-field="username" value="${escapeHtml(cfg.username)}" placeholder="example-user">
+                    ${state.settingsErrors?.username ? `<span class="field-error">${escapeHtml(state.settingsErrors.username)}</span>` : ''}
                   </label>
                   <label class="field">${escapeHtml(t(lang, 'setWebDavPass'))}
                     <div class="password-wrap">
@@ -213,10 +234,12 @@
                         ${renderIcon(state.showPassword ? 'eye-off' : 'eye', 'icon-sm')}
                       </button>
                     </div>
+                    ${state.settingsErrors?.password ? `<span class="field-error">${escapeHtml(state.settingsErrors.password)}</span>` : ''}
                   </label>
                 </div>
                 <label class="field">${escapeHtml(t(lang, 'setWebDavPath'))}
                   <input type="text" data-set-field="filePath" value="${escapeHtml(cfg.filePath)}" placeholder="tasks.tdf">
+                  ${state.settingsErrors?.filePath ? `<span class="field-error">${escapeHtml(state.settingsErrors.filePath)}</span>` : ''}
                 </label>
                 ${
                   resolvedRemote
@@ -233,12 +256,23 @@
           }
         </section>
       </div>
+    `;
+  }
 
-      <div class="task-editor-actions">
-        <span></span>
-        <div>
-          <button type="button" class="secondary" data-settings-save>${escapeHtml(t(lang, 'actionSave'))}</button>
-          <button type="button" class="primary" data-settings-test-sync ${!usesWebDav ? 'disabled' : ''}>
+  function renderSettingsActionDock(state, workspace) {
+    const lang = state.lang;
+    const cfg = workspace.config;
+    const usesWebDav = cfg.storageMode === 'webdav' || cfg.storageMode === 'both';
+    return `
+      <div class="view-action-dock-inner">
+        ${
+          state.settingsDirty && usesWebDav
+            ? `<span class="pill-badge tone-warning">${escapeHtml(t(lang, 'setUnsavedWebDavBadge'))}</span>`
+            : '<span></span>'
+        }
+        <div class="view-action-dock-buttons">
+          <button type="button" class="${state.settingsDirty ? 'primary' : 'secondary'}" data-settings-save>${escapeHtml(t(lang, 'actionSave'))}</button>
+          <button type="button" class="${state.settingsDirty ? 'secondary' : 'primary'}" data-settings-test-sync ${!usesWebDav ? 'disabled' : ''}>
             ${renderIcon('refresh-cw', 'icon-sm')}${escapeHtml(t(lang, 'setActionTestSync'))}
           </button>
         </div>
@@ -298,8 +332,6 @@
         </div>
       </div>
 
-      ${window.TT2.viewsCore.renderNotice(state)}
-
       <div class="log-meta-card">
         <div class="mono-sm">${escapeHtml(logFileName)} · v0.4.0+a1b2c3d (linux) · ${escapeHtml(workspace.id)} · ${escapeHtml(cfg.logLevel.toUpperCase())}</div>
         <small>${escapeHtml(t(lang, 'logStats', { entries: entryCount, warnings: warnCount, errors: errCount }))}</small>
@@ -350,9 +382,12 @@
 
   function renderRawTdfView(state, workspace) {
     const lang = state.lang;
-    const serialized = serializeTdf080(workspace);
-    const bytes = new TextEncoder().encode(serialized).length;
-    const lineCount = serialized.split('\n').length;
+    const limitExceeded = state.simState === 'raw_tdf_limit';
+    const serialized = limitExceeded ? '' : serializeTdf080(workspace);
+    const bytes = limitExceeded
+      ? 1048577
+      : new TextEncoder().encode(serialized).length;
+    const lineCount = limitExceeded ? 16385 : serialized.split('\n').length;
 
     return `
       <button type="button" class="back" data-view="tasks">${renderIcon('arrow-left', 'icon-sm')}${escapeHtml(t(lang, 'actionBackTasks'))}</button>
@@ -361,15 +396,24 @@
           <h2>${escapeHtml(t(lang, 'rawTdfTitle'))}</h2>
           <div class="subtitle">${escapeHtml(t(lang, 'rawTdfSub'))}</div>
         </div>
-        <button type="button" class="primary compact" data-copy-raw-tdf>
+        <button type="button" class="primary compact" data-copy-raw-tdf ${limitExceeded ? 'disabled' : ''}>
           ${renderIcon('copy', 'icon-xs')}${escapeHtml(t(lang, 'actionCopy'))}
         </button>
       </div>
-      ${window.TT2.viewsCore.renderNotice(state)}
       <div class="log-meta-card">
         <div class="mono-sm">${escapeHtml(t(lang, 'rawTdfStats', { bytes, lines: lineCount }))}</div>
       </div>
-      <pre class="raw-tdf-code"><code>${escapeHtml(serialized)}</code></pre>
+      ${
+        limitExceeded
+          ? `<div class="status-banner tone-warning" role="alert">
+              ${renderIcon('alert-triangle', 'icon-sm')}
+              <div class="banner-body">
+                <strong>${escapeHtml(t(lang, 'rawTdfLimitTitle'))}</strong>
+                <div class="banner-sublines">${escapeHtml(t(lang, 'rawTdfLimitDesc'))}</div>
+              </div>
+            </div>`
+          : `<pre class="raw-tdf-code"><code>${escapeHtml(serialized)}</code></pre>`
+      }
     `;
   }
 
@@ -407,10 +451,15 @@
           )
           .join('')}
       </div>
+    `;
+  }
 
-      <div class="task-editor-actions">
+  function renderConflictActionDock(state) {
+    const lang = state.lang;
+    return `
+      <div class="view-action-dock-inner">
         <span></span>
-        <div>
+        <div class="view-action-dock-buttons">
           <button type="button" class="secondary" data-view="tasks">${escapeHtml(t(lang, 'actionCancel'))}</button>
           <button type="button" class="primary" data-apply-conflicts>${escapeHtml(t(lang, 'conflictApply'))}</button>
         </div>
@@ -452,10 +501,15 @@
           )
           .join('')}
       </div>
+    `;
+  }
 
-      <div class="task-editor-actions">
+  function renderRecoveryActionDock(state) {
+    const lang = state.lang;
+    return `
+      <div class="view-action-dock-inner">
         <span></span>
-        <div>
+        <div class="view-action-dock-buttons">
           <button type="button" class="secondary" data-view="tasks">${escapeHtml(t(lang, 'actionCancel'))}</button>
           <button type="button" class="primary" data-apply-recovery>${escapeHtml(t(lang, 'recoveryApply'))}</button>
         </div>
@@ -649,7 +703,7 @@
             <h3>${escapeHtml(t(lang, 'selectLocalTitle'))}</h3>
             <p class="modal-subtitle">${escapeHtml(t(lang, 'selectLocalDesc'))}</p>
           </div>
-          <button type="button" class="icon-button compact" data-close-modal>${renderIcon('x')}</button>
+          <button type="button" class="icon-button compact" data-close-modal aria-label="${escapeHtml(t(lang, 'actionClose'))}">${renderIcon('x')}</button>
         </div>
         <div class="modal-body">
           <div class="file-list-box">
@@ -694,7 +748,7 @@
             <h3>${escapeHtml(t(lang, 'renameLocalTitle'))}</h3>
             <p class="modal-subtitle">${escapeHtml(t(lang, 'renameLocalDesc', { file: currentFile }))}</p>
           </div>
-          <button type="button" class="icon-button compact" data-close-modal>${renderIcon('x')}</button>
+          <button type="button" class="icon-button compact" data-close-modal aria-label="${escapeHtml(t(lang, 'actionClose'))}">${renderIcon('x')}</button>
         </div>
         <div class="modal-body">
           <label class="field">${escapeHtml(t(lang, 'localFileInputLabel'))}
@@ -729,7 +783,7 @@
             <h3>${escapeHtml(t(lang, isRemote ? 'wipeRemoteTitle' : 'wipeLocalTitle'))}</h3>
             <p class="modal-subtitle">${escapeHtml(t(lang, isRemote ? 'wipeRemoteDesc' : 'wipeLocalDesc', { file: fileName, base: expectedBase }))}</p>
           </div>
-          <button type="button" class="icon-button compact" data-close-modal>${renderIcon('x')}</button>
+          <button type="button" class="icon-button compact" data-close-modal aria-label="${escapeHtml(t(lang, 'actionClose'))}">${renderIcon('x')}</button>
         </div>
         <div class="modal-body">
           <label class="field">${escapeHtml(t(lang, 'wipeConfirmLabel'))}
@@ -755,7 +809,7 @@
       <div class="modal-card modal-sm" role="dialog" aria-modal="true" aria-label="${escapeHtml(t(lang, 'colorPickerTitle'))}">
         <div class="modal-header">
           <h3>${escapeHtml(t(lang, 'colorPickerTitle'))}</h3>
-          <button type="button" class="icon-button compact" data-close-modal>${renderIcon('x')}</button>
+          <button type="button" class="icon-button compact" data-close-modal aria-label="${escapeHtml(t(lang, 'actionClose'))}">${renderIcon('x')}</button>
         </div>
         <div class="modal-body color-wheel-body">
           <div class="color-preview-bar">
@@ -786,7 +840,7 @@
             <h3>${escapeHtml(t(lang, 'candidateDialogTitle'))}</h3>
             <p class="modal-subtitle">${escapeHtml(t(lang, 'candidateDialogSub'))}</p>
           </div>
-          <button type="button" class="icon-button compact" data-close-modal>${renderIcon('x')}</button>
+          <button type="button" class="icon-button compact" data-close-modal aria-label="${escapeHtml(t(lang, 'actionClose'))}">${renderIcon('x')}</button>
         </div>
         <div class="modal-body">
           <div class="file-list-box">
@@ -849,10 +903,13 @@
 
   window.TT2.viewsSecondary = {
     renderSettingsView,
+    renderSettingsActionDock,
     renderLogViewerView,
     renderRawTdfView,
     renderConflictResolutionView,
+    renderConflictActionDock,
     renderRecoveryResolutionView,
+    renderRecoveryActionDock,
     renderActiveModal,
   };
 })();

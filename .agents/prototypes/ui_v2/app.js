@@ -35,18 +35,23 @@
     renderSidebar,
     renderBanners,
     renderFullFileReadError,
+    renderLoadingView,
+    renderFloatingNotices,
     renderTaskView,
-    renderScrollToComposerButton,
+    renderQuickComposer,
     renderManagerView,
     renderMobileLabelPickerSheet,
   } = window.TT2.viewsCore;
 
   const {
     renderSettingsView,
+    renderSettingsActionDock,
     renderLogViewerView,
     renderRawTdfView,
     renderConflictResolutionView,
+    renderConflictActionDock,
     renderRecoveryResolutionView,
+    renderRecoveryActionDock,
     renderActiveModal,
   } = window.TT2.viewsSecondary;
 
@@ -54,6 +59,7 @@
 
   const state = {
     lang: 'en',
+    isDevBuild: false,
     workspaces,
     activeWorkspaceId: workspaces[0].id,
     nowMs: NOW_UTC_MS,
@@ -73,6 +79,9 @@
     sidebarLocationsCollapsed: false,
     taskLabelPicker: null,
     draftLabelPicker: null,
+    entityDraft: null,
+    entityDraftLabelPicker: null,
+    returnContext: null,
     expandedEntity: null,
     justExpandedKey: null,
     scrollToEntityKey: null,
@@ -80,8 +89,14 @@
     inlineDeleteConfirmKey: null,
     editingHistoryIndex: null,
     historyEditDraft: '',
+    historyEditTimeDraft: '',
+    historyNewDraft: '',
+    historyNewTimeDraft: '',
+    historyTimeOpen: false,
+    historyError: '',
     draft: { title: '', mode: 'queue', labels: [] },
     message: '',
+    messageTone: 'normal',
     showUndoAction: false,
     recoveryNotice: null,
     undoStack: [],
@@ -93,6 +108,8 @@
     locationFix: { ...SIMULATED_LOCATIONS.office },
     locationSearching: false,
     showPassword: false,
+    settingsDirty: false,
+    settingsErrors: {},
     settingsBanner: null,
     logs: createSeedLogs(workspaces[0].id),
     logFilterLevel: 'debug',
@@ -101,11 +118,46 @@
     recoveryItems: [],
   };
 
+  let noticeTimer = null;
+  let modalReturnFocus = null;
+
   function activeWorkspace() {
     return (
       state.workspaces.find((w) => w.id === state.activeWorkspaceId) ||
       state.workspaces[0]
     );
+  }
+
+  function clearNotice() {
+    if (noticeTimer) {
+      clearTimeout(noticeTimer);
+      noticeTimer = null;
+    }
+    state.message = '';
+    state.messageTone = 'normal';
+    state.showUndoAction = false;
+  }
+
+  function setNotice(
+    text,
+    { showUndo = false, tone = 'normal', autoHideMs = showUndo ? 8000 : 5000 } = {},
+  ) {
+    if (noticeTimer) {
+      clearTimeout(noticeTimer);
+      noticeTimer = null;
+    }
+    state.message = text || '';
+    state.messageTone = tone;
+    state.showUndoAction = showUndo;
+    if (state.message && autoHideMs > 0) {
+      noticeTimer = setTimeout(() => {
+        noticeTimer = null;
+        state.message = '';
+        state.messageTone = 'normal';
+        state.showUndoAction = false;
+        app.querySelector('.floating-notice-layer')?.remove();
+      }, autoHideMs);
+    }
   }
 
   function logEvent(level, tag, eventName, fields = {}) {
@@ -132,8 +184,7 @@
     if (navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).catch(() => {});
     }
-    state.message = t(state.lang, messageKey);
-    state.showUndoAction = false;
+    setNotice(t(state.lang, messageKey));
     render();
   }
 
@@ -157,14 +208,16 @@
     ws.tasks = entry.tasks;
     ws.queue = entry.queue;
     ws.deleted = entry.deleted;
-    state.showUndoAction = state.undoStack.length > 0;
-    state.message =
-      state.undoStack.length > 0
-        ? t(state.lang, 'msgUndoDone', { remaining: state.undoStack.length })
-        : t(state.lang, 'msgUndoEmpty');
+    const remaining = state.undoStack.length;
+    setNotice(
+      remaining > 0
+        ? t(state.lang, 'msgUndoDone', { remaining })
+        : t(state.lang, 'msgUndoEmpty'),
+      { showUndo: remaining > 0 },
+    );
     logEvent('info', 'ui', 'ui.undo.applied', {
       kind: entry.kind,
-      remaining: state.undoStack.length,
+      remaining,
     });
     render();
   }
@@ -235,11 +288,15 @@
       btn.setAttribute('aria-pressed', String(btn.dataset.lang === state.lang));
     });
 
+    const devBtn = root.querySelector('[data-dev-build]');
+    if (devBtn) devBtn.setAttribute('aria-pressed', String(state.isDevBuild));
+
     const labelMap = {
       view: 'previewView',
       theme: 'previewTheme',
       mode: 'previewMode',
       lang: 'previewLang',
+      build: 'previewBuild',
       sim: 'previewSim',
     };
     root.querySelectorAll('[data-preview-label]').forEach((el) => {
@@ -255,10 +312,12 @@
 
     const simOptionKeys = {
       normal: 'simNormal',
+      loading: 'simLoading',
       syncing: 'simSyncing',
       sync_error: 'simSyncError',
       file_read_banner: 'simFileReadBanner',
       file_read_full: 'simFileReadFull',
+      raw_tdf_limit: 'simRawTdfLimit',
       conflict_deletion: 'simConflictDeletion',
       conflict_recovery: 'simConflictRecovery',
       generation_rollback: 'simGenRollback',
@@ -272,6 +331,9 @@
   }
 
   function renderMainContent(workspace, evalRes) {
+    if (state.simState === 'loading' && state.view === 'tasks') {
+      return renderLoadingView(state);
+    }
     if (state.simState === 'file_read_full' && state.view === 'tasks') {
       return renderFullFileReadError(state);
     }
@@ -296,20 +358,27 @@
     }
   }
 
+  function captureElementSelector(element) {
+    if (!element || !app.contains(element)) return null;
+    for (const attr of element.attributes) {
+      if (attr.name.startsWith('data-')) {
+        return `[${attr.name}="${CSS.escape(attr.value)}"]`;
+      }
+    }
+    return null;
+  }
+
   function captureFocusDescriptor() {
     const active = document.activeElement;
     if (!active || !app.contains(active)) return null;
     if (!active.matches('input, textarea, select')) return null;
-    for (const attr of active.attributes) {
-      if (attr.name.startsWith('data-')) {
-        return {
-          selector: `[${attr.name}="${CSS.escape(attr.value)}"]`,
-          start: active.selectionStart,
-          end: active.selectionEnd,
-        };
-      }
-    }
-    return null;
+    const selector = captureElementSelector(active);
+    if (!selector) return null;
+    return {
+      selector,
+      start: active.selectionStart,
+      end: active.selectionEnd,
+    };
   }
 
   function restoreFocusDescriptor(desc) {
@@ -329,57 +398,67 @@
     }
   }
 
+  function getFocusableElements(container) {
+    if (!container) return [];
+    return [
+      ...container.querySelectorAll(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((el) => el.offsetParent !== null);
+  }
+
+  function openModal(modalObj) {
+    if (!state.modal) {
+      modalReturnFocus = captureElementSelector(document.activeElement);
+    }
+    state.modal = modalObj;
+    render();
+    const modalCard = app.querySelector('.modal-card');
+    const focusables = getFocusableElements(modalCard);
+    const preferred =
+      focusables.find((el) => el.matches('input, select, textarea')) ||
+      focusables[0];
+    if (preferred) preferred.focus({ preventScroll: true });
+  }
+
+  function closeModal() {
+    state.modal = null;
+    const returnSelector = modalReturnFocus;
+    modalReturnFocus = null;
+    render();
+    if (returnSelector) {
+      const target = app.querySelector(returnSelector);
+      if (target) target.focus({ preventScroll: true });
+    }
+  }
+
   let lastMainScrollScope = '';
   let lastSidebarWorkspaceId = '';
   let lastLabelPickerScope = '';
-  let mainScrollJumpVisible = false;
-  let mainResizeObserver = null;
 
   function hasTaskComposer() {
     return (
       state.view === 'tasks' &&
       !state.searchOpen &&
-      state.simState !== 'file_read_full'
+      state.simState !== 'file_read_full' &&
+      state.simState !== 'loading'
     );
   }
 
-  function syncMainScrollJumpButton() {
-    const mainEl = app.querySelector('.main');
-    const jumpBtn = app.querySelector('[data-scroll-to-composer]');
-    if (!mainEl || !jumpBtn) {
-      mainScrollJumpVisible = false;
-      return;
+  function renderBottomDock(workspace, evalRes) {
+    if (hasTaskComposer()) {
+      return `<div class="composer-dock">${renderQuickComposer(state, workspace, evalRes)}</div>`;
     }
-    const overflow = mainEl.scrollHeight - mainEl.clientHeight;
-    const remaining = overflow - mainEl.scrollTop;
-    const shouldShow = overflow > 8 && remaining > 8;
-    mainScrollJumpVisible = shouldShow;
-    jumpBtn.classList.toggle('is-visible', shouldShow);
-    jumpBtn.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
-    if (shouldShow) {
-      jumpBtn.removeAttribute('tabindex');
-    } else {
-      jumpBtn.setAttribute('tabindex', '-1');
+    if (state.view === 'settings') {
+      return `<div class="view-action-dock">${renderSettingsActionDock(state, workspace)}</div>`;
     }
-  }
-
-  function bindMainScrollObserver(mainEl) {
-    if (mainResizeObserver) {
-      mainResizeObserver.disconnect();
-      mainResizeObserver = null;
+    if (state.view === 'conflict-resolution') {
+      return `<div class="view-action-dock">${renderConflictActionDock(state)}</div>`;
     }
-    if (!mainEl || !hasTaskComposer()) return;
-    mainEl.addEventListener('scroll', syncMainScrollJumpButton, {
-      passive: true,
-    });
-    mainEl.addEventListener('transitionend', syncMainScrollJumpButton);
-    if (typeof ResizeObserver === 'function') {
-      mainResizeObserver = new ResizeObserver(syncMainScrollJumpButton);
-      mainResizeObserver.observe(mainEl);
-      for (const child of mainEl.children) {
-        mainResizeObserver.observe(child);
-      }
+    if (state.view === 'recovery-resolution') {
+      return `<div class="view-action-dock">${renderRecoveryActionDock(state)}</div>`;
     }
+    return '';
   }
 
   function isCompactViewport() {
@@ -390,10 +469,6 @@
   }
 
   function render() {
-    if (mainResizeObserver) {
-      mainResizeObserver.disconnect();
-      mainResizeObserver = null;
-    }
     state.isCompact = isCompactViewport();
     const focusDesc = captureFocusDescriptor();
     const prevSidebarScroll = app.querySelector('.sidebar')?.scrollTop || 0;
@@ -405,16 +480,13 @@
     syncPreviewToolbarFromConfig();
 
     const mainScrollScope = `${state.activeWorkspaceId}:${state.view}:${state.tier}:${state.label}:${state.searchOpen}`;
-    const showJumpBtn = hasTaskComposer();
-    const initialJumpVisible =
-      showJumpBtn &&
-      lastMainScrollScope === mainScrollScope &&
-      mainScrollJumpVisible;
     const labelPickerScope = state.taskLabelPicker
       ? `task:${state.taskLabelPicker.taskId}:${state.taskLabelPicker.scopeFilter}:${state.taskLabelPicker.query}`
-      : state.draftLabelPicker
-        ? `draft:${state.draftLabelPicker.scopeFilter}:${state.draftLabelPicker.query}`
-        : '';
+      : state.entityDraftLabelPicker
+        ? `entity-draft:${state.entityDraftLabelPicker.scopeFilter}:${state.entityDraftLabelPicker.query}`
+        : state.draftLabelPicker
+          ? `draft:${state.draftLabelPicker.scopeFilter}:${state.draftLabelPicker.query}`
+          : '';
 
     app.innerHTML = `
       ${renderChrome(state, ws)}
@@ -424,11 +496,14 @@
           ${renderSidebar(state, ws, evalRes)}
         </nav>
         <div class="main-shell">
-          <main class="main">
-            ${renderBanners(state, ws)}
-            ${renderMainContent(ws, evalRes)}
-          </main>
-          ${showJumpBtn ? renderScrollToComposerButton(state, initialJumpVisible) : ''}
+          <div class="main-scroll-wrap">
+            <main class="main">
+              ${renderBanners(state, ws)}
+              ${renderMainContent(ws, evalRes)}
+            </main>
+            ${renderFloatingNotices(state)}
+          </div>
+          ${renderBottomDock(ws, evalRes)}
         </div>
       </div>
       ${renderMobileLabelPickerSheet(state, ws, evalRes)}
@@ -446,8 +521,6 @@
       nextMain.scrollTop = prevMainScroll;
     }
     lastMainScrollScope = mainScrollScope;
-    bindMainScrollObserver(nextMain);
-    syncMainScrollJumpButton();
 
     const nextPickerList = app.querySelector('.label-picker-list');
     if (nextPickerList && labelPickerScope && lastLabelPickerScope === labelPickerScope) {
@@ -605,6 +678,11 @@
     state.inlineDeleteConfirmKey = null;
     state.editingHistoryIndex = null;
     state.historyEditDraft = '';
+    state.historyEditTimeDraft = '';
+    state.historyNewDraft = '';
+    state.historyNewTimeDraft = '';
+    state.historyTimeOpen = false;
+    state.historyError = '';
   }
 
   function openManagedEntity(viewKind, id) {
@@ -614,9 +692,23 @@
       state.view === viewKind &&
       state.expandedEntity?.kind === entityKind &&
       state.expandedEntity?.id === id;
+    if (state.view === 'tasks') {
+      state.returnContext = {
+        view: 'tasks',
+        tier: state.tier,
+        label: state.label,
+        searchOpen: state.searchOpen,
+        searchQuery: state.searchQuery,
+        expandedEntity: state.expandedEntity
+          ? { ...state.expandedEntity }
+          : null,
+      };
+    }
     state.drawer = false;
     state.modal = null;
     state.draftLabelPicker = null;
+    state.entityDraft = null;
+    state.entityDraftLabelPicker = null;
     state.searchOpen = false;
     state.view = viewKind;
     if (!alreadyExpanded) {
@@ -627,6 +719,78 @@
     state.scrollToEntityKey = key;
     logEvent('info', 'ui', 'ui.managed_entity.open', { kind: entityKind, id });
     render();
+  }
+
+  function goBackFromManaged() {
+    state.drawer = false;
+    state.modal = null;
+    state.entityDraft = null;
+    state.entityDraftLabelPicker = null;
+    const ret = state.returnContext;
+    state.returnContext = null;
+    if (ret) {
+      state.view = ret.view;
+      state.tier = ret.tier;
+      state.label = ret.label;
+      state.searchOpen = ret.searchOpen;
+      state.searchQuery = ret.searchQuery;
+      clearExpandedState();
+      if (ret.expandedEntity) {
+        state.expandedEntity = { ...ret.expandedEntity };
+        state.scrollToEntityKey = `${ret.expandedEntity.kind}:${ret.expandedEntity.id}`;
+      }
+      render();
+      return;
+    }
+    state.view = 'tasks';
+    state.searchOpen = false;
+    clearExpandedState();
+    render();
+  }
+
+  function canonicalCompareHistory(a, b) {
+    const ta = Date.parse(a.timestampUtc) || 0;
+    const tb = Date.parse(b.timestampUtc) || 0;
+    if (ta !== tb) return ta - tb;
+    if (a.text === b.text) return 0;
+    return a.text < b.text ? -1 : 1;
+  }
+
+  function validateWebDavConfig(cfg, lang) {
+    const errors = {};
+    const rawUrl = String(cfg.serverUrl || '').trim();
+    if (!rawUrl) {
+      errors.serverUrl = t(lang, 'errWebDavUrlInvalid');
+    } else {
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          errors.serverUrl = t(lang, 'errWebDavUrlInvalid');
+        } else if (parsed.username || parsed.password) {
+          errors.serverUrl = t(lang, 'errWebDavUserinfo');
+        } else if (!parsed.hostname) {
+          errors.serverUrl = t(lang, 'errWebDavUrlInvalid');
+        }
+      } catch {
+        errors.serverUrl = t(lang, 'errWebDavUrlInvalid');
+      }
+    }
+    if (!String(cfg.username || '').trim()) {
+      errors.username = t(lang, 'errWebDavUserEmpty');
+    }
+    if (!String(cfg.password || '')) {
+      errors.password = t(lang, 'errWebDavPassEmpty');
+    }
+    const rawPath = String(cfg.filePath || '').trim();
+    if (
+      rawPath &&
+      (rawPath.includes('..') ||
+        rawPath.includes('\\') ||
+        /[\u0000-\u001F\u007F]/.test(rawPath))
+    ) {
+      errors.filePath = t(lang, 'errWebDavPathInvalid');
+    }
+    return errors;
   }
 
   function buildTaskInlineDraft(task, section, offset) {
@@ -777,13 +941,16 @@
       nextTier !== state.tier
     ) {
       clearExpandedState();
-      state.message = t(lang, 'msgTaskMovedTier', {
-        tier: tierName(lang, nextTier),
-      });
+      setNotice(
+        t(lang, 'msgTaskMovedTier', {
+          tier: tierName(lang, nextTier),
+        }),
+      );
     } else if (fallbackKey) {
-      state.message = t(lang, fallbackKey);
+      setNotice(t(lang, fallbackKey));
+    } else {
+      state.showUndoAction = false;
     }
-    state.showUndoAction = false;
   }
 
   function saveLabelInlineEdit(ws, edit, nowIso) {
@@ -835,8 +1002,7 @@
 
     label.modifiedAt = nowIso;
     state.inlineEdit = null;
-    state.message = t(lang, 'msgSavedLabel');
-    state.showUndoAction = false;
+    setNotice(t(lang, 'msgSavedLabel'));
     logEvent('info', 'domain', 'label.inline_updated', {
       id: label.id,
       section,
@@ -890,8 +1056,7 @@
 
     loc.modifiedAt = nowIso;
     state.inlineEdit = null;
-    state.message = t(lang, 'msgSavedLocation');
-    state.showUndoAction = false;
+    setNotice(t(lang, 'msgSavedLocation'));
     logEvent('info', 'domain', 'location.inline_updated', {
       id: loc.id,
       section,
@@ -966,21 +1131,23 @@
         pushUndo('complete', task.title);
         const res = completeTask(ws, task.id, evalContext());
         clearExpandedState();
-        state.message = t(
-          lang,
-          res.repeated ? 'msgCompletedRepeat' : 'msgCompleted',
-          { title: task.title },
+        setNotice(
+          t(lang, res.repeated ? 'msgCompletedRepeat' : 'msgCompleted', {
+            title: task.title,
+          }),
+          { showUndo: true },
         );
         logEvent('info', 'domain', 'task.auto_finished', { id: task.id });
         render();
         return;
       }
     } else if (section === 'due') {
+      const prevDueAt = task.dueAt;
       const dueAt = draft.dueLocal
         ? localDatetimeInputToIsoUtc(draft.dueLocal, offset)
         : null;
       task.dueAt = dueAt;
-      task.dueAnchor = dueAt ? task.dueAnchor : null;
+      task.dueAnchor = dueAt && dueAt === prevDueAt ? task.dueAnchor : null;
       task.duePassive = dueAt ? !draft.autoDue : false;
       task.dueNote = dueAt ? String(draft.dueNote || '').trim() : '';
       if (!dueAt && task.repeat) {
@@ -1068,8 +1235,7 @@
       }
       label.modifiedAt = nowIso;
       state.inlineEdit = null;
-      state.message = t(lang, 'msgSavedLabel');
-      state.showUndoAction = false;
+      setNotice(t(lang, 'msgSavedLabel'));
       logEvent('info', 'domain', 'label.inline_cleared', {
         id: label.id,
         section,
@@ -1084,8 +1250,7 @@
       if (section === 'note') loc.note = '';
       loc.modifiedAt = nowIso;
       state.inlineEdit = null;
-      state.message = t(lang, 'msgSavedLocation');
-      state.showUndoAction = false;
+      setNotice(t(lang, 'msgSavedLocation'));
       logEvent('info', 'domain', 'location.inline_cleared', {
         id: loc.id,
         section,
@@ -1148,8 +1313,7 @@
     label.modifiedAt = new Date(state.nowMs)
       .toISOString()
       .replace(/\.\d{3}Z$/, 'Z');
-    state.message = t(state.lang, 'msgSavedLabel');
-    state.showUndoAction = false;
+    setNotice(t(state.lang, 'msgSavedLabel'));
     logEvent('info', 'domain', 'label.scope_toggled', {
       id: label.id,
       scoped,
@@ -1185,27 +1349,31 @@
     const nextTier = evalRes.tierOfTask.get(task.id);
     if (nextTier === undefined) {
       clearExpandedState();
-      state.message =
+      setNotice(
         !hadLabel && label.scoped
           ? t(lang, 'msgTaskMovedScoped', { label: label.name })
           : t(lang, hadLabel ? 'msgLabelRemoved' : 'msgLabelAdded', {
               name: label.name,
-            });
+            }),
+      );
     } else if (
       state.view === 'tasks' &&
       !state.searchOpen &&
       nextTier !== state.tier
     ) {
       clearExpandedState();
-      state.message = t(lang, 'msgTaskMovedTier', {
-        tier: tierName(lang, nextTier),
-      });
+      setNotice(
+        t(lang, 'msgTaskMovedTier', {
+          tier: tierName(lang, nextTier),
+        }),
+      );
     } else {
-      state.message = t(lang, hadLabel ? 'msgLabelRemoved' : 'msgLabelAdded', {
-        name: label.name,
-      });
+      setNotice(
+        t(lang, hadLabel ? 'msgLabelRemoved' : 'msgLabelAdded', {
+          name: label.name,
+        }),
+      );
     }
-    state.showUndoAction = false;
     render();
   }
 
@@ -1219,11 +1387,26 @@
     render();
   }
 
+  function toggleEntityDraftLabel(labelId) {
+    const ws = activeWorkspace();
+    if (!state.entityDraft || state.entityDraft.kind !== 'task') return;
+    if (!ws.labels.some((item) => item.id === labelId)) return;
+    const had = state.entityDraft.labels.includes(labelId);
+    state.entityDraft.labels = had
+      ? state.entityDraft.labels.filter((id) => id !== labelId)
+      : [...state.entityDraft.labels, labelId];
+    render();
+  }
+
   function createAndAssignLabelFromPicker(mode) {
     const ws = activeWorkspace();
     const lang = state.lang;
     const picker =
-      mode === 'task' ? state.taskLabelPicker : state.draftLabelPicker;
+      mode === 'task'
+        ? state.taskLabelPicker
+        : mode === 'entity-draft'
+          ? state.entityDraftLabelPicker
+          : state.draftLabelPicker;
     if (!picker) return;
     const name = String(picker.query || '').trim();
     if (!name || name.length > 120) return;
@@ -1261,6 +1444,8 @@
           added: true,
         });
       }
+    } else if (mode === 'entity-draft' && state.entityDraft?.kind === 'task') {
+      state.entityDraft.labels = [...state.entityDraft.labels, created.id];
     } else {
       state.draft.labels = [...state.draft.labels, created.id];
     }
@@ -1268,8 +1453,7 @@
     picker.query = '';
     picker.scopeFilter = 'all';
     picker.activeIndex = -1;
-    state.message = t(lang, 'msgLabelCreatedAssigned', { name: created.name });
-    state.showUndoAction = false;
+    setNotice(t(lang, 'msgLabelCreatedAssigned', { name: created.name }));
     render();
   }
 
@@ -1310,13 +1494,312 @@
     render();
   }
 
-  function createQuickTask(expandAfter) {
+  function openEntityDraft(kind) {
+    const ws = activeWorkspace();
+    clearExpandedState();
+    state.draftLabelPicker = null;
+    state.entityDraftLabelPicker = null;
+    state.mobileQuickAddOpen = false;
+
+    if (kind === 'task') {
+      state.entityDraft = {
+        kind: 'task',
+        title: state.draft.title.trim(),
+        mode: state.draft.mode || 'queue',
+        labels: [...(state.draft.labels || [])],
+        note: '',
+        dueLocal: '',
+        autoDue: true,
+        dueNote: '',
+        repeatEvery: 1,
+        repeatUnit: 'weeks',
+        repeatLeadDays: 0,
+        suspendedMode: 'until',
+        suspendedLocal: '',
+        suspendedNote: '',
+        subtasks: [],
+        subtasksAutoFinish: false,
+        links: [],
+        editingLinkIndex: null,
+        linkTitleDraft: '',
+        linkUriDraft: '',
+        openSections: {},
+        error: '',
+      };
+      state.draft = {
+        title: '',
+        mode: 'queue',
+        labels: state.label ? [state.label] : [],
+      };
+    } else if (kind === 'labels') {
+      const form = app.querySelector('form[data-form="quick-create-labels"]');
+      const name = String(form?.querySelector('input[name="name"]')?.value || '').trim();
+      state.entityDraft = {
+        kind: 'label',
+        name,
+        color: LABEL_COLOR_PRESETS[ws.labels.length % LABEL_COLOR_PRESETS.length],
+        scoped: false,
+        note: '',
+        openSections: {},
+        error: '',
+      };
+    } else if (kind === 'locations') {
+      const form = app.querySelector('form[data-form="quick-create-locations"]');
+      const name = String(form?.querySelector('input[name="name"]')?.value || '').trim();
+      const fix = state.locationFix;
+      state.entityDraft = {
+        kind: 'location',
+        name,
+        sourceType: 'gps',
+        source: '',
+        latitude:
+          fix.status === 'found' ? Number(fix.latitude).toFixed(6) : '',
+        longitude:
+          fix.status === 'found' ? Number(fix.longitude).toFixed(6) : '',
+        radiusText: '100m',
+        note: '',
+        openSections: {},
+        error: '',
+      };
+    }
+
+    render();
+    const mainEl = app.querySelector('.main');
+    if (mainEl) mainEl.scrollTop = 0;
+    app.querySelector('.draft-card-title-input')?.focus();
+  }
+
+  function commitEntityDraft() {
+    const draft = state.entityDraft;
+    if (!draft) return;
+    const ws = activeWorkspace();
+    const lang = state.lang;
+    const nowIso = new Date(state.nowMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+    if (draft.kind === 'task') {
+      const title = String(draft.title || '').trim();
+      if (!title) {
+        draft.error = t(lang, 'errTaskNameEmpty');
+        render();
+        return;
+      }
+      if (ws.tasks.some((item) => item.title.trim().toLowerCase() === title.toLowerCase())) {
+        draft.error = t(lang, 'errTaskNameDup');
+        render();
+        return;
+      }
+      const offset = resolveOffsetMinutes(ws.config);
+      const open = draft.openSections || {};
+      const dueAt =
+        open.due && draft.dueLocal
+          ? localDatetimeInputToIsoUtc(draft.dueLocal, offset)
+          : null;
+      let repeat = null;
+      if (open.repeat) {
+        const repEvery = Number(draft.repeatEvery);
+        if (!Number.isInteger(repEvery) || repEvery < 1 || repEvery > 3650) {
+          draft.error = t(lang, 'errRepeatRange');
+          render();
+          return;
+        }
+        const leadDays = Number(draft.repeatLeadDays || 0);
+        if (dueAt && (!Number.isInteger(leadDays) || leadDays < 0 || leadDays > 3650)) {
+          draft.error = t(lang, 'errLeadRange');
+          render();
+          return;
+        }
+        repeat = {
+          count: repEvery,
+          unit: draft.repeatUnit,
+          leadDays: dueAt ? leadDays : 0,
+        };
+      }
+      let suspendedMode = 'none';
+      let suspendedAt = null;
+      let suspendedNote = '';
+      if (open.suspended) {
+        if (draft.suspendedMode === 'until' && !draft.suspendedLocal) {
+          draft.error = t(lang, 'errSuspendedUntilReq');
+          render();
+          return;
+        }
+        suspendedMode = draft.suspendedMode;
+        suspendedAt =
+          draft.suspendedMode === 'until'
+            ? localDatetimeInputToIsoUtc(draft.suspendedLocal, offset)
+            : null;
+        suspendedNote = String(draft.suspendedNote || '').trim();
+      }
+      const cleanedSubtasks = open.subtasks
+        ? (draft.subtasks || [])
+            .map((step) => ({ text: String(step.text || '').trim(), done: false }))
+            .filter((step) => step.text.length > 0)
+        : [];
+      const newTask = {
+        id: generateBase62Id(),
+        title: title.slice(0, 300),
+        note: open.note ? String(draft.note || '').trim() : '',
+        labels: [...(draft.labels || [])],
+        priority: draft.mode === 'priority',
+        dueAt,
+        dueAnchor: null,
+        duePassive: dueAt ? !draft.autoDue : false,
+        dueNote: dueAt ? String(draft.dueNote || '').trim() : '',
+        suspendedMode,
+        suspendedAt,
+        suspendedNote,
+        repeat,
+        completions: 0,
+        subtasksAutoFinish: open.subtasks ? Boolean(draft.subtasksAutoFinish) : false,
+        subtasks: cleanedSubtasks,
+        links: open.links ? structuredClone(draft.links || []) : [],
+        history: [],
+        blockedBy: [],
+        conditions: {
+          ignoreLabels: false,
+          daysMode: 'inherit',
+          days: [],
+          timeMode: 'inherit',
+          times: [],
+          placesMode: 'inherit',
+          locationIds: [],
+        },
+        createdAt: nowIso,
+        modifiedAt: nowIso,
+        finishedAt: null,
+      };
+      ws.tasks.push(newTask);
+      if (draft.mode === 'priority') ws.queue.unshift(newTask.id);
+      else if (draft.mode === 'queue') ws.queue.push(newTask.id);
+
+      state.entityDraft = null;
+      state.entityDraftLabelPicker = null;
+      const evalRes = evaluateBoard(ws, evalContext());
+      const targetTier = evalRes.tierOfTask.get(newTask.id);
+      if (targetTier !== undefined) {
+        state.tier = targetTier;
+        state.expandedEntity = { kind: 'task', id: newTask.id };
+        state.justExpandedKey = `task:${newTask.id}`;
+        state.scrollToEntityKey = `task:${newTask.id}`;
+        setNotice(t(lang, 'msgSavedTask'));
+      } else {
+        const scopedLbl = ws.labels.find(
+          (lbl) => lbl.scoped && newTask.labels.includes(lbl.id),
+        );
+        setNotice(
+          scopedLbl
+            ? t(lang, 'msgTaskMovedScoped', { label: scopedLbl.name })
+            : t(lang, 'msgSavedTask'),
+        );
+      }
+      logEvent('info', 'domain', 'task.draft_created', { id: newTask.id });
+      render();
+      return;
+    }
+
+    if (draft.kind === 'label') {
+      const name = String(draft.name || '').trim();
+      if (!name) {
+        draft.error = t(lang, 'errLabelNameEmpty');
+        render();
+        return;
+      }
+      if (ws.labels.some((l) => l.name.toLowerCase() === name.toLowerCase())) {
+        draft.error = t(lang, 'errLabelNameDup');
+        render();
+        return;
+      }
+      const color = String(draft.color || '').trim().toUpperCase();
+      if (color && !/^#[0-9A-F]{6}$/.test(color)) {
+        draft.error = t(lang, 'errColorInvalid');
+        render();
+        return;
+      }
+      const created = {
+        id: generateBase62Id(),
+        name: name.slice(0, 120),
+        color: color || '#2196F3',
+        scoped: Boolean(draft.scoped),
+        note: draft.openSections?.note ? String(draft.note || '').trim() : '',
+        links: [],
+        conditions: { days: [], times: [], locationIds: [] },
+        modifiedAt: nowIso,
+      };
+      ws.labels.push(created);
+      state.entityDraft = null;
+      state.expandedEntity = { kind: 'label', id: created.id };
+      state.justExpandedKey = `label:${created.id}`;
+      state.scrollToEntityKey = `label:${created.id}`;
+      setNotice(t(lang, 'msgSavedLabel'));
+      logEvent('info', 'domain', 'label.draft_created', { id: created.id });
+      render();
+      return;
+    }
+
+    if (draft.kind === 'location') {
+      const name = String(draft.name || '').trim();
+      if (!name) {
+        draft.error = t(lang, 'errLocNameEmpty');
+        render();
+        return;
+      }
+      const lat = Number(draft.latitude);
+      const lon = Number(draft.longitude);
+      const radius = parseRadiusMeters(draft.radiusText);
+      if (
+        String(draft.latitude).trim() === '' ||
+        String(draft.longitude).trim() === '' ||
+        !Number.isFinite(lat) ||
+        lat < -90 ||
+        lat > 90 ||
+        !Number.isFinite(lon) ||
+        lon < -180 ||
+        lon > 180 ||
+        radius === null
+      ) {
+        draft.error = t(lang, 'errLocCoordsInvalid');
+        render();
+        return;
+      }
+      const created = {
+        id: generateBase62Id(),
+        name: name.slice(0, 120),
+        sourceType: draft.sourceType,
+        source:
+          draft.sourceType === 'gps' ? 'gps' : String(draft.source || '').trim(),
+        latitude: Math.round(lat * 1e6) / 1e6,
+        longitude: Math.round(lon * 1e6) / 1e6,
+        radius,
+        note: draft.openSections?.note ? String(draft.note || '').trim() : '',
+        modifiedAt: nowIso,
+      };
+      ws.locations.push(created);
+      state.entityDraft = null;
+      state.expandedEntity = { kind: 'location', id: created.id };
+      state.justExpandedKey = `location:${created.id}`;
+      state.scrollToEntityKey = `location:${created.id}`;
+      setNotice(t(lang, 'msgSavedLocation'));
+      logEvent('info', 'domain', 'location.draft_created', { id: created.id });
+      render();
+    }
+  }
+
+  function createQuickTask() {
     const ws = activeWorkspace();
     const lang = state.lang;
     const form = app.querySelector('form[data-form="quick-task"]');
-    const title = state.draft.title.trim();
+    const title = state.draft.title.trim().slice(0, 300);
     if (!title) {
       if (form) form.reportValidity();
+      return;
+    }
+    if (
+      ws.tasks.some(
+        (item) => item.title.trim().toLowerCase() === title.toLowerCase(),
+      )
+    ) {
+      setNotice(t(lang, 'errTaskNameDup'), { tone: 'danger' });
+      render();
       return;
     }
     const nowIso = new Date(state.nowMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -1365,36 +1848,17 @@
     };
     state.draftLabelPicker = null;
     state.mobileQuickAddOpen = false;
-    state.message = t(lang, 'msgSavedTask');
-    state.showUndoAction = false;
-    logEvent('info', 'domain', 'task.quick_added', {
-      id: newTask.id,
-      mode,
-      expandAfter,
-    });
-
-    if (expandAfter) {
-      const evalRes = evaluateBoard(ws, evalContext());
-      const targetTier = evalRes.tierOfTask.get(newTask.id);
-      if (targetTier !== undefined) {
-        state.tier = targetTier;
-      }
-      state.view = 'tasks';
-      state.searchOpen = false;
-      clearExpandedState();
-      state.expandedEntity = { kind: 'task', id: newTask.id };
-      state.justExpandedKey = `task:${newTask.id}`;
-      state.scrollToEntityKey = `task:${newTask.id}`;
-    }
+    setNotice(t(lang, 'msgSavedTask'));
+    logEvent('info', 'domain', 'task.quick_added', { id: newTask.id, mode });
     render();
   }
 
-  function createQuickManagedEntity(kind, expandAfter) {
+  function createQuickManagedEntity(kind) {
     const ws = activeWorkspace();
     const lang = state.lang;
     const form = app.querySelector(`form[data-form="quick-create-${kind}"]`);
     const input = form?.querySelector('input[name="name"]');
-    const name = String(input?.value || '').trim();
+    const name = String(input?.value || '').trim().slice(0, 120);
     if (!name) {
       if (form) form.reportValidity();
       return;
@@ -1403,15 +1867,14 @@
 
     if (kind === 'labels') {
       if (ws.labels.some((l) => l.name.toLowerCase() === name.toLowerCase())) {
-        state.message = t(lang, 'errLabelNameDup');
-        state.showUndoAction = false;
+        setNotice(t(lang, 'errLabelNameDup'), { tone: 'danger' });
         render();
         return;
       }
       const created = {
         id: generateBase62Id(),
         name,
-        color: '#2196F3',
+        color: LABEL_COLOR_PRESETS[ws.labels.length % LABEL_COLOR_PRESETS.length],
         scoped: false,
         note: '',
         links: [],
@@ -1419,18 +1882,8 @@
         modifiedAt: nowIso,
       };
       ws.labels.push(created);
-      state.message = t(lang, 'msgSavedLabel');
-      state.showUndoAction = false;
-      logEvent('info', 'domain', 'label.added', {
-        id: created.id,
-        expandAfter,
-      });
-      if (expandAfter) {
-        clearExpandedState();
-        state.expandedEntity = { kind: 'label', id: created.id };
-        state.justExpandedKey = `label:${created.id}`;
-        state.scrollToEntityKey = `label:${created.id}`;
-      }
+      setNotice(t(lang, 'msgSavedLabel'));
+      logEvent('info', 'domain', 'label.added', { id: created.id });
       render();
       return;
     }
@@ -1454,18 +1907,8 @@
       modifiedAt: nowIso,
     };
     ws.locations.push(created);
-    state.message = t(lang, 'msgSavedLocation');
-    state.showUndoAction = false;
-    logEvent('info', 'domain', 'location.added', {
-      id: created.id,
-      expandAfter,
-    });
-    if (expandAfter) {
-      clearExpandedState();
-      state.expandedEntity = { kind: 'location', id: created.id };
-      state.justExpandedKey = `location:${created.id}`;
-      state.scrollToEntityKey = `location:${created.id}`;
-    }
+    setNotice(t(lang, 'msgSavedLocation'));
+    logEvent('info', 'domain', 'location.added', { id: created.id });
     render();
   }
 
@@ -1557,6 +2000,18 @@
     return false;
   }
 
+  function resolveLabelPicker(mode) {
+    if (mode === 'task') return state.taskLabelPicker;
+    if (mode === 'entity-draft') return state.entityDraftLabelPicker;
+    return state.draftLabelPicker;
+  }
+
+  function clearLabelPicker(mode) {
+    if (mode === 'task') state.taskLabelPicker = null;
+    else if (mode === 'entity-draft') state.entityDraftLabelPicker = null;
+    else state.draftLabelPicker = null;
+  }
+
   function switchWorkspace(wsId) {
     const target = state.workspaces.find((w) => w.id === wsId);
     if (!target) return;
@@ -1568,18 +2023,25 @@
     state.searchQuery = '';
     state.drawer = false;
     state.modal = null;
+    modalReturnFocus = null;
+    state.returnContext = null;
     state.sidebarLabelFilterOpen = false;
     state.sidebarLabelFilter = '';
     state.sidebarLocationFilterOpen = false;
     state.sidebarLocationFilter = '';
     state.draftLabelPicker = null;
+    state.entityDraft = null;
+    state.entityDraftLabelPicker = null;
+    state.settingsDirty = false;
+    state.settingsErrors = {};
+    state.settingsBanner = null;
     clearExpandedState();
     state.undoStack = [];
     state.showUndoAction = false;
     state.draft = { title: '', mode: 'queue', labels: [] };
     state.logs = createSeedLogs(target.id);
     state.lang = resolveLang(target.config.language);
-    state.message = t(state.lang, 'msgWorkspaceSwitched', { name: target.name });
+    setNotice(t(state.lang, 'msgWorkspaceSwitched', { name: target.name }));
     logEvent('info', 'lifecycle', 'workspace.switched', { id: target.id });
     render();
   }
@@ -1591,8 +2053,7 @@
   app.addEventListener('click', (event) => {
     // Click on modal backdrop closes modal
     if (event.target.hasAttribute('data-modal-backdrop')) {
-      state.modal = null;
-      render();
+      closeModal();
       return;
     }
 
@@ -1600,6 +2061,7 @@
     if (event.target.hasAttribute('data-sheet-backdrop')) {
       state.taskLabelPicker = null;
       state.draftLabelPicker = null;
+      state.entityDraftLabelPicker = null;
       render();
       return;
     }
@@ -1631,7 +2093,25 @@
       return;
     }
     if (has('close-modal')) {
-      state.modal = null;
+      closeModal();
+      return;
+    }
+    if (has('go-back')) {
+      goBackFromManaged();
+      return;
+    }
+    if (has('clear-active-label')) {
+      state.label = '';
+      state.draft.labels = [];
+      state.draftLabelPicker = null;
+      if (!state.searchOpen) {
+        clearExpandedState();
+      }
+      render();
+      return;
+    }
+    if (has('dismiss-notice')) {
+      clearNotice();
       render();
       return;
     }
@@ -1639,9 +2119,14 @@
       state.view = button.dataset.view;
       state.drawer = false;
       state.modal = null;
+      modalReturnFocus = null;
+      state.returnContext = null;
       state.draftLabelPicker = null;
+      state.entityDraft = null;
+      state.entityDraftLabelPicker = null;
       clearExpandedState();
       state.settingsBanner = null;
+      state.settingsErrors = {};
       if (state.view === 'tasks') state.searchOpen = false;
       render();
       return;
@@ -1651,9 +2136,12 @@
       state.view = 'tasks';
       state.searchOpen = false;
       state.drawer = false;
+      state.returnContext = null;
       state.draftLabelPicker = null;
+      state.entityDraft = null;
+      state.entityDraftLabelPicker = null;
       clearExpandedState();
-      state.message = '';
+      clearNotice();
       render();
       return;
     }
@@ -1662,10 +2150,13 @@
       state.view = 'tasks';
       state.tier = 0;
       state.drawer = false;
+      state.returnContext = null;
       state.draftLabelPicker = null;
+      state.entityDraft = null;
+      state.entityDraftLabelPicker = null;
       clearExpandedState();
       state.draft.labels = state.label ? [state.label] : [];
-      state.message = '';
+      clearNotice();
       render();
       return;
     }
@@ -1734,32 +2225,15 @@
       state.searchOpen = !state.searchOpen;
       state.searchQuery = '';
       state.draftLabelPicker = null;
-      if (state.searchOpen) state.view = 'tasks';
+      if (state.searchOpen) {
+        state.view = 'tasks';
+        state.entityDraft = null;
+        state.entityDraftLabelPicker = null;
+      }
       render();
       if (state.searchOpen) {
         const searchInput = app.querySelector('[data-global-search]');
         if (searchInput) searchInput.focus();
-      }
-      return;
-    }
-    if (has('scroll-to-composer')) {
-      if (isCompactViewport() && !state.mobileQuickAddOpen) {
-        state.mobileQuickAddOpen = true;
-        render();
-      }
-      const mainEl = app.querySelector('.main');
-      if (mainEl) {
-        const reducedMotion = window.matchMedia?.(
-          '(prefers-reduced-motion: reduce)',
-        )?.matches;
-        mainEl.scrollTo({
-          top: mainEl.scrollHeight,
-          behavior: reducedMotion ? 'auto' : 'smooth',
-        });
-        const draftInput = mainEl.querySelector('[data-draft="title"]');
-        if (draftInput) {
-          draftInput.focus({ preventScroll: true });
-        }
       }
       return;
     }
@@ -1768,9 +2242,6 @@
       if (!state.mobileQuickAddOpen) state.draftLabelPicker = null;
       render();
       if (state.mobileQuickAddOpen) {
-        const mainEl = app.querySelector('.main');
-        if (mainEl) mainEl.scrollTop = mainEl.scrollHeight;
-        syncMainScrollJumpButton();
         const draftInput = app.querySelector('[data-draft="title"]');
         if (draftInput) draftInput.focus({ preventScroll: true });
       }
@@ -1797,8 +2268,7 @@
           const simSelect = root.querySelector('[data-sim-state]');
           if (simSelect) simSelect.value = 'normal';
         }
-        state.message = t(state.lang, 'msgSyncedNow');
-        state.showUndoAction = false;
+        setNotice(t(state.lang, 'msgSyncedNow'));
         logEvent('info', 'sync', 'sync.manual_complete', { workspace: ws.id });
         render();
       }, 450);
@@ -1828,28 +2298,27 @@
       const type = button.dataset.openModal;
       state.drawer = false;
       if (type === 'workspaces') {
-        state.modal = {
+        openModal({
           type: 'workspaces',
           createName: '',
           renamingId: null,
           renameDraft: '',
           deletingId: null,
           error: '',
-        };
+        });
       } else if (type === 'location-status') {
-        state.modal = { type: 'location-status' };
+        openModal({ type: 'location-status' });
       } else if (type === 'select-local') {
-        state.modal = {
+        openModal({
           type: 'select-local',
           fileInput: ws.config.localFilePath,
-        };
+        });
       } else if (type === 'rename-local') {
-        state.modal = {
+        openModal({
           type: 'rename-local',
           fileInput: ws.config.localFilePath.replace(/\.tdf$/i, ''),
-        };
+        });
       }
-      render();
       return;
     }
     if (has('toggle-entity')) {
@@ -1918,7 +2387,9 @@
           ws.tasks = ws.tasks.filter((item) => item.id !== id);
           ws.queue = ws.queue.filter((qid) => qid !== id);
           ws.deleted.tasks.push({ id: target.id, deletedAt: nowIso });
-          state.message = t(lang, 'msgDeleted', { title: target.title });
+          setNotice(t(lang, 'msgDeleted', { title: target.title }), {
+            showUndo: true,
+          });
           logEvent('info', 'domain', 'task.deleted', { id: target.id });
         }
       } else if (kind === 'label') {
@@ -1929,8 +2400,7 @@
         ws.deleted.labels.push({ id, deletedAt: nowIso });
         if (state.label === id) state.label = '';
         state.draft.labels = state.draft.labels.filter((lid) => lid !== id);
-        state.message = t(lang, 'msgDeletedLabel');
-        state.showUndoAction = false;
+        setNotice(t(lang, 'msgDeletedLabel'));
         logEvent('info', 'domain', 'label.deleted', { id });
       } else if (kind === 'location') {
         ws.locations = ws.locations.filter((l) => l.id !== id);
@@ -1949,8 +2419,7 @@
           }
         }
         ws.deleted.locations.push({ id, deletedAt: nowIso });
-        state.message = t(lang, 'msgDeletedLocation');
-        state.showUndoAction = false;
+        setNotice(t(lang, 'msgDeletedLocation'));
         logEvent('info', 'domain', 'location.deleted', { id });
       }
       clearExpandedState();
@@ -1968,6 +2437,7 @@
       const taskId = button.dataset.openTaskLabelPicker;
       state.inlineEdit = null;
       state.draftLabelPicker = null;
+      state.entityDraftLabelPicker = null;
       state.taskLabelPicker = {
         taskId,
         query: '',
@@ -1985,12 +2455,36 @@
       render();
       return;
     }
+    if (has('open-entity-draft-label-picker')) {
+      state.taskLabelPicker = null;
+      state.draftLabelPicker = null;
+      state.entityDraftLabelPicker = {
+        query: '',
+        scopeFilter: 'all',
+        activeIndex: -1,
+      };
+      render();
+      if (!state.isCompact) {
+        app.querySelector('[data-lp-search="entity-draft"]')?.focus();
+      }
+      return;
+    }
+    if (has('close-entity-draft-label-picker')) {
+      state.entityDraftLabelPicker = null;
+      render();
+      return;
+    }
+    if (has('entity-draft-toggle-label')) {
+      toggleEntityDraftLabel(button.dataset.entityDraftToggleLabel);
+      return;
+    }
     if (has('toggle-draft-label-picker')) {
       if (state.draftLabelPicker) {
         state.draftLabelPicker = null;
         render();
       } else {
         state.taskLabelPicker = null;
+        state.entityDraftLabelPicker = null;
         state.draftLabelPicker = {
           query: '',
           scopeFilter: 'all',
@@ -2011,6 +2505,7 @@
     if (has('close-label-sheet')) {
       state.taskLabelPicker = null;
       state.draftLabelPicker = null;
+      state.entityDraftLabelPicker = null;
       render();
       return;
     }
@@ -2020,8 +2515,7 @@
     }
     if (has('lp-scope')) {
       const [mode, scope] = button.dataset.lpScope.split(':');
-      const picker =
-        mode === 'task' ? state.taskLabelPicker : state.draftLabelPicker;
+      const picker = resolveLabelPicker(mode);
       if (picker) {
         picker.scopeFilter = scope;
         picker.activeIndex = picker.query.trim() ? 0 : -1;
@@ -2031,8 +2525,7 @@
     }
     if (has('lp-clear')) {
       const mode = button.dataset.lpClear;
-      const picker =
-        mode === 'task' ? state.taskLabelPicker : state.draftLabelPicker;
+      const picker = resolveLabelPicker(mode);
       if (picker) {
         picker.query = '';
         picker.activeIndex = -1;
@@ -2064,16 +2557,16 @@
       if (!task) return;
       if (task.finishedAt) {
         restoreTask(ws, taskId, evalContext());
-        state.message = t(lang, 'msgRestored', { title: task.title });
-        state.showUndoAction = false;
+        setNotice(t(lang, 'msgRestored', { title: task.title }));
         logEvent('info', 'domain', 'task.restored', { id: taskId });
       } else {
         pushUndo('complete', task.title);
         const res = completeTask(ws, taskId, evalContext());
-        state.message = t(
-          lang,
-          res.repeated ? 'msgCompletedRepeat' : 'msgCompleted',
-          { title: task.title },
+        setNotice(
+          t(lang, res.repeated ? 'msgCompletedRepeat' : 'msgCompleted', {
+            title: task.title,
+          }),
+          { showUndo: true },
         );
         logEvent('info', 'domain', 'task.completed', {
           id: taskId,
@@ -2095,7 +2588,9 @@
       if (!task) return;
       pushUndo('downgrade', task.title);
       if (downgradeTask(ws, taskId, evalContext())) {
-        state.message = t(lang, 'msgDowngraded', { title: task.title });
+        setNotice(t(lang, 'msgDowngraded', { title: task.title }), {
+          showUndo: true,
+        });
         if (
           state.expandedEntity?.kind === 'task' &&
           state.expandedEntity?.id === taskId
@@ -2105,6 +2600,7 @@
         logEvent('info', 'domain', 'task.downgraded', { id: taskId });
       } else {
         state.undoStack.pop();
+        state.showUndoAction = state.undoStack.length > 0;
       }
       render();
       return;
@@ -2132,8 +2628,7 @@
     }
     if (has('open-uri')) {
       const uri = button.dataset.openUri;
-      state.message = t(lang, 'msgOpenedLink', { uri });
-      state.showUndoAction = false;
+      setNotice(t(lang, 'msgOpenedLink', { uri }));
       logEvent('info', 'ui', 'link.opened', { scheme: uri.split(':')[0] });
       render();
       return;
@@ -2145,77 +2640,296 @@
         (item) => item.id === state.expandedEntity.id,
       );
       if (task) {
+        const offset = resolveOffsetMinutes(ws.config);
+        const nowIso = new Date(state.nowMs)
+          .toISOString()
+          .replace(/\.\d{3}Z$/, 'Z');
+
+        if (has('info-hist-toggle-time')) {
+          state.historyTimeOpen = !state.historyTimeOpen;
+          if (!state.historyTimeOpen) {
+            state.historyNewTimeDraft = '';
+          } else if (!state.historyNewTimeDraft) {
+            state.historyNewTimeDraft = formatLocalDatetimeInput(nowIso, offset);
+          }
+          render();
+          if (state.historyTimeOpen) {
+            app.querySelector('[data-info-hist-new-time]')?.focus();
+          }
+          return;
+        }
         if (has('info-hist-add')) {
           const input = app.querySelector('[data-info-hist-new]');
-          const text = String(input?.value || '')
+          const timeInput = app.querySelector('[data-info-hist-new-time]');
+          const text = String(input?.value ?? state.historyNewDraft ?? '')
             .replace(/[\r\n\t]+/g, ' ')
             .trim();
-          if (!text) return;
+          if (!text) {
+            state.historyError = t(lang, 'errHistoryEmpty');
+            render();
+            return;
+          }
+          if (text.length > 500) {
+            state.historyError = t(lang, 'errHistoryTooLong');
+            render();
+            return;
+          }
           task.history = task.history || [];
-          task.history.push({
-            timestampUtc: new Date(state.nowMs)
-              .toISOString()
-              .replace(/\.\d{3}Z$/, 'Z'),
-            text: text.slice(0, 500),
-          });
+          if (task.history.length >= 200) {
+            state.historyError = t(lang, 'errHistoryMax');
+            render();
+            return;
+          }
+          const rawTime = state.historyTimeOpen
+            ? String(timeInput?.value ?? state.historyNewTimeDraft ?? '').trim()
+            : '';
+          const timestampUtc = rawTime
+            ? localDatetimeInputToIsoUtc(rawTime, offset)
+            : nowIso;
+          if (
+            task.history.some(
+              (entry) =>
+                entry.timestampUtc === timestampUtc && entry.text === text,
+            )
+          ) {
+            state.historyError = t(lang, 'errHistoryDup');
+            render();
+            return;
+          }
+          task.history.push({ timestampUtc, text });
+          task.history.sort(canonicalCompareHistory);
+          task.modifiedAt = nowIso;
+          state.historyNewDraft = '';
+          state.historyNewTimeDraft = '';
+          state.historyTimeOpen = false;
+          state.historyError = '';
           logEvent('info', 'ui', 'ui.task_panel.history_added', { id: task.id });
           render();
           return;
         }
         if (has('info-hist-start-edit')) {
           const idx = Number(button.dataset.infoHistStartEdit);
-          state.editingHistoryIndex = idx;
-          state.historyEditDraft = task.history[idx]?.text || '';
-          render();
+          const entry = (task.history || [])[idx];
+          if (entry) {
+            state.editingHistoryIndex = idx;
+            state.historyEditDraft = entry.text || '';
+            state.historyEditTimeDraft = formatLocalDatetimeInput(
+              entry.timestampUtc,
+              offset,
+            );
+            state.historyError = '';
+            render();
+            app.querySelector('[data-info-hist-edit-input]')?.focus();
+          }
           return;
         }
         if (has('info-hist-cancel')) {
           state.editingHistoryIndex = null;
           state.historyEditDraft = '';
+          state.historyEditTimeDraft = '';
+          state.historyError = '';
           render();
           return;
         }
         if (has('info-hist-save')) {
           const idx = Number(button.dataset.infoHistSave);
+          const entry = (task.history || [])[idx];
+          if (!entry) return;
           const input = app.querySelector('[data-info-hist-edit-input]');
-          const text = String(input?.value || '')
+          const timeInput = app.querySelector('[data-info-hist-edit-time]');
+          const text = String(input?.value ?? state.historyEditDraft ?? '')
             .replace(/[\r\n\t]+/g, ' ')
             .trim();
-          if (text && task.history[idx]) {
-            task.history[idx].text = text.slice(0, 500);
+          if (!text) {
+            state.historyError = t(lang, 'errHistoryEmpty');
+            render();
+            return;
           }
+          if (text.length > 500) {
+            state.historyError = t(lang, 'errHistoryTooLong');
+            render();
+            return;
+          }
+          const rawTime = String(
+            timeInput?.value ?? state.historyEditTimeDraft ?? '',
+          ).trim();
+          const timestampUtc = rawTime
+            ? localDatetimeInputToIsoUtc(rawTime, offset)
+            : entry.timestampUtc;
+          if (
+            task.history.some(
+              (other, i) =>
+                i !== idx &&
+                other.timestampUtc === timestampUtc &&
+                other.text === text,
+            )
+          ) {
+            state.historyError = t(lang, 'errHistoryDup');
+            render();
+            return;
+          }
+          task.history[idx] = { timestampUtc, text };
+          task.history.sort(canonicalCompareHistory);
+          task.modifiedAt = nowIso;
           state.editingHistoryIndex = null;
           state.historyEditDraft = '';
+          state.historyEditTimeDraft = '';
+          state.historyError = '';
+          logEvent('info', 'ui', 'ui.task_panel.history_updated', {
+            id: task.id,
+          });
           render();
           return;
         }
         if (has('info-hist-delete')) {
           const idx = Number(button.dataset.infoHistDelete);
-          task.history.splice(idx, 1);
+          (task.history || []).splice(idx, 1);
+          task.modifiedAt = nowIso;
           state.editingHistoryIndex = null;
           state.historyEditDraft = '';
-          logEvent('info', 'ui', 'ui.task_panel.history_removed', { id: task.id });
+          state.historyEditTimeDraft = '';
+          state.historyError = '';
+          logEvent('info', 'ui', 'ui.task_panel.history_removed', {
+            id: task.id,
+          });
           render();
           return;
         }
       }
     }
 
-    // Quick-Add Submit & Add + Expand (Tasks, Labels, Locations)
+    // Quick-Add Submit & Uncommitted Entity Draft Controls (Tasks, Labels, Locations)
     if (has('save')) {
       const form = button.closest('form');
       if (form?.dataset.form === 'quick-task') {
-        createQuickTask(false);
+        createQuickTask();
       }
       return;
     }
     if (has('quick-add-expand')) {
-      createQuickTask(true);
+      openEntityDraft('task');
       return;
     }
     if (has('quick-create-expand')) {
-      createQuickManagedEntity(button.dataset.quickCreateExpand, true);
+      openEntityDraft(button.dataset.quickCreateExpand);
       return;
+    }
+    if (has('draft-entity-cancel')) {
+      state.entityDraft = null;
+      state.entityDraftLabelPicker = null;
+      render();
+      return;
+    }
+    if (has('draft-entity-commit')) {
+      commitEntityDraft();
+      return;
+    }
+    if (state.entityDraft) {
+      const draft = state.entityDraft;
+      if (has('ed-task-mode') && draft.kind === 'task') {
+        draft.mode = button.dataset.edTaskMode;
+        draft.error = '';
+        render();
+        return;
+      }
+      if (has('ed-label-scope') && draft.kind === 'label') {
+        draft.scoped = button.dataset.edLabelScope === 'true';
+        draft.error = '';
+        render();
+        return;
+      }
+      if (has('ed-toggle-section')) {
+        const sec = button.dataset.edToggleSection;
+        draft.openSections = draft.openSections || {};
+        draft.openSections[sec] = true;
+        draft.error = '';
+        render();
+        return;
+      }
+      if (has('ed-color-preset') && draft.kind === 'label') {
+        draft.color = button.dataset.edColorPreset;
+        draft.error = '';
+        render();
+        return;
+      }
+      if (
+        has('open-color-picker') &&
+        button.dataset.openColorPicker === 'entity-draft' &&
+        draft.kind === 'label'
+      ) {
+        const hsv = hexToHsv(draft.color);
+        openModal({
+          type: 'color-picker',
+          target: 'entity-draft',
+          h: hsv.h,
+          s: hsv.s,
+          v: hsv.v,
+          hex: hsvToHex(hsv.h, hsv.s, hsv.v),
+        });
+        return;
+      }
+      if (draft.kind === 'task') {
+        if (has('ed-add-step')) {
+          const input = app.querySelector('[data-ed-new-step]');
+          const text = String(input?.value || '').trim();
+          if (text && draft.subtasks.length < 100) {
+            draft.subtasks.push({ text, done: false });
+            draft.error = '';
+            render();
+            app.querySelector('[data-ed-new-step]')?.focus();
+          }
+          return;
+        }
+        if (has('ed-step-remove')) {
+          draft.subtasks.splice(Number(button.dataset.edStepRemove), 1);
+          render();
+          return;
+        }
+        if (
+          handleLinkListAction(draft, 'ed', button, (msg) => {
+            draft.error = msg;
+          })
+        ) {
+          return;
+        }
+      }
+      if (draft.kind === 'location') {
+        if (has('ed-use-gps')) {
+          if (state.locationFix.status === 'found') {
+            draft.latitude = Number(state.locationFix.latitude).toFixed(6);
+            draft.longitude = Number(state.locationFix.longitude).toFixed(6);
+            draft.error = '';
+            setNotice(t(lang, 'msgGpsApplied'));
+            render();
+          }
+          return;
+        }
+        if (has('ed-resolve')) {
+          const res = simulateResolveLocationSource(
+            draft.sourceType,
+            draft.source,
+          );
+          if (!res.ok) {
+            draft.error = t(lang, res.errorKey);
+            render();
+            return;
+          }
+          if (res.candidates.length === 1) {
+            draft.latitude = res.candidates[0].latitude.toFixed(6);
+            draft.longitude = res.candidates[0].longitude.toFixed(6);
+            draft.error = '';
+            setNotice(t(lang, 'msgResolvedSingle'));
+            render();
+          } else {
+            openModal({
+              type: 'geo-candidates',
+              target: 'entity-draft',
+              candidates: res.candidates,
+            });
+          }
+          return;
+        }
+      }
     }
 
     // Unified Inline Section Edit Sub-Controls (Tasks, Labels, Locations)
@@ -2305,14 +3019,14 @@
         }
         if (has('open-color-picker')) {
           const hsv = hexToHsv(draft.color);
-          state.modal = {
+          openModal({
             type: 'color-picker',
+            target: 'inline-edit',
             h: hsv.h,
             s: hsv.s,
             v: hsv.v,
             hex: hsvToHex(hsv.h, hsv.s, hsv.v),
-          };
-          render();
+          });
           return;
         }
       }
@@ -2322,8 +3036,7 @@
             draft.latitude = Number(state.locationFix.latitude).toFixed(6);
             draft.longitude = Number(state.locationFix.longitude).toFixed(6);
             state.inlineEdit.error = '';
-            state.message = t(lang, 'msgGpsApplied');
-            state.showUndoAction = false;
+            setNotice(t(lang, 'msgGpsApplied'));
             render();
           }
           return;
@@ -2342,15 +3055,14 @@
             draft.latitude = res.candidates[0].latitude.toFixed(6);
             draft.longitude = res.candidates[0].longitude.toFixed(6);
             state.inlineEdit.error = '';
-            state.message = t(lang, 'msgResolvedSingle');
-            state.showUndoAction = false;
+            setNotice(t(lang, 'msgResolvedSingle'));
             render();
           } else {
-            state.modal = {
+            openModal({
               type: 'geo-candidates',
+              target: 'inline-edit',
               candidates: res.candidates,
-            };
-            render();
+            });
           }
           return;
         }
@@ -2360,14 +3072,19 @@
     // Color Picker Confirm
     if (has('confirm-color-picker') && state.modal?.type === 'color-picker') {
       if (
+        state.modal.target === 'entity-draft' &&
+        state.entityDraft?.kind === 'label'
+      ) {
+        state.entityDraft.color = state.modal.hex;
+        state.entityDraft.error = '';
+      } else if (
         state.inlineEdit?.kind === 'label' &&
         state.inlineEdit?.section === 'color'
       ) {
         state.inlineEdit.draft.color = state.modal.hex;
         state.inlineEdit.error = '';
       }
-      state.modal = null;
-      render();
+      closeModal();
       return;
     }
 
@@ -2375,6 +3092,15 @@
     if (has('pick-candidate') && state.modal?.type === 'geo-candidates') {
       const cand = state.modal.candidates[Number(button.dataset.pickCandidate)];
       if (
+        cand &&
+        state.modal.target === 'entity-draft' &&
+        state.entityDraft?.kind === 'location'
+      ) {
+        state.entityDraft.latitude = cand.latitude.toFixed(6);
+        state.entityDraft.longitude = cand.longitude.toFixed(6);
+        state.entityDraft.source = cand.displayName;
+        state.entityDraft.error = '';
+      } else if (
         cand &&
         state.inlineEdit?.kind === 'location' &&
         state.inlineEdit?.section === 'coordinates'
@@ -2384,8 +3110,7 @@
         state.inlineEdit.draft.source = cand.displayName;
         state.inlineEdit.error = '';
       }
-      state.modal = null;
-      render();
+      closeModal();
       return;
     }
 
@@ -2537,6 +3262,10 @@
       if (key === 'language') {
         state.lang = resolveLang(val);
       }
+      if (key === 'storageMode') {
+        state.settingsErrors = {};
+        if (val === 'local') state.settingsDirty = false;
+      }
       if (key === 'themePalette' || key === 'themeMode') {
         // Apply across all workspaces for cohesive preview feel
         for (const w of state.workspaces) w.config[key] = val;
@@ -2551,6 +3280,7 @@
       return;
     }
     if (has('move-local')) {
+      if (state.isCompact) return;
       ws.config.localDirectory =
         ws.config.localDirectory.endsWith('/sync')
           ? '/home/demo/.local/share/tiertask'
@@ -2575,12 +3305,11 @@
       if (!name.toLowerCase().endsWith('.tdf')) name += '.tdf';
       ws.config.localFilePath = name;
       if (!ws.localFiles.includes(name)) ws.localFiles.push(name);
-      state.modal = null;
       state.settingsBanner = {
         tone: 'success',
         text: t(lang, 'setSelectedBanner'),
       };
-      render();
+      closeModal();
       return;
     }
     if (has('confirm-rename-local') && state.modal?.type === 'rename-local') {
@@ -2589,22 +3318,20 @@
       const oldName = ws.config.localFilePath;
       ws.config.localFilePath = name;
       ws.localFiles = ws.localFiles.map((f) => (f === oldName ? name : f));
-      state.modal = null;
       state.settingsBanner = {
         tone: 'success',
         text: t(lang, 'setRenamedBanner'),
       };
-      render();
+      closeModal();
       return;
     }
     if (has('open-wipe')) {
-      state.modal = {
+      openModal({
         type: 'wipe-tdf',
         target: button.dataset.openWipe,
         confirmInput: '',
         createBackup: true,
-      };
-      render();
+      });
       return;
     }
     if (has('confirm-wipe') && state.modal?.type === 'wipe-tdf') {
@@ -2615,7 +3342,6 @@
       ws.locations = [];
       ws.deleted = { generation: 0, tasks: [], labels: [], locations: [] };
       state.undoStack = [];
-      state.modal = null;
       state.settingsBanner = {
         tone: 'success',
         text: t(
@@ -2626,24 +3352,37 @@
       logEvent('warn', 'storage', 'tdf.wiped', {
         target: isRemote ? 'remote' : 'local',
       });
-      render();
+      closeModal();
       return;
     }
-    if (has('settings-save')) {
+    if (has('settings-save') || has('settings-test-sync')) {
+      const isTestSync = has('settings-test-sync');
+      const usesWebDav =
+        ws.config.storageMode === 'webdav' || ws.config.storageMode === 'both';
+      if (usesWebDav) {
+        const errors = validateWebDavConfig(ws.config, lang);
+        if (Object.keys(errors).length > 0) {
+          state.settingsErrors = errors;
+          state.settingsBanner = {
+            tone: 'error',
+            text: Object.values(errors)[0],
+          };
+          render();
+          return;
+        }
+      }
+      state.settingsErrors = {};
+      state.settingsDirty = false;
       state.settingsBanner = {
         tone: 'success',
-        text: t(lang, 'setSavedBanner'),
+        text: t(lang, isTestSync ? 'setSyncedBanner' : 'setSavedBanner'),
       };
-      logEvent('info', 'storage', 'settings.saved', { workspace: ws.id });
-      render();
-      return;
-    }
-    if (has('settings-test-sync')) {
-      state.settingsBanner = {
-        tone: 'success',
-        text: t(lang, 'setSyncedBanner'),
-      };
-      logEvent('info', 'sync', 'settings.test_sync_ok', { workspace: ws.id });
+      logEvent(
+        'info',
+        isTestSync ? 'sync' : 'storage',
+        isTestSync ? 'settings.test_sync_ok' : 'settings.saved',
+        { workspace: ws.id },
+      );
       render();
       return;
     }
@@ -2655,14 +3394,12 @@
     }
     if (has('log-clear')) {
       state.logs = state.logs.slice(0, 2);
-      state.message = t(lang, 'logClearedMsg');
-      state.showUndoAction = false;
+      setNotice(t(lang, 'logClearedMsg'));
       render();
       return;
     }
     if (has('log-sync')) {
-      state.message = t(lang, 'logSyncedMsg');
-      state.showUndoAction = false;
+      setNotice(t(lang, 'logSyncedMsg'));
       logEvent('info', 'sync', 'log.uploaded_webdav', { workspace: ws.id });
       render();
       return;
@@ -2673,6 +3410,7 @@
       return;
     }
     if (has('copy-raw-tdf')) {
+      if (state.simState === 'raw_tdf_limit') return;
       copyToClipboard(serializeTdf080(ws), 'rawTdfCopied');
       return;
     }
@@ -2689,9 +3427,33 @@
     }
     if (has('apply-conflicts')) {
       for (const item of state.conflictItems) {
-        if (item.choice === 'delete' && item.entityType === 'task') {
+        if (item.choice !== 'delete') continue;
+        if (item.entityType === 'task') {
           ws.tasks = ws.tasks.filter((task) => task.id !== item.id);
           ws.queue = ws.queue.filter((qid) => qid !== item.id);
+        } else if (item.entityType === 'label') {
+          ws.labels = ws.labels.filter((lbl) => lbl.id !== item.id);
+          for (const task of ws.tasks) {
+            task.labels = (task.labels || []).filter((lid) => lid !== item.id);
+          }
+          if (state.label === item.id) state.label = '';
+          state.draft.labels = state.draft.labels.filter((lid) => lid !== item.id);
+        } else if (item.entityType === 'location') {
+          ws.locations = ws.locations.filter((loc) => loc.id !== item.id);
+          for (const task of ws.tasks) {
+            if (task.conditions?.locationIds) {
+              task.conditions.locationIds = task.conditions.locationIds.filter(
+                (locId) => locId !== item.id,
+              );
+            }
+          }
+          for (const lbl of ws.labels) {
+            if (lbl.conditions?.locationIds) {
+              lbl.conditions.locationIds = lbl.conditions.locationIds.filter(
+                (locId) => locId !== item.id,
+              );
+            }
+          }
         }
       }
       ws.deleted.generation += 1;
@@ -2700,8 +3462,7 @@
       const simSelect = root.querySelector('[data-sim-state]');
       if (simSelect) simSelect.value = 'normal';
       state.view = 'tasks';
-      state.message = t(lang, 'conflictResolvedMsg');
-      state.showUndoAction = false;
+      setNotice(t(lang, 'conflictResolvedMsg'));
       logEvent('info', 'sync', 'sync.deletion_conflicts_resolved', {
         generation: ws.deleted.generation,
       });
@@ -2720,13 +3481,70 @@
     if (has('apply-recovery')) {
       for (const item of state.recoveryItems) {
         if (item.choice === 'discard') {
-          ws.tasks = ws.tasks.filter((task) => task.id !== item.id);
-          ws.queue = ws.queue.filter((qid) => qid !== item.id);
-        } else {
+          if (item.entityType === 'task') {
+            ws.tasks = ws.tasks.filter((task) => task.id !== item.id);
+            ws.queue = ws.queue.filter((qid) => qid !== item.id);
+          } else if (item.entityType === 'label') {
+            ws.labels = ws.labels.filter((lbl) => lbl.id !== item.id);
+            for (const task of ws.tasks) {
+              task.labels = (task.labels || []).filter((lid) => lid !== item.id);
+            }
+            if (state.label === item.id) state.label = '';
+            state.draft.labels = state.draft.labels.filter((lid) => lid !== item.id);
+          } else if (item.entityType === 'location') {
+            ws.locations = ws.locations.filter((loc) => loc.id !== item.id);
+            for (const task of ws.tasks) {
+              if (task.conditions?.locationIds) {
+                task.conditions.locationIds = task.conditions.locationIds.filter(
+                  (locId) => locId !== item.id,
+                );
+              }
+            }
+            for (const lbl of ws.labels) {
+              if (lbl.conditions?.locationIds) {
+                lbl.conditions.locationIds = lbl.conditions.locationIds.filter(
+                  (locId) => locId !== item.id,
+                );
+              }
+            }
+          }
+        } else if (item.entityType === 'task') {
           const target = ws.tasks.find((task) => task.id === item.id);
           if (target) {
             const freshId = generateBase62Id();
             ws.queue = ws.queue.map((qid) => (qid === target.id ? freshId : qid));
+            target.id = freshId;
+          }
+        } else if (item.entityType === 'label') {
+          const target = ws.labels.find((lbl) => lbl.id === item.id);
+          if (target) {
+            const freshId = generateBase62Id();
+            for (const task of ws.tasks) {
+              task.labels = (task.labels || []).map((lid) =>
+                lid === target.id ? freshId : lid,
+              );
+            }
+            if (state.label === target.id) state.label = freshId;
+            target.id = freshId;
+          }
+        } else if (item.entityType === 'location') {
+          const target = ws.locations.find((loc) => loc.id === item.id);
+          if (target) {
+            const freshId = generateBase62Id();
+            for (const task of ws.tasks) {
+              if (task.conditions?.locationIds) {
+                task.conditions.locationIds = task.conditions.locationIds.map(
+                  (locId) => (locId === target.id ? freshId : locId),
+                );
+              }
+            }
+            for (const lbl of ws.labels) {
+              if (lbl.conditions?.locationIds) {
+                lbl.conditions.locationIds = lbl.conditions.locationIds.map(
+                  (locId) => (locId === target.id ? freshId : locId),
+                );
+              }
+            }
             target.id = freshId;
           }
         }
@@ -2737,8 +3555,7 @@
       const simSelect = root.querySelector('[data-sim-state]');
       if (simSelect) simSelect.value = 'normal';
       state.view = 'tasks';
-      state.message = t(lang, 'recoveryResolvedMsg');
-      state.showUndoAction = false;
+      setNotice(t(lang, 'recoveryResolvedMsg'));
       logEvent('info', 'sync', 'sync.recovery_completed', {
         generation: ws.deleted.generation,
       });
@@ -2791,8 +3608,7 @@
     }
     if (el.hasAttribute('data-lp-search')) {
       const mode = el.dataset.lpSearch;
-      const picker =
-        mode === 'task' ? state.taskLabelPicker : state.draftLabelPicker;
+      const picker = resolveLabelPicker(mode);
       if (picker) {
         picker.query = el.value;
         picker.activeIndex = el.value.trim() ? 0 : -1;
@@ -2803,6 +3619,57 @@
     if (el.hasAttribute('data-draft')) {
       state.draft[el.dataset.draft] = el.value;
       return;
+    }
+    if (el.hasAttribute('data-info-hist-new')) {
+      state.historyNewDraft = el.value;
+      if (state.historyError) {
+        state.historyError = '';
+        render();
+      }
+      return;
+    }
+    if (el.hasAttribute('data-info-hist-new-time')) {
+      state.historyNewTimeDraft = el.value;
+      return;
+    }
+    if (el.hasAttribute('data-info-hist-edit-input')) {
+      state.historyEditDraft = el.value;
+      if (state.historyError) {
+        state.historyError = '';
+        render();
+      }
+      return;
+    }
+    if (el.hasAttribute('data-info-hist-edit-time')) {
+      state.historyEditTimeDraft = el.value;
+      return;
+    }
+    if (state.entityDraft) {
+      if (el.hasAttribute('data-ed-field')) {
+        const key = el.dataset.edField;
+        state.entityDraft[key] = el.type === 'checkbox' ? el.checked : el.value;
+        state.entityDraft.error = '';
+        if (key === 'color') {
+          const swatch = app.querySelector('.draft-card .color-swatch-preview');
+          if (swatch && /^#[0-9a-fA-F]{6}$/.test(el.value.trim())) {
+            swatch.style.background = el.value.trim();
+          }
+        }
+        return;
+      }
+      if (el.hasAttribute('data-ed-link-title')) {
+        state.entityDraft.linkTitleDraft = el.value;
+        return;
+      }
+      if (el.hasAttribute('data-ed-link-uri')) {
+        state.entityDraft.linkUriDraft = el.value;
+        return;
+      }
+      if (el.hasAttribute('data-ed-step-text')) {
+        const step = state.entityDraft.subtasks?.[Number(el.dataset.edStepText)];
+        if (step) step.text = el.value;
+        return;
+      }
     }
     if (el.hasAttribute('data-ie') && state.inlineEdit) {
       state.inlineEdit.draft[el.dataset.ie] =
@@ -2835,11 +3702,25 @@
       return;
     }
     if (el.hasAttribute('data-set-field')) {
-      ws.config[el.dataset.setField] = el.value;
+      const field = el.dataset.setField;
+      ws.config[field] = el.value;
+      const isWebDavField =
+        field === 'serverUrl' ||
+        field === 'username' ||
+        field === 'password' ||
+        field === 'filePath';
+      const wasDirty = state.settingsDirty;
+      const hadError = Boolean(state.settingsErrors[field]);
+      if (isWebDavField) {
+        state.settingsDirty = true;
+        if (hadError) delete state.settingsErrors[field];
+      }
       if (
-        el.dataset.setField === 'serverUrl' ||
-        el.dataset.setField === 'username' ||
-        el.dataset.setField === 'filePath'
+        field === 'serverUrl' ||
+        field === 'username' ||
+        field === 'filePath' ||
+        wasDirty !== state.settingsDirty ||
+        hadError
       ) {
         render();
       }
@@ -2910,10 +3791,11 @@
       task.subtasks[idx].done = el.checked;
       if (willAutoFinish) {
         const res = completeTask(ws, task.id, evalContext());
-        state.message = t(
-          lang,
-          res.repeated ? 'msgCompletedRepeat' : 'msgCompleted',
-          { title: task.title },
+        setNotice(
+          t(lang, res.repeated ? 'msgCompletedRepeat' : 'msgCompleted', {
+            title: task.title,
+          }),
+          { showUndo: true },
         );
         if (
           state.expandedEntity?.kind === 'task' &&
@@ -2960,6 +3842,19 @@
     if (el.hasAttribute('data-log-tag')) {
       state.logFilterTag = el.value;
       render();
+      return;
+    }
+    if (state.entityDraft && el.hasAttribute('data-ed-field')) {
+      const key = el.dataset.edField;
+      state.entityDraft[key] = el.type === 'checkbox' ? el.checked : el.value;
+      state.entityDraft.error = '';
+      if (
+        key === 'sourceType' ||
+        key === 'suspendedMode' ||
+        key === 'dueLocal'
+      ) {
+        render();
+      }
       return;
     }
 
@@ -3012,21 +3907,49 @@
       return;
     }
     if (form.dataset.form === 'quick-create-labels') {
-      createQuickManagedEntity('labels', false);
+      createQuickManagedEntity('labels');
       return;
     }
     if (form.dataset.form === 'quick-create-locations') {
-      createQuickManagedEntity('locations', false);
+      createQuickManagedEntity('locations');
     }
   });
 
   document.addEventListener('keydown', (event) => {
     const isInput = event.target?.matches('input, textarea, select');
 
+    // Focus trap inside active modal or mobile bottom sheet
+    if (event.key === 'Tab') {
+      const dialog =
+        app.querySelector('.modal-card') || app.querySelector('.bottom-sheet');
+      if (dialog) {
+        const focusables = getFocusableElements(dialog);
+        if (focusables.length > 0) {
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (event.shiftKey) {
+            if (
+              document.activeElement === first ||
+              !dialog.contains(document.activeElement)
+            ) {
+              event.preventDefault();
+              last.focus();
+            }
+          } else if (
+            document.activeElement === last ||
+            !dialog.contains(document.activeElement)
+          ) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+        return;
+      }
+    }
+
     if (event.target?.hasAttribute('data-lp-search')) {
       const mode = event.target.dataset.lpSearch;
-      const picker =
-        mode === 'task' ? state.taskLabelPicker : state.draftLabelPicker;
+      const picker = resolveLabelPicker(mode);
       if (picker) {
         const ws = activeWorkspace();
         const { filtered, canCreate } = filterPickerLabels(
@@ -3067,6 +3990,8 @@
             const targetId = filtered[idx].id;
             if (mode === 'task') {
               directToggleLabel(picker.taskId, targetId);
+            } else if (mode === 'entity-draft') {
+              toggleEntityDraftLabel(targetId);
             } else {
               toggleDraftLabel(targetId);
             }
@@ -3082,8 +4007,7 @@
             picker.activeIndex = -1;
             render();
           } else {
-            if (mode === 'task') state.taskLabelPicker = null;
-            else state.draftLabelPicker = null;
+            clearLabelPicker(mode);
             render();
           }
           return;
@@ -3101,9 +4025,41 @@
         saveInlineEdit();
         return;
       }
+      const edKey = event.target.getAttribute('data-ed-field');
+      if (
+        (edKey === 'title' && state.entityDraft?.kind === 'task') ||
+        (edKey === 'name' &&
+          (state.entityDraft?.kind === 'label' ||
+            state.entityDraft?.kind === 'location'))
+      ) {
+        event.preventDefault();
+        commitEntityDraft();
+        return;
+      }
       if (event.target.hasAttribute('data-ie-new-step')) {
         event.preventDefault();
         app.querySelector('[data-ie-add-step]')?.click();
+        return;
+      }
+      if (event.target.hasAttribute('data-ed-new-step')) {
+        event.preventDefault();
+        app.querySelector('[data-ed-add-step]')?.click();
+        return;
+      }
+      if (
+        event.target.hasAttribute('data-ie-link-title') ||
+        event.target.hasAttribute('data-ie-link-uri')
+      ) {
+        event.preventDefault();
+        app.querySelector('[data-ie-link-submit]')?.click();
+        return;
+      }
+      if (
+        event.target.hasAttribute('data-ed-link-title') ||
+        event.target.hasAttribute('data-ed-link-uri')
+      ) {
+        event.preventDefault();
+        app.querySelector('[data-ed-link-submit]')?.click();
         return;
       }
       if (event.target.hasAttribute('data-info-hist-new')) {
@@ -3111,9 +4067,32 @@
         app.querySelector('[data-info-hist-add]')?.click();
         return;
       }
+      if (event.target.hasAttribute('data-info-hist-edit-input')) {
+        event.preventDefault();
+        app.querySelector('[data-info-hist-save]')?.click();
+        return;
+      }
       if (event.target.hasAttribute('data-ws-create-input')) {
         event.preventDefault();
         app.querySelector('[data-ws-create-submit]')?.click();
+        return;
+      }
+      if (event.target.hasAttribute('data-ws-rename-input')) {
+        event.preventDefault();
+        app.querySelector('[data-ws-rename-save]')?.click();
+        return;
+      }
+      if (event.target.hasAttribute('data-local-file-input')) {
+        event.preventDefault();
+        const confirmBtn =
+          app.querySelector('[data-confirm-select-local]') ||
+          app.querySelector('[data-confirm-rename-local]');
+        confirmBtn?.click();
+        return;
+      }
+      if (event.target.hasAttribute('data-wipe-confirm-input')) {
+        event.preventDefault();
+        app.querySelector('[data-confirm-wipe]')?.click();
         return;
       }
     }
@@ -3132,13 +4111,22 @@
         return;
       }
       if (state.modal) {
-        state.modal = null;
+        closeModal();
+        return;
+      }
+      if (
+        state.taskLabelPicker ||
+        state.draftLabelPicker ||
+        state.entityDraftLabelPicker
+      ) {
+        state.taskLabelPicker = null;
+        state.draftLabelPicker = null;
+        state.entityDraftLabelPicker = null;
         render();
         return;
       }
-      if (state.taskLabelPicker || state.draftLabelPicker) {
-        state.taskLabelPicker = null;
-        state.draftLabelPicker = null;
+      if (state.entityDraft) {
+        state.entityDraft = null;
         render();
         return;
       }
@@ -3181,6 +4169,48 @@
     }
 
     if (
+      !state.modal &&
+      state.simState !== 'loading' &&
+      state.simState !== 'file_read_full' &&
+      (((event.ctrlKey || event.metaKey) &&
+        !event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'f') ||
+        (!isInput &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          event.key === '/'))
+    ) {
+      event.preventDefault();
+      state.searchOpen = true;
+      state.view = 'tasks';
+      state.entityDraft = null;
+      state.entityDraftLabelPicker = null;
+      render();
+      app.querySelector('[data-global-search]')?.focus();
+      return;
+    }
+
+    if (
+      !isInput &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey &&
+      !state.modal &&
+      event.key.toLowerCase() === 'n' &&
+      hasTaskComposer()
+    ) {
+      event.preventDefault();
+      if (state.isCompact && !state.mobileQuickAddOpen) {
+        state.mobileQuickAddOpen = true;
+        render();
+      }
+      app.querySelector('[data-draft="title"]')?.focus();
+      return;
+    }
+
+    if (
       !isInput &&
       !state.modal &&
       state.view === 'tasks' &&
@@ -3219,8 +4249,6 @@
   window.addEventListener('resize', () => {
     if (isCompactViewport() !== state.isCompact) {
       render();
-    } else {
-      syncMainScrollJumpButton();
     }
   });
 
@@ -3249,6 +4277,14 @@
     });
   });
 
+  const devBuildBtn = root.querySelector('[data-dev-build]');
+  if (devBuildBtn) {
+    devBuildBtn.addEventListener('click', () => {
+      state.isDevBuild = !state.isDevBuild;
+      render();
+    });
+  }
+
   const simSelect = root.querySelector('[data-sim-state]');
   if (simSelect) {
     simSelect.addEventListener('change', () => {
@@ -3268,8 +4304,11 @@
         if (value === 'conflict_deletion' || value === 'conflict_recovery') {
           seedConflictItems();
         }
-        if (value === 'file_read_full') {
+        if (value === 'file_read_full' || value === 'loading') {
           state.view = 'tasks';
+        }
+        if (value === 'raw_tdf_limit') {
+          state.view = 'raw-tdf';
         }
       }
       render();

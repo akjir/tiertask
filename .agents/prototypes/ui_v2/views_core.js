@@ -1,10 +1,11 @@
 (() => {
   window.TT2 = window.TT2 || {};
-  const { escapeHtml, renderIcon } = window.TT2;
+  const { escapeHtml, renderIcon, renderAppLogo } = window.TT2;
   const {
     t,
     formatLocalDate,
     formatLocalTimestamp,
+    formatLocalDatetimeInput,
     formatRemainingDuration,
     formatRepeatPhrase,
   } = window.TT2.i18n;
@@ -82,8 +83,9 @@
           ${renderIcon(state.drawer ? 'x' : 'menu')}
         </button>
         <button type="button" class="brand-btn" data-view="tasks" aria-label="${escapeHtml(t(lang, 'appTitle'))}">
-          <span class="mark" aria-hidden="true"><b></b><b></b><b></b></span>
+          ${renderAppLogo()}
           <span>TierTask</span>
+          ${state.isDevBuild ? `<span class="dev-badge">${escapeHtml(t(lang, 'devBadgeLabel'))}</span>` : ''}
         </button>
         <button type="button" class="workspace-pill" data-open-modal="workspaces" title="${escapeHtml(t(lang, 'workspacesTitle'))}">
           ${renderIcon('workspaces', 'icon-sm')}
@@ -529,34 +531,83 @@
     `;
   }
 
-  function renderNotice(state) {
+  function renderLoadingView(state) {
+    const lang = state.lang;
+    return `
+      <div class="loading-state" role="status" aria-live="polite">
+        <span class="loading-spinner" aria-hidden="true"></span>
+        <h2>${escapeHtml(t(lang, 'loadingBoardTitle'))}</h2>
+        <p class="subtitle centered">${escapeHtml(t(lang, 'loadingBoardSub'))}</p>
+      </div>
+    `;
+  }
+
+  function renderActiveLabelBar(state, workspace) {
+    if (!state.label) return '';
+    const lang = state.lang;
+    const activeLabel = workspace.labels.find((item) => item.id === state.label);
+    if (!activeLabel) return '';
+    return `
+      <div class="active-label-bar" role="region" aria-label="${escapeHtml(t(lang, 'activeFilterLabel'))}">
+        <button type="button" class="active-label-bar-main" data-open-managed="labels:${escapeHtml(activeLabel.id)}" title="${escapeHtml(t(lang, 'labelHubOpenTooltip'))}">
+          <span class="dot" style="--label-color:${escapeHtml(activeLabel.color || '#00648b')}"></span>
+          <span>${escapeHtml(activeLabel.name)}</span>
+          ${activeLabel.scoped ? `<span class="pill-badge tone-accent">${escapeHtml(t(lang, 'scopedQueue'))}</span>` : ''}
+          ${renderIcon('info', 'icon-xs')}
+        </button>
+        <button type="button" class="icon-button compact" data-clear-active-label title="${escapeHtml(t(lang, 'activeFilterClear'))}" aria-label="${escapeHtml(t(lang, 'activeFilterClear'))}">
+          ${renderIcon('x', 'icon-xs')}
+        </button>
+      </div>
+    `;
+  }
+
+  function renderFloatingNotices(state) {
     const lang = state.lang;
     const undoDepth = state.undoStack.length;
     if (!state.message && !state.recoveryNotice) return '';
+    const msgToneClass =
+      state.messageTone === 'danger'
+        ? 'tone-danger'
+        : state.messageTone === 'warning'
+          ? 'tone-warning'
+          : '';
     return `
-      <div class="notice-stack" aria-live="polite">
+      <div class="floating-notice-layer" aria-live="polite">
         ${
           state.recoveryNotice
-            ? `<div class="notice-toast tone-warning">
-                ${renderIcon('alert-triangle', 'icon-sm')}
-                <span>${escapeHtml(t(lang, state.recoveryNotice))}</span>
-                <button type="button" class="text-button" data-dismiss-recovery>${escapeHtml(t(lang, 'actionClose'))}</button>
+            ? `<div class="notice-toast tone-warning" role="status">
+                <span class="notice-toast-text">
+                  ${renderIcon('alert-triangle', 'icon-sm')}
+                  <span>${escapeHtml(t(lang, state.recoveryNotice))}</span>
+                </span>
+                <div class="notice-toast-actions">
+                  <button type="button" class="text-button" data-dismiss-recovery>${escapeHtml(t(lang, 'actionClose'))}</button>
+                </div>
               </div>`
             : ''
         }
         ${
           state.message
-            ? `<div class="notice-toast">
-                <span>${escapeHtml(state.message)}</span>
-                ${
-                  undoDepth > 0 && state.showUndoAction
-                    ? `<button type="button" class="undo-btn" data-undo>
-                        ${renderIcon('undo', 'icon-xs')}
-                        <span>${escapeHtml(t(lang, 'actionUndo'))}</span>
-                        <kbd class="kbd-hint">Ctrl+Z</kbd>
-                      </button>`
-                    : ''
-                }
+            ? `<div class="notice-toast ${msgToneClass}" role="status">
+                <span class="notice-toast-text">
+                  ${state.messageTone === 'danger' ? renderIcon('alert-circle', 'icon-sm') : ''}
+                  <span>${escapeHtml(state.message)}</span>
+                </span>
+                <div class="notice-toast-actions">
+                  ${
+                    undoDepth > 0 && state.showUndoAction
+                      ? `<button type="button" class="undo-btn" data-undo>
+                          ${renderIcon('undo', 'icon-xs')}
+                          <span>${escapeHtml(t(lang, 'actionUndo'))}</span>
+                          <kbd class="kbd-hint">Ctrl+Z</kbd>
+                        </button>`
+                      : ''
+                  }
+                  <button type="button" class="icon-button compact" data-dismiss-notice title="${escapeHtml(t(lang, 'actionDismiss'))}" aria-label="${escapeHtml(t(lang, 'actionDismiss'))}">
+                    ${renderIcon('x', 'icon-xs')}
+                  </button>
+                </div>
               </div>`
             : ''
         }
@@ -673,6 +724,7 @@
     lang,
     showAddButton = false,
     compact = false,
+    readOnly = false,
   }) {
     const chipsHtml = labels
       .map((lbl) => {
@@ -686,19 +738,27 @@
                 <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
                 <span>${escapeHtml(lbl.name)}</span>
               </button>
-              <button type="button" class="assigned-label-chip-remove" data-direct-toggle-label="${escapeHtml(lbl.id)}" data-task-id="${escapeHtml(taskId)}" title="${escapeHtml(removeTitle)}" aria-label="${escapeHtml(removeTitle)}">
-                ${renderIcon('x', 'icon-xs')}
-              </button>
+              ${
+                readOnly
+                  ? ''
+                  : `<button type="button" class="assigned-label-chip-remove" data-direct-toggle-label="${escapeHtml(lbl.id)}" data-task-id="${escapeHtml(taskId)}" title="${escapeHtml(removeTitle)}" aria-label="${escapeHtml(removeTitle)}">
+                      ${renderIcon('x', 'icon-xs')}
+                    </button>`
+              }
             </div>
           `;
         }
+        const removeAttr =
+          targetKind === 'entity-draft'
+            ? `data-entity-draft-toggle-label="${escapeHtml(lbl.id)}"`
+            : `data-draft-toggle-label="${escapeHtml(lbl.id)}"`;
         return `
           <div class="assigned-label-chip ${compact ? 'is-compact' : ''}">
             <span class="assigned-label-chip-main is-static">
               <span class="dot" style="--label-color:${escapeHtml(lbl.color || '#00648b')}"></span>
               <span>${escapeHtml(lbl.name)}</span>
             </span>
-            <button type="button" class="assigned-label-chip-remove" data-draft-toggle-label="${escapeHtml(lbl.id)}" title="${escapeHtml(removeTitle)}" aria-label="${escapeHtml(removeTitle)}">
+            <button type="button" class="assigned-label-chip-remove" ${removeAttr} title="${escapeHtml(removeTitle)}" aria-label="${escapeHtml(removeTitle)}">
               ${renderIcon('x', 'icon-xs')}
             </button>
           </div>
@@ -706,9 +766,12 @@
       })
       .join('');
 
-    const addBtnHtml = showAddButton
-      ? `<button type="button" class="add-field-chip" data-open-task-label-picker="${escapeHtml(taskId)}">${renderIcon('plus', 'icon-xs')}<span>${escapeHtml(t(lang, 'actionAdd'))}</span></button>`
-      : '';
+    const addBtnHtml =
+      showAddButton && !readOnly
+        ? targetKind === 'entity-draft'
+          ? `<button type="button" class="add-field-chip" data-open-entity-draft-label-picker>${renderIcon('plus', 'icon-xs')}<span>${escapeHtml(t(lang, 'actionAdd'))}</span></button>`
+          : `<button type="button" class="add-field-chip" data-open-task-label-picker="${escapeHtml(taskId)}">${renderIcon('plus', 'icon-xs')}<span>${escapeHtml(t(lang, 'actionAdd'))}</span></button>`
+        : '';
 
     return `<div class="assigned-label-chips">${chipsHtml}${addBtnHtml}</div>`;
   }
@@ -772,7 +835,9 @@
         const toggleAttrs =
           mode === 'task'
             ? `data-direct-toggle-label="${escapeHtml(lbl.id)}" data-task-id="${escapeHtml(taskId)}"`
-            : `data-draft-toggle-label="${escapeHtml(lbl.id)}"`;
+            : mode === 'entity-draft'
+              ? `data-entity-draft-toggle-label="${escapeHtml(lbl.id)}"`
+              : `data-draft-toggle-label="${escapeHtml(lbl.id)}"`;
         return `
           <div class="label-picker-row ${active ? 'is-selected' : ''} ${highlighted ? 'is-highlighted' : ''}" data-lp-row-idx="${idx}">
             <button type="button" class="label-picker-row-main" ${toggleAttrs} role="option" aria-selected="${active}">
@@ -842,6 +907,10 @@
         selectedIds = task.labels || [];
         pickerState = state.taskLabelPicker;
       }
+    } else if (state.entityDraftLabelPicker && state.entityDraft?.kind === 'task') {
+      mode = 'entity-draft';
+      selectedIds = state.entityDraft.labels || [];
+      pickerState = state.entityDraftLabelPicker;
     } else if (state.draftLabelPicker) {
       mode = 'draft';
       selectedIds = state.draft.labels || [];
@@ -877,8 +946,8 @@
     `;
   }
 
-  function renderNoteSection({ kind, id, note, isEditing, draft, error, lang }) {
-    if (isEditing) {
+  function renderNoteSection({ kind, id, note, isEditing, draft, error, lang, readOnly = false }) {
+    if (isEditing && !readOnly) {
       return `
         <div class="info-card is-editing">
           <div class="info-card-head">
@@ -909,7 +978,7 @@
             <button type="button" class="icon-button compact" data-copy-note="${escapeHtml(note)}" title="${escapeHtml(t(lang, 'actionCopy'))}">
               ${renderIcon('copy', 'icon-xs')}
             </button>
-            ${renderInlineEditBtn(kind, id, 'note', lang, '')}
+            ${readOnly ? '' : renderInlineEditBtn(kind, id, 'note', lang, '')}
           </div>
         </div>
         <p class="info-note">${escapeHtml(note)}</p>
@@ -917,8 +986,8 @@
     `;
   }
 
-  function renderLinksSection({ kind, id, links, isEditing, draft, error, lang }) {
-    if (isEditing) {
+  function renderLinksSection({ kind, id, links, isEditing, draft, error, lang, readOnly = false }) {
+    if (isEditing && !readOnly) {
       const editingLinkIdx = draft.editingLinkIndex;
       return `
         <div class="info-card is-editing">
@@ -981,7 +1050,7 @@
         <div class="info-card-head">
           ${renderIcon('link', 'icon-sm')}
           <strong>${escapeHtml(t(lang, 'taskInfoLinksTitle'))}</strong>
-          ${renderInlineEditBtn(kind, id, 'links', lang)}
+          ${readOnly ? '' : renderInlineEditBtn(kind, id, 'links', lang)}
         </div>
         <div class="hub-links-list">
           ${links
@@ -1196,6 +1265,7 @@
     extraCardClass = '',
     isExpanded,
     isEditingTitle,
+    allowTitleEdit = true,
     title,
     titleField,
     titleMaxLength,
@@ -1228,7 +1298,7 @@
                 </button>
                 <div class="task-actions">
                   ${
-                    isExpanded
+                    isExpanded && allowTitleEdit
                       ? `<button type="button" class="icon-button compact" data-ie-open="${titleField}" data-ie-kind="${kind}" data-ie-id="${escapeHtml(id)}" title="${escapeHtml(titleAriaLabel)}" aria-label="${escapeHtml(titleAriaLabel)}">
                           ${renderIcon('pencil', 'icon-sm')}
                         </button>`
@@ -1291,7 +1361,8 @@
     const hasConditions =
       (condEval && condEval.rules.length > 0) || hasCustomTaskConds;
 
-    const editBtn = (section) => renderInlineEditBtn('task', task.id, section, lang);
+    const editBtn = (section) =>
+      isCompleted ? '' : renderInlineEditBtn('task', task.id, section, lang);
 
     const editHistIdx = state.editingHistoryIndex;
     const sections = [];
@@ -1305,6 +1376,7 @@
       draft,
       error: err,
       lang,
+      readOnly: isCompleted,
     });
     if (noteHtml) sections.push(noteHtml);
 
@@ -1317,11 +1389,12 @@
       draft,
       error: err,
       lang,
+      readOnly: isCompleted,
     });
     if (linksHtml) sections.push(linksHtml);
 
     // 4. Subtasks
-    if (editing === 'subtasks') {
+    if (editing === 'subtasks' && !isCompleted) {
       sections.push(`
         <div class="info-card is-editing">
           <div class="info-card-head">
@@ -1374,7 +1447,7 @@
             ${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-sm')}
             <strong>${escapeHtml(t(lang, 'taskInfoSubtasksTitle'))}</strong>
             <span class="info-sub ml-auto">${escapeHtml(t(lang, 'taskInfoSubtasksProgress', { completed: done, total: task.subtasks.length }))}</span>
-            ${renderInlineEditBtn('task', task.id, 'subtasks', lang, '')}
+            ${isCompleted ? '' : renderInlineEditBtn('task', task.id, 'subtasks', lang, '')}
           </div>
           <div class="progress-bar"><span style="width:${pct}%"></span></div>
           ${task.subtasksAutoFinish ? `<small class="info-sub">${escapeHtml(t(lang, 'taskInfoAutoFinishActive'))}</small>` : ''}
@@ -1393,24 +1466,30 @@
       `);
     }
 
-    // 5. History (always live interactive)
+    // 5. History (always live interactive, with optional local wall-clock timestamp)
+    const histCount = (task.history || []).length;
     sections.push(`
       <div class="info-card">
         <div class="info-card-head">
           ${renderIcon('history', 'icon-sm')}
           <strong>${escapeHtml(t(lang, 'taskInfoHistoryTitle'))}</strong>
-          <span class="info-sub ml-auto">${(task.history || []).length}</span>
+          <span class="info-sub ml-auto">${histCount} / 200</span>
         </div>
         ${
-          task.history?.length
+          histCount
             ? `<div class="info-history-list">
                 ${task.history
                   .map((entry, idx) =>
                     editHistIdx === idx
                       ? `<div class="history-inline-edit">
-                          <input type="text" data-info-hist-edit-input value="${escapeHtml(state.historyEditDraft || entry.text)}" maxlength="500">
-                          <button type="button" class="primary compact" data-info-hist-save="${idx}">${escapeHtml(t(lang, 'actionSave'))}</button>
-                          <button type="button" class="secondary compact" data-info-hist-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
+                          <div class="history-inline-edit-row">
+                            <input type="datetime-local" data-info-hist-edit-time value="${escapeHtml(state.historyEditTimeDraft || formatLocalDatetimeInput(entry.timestampUtc, offset))}" aria-label="${escapeHtml(t(lang, 'fieldHistoryTimestamp'))}">
+                          </div>
+                          <div class="history-inline-edit-row">
+                            <input type="text" data-info-hist-edit-input value="${escapeHtml(state.historyEditDraft || entry.text)}" maxlength="500">
+                            <button type="button" class="primary compact" data-info-hist-save="${idx}">${escapeHtml(t(lang, 'actionSave'))}</button>
+                            <button type="button" class="secondary compact" data-info-hist-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
+                          </div>
                         </div>`
                       : `<div class="history-entry-row">
                           <div class="record-text">
@@ -1428,14 +1507,26 @@
             : `<div class="info-sub">${escapeHtml(t(lang, 'taskInfoHistoryEmpty'))}</div>`
         }
         <div class="edit-add-row mt-8">
-          <input type="text" data-info-hist-new placeholder="${escapeHtml(t(lang, 'taskInfoHistoryPlaceholder'))}" maxlength="500">
+          <input type="text" data-info-hist-new value="${escapeHtml(state.historyNewDraft || '')}" placeholder="${escapeHtml(t(lang, 'taskInfoHistoryPlaceholder'))}" maxlength="500">
+          <button type="button" class="icon-button compact ${state.historyTimeOpen ? 'is-accent' : ''}" data-info-hist-toggle-time title="${escapeHtml(t(lang, 'actionToggleHistoryTimestamp'))}" aria-label="${escapeHtml(t(lang, 'actionToggleHistoryTimestamp'))}" aria-pressed="${Boolean(state.historyTimeOpen)}">
+            ${renderIcon('clock', 'icon-xs')}
+          </button>
           <button type="button" class="secondary compact" data-info-hist-add>${escapeHtml(t(lang, 'taskInfoHistoryAdd'))}</button>
         </div>
+        ${
+          state.historyTimeOpen
+            ? `<div class="history-timestamp-row">
+                <span class="info-sub">${escapeHtml(t(lang, 'fieldHistoryTimestamp'))}</span>
+                <input type="datetime-local" data-info-hist-new-time value="${escapeHtml(state.historyNewTimeDraft || '')}" aria-label="${escapeHtml(t(lang, 'fieldHistoryTimestamp'))}">
+              </div>`
+            : ''
+        }
+        ${state.historyError ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(state.historyError)}</div>` : ''}
       </div>
     `);
 
     // 6. Labels (assigned chips + on-demand searchable picker; empty collapses to + Labels chip)
-    if (showInlineLabelPicker) {
+    if (showInlineLabelPicker && !isCompleted) {
       sections.push(`
         <div class="info-card is-editing label-picker-card">
           <div class="info-card-head">
@@ -1469,7 +1560,8 @@
             targetKind: 'task',
             taskId: task.id,
             lang,
-            showAddButton: true,
+            showAddButton: !isCompleted,
+            readOnly: isCompleted,
           })}
         </div>
       `);
@@ -1818,60 +1910,62 @@
       `);
     }
 
-    // 13. Compact "+ Add" & direct quick-toggle bar for unset fields
+    // 13. Compact "+ Add" & direct quick-toggle bar for unset fields (active tasks only)
     const addChips = [];
-    if (!task.note && editing !== 'note') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'note', 'file-text', t(lang, 'inlineAddNote')),
-      );
-    }
-    if (!task.links?.length && editing !== 'links') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'links', 'link', t(lang, 'inlineAddLinks')),
-      );
-    }
-    if (!task.subtasks?.length && editing !== 'subtasks') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'subtasks', 'list-checks', t(lang, 'inlineAddSubtasks')),
-      );
-    }
-    if (!taskLabels.length && !showInlineLabelPicker) {
-      addChips.push(
-        `<button type="button" class="add-field-chip" data-open-task-label-picker="${escapeHtml(task.id)}">${renderIcon('tags', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddLabels'))}</span></button>`,
-      );
-    }
-    if (!task.dueAt && editing !== 'due') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'due', 'calendar-days', t(lang, 'inlineAddDue')),
-      );
-    }
-    if (!isCompleted && currentMode === 'queue') {
-      addChips.push(
-        `<button type="button" class="add-field-chip is-direct" data-direct-mode="priority" data-task-id="${escapeHtml(task.id)}">${renderIcon('zap', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddPriority'))}</span></button>`,
-      );
-      addChips.push(
-        `<button type="button" class="add-field-chip is-direct" data-direct-mode="someday" data-task-id="${escapeHtml(task.id)}">${renderIcon('lightbulb', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddSomeday'))}</span></button>`,
-      );
-    }
-    if (!task.repeat && editing !== 'repeat') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'repeat', 'repeat', t(lang, 'inlineAddRepeat')),
-      );
-    }
-    if (!suspendedActive && !isCompleted && editing !== 'suspended') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'suspended', 'pause-circle', t(lang, 'inlineAddSuspend')),
-      );
-    }
-    if ((!depEval || depEval.total === 0) && editing !== 'prereqs') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'prereqs', 'lock', t(lang, 'inlineAddPrereqs')),
-      );
-    }
-    if (!hasConditions && editing !== 'conditions') {
-      addChips.push(
-        renderAddFieldChip('task', task.id, 'conditions', 'sliders', t(lang, 'inlineAddConditions')),
-      );
+    if (!isCompleted) {
+      if (!task.note && editing !== 'note') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'note', 'file-text', t(lang, 'inlineAddNote')),
+        );
+      }
+      if (!task.links?.length && editing !== 'links') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'links', 'link', t(lang, 'inlineAddLinks')),
+        );
+      }
+      if (!task.subtasks?.length && editing !== 'subtasks') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'subtasks', 'list-checks', t(lang, 'inlineAddSubtasks')),
+        );
+      }
+      if (!taskLabels.length && !showInlineLabelPicker) {
+        addChips.push(
+          `<button type="button" class="add-field-chip" data-open-task-label-picker="${escapeHtml(task.id)}">${renderIcon('tags', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddLabels'))}</span></button>`,
+        );
+      }
+      if (!task.dueAt && editing !== 'due') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'due', 'calendar-days', t(lang, 'inlineAddDue')),
+        );
+      }
+      if (currentMode === 'queue') {
+        addChips.push(
+          `<button type="button" class="add-field-chip is-direct" data-direct-mode="priority" data-task-id="${escapeHtml(task.id)}">${renderIcon('zap', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddPriority'))}</span></button>`,
+        );
+        addChips.push(
+          `<button type="button" class="add-field-chip is-direct" data-direct-mode="someday" data-task-id="${escapeHtml(task.id)}">${renderIcon('lightbulb', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddSomeday'))}</span></button>`,
+        );
+      }
+      if (!task.repeat && editing !== 'repeat') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'repeat', 'repeat', t(lang, 'inlineAddRepeat')),
+        );
+      }
+      if (!suspendedActive && editing !== 'suspended') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'suspended', 'pause-circle', t(lang, 'inlineAddSuspend')),
+        );
+      }
+      if ((!depEval || depEval.total === 0) && editing !== 'prereqs') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'prereqs', 'lock', t(lang, 'inlineAddPrereqs')),
+        );
+      }
+      if (!hasConditions && editing !== 'conditions') {
+        addChips.push(
+          renderAddFieldChip('task', task.id, 'conditions', 'sliders', t(lang, 'inlineAddConditions')),
+        );
+      }
     }
 
     return renderEntitySlideShell({
@@ -1879,6 +1973,9 @@
       id: task.id,
       isAnimating,
       regionLabel: t(lang, 'taskInfoTitle'),
+      metaExtraHtml: isCompleted
+        ? `<span class="pill-badge">${escapeHtml(t(lang, 'completedReadOnlyHint'))}</span>`
+        : '',
       deleteConfirmText: t(lang, 'inlineDeleteConfirm'),
       isConfirmingDelete: state.inlineDeleteConfirmKey === `task:${task.id}`,
       sectionsHtml: sections.join(''),
@@ -1886,6 +1983,8 @@
       lang,
     });
   }
+
+  const MAX_VISIBLE_SECONDARY_BADGES = 3;
 
   function renderTaskCard(task, tierIdx, state, workspace, evalRes, showTierBadge = false) {
     const lang = state.lang;
@@ -1898,6 +1997,7 @@
     const canDowngrade = !isCompleted && tierIdx <= 2;
     const isEditingTitle =
       isExpanded &&
+      !isCompleted &&
       state.inlineEdit?.kind === 'task' &&
       state.inlineEdit?.id === task.id &&
       state.inlineEdit?.section === 'title';
@@ -1915,15 +2015,20 @@
         state.nowMs,
         workspace.config.dueLeadWindow,
       );
+      const isAutoPrioritized =
+        !isCompleted &&
+        !task.priority &&
+        evalRes.effectivePriorityIds.has(task.id);
       const suspendedActive = isTaskSuspendedActive(task, state.nowMs);
       const depEval = evalRes.dependencyDetailsByTask.get(task.id);
       const condEval = evalRes.conditionDetailsByTask.get(task.id);
 
-      const badges = [];
+      const primaryBadges = [];
+      const secondaryBadges = [];
       const toggleAttr = `data-toggle-entity="${escapeHtml(key)}"`;
 
       if (showTierBadge) {
-        badges.push(
+        primaryBadges.push(
           `<span class="meta-pill tone-soft">${renderIcon(TIER_ICONS[tierIdx], 'icon-xs')}${escapeHtml(tierName(lang, tierIdx))}</span>`,
         );
       }
@@ -1941,45 +2046,18 @@
           overdue && !isCompleted
             ? t(lang, 'badgeOverduePrefix', { date: dateStr })
             : t(lang, 'badgeDuePrefix', { date: dateStr });
-        badges.push(
+        primaryBadges.push(
           `<button type="button" class="meta-pill is-interactive ${dueTone}" ${toggleAttr}>${renderIcon('calendar-days', 'icon-xs')}${escapeHtml(dueText)}</button>`,
         );
       }
 
-      if (task.note) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
-        );
-      }
-
-      if (task.links?.length) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, task.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: task.links.length }))}</button>`,
-        );
-      }
-
-      if (task.subtasks?.length) {
-        const doneCount = task.subtasks.filter((s) => s.done).length;
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-xs')}${escapeHtml(t(lang, 'badgeSteps', { done: doneCount, total: task.subtasks.length }))}</button>`,
-        );
-      }
-
-      if (task.history?.length) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('history', 'icon-xs')}${escapeHtml(t(lang, 'badgeHistory', { count: task.history.length }))}</button>`,
-        );
-      }
-
       if (task.priority && !isCompleted) {
-        badges.push(
+        secondaryBadges.push(
           `<button type="button" class="meta-pill is-interactive tone-accent" ${toggleAttr}>${renderIcon('zap', 'icon-xs')}${escapeHtml(t(lang, 'badgePriority'))}</button>`,
         );
-      }
-
-      if (task.repeat) {
-        badges.push(
-          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('repeat', 'icon-xs')}${escapeHtml(formatRepeatSummary(task, lang))}</button>`,
+      } else if (isAutoPrioritized) {
+        secondaryBadges.push(
+          `<button type="button" class="meta-pill is-interactive tone-warning" ${toggleAttr}>${renderIcon('zap', 'icon-xs')}${escapeHtml(t(lang, 'badgeAutoPriority'))}</button>`,
         );
       }
 
@@ -1990,24 +2068,65 @@
             : t(lang, 'badgeSuspendedUntil', {
                 date: formatLocalDate(task.suspendedAt, offset),
               });
-        badges.push(
+        secondaryBadges.push(
           `<button type="button" class="meta-pill is-interactive tone-warning" ${toggleAttr}>${renderIcon('pause-circle', 'icon-xs')}${escapeHtml(suspText)}</button>`,
         );
       }
 
       if (depEval && !depEval.satisfied) {
-        badges.push(
+        secondaryBadges.push(
           `<button type="button" class="meta-pill is-interactive tone-warning" ${toggleAttr}>${renderIcon('lock', 'icon-xs')}${escapeHtml(t(lang, 'badgeBlockedBy', { done: depEval.satisfiedCount, total: depEval.total }))}</button>`,
         );
       }
 
       if (condEval && condEval.rules.length > 0) {
-        badges.push(
+        secondaryBadges.push(
           `<button type="button" class="meta-pill is-interactive ${condEval.satisfied ? '' : 'tone-warning'}" ${toggleAttr}>${renderIcon('sliders', 'icon-xs')}${escapeHtml(t(lang, 'badgeConditions'))}</button>`,
         );
       }
 
-      if (taskLabels.length || badges.length) {
+      if (task.subtasks?.length) {
+        const doneCount = task.subtasks.filter((s) => s.done).length;
+        secondaryBadges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon(task.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-xs')}${escapeHtml(t(lang, 'badgeSteps', { done: doneCount, total: task.subtasks.length }))}</button>`,
+        );
+      }
+
+      if (task.repeat) {
+        secondaryBadges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('repeat', 'icon-xs')}${escapeHtml(formatRepeatSummary(task, lang))}</button>`,
+        );
+      }
+
+      if (task.note) {
+        secondaryBadges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('file-text', 'icon-xs')}${escapeHtml(t(lang, 'badgeNote'))}</button>`,
+        );
+      }
+
+      if (task.links?.length) {
+        secondaryBadges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('link', 'icon-xs')}${escapeHtml(t(lang, task.links.length === 1 ? 'badgeLinkSingular' : 'badgeLinks', { count: task.links.length }))}</button>`,
+        );
+      }
+
+      if (task.history?.length) {
+        secondaryBadges.push(
+          `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${renderIcon('history', 'icon-xs')}${escapeHtml(t(lang, 'badgeHistory', { count: task.history.length }))}</button>`,
+        );
+      }
+
+      const displayedSecondary =
+        secondaryBadges.length > MAX_VISIBLE_SECONDARY_BADGES
+          ? [
+              ...secondaryBadges.slice(0, MAX_VISIBLE_SECONDARY_BADGES),
+              `<button type="button" class="meta-pill is-interactive" ${toggleAttr}>${escapeHtml(t(lang, 'badgeMoreIndicators', { count: secondaryBadges.length - MAX_VISIBLE_SECONDARY_BADGES }))}</button>`,
+            ]
+          : secondaryBadges;
+
+      const allBadges = [...primaryBadges, ...displayedSecondary];
+
+      if (taskLabels.length || allBadges.length) {
         metadataHtml = `<div class="metadata">
           ${taskLabels
             .map(
@@ -2018,7 +2137,7 @@
             </button>`,
             )
             .join('')}
-          ${badges.join('')}
+          ${allBadges.join('')}
         </div>`;
       }
     }
@@ -2029,6 +2148,7 @@
       extraCardClass: isCompleted ? 'is-completed' : '',
       isExpanded,
       isEditingTitle,
+      allowTitleEdit: !isCompleted,
       title: task.title,
       titleField: 'title',
       titleMaxLength: 300,
@@ -2051,6 +2171,501 @@
         : '',
       lang,
     });
+  }
+
+  function renderTaskDraftCard(state, workspace, evalRes) {
+    const draft = state.entityDraft;
+    if (!draft || draft.kind !== 'task') return '';
+    const lang = state.lang;
+    const labelsById = new Map(workspace.labels.map((l) => [l.id, l]));
+    const draftLabels = (draft.labels || [])
+      .map((id) => labelsById.get(id))
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const showInlinePicker =
+      Boolean(state.entityDraftLabelPicker) && !state.isCompact;
+    const open = draft.openSections || {};
+
+    const sections = [];
+
+    // Placement
+    sections.push(`
+      <div class="info-card">
+        <div class="info-card-head">
+          ${renderIcon('zap', 'icon-sm')}
+          <strong>${escapeHtml(t(lang, 'inlinePlacementTitle'))}</strong>
+        </div>
+        <div class="segmented" role="group" aria-label="${escapeHtml(t(lang, 'inlinePlacementTitle'))}">
+          <button type="button" data-ed-task-mode="queue" aria-pressed="${draft.mode === 'queue'}">${escapeHtml(t(lang, 'modeQueue'))}</button>
+          <button type="button" data-ed-task-mode="priority" aria-pressed="${draft.mode === 'priority'}">${escapeHtml(t(lang, 'modePriority'))}</button>
+          <button type="button" data-ed-task-mode="someday" aria-pressed="${draft.mode === 'someday'}">${escapeHtml(t(lang, 'modeSomeday'))}</button>
+        </div>
+      </div>
+    `);
+
+    // Labels
+    if (showInlinePicker) {
+      sections.push(`
+        <div class="info-card is-editing label-picker-card">
+          <div class="info-card-head">
+            ${renderIcon('tags', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
+            <span class="info-sub">${draftLabels.length}</span>
+            <button type="button" class="secondary compact ml-auto" data-close-entity-draft-label-picker>${escapeHtml(t(lang, 'actionDone'))}</button>
+          </div>
+          ${renderLabelPickerBody({
+            mode: 'entity-draft',
+            selectedIds: draft.labels || [],
+            pickerState: state.entityDraftLabelPicker,
+            workspace,
+            evalRes,
+            lang,
+            showSelectedStrip: true,
+          })}
+        </div>
+      `);
+    } else if (draftLabels.length) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('tags', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoLabelsTitle'))}</strong>
+            <span class="info-sub ml-auto">${draftLabels.length}</span>
+          </div>
+          ${renderAssignedLabelChips({
+            labels: draftLabels,
+            targetKind: 'entity-draft',
+            lang,
+            showAddButton: true,
+          })}
+        </div>
+      `);
+    }
+
+    if (open.note) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('file-text', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoNoteTitle'))}</strong>
+          </div>
+          <label class="field">
+            <textarea data-ed-field="note" rows="3" maxlength="10000" aria-label="${escapeHtml(t(lang, 'taskInfoNoteTitle'))}">${escapeHtml(draft.note || '')}</textarea>
+          </label>
+        </div>
+      `);
+    }
+
+    if (open.due) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('calendar-days', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoDueTitle'))}</strong>
+          </div>
+          <div class="inline-edit-body">
+            <label class="field">${escapeHtml(t(lang, 'fieldDue'))}
+              <input type="datetime-local" data-ed-field="dueLocal" value="${escapeHtml(draft.dueLocal || '')}">
+            </label>
+            <label class="check-field compact-check">
+              <input type="checkbox" data-ed-field="autoDue" ${draft.autoDue ? 'checked' : ''}>
+              <span>${escapeHtml(t(lang, 'fieldDueAuto'))}<small>${escapeHtml(t(lang, 'fieldDueAutoDesc'))}</small></span>
+            </label>
+            <label class="field">${escapeHtml(t(lang, 'fieldDueNote'))}
+              <textarea data-ed-field="dueNote" rows="2" placeholder="${escapeHtml(t(lang, 'placeholderDueNote'))}">${escapeHtml(draft.dueNote || '')}</textarea>
+            </label>
+          </div>
+        </div>
+      `);
+    }
+
+    if (open.repeat) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('repeat', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoRepeatTitle'))}</strong>
+          </div>
+          <div class="inline-edit-body">
+            <div class="field-grid">
+              <label class="field">${escapeHtml(t(lang, 'fieldRepeatEvery'))}
+                <input type="number" min="1" max="3650" data-ed-field="repeatEvery" value="${escapeHtml(draft.repeatEvery)}">
+              </label>
+              <label class="field">${escapeHtml(t(lang, 'fieldRepeatUnit'))}
+                <select data-ed-field="repeatUnit">
+                  <option value="days" ${draft.repeatUnit === 'days' ? 'selected' : ''}>${escapeHtml(t(lang, 'unitDays'))}</option>
+                  <option value="weeks" ${draft.repeatUnit === 'weeks' ? 'selected' : ''}>${escapeHtml(t(lang, 'unitWeeks'))}</option>
+                  <option value="months" ${draft.repeatUnit === 'months' ? 'selected' : ''}>${escapeHtml(t(lang, 'unitMonths'))}</option>
+                </select>
+              </label>
+            </div>
+            ${
+              draft.dueLocal
+                ? `<label class="field">${escapeHtml(t(lang, 'fieldRepeatLead'))}
+                    <input type="number" min="0" max="3650" data-ed-field="repeatLeadDays" value="${escapeHtml(draft.repeatLeadDays)}" placeholder="0">
+                    <small class="field-hint">${escapeHtml(t(lang, 'hintRepeatLead'))}</small>
+                  </label>`
+                : `<small class="info-sub">${escapeHtml(t(lang, 'inlineRepeatLeadNeedsDue'))}</small>`
+            }
+          </div>
+        </div>
+      `);
+    }
+
+    if (open.suspended) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('pause-circle', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoSuspendedTitle'))}</strong>
+          </div>
+          <div class="inline-edit-body">
+            <label class="field">${escapeHtml(t(lang, 'fieldSuspended'))}
+              <select data-ed-field="suspendedMode">
+                <option value="until" ${draft.suspendedMode === 'until' ? 'selected' : ''}>${escapeHtml(t(lang, 'optSuspendedUntil'))}</option>
+                <option value="forever" ${draft.suspendedMode === 'forever' ? 'selected' : ''}>${escapeHtml(t(lang, 'optSuspendedForever'))}</option>
+              </select>
+            </label>
+            ${
+              draft.suspendedMode === 'until'
+                ? `<label class="field">${escapeHtml(t(lang, 'fieldSuspendedUntil'))}
+                    <input type="datetime-local" data-ed-field="suspendedLocal" value="${escapeHtml(draft.suspendedLocal || '')}">
+                  </label>`
+                : ''
+            }
+            <label class="field">${escapeHtml(t(lang, 'fieldSuspendedNote'))}
+              <textarea data-ed-field="suspendedNote" rows="2" placeholder="${escapeHtml(t(lang, 'placeholderSuspendedNote'))}">${escapeHtml(draft.suspendedNote || '')}</textarea>
+            </label>
+          </div>
+        </div>
+      `);
+    }
+
+    if (open.subtasks) {
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon(draft.subtasksAutoFinish ? 'check-square' : 'list-checks', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoSubtasksTitle'))}</strong>
+            <span class="info-sub ml-auto">${draft.subtasks.length}</span>
+          </div>
+          <div class="inline-edit-body">
+            ${
+              draft.subtasks.length
+                ? `<div class="inline-subtask-edit-list">
+                    ${draft.subtasks
+                      .map(
+                        (step, idx) => `
+                      <div class="inline-subtask-edit-row">
+                        <input type="text" data-ed-step-text="${idx}" value="${escapeHtml(step.text)}" maxlength="200">
+                        <button type="button" class="icon-button compact is-danger-hover" data-ed-step-remove="${idx}" title="${escapeHtml(t(lang, 'actionRemove'))}">${renderIcon('trash', 'icon-xs')}</button>
+                      </div>`,
+                      )
+                      .join('')}
+                  </div>`
+                : ''
+            }
+            <div class="edit-add-row">
+              <input type="text" data-ed-new-step placeholder="${escapeHtml(t(lang, 'placeholderSubtask'))}" maxlength="200">
+              <button type="button" class="secondary compact" data-ed-add-step>${escapeHtml(t(lang, 'actionAdd'))}</button>
+            </div>
+            <label class="check-field compact-check">
+              <input type="checkbox" data-ed-field="subtasksAutoFinish" ${draft.subtasksAutoFinish ? 'checked' : ''}>
+              <span>${escapeHtml(t(lang, 'fieldAutoFinish'))}<small>${escapeHtml(t(lang, 'fieldAutoFinishDesc'))}</small></span>
+            </label>
+          </div>
+        </div>
+      `);
+    }
+
+    if (open.links) {
+      const editingLinkIdx = draft.editingLinkIndex;
+      sections.push(`
+        <div class="info-card">
+          <div class="info-card-head">
+            ${renderIcon('link', 'icon-sm')}
+            <strong>${escapeHtml(t(lang, 'taskInfoLinksTitle'))}</strong>
+            <span class="info-sub ml-auto">${draft.links.length} / 20</span>
+          </div>
+          <div class="inline-edit-body">
+            ${
+              draft.links.length
+                ? draft.links
+                    .map(
+                      (link, index) => `
+                    <div class="record ${editingLinkIdx === index ? 'is-editing' : ''}">
+                      <div class="record-text">
+                        <strong>${escapeHtml(link.title)}</strong>
+                        <span class="mono-sm">${escapeHtml(link.uri)}</span>
+                      </div>
+                      <div class="record-actions">
+                        <button type="button" class="icon-button compact" data-ed-link-up="${index}" ${index === 0 ? 'disabled' : ''} title="${escapeHtml(t(lang, 'actionUp'))}">${renderIcon('arrow-up', 'icon-xs')}</button>
+                        <button type="button" class="icon-button compact" data-ed-link-down="${index}" ${index === draft.links.length - 1 ? 'disabled' : ''} title="${escapeHtml(t(lang, 'actionDown'))}">${renderIcon('arrow-down', 'icon-xs')}</button>
+                        <button type="button" class="icon-button compact" data-ed-link-edit="${index}" title="${escapeHtml(t(lang, 'actionEdit'))}">${renderIcon('pencil', 'icon-xs')}</button>
+                        <button type="button" class="icon-button compact is-danger-hover" data-ed-link-remove="${index}" title="${escapeHtml(t(lang, 'actionRemove'))}">${renderIcon('trash', 'icon-xs')}</button>
+                      </div>
+                    </div>`,
+                    )
+                    .join('')
+                : `<div class="info-sub">${escapeHtml(t(lang, 'emptyLinks'))}</div>`
+            }
+            <div class="field-grid">
+              <label class="field">${escapeHtml(t(lang, 'fieldLinkTitle'))}
+                <input data-ed-link-title value="${escapeHtml(draft.linkTitleDraft || '')}" placeholder="${escapeHtml(t(lang, 'placeholderLinkTitle'))}">
+              </label>
+              <label class="field">${escapeHtml(t(lang, 'fieldLinkUri'))}
+                <input data-ed-link-uri value="${escapeHtml(draft.linkUriDraft || '')}" placeholder="${escapeHtml(t(lang, 'placeholderLinkUri'))}">
+              </label>
+            </div>
+            <div class="inline-btn-row">
+              <button type="button" class="secondary compact" data-ed-link-submit>${escapeHtml(t(lang, editingLinkIdx !== null && editingLinkIdx !== undefined ? 'actionSaveLink' : 'actionAddLink'))}</button>
+              ${
+                editingLinkIdx !== null && editingLinkIdx !== undefined
+                  ? `<button type="button" class="text-button" data-ed-link-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>`
+                  : ''
+              }
+            </div>
+          </div>
+        </div>
+      `);
+    }
+
+    const addChips = [];
+    if (!draftLabels.length && !showInlinePicker) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-open-entity-draft-label-picker>${renderIcon('tags', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddLabels'))}</span></button>`,
+      );
+    }
+    if (!open.note) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-ed-toggle-section="note">${renderIcon('file-text', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddNote'))}</span></button>`,
+      );
+    }
+    if (!open.links) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-ed-toggle-section="links">${renderIcon('link', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddLinks'))}</span></button>`,
+      );
+    }
+    if (!open.subtasks) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-ed-toggle-section="subtasks">${renderIcon('list-checks', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddSubtasks'))}</span></button>`,
+      );
+    }
+    if (!open.due) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-ed-toggle-section="due">${renderIcon('calendar-days', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddDue'))}</span></button>`,
+      );
+    }
+    if (!open.repeat) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-ed-toggle-section="repeat">${renderIcon('repeat', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddRepeat'))}</span></button>`,
+      );
+    }
+    if (!open.suspended) {
+      addChips.push(
+        `<button type="button" class="add-field-chip" data-ed-toggle-section="suspended">${renderIcon('pause-circle', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddSuspend'))}</span></button>`,
+      );
+    }
+
+    return `
+      <section class="draft-card" aria-label="${escapeHtml(t(lang, 'draftNewTaskTitle'))}">
+        <div class="draft-card-head">
+          <div>
+            <strong>${escapeHtml(t(lang, 'draftNewTaskTitle'))}</strong>
+            <div class="info-sub">${escapeHtml(t(lang, 'draftHintUncommitted'))}</div>
+          </div>
+          <button type="button" class="icon-button compact" data-draft-entity-cancel aria-label="${escapeHtml(t(lang, 'actionCancel'))}">${renderIcon('x', 'icon-sm')}</button>
+        </div>
+        <input type="text" class="draft-card-title-input" data-ed-field="title" value="${escapeHtml(draft.title || '')}" placeholder="${escapeHtml(t(lang, 'placeholderTaskTitle'))}" maxlength="300" autocomplete="off">
+        <div class="task-slide-sections">${sections.join('')}</div>
+        ${addChips.length ? `<div class="task-add-fields-bar">${addChips.join('')}</div>` : ''}
+        ${draft.error ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(draft.error)}</div>` : ''}
+        <div class="draft-card-footer">
+          <span></span>
+          <div class="inline-edit-buttons">
+            <button type="button" class="secondary compact" data-draft-entity-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
+            <button type="button" class="primary compact" data-draft-entity-commit>${renderIcon('plus', 'icon-xs')}${escapeHtml(t(lang, 'actionCreateTask'))}</button>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderLabelDraftCard(state) {
+    const draft = state.entityDraft;
+    if (!draft || draft.kind !== 'label') return '';
+    const lang = state.lang;
+    const open = draft.openSections || {};
+
+    return `
+      <section class="draft-card" aria-label="${escapeHtml(t(lang, 'draftNewLabelTitle'))}">
+        <div class="draft-card-head">
+          <div>
+            <strong>${escapeHtml(t(lang, 'draftNewLabelTitle'))}</strong>
+            <div class="info-sub">${escapeHtml(t(lang, 'draftHintUncommitted'))}</div>
+          </div>
+          <button type="button" class="icon-button compact" data-draft-entity-cancel aria-label="${escapeHtml(t(lang, 'actionCancel'))}">${renderIcon('x', 'icon-sm')}</button>
+        </div>
+        <input type="text" class="draft-card-title-input" data-ed-field="name" value="${escapeHtml(draft.name || '')}" placeholder="${escapeHtml(t(lang, 'placeholderLabelName'))}" maxlength="120" autocomplete="off">
+        <div class="task-slide-sections">
+          <div class="info-card">
+            <div class="info-card-head">
+              ${renderIcon('palette', 'icon-sm')}
+              <strong>${escapeHtml(t(lang, 'labelInfoColorTitle'))}</strong>
+            </div>
+            <div class="inline-edit-body">
+              <div class="color-input-row">
+                <span class="color-swatch-preview" style="background:${escapeHtml(draft.color || '#2196F3')}"></span>
+                <input data-ed-field="color" value="${escapeHtml(draft.color || '#2196F3')}" placeholder="#2196F3" maxlength="7" aria-label="${escapeHtml(t(lang, 'fieldColorHex'))}">
+                <button type="button" class="secondary compact" data-open-color-picker="entity-draft">${renderIcon('palette', 'icon-xs')}${escapeHtml(t(lang, 'actionCustomColor'))}</button>
+              </div>
+              <div class="color-presets">
+                ${LABEL_COLOR_PRESETS.map(
+                  (hex) => `
+                  <button type="button" class="color-preset-chip ${String(draft.color).toUpperCase() === hex ? 'is-selected' : ''}" data-ed-color-preset="${hex}">
+                    <span class="dot" style="--label-color:${hex}"></span>
+                    <span>${hex}</span>
+                  </button>`,
+                ).join('')}
+              </div>
+            </div>
+          </div>
+          <div class="info-card">
+            <div class="info-card-head">
+              ${renderIcon('layers', 'icon-sm')}
+              <strong>${escapeHtml(t(lang, 'labelInfoScopeTitle'))}</strong>
+            </div>
+            <div class="segmented" role="group" aria-label="${escapeHtml(t(lang, 'labelInfoScopeTitle'))}">
+              <button type="button" data-ed-label-scope="false" aria-pressed="${!draft.scoped}">${escapeHtml(t(lang, 'globalContext'))}</button>
+              <button type="button" data-ed-label-scope="true" aria-pressed="${Boolean(draft.scoped)}">${escapeHtml(t(lang, 'scopedQueue'))}</button>
+            </div>
+            <small class="info-sub">${escapeHtml(t(lang, 'labelScopedDesc'))}</small>
+          </div>
+          ${
+            open.note
+              ? `<div class="info-card">
+                  <div class="info-card-head">
+                    ${renderIcon('file-text', 'icon-sm')}
+                    <strong>${escapeHtml(t(lang, 'taskInfoNoteTitle'))}</strong>
+                  </div>
+                  <label class="field">
+                    <textarea data-ed-field="note" rows="3" maxlength="10000" aria-label="${escapeHtml(t(lang, 'taskInfoNoteTitle'))}">${escapeHtml(draft.note || '')}</textarea>
+                  </label>
+                </div>`
+              : ''
+          }
+        </div>
+        ${
+          !open.note
+            ? `<div class="task-add-fields-bar">
+                <button type="button" class="add-field-chip" data-ed-toggle-section="note">${renderIcon('file-text', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddNote'))}</span></button>
+              </div>`
+            : ''
+        }
+        ${draft.error ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(draft.error)}</div>` : ''}
+        <div class="draft-card-footer">
+          <span></span>
+          <div class="inline-edit-buttons">
+            <button type="button" class="secondary compact" data-draft-entity-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
+            <button type="button" class="primary compact" data-draft-entity-commit>${renderIcon('plus', 'icon-xs')}${escapeHtml(t(lang, 'actionCreateLabel'))}</button>
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderLocationDraftCard(state) {
+    const draft = state.entityDraft;
+    if (!draft || draft.kind !== 'location') return '';
+    const lang = state.lang;
+    const isGps = draft.sourceType === 'gps';
+    const open = draft.openSections || {};
+
+    return `
+      <section class="draft-card" aria-label="${escapeHtml(t(lang, 'draftNewLocationTitle'))}">
+        <div class="draft-card-head">
+          <div>
+            <strong>${escapeHtml(t(lang, 'draftNewLocationTitle'))}</strong>
+            <div class="info-sub">${escapeHtml(t(lang, 'draftHintUncommitted'))}</div>
+          </div>
+          <button type="button" class="icon-button compact" data-draft-entity-cancel aria-label="${escapeHtml(t(lang, 'actionCancel'))}">${renderIcon('x', 'icon-sm')}</button>
+        </div>
+        <input type="text" class="draft-card-title-input" data-ed-field="name" value="${escapeHtml(draft.name || '')}" placeholder="${escapeHtml(t(lang, 'placeholderLocationName'))}" maxlength="120" autocomplete="off">
+        <div class="task-slide-sections">
+          <div class="info-card">
+            <div class="info-card-head">
+              ${renderIcon('locate', 'icon-sm')}
+              <strong>${escapeHtml(t(lang, 'locInfoCoordsTitle'))}</strong>
+            </div>
+            <div class="inline-edit-body">
+              <div class="field-grid">
+                <label class="field">${escapeHtml(t(lang, 'fieldSourceType'))}
+                  <select data-ed-field="sourceType">
+                    <option value="gps" ${draft.sourceType === 'gps' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourceGps'))}</option>
+                    <option value="address" ${draft.sourceType === 'address' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourceAddress'))}</option>
+                    <option value="plusCode" ${draft.sourceType === 'plusCode' ? 'selected' : ''}>${escapeHtml(t(lang, 'sourcePlusCode'))}</option>
+                  </select>
+                </label>
+                <label class="field">${escapeHtml(t(lang, 'fieldRadius'))}
+                  <input data-ed-field="radiusText" value="${escapeHtml(draft.radiusText)}" placeholder="150m">
+                </label>
+              </div>
+              ${
+                !isGps
+                  ? `<label class="field">${escapeHtml(t(lang, draft.sourceType === 'address' ? 'sourceAddress' : 'sourcePlusCode'))}
+                      <input data-ed-field="source" value="${escapeHtml(draft.source || '')}" placeholder="${escapeHtml(t(lang, draft.sourceType === 'address' ? 'placeholderAddress' : 'placeholderPlusCode'))}">
+                    </label>`
+                  : ''
+              }
+              <div class="field-grid">
+                <label class="field">${escapeHtml(t(lang, 'fieldLat'))}
+                  <input data-ed-field="latitude" type="number" step="any" min="-90" max="90" value="${escapeHtml(draft.latitude || '')}" ${!isGps ? 'readonly' : ''}>
+                </label>
+                <label class="field">${escapeHtml(t(lang, 'fieldLon'))}
+                  <input data-ed-field="longitude" type="number" step="any" min="-180" max="180" value="${escapeHtml(draft.longitude || '')}" ${!isGps ? 'readonly' : ''}>
+                </label>
+              </div>
+              <div class="inline-btn-row">
+                <button type="button" class="secondary compact" data-ed-use-gps ${!isGps ? 'disabled' : ''}>
+                  ${renderIcon('locate', 'icon-xs')}${escapeHtml(t(lang, 'actionUseGps'))}
+                </button>
+                <button type="button" class="secondary compact" data-ed-resolve ${isGps ? 'disabled' : ''}>
+                  ${renderIcon('search', 'icon-xs')}${escapeHtml(t(lang, 'actionResolveSource'))}
+                </button>
+              </div>
+            </div>
+          </div>
+          ${
+            open.note
+              ? `<div class="info-card">
+                  <div class="info-card-head">
+                    ${renderIcon('file-text', 'icon-sm')}
+                    <strong>${escapeHtml(t(lang, 'taskInfoNoteTitle'))}</strong>
+                  </div>
+                  <label class="field">
+                    <textarea data-ed-field="note" rows="3" maxlength="10000" aria-label="${escapeHtml(t(lang, 'taskInfoNoteTitle'))}">${escapeHtml(draft.note || '')}</textarea>
+                  </label>
+                </div>`
+              : ''
+          }
+        </div>
+        ${
+          !open.note
+            ? `<div class="task-add-fields-bar">
+                <button type="button" class="add-field-chip" data-ed-toggle-section="note">${renderIcon('file-text', 'icon-xs')}<span>${escapeHtml(t(lang, 'inlineAddNote'))}</span></button>
+              </div>`
+            : ''
+        }
+        ${draft.error ? `<div class="edit-error inline-edit-error" role="status">${escapeHtml(draft.error)}</div>` : ''}
+        <div class="draft-card-footer">
+          <span></span>
+          <div class="inline-edit-buttons">
+            <button type="button" class="secondary compact" data-draft-entity-cancel>${escapeHtml(t(lang, 'actionCancel'))}</button>
+            <button type="button" class="primary compact" data-draft-entity-commit>${renderIcon('plus', 'icon-xs')}${escapeHtml(t(lang, 'actionCreateLocation'))}</button>
+          </div>
+        </div>
+      </section>
+    `;
   }
 
   function renderQuickComposer(state, workspace, evalRes) {
@@ -2101,7 +2716,7 @@
           }
           <form data-form="quick-task">
             <div class="entry-row">
-              <input name="title" data-draft="title" value="${escapeHtml(draft.title)}" aria-label="${escapeHtml(t(lang, 'quickAddPlaceholder'))}" placeholder="${escapeHtml(t(lang, 'quickAddPlaceholder'))}" autocomplete="off" required>
+              <input name="title" data-draft="title" value="${escapeHtml(draft.title)}" maxlength="300" aria-label="${escapeHtml(t(lang, 'quickAddPlaceholder'))}" placeholder="${escapeHtml(t(lang, 'quickAddPlaceholder'))}" autocomplete="off" required>
               <div class="entry-options">
                 <select name="mode" data-draft="mode" aria-label="${escapeHtml(t(lang, 'fieldPlacement'))}">
                   <option value="queue" ${draft.mode === 'queue' ? 'selected' : ''}>${escapeHtml(t(lang, 'modeQueue'))}</option>
@@ -2147,6 +2762,7 @@
 
   function renderTaskView(state, workspace, evalRes) {
     const lang = state.lang;
+    const activeLabelBarHtml = renderActiveLabelBar(state, workspace);
 
     if (state.searchOpen) {
       const query = state.searchQuery.trim().toLowerCase();
@@ -2159,6 +2775,7 @@
         }
       }
       return `
+        ${activeLabelBarHtml}
         <div class="heading">
           <div>
             <h2>${escapeHtml(t(lang, 'searchTitle'))}</h2>
@@ -2177,7 +2794,6 @@
               : `<div class="empty">${escapeHtml(t(lang, 'searchEmpty'))}</div>`
           }
         </div>
-        ${renderNotice(state)}
       `;
     }
 
@@ -2198,6 +2814,8 @@
         </select>
       </label>
 
+      ${activeLabelBarHtml}
+
       <div class="heading">
         <div>
           <h2>${escapeHtml(tierName(lang, state.tier))}</h2>
@@ -2205,6 +2823,8 @@
         </div>
         <span class="limit">${queue.length}${limitSuffix}</span>
       </div>
+
+      ${renderTaskDraftCard(state, workspace, evalRes)}
 
       <div class="tasks">
         ${
@@ -2217,26 +2837,6 @@
             : `<div class="empty">${escapeHtml(t(lang, `emptyTier${state.tier}`))}</div>`
         }
       </div>
-
-      ${renderNotice(state)}
-      ${renderQuickComposer(state, workspace, evalRes)}
-    `;
-  }
-
-  function renderScrollToComposerButton(state, isVisible = false) {
-    const label = t(state.lang, 'quickAddJumpBottom');
-    return `
-      <button
-        type="button"
-        class="scroll-to-composer-btn${isVisible ? ' is-visible' : ''}"
-        data-scroll-to-composer
-        title="${escapeHtml(label)}"
-        aria-label="${escapeHtml(label)}"
-        aria-hidden="${isVisible ? 'false' : 'true'}"
-        ${isVisible ? '' : 'tabindex="-1"'}
-      >
-        ${renderIcon('arrow-down-to-line')}
-      </button>
     `;
   }
 
@@ -2667,9 +3267,12 @@
     const items = [
       ...(isLabels ? workspace.labels : workspace.locations),
     ].sort((a, b) => a.name.localeCompare(b.name));
+    const backLabel = state.returnContext?.searchOpen
+      ? t(lang, 'actionBackSearch')
+      : t(lang, 'actionBackTasks');
 
     return `
-      <button type="button" class="back" data-view="tasks">${renderIcon('arrow-left', 'icon-sm')}${escapeHtml(t(lang, 'actionBackTasks'))}</button>
+      <button type="button" class="back" data-go-back>${renderIcon('arrow-left', 'icon-sm')}${escapeHtml(backLabel)}</button>
       <div class="heading">
         <div>
           <h2>${escapeHtml(t(lang, isLabels ? 'sectionLabels' : 'sectionLocations'))}</h2>
@@ -2690,7 +3293,7 @@
         </div>
       </form>
 
-      ${renderNotice(state)}
+      ${isLabels ? renderLabelDraftCard(state) : renderLocationDraftCard(state)}
 
       <div class="tasks">
         ${
@@ -2716,9 +3319,10 @@
     renderSidebar,
     renderBanners,
     renderFullFileReadError,
-    renderNotice,
+    renderLoadingView,
+    renderFloatingNotices,
     renderTaskView,
-    renderScrollToComposerButton,
+    renderQuickComposer,
     renderManagerView,
     renderMobileLabelPickerSheet,
   };

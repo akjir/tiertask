@@ -26,9 +26,9 @@ TierTask's core layers (`lib/models/`, `lib/services/`, `lib/repositories/`) are
 - **Goals:**
   - Establish a strict, tooling-enforced presentation boundary (`lib/presentation/`) so feature UI (`lib/ui/`) imports only `package:tiertask_ui/tiertask_ui.dart`, `lib/presentation/*`, acyclic intra-layer `lib/ui/*`, `lib/l10n/app_localizations.dart`, `package:flutter_riverpod/flutter_riverpod.dart`, Flutter/`material_ui` packages, and non-I/O Dart SDK utilities (such as `dart:async` for `unawaited`).
   - Eliminate all `lib/repositories/` and `lib/services/` imports from `lib/ui/` before starting any visual redesign.
-  - Create a compiler-isolated local Flutter package (`packages/tiertask_ui/`) organized into four abstraction layers (Tokens, Primitives, Adaptive Layouts, Domain-Agnostic Organisms) with a runnable `example/` widget gallery.
+  - Create a compiler-isolated local Flutter package (`packages/tiertask_ui/`) organized into four abstraction layers (Tokens, Primitives, Adaptive Layouts, Domain-Agnostic Composites) with a runnable `example/` widget gallery, maximizing widget reuse while keeping the total widget catalog as small as possible.
   - Replace legacy `Slate` and `Navy` themes with an extensible `UiThemePreset` architecture shipping with two WCAG-AA verified palettes in Light and Dark modes: `Calm` (default) and `Plum Umber` (purple and brown).
-  - Iterate and complete full production UX parity in an offline modular HTML prototype (`.agents/prototypes/ui_v2/`) between Phase 1 and Phase 2 before authoring Flutter UI components.
+  - Iterate and complete full production UX parity in an offline modular HTML prototype (`.agents/prototypes/ui_v2/`) between Phase 1 and Phase 2, then match the `ui_v2` prototype's visual appearance and interaction model as closely as possible in the initial Flutter implementation (later post-cutover iterations in the real app may refine or diverge from the HTML prototype).
   - Execute a clean parallel shell cutover in Phase 3 followed by full removal of legacy UI code (`P-NO-DEAD-CODE`) in Phase 4.
   - Govern every phase through a dedicated child TEP created just-in-time at phase kickoff.
 - **Non-Goals:**
@@ -51,17 +51,19 @@ This umbrella proposal sets non-negotiable architectural invariants and phase ga
 | **Phase 4: Legacy Retirement & Architecture Finalization** | Yes (dedicated child TEP) | Delete all retired legacy screens, widgets, and tests (`P-NO-DEAD-CODE`), move new screens into `lib/ui/`, enforce the strict `lib/ui/` import whitelist globally in `tiertask_dev.py`, and synchronize `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, and `CHANGELOG.md`. | Zero legacy UI files remain; global strict DAG gate green; `verify --full --fix` passes cleanly. |
 
 #### Production Parity Inventory (Prototype Gate Scope)
-The initial draft in `.agents/prototypes/tiertask_ui_prototype.html` defines the core adaptive shell (top chrome bar, persistent `220px` desktop sidebar / mobile slide-over drawer, mobile tier selector, bordered task cards with inline expansion, bottom quick-add composer, 3-tab full task editor, and label/location managers and editors). Before Phase 2 begins, `.agents/prototypes/ui_v2/` must incorporate all remaining production TierTask workflows:
-- Inline/global task search across all six tiers
-- Task downgrade (`>`) action, priority queue reordering, and full Undo recovery across `complete`, `downgrade`, and `delete` actions (including floating undo notice and desktop `Ctrl+Z` shortcut)
-- `Task Info` view (including `due.anchor`, remaining countdowns, scheduling notes, clickable links, interactive label chips opening `Label Hub`, and interactive task history journal supporting append, inline edit, and delete per `TEP-012`) and `Label Hub` view (note copy, links, inherited conditions)
-- Label Editor parity additions (custom HSV color wheel picker alongside color presets, repeatable ordered reference links with inline edit/reorder/open/remove, full weekday/time/location inherited conditions, and label deletion) and Location Editor parity additions (forward-geocoding multi-candidate disambiguation dialog and location deletion)
+The initial draft in `.agents/prototypes/tiertask_ui_prototype.html` established the baseline adaptive shell (top chrome bar, persistent `220px` desktop sidebar / mobile slide-over drawer, mobile tier selector, and bordered task cards). The finalized modular blueprint in `.agents/prototypes/ui_v2/` replaces the legacy 3-tab Task Editor, separate Label/Location editors, `TaskInfoDialog`, and `LabelHubDialog` with **Unified Expandable Entity Cards** featuring inline section editing, and covers full production TierTask `0.8.0` parity:
+- Inline/global task search across all six tiers, preserving active label context with an explicit active-label filter bar (`Clear filter`) and restoring Search/Tier context when navigating back from linked labels or locations
+- Task downgrade (`>`), Priority/Queue/Someday placement switching (deterministic ordering without manual drag-and-drop queue reordering), automatic priority escalation badge (`due.auto`), bounded secondary badge overflow (`+N more`), and full Undo recovery across `complete`, `downgrade`, and `delete` actions via a floating bottom notice overlay (with dismiss, auto-hide, and desktop `Ctrl+Z` shortcut)
+- Unified expandable entity cards for Tasks, Labels, and Locations with inline section editing (plus read-only completed task panels keeping Restore, Copy, Links, live History journal, and Delete): live checklists with auto-finish, `due.anchor`, remaining countdowns, scheduling notes, clickable links, searchable Label Picker (desktop popover and mobile bottom sheet with scope filters and inline creation), interactive task history journal (`N / 200`, optional timestamp override on add and inline edit, duplicate protection, canonical sorting per `TEP-012`), custom HSV color wheel picker alongside presets, repeatable ordered reference links, inherited/custom weekday/time/location conditions, and forward-geocoding multi-candidate disambiguation
+- Uncommitted inline entity draft cards (`Open as draft`) for creating detailed Tasks, Labels, and Locations without committing premature records on cancel
+- Docked bottom Quick-Add composer (Tasks) and docked view action footers (Settings Save/Test Sync with dirty indicator, Conflict/Recovery Apply) outside the main scroll viewport so floating notices sit cleanly above the dock without layout jitter
 - Workspace switcher and management (`create`, `rename`, `delete`, `switch`)
-- Settings view (language, theme mode, palette preset, timezone, due lead window, foreground location, diagnostic logging, local `.tdf` file actions, WebDAV configuration and wipe) and Diagnostic Log Viewer
+- Settings view distinguishing immediately persisted preferences (`Auto-saved` badge) from explicit WebDAV credentials save/test validation (`Unsaved changes` badge, inline validation for HTTP(S) scheme, userinfo, path traversal, and credentials, and compact-viewport desktop-only Move guard) and Diagnostic Log Viewer
 - Foreground location status button and dialog
-- Sync status, startup settings recovery notice (`recoveredFromBackup`, `resetAfterQuarantine`), readability diagnostics (`StorageFileReadReport`), deletion conflict (`TDF-DEL-003`), recovery (`TDF-REC-002`), and raw `.tdf` preview views
-- Application branding and build chrome (`AppLogo`, SemVer build footer via `AppVersionRepository`, and `DEV` build corner banner via `AppBuildProfile.isDev`)
-- Mobile tier navigation review (keeping the drawer + compact tier selector baseline and evaluating optional horizontal swipe gestures)
+- Initial loading state, sync status, startup settings recovery notice (`recoveredFromBackup`, `resetAfterQuarantine`), readability diagnostics (`StorageFileReadReport`), deletion conflict (`TDF-DEL-003`) and recovery (`TDF-REC-002`) resolution across tasks, labels, and locations, and raw `.tdf` preview including the `maxTdfFileBytes` limit-exceeded state
+- Application branding and build chrome (palette-themed `AppLogo`, inline `DEV` build pill in the chrome bar via `AppBuildProfile.isDev`, and SemVer build footer in the sidebar via `AppVersionRepository`)
+- Keyboard accessibility and desktop shortcuts: thin `1px` single-ring `:focus-visible` outlines (`--focus-ring-width`, `--focus-ring-offset`), modal/sheet `Tab` focus trapping with focus restoration on close, `Enter` form/modal confirmation, `Escape` dismissal, `/` and `Ctrl/Cmd+F` search focus, `n` quick-add focus, `Ctrl/Cmd+Z` undo, and `ArrowLeft`/`ArrowRight` tier switching
+- Mobile tier navigation (drawer + compact tier selector baseline, docked collapsible quick-add bar, mobile label picker bottom sheet, and evaluation of optional horizontal swipe gestures)
 
 ### 1.5 Alternatives
 - **Internal `lib/design_system/` module instead of `packages/tiertask_ui/`:** Rejected because linter-only enforcement is weaker than Dart package-level compiler isolation, and a separate package enables an independent `example/` gallery app and zero accidental Riverpod or domain imports.
@@ -93,10 +95,28 @@ Phase 1 introduces `lib/presentation/` and Phase 2 adds the external local packa
 `AGENTS.md` forbids barrel `export` shims in hand-written application `lib/` and `test/`. For `packages/tiertask_ui/` only, one idiomatic Dart package entrypoint (`packages/tiertask_ui/lib/tiertask_ui.dart`) exports the curated public API whose implementation resides in `packages/tiertask_ui/lib/src/{tokens,primitives,layout,components}/`. Nested internal barrels inside `lib/src/` and barrels inside application `lib/` remain forbidden.
 
 #### Four-Layer Design System Abstraction (`packages/tiertask_ui/lib/src/`)
-1. **`tokens/`:** `UiThemeTokens` (`ThemeExtension`), `UiColorTokens`, `UiTypographyTokens`, `UiSpacingTokens`, `UiRadiusTokens`, `UiBreakpoints` (non-overlapping partition matching `.agents/prototypes/ui_v2/tokens.css` and `components.css`: `compact <= 720`, `medium > 720 && <= 820`, `expanded > 820`), and extensible `UiThemePreset` definitions (`Calm` and `Plum Umber`, Light and Dark).
-2. **`primitives/`:** `UiButton` (`primary`, `secondary`, `text`, `danger`, `icon`), `UiSurfaceCard`, `UiBadge`, `UiCountPill`, `UiColorDot`, `UiSelectChip`, `UiDayPillGroup`, `UiTextField`, `UiDropdownField`, `UiCheckboxRow`, `UiDisclosureSection`, `UiTabBar`, `UiInlineNotice`, `UiInlineConfirmation`.
-3. **`layout/`:** `UiAdaptiveAppShell`, `UiSidebarNavSection`, `UiSidebarNavItem`, `UiPageHeader`, `UiResponsiveFormGrid`, `UiManagerListRow`.
-4. **`components/`:** `UiTaskCard`, `UiQuickComposer`, `UiEditableRecordList`, `UiSearchableCheckList`, and future parity composites defined during the HTML prototype gate.
+Follow a strict **maximum-reuse, minimum-widget-count** design rule: introduce a new widget only when an existing primitive or layout cannot express the pattern cleanly through composition or semantic variants, while matching `.agents/prototypes/ui_v2/` as closely as possible for initial cutover.
+1. **`tokens/`:** `UiThemeTokens` (`ThemeExtension`), `UiColorTokens` (including palette-themed `AppLogo` colors), `UiTypographyTokens`, `UiSpacingTokens`, `UiRadiusTokens`, `UiFocusTokens` (`1px` focus ring width and offset), `UiBreakpoints` (non-overlapping partition matching `.agents/prototypes/ui_v2/tokens.css` and `components.css`: `compact <= 720`, `medium > 720 && <= 820`, `expanded > 820`), and extensible `UiThemePreset` definitions (`Calm` and `Plum Umber`, Light and Dark).
+2. **`primitives/` (8 core primitives):**
+   - `UiAppLogo` (palette-themed TierTask logo mark)
+   - `UiButton` (`primary`, `secondary`, `text`, `danger`, `icon`, optional compact density)
+   - `UiPill` (unified badge, count pill, `DEV` build pill, color-dotted label chip, removable/selectable chip, and weekday pill via semantic tone and interactivity slots)
+   - `UiSegmentedControl` (placement modes, scope switch, settings preferences, conflict/recovery choices)
+   - `UiCard` (unified bordered surface covering static info/settings section cards with header slots, expandable entity cards for tasks/labels/locations, and uncommitted draft/inline-edit containers)
+   - `UiField` (unified labeled text, multiline, password, select, and date/time field wrapper with `1px` focus styling, helper hint, and inline validation error)
+   - `UiToggleRow` (checkbox or switch row with label and description)
+   - `UiBanner` (unified status banner, floating bottom toast/Undo overlay, inline confirmation bar, and empty/loading state surface)
+3. **`layout/` (4 adaptive layout primitives):**
+   - `UiAdaptiveAppShell` (top chrome bar, persistent desktop sidebar / mobile drawer, scrollable body, floating overlay slot, and docked bottom action/composer slot)
+   - `UiSidebarSection` (collapsible, optionally filterable navigation group and nav item rows)
+   - `UiPageHeader` (optional back button, heading/subtitle, trailing actions, and optional active-filter bar)
+   - `UiResponsiveGrid` (adaptive 2-column desktop / 1-column compact form and settings grid)
+4. **`components/` (5 reusable domain-agnostic composites):**
+   - `UiDialogFrame` (focus-trapped modal dialog and mobile bottom-sheet container reused across all dialogs and sheets)
+   - `UiQuickComposer` (docked quick-add / quick-create bar with compact mobile collapsed toggle)
+   - `UiSearchablePicker` (searchable list with optional scope filter, keyboard navigation, and inline create; reused for Label Picker popover/sheet, Prerequisite Picker, and Local File Picker)
+   - `UiOrderedItemList` (repeatable item rows with add bar, inline edit, reorder up/down, and delete; reused for Subtasks, Reference Links, Time Windows, and History Journal)
+   - `UiColorWheel` (custom-painted HSV color wheel, brightness slider, and preset swatch selector)
 
 ### 2.2 TDF Schema, Localization & State Changes
 - **`spec/TDF_SPEC_0.8.0.md`:** Zero changes. All TDF `0.8.0` parsing, serialization, evaluation, mutation, locking, and sync contracts remain unchanged.
@@ -116,6 +136,10 @@ Phase 1 introduces `lib/presentation/` and Phase 2 adds the external local packa
 - **Unidirectional Data Flow (`P-UDF-ARCHITECTURE`) & Strict Isolation:**
   - `lib/ui/` widgets MUST NOT hold business logic, mutate `TaskBoard`, invoke `clockProvider`, open links directly, serialize `.tdf`, decode Plus Codes, or instantiate repositories.
   - All mutations, validation, async guards, diagnostic log projection, and `AppLogger.event(..., tag: LogTag.ui)` telemetry execute inside `lib/presentation/` controllers and `lib/providers/` notifiers.
+- **Widget Minimalism, Reuse & Prototype Fidelity Policy:**
+  - Favor the smallest viable set of highly reusable widgets in `packages/tiertask_ui/` and compose feature views in `lib/ui_v2/` (`lib/ui/`) from those shared building blocks instead of duplicating bespoke one-off widgets across Tasks, Labels, Locations, Settings, Conflicts, and Modals.
+  - Initial Flutter implementation (Phases 2 and 3) MUST match the visual design, layout proportions, token values, and interaction flows of `.agents/prototypes/ui_v2/` as closely as possible.
+  - Once cutover parity is reached, future iterations of the real Flutter app MAY refine, extend, or diverge from `.agents/prototypes/ui_v2/` without requiring backports to the HTML prototype.
 - **Pragmatic Phase 1 Enforcement, Phase 3 Cutover Window, & Phase 4 Global Lock:**
   - In Phase 1, `tiertask_dev.py` immediately enforces zero `lib/repositories/` and zero `lib/services/` imports across all of `lib/ui/` (exposing presentation-layer diagnostic log view types so `log_viewer_dialog.dart` and `settings_preference_cards.dart` drop `lib/services/app_logger.dart`), while allowing legacy `lib/ui/` files to retain `lib/models/` and `lib/providers/` imports temporarily until deleted in Phase 4.
   - In Phase 3, `tiertask_dev.py` enforces the full strict Rank `7` UI whitelist (`packages/tiertask_ui/`, `lib/presentation/`, acyclic `lib/ui_v2/`, `lib/l10n/app_localizations.dart`, `flutter_riverpod`, Flutter/`material_ui`, and non-I/O Dart SDK utilities; forbidding `lib/ui_v2/*` -> legacy `lib/ui/*`) on all new UI files (`lib/ui_v2/`). Between the Phase 3 `lib/main.dart` switchover and Phase 4 retirement, legacy `lib/ui/` files are explicitly retained under a bounded cutover-window exception to `P-NO-DEAD-CODE` for safe rollback.
@@ -127,7 +151,7 @@ Phase 1 introduces `lib/presentation/` and Phase 2 adds the external local packa
   - **Phase 4 child TEP:** Remove temporary `lib/ui_v2/` branch rules after moving screens into `lib/ui/` and lock the strict UI import whitelist globally on `lib/ui/*`.
 - **Prototype Repository Layout:**
   - `.agents/prototypes/tiertask_ui_prototype.html` retains the original exported reference draft.
-  - `.agents/prototypes/ui_v2/` (`index.html`, `tokens.css`, `components.css`, `app.js`) serves as the active, offline, unescaped blueprint mirroring `packages/tiertask_ui/` layers and themes (`Calm` and `Plum Umber`, Light and Dark, Desktop and Mobile).
+  - `.agents/prototypes/ui_v2/` (`index.html`, `tokens.css`, `components.css`, `icons.js`, `i18n.js`, `tdf_engine.js`, `views_core.js`, `views_secondary.js`, `app.js`) serves as the active, offline, unescaped blueprint mirroring `packages/tiertask_ui/` layers and themes (`Calm` and `Plum Umber`, Light and Dark, Desktop and Mobile).
 
 ### 2.4 Testing Strategy
 Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) covering all applicable mandatory categories (`AGENTS.md` Section 5):
@@ -150,6 +174,8 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 ### 3.2 Work Log & Decisions
 - **2026-11-21:** Completed interactive architecture interview (`/grill-me`) and drafted umbrella `TEP-015`. Locked in: standalone `packages/tiertask_ui/` package with `example/` gallery, dedicated `lib/presentation/` DAG layer, strict ViewModel contract for new `lib/ui/`, pragmatic Phase 1 transition avoiding throwaway legacy rewrites, `Calm` (default) + `Plum Umber` extensible themes with verified WCAG AA contrast, modular offline prototype under `.agents/prototypes/ui_v2/`, and mandatory per-phase child TEPs created just-in-time.
 - **2026-11-21:** Completed Phase 1 child proposal [`TEP-016`](tep-016-presentation-layer-decoupling.md) (`status: completed`): Rank `6` `lib/presentation/` layer delivered, `lib/models/tdf_file_path.dart` extracted, all `lib/ui/` repository/service imports and transitive repository/service/native-picker provider references eliminated and statically enforced in `.agents/scripts/tiertask_dev.py`.
+- **2026-11-21:** Finalized Design Gate prototype parity in `.agents/prototypes/ui_v2/`: unified expandable entity cards with inline section editing (replacing the legacy 3-tab task editor and separate info/hub dialogs), read-only completed task panels, uncommitted inline entity draft cards, docked Quick-Add composer and view action footers, floating bottom notice/Undo overlay, active-label filter bar and search back-navigation, thin `1px` single-ring `:focus-visible` tokens, palette-themed `AppLogo` + inline `DEV` build pill, full History journal timestamp/cap/dedup rules, Settings auto-save vs. WebDAV dirty/validation split, full task/label/location conflict and recovery handling, initial loading and raw-TDF limit-exceeded states, modal/sheet `Tab` focus trapping, and desktop keyboard shortcuts (`/`, `Ctrl/Cmd+F`, `n`, `Ctrl/Cmd+Z`). Confirmed deterministic priority/downgrade ordering without manual drag-and-drop queue reordering.
+- **2026-11-21:** Locked in the **maximum-reuse, minimum-widget-count** design rule for `packages/tiertask_ui/` and `lib/ui/`: consolidated the planned UI library to 17 orthogonal widgets (`8` primitives, `4` layouts, `5` composites) that reproduce `.agents/prototypes/ui_v2/` as closely as possible for the initial Flutter cutover, with explicit allowance to refine or diverge from the HTML prototype in later app iterations.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*
