@@ -985,12 +985,6 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
 
   /// Validates the task inputs and saves the created or updated task.
   Future<void> _submit() async {
-    final hasPendingLink =
-        _linkTitleController.text.trim().isNotEmpty ||
-        _linkUriController.text.trim().isNotEmpty;
-    if (hasPendingLink && !_addLink()) {
-      return;
-    }
     final board =
         ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
     final configuration =
@@ -1024,6 +1018,8 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
             isSuspended: _isSuspended,
             links: _links,
             mode: _mode,
+            pendingLinkTitle: _linkTitleController.text,
+            pendingLinkUri: _linkUriController.text,
             pendingSubtaskText: _subtaskController.text,
             rawDueNote: _dueNoteController.text,
             rawDueText: _dueController.text,
@@ -1054,6 +1050,7 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
       case TaskEditorPersistFailed(
         :final errors,
         :final committedHistoryEntries,
+        :final committedLinks,
       ):
         setState(() {
           if (committedHistoryEntries != null) {
@@ -1061,6 +1058,13 @@ class _EditTaskScreenState extends ConsumerState<EditTaskScreen> {
               committedHistoryEntries,
             );
             _resetHistoryEditInputs();
+          }
+          if (committedLinks != null) {
+            _links = List<TaskLink>.of(committedLinks);
+            _lastCanAddLink = false;
+            _linkErrorMessage = null;
+            _linkTitleController.clear();
+            _linkUriController.clear();
           }
           _applyFieldErrors(errors);
         });

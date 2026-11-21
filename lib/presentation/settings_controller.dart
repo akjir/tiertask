@@ -22,7 +22,6 @@ import '../l10n/app_localizations.dart';
 import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
 import '../models/settings_codec.dart';
-import '../models/tdf_file_path.dart';
 import '../models/webdav_config.dart';
 import '../providers/config_providers.dart';
 import '../providers/workspace_providers.dart';
@@ -134,7 +133,7 @@ class SettingsController {
         selectedDirectory == currentDirectory) {
       return null;
     }
-    return TdfFilePath.combineDirectoryAndFileName(
+    return LocalFileRepository.combineDirectoryAndFileName(
       selectedDirectory,
       currentFileName,
     );
@@ -165,7 +164,7 @@ class SettingsController {
         _pathSeparatorPattern.hasMatch(config.localFilePath) ||
         baseDirectoryPath != null;
     return (hasDirectory && currentDirectory != null)
-        ? TdfFilePath.combineDirectoryAndFileName(
+        ? LocalFileRepository.combineDirectoryAndFileName(
             currentDirectory,
             chosenFileName,
           )

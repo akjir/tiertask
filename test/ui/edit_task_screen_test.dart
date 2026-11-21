@@ -22,6 +22,7 @@ import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
@@ -656,6 +657,36 @@ task 000001OkD2 {
         find.byKey(const ValueKey('editor_open_link_0')),
       );
       expect(find.text('Could not open link.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'EditTaskScreen validates primary fields before flushing pending link input',
+    (WidgetTester tester) async {
+      await pumpLeafWidget(
+        tester,
+        const EditTaskScreen(initialMode: QuickAddMode.standard),
+        wrapInScaffold: false,
+      );
+
+      final linkTitleFinder = find.byKey(
+        const ValueKey('editor_link_title_input'),
+      );
+      final linkUriFinder = find.byKey(const ValueKey('editor_link_uri_input'));
+      await tester.ensureVisible(linkUriFinder);
+      await tester.enterText(linkTitleFinder, 'Pending Spec');
+      await tester.enterText(linkUriFinder, 'https://example.com/spec');
+      await tester.pump();
+
+      await _tapKey(tester, 'task_editor_save_button');
+
+      // Title validation must fail without prematurely committing the pending link.
+      expect(find.text('Please enter a task name.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('editor_link_row_0')), findsNothing);
+      final titleField = tester.widget<TextField>(linkTitleFinder);
+      final uriField = tester.widget<TextField>(linkUriFinder);
+      expect(titleField.controller?.text, equals('Pending Spec'));
+      expect(uriField.controller?.text, equals('https://example.com/spec'));
     },
   );
 

@@ -37,36 +37,34 @@ final appVersionViewModelProvider = Provider<AppVersionViewModel>(
 );
 
 /// Evaluates the live [TaskBoard] against clock, boundary ticks, location fix, lead window, and [activeLabelId].
-final evaluatedBoardProvider = Provider.family<AsyncValue<TaskBoard>, String?>((
-  ref,
-  activeLabelId,
-) {
-  ref.watch(boundaryTickProvider);
-  final boardAsync = ref.watch(taskNotifierProvider);
-  final activeFix = ref.watch(
-    locationStateProvider.select(
-      (state) => state.status == LocationStatus.found ? state.fix : null,
-    ),
-  );
-  final configuration = ref.watch(
-    webDavConfigProvider.select(
-      (asyncConfiguration) =>
-          asyncConfiguration.asData?.value ?? const WebDavConfig(),
-    ),
-  );
-  final clock = ref.watch(clockProvider);
-  return boardAsync.whenData((board) {
-    final evaluationTime = clock().toUtc();
-    return board.evaluateForContext(
-      activeLabelId: activeLabelId,
-      currentLatitude: activeFix?.latitude,
-      currentLongitude: activeFix?.longitude,
-      evaluationTime: evaluationTime,
-      localEvaluationTime: configuration.toLocalWallClock(evaluationTime),
-      dueLeadWindow: configuration.dueLeadWindow.duration,
-    );
-  });
-});
+final evaluatedBoardProvider = Provider.autoDispose
+    .family<AsyncValue<TaskBoard>, String?>((ref, activeLabelId) {
+      ref.watch(boundaryTickProvider);
+      final boardAsync = ref.watch(taskNotifierProvider);
+      final activeFix = ref.watch(
+        locationStateProvider.select(
+          (state) => state.status == LocationStatus.found ? state.fix : null,
+        ),
+      );
+      final configuration = ref.watch(
+        webDavConfigProvider.select(
+          (asyncConfiguration) =>
+              asyncConfiguration.asData?.value ?? const WebDavConfig(),
+        ),
+      );
+      final clock = ref.watch(clockProvider);
+      return boardAsync.whenData((board) {
+        final evaluationTime = clock().toUtc();
+        return board.evaluateForContext(
+          activeLabelId: activeLabelId,
+          currentLatitude: activeFix?.latitude,
+          currentLongitude: activeFix?.longitude,
+          evaluationTime: evaluationTime,
+          localEvaluationTime: configuration.toLocalWallClock(evaluationTime),
+          dueLeadWindow: configuration.dueLeadWindow.duration,
+        );
+      });
+    });
 
 /// Provides [TdfPreviewController] for exporting the current board into raw `.tdf` preview text.
 final tdfPreviewControllerProvider = Provider<TdfPreviewController>(

@@ -34,6 +34,7 @@ import 'package:tiertask/services/app_logger.dart';
 class _RecordingTaskNotifier extends TaskNotifier {
   Object? errorToThrow;
   String? lastAddedTitle;
+  List<TaskLink>? lastAddedLinks;
   List<TaskHistoryEntry>? lastAddedHistory;
   String? lastUpdatedId;
   bool? lastUpdatedIsDuePassive;
@@ -74,6 +75,7 @@ class _RecordingTaskNotifier extends TaskNotifier {
       throw error;
     }
     lastAddedTitle = title;
+    lastAddedLinks = List<TaskLink>.of(links);
     lastAddedHistory = history?.toList();
   }
 
@@ -302,6 +304,9 @@ void main() {
       bool isRepeating = false,
       String rawRepeatCount = '1',
       String rawRepeatLeadDays = '',
+      List<TaskLink> links = const <TaskLink>[],
+      String pendingLinkTitle = '',
+      String pendingLinkUri = '',
       List<TaskHistoryEntry> historyEntries = const <TaskHistoryEntry>[],
       String rawHistoryTimestamp = '',
       String rawHistoryText = '',
@@ -322,7 +327,9 @@ void main() {
         pendingSubtaskText: '',
         selectedLabelIds: const <String>{},
         selectedBlockedByIds: const <String>{},
-        links: const <TaskLink>[],
+        links: links,
+        pendingLinkTitle: pendingLinkTitle,
+        pendingLinkUri: pendingLinkUri,
         conditions: const <TaskCondition>[],
         hasDue: hasDue,
         rawDueText: rawDueText,
@@ -492,6 +499,98 @@ void main() {
       expect(logText, contains('ui.delete_task.confirmed | id=task-42'));
       expect(logText, isNot(contains('Top secret body note')));
       expect(logText, isNot(contains('Secret history text')));
+    });
+
+    test('validates primary fields before pending link and folds valid pending link on submit or persist failure', () async {
+      final en = lookupAppLocalizations(const Locale('en'));
+      final taskNotifier = _RecordingTaskNotifier();
+      final container = ProviderContainer(
+        overrides: [
+          taskNotifierProvider.overrideWith(() => taskNotifier),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 21, 10)),
+          appLocaleProvider.overrideWithValue(const Locale('en')),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(taskNotifierProvider.future);
+      final controller = container.read(taskEditorControllerProvider);
+
+      // Invalid title takes precedence over invalid pending link.
+      final titleFirst = await controller.submitDraft(
+        buildInput(
+          rawTitle: '   ',
+          pendingLinkTitle: 'Bad',
+          pendingLinkUri: 'not-a-uri',
+        ),
+      );
+      expect(titleFirst, isA<TaskEditorValidationFailed>());
+      final titleFirstErrors =
+          (titleFirst as TaskEditorValidationFailed).errors;
+      expect(titleFirstErrors.titleError, equals(en.taskNameErrorEmpty));
+      expect(titleFirstErrors.linkError, isNull);
+
+      // Valid primary fields + invalid pending link returns linkErrorInvalid.
+      final badPendingLink = await controller.submitDraft(
+        buildInput(pendingLinkTitle: 'Docs', pendingLinkUri: 'bad-uri'),
+      );
+      expect(badPendingLink, isA<TaskEditorValidationFailed>());
+      expect(
+        (badPendingLink as TaskEditorValidationFailed).errors.linkError,
+        equals(en.linkErrorInvalid),
+      );
+
+      // Valid primary fields + max links reached returns linkErrorMaxExceeded.
+      final maxLinks = <TaskLink>[
+        for (var i = 0; i < TaskLink.maxLinksPerTask; i++)
+          TaskLink(title: 'Link $i', uri: 'https://example.com/$i'),
+      ];
+      final overMaxLink = await controller.submitDraft(
+        buildInput(
+          links: maxLinks,
+          pendingLinkTitle: 'Overflow',
+          pendingLinkUri: 'https://example.com/overflow',
+        ),
+      );
+      expect(overMaxLink, isA<TaskEditorValidationFailed>());
+      expect(
+        (overMaxLink as TaskEditorValidationFailed).errors.linkError,
+        equals(en.linkErrorMaxExceeded),
+      );
+
+      // Valid pending link is folded into persisted links on success.
+      final foldedSubmit = await controller.submitDraft(
+        buildInput(
+          pendingLinkTitle: 'Spec',
+          pendingLinkUri: 'https://example.com/spec',
+        ),
+      );
+      expect(foldedSubmit, isA<TaskEditorSubmitted>());
+      expect(
+        taskNotifier.lastAddedLinks,
+        equals(const <TaskLink>[
+          TaskLink(title: 'Spec', uri: 'https://example.com/spec'),
+        ]),
+      );
+
+      // On persistence failure, committedLinks returns the folded list.
+      taskNotifier.errorToThrow = const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 0,
+        message: 'Limit exceeded',
+      );
+      final persistFailed = await controller.submitDraft(
+        buildInput(
+          pendingLinkTitle: 'Spec 2',
+          pendingLinkUri: 'https://example.com/spec-2',
+        ),
+      );
+      expect(persistFailed, isA<TaskEditorPersistFailed>());
+      expect(
+        (persistFailed as TaskEditorPersistFailed).committedLinks,
+        equals(const <TaskLink>[
+          TaskLink(title: 'Spec 2', uri: 'https://example.com/spec-2'),
+        ]),
+      );
     });
   });
 }

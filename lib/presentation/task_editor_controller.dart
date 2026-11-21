@@ -45,16 +45,23 @@ sealed class TaskEditorSubmitResult {
 /// Outcome returned when domain persistence rejects a validated task draft.
 @immutable
 final class TaskEditorPersistFailed extends TaskEditorSubmitResult {
-  /// Creates a [TaskEditorPersistFailed] outcome with field [errors] and optional [committedHistoryEntries].
+  /// Creates a [TaskEditorPersistFailed] outcome with field [errors] and optional committed drafts.
   TaskEditorPersistFailed({
     required this.errors,
     Iterable<TaskHistoryEntry>? committedHistoryEntries,
+    Iterable<TaskLink>? committedLinks,
   }) : committedHistoryEntries = committedHistoryEntries == null
            ? null
-           : List<TaskHistoryEntry>.unmodifiable(committedHistoryEntries);
+           : List<TaskHistoryEntry>.unmodifiable(committedHistoryEntries),
+       committedLinks = committedLinks == null
+           ? null
+           : List<TaskLink>.unmodifiable(committedLinks);
 
   /// Normalized history list when a pending history draft was folded in prior to persistence failure.
   final List<TaskHistoryEntry>? committedHistoryEntries;
+
+  /// Updated link list when a pending link draft was folded in prior to persistence failure.
+  final List<TaskLink>? committedLinks;
 
   /// Mapped inline field errors surfaced back to the task editor screen.
   final TaskEditorFieldErrors errors;
@@ -64,14 +71,22 @@ final class TaskEditorPersistFailed extends TaskEditorSubmitResult {
     if (identical(this, other)) return true;
     return other is TaskEditorPersistFailed &&
         other.errors == errors &&
-        listEquals(other.committedHistoryEntries, committedHistoryEntries);
+        listEquals(other.committedHistoryEntries, committedHistoryEntries) &&
+        listEquals(other.committedLinks, committedLinks);
   }
 
   @override
-  int get hashCode => Object.hash(errors, switch (committedHistoryEntries) {
-    final entries? => Object.hashAll(entries),
-    null => null,
-  });
+  int get hashCode => Object.hash(
+    errors,
+    switch (committedHistoryEntries) {
+      final entries? => Object.hashAll(entries),
+      null => null,
+    },
+    switch (committedLinks) {
+      final foldedLinks? => Object.hashAll(foldedLinks),
+      null => null,
+    },
+  );
 }
 
 /// Outcome returned when the task draft passes validation and persists cleanly.
@@ -209,6 +224,8 @@ class TaskEditorDraftInput {
     required this.isSuspended,
     required Iterable<TaskLink> links,
     required this.mode,
+    this.pendingLinkTitle = '',
+    this.pendingLinkUri = '',
     required this.pendingSubtaskText,
     required this.rawDueNote,
     required this.rawDueText,
@@ -299,6 +316,12 @@ class TaskEditorDraftInput {
 
   /// Active [QuickAddMode] selection.
   final QuickAddMode mode;
+
+  /// Uncommitted title text in the reference link input row.
+  final String pendingLinkTitle;
+
+  /// Uncommitted URI text in the reference link input row.
+  final String pendingLinkUri;
 
   /// Uncommitted text in the subtask input field.
   final String pendingSubtaskText;
@@ -902,6 +925,13 @@ class TaskEditorController {
       return TaskEditorValidationFailed(validationErrors);
     }
 
+    final linkResolution = _resolvePendingLinks(input, localizations);
+    if (linkResolution.error case final linkError?) {
+      return TaskEditorValidationFailed(
+        TaskEditorFieldErrors(linkError: linkError),
+      );
+    }
+
     final repeatRule = parseRepeatRule(
       existingClock:
           input.existingTask?.repeatRule?.clock ?? TdfRepeatClock.midnight,
@@ -914,6 +944,9 @@ class TaskEditorController {
     final committedHistory = historyResolution.hasPending
         ? historyResolution.entries
         : null;
+    final committedLinks = linkResolution.hasPending
+        ? linkResolution.links
+        : null;
     final effectiveHistoryCount = historyResolution.entries.length;
     try {
       await _persistTask(
@@ -921,6 +954,7 @@ class TaskEditorController {
         due: dueDraft,
         dueNote: dueNote,
         history: historyResolution.entries,
+        links: linkResolution.links,
         repeatRule: repeatRule,
         suspended: suspendedDraft,
         suspendedNote: suspendedNote,
@@ -932,6 +966,7 @@ class TaskEditorController {
         kind: error.kind,
         historyCount: effectiveHistoryCount,
         committedHistoryEntries: committedHistory,
+        committedLinks: committedLinks,
         localizations: localizations,
       );
     } on TdfContextException catch (error) {
@@ -942,6 +977,7 @@ class TaskEditorController {
         contextKind: error.kind,
         historyCount: effectiveHistoryCount,
         committedHistoryEntries: committedHistory,
+        committedLinks: committedLinks,
         localizations: localizations,
       );
     } on FormatException {
@@ -951,6 +987,7 @@ class TaskEditorController {
         kind: TdfErrorKind.invalidTimestamp,
         historyCount: effectiveHistoryCount,
         committedHistoryEntries: committedHistory,
+        committedLinks: committedLinks,
         localizations: localizations,
       );
     }
@@ -1064,6 +1101,7 @@ class TaskEditorController {
     TdfContextOutcomeKind? contextKind,
     required int historyCount,
     required List<TaskHistoryEntry>? committedHistoryEntries,
+    required List<TaskLink>? committedLinks,
     required AppLocalizations localizations,
   }) {
     if (AppLogger.shouldLog(LogLevel.warn)) {
@@ -1084,6 +1122,7 @@ class TaskEditorController {
     return TaskEditorPersistFailed(
       errors: errors,
       committedHistoryEntries: committedHistoryEntries,
+      committedLinks: committedLinks,
     );
   }
 
@@ -1241,6 +1280,7 @@ class TaskEditorController {
     required ResolvedDueDraft due,
     required String? dueNote,
     required List<TaskHistoryEntry> history,
+    required List<TaskLink> links,
     required TaskRepeatRule? repeatRule,
     required ResolvedSuspendedDraft suspended,
     required String? suspendedNote,
@@ -1306,7 +1346,7 @@ class TaskEditorController {
         repeatRule: repeatRule,
         clearRepeatRule: !input.isRepeating,
         blockedByTaskIds: blockedByIds,
-        links: input.links,
+        links: links,
         history: history,
         conditions: input.conditions,
       );
@@ -1328,7 +1368,7 @@ class TaskEditorController {
       suspendedNote: suspendedNote,
       repeatRule: repeatRule,
       blockedByTaskIds: blockedByIds,
-      links: input.links,
+      links: links,
       history: history,
       conditions: input.conditions,
     );
@@ -1379,6 +1419,43 @@ class TaskEditorController {
       );
     }
     return (entries: nextEntries, error: null, hasPending: true);
+  }
+
+  /// Validates and folds any pending link input inside [input] into an unmodifiable list or localized error.
+  static ({List<TaskLink> links, String? error, bool hasPending})
+  _resolvePendingLinks(
+    TaskEditorDraftInput input,
+    AppLocalizations localizations,
+  ) {
+    final hasPending =
+        input.pendingLinkTitle.trim().isNotEmpty ||
+        input.pendingLinkUri.trim().isNotEmpty;
+    if (!hasPending) {
+      return (links: input.links, error: null, hasPending: false);
+    }
+    if (input.links.length >= TaskLink.maxLinksPerTask) {
+      return (
+        links: input.links,
+        error: localizations.linkErrorMaxExceeded,
+        hasPending: true,
+      );
+    }
+    final parsed = TaskLink.tryParse(
+      rawTitle: input.pendingLinkTitle,
+      rawUri: input.pendingLinkUri,
+    );
+    if (parsed == null) {
+      return (
+        links: input.links,
+        error: localizations.linkErrorInvalid,
+        hasPending: true,
+      );
+    }
+    return (
+      links: List<TaskLink>.unmodifiable(<TaskLink>[...input.links, parsed]),
+      error: null,
+      hasPending: true,
+    );
   }
 
   /// Resolves an optional scheduling note, preserving [initialNote] verbatim when untouched.

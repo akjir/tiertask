@@ -92,7 +92,8 @@ class TaskInfoController {
     required String rawText,
     Locale? locale,
   }) async {
-    if (!isTaskOnBoard(currentTask.id)) {
+    final liveTask = _findTask(currentTask.id);
+    if (liveTask == null) {
       return const TaskHistoryMutationNotApplied();
     }
     final localizations = lookupAppLocalizations(
@@ -104,17 +105,14 @@ class TaskInfoController {
       localizations,
     );
     if (textError != null) {
-      _logValidationFailed(
-        currentTask.id,
-        _validationReasonCode(sanitizedText),
-      );
+      _logValidationFailed(liveTask.id, _validationReasonCode(sanitizedText));
       return TaskHistoryMutationFailed(textError);
     }
     final timestampUtc = TaskItem.normalizeTimestamp(
       _ref.read(clockProvider)().toUtc(),
     );
     if (!TdfCalendar.isWithinTimestampBounds(timestampUtc)) {
-      _logValidationFailed(currentTask.id, 'invalid_timestamp');
+      _logValidationFailed(liveTask.id, 'invalid_timestamp');
       return TaskHistoryMutationFailed(
         localizations.historyErrorTimestampInvalid,
       );
@@ -123,18 +121,18 @@ class TaskInfoController {
       timestampUtc: timestampUtc,
       text: sanitizedText,
     );
-    if (!currentTask.history.contains(candidate) &&
-        currentTask.history.length >= maxTdfHistoryPerTask) {
-      _logValidationFailed(currentTask.id, 'max_exceeded');
+    if (!liveTask.history.contains(candidate) &&
+        liveTask.history.length >= maxTdfHistoryPerTask) {
+      _logValidationFailed(liveTask.id, 'max_exceeded');
       return TaskHistoryMutationFailed(localizations.historyErrorMaxExceeded);
     }
     final failure = await _runPersistMutation(
-      taskId: currentTask.id,
+      taskId: liveTask.id,
       localizations: localizations,
       action: () => _ref
           .read(taskNotifierProvider.notifier)
           .addTaskHistoryEntry(
-            currentTask.id,
+            liveTask.id,
             timestampUtc: candidate.timestampUtc,
             text: candidate.text,
           ),
@@ -142,11 +140,11 @@ class TaskInfoController {
     if (failure != null) {
       return failure;
     }
-    final postTask = _findTask(currentTask.id);
+    final postTask = _findTask(liveTask.id);
     if (postTask != null && postTask.history.contains(candidate)) {
       _logHistoryMutated(
         'ui.task_info.history_added',
-        currentTask.id,
+        liveTask.id,
         postTask.history.length,
       );
       return const TaskHistoryMutationCommitted();

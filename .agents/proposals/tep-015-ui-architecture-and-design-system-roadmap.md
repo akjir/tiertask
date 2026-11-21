@@ -140,7 +140,7 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 
 ### 3.1 Task Breakdown
 - [ ] Review and finalize `TEP-015` (optionally via `/verify-spec .agents/proposals/tep-015-ui-architecture-and-design-system-roadmap.md`) and advance status from `concept` to `planned`.
-- [ ] Author and complete **Phase 1 Child TEP** ([`TEP-016`](tep-016-presentation-layer-decoupling.md): Presentation Layer Decoupling & Strict `repositories/`/`services/` Boundary).
+- [x] Author and complete **Phase 1 Child TEP** ([`TEP-016`](tep-016-presentation-layer-decoupling.md): Presentation Layer Decoupling & Strict `repositories/`/`services/` Boundary).
 - [ ] Complete **Design Gate** in `.agents/prototypes/ui_v2/` covering all production TierTask `0.8.0` parity views and mobile/desktop interactions.
 - [ ] Author and complete **Phase 2 Child TEP** (`packages/tiertask_ui/` Component Library, Themes, Gallery App, and Tooling Integration).
 - [ ] Author and complete **Phase 3 Child TEP** (Adaptive Shell & Feature Screens Cutover under Strict ViewModel Contract).
@@ -149,6 +149,7 @@ Each child TEP MUST define Red-Green-Refactor TDD test cases (`P-TDD-FIRST`) cov
 
 ### 3.2 Work Log & Decisions
 - **2026-11-21:** Completed interactive architecture interview (`/grill-me`) and drafted umbrella `TEP-015`. Locked in: standalone `packages/tiertask_ui/` package with `example/` gallery, dedicated `lib/presentation/` DAG layer, strict ViewModel contract for new `lib/ui/`, pragmatic Phase 1 transition avoiding throwaway legacy rewrites, `Calm` (default) + `Plum Umber` extensible themes with verified WCAG AA contrast, modular offline prototype under `.agents/prototypes/ui_v2/`, and mandatory per-phase child TEPs created just-in-time.
+- **2026-11-21:** Completed Phase 1 child proposal [`TEP-016`](tep-016-presentation-layer-decoupling.md) (`status: completed`): Rank `6` `lib/presentation/` layer delivered, `lib/models/tdf_file_path.dart` extracted, all `lib/ui/` repository/service imports and transitive repository/service/native-picker provider references eliminated and statically enforced in `.agents/scripts/tiertask_dev.py`.
 
 ### 3.3 Delivered Artifacts
 *(Complete upon approval)*

@@ -73,14 +73,17 @@ void main() {
         ]),
       );
 
-      for (final tag in LogTag.values) {
-        final mapped = DiagnosticLogTag.fromLogTag(tag);
+      expect(
+        DiagnosticLogTag.values.map((tag) => tag.toLogTag()).toSet(),
+        equals(LogTag.values.toSet()),
+        reason: 'DiagnosticLogTag must cover every LogTag 1-to-1',
+      );
+      for (final tag in DiagnosticLogTag.values) {
         expect(
-          mapped.toLogTag(),
-          equals(tag),
-          reason: 'Round-trip failed for $tag',
+          tag.label,
+          equals(tag.toLogTag().label),
+          reason: 'Label mismatch for $tag',
         );
-        expect(mapped.label, equals(tag.label));
       }
     });
   });
@@ -231,10 +234,19 @@ void main() {
         expect(await controller.syncLogToWebDav(), isA<LogSyncSucceeded>());
         expect(configNotifier.syncCalls, equals(1));
 
-        configNotifier.syncError = StateError('WebDAV offline');
+        AppLogger.setSecretToRedact('super-secret-webdav-pw');
+        configNotifier.syncError = StateError(
+          'WebDAV offline with super-secret-webdav-pw',
+        );
         final failure = await controller.syncLogToWebDav();
         expect(failure, isA<LogSyncFailed>());
-        expect((failure as LogSyncFailed).message, contains('WebDAV offline'));
+        final failureMessage = (failure as LogSyncFailed).message;
+        expect(failureMessage, contains('WebDAV offline'));
+        expect(
+          failureMessage,
+          isNot(contains('super-secret-webdav-pw')),
+          reason: 'LogSyncFailed must redact registered secrets',
+        );
       },
     );
 

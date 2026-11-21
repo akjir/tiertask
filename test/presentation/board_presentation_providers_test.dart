@@ -73,6 +73,15 @@ class _ThrowingTdfService extends TdfService {
   }
 }
 
+final class _DisposalObserver extends ProviderObserver {
+  final List<Object> disposedProviders = <Object>[];
+
+  @override
+  void didDisposeProvider(ProviderObserverContext context) {
+    disposedProviders.add(context.provider);
+  }
+}
+
 void main() {
   group('AppVersionViewModel and appVersionViewModelProvider', () {
     test('parses version prefix and build metadata across variants', () {
@@ -227,7 +236,9 @@ void main() {
         ),
       );
 
+      final disposalObserver = _DisposalObserver();
       final container = ProviderContainer(
+        observers: [disposalObserver],
         overrides: [
           clockProvider.overrideWithValue(() => now),
           taskNotifierProvider.overrideWith(() => _StubTaskNotifier(board)),
@@ -278,7 +289,7 @@ void main() {
         equals(TaskTier.focus),
       );
 
-      // With LocationStatus.unavailable, fix is null so location condition blocks again.
+      // With LocationStatus.unavailable, activeFix is null so location conditions fail open.
       locationNotifier.setLocationState(
         LocationState(
           status: LocationStatus.unavailable,
@@ -290,6 +301,81 @@ void main() {
           .read(evaluatedBoardProvider('work'))
           .value;
       expect(unavailableBoard?.findTierOfTask('t_loc'), equals(TaskTier.focus));
+
+      // Verify autoDispose releases unreferenced family label instances.
+      disposalObserver.disposedProviders.clear();
+      final tempSub = container.listen(
+        evaluatedBoardProvider('work'),
+        (_, _) {},
+      );
+      expect(disposalObserver.disposedProviders, isEmpty);
+      tempSub.close();
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        disposalObserver.disposedProviders,
+        contains(evaluatedBoardProvider('work')),
+        reason: 'evaluatedBoardProvider must autoDispose unused activeLabelId instances',
+      );
+
+      // Verify dueLeadWindow promotes an urgent task above filled Focus/Ready slots.
+      final urgentBoard = TaskBoard.empty()
+          .addTask('Focus 1', id: 'f1', currentDate: now)
+          .addTask('Focus 2', id: 'f2', currentDate: now)
+          .addTask('Focus 3', id: 'f3', currentDate: now)
+          .addTask('Ready 1', id: 'r1', currentDate: now)
+          .addTask(
+            'Urgent due task',
+            id: 't_due',
+            dueAt: now.add(const Duration(hours: 6)),
+            currentDate: now,
+          );
+      final leadOffContainer = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() => now),
+          taskNotifierProvider.overrideWith(
+            () => _StubTaskNotifier(urgentBoard),
+          ),
+          webDavConfigProvider.overrideWith(
+            () => _StubWebDavConfigNotifier(
+              const WebDavConfig(dueLeadWindow: DueLeadWindow.off),
+            ),
+          ),
+        ],
+      );
+      addTearDown(leadOffContainer.dispose);
+      await leadOffContainer.read(taskNotifierProvider.future);
+      await leadOffContainer.read(webDavConfigProvider.future);
+      expect(
+        leadOffContainer
+            .read(evaluatedBoardProvider(null))
+            .value
+            ?.findTierOfTask('t_due'),
+        equals(TaskTier.ready),
+      );
+
+      final leadOnContainer = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() => now),
+          taskNotifierProvider.overrideWith(
+            () => _StubTaskNotifier(urgentBoard),
+          ),
+          webDavConfigProvider.overrideWith(
+            () => _StubWebDavConfigNotifier(
+              const WebDavConfig(dueLeadWindow: DueLeadWindow.hours24),
+            ),
+          ),
+        ],
+      );
+      addTearDown(leadOnContainer.dispose);
+      await leadOnContainer.read(taskNotifierProvider.future);
+      await leadOnContainer.read(webDavConfigProvider.future);
+      expect(
+        leadOnContainer
+            .read(evaluatedBoardProvider(null))
+            .value
+            ?.findTierOfTask('t_due'),
+        equals(TaskTier.focus),
+      );
 
       // Verify boundaryTickProvider triggers re-evaluation when clock crosses suspension boundary.
       final suspendedBoard = TaskBoard.empty().addTask(

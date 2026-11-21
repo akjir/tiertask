@@ -2223,6 +2223,23 @@
     `;
   }
 
+  function renderScrollToComposerButton(state, isVisible = false) {
+    const label = t(state.lang, 'quickAddJumpBottom');
+    return `
+      <button
+        type="button"
+        class="scroll-to-composer-btn${isVisible ? ' is-visible' : ''}"
+        data-scroll-to-composer
+        title="${escapeHtml(label)}"
+        aria-label="${escapeHtml(label)}"
+        aria-hidden="${isVisible ? 'false' : 'true'}"
+        ${isVisible ? '' : 'tabindex="-1"'}
+      >
+        ${renderIcon('arrow-down-to-line')}
+      </button>
+    `;
+  }
+
   function renderLabelSlidePanel(label, state, workspace, openCount, isAnimating) {
     const lang = state.lang;
     const edit =
@@ -2701,6 +2718,7 @@
     renderFullFileReadError,
     renderNotice,
     renderTaskView,
+    renderScrollToComposerButton,
     renderManagerView,
     renderMobileLabelPickerSheet,
   };

@@ -16,6 +16,7 @@
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
@@ -263,7 +264,7 @@ void main() {
 
         final moved = await controller.pickLocalDirectory(config);
         expect(capturedInitialDir, equals(tempDir.path));
-        expect(moved, equals('/mock/moved/tasks.tdf'));
+        expect(moved, equals('/mock/moved${sep}tasks.tdf'));
 
         // Unchanged or cancelled directory picker returns null.
         pickedDirectory = tempDir.path;
@@ -278,6 +279,25 @@ void main() {
         expect(
           controller.resolveChosenLocalFileName(config, 'renamed.tdf'),
           equals('${tempDir.path}${sep}renamed.tdf'),
+        );
+
+        // Must always follow host Platform.pathSeparator even when Flutter's
+        // defaultTargetPlatform differs (e.g., TargetPlatform.android during Windows tests).
+        final mismatchedPlatform = Platform.isWindows
+            ? TargetPlatform.android
+            : TargetPlatform.windows;
+        debugDefaultTargetPlatformOverride = mismatchedPlatform;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        pickedDirectory = '/mock/moved';
+        expect(
+          await controller.pickLocalDirectory(config),
+          equals('/mock/moved${sep}tasks.tdf'),
+          reason: 'pickLocalDirectory must use host Platform.pathSeparator regardless of defaultTargetPlatform',
+        );
+        expect(
+          controller.resolveChosenLocalFileName(config, 'renamed.tdf'),
+          equals('${tempDir.path}${sep}renamed.tdf'),
+          reason: 'resolveChosenLocalFileName must use host Platform.pathSeparator regardless of defaultTargetPlatform',
         );
       },
     );

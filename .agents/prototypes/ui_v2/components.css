@@ -915,7 +915,17 @@ body {
   opacity: 0.65;
 }
 
+#tt2 .main-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
 #tt2 .main {
+  flex: 1 1 auto;
   padding: 22px 26px 18px;
   display: flex;
   flex-direction: column;
@@ -926,6 +936,56 @@ body {
 
 #tt2 .main > * {
   flex-shrink: 0;
+}
+
+#tt2 .scroll-to-composer-btn {
+  position: absolute;
+  right: 28px;
+  bottom: 20px;
+  z-index: 8;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  padding: 0;
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--accent);
+  background: var(--soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    visibility 0s linear 160ms;
+}
+
+#tt2 .scroll-to-composer-btn.is-visible {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    visibility 0s;
+}
+
+#tt2 .scroll-to-composer-btn.is-visible:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+#tt2 .scroll-to-composer-btn.is-visible:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 #tt2 .status-banner {
@@ -2979,6 +3039,13 @@ body {
   padding: 16px 14px 16px;
 }
 
+#tt2 .stage.mobile .scroll-to-composer-btn {
+  right: 24px;
+  bottom: 16px;
+  width: var(--touch-target-mobile);
+  height: var(--touch-target-mobile);
+}
+
 #tt2 .stage.mobile .chrome {
   padding: 8px 10px;
   gap: 6px;
@@ -3130,6 +3197,13 @@ body {
     flex: 1 1 auto;
     min-height: 0;
     padding: 16px 14px 16px;
+  }
+
+  #tt2 .scroll-to-composer-btn {
+    right: 24px;
+    bottom: 16px;
+    width: var(--touch-target-mobile);
+    height: var(--touch-target-mobile);
   }
 
   #tt2 .chrome {

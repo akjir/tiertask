@@ -36,6 +36,7 @@
     renderBanners,
     renderFullFileReadError,
     renderTaskView,
+    renderScrollToComposerButton,
     renderManagerView,
     renderMobileLabelPickerSheet,
   } = window.TT2.viewsCore;
@@ -331,6 +332,55 @@
   let lastMainScrollScope = '';
   let lastSidebarWorkspaceId = '';
   let lastLabelPickerScope = '';
+  let mainScrollJumpVisible = false;
+  let mainResizeObserver = null;
+
+  function hasTaskComposer() {
+    return (
+      state.view === 'tasks' &&
+      !state.searchOpen &&
+      state.simState !== 'file_read_full'
+    );
+  }
+
+  function syncMainScrollJumpButton() {
+    const mainEl = app.querySelector('.main');
+    const jumpBtn = app.querySelector('[data-scroll-to-composer]');
+    if (!mainEl || !jumpBtn) {
+      mainScrollJumpVisible = false;
+      return;
+    }
+    const overflow = mainEl.scrollHeight - mainEl.clientHeight;
+    const remaining = overflow - mainEl.scrollTop;
+    const shouldShow = overflow > 8 && remaining > 8;
+    mainScrollJumpVisible = shouldShow;
+    jumpBtn.classList.toggle('is-visible', shouldShow);
+    jumpBtn.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+    if (shouldShow) {
+      jumpBtn.removeAttribute('tabindex');
+    } else {
+      jumpBtn.setAttribute('tabindex', '-1');
+    }
+  }
+
+  function bindMainScrollObserver(mainEl) {
+    if (mainResizeObserver) {
+      mainResizeObserver.disconnect();
+      mainResizeObserver = null;
+    }
+    if (!mainEl || !hasTaskComposer()) return;
+    mainEl.addEventListener('scroll', syncMainScrollJumpButton, {
+      passive: true,
+    });
+    mainEl.addEventListener('transitionend', syncMainScrollJumpButton);
+    if (typeof ResizeObserver === 'function') {
+      mainResizeObserver = new ResizeObserver(syncMainScrollJumpButton);
+      mainResizeObserver.observe(mainEl);
+      for (const child of mainEl.children) {
+        mainResizeObserver.observe(child);
+      }
+    }
+  }
 
   function isCompactViewport() {
     return (
@@ -340,6 +390,10 @@
   }
 
   function render() {
+    if (mainResizeObserver) {
+      mainResizeObserver.disconnect();
+      mainResizeObserver = null;
+    }
     state.isCompact = isCompactViewport();
     const focusDesc = captureFocusDescriptor();
     const prevSidebarScroll = app.querySelector('.sidebar')?.scrollTop || 0;
@@ -351,6 +405,11 @@
     syncPreviewToolbarFromConfig();
 
     const mainScrollScope = `${state.activeWorkspaceId}:${state.view}:${state.tier}:${state.label}:${state.searchOpen}`;
+    const showJumpBtn = hasTaskComposer();
+    const initialJumpVisible =
+      showJumpBtn &&
+      lastMainScrollScope === mainScrollScope &&
+      mainScrollJumpVisible;
     const labelPickerScope = state.taskLabelPicker
       ? `task:${state.taskLabelPicker.taskId}:${state.taskLabelPicker.scopeFilter}:${state.taskLabelPicker.query}`
       : state.draftLabelPicker
@@ -364,10 +423,13 @@
         <nav class="sidebar ${state.drawer ? 'drawer-open' : ''}" aria-label="Primary Navigation">
           ${renderSidebar(state, ws, evalRes)}
         </nav>
-        <main class="main">
-          ${renderBanners(state, ws)}
-          ${renderMainContent(ws, evalRes)}
-        </main>
+        <div class="main-shell">
+          <main class="main">
+            ${renderBanners(state, ws)}
+            ${renderMainContent(ws, evalRes)}
+          </main>
+          ${showJumpBtn ? renderScrollToComposerButton(state, initialJumpVisible) : ''}
+        </div>
       </div>
       ${renderMobileLabelPickerSheet(state, ws, evalRes)}
       ${renderActiveModal(state, ws)}
@@ -384,6 +446,8 @@
       nextMain.scrollTop = prevMainScroll;
     }
     lastMainScrollScope = mainScrollScope;
+    bindMainScrollObserver(nextMain);
+    syncMainScrollJumpButton();
 
     const nextPickerList = app.querySelector('.label-picker-list');
     if (nextPickerList && labelPickerScope && lastLabelPickerScope === labelPickerScope) {
@@ -1678,10 +1742,38 @@
       }
       return;
     }
+    if (has('scroll-to-composer')) {
+      if (isCompactViewport() && !state.mobileQuickAddOpen) {
+        state.mobileQuickAddOpen = true;
+        render();
+      }
+      const mainEl = app.querySelector('.main');
+      if (mainEl) {
+        const reducedMotion = window.matchMedia?.(
+          '(prefers-reduced-motion: reduce)',
+        )?.matches;
+        mainEl.scrollTo({
+          top: mainEl.scrollHeight,
+          behavior: reducedMotion ? 'auto' : 'smooth',
+        });
+        const draftInput = mainEl.querySelector('[data-draft="title"]');
+        if (draftInput) {
+          draftInput.focus({ preventScroll: true });
+        }
+      }
+      return;
+    }
     if (has('toggle-mobile-add')) {
       state.mobileQuickAddOpen = !state.mobileQuickAddOpen;
       if (!state.mobileQuickAddOpen) state.draftLabelPicker = null;
       render();
+      if (state.mobileQuickAddOpen) {
+        const mainEl = app.querySelector('.main');
+        if (mainEl) mainEl.scrollTop = mainEl.scrollHeight;
+        syncMainScrollJumpButton();
+        const draftInput = app.querySelector('[data-draft="title"]');
+        if (draftInput) draftInput.focus({ preventScroll: true });
+      }
       return;
     }
     if (has('trigger-sync')) {
@@ -3127,6 +3219,8 @@
   window.addEventListener('resize', () => {
     if (isCompactViewport() !== state.isCompact) {
       render();
+    } else {
+      syncMainScrollJumpButton();
     }
   });
 

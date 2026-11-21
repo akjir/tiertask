@@ -358,13 +358,19 @@ void main() {
           ),
           isA<TaskHistoryMutationFailed>(),
         );
-        // Max exceeded.
+        // Max exceeded checked against live board state even when caller passes a stale task snapshot.
+        final staleTaskSnapshot = TaskItem(
+          id: 't1',
+          title: 'Full task',
+          history: const <TaskHistoryEntry>[],
+        );
         expect(
           await controller.appendHistoryEntry(
-            currentTask: task,
+            currentTask: staleTaskSnapshot,
             rawText: 'overflow entry',
           ),
           isA<TaskHistoryMutationFailed>(),
+          reason: 'appendHistoryEntry must enforce maxTdfHistoryPerTask against live board state',
         );
         // Invalid timestamp bounds (year 10000).
         clockNow = DateTime.utc(10000, 1, 1);

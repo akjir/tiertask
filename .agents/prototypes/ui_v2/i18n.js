@@ -113,6 +113,7 @@
       quickAddPlaceholder: 'Neue Aufgabe ...',
       quickAddNewMobile: 'Neue Aufgabe',
       quickAddAdvanced: 'Anlegen & öffnen',
+      quickAddJumpBottom: 'Nach unten zur neuen Aufgabe',
 
       badgePriority: 'Priorität',
       badgeAutoPriority: 'Fällig · Priorisiert',
@@ -639,6 +640,7 @@
       quickAddPlaceholder: 'New task ...',
       quickAddNewMobile: 'New task',
       quickAddAdvanced: 'Add & expand',
+      quickAddJumpBottom: 'Jump to bottom to add a task',
 
       badgePriority: 'Priority',
       badgeAutoPriority: 'Due · Prioritized',

@@ -19,7 +19,6 @@ import '../../l10n/app_localizations.dart';
 import '../../models/task_board.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
-import '../../presentation/task_editor_controller.dart';
 import '../app_theme.dart';
 import 'clearable_text_field.dart';
 import 'task_editor_sections.dart';
@@ -205,21 +204,6 @@ class TaskEditorBoardHelper {
     };
   }
 
-  /// Collects selected prerequisite task IDs in canonical board declaration order.
-  static List<String> collectOrderedBlockedByIds(
-    TaskBoard board,
-    Set<String> selectedBlockedByIds,
-  ) => TaskEditorController.collectOrderedBlockedByIds(
-    board,
-    selectedBlockedByIds,
-  );
-
-  /// Collects selected label IDs in canonical board declaration order.
-  static List<String> collectOrderedLabelIds(
-    TaskBoard board,
-    Set<String> selectedLabelIds,
-  ) => TaskEditorController.collectOrderedLabelIds(board, selectedLabelIds);
-
   /// Derives the initial [QuickAddMode] for an existing [task] on [board].
   static QuickAddMode resolveInitialMode(TaskItem task, TaskBoard board) {
     if (task.isCompleted || task.completedAt != null) {
@@ -235,19 +219,6 @@ class TaskEditorBoardHelper {
     }
     return QuickAddMode.standard;
   }
-
-  /// Validates the entered task [rawTitle] against empty and duplicate constraints.
-  static String? validateTitle({
-    required TaskBoard board,
-    required String rawTitle,
-    required String? excludingTaskId,
-    required AppLocalizations localizations,
-  }) => TaskEditorController.validateTaskTitle(
-    board: board,
-    rawTitle: rawTitle,
-    excludingTaskId: excludingTaskId,
-    localizations: localizations,
-  );
 }
 
 /// Subtasks editor card inside the task editor with `auto-finish` toggle, list, and input row.

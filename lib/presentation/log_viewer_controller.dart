@@ -129,18 +129,6 @@ enum DiagnosticLogTag {
   /// Canonical uppercase subsystem token.
   final String label;
 
-  /// Maps a service-layer [LogTag] to its [DiagnosticLogTag] counterpart.
-  static DiagnosticLogTag fromLogTag(LogTag tag) {
-    return switch (tag) {
-      LogTag.lifecycle => DiagnosticLogTag.lifecycle,
-      LogTag.tdf => DiagnosticLogTag.tdf,
-      LogTag.domain => DiagnosticLogTag.domain,
-      LogTag.sync => DiagnosticLogTag.sync,
-      LogTag.storage => DiagnosticLogTag.storage,
-      LogTag.ui => DiagnosticLogTag.ui,
-    };
-  }
-
   /// Maps this [DiagnosticLogTag] back to its service-layer [LogTag].
   LogTag toLogTag() {
     return switch (this) {
@@ -384,7 +372,7 @@ class LogViewerController extends Notifier<DiagnosticLogViewModel> {
       await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
       return const LogSyncSucceeded();
     } on Object catch (error) {
-      return LogSyncFailed(error.toString());
+      return LogSyncFailed(AppLogger.sanitize(error.toString()));
     }
   }
 
