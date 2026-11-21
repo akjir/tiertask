@@ -772,9 +772,6 @@ class _TasksHeaderAndBannersSliver extends StatelessWidget {
           TaskDraftCard(
             allLabels: viewModel.allLabels,
             allLocations: viewModel.allLocations,
-            prerequisiteCandidates: _collectDraftPrerequisiteCandidates(
-              viewModel.tasks,
-            ),
             hasBothScopedAndGlobalLabels:
                 viewModel.hasBothScopedAndGlobalLabels,
             currentLocalDateTimeHint: viewModel.currentLocalDateTimeHint,
@@ -1435,39 +1432,6 @@ class _TasksViewState extends ConsumerState<TasksView> {
       ref.read(syncV2ControllerProvider.notifier).syncNow(locale: locale),
     );
   }
-}
-
-/// Derives selectable open-task prerequisite candidates for an uncommitted [TaskDraftCard].
-List<PrerequisiteCandidateViewModel> _collectDraftPrerequisiteCandidates(
-  List<TaskCardViewModel> visibleTasks,
-) {
-  if (visibleTasks.isEmpty) {
-    return const <PrerequisiteCandidateViewModel>[];
-  }
-  final byId = <String, PrerequisiteCandidateViewModel>{};
-  final firstTask = visibleTasks.first;
-  if (!firstTask.isCompleted) {
-    byId[firstTask.id] = PrerequisiteCandidateViewModel(
-      id: firstTask.id,
-      title: firstTask.title,
-      wouldCreateCycle: false,
-      isSelected: false,
-    );
-  }
-  for (final candidate in firstTask.prerequisiteCandidates) {
-    byId[candidate.id] = PrerequisiteCandidateViewModel(
-      id: candidate.id,
-      title: candidate.title,
-      wouldCreateCycle: false,
-      isSelected: false,
-    );
-  }
-  final sorted = byId.values.toList(growable: false)
-    ..sort(
-      (left, right) =>
-          left.title.toLowerCase().compareTo(right.title.toLowerCase()),
-    );
-  return sorted;
 }
 
 /// Parses a serialized [ShellTier] name safely without unchecked casts.

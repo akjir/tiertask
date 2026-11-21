@@ -1376,4 +1376,146 @@ task suslocOkD2 {
       );
     });
   });
+
+  group('Dependency cycle reverse-reachability index', () {
+    test('collectCycleCreatingPrerequisiteIds matches wouldCreateDependencyCycle across chains, diamonds, completed nodes, dangling IDs, and blank input', () {
+      final now = DateTime.utc(2026, 11, 10, 12, 0);
+      final root = TaskItem(
+        id: 'tskRoot001',
+        title: 'Root',
+        createdAt: now,
+        modifiedAt: now,
+      );
+      final leftBranch = TaskItem(
+        id: 'tskLeft001',
+        title: 'Left',
+        createdAt: now,
+        modifiedAt: now,
+        blockedByTaskIds: const <String>['tskRoot001'],
+      );
+      final rightBranch = TaskItem(
+        id: 'tskRght001',
+        title: 'Right',
+        createdAt: now,
+        modifiedAt: now,
+        blockedByTaskIds: const <String>['tskRoot001'],
+      );
+      final diamondLeaf = TaskItem(
+        id: 'tskLeaf001',
+        title: 'Diamond Leaf',
+        createdAt: now,
+        modifiedAt: now,
+        blockedByTaskIds: const <String>['tskLeft001', 'tskRght001'],
+      );
+      final unrelated = TaskItem(
+        id: 'tskFree001',
+        title: 'Unrelated',
+        createdAt: now,
+        modifiedAt: now,
+        blockedByTaskIds: const <String>['missing999'],
+      );
+      final completedChild = TaskItem(
+        id: 'tskDone001',
+        title: 'Completed Child',
+        createdAt: now,
+        modifiedAt: now,
+        completedAt: now,
+        isCompleted: true,
+        completions: 1,
+        blockedByTaskIds: const <String>['tskLeaf001'],
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          root,
+          leftBranch,
+          rightBranch,
+          diamondLeaf,
+          unrelated,
+          completedChild,
+        ],
+        queueBlock: TdfQueueBlock(
+          taskIds: const <String>[
+            'tskRoot001',
+            'tskLeft001',
+            'tskRght001',
+            'tskLeaf001',
+            'tskFree001',
+          ],
+        ),
+        evaluationTime: now,
+      );
+
+      expect(
+        TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+          taskId: '   ',
+          tasks: board.allTasks,
+        ),
+        isEmpty,
+        reason: 'Blank taskId must produce an empty cycle set',
+      );
+      expect(
+        TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+          taskId: 'missing999',
+          tasks: board.allTasks,
+        ),
+        equals(<String>{'missing999', 'tskFree001'}),
+        reason: 'Even a dangling target must include nodes blocked by it',
+      );
+
+      for (final task in board.allTasks) {
+        final cyclicIds =
+            TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+              taskId: task.id,
+              tasks: board.allTasks,
+            );
+        for (final candidate in board.allTasks) {
+          final expected = board.wouldCreateDependencyCycle(
+            task.id,
+            candidate.id,
+          );
+          expect(
+            cyclicIds.contains(candidate.id),
+            equals(expected),
+            reason:
+                'Reverse reachability for (${task.id} <- ${candidate.id}) must match wouldCreateDependencyCycle',
+          );
+        }
+      }
+    });
+
+    test(
+      'collectCycleCreatingPrerequisiteIds scales linearly on a 400-task chain',
+      () {
+        final now = DateTime.utc(2026, 11, 10, 12, 0);
+        final tasks = <TaskItem>[
+          for (var i = 0; i < 400; i++)
+            TaskItem(
+              id: 'chn${i.toString().padLeft(7, '0')}',
+              title: 'Chain $i',
+              createdAt: now,
+              modifiedAt: now,
+              blockedByTaskIds: i == 0
+                  ? const <String>[]
+                  : <String>['chn${(i - 1).toString().padLeft(7, '0')}'],
+            ),
+        ];
+        final stopwatch = Stopwatch()..start();
+        final cyclic = TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+          taskId: 'chn0000100',
+          tasks: tasks,
+        );
+        stopwatch.stop();
+
+        expect(cyclic, hasLength(300));
+        expect(cyclic, contains('chn0000100'));
+        expect(cyclic, contains('chn0000399'));
+        expect(cyclic, isNot(contains('chn0000099')));
+        expect(
+          stopwatch.elapsedMilliseconds,
+          lessThan(200),
+          reason: 'Single-pass reverse BFS over 400 tasks must finish well under 200ms',
+        );
+      },
+    );
+  });
 }

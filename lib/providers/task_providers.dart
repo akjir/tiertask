@@ -1462,12 +1462,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
 
     final existingBoard = state.asData?.value;
-    state = const AsyncLoading();
+    final epoch = _mutationEpoch;
+    if (existingBoard == null) {
+      state = const AsyncLoading();
+    }
     try {
       final board = await _runSyncWithStatus(
         config,
         candidateBoard: existingBoard,
         candidateOriginBoard: _pendingConflictOriginBoard,
+        shouldApplyState: () => epoch == _mutationEpoch,
       );
       if (!ref.mounted) {
         return;
@@ -1479,7 +1483,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
       _lastSelfWipeDigest = null;
-      state = AsyncData(board);
+      if (epoch == _mutationEpoch) {
+        if (state.asData?.value != board) {
+          state = AsyncData(board);
+        }
+      } else if (AppLogger.shouldLog(LogLevel.debug)) {
+        AppLogger.event(
+          LogLevel.debug,
+          LogTag.sync,
+          'sync.refresh.stale_epoch',
+          fields: <String, Object?>{
+            'startedEpoch': epoch,
+            'currentEpoch': _mutationEpoch,
+          },
+        );
+      }
     } on TdfSyncOutcomeException catch (error, stackTrace) {
       if (!ref.mounted) {
         return;
@@ -1491,9 +1509,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       if (!ref.mounted) {
         return;
       }
-      state = existingBoard != null
-          ? AsyncData(existingBoard)
-          : AsyncError(error, stackTrace);
+      if (epoch == _mutationEpoch) {
+        final fallbackBoard = existingBoard ?? state.asData?.value;
+        state = fallbackBoard != null
+            ? AsyncData(fallbackBoard)
+            : AsyncError(error, stackTrace);
+      }
     } on UnsupportedTdfVersionException catch (error, stackTrace) {
       if (!ref.mounted) {
         return;
@@ -1502,14 +1523,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       if (!ref.mounted) {
         return;
       }
-      state = existingBoard != null
-          ? AsyncData(existingBoard)
-          : AsyncError(error, stackTrace);
+      if (epoch == _mutationEpoch) {
+        final fallbackBoard = existingBoard ?? state.asData?.value;
+        state = fallbackBoard != null
+            ? AsyncData(fallbackBoard)
+            : AsyncError(error, stackTrace);
+      }
     } on Object catch (error, stackTrace) {
       if (!ref.mounted) {
         return;
       }
-      state = AsyncError(error, stackTrace);
+      if (epoch == _mutationEpoch && existingBoard == null && !state.hasValue) {
+        state = AsyncError(error, stackTrace);
+      }
     }
   }
 
@@ -2194,6 +2220,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TaskBoard? candidateOriginBoard,
     bool isInitialLoad = false,
     bool requireTargets = false,
+    bool Function()? shouldApplyState,
   }) async {
     final board = await TaskSyncPipeline.runSyncWithStatus(
       ref,
@@ -2206,9 +2233,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         if (!ref.mounted) {
           return;
         }
-        state = AsyncData(
-          _alignBoardWithCurrentLeadWindow(mergedBoard, config.dueLeadWindow),
+        if (shouldApplyState != null && !shouldApplyState()) {
+          return;
+        }
+        final aligned = _alignBoardWithCurrentLeadWindow(
+          mergedBoard,
+          config.dueLeadWindow,
         );
+        if (state.asData?.value != aligned) {
+          state = AsyncData(aligned);
+        }
       },
     );
     if (!ref.mounted) {

@@ -379,6 +379,27 @@ final sidebarViewModelProvider = Provider<SidebarViewModel>((ref) {
   );
 });
 
+/// Provides sorted prerequisite picker candidates for [taskId], or all open tasks when `null` for an uncommitted Task Draft Card.
+final taskPrerequisiteCandidatesProvider = Provider.autoDispose
+    .family<List<PrerequisiteCandidateViewModel>, String?>((ref, taskId) {
+      final board =
+          ref.watch(
+            taskNotifierProvider.select(
+              (boardAsync) => boardAsync.asData?.value,
+            ),
+          ) ??
+          TaskBoard.empty();
+      final allTasks = board.allTasks;
+      if (taskId == null) {
+        return _buildDraftPrerequisiteCandidates(allTasks);
+      }
+      final task = board.findTask(taskId);
+      if (task == null || task.isCompleted) {
+        return const <PrerequisiteCandidateViewModel>[];
+      }
+      return _buildTaskPrerequisiteCandidates(allTasks, task);
+    });
+
 /// Provides the model-free Tasks and Global Search projection for `lib/ui_v2/`.
 final tasksViewModelProvider = Provider<TasksViewModel>((ref) {
   final locale = ref.watch(appLocaleProvider);
@@ -403,12 +424,26 @@ final tasksViewModelProvider = Provider<TasksViewModel>((ref) {
   final fileReadDismissed = ref.watch(
     appShellControllerProvider.select((shell) => shell.fileReadBannerDismissed),
   );
-  final activeView = ref.watch(
-    appShellControllerProvider.select((shell) => shell.view),
+  final bannerSuppressionView = ref.watch(
+    appShellControllerProvider.select(
+      (shell) =>
+          shell.view == ShellView.conflict || shell.view == ShellView.recovery
+          ? shell.view
+          : ShellView.tasks,
+    ),
   );
 
   final evaluatedAsync = ref.watch(evaluatedBoardProvider(activeLabelId));
-  final syncState = ref.watch(syncStateProvider);
+  final syncBannerState = ref.watch(
+    syncStateProvider.select(
+      (state) => (
+        hasOpenConflict: state.hasOpenConflict,
+        syncOutcome: state.syncOutcome,
+        fileReadReport: state.fileReadReport,
+        errorMessage: state.errorMessage,
+      ),
+    ),
+  );
   final config = ref.watch(
     webDavConfigProvider.select(
       (asyncConfig) => asyncConfig.asData?.value ?? const WebDavConfig(),
@@ -440,8 +475,11 @@ final tasksViewModelProvider = Provider<TasksViewModel>((ref) {
 
   final banners = _buildStatusBanners(
     config: config,
-    syncState: syncState,
-    activeView: activeView,
+    hasOpenConflict: syncBannerState.hasOpenConflict,
+    syncOutcome: syncBannerState.syncOutcome,
+    fileReadReport: syncBannerState.fileReadReport,
+    errorMessage: syncBannerState.errorMessage,
+    activeView: bannerSuppressionView,
     syncErrorDismissed: syncErrorDismissed,
     fileReadDismissed: fileReadDismissed,
     fullScreenError: fullScreenError != null,
@@ -457,7 +495,6 @@ final tasksViewModelProvider = Provider<TasksViewModel>((ref) {
   final taskCards = <TaskCardViewModel>[
     for (final entry in taskPairs)
       _buildTaskCardViewModel(
-        board: board,
         task: entry.task,
         tier: entry.tier,
         isSearchMode: searchOpen,
@@ -1877,7 +1914,6 @@ class TaskCardViewModel {
     required this.suspendedNote,
     required Iterable<PrerequisiteItemViewModel> prerequisites,
     required this.prerequisitesProgressLabel,
-    required Iterable<PrerequisiteCandidateViewModel> prerequisiteCandidates,
     required this.hasConditions,
     required this.conditionsSatisfied,
     required this.conditionsStatusLabel,
@@ -1897,10 +1933,6 @@ class TaskCardViewModel {
        prerequisites = List<PrerequisiteItemViewModel>.unmodifiable(
          prerequisites,
        ),
-       prerequisiteCandidates =
-           List<PrerequisiteCandidateViewModel>.unmodifiable(
-             prerequisiteCandidates,
-           ),
        conditionsSummary = List<ConditionSummaryChipViewModel>.unmodifiable(
          conditionsSummary,
        ),
@@ -1986,9 +2018,6 @@ class TaskCardViewModel {
 
   /// Current placement mode (`queue`, `priority`, or `someday`).
   final TaskPlacementOption placement;
-
-  /// Candidate tasks available in the inline Prerequisite picker.
-  final List<PrerequisiteCandidateViewModel> prerequisiteCandidates;
 
   /// Assigned prerequisite dependencies.
   final List<PrerequisiteItemViewModel> prerequisites;
@@ -2098,7 +2127,6 @@ class TaskCardViewModel {
         other.suspendedNote == suspendedNote &&
         listEquals(other.prerequisites, prerequisites) &&
         other.prerequisitesProgressLabel == prerequisitesProgressLabel &&
-        listEquals(other.prerequisiteCandidates, prerequisiteCandidates) &&
         other.hasConditions == hasConditions &&
         other.conditionsSatisfied == conditionsSatisfied &&
         other.conditionsStatusLabel == conditionsStatusLabel &&
@@ -2150,7 +2178,6 @@ class TaskCardViewModel {
     suspendedNote,
     Object.hashAll(prerequisites),
     prerequisitesProgressLabel,
-    Object.hashAll(prerequisiteCandidates),
     hasConditions,
     conditionsSatisfied,
     conditionsStatusLabel,
@@ -2629,7 +2656,10 @@ RawTdfViewModel _buildRawTdfSuccess(
 /// Builds the ordered operational status banners for Tasks view (`U-UX-007`).
 List<ShellBannerViewModel> _buildStatusBanners({
   required WebDavConfig config,
-  required SyncState syncState,
+  required bool hasOpenConflict,
+  required TdfSyncOutcomeException? syncOutcome,
+  required StorageFileReadReport? fileReadReport,
+  required String? errorMessage,
   required ShellView activeView,
   required bool syncErrorDismissed,
   required bool fileReadDismissed,
@@ -2651,18 +2681,15 @@ List<ShellBannerViewModel> _buildStatusBanners({
       ),
     );
   }
-  final outcome = syncState.syncOutcome;
-  if (syncState.hasOpenConflict && outcome != null) {
-    switch (outcome.kind) {
+  if (hasOpenConflict && syncOutcome != null) {
+    switch (syncOutcome.kind) {
       case TdfSyncOutcomeKind.deletionConflict:
         if (activeView != ShellView.conflict) {
           banners.add(
             ShellBannerViewModel(
               kind: ShellBannerKind.deletionConflict,
               tone: BannerTone.warning,
-              message:
-                  syncState.errorMessage ??
-                  localizations.syncConflictDeletionBanner,
+              message: errorMessage ?? localizations.syncConflictDeletionBanner,
               dismissible: false,
               primaryActionLabel: localizations.actionResolveConflict,
             ),
@@ -2674,9 +2701,7 @@ List<ShellBannerViewModel> _buildStatusBanners({
             ShellBannerViewModel(
               kind: ShellBannerKind.recoveryRequired,
               tone: BannerTone.warning,
-              message:
-                  syncState.errorMessage ??
-                  localizations.syncConflictRecoveryBanner,
+              message: errorMessage ?? localizations.syncConflictRecoveryBanner,
               dismissible: false,
               primaryActionLabel: localizations.actionResolveRecovery,
             ),
@@ -2689,7 +2714,7 @@ List<ShellBannerViewModel> _buildStatusBanners({
               kind: ShellBannerKind.syncError,
               tone: BannerTone.danger,
               message:
-                  syncState.errorMessage ??
+                  errorMessage ??
                   localizations.syncErrorGenerationRollbackBanner,
               dismissible: true,
               primaryActionLabel: localizations.actionRetry,
@@ -2698,7 +2723,7 @@ List<ShellBannerViewModel> _buildStatusBanners({
           );
         }
     }
-  } else if (syncState.fileReadReport case final report?) {
+  } else if (fileReadReport case final report?) {
     if (!fileReadDismissed && report.hasFailure) {
       final scope = report.failureScope;
       banners.add(
@@ -2718,13 +2743,13 @@ List<ShellBannerViewModel> _buildStatusBanners({
         ),
       );
     }
-  } else if (syncState.errorMessage case final errorMessage?) {
-    if (!syncErrorDismissed && errorMessage.isNotEmpty) {
+  } else if (errorMessage case final currentErrorMessage?) {
+    if (!syncErrorDismissed && currentErrorMessage.isNotEmpty) {
       banners.add(
         ShellBannerViewModel(
           kind: ShellBannerKind.syncError,
           tone: BannerTone.danger,
-          message: errorMessage,
+          message: currentErrorMessage,
           dismissible: true,
           primaryActionLabel: localizations.actionRetry,
           secondaryActionLabel: localizations.actionSettings,
@@ -2737,7 +2762,6 @@ List<ShellBannerViewModel> _buildStatusBanners({
 
 /// Builds a single [TaskCardViewModel] enforcing `U-CARD-001`..`005`.
 TaskCardViewModel _buildTaskCardViewModel({
-  required TaskBoard board,
   required TaskItem task,
   required ShellTier tier,
   required bool isSearchMode,
@@ -2894,7 +2918,6 @@ TaskCardViewModel _buildTaskCardViewModel({
       ),
   ];
 
-  final candidates = _buildPrerequisiteCandidates(board, task);
   final conditionSummary = _buildConditionSummaryChips(
     ownRules: task.conditions,
     inheritedRules: inheritedConditions,
@@ -2988,7 +3011,6 @@ TaskCardViewModel _buildTaskCardViewModel({
             '$satisfiedPrereqCount',
             '${prereqItems.length}',
           ),
-    prerequisiteCandidates: candidates,
     hasConditions: hasConditions,
     conditionsSatisfied: conditionsSatisfied,
     conditionsStatusLabel: conditionsSatisfied
@@ -3024,14 +3046,40 @@ CardBadgeViewModel _buildDueBadge({
   );
 }
 
-/// Builds prerequisite picker candidates excluding self and non-selected completed tasks, tagging cycles.
-List<PrerequisiteCandidateViewModel> _buildPrerequisiteCandidates(
-  TaskBoard board,
+/// Builds sorted open-task prerequisite picker candidates for an uncommitted Task Draft Card.
+List<PrerequisiteCandidateViewModel> _buildDraftPrerequisiteCandidates(
+  List<TaskItem> allTasks,
+) {
+  final candidates = <PrerequisiteCandidateViewModel>[];
+  for (final other in allTasks) {
+    if (other.isCompleted) {
+      continue;
+    }
+    candidates.add(
+      PrerequisiteCandidateViewModel(
+        id: other.id,
+        title: other.title,
+        wouldCreateCycle: false,
+        isSelected: false,
+      ),
+    );
+  }
+  candidates.sort(_comparePrerequisiteCandidatesByTitle);
+  return List<PrerequisiteCandidateViewModel>.unmodifiable(candidates);
+}
+
+/// Builds sorted prerequisite picker candidates for [task], tagging cycle-creating candidates in a single $O(N + E)$ pass.
+List<PrerequisiteCandidateViewModel> _buildTaskPrerequisiteCandidates(
+  List<TaskItem> allTasks,
   TaskItem task,
 ) {
   final selectedIds = task.blockedByTaskIds.toSet();
+  final cyclicIds = TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+    taskId: task.id,
+    tasks: allTasks,
+  );
   final candidates = <PrerequisiteCandidateViewModel>[];
-  for (final other in board.allTasks) {
+  for (final other in allTasks) {
     if (other.id == task.id) {
       continue;
     }
@@ -3039,8 +3087,7 @@ List<PrerequisiteCandidateViewModel> _buildPrerequisiteCandidates(
     if (other.isCompleted && !isSelected) {
       continue;
     }
-    final wouldCycle =
-        !isSelected && board.wouldCreateDependencyCycle(task.id, other.id);
+    final wouldCycle = !isSelected && cyclicIds.contains(other.id);
     candidates.add(
       PrerequisiteCandidateViewModel(
         id: other.id,
@@ -3050,12 +3097,15 @@ List<PrerequisiteCandidateViewModel> _buildPrerequisiteCandidates(
       ),
     );
   }
-  candidates.sort(
-    (left, right) =>
-        left.title.toLowerCase().compareTo(right.title.toLowerCase()),
-  );
-  return candidates;
+  candidates.sort(_comparePrerequisiteCandidatesByTitle);
+  return List<PrerequisiteCandidateViewModel>.unmodifiable(candidates);
 }
+
+/// Compares two [PrerequisiteCandidateViewModel] items case-insensitively by title.
+int _comparePrerequisiteCandidatesByTitle(
+  PrerequisiteCandidateViewModel left,
+  PrerequisiteCandidateViewModel right,
+) => left.title.toLowerCase().compareTo(right.title.toLowerCase());
 
 /// Resolves assigned prerequisite display items and completion satisfaction.
 List<PrerequisiteItemViewModel> _buildPrerequisiteItems(

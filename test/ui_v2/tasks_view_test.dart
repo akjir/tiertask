@@ -1527,5 +1527,106 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'TaskDraftCard lists open tasks from other tiers when Focus is empty and inline Prerequisites editor tags cycles via lazy provider',
+      (tester) async {
+        _setViewport(tester, const Size(1280.0, 900.0));
+        final somedayTask = TaskItem(
+          id: 'tskSome001',
+          title: 'Someday Prerequisite',
+          createdAt: _fixedNowUtc,
+          modifiedAt: _fixedNowUtc,
+        );
+        final rootTask = TaskItem(
+          id: 'tskRoot001',
+          title: 'Root Task',
+          createdAt: _fixedNowUtc,
+          modifiedAt: _fixedNowUtc,
+        );
+        final dependentTask = TaskItem(
+          id: 'tskDep0001',
+          title: 'Dependent Task',
+          createdAt: _fixedNowUtc,
+          modifiedAt: _fixedNowUtc,
+          blockedByTaskIds: const <String>['tskRoot001'],
+        );
+
+        // 1. Focus tier is empty (only Someday has an open task); Draft Card must still list Someday task as candidate.
+        final emptyFocusBoard = _buildBoard(
+          tasks: <TaskItem>[somedayTask],
+          queueIds: const <String>[],
+        );
+        final container = await pumpV2Widget(
+          tester,
+          const _TasksHarness(),
+          board: emptyFocusBoard,
+        );
+        expect(find.text('Someday Prerequisite'), findsNothing);
+
+        container
+            .read(appShellControllerProvider.notifier)
+            .openDraft(EntityDraftKind.task);
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('draft_add_prerequisites_chip')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Someday Prerequisite'),
+          findsOneWidget,
+          reason: 'Draft Card prerequisite picker must list open tasks from all tiers even when Focus is empty',
+        );
+
+        // 2. Existing task prerequisites editor loads cycle-tagged candidates lazily.
+        final depBoard = _buildBoard(
+          tasks: <TaskItem>[rootTask, dependentTask],
+          queueIds: const <String>['tskRoot001', 'tskDep0001'],
+        );
+        final depContainer = await pumpV2Widget(
+          tester,
+          const _TasksHarness(),
+          board: depBoard,
+        );
+        depContainer
+            .read(appShellControllerProvider.notifier)
+            .expandEntity(
+              const EntityRef(kind: EntityKind.task, id: 'tskRoot001'),
+            );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('task_add_prerequisites_tskRoot001'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final picker = tester.widget<UiSearchablePicker<String>>(
+          find.descendant(
+            of: find.byKey(
+              const ValueKey<String>('task_prerequisites_edit_card'),
+            ),
+            matching: find.byType(UiSearchablePicker<String>),
+          ),
+        );
+        expect(
+          picker.options.map((option) => option.id).toList(),
+          equals(<String>['tskDep0001']),
+          reason: 'Inline prerequisites editor must list candidate tasks from taskPrerequisiteCandidatesProvider',
+        );
+        expect(
+          picker.options.single.enabled,
+          isFalse,
+          reason: 'Cycle-creating candidate must be disabled inside inline prerequisites editor',
+        );
+        expect(
+          picker.options.single.disabledHint,
+          isNotNull,
+          reason:
+              'Cycle-creating candidate must expose its localized cycle hint',
+        );
+      },
+    );
   });
 }

@@ -60,7 +60,6 @@ class TaskDraftCard extends ConsumerStatefulWidget {
     required this.allLocations,
     required this.hasBothScopedAndGlobalLabels,
     required this.currentLocalDateTimeHint,
-    this.prerequisiteCandidates = const <PrerequisiteCandidateViewModel>[],
   });
 
   /// Workspace labels available in the searchable label picker.
@@ -74,9 +73,6 @@ class TaskDraftCard extends ConsumerStatefulWidget {
 
   /// Whether workspace contains both scoped and global labels.
   final bool hasBothScopedAndGlobalLabels;
-
-  /// Open tasks selectable as prerequisite dependencies on the new task.
-  final List<PrerequisiteCandidateViewModel> prerequisiteCandidates;
 
   @override
   ConsumerState<TaskDraftCard> createState() => _TaskDraftCardState();
@@ -2451,6 +2447,10 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       taskV2ControllerProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
+    final prerequisiteCandidates =
+        _openSections.contains(TaskSectionKind.prerequisites)
+        ? ref.watch(taskPrerequisiteCandidatesProvider(null))
+        : const <PrerequisiteCandidateViewModel>[];
 
     return UiCard.draft(
       key: const ValueKey<String>('task_draft_card'),
@@ -2469,7 +2469,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         placement: _placement,
         allLabels: widget.allLabels,
         allLocations: widget.allLocations,
-        prerequisiteCandidates: widget.prerequisiteCandidates,
+        prerequisiteCandidates: prerequisiteCandidates,
         hasBothScopedAndGlobalLabels: widget.hasBothScopedAndGlobalLabels,
         currentLocalDateTimeHint: widget.currentLocalDateTimeHint,
         selectedLabelIds: _selectedLabelIds,
@@ -4767,8 +4767,11 @@ class _TaskPrerequisitesSectionState
             );
     }
 
+    final candidates = ref.watch(
+      taskPrerequisiteCandidatesProvider(widget.task.id),
+    );
     return _TaskPrerequisitesEditCard(
-      candidates: widget.task.prerequisiteCandidates,
+      candidates: candidates,
       selectedIds: _selectedIds,
       hasExistingPrerequisites: widget.task.prerequisites.isNotEmpty,
       errorText: _errorText,

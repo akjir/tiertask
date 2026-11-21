@@ -366,5 +366,265 @@ void main() {
       expect(rawVm.byteCount, greaterThan(0));
       expect(rawVm.lineCount, greaterThan(0));
     });
+
+    test('taskPrerequisiteCandidatesProvider computes sorted draft and task candidates with cross-label cycle detection', () async {
+      const workLabel = TdfLabel(
+        id: 'lblWork001',
+        name: 'Work',
+        color: '#2196F3',
+      );
+      final rootTask = TaskItem(
+        id: 'tskRoot001',
+        title: 'Beta Root',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        labelIds: const <String>['lblWork001'],
+      );
+      final unlabeledBridge = TaskItem(
+        id: 'tskMid0001',
+        title: 'Alpha Bridge',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        blockedByTaskIds: const <String>['tskRoot001'],
+      );
+      final leafTask = TaskItem(
+        id: 'tskLeaf001',
+        title: 'Gamma Leaf',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        labelIds: const <String>['lblWork001'],
+        blockedByTaskIds: const <String>['tskMid0001'],
+      );
+      final freeTask = TaskItem(
+        id: 'tskFree001',
+        title: 'Delta Free',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+      );
+      final completedSelected = TaskItem(
+        id: 'tskDoneSel',
+        title: 'Completed Selected',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        completedAt: fixedNow,
+        isCompleted: true,
+        completions: 1,
+      );
+      final completedUnselected = TaskItem(
+        id: 'tskDoneIgn',
+        title: 'Completed Ignored',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        completedAt: fixedNow,
+        isCompleted: true,
+        completions: 1,
+      );
+      final taskWithCompletedDep = TaskItem(
+        id: 'tskHasDone',
+        title: 'Epsilon Dependent',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+        blockedByTaskIds: const <String>['tskDoneSel'],
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          rootTask,
+          unlabeledBridge,
+          leafTask,
+          freeTask,
+          completedSelected,
+          completedUnselected,
+          taskWithCompletedDep,
+        ],
+        labels: const <TdfLabel>[workLabel],
+        queueBlock: TdfQueueBlock(
+          taskIds: const <String>[
+            'tskRoot001',
+            'tskMid0001',
+            'tskLeaf001',
+            'tskFree001',
+            'tskHasDone',
+          ],
+        ),
+        evaluationTime: fixedNow,
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(webDavConfigProvider.future);
+      await container.read(taskNotifierProvider.future);
+
+      // Filter the shell by Work label; cross-label bridge must still be visible and cycle-checked.
+      container
+          .read(appShellControllerProvider.notifier)
+          .selectLabelFilter('lblWork001');
+
+      final rootCandidates = container.read(
+        taskPrerequisiteCandidatesProvider('tskRoot001'),
+      );
+      expect(
+        rootCandidates.map((candidate) => candidate.id).toList(),
+        equals(<String>[
+          'tskMid0001',
+          'tskFree001',
+          'tskHasDone',
+          'tskLeaf001',
+        ]),
+        reason: 'Open candidates must be sorted alphabetically by title and exclude self and unselected completed tasks',
+      );
+      expect(
+        rootCandidates
+            .where((candidate) => candidate.wouldCreateCycle)
+            .map((candidate) => candidate.id)
+            .toSet(),
+        equals(<String>{'tskMid0001', 'tskLeaf001'}),
+        reason: 'Transitive cycle through unlabeled bridge must be flagged even when activeLabelId filters the view',
+      );
+
+      final selectedCompletedCandidates = container.read(
+        taskPrerequisiteCandidatesProvider('tskHasDone'),
+      );
+      expect(
+        selectedCompletedCandidates.any(
+          (candidate) => candidate.id == 'tskDoneSel' && candidate.isSelected,
+        ),
+        isTrue,
+        reason: 'Already-selected completed prerequisite must remain visible for removal',
+      );
+      expect(
+        selectedCompletedCandidates.any(
+          (candidate) => candidate.id == 'tskDoneIgn',
+        ),
+        isFalse,
+        reason: 'Unselected completed tasks must be excluded',
+      );
+
+      final draftCandidates = container.read(
+        taskPrerequisiteCandidatesProvider(null),
+      );
+      expect(
+        draftCandidates.map((candidate) => candidate.id).toList(),
+        equals(<String>[
+          'tskMid0001',
+          'tskRoot001',
+          'tskFree001',
+          'tskHasDone',
+          'tskLeaf001',
+        ]),
+        reason: 'Draft candidates must include all open tasks across tiers sorted by title',
+      );
+      expect(
+        draftCandidates.every(
+          (candidate) => !candidate.wouldCreateCycle && !candidate.isSelected,
+        ),
+        isTrue,
+      );
+
+      expect(
+        container.read(taskPrerequisiteCandidatesProvider('tskDoneSel')),
+        isEmpty,
+        reason: 'Completed tasks cannot edit prerequisites',
+      );
+      expect(
+        container.read(taskPrerequisiteCandidatesProvider('unknown999')),
+        isEmpty,
+        reason: 'Unknown task IDs must yield no prerequisite candidates',
+      );
+    });
+
+    test('tasksViewModelProvider ignores non-banner sync churn and non-conflict view changes and scales linearly in Global Search', () async {
+      final tasks = <TaskItem>[
+        for (var i = 0; i < 400; i++)
+          TaskItem(
+            id: 'prf${i.toString().padLeft(7, '0')}',
+            title: 'Task $i',
+            createdAt: fixedNow,
+            modifiedAt: fixedNow,
+            isCompleted: i >= 320,
+            completedAt: i >= 320 ? fixedNow : null,
+            completions: i >= 320 ? 1 : 0,
+            blockedByTaskIds: i > 0 && i < 20
+                ? <String>['prf${(i - 1).toString().padLeft(7, '0')}']
+                : const <String>[],
+          ),
+      ];
+      final board = TaskBoard.evaluate(
+        tasks: tasks,
+        queueBlock: TdfQueueBlock(
+          taskIds: <String>[
+            for (var i = 0; i < 320; i++) 'prf${i.toString().padLeft(7, '0')}',
+          ],
+        ),
+        evaluationTime: fixedNow,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(webDavConfigProvider.future);
+      await container.read(taskNotifierProvider.future);
+
+      var rebuildCount = 0;
+      final subscription = container.listen<TasksViewModel>(
+        tasksViewModelProvider,
+        (_, _) => rebuildCount++,
+        fireImmediately: false,
+      );
+      addTearDown(subscription.close);
+
+      // Opening Global Search on 400 tasks must finish quickly without cubic candidate builds.
+      final shell = container.read(appShellControllerProvider.notifier);
+      final stopwatch = Stopwatch()..start();
+      shell.openSearch();
+      final searchVm = container.read(tasksViewModelProvider);
+      stopwatch.stop();
+
+      expect(searchVm.tasks, hasLength(400));
+      expect(
+        stopwatch.elapsedMilliseconds,
+        lessThan(500),
+        reason: 'Opening Global Search across 400 tasks must scale linearly instead of O(N^3)',
+      );
+
+      final rebuildsAfterSearch = rebuildCount;
+
+      // Toggling isSyncing and updating lastSyncedAt without banner changes must not rebuild tasksViewModelProvider.
+      final syncNotifier = container.read(syncStateProvider.notifier);
+      syncNotifier.setSyncing();
+      syncNotifier.setSuccess(fixedNow.add(const Duration(seconds: 5)));
+      expect(
+        rebuildCount,
+        equals(rebuildsAfterSearch),
+        reason: 'Clean sync isSyncing/lastSyncedAt updates must not recompute tasksViewModelProvider',
+      );
+
+      // Switching between Tasks, Settings, and Labels must not recompute tasksViewModelProvider.
+      shell.openView(ShellView.settings);
+      shell.openView(ShellView.labels);
+      shell.openView(ShellView.tasks);
+      expect(
+        rebuildCount,
+        equals(rebuildsAfterSearch),
+        reason: 'Opening Settings or Labels must not recompute tasksViewModelProvider',
+      );
+    });
   });
 }

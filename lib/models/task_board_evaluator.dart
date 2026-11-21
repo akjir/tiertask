@@ -278,6 +278,33 @@ class TaskBoardEvaluator {
     );
   }
 
+  /// Collects all task IDs in [tasks] whose selection as a prerequisite of [taskId] would create a dependency cycle in a single $O(N + E)$ reverse-BFS pass.
+  static Set<String> collectCycleCreatingPrerequisiteIds({
+    required String taskId,
+    required Iterable<TaskItem> tasks,
+  }) {
+    final targetId = taskId.trim();
+    if (targetId.isEmpty) {
+      return const <String>{};
+    }
+    final dependentsByBlocker = <String, List<String>>{};
+    for (final task in tasks) {
+      _indexReverseDependencies(task, dependentsByBlocker);
+    }
+    final visited = <String>{targetId};
+    final frontier = <String>[targetId];
+    var cursor = 0;
+    while (cursor < frontier.length) {
+      final currentId = frontier[cursor++];
+      _enqueueUnvisitedDependents(
+        dependentsByBlocker[currentId],
+        visited,
+        frontier,
+      );
+    }
+    return visited;
+  }
+
   /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC.md` Section 5.
   static NormalizedTierSlices evaluate({
     required Iterable<TaskItem> tasks,
@@ -975,6 +1002,22 @@ class TaskBoardEvaluator {
     );
   }
 
+  /// Appends any unvisited task IDs in [dependents] into [visited] and [frontier].
+  static void _enqueueUnvisitedDependents(
+    List<String>? dependents,
+    Set<String> visited,
+    List<String> frontier,
+  ) {
+    if (dependents == null) {
+      return;
+    }
+    for (final dependentId in dependents) {
+      if (visited.add(dependentId)) {
+        frontier.add(dependentId);
+      }
+    }
+  }
+
   /// Evaluates all rules belonging to [group] within [rules] using intra-group `OR` short-circuiting (`TDF-EVAL-003`, `TDF-CTX-001`).
   static bool _evaluateGroupRules(
     List<TaskCondition> rules,
@@ -1133,6 +1176,19 @@ class TaskBoardEvaluator {
     }
     for (final locationId in effectiveLocationIds) {
       counts[locationId] = (counts[locationId] ?? 0) + 1;
+    }
+  }
+
+  /// Records reverse dependency edges (`blockerId -> task.id`) for [task] inside [dependentsByBlocker].
+  static void _indexReverseDependencies(
+    TaskItem task,
+    Map<String, List<String>> dependentsByBlocker,
+  ) {
+    if (task.blockedByTaskIds.isEmpty) {
+      return;
+    }
+    for (final blockerId in task.blockedByTaskIds) {
+      (dependentsByBlocker[blockerId] ??= <String>[]).add(task.id);
     }
   }
 

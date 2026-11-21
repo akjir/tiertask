@@ -17,6 +17,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_board.dart';
+import '../../models/task_board_evaluator.dart';
 import '../../models/task_item.dart';
 import '../../models/task_tier.dart';
 import '../app_theme.dart';
@@ -197,10 +198,13 @@ class TaskEditorBoardHelper {
     if (currentTask == null) {
       return const <String>{};
     }
+    final cyclicIds = TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+      taskId: currentTask.id,
+      tasks: board.allTasks,
+    );
     return <String>{
       for (final candidate in candidates)
-        if (board.wouldCreateDependencyCycle(currentTask.id, candidate.id))
-          candidate.id,
+        if (cyclicIds.contains(candidate.id)) candidate.id,
     };
   }
 

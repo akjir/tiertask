@@ -3376,6 +3376,161 @@ void main() {
         reason: 'Disposing ProviderContainer mid-flight during _runExternalWatchSynchronize must not throw StateError',
       );
     });
+
+    test('syncFromRemote preserves AsyncData while in flight, yields to mid-flight optimistic mutations, and retains loaded board on transient WebDAV errors', () async {
+      const initialRemoteTdf =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-14 14:00:00\n'
+          '    task initTask01\n'
+          '}\n\n'
+          'task initTask01 {\n'
+          '    name     "Initial Remote Task"\n'
+          '    created  2026-11-14 14:00:00\n'
+          '    modified 2026-11-14 14:00:00\n'
+          '}\n';
+      var remoteContent = initialRemoteTdf;
+      var remoteEtag = '"v1"';
+      Completer<void>? remoteGetGate;
+      Completer<void>? remoteGetEntered;
+      var failNextRemoteGet = false;
+      var currentTime = DateTime.utc(2026, 11, 14, 14, 0);
+
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        if (request.method == 'GET') {
+          remoteGetEntered?.complete();
+          remoteGetEntered = null;
+          if (remoteGetGate case final gate?) {
+            await gate.future;
+          }
+          if (failNextRemoteGet) {
+            failNextRemoteGet = false;
+            request.response.statusCode = HttpStatus.serviceUnavailable;
+            await request.response.close();
+            return;
+          }
+          final ifNoneMatch = request.headers.value(
+            HttpHeaders.ifNoneMatchHeader,
+          );
+          if (ifNoneMatch == remoteEtag) {
+            request.response
+              ..statusCode = HttpStatus.notModified
+              ..headers.set(HttpHeaders.etagHeader, remoteEtag);
+            await request.response.close();
+            return;
+          }
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..headers.set(HttpHeaders.etagHeader, remoteEtag)
+            ..write(remoteContent);
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'PUT') {
+          remoteContent = await utf8.decoder.bind(request).join();
+          remoteEtag = '"v${DateTime.now().microsecondsSinceEpoch}"';
+          request.response
+            ..statusCode = HttpStatus.noContent
+            ..headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      });
+
+      final config = WebDavConfig(
+        serverUrl: 'http://127.0.0.1:${server.port}',
+        username: 'example-user',
+        password: 'example-password',
+        filePath: 'tasks.tdf',
+        storageMode: StorageMode.webdav,
+        language: AppLanguage.english,
+      );
+      final container = ProviderContainer(
+        retry: disableProviderRetry,
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          clockProvider.overrideWithValue(() => currentTime),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final loadedBoard = await container.read(taskNotifierProvider.future);
+      expect(loadedBoard.findTask('initTask01')?.title, 'Initial Remote Task');
+
+      // 1. Start manual refresh while remote GET suspends: board must stay in AsyncData (no loading-screen wipe).
+      final enteredGate = Completer<void>();
+      remoteGetEntered = enteredGate;
+      remoteGetGate = Completer<void>();
+      final notifier = container.read(taskNotifierProvider.notifier);
+      final firstSyncFuture = notifier.syncFromRemote();
+      await enteredGate.future;
+
+      final midFlightState = container.read(taskNotifierProvider);
+      expect(
+        midFlightState,
+        isA<AsyncData<TaskBoard>>(),
+        reason: 'Manual syncFromRemote on a loaded board must preserve AsyncData instead of wiping to AsyncLoading',
+      );
+      expect(midFlightState.isLoading, isFalse);
+      expect(midFlightState.asData?.value.findTask('initTask01'), isNotNull);
+      expect(container.read(syncStateProvider).isSyncing, isTrue);
+
+      // 2. User adds a task optimistically while syncFromRemote is still suspended in flight.
+      currentTime = DateTime.utc(2026, 11, 14, 14, 1);
+      final addFuture = notifier.addTask('Optimistic During Refresh');
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .asData
+            ?.value
+            .allTasks
+            .any((task) => task.title == 'Optimistic During Refresh'),
+        isTrue,
+        reason: 'Optimistic local mutation must appear immediately even while syncFromRemote is in flight',
+      );
+
+      // Release in-flight refresh; it must NOT clobber the optimistic state, and queued pushToRemote must converge both.
+      remoteGetGate.complete();
+      remoteGetGate = null;
+      await firstSyncFuture;
+      expect(
+        container
+            .read(taskNotifierProvider)
+            .asData
+            ?.value
+            .allTasks
+            .any((task) => task.title == 'Optimistic During Refresh'),
+        isTrue,
+        reason: 'Completing stale syncFromRemote must not overwrite a newer optimistic mutation epoch',
+      );
+      await addFuture;
+      expect(remoteContent, contains('Optimistic During Refresh'));
+      expect(remoteContent, contains('Initial Remote Task'));
+
+      // 3. Transient WebDAV 503 during manual refresh on a loaded board must preserve AsyncData and surface syncStateProvider error.
+      failNextRemoteGet = true;
+      currentTime = DateTime.utc(2026, 11, 14, 14, 2);
+      await notifier.syncFromRemote();
+      final afterErrorState = container.read(taskNotifierProvider);
+      expect(
+        afterErrorState,
+        isA<AsyncData<TaskBoard>>(),
+        reason: 'Transient WebDAV error during refresh must preserve loaded TaskBoard in AsyncData',
+      );
+      expect(
+        afterErrorState.asData?.value.allTasks.any(
+          (task) => task.title == 'Optimistic During Refresh',
+        ),
+        isTrue,
+      );
+      expect(container.read(syncStateProvider).errorMessage, isNotNull);
+    });
   });
 }
 
