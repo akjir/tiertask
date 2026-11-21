@@ -16,6 +16,8 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   intl: any
   material_ui: ^1.11.1
+  tiertask_ui:
+    path: packages/tiertask_ui
 
 dev_dependencies:
   flutter_test:

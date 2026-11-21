@@ -1594,4 +1594,614 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsResetAfterQuarantineNotice =>
       'Corrupt settings were backed up and reset to defaults.';
+
+  @override
+  String get themePaletteCalm => 'Calm';
+
+  @override
+  String get themePalettePlumUmber => 'Plum Umber';
+
+  @override
+  String get devBuildBadge => 'DEV';
+
+  @override
+  String get tierFocusSubtitle => 'Three active tasks. One clear next step.';
+
+  @override
+  String get tierReadySubtitle =>
+      'Up to five tasks queued to pull into Focus next.';
+
+  @override
+  String get tierPlannedSubtitle =>
+      'Active backlog feeding Ready automatically.';
+
+  @override
+  String get tierBlockedSubtitle =>
+      'Suspended or waiting on prerequisites and activation conditions.';
+
+  @override
+  String get tierSomedaySubtitle => 'Collected outside the active queue.';
+
+  @override
+  String get tierCompletedSubtitle =>
+      'Completed tasks are retained for 30 days (UTC).';
+
+  @override
+  String get sectionTasksTitle => 'Tasks';
+
+  @override
+  String get sectionToolsTitle => 'Tools';
+
+  @override
+  String get allTasksLabel => 'All Tasks';
+
+  @override
+  String get activeFilterLabel => 'Active filter';
+
+  @override
+  String get activeFilterClearTooltip => 'Clear filter (All Tasks)';
+
+  @override
+  String get actionBackToTasks => 'Back to tasks';
+
+  @override
+  String get actionBackToSearch => 'Back to search';
+
+  @override
+  String get actionDismiss => 'Dismiss';
+
+  @override
+  String get actionResolveConflict => 'Resolve conflict';
+
+  @override
+  String get actionResolveRecovery => 'Open recovery';
+
+  @override
+  String get actionComplete => 'Complete';
+
+  @override
+  String get actionRestore => 'Restore';
+
+  @override
+  String get actionCopy => 'Copy';
+
+  @override
+  String get searchViewTitle => 'All Tasks';
+
+  @override
+  String get searchViewSubtitle =>
+      'Searching across all six tiers in the active context.';
+
+  @override
+  String get searchEmptyHint => 'No matching tasks found.';
+
+  @override
+  String get searchCloseTooltip => 'Close search';
+
+  @override
+  String get loadingBoardTitle => 'Loading workspace...';
+
+  @override
+  String get loadingBoardSubtitle =>
+      'Reading TDF document and evaluating six tiers.';
+
+  @override
+  String get sidebarFilterLabelsPlaceholder => 'Filter labels...';
+
+  @override
+  String get sidebarFilterLabelsEmpty => 'No matching labels.';
+
+  @override
+  String get sidebarFilterLabelsToggle => 'Filter labels';
+
+  @override
+  String get sidebarManageLabels => 'Manage labels';
+
+  @override
+  String get sidebarCollapseLabels => 'Collapse labels';
+
+  @override
+  String get sidebarExpandLabels => 'Expand labels';
+
+  @override
+  String get sidebarFilterLocationsPlaceholder => 'Filter locations...';
+
+  @override
+  String get sidebarFilterLocationsEmpty => 'No matching locations.';
+
+  @override
+  String get sidebarFilterLocationsToggle => 'Filter locations';
+
+  @override
+  String get sidebarManageLocations => 'Manage locations';
+
+  @override
+  String get sidebarCollapseLocations => 'Collapse locations';
+
+  @override
+  String get sidebarExpandLocations => 'Expand locations';
+
+  @override
+  String get openLabelInManagerTooltip => 'Open and expand label in Manage';
+
+  @override
+  String get openLocationInManagerTooltip =>
+      'Open and expand location in Manage';
+
+  @override
+  String get syncStatusLocalOnly => 'Local only';
+
+  @override
+  String get syncStatusSynced => 'Synced';
+
+  @override
+  String get syncStatusSyncing => 'Syncing...';
+
+  @override
+  String get syncStatusConflict => 'Conflict';
+
+  @override
+  String get syncStatusError => 'Sync error';
+
+  @override
+  String get rawTdfPreviewTitle => 'Raw TDF 0.8.0';
+
+  @override
+  String get rawTdfPreviewSubtitle =>
+      'Canonical LF-terminated TDF 0.8.0 serialization of the current workspace board.';
+
+  @override
+  String rawTdfStatsSummary(String bytes, String lines) {
+    return '$bytes bytes / 1 MiB · $lines lines / 16,384 max';
+  }
+
+  @override
+  String get rawTdfCopiedNotice => 'TDF document copied to clipboard.';
+
+  @override
+  String get rawTdfLimitExceededTitle => 'Preview Limit Exceeded';
+
+  @override
+  String get rawTdfLimitExceededDescription =>
+      'The serialized TDF document exceeds the canonical 1 MiB or 16,384-line limit (TDF 0.8.0 Section 6.2) and cannot be previewed inline.';
+
+  @override
+  String badgeMoreIndicators(String count) {
+    return '+$count more';
+  }
+
+  @override
+  String get badgeAutoPriority => 'Due · Prioritized';
+
+  @override
+  String badgeOverduePrefix(String date) {
+    return 'Overdue: $date';
+  }
+
+  @override
+  String badgeSuspendedUntil(String date) {
+    return 'Suspended until $date';
+  }
+
+  @override
+  String get badgeSuspendedForever => 'Suspended indefinitely';
+
+  @override
+  String badgeBlockedByProgress(String done, String total) {
+    return '$done/$total prerequisites';
+  }
+
+  @override
+  String badgeStepsProgress(String done, String total) {
+    return '$done/$total steps';
+  }
+
+  @override
+  String get badgeLinkSingular => '1 link';
+
+  @override
+  String badgeHistoryCount(String count) {
+    return '$count history';
+  }
+
+  @override
+  String get repeatEveryDay => 'Every day';
+
+  @override
+  String get repeatEveryWeek => 'Every week';
+
+  @override
+  String get repeatEveryMonth => 'Every month';
+
+  @override
+  String get completedReadOnlyPill => 'Completed · restore task to edit';
+
+  @override
+  String get inlineEditTitleTooltip => 'Edit title';
+
+  @override
+  String get inlineEditNameTooltip => 'Edit name';
+
+  @override
+  String get inlineAddNote => '+ Note';
+
+  @override
+  String get inlineAddLinks => '+ Links';
+
+  @override
+  String get inlineAddSubtasks => '+ Subtasks';
+
+  @override
+  String get inlineAddLabels => '+ Labels';
+
+  @override
+  String get inlineAddDue => '+ Due';
+
+  @override
+  String get inlineAddRepeat => '+ Repeat';
+
+  @override
+  String get inlineAddSuspend => '+ Suspend';
+
+  @override
+  String get inlineAddPrerequisites => '+ Prerequisites';
+
+  @override
+  String get inlineAddConditions => '+ Conditions';
+
+  @override
+  String get inlineClearAction => 'Clear';
+
+  @override
+  String get inlineDisableRepeatAction => 'Disable repeat';
+
+  @override
+  String get inlineResumeTaskAction => 'Resume task';
+
+  @override
+  String get inlineRepeatLeadNeedsDueHint =>
+      'Set a due date to configure preparation lead days.';
+
+  @override
+  String get inlinePlacementSectionTitle => 'Queue & Priority';
+
+  @override
+  String get placementQueueOption => 'Queue';
+
+  @override
+  String get placementQueueHint => 'Append at the end of the active queue.';
+
+  @override
+  String get placementPriorityHint =>
+      'Prioritize ahead of regular tasks in Focus or Ready.';
+
+  @override
+  String get placementSomedayHint =>
+      'Park outside the active queue in Someday.';
+
+  @override
+  String get inlineDeleteTaskConfirm => 'Delete this task?';
+
+  @override
+  String get inlineDeleteLabelConfirm => 'Delete this label?';
+
+  @override
+  String get inlineDeleteLocationConfirm => 'Delete this location?';
+
+  @override
+  String get actionKeep => 'Keep';
+
+  @override
+  String get actionConfirmDelete => 'Yes, delete';
+
+  @override
+  String get actionDone => 'Done';
+
+  @override
+  String get actionOpenAsDraft => 'Open as draft';
+
+  @override
+  String get actionNewTaskCompact => 'New task';
+
+  @override
+  String get actionCreateTask => 'Create task';
+
+  @override
+  String get actionCreateLabel => 'Create label';
+
+  @override
+  String get actionCreateLocation => 'Create location';
+
+  @override
+  String get draftNewTaskTitle => 'New Task (Draft)';
+
+  @override
+  String get draftNewLabelTitle => 'New Label (Draft)';
+
+  @override
+  String get draftNewLocationTitle => 'New Location (Draft)';
+
+  @override
+  String get draftUncommittedHint =>
+      'Uncommitted · saved to the TDF file only when you click Create.';
+
+  @override
+  String get quickCreateLabelHint => 'Quick-create a new label...';
+
+  @override
+  String get quickCreateLocationHint => 'Quick-create a new location...';
+
+  @override
+  String get labelsManagerSubtitle =>
+      'Contexts, scoped queues, reference links, and inherited conditions.';
+
+  @override
+  String get locationsManagerSubtitle =>
+      'Reusable locations for task and label GPS conditions.';
+
+  @override
+  String get labelPickerSearchPlaceholder => 'Search or create label...';
+
+  @override
+  String labelPickerFilterAll(String count) {
+    return 'All ($count)';
+  }
+
+  @override
+  String labelPickerFilterScoped(String count) {
+    return 'Scoped ($count)';
+  }
+
+  @override
+  String labelPickerFilterGlobal(String count) {
+    return 'Global ($count)';
+  }
+
+  @override
+  String get labelPickerNoMatches => 'No matching labels found.';
+
+  @override
+  String get labelPickerEmptyHint =>
+      'No labels yet. Type a name above to create one.';
+
+  @override
+  String labelPickerCreateAndAssign(String name) {
+    return 'Create & assign \"$name\"';
+  }
+
+  @override
+  String labelPickerRemoveTooltip(String name) {
+    return 'Remove label: $name';
+  }
+
+  @override
+  String openTasksCountPill(String count) {
+    return '$count open';
+  }
+
+  @override
+  String get prerequisiteCyclePreventedHint => 'Cycle prevented';
+
+  @override
+  String get globalContextLabel => 'Global Context';
+
+  @override
+  String get scopedQueueLabel => 'Scoped Queue';
+
+  @override
+  String get conditionInheritLabel => 'Inherit label conditions';
+
+  @override
+  String get conditionCustomLabel => 'Custom condition';
+
+  @override
+  String get conditionSatisfiedStatus => 'Currently satisfied';
+
+  @override
+  String get conditionBlockedStatus => 'Currently unmet (blocked)';
+
+  @override
+  String get suspendedUntilModeLabel => 'Until a date and time';
+
+  @override
+  String get suspendedForeverModeLabel => 'Indefinitely';
+
+  @override
+  String get historyTimestampToggleTooltip => 'Set timestamp';
+
+  @override
+  String get historyErrorDuplicate =>
+      'An identical history entry with this timestamp already exists.';
+
+  @override
+  String locationRadiusReadout(String radius) {
+    return 'Radius: $radius';
+  }
+
+  @override
+  String get entityRemovedExternallyNotice =>
+      'This item was removed by an external update.';
+
+  @override
+  String get taskCompletedExternallyNotice =>
+      'This task was completed by an external update.';
+
+  @override
+  String get labelIdCopiedNotice => 'Label ID copied to clipboard.';
+
+  @override
+  String get locationIdCopiedNotice => 'Location ID copied to clipboard.';
+
+  @override
+  String taskRestoredNotice(String title) {
+    return '\"$title\" restored.';
+  }
+
+  @override
+  String taskCompletedRepeatNotice(String title) {
+    return '\"$title\" completed and rescheduled for the next cycle.';
+  }
+
+  @override
+  String get actionUndoneNotice => 'Action undone.';
+
+  @override
+  String actionUndoneRemainingNotice(String remaining) {
+    return 'Action undone ($remaining more in history).';
+  }
+
+  @override
+  String workspaceSwitchedNotice(String name) {
+    return 'Switched workspace: $name';
+  }
+
+  @override
+  String get gpsAppliedNotice => 'Current GPS position applied.';
+
+  @override
+  String get locationResolvedNotice => 'Source resolved to coordinates.';
+
+  @override
+  String get labelSavedNotice => 'Label saved.';
+
+  @override
+  String get labelDeletedNotice => 'Label deleted.';
+
+  @override
+  String get locationSavedNotice => 'Location saved.';
+
+  @override
+  String get locationDeletedNotice => 'Location deleted.';
+
+  @override
+  String get noticeTaskSaved => 'Task saved.';
+
+  @override
+  String noticeTaskSavedInTier(String tier) {
+    return 'Saved · now in $tier';
+  }
+
+  @override
+  String noticeTaskMovedToScopedQueue(String label) {
+    return 'Moved to scoped queue: $label';
+  }
+
+  @override
+  String get noticePriorityEnabled => 'Task prioritized';
+
+  @override
+  String get noticePriorityDisabled => 'Priority cleared';
+
+  @override
+  String get noticeMovedToSomeday => 'Moved to Someday';
+
+  @override
+  String get noticeMovedToQueue => 'Activated in queue';
+
+  @override
+  String noticeLabelAdded(String name) {
+    return 'Label added: $name';
+  }
+
+  @override
+  String noticeLabelRemoved(String name) {
+    return 'Label removed: $name';
+  }
+
+  @override
+  String noticeLabelCreatedAndAssigned(String name) {
+    return 'Label created and assigned: $name';
+  }
+
+  @override
+  String settingsWorkspaceSubtitle(String workspace) {
+    return 'Configuration for active workspace \"$workspace\".';
+  }
+
+  @override
+  String get settingsAutoSavedBadge => 'Auto-saved';
+
+  @override
+  String get settingsUnsavedChangesBadge => 'Unsaved changes';
+
+  @override
+  String get settingsMoveDesktopOnlyTooltip =>
+      'Moving directories is available only on desktop platforms (Linux/Windows).';
+
+  @override
+  String get webDavUrlUserinfoError =>
+      'URL must not contain embedded credentials (user:pass@).';
+
+  @override
+  String get webDavPathInvalidError =>
+      'Invalid remote file path (\"..\", backslashes, and control characters are forbidden).';
+
+  @override
+  String get logViewerSubtitle =>
+      'Structured runtime entries (credentials, raw GPS coordinates, and notes redacted).';
+
+  @override
+  String get logFilterSubsystemLabel => 'Subsystem';
+
+  @override
+  String get logActionUpload => 'Upload Log';
+
+  @override
+  String get logActionClear => 'Clear';
+
+  @override
+  String get conflictResolutionTitle =>
+      'Resolve Deletion Conflicts (TDF-DEL-003)';
+
+  @override
+  String get conflictResolutionSubtitle =>
+      'Choose whether to keep the concurrent local edit or confirm deletion for each conflicted item.';
+
+  @override
+  String get conflictKeepEditOption => 'Keep Edit (Undelete)';
+
+  @override
+  String get conflictConfirmDeleteOption => 'Confirm Deletion';
+
+  @override
+  String get conflictApplyAndSyncAction => 'Apply Decisions & Sync';
+
+  @override
+  String get conflictResolvedNotice =>
+      'Deletion conflicts resolved. Synchronization resumed.';
+
+  @override
+  String get recoveryResolutionTitle =>
+      'Recover After History Advancement (TDF-REC-002)';
+
+  @override
+  String get recoveryResolutionSubtitle =>
+      'Shared deletion history advanced past the last acknowledged state. Choose an action for each affected local item.';
+
+  @override
+  String get recoveryAsNewOption => 'Recover as New (fresh ID)';
+
+  @override
+  String get recoveryDiscardLocalOption => 'Discard Local Change';
+
+  @override
+  String get recoveryApplyAndSyncAction => 'Apply Recovery & Sync';
+
+  @override
+  String get recoveryResolvedNotice =>
+      'Recovery completed. Synchronization resumed.';
+
+  @override
+  String get entityKindTaskBadge => 'TASK';
+
+  @override
+  String get entityKindLabelBadge => 'LABEL';
+
+  @override
+  String get entityKindLocationBadge => 'LOCATION';
+
+  @override
+  String versionFooterLabel(String version) {
+    return 'Version $version';
+  }
 }

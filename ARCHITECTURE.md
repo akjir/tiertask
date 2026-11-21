@@ -12,12 +12,12 @@
 | Services | `lib/services/` | Opt-in diagnostic logging service (`AppLogger`, `AppLogSink`, `LogLevel`, `LogTag`) at DAG rank `0`, stateless single-pass $O(N)$ RFC 4648 Base64 codec (`Base64Service`, `Base64Exception`, `Base64ErrorKind`), Open Location Code parser and decoder (`PlusCodeService`, `PlusCodeArea`, `PlusCodeInput`), pure-Dart FIPS 180-4 SHA-256 digest service (`Sha256Service`), and TDF `0.8.0` lexical scanner (`TdfScanner`), structural parser (`TdfParser`, `TdfDirectiveParser`), and byte-exact canonical `LF` serializer (`TdfSerializer`, `TdfService`). |
 | Repositories | `lib/repositories/` | All external I/O: WebDAV HTTP `GET`/`PUT` (`dart:io` `HttpClient`), pure-Dart `dart:ffi` non-blocking host-local cooperative file locking and atomic temp-file publication (`HostFileLockManager`), local `.tdf` file and `tiertask.log` reads/writes (`LocalFileRepository`, `LocalFileOperations`, `LocalFileLogSink`), foreground location channel and bounded reverse/forward geocoding and GeoIP lookup (`MethodChannel` and `HttpClient`), and split host-local JSON settings (`settings.json` + `.bak` + quarantine) with per-workspace encrypted WebDAV passwords and `TTS\x04` sync baselines (`flutter_secure_storage`). |
 | Providers | `lib/providers/` | Riverpod state management (`Provider`, `Notifier`, `AsyncNotifier`) across `workspace_providers.dart`, `config_providers.dart`, `local_file_watch_providers.dart`, `location_providers.dart`, `sync_providers.dart`, and `task_providers.dart` coordinating single-active-workspace unload/load transitions, parent-directory `.tdf` file watching, foreground lifecycle-aware location determination, locale and theme resolution, domain mutations, conflict/recovery resolution, and multi-stage repository synchronization (`TaskSyncPipeline`). |
-| Presentation | `lib/presentation/` | Screen and dialog controllers, presentation view-models, redacted UI telemetry, and wall-clock boundary scheduling (`BoardBoundaryTimer`, `TdfPreviewController`, `evaluatedBoardProvider`, `LabelEditorController`, `LinkActionController`, `LocationEditorController`, `LogViewerController`, `SettingsController`, `TaskEditorController`, `TaskInfoController`, `UiTelemetry`) mediating between `lib/ui/` and lower layers so views remain free of repository and service dependencies. |
+| Presentation | `lib/presentation/` | Model-free v2 shell, board, entity, task, settings, workspace, sync, and floating-notice controllers (`AppShellController`, `FloatingNoticeController`, `TaskV2Controller`, `EntityV2Controller`, `SettingsV2Controller`, `WorkspaceV2Controller`, `SyncV2Controller`, `board_v2_view_models.dart`, `ui_v2_shell_models.dart`), redacted UI telemetry (`UiTelemetry`), wall-clock boundary timer (`BoardBoundaryTimer`), and Phase 1 legacy editor controllers mediating between UI views and lower layers. |
 | UI Component Library | `packages/tiertask_ui/` | Compiler-isolated local Flutter package (`tiertask_ui`) with zero `tiertask`, `flutter_riverpod`, `dart:io`, or `dart:ffi` dependencies, exporting Layer 1 design tokens (`Calm` default and `Plum Umber`, Light and Dark, automated WCAG AA contrast checking), 8 core primitives, 4 adaptive layouts, and 5 composites through one curated barrel (`lib/tiertask_ui.dart`) alongside a runnable `example/` gallery app. |
-| UI | `lib/ui/` | Localized Material 3 screens (`lib/ui/`) and modular leaf widgets (`lib/ui/widgets/`) for Linux, Android, and Windows delegating orchestration, validation, and external actions to `lib/presentation/`. |
+| UI | `lib/ui_v2/`, `lib/ui/` | Production adaptive v2 shell (`lib/ui_v2/`, strict Rank `7` model-free adapters over `packages/tiertask_ui/`, `lib/presentation/`, and `AppLocalizations`) for Linux, Android, and Windows, alongside legacy Phase 1 screens (`lib/ui/`) retained until Phase 4 retirement. |
 
 > [!NOTE]
-> Per Google's Flutter App Architecture guidelines (`P-UDF-ARCHITECTURE`, `P-ACYCLIC-DAG`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-GLOBAL-ERROR-BOUNDARY`, `P-ATOMIC-STATE`, `P-SECRET-HYGIENE`, `P-TRANSPORT-SECURITY`), data flows unidirectionally from single-source-of-truth repositories (`lib/repositories/`) through state notifiers (`lib/providers/`) and presentation controllers (`lib/presentation/`) to stateless views (`lib/ui/`), enforcing strict bottom-up DAG rank order (`0: lib/services/app_logger.dart < 1: lib/models/* < 2: lib/l10n/* < 3: lib/services/* < 4: lib/repositories/* < 5: lib/providers/* < 6: lib/presentation/* < 7: lib/ui/* < 8: lib/main.dart`). `lib/ui/` never imports `lib/repositories/*` or `lib/services/*` directly and never references repository, service, or native-picker providers; all network (`HttpClient`), native OS locking (`dart:ffi`), local filesystem (`File`), and secure storage (`FlutterSecureStorage`) operations are strictly isolated in `lib/repositories/`, global synchronous and asynchronous error boundaries (`FlutterError.onError` and `PlatformDispatcher.instance.onError`) guard runtime stability, and credentials are redacted from logs and error messages.
+> Per Google's Flutter App Architecture guidelines (`P-UDF-ARCHITECTURE`, `P-ACYCLIC-DAG`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-GLOBAL-ERROR-BOUNDARY`, `P-ATOMIC-STATE`, `P-SECRET-HYGIENE`, `P-TRANSPORT-SECURITY`), data flows unidirectionally from single-source-of-truth repositories (`lib/repositories/`) through state notifiers (`lib/providers/`) and presentation controllers (`lib/presentation/`) to stateless views (`lib/ui_v2/` and legacy `lib/ui/`), enforcing strict bottom-up DAG rank order (`0: lib/services/app_logger.dart < 1: lib/models/* < 2: lib/l10n/* < 3: lib/services/* < 4: lib/repositories/* < 5: lib/providers/* < 6: lib/presentation/* < 7: lib/ui/* & lib/ui_v2/* < 8: lib/main.dart`). `lib/ui_v2/` enforces a strict import whitelist (`packages/tiertask_ui/`, `lib/presentation/*`, acyclic `lib/ui_v2/*`, `lib/l10n/app_localizations.dart`, `flutter_riverpod`, Flutter/`material_ui`, and non-I/O Dart SDK utilities only); legacy `lib/ui/` never imports `lib/repositories/*` or `lib/services/*` directly; all network (`HttpClient`), native OS locking (`dart:ffi`), local filesystem (`File`), and secure storage (`FlutterSecureStorage`) operations are strictly isolated in `lib/repositories/`; global error boundaries (`FlutterError.onError` and `PlatformDispatcher.instance.onError`) guard runtime stability; and credentials are redacted from logs and error messages.
 
 ## Directory Layout
 
@@ -79,16 +79,25 @@ tiertask/
 │   │   ├── webdav_config.dart
 │   │   └── workspace_sync_state.dart
 │   ├── presentation/
+│   │   ├── app_shell_controller.dart
 │   │   ├── board_boundary_timer.dart
 │   │   ├── board_presentation_providers.dart
+│   │   ├── board_v2_view_models.dart
+│   │   ├── entity_v2_controller.dart
+│   │   ├── floating_notice_controller.dart
 │   │   ├── label_editor_controller.dart
 │   │   ├── link_action_controller.dart
 │   │   ├── location_editor_controller.dart
 │   │   ├── log_viewer_controller.dart
 │   │   ├── settings_controller.dart
+│   │   ├── settings_v2_controller.dart
+│   │   ├── sync_v2_controller.dart
 │   │   ├── task_editor_controller.dart
 │   │   ├── task_info_controller.dart
-│   │   └── ui_telemetry.dart
+│   │   ├── task_v2_controller.dart
+│   │   ├── ui_telemetry.dart
+│   │   ├── ui_v2_shell_models.dart
+│   │   └── workspace_v2_controller.dart
 │   ├── providers/
 │   │   ├── config_providers.dart
 │   │   ├── local_file_watch_providers.dart
@@ -115,43 +124,59 @@ tiertask/
 │   │   ├── tdf_scanner.dart
 │   │   ├── tdf_serializer.dart
 │   │   └── tdf_service.dart
-│   └── ui/
-│       ├── app_theme.dart
-│       ├── edit_labels_screen.dart
-│       ├── edit_locations_screen.dart
-│       ├── edit_task_screen.dart
-│       ├── home_screen.dart
-│       ├── settings_screen.dart
-│       └── widgets/
-│           ├── app_logo.dart
-│           ├── clearable_text_field.dart
-│           ├── condition_editor_controller.dart
-│           ├── file_read_status_info.dart
-│           ├── home_drawer.dart
-│           ├── home_tier_pane.dart
-│           ├── home_top_bar.dart
-│           ├── label_color_picker_dialog.dart
-│           ├── label_hub_dialog.dart
-│           ├── local_tdf_file_dialogs.dart
-│           ├── location_status_dialog.dart
-│           ├── log_viewer_dialog.dart
-│           ├── quick_add_bar.dart
-│           ├── settings_local_storage_section.dart
-│           ├── settings_preference_cards.dart
-│           ├── settings_webdav_storage_section.dart
-│           ├── task_editor_conditions_section.dart
-│           ├── task_editor_history_section.dart
-│           ├── task_editor_links_section.dart
-│           ├── task_editor_scheduling_card.dart
-│           ├── task_editor_sections.dart
-│           ├── task_editor_subtasks_and_blockers.dart
-│           ├── task_info_dialog.dart
-│           ├── tier_page_indicator.dart
-│           ├── tier_task_pill.dart
-│           ├── tier_task_subtasks_section.dart
-│           ├── wipe_tdf_dialog.dart
-│           ├── workspace_dialog.dart
-│           └── workspace_row_card.dart
+│   ├── ui/
+│   │   ├── app_theme.dart
+│   │   ├── edit_labels_screen.dart
+│   │   ├── edit_locations_screen.dart
+│   │   ├── edit_task_screen.dart
+│   │   ├── home_screen.dart
+│   │   ├── settings_screen.dart
+│   │   └── widgets/
+│   │       ├── app_logo.dart
+│   │       ├── clearable_text_field.dart
+│   │       ├── condition_editor_controller.dart
+│   │       ├── file_read_status_info.dart
+│   │       ├── home_drawer.dart
+│   │       ├── home_tier_pane.dart
+│   │       ├── home_top_bar.dart
+│   │       ├── label_color_picker_dialog.dart
+│   │       ├── label_hub_dialog.dart
+│   │       ├── local_tdf_file_dialogs.dart
+│   │       ├── location_status_dialog.dart
+│   │       ├── log_viewer_dialog.dart
+│   │       ├── quick_add_bar.dart
+│   │       ├── settings_local_storage_section.dart
+│   │       ├── settings_preference_cards.dart
+│   │       ├── settings_webdav_storage_section.dart
+│   │       ├── task_editor_conditions_section.dart
+│   │       ├── task_editor_history_section.dart
+│   │       ├── task_editor_links_section.dart
+│   │       ├── task_editor_scheduling_card.dart
+│   │       ├── task_editor_sections.dart
+│   │       ├── task_editor_subtasks_and_blockers.dart
+│   │       ├── task_info_dialog.dart
+│   │       ├── tier_page_indicator.dart
+│   │       ├── tier_task_pill.dart
+│   │       ├── tier_task_subtasks_section.dart
+│   │       ├── wipe_tdf_dialog.dart
+│   │       ├── workspace_dialog.dart
+│   │       └── workspace_row_card.dart
+│   └── ui_v2/
+│       ├── tier_task_shell_screen.dart
+│       ├── ui_v2_icon_mapper.dart
+│       ├── dialogs/
+│       │   └── app_modals.dart
+│       └── views/
+│           ├── entity_section_widgets.dart
+│           ├── labels_view.dart
+│           ├── locations_view.dart
+│           ├── log_viewer_view.dart
+│           ├── raw_tdf_view.dart
+│           ├── resolution_views.dart
+│           ├── settings_view.dart
+│           ├── task_card.dart
+│           ├── task_inline_editors.dart
+│           └── tasks_view.dart
 ├── packages/
 │   └── tiertask_ui/
 │       ├── analysis_options.yaml
@@ -244,16 +269,23 @@ tiertask/
     │   ├── tdf_primitives_test.dart
     │   └── tdf_v080_merge_conformance_test.dart
     ├── presentation/
+    │   ├── app_shell_controller_test.dart
     │   ├── board_boundary_timer_test.dart
     │   ├── board_presentation_providers_test.dart
+    │   ├── board_v2_view_models_test.dart
+    │   ├── entity_v2_controller_test.dart
     │   ├── label_editor_controller_test.dart
     │   ├── link_action_controller_test.dart
     │   ├── location_editor_controller_test.dart
     │   ├── log_viewer_controller_test.dart
     │   ├── settings_controller_test.dart
+    │   ├── settings_v2_controller_test.dart
+    │   ├── sync_v2_controller_test.dart
     │   ├── task_editor_controller_test.dart
     │   ├── task_info_controller_test.dart
-    │   └── ui_telemetry_test.dart
+    │   ├── task_v2_controller_test.dart
+    │   ├── ui_telemetry_test.dart
+    │   └── workspace_v2_controller_test.dart
     ├── providers/
     │   ├── config_providers_test.dart
     │   ├── local_file_watch_providers_test.dart
@@ -276,32 +308,44 @@ tiertask/
     │   ├── tdf_service_bounds_test.dart
     │   ├── tdf_service_parser_test.dart
     │   └── tdf_v080_conformance_test.dart
-    └── ui/
-        ├── app_theme_test.dart
-        ├── edit_labels_screen_test.dart
-        ├── edit_locations_screen_test.dart
-        ├── edit_task_screen_test.dart
-        ├── home_drawer_test.dart
-        ├── home_screen_test.dart
-        ├── local_directory_picker_test.dart
-        ├── location_ui_test.dart
-        ├── settings_screen_test.dart
+    ├── ui/
+    │   ├── app_theme_test.dart
+    │   ├── edit_labels_screen_test.dart
+    │   ├── edit_locations_screen_test.dart
+    │   ├── edit_task_screen_test.dart
+    │   ├── home_drawer_test.dart
+    │   ├── home_screen_test.dart
+    │   ├── local_directory_picker_test.dart
+    │   ├── location_ui_test.dart
+    │   ├── settings_screen_test.dart
+    │   ├── test_helpers.dart
+    │   └── widgets/
+    │       ├── app_logo_test.dart
+    │       ├── clearable_text_field_test.dart
+    │       ├── file_read_status_info_test.dart
+    │       ├── label_color_picker_dialog_test.dart
+    │       ├── label_hub_dialog_test.dart
+    │       ├── quick_add_bar_test.dart
+    │       ├── task_editor_conditions_test.dart
+    │       ├── task_editor_history_section_test.dart
+    │       ├── task_info_dialog_test.dart
+    │       ├── tier_page_indicator_test.dart
+    │       ├── tier_task_pill_test.dart
+    │       ├── tier_task_subtasks_test.dart
+    │       ├── wipe_tdf_dialog_test.dart
+    │       └── workspace_dialog_test.dart
+    └── ui_v2/
+        ├── app_modals_test.dart
+        ├── entity_section_widgets_test.dart
+        ├── labels_view_test.dart
+        ├── locations_view_test.dart
+        ├── real_mechanics_v2_test.dart
+        ├── secondary_views_test.dart
+        ├── settings_view_test.dart
+        ├── tasks_view_test.dart
         ├── test_helpers.dart
-        └── widgets/
-            ├── app_logo_test.dart
-            ├── clearable_text_field_test.dart
-            ├── file_read_status_info_test.dart
-            ├── label_color_picker_dialog_test.dart
-            ├── label_hub_dialog_test.dart
-            ├── quick_add_bar_test.dart
-            ├── task_editor_conditions_test.dart
-            ├── task_editor_history_section_test.dart
-            ├── task_info_dialog_test.dart
-            ├── tier_page_indicator_test.dart
-            ├── tier_task_pill_test.dart
-            ├── tier_task_subtasks_test.dart
-            ├── wipe_tdf_dialog_test.dart
-            └── workspace_dialog_test.dart
+        ├── tier_task_shell_screen_test.dart
+        └── ui_v2_icon_mapper_test.dart
 ```
 
 ## Root Files
@@ -399,22 +443,31 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
+| `lib/presentation/app_shell_controller.dart` | Coordinates adaptive shell routes, returnContext, single-expand cards, inline editing, drafts, external board updates, and Escape/PopScope unwinding. |
 | `lib/presentation/board_boundary_timer.dart` | Single-timer wall-clock boundary scheduler (`BoardBoundaryTimer`, `boardBoundaryTimerProvider`) monitoring foreground lifecycle state, workspace time zone, and due lead windows to advance `boundaryTickProvider` at exact suspension and deadline transitions. |
 | `lib/presentation/board_presentation_providers.dart` | Presentation providers and view-models (`AppVersionViewModel`, `appVersionViewModelProvider`, `evaluatedBoardProvider`, `TdfPreviewController`, `TdfPreviewResult`, `TdfPreviewSuccess`, `TdfPreviewLimitExceeded`, `tdfPreviewControllerProvider`) exposing evaluated boards, formatted versions, and localized `.tdf` previews to `lib/ui/`. |
+| `lib/presentation/board_v2_view_models.dart` | Projects model-free view models for theme state, top chrome, sidebar, tasks/search badges, labels, locations, and raw TDF preview. |
+| `lib/presentation/entity_v2_controller.dart` | Owns model-free label and location Quick-Create, draft cards, inline editors, live board scope toggles, and geocoding/Plus Code resolution. |
+| `lib/presentation/floating_notice_controller.dart` | Manages floating toast notices, LIFO Undo recovery notifications, auto-hide timers, and persistent startup recovery alerts. |
 | `lib/presentation/label_editor_controller.dart` | Label editor controller (`LabelEditorController`, `LabelValidationErrorKind`, `LabelValidationResult`, `labelEditorControllerProvider`) handling label name uniqueness, `#RRGGBB` color normalization, redacted telemetry, and label CRUD mutations. |
 | `lib/presentation/link_action_controller.dart` | Reference link launch controller (`LinkActionController`, `LinkOpenOutcome`, `linkActionControllerProvider`) validating and opening external URIs through `LinkLauncherRepository` with typed `opened` and `failed` outcomes. |
 | `lib/presentation/location_editor_controller.dart` | Location editor controller (`LocationEditorController`, `LocationSourceResolutionResult`, `LocationValidationErrorKind`, `LocationValidationResult`, `ValidatedLocationDraft`, `locationEditorControllerProvider`) coordinating GPS, address forward geocoding, Plus Code decoding and recovery, radius and coordinate validation, and location persistence. |
 | `lib/presentation/log_viewer_controller.dart` | Diagnostic log presentation controller (`LogViewerController`, `DiagnosticLogViewModel`, `DiagnosticLogLineViewModel`, `DiagnosticLogLevel`, `DiagnosticLogTag`, `DiagnosticLogSeverity`, `LogSyncResult`, `activeLogFileNameProvider`, `logViewerControllerProvider`) exposing reactive log snapshots, filtering, clearing, WebDAV log syncing, and UI-safe severity and tag enums. |
 | `lib/presentation/settings_controller.dart` | Settings presentation controller (`SettingsController`, `SettingsPreferenceSaveResult`, `settingsControllerProvider`, `supportsNativeDirectoryPickerProvider`) managing preference persistence, diagnostic log level mapping, startup recovery notices, local `.tdf` directory and file pickers, and preview path resolution. |
+| `lib/presentation/settings_v2_controller.dart` | Owns model-free dual-persistence Settings state, auto-saved preferences, dirty WebDAV validation, and capability-gated local file and wipe actions. |
+| `lib/presentation/sync_v2_controller.dart` | Projects foreground location status and TDF-DEL-003/TDF-REC-002 resolution views, owning sync, refresh, and resolution intents. |
 | `lib/presentation/task_editor_controller.dart` | Task editor controller (`TaskEditorController`, `TaskEditorDraftInput`, `TaskEditorFieldErrors`, `TaskEditorSubmitResult`, `ResolvedDueDraft`, `ResolvedSuspendedDraft`, `taskEditorControllerProvider`) providing scheduling and recurrence parsing, TDF `0.8.0` bound validation, pending history resolution, redacted telemetry, and task submission and deletion. |
 | `lib/presentation/task_info_controller.dart` | Task info dialog controller (`TaskInfoController`, `TaskHistoryMutationResult`, `taskInfoControllerProvider`) coordinating verified history append, inline update, and delete mutations, redacted failure telemetry, and remaining-duration or anchor-difference formatting. |
+| `lib/presentation/task_v2_controller.dart` | Owns model-free task intents for non-jumping Quick-Add, drafts, live controls, history journal, and single-section inline editors. |
 | `lib/presentation/ui_telemetry.dart` | Presentation-layer diagnostic telemetry facade (`UiTelemetry`) emitting redacted structured `LogTag.ui` events to `AppLogger` while keeping `lib/ui/` free of direct `lib/services/` imports. |
+| `lib/presentation/ui_v2_shell_models.dart` | Defines immutable model-free presentation enums, shell state, return context, floating notice, and action outcome types for adaptive UI v2. |
+| `lib/presentation/workspace_v2_controller.dart` | Projects workspace rows and owns model-free workspace switching, creation, renaming, and deletion intents. |
 
 ## User Interface
 
 | File | Function |
 | :--- | :--- |
-| `lib/main.dart` | Application entry point registering global crash hooks (`FlutterError.onError` and `PlatformDispatcher.instance.onError`) and `AppLifecycleListener`, and mounting `TierTaskApp` inside `ProviderScope` with Material 3 themes, `AppLocalizations.delegate`, and `GlobalMaterialLocalizations.delegates`. |
+| `lib/main.dart` | Application entry point registering global crash hooks (`FlutterError.onError`, `PlatformDispatcher.instance.onError`) and `AppLifecycleListener`, mounting `TierTaskApp` inside `ProviderScope` with `UiThemePresets` (`shellThemeStateProvider`), `AppLocalizations`, and `TierTaskShellScreen`. |
 | `lib/ui/app_theme.dart` | Unified Material 3 theme definition (`AppTheme`, `AppThemeSet`, `appThemeProvider`) implementing `ThemeExtension<AppTheme>` and `toThemeData()` for the `Slate` and `Navy` light and dark palettes. |
 | `lib/ui/edit_labels_screen.dart` | Dedicated label overview screen (`EditLabelsScreen`) and label editor panel (`EditLabelScreen`, `openEditLabelScreen`) for creating, editing, and deleting `TdfLabel` definitions with `scoped` queue toggle, custom color wheel selection, color presets, notes, reference links (create, inline edit, reorder, open, remove), and inherited conditions. |
 | `lib/ui/edit_locations_screen.dart` | Dedicated location overview screen (`EditLocationsScreen`) and location editor panel (`EditLocationScreen`, `openEditLocationScreen`) for creating, editing, and deleting reusable `TdfLocation` entities with selectable source resolution (`GPS Coordinates`, `Address`, `Google Plus Code`), forward-geocoding candidate disambiguation, radius in meters, and notes. |
@@ -450,6 +503,19 @@ tiertask/
 | `lib/ui/widgets/wipe_tdf_dialog.dart` | Confirmation dialog (`WipeTdfDialog`, `WipeTdfDialogResult`, `WipeTdfTarget`, `showWipeTdfDialog`) requiring exact filename confirmation and offering optional `.bak` / `.bak.001`+ backup creation before wiping a local or remote `.tdf` file. |
 | `lib/ui/widgets/workspace_dialog.dart` | Active workspace navigation drawer card (`DrawerWorkspaceCard`) and Material 3 workspace management dialog (`WorkspaceDialog`, `showWorkspaceDialog`) coordinating workspace switching, creation, renaming, and deletion. |
 | `lib/ui/widgets/workspace_row_card.dart` | Individual workspace list row card (`WorkspaceRowCard`) inside `WorkspaceDialog` rendering workspace metadata, storage mode badge, inline rename input, and delete confirmation controls. |
+| `lib/ui_v2/dialogs/app_modals.dart` | Adaptive v2 modal sheets and dialogs for workspaces, location status, label info, wipe/factory reset, and raw TDF diagnostics. |
+| `lib/ui_v2/tier_task_shell_screen.dart` | Adaptive Phase 3 root shell integrating UiAdaptiveAppShell, top chrome, sidebar, views, docks, floating notices, keyboard shortcuts, and PopScope. |
+| `lib/ui_v2/ui_v2_icon_mapper.dart` | Maps model-free presentation enums to tiertask_ui theme presets, semantic pill/banner/button tones, and canonical outline icons. |
+| `lib/ui_v2/views/entity_section_widgets.dart` | Reusable v2 entity section widgets for searchable label pickers, inline color selectors, and unified entity delete confirmations. |
+| `lib/ui_v2/views/labels_view.dart` | v2 Labels management view with unified single-expand cards, inline name/color/scope/conditions/notes editing, and new-label draft card. |
+| `lib/ui_v2/views/locations_view.dart` | v2 Locations management view with single-expand geofence cards, inline coordinates/radius/label editing, live GPS fill, and draft card. |
+| `lib/ui_v2/views/log_viewer_view.dart` | v2 Diagnostic Log view with bounded scrollable log surface, search/level/tag filtering, copy, and clear actions. |
+| `lib/ui_v2/views/raw_tdf_view.dart` | v2 Raw TDF 0.8.0 preview view displaying canonical serialized LF output, size/line stats, 1 MiB limit notice, and copy action. |
+| `lib/ui_v2/views/resolution_views.dart` | v2 TDF-DEL-003 deletion conflict and TDF-REC-002 recovery resolution views with per-entity choices and docked Apply & Sync bar. |
+| `lib/ui_v2/views/settings_view.dart` | v2 Settings view with single-column preference cards, WebDAV/Local/Time-Zone controls, Danger Zone, and docked action bar. |
+| `lib/ui_v2/views/task_card.dart` | Unified single-expand v2 task card supporting inline editing, scheduling, dependencies, links, subtasks, history, and lifecycle actions. |
+| `lib/ui_v2/views/task_inline_editors.dart` | Inline task field editors, subtask checklist, history log, scheduling rules, dependencies, and links inside expanded task cards. |
+| `lib/ui_v2/views/tasks_view.dart` | Primary six-tier v2 Tasks view, Global Search view, empty/error states, inline Task Draft Card, and pinned Quick-Add dock. |
 
 ## UI Component Library
 
@@ -483,7 +549,7 @@ tiertask/
 
 ## Execution & Synchronization Flow
 
-1. **Startup, Workspace Loading & Locale Resolution:** `main.dart` registers `LocalFileLogSink` on `AppLogger` and initializes `ProviderScope`. `ActiveWorkspaceNotifier` (`lib/providers/workspace_providers.dart`) loads only the single active `AppWorkspace` (`Tasks` / `tasks.tdf` by default) from `SettingsRepository`, `WebDavConfigNotifier` (`lib/providers/config_providers.dart`) exposes its `WebDavConfig`, and `appLocaleProvider` / `appThemeModeProvider` resolve the active `Locale` and `AppThemeMode` (`appThemeProvider` in `lib/ui/app_theme.dart`). Switching workspaces at runtime via `ActiveWorkspaceNotifier.switchWorkspace` unloads the current `TaskBoard` and `SyncState` from memory and loads the selected `AppWorkspace` and its `.tdf` file without restarting the application.
+1. **Startup, Workspace Loading & Locale Resolution:** `main.dart` registers global error handlers and initializes `ProviderScope`. `ActiveWorkspaceNotifier` (`lib/providers/workspace_providers.dart`) loads only the single active `AppWorkspace` (`Tasks` / `tasks.tdf` by default) from `SettingsRepository`, `WebDavConfigNotifier` (`lib/providers/config_providers.dart`) exposes its `WebDavConfig`, and `shellThemeStateProvider` (`lib/presentation/board_v2_view_models.dart`) resolves the active `Locale`, `UiThemePresets` preset (`Calm` or `Plum Umber`), and theme mode for `TierTaskShellScreen` (`lib/ui_v2/tier_task_shell_screen.dart`). Switching workspaces at runtime via `ActiveWorkspaceNotifier.switchWorkspace` unloads the current `TaskBoard` and `SyncState` from memory and loads the selected `AppWorkspace` and its `.tdf` file without restarting the application.
 2. **Multi-Stage TDF Fetch, External Directory Watching & Three-Way Merge (`In-Memory <-> Local File <-> WebDAV`):** On startup, on every manual sync (`syncFromRemote`, `testConnectionAndSync`), on external local `.tdf` edits detected via `LocalFileWatcherNotifier` (`350 ms` trailing-edge debounced `Directory.watch` events and `AppLifecycleState.resumed` catch-up checks gated by `WebDavConfig.localWatchEnabled` and `WorkspaceSyncState.localSourceDigest` inside `TaskNotifier.reconcileExternalLocalChanges`), and on every saved mutation or conflict/recovery resolution (`resolveDeletionConflicts`, `resolveRecovery`), `TaskNotifier` (`lib/providers/task_providers.dart`) delegates to `TaskSyncPipeline` (`lib/providers/sync_providers.dart`): Stage 1 acquires the non-blocking host-local cooperative lock (`HostFileLockManager` via `LocalFileRepository.withExclusiveTargetLock`), reads the local `.tdf` file (`LocalFileRepository.readTdfWithDigest`), merges external local `tdf 0.8.0` changes with the in-memory `TaskBoard` across `task`, `location`, `label`, `queue`, and `deleted` (`generation`) via `TaskBoardSync.merge` using `TdfCleanupMode.deferred` when WebDAV Stage 2 follows (`TdfCleanupMode.finalStage` in `StorageMode.local`), and atomically replaces the local file via guarded CAS publication (`_publishLocalWithCasLoop`); Stage 2 seeds `WebDavRepository` with the persisted `remoteEtag`, `remoteLastModified`, and canonical `lastSyncedRemoteTdf` baseline, fetches the remote `.tdf` file (`WebDavRepository.fetchTdf` using `If-None-Match` and `If-Modified-Since` to short-circuit unchanged remote files on `HTTP 304 Not Modified`), merges concurrent remote changes in `TdfCleanupMode.finalStage` with authoritative 30-day retention pruning (`TDF-PUB-004`), writes changed `tdf 0.8.0` documents to WebDAV with `If-Match` / `If-None-Match: *` CAS retry (`_publishRemoteWithCasLoop` on `HTTP 412 Precondition Failed`), and in Stage 3 converges the local `.tdf` file (`TdfCleanupMode.finalStage` with symmetric generation refresh) and `WorkspaceSyncState` (`TTS\x04`: canonical `lastSyncedLocalTdf` and `lastSyncedRemoteTdf`, `acknowledgedLocalGeneration`, `acknowledgedRemoteGeneration`, `localSourceDigest`, `remoteSourceDigest`, `remoteEtag`, `remoteLastModified`) so both storage backends converge to byte-identical `tdf 0.8.0` documents.
 3. **Single-Pass Parse & Dynamic 6-Tier Derivation:** `TdfService.parse` (`TdfScanner`, `TdfParser`, `TdfDirectiveParser`) validates the strict single-version `tdf 0.8.0` header (`TDF-COMPAT-001`), scans and validates `queue`, `deleted`, `location`, `label`, and `task` blocks in a single $O(N)$ pass (interpreting `created`, `finished`, `modified`, `due`, `history`, and timed `suspended` in UTC alongside optional local `due.anchor` calendar tuples while evaluating `condition day`, `condition time`, and `repeat` calendar progression in the workspace's `TDF-CTX-001` local time zone), and invokes `TaskBoard.evaluate` (`TaskBoardEvaluator`) to derive `Completed`, `Someday` (open tasks omitted from `queue` without an active `suspended` lock), `Blocked`, and the `queue`-ordered active tiers (`Focus`, `Ready`, `Planned`, with configurable per-workspace non-`passive` `due` lead-window auto-promotion defaulting to `24` hours, and `scoped` label queue partitioning) per `spec/TDF_SPEC_0.8.0.md` Section 9.
 4. **Mutation, Undo & Persistence:** Every user action advances the mutated entity's (and `queue` block's when reordered) UTC `modified` timestamp monotonically (`TaskItem.nextModifiedTimestamp`), cleans expired finite `suspended` locks and resolved one-shot `blocked` prerequisites on open tasks, records explicit task, location, and label deletions in `deleted` (`TdfDeletedBlock`) via `TaskBoardMutator` and `TaskBoardQueueMutator`, captures bounded 10-entry in-memory LIFO undo snapshots (`TaskBoardUndo`) for task completion, downgrade, and deletion (clearing the undo stack immediately upon conflict or recovery resolution), triggers `TaskSyncPipeline`, serializes byte-exact canonical `LF`-terminated `tdf 0.8.0` output via `TdfService.serialize` (`TdfSerializer`), and persists the converged `.tdf` document and `TTS\x04` sync baselines across the configured local and WebDAV targets.

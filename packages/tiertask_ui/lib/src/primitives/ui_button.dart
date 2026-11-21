@@ -403,12 +403,11 @@ class _UiButtonState extends State<UiButton>
     return base.copyWith(color: foreground, fontWeight: weight);
   }
 
-  /// Creates or disposes the loading rotation animation controller cleanly.
+  /// Starts, pauses, or updates the lazily allocated loading rotation animation controller.
   void _syncSpinController() {
     if (!widget.isLoading) {
       _spinController?.stop();
-      _spinController?.dispose();
-      _spinController = null;
+      _spinController?.reset();
       return;
     }
     final duration = UiThemeTokens.of(context).focus.spinDuration;
@@ -416,8 +415,12 @@ class _UiButtonState extends State<UiButton>
     if (existing == null) {
       _spinController = AnimationController(vsync: this, duration: duration)
         ..repeat();
-    } else if (existing.duration != duration) {
+      return;
+    }
+    if (existing.duration != duration) {
       existing.duration = duration;
+    }
+    if (!existing.isAnimating) {
       existing.repeat();
     }
   }

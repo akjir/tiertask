@@ -90,7 +90,7 @@ void main() {
               storageMode: StorageMode.both,
               language: AppLanguage.german,
               themeMode: AppThemeMode.dark,
-              themePalette: AppThemePalette.slate,
+              themePalette: AppThemePalette.calm,
             ),
           ),
         ],

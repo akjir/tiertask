@@ -636,7 +636,7 @@ class SettingsCodec {
       entryMap,
       'themePalette',
       parser: AppThemePalette.tryParseJson,
-      fallback: AppThemePalette.slate,
+      fallback: AppThemePalette.calm,
       workspaceId: workspaceId,
       warnings: warnings,
     );

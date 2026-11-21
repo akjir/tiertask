@@ -6,8 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added desktop keyboard shortcuts for global search, quick task creation, tier navigation, undo, and layered Escape dismissal.
+- Added dedicated views for deletion conflict resolution, history recovery, raw TDF preview, and diagnostic logs.
+- Added uncommitted inline draft cards for creating detailed tasks, labels, and locations without saving premature entries.
+
 ### Changed
 
+- Changed the application layout to an adaptive desktop sidebar and compact mobile drawer shell with docked action bars.
+- Changed task, label, and location management to unified expandable cards with inline section editing and live updates.
+- Changed built-in color palettes from Slate and Navy to Calm (default) and Plum Umber in Light and Dark modes, migrating saved palettes automatically.
+- Changed the development build indicator from a corner banner ribbon to an inline pill in the top bar.
 - Changed the application logo and platform launcher icons to the minimal three-bar TierTask mark.
 
 ## [0.4.0] - 2026-11-20

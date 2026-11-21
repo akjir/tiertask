@@ -251,10 +251,10 @@ class LegacyTtwV2Converter {
     _ => AppThemeMode.system,
   };
 
-  /// Resolves a `TTW\x02` palette ID (`0..1`) into an [AppThemePalette].
+  /// Resolves a legacy `TTW\x02` palette ID (`0..1`) silently to [AppThemePalette.calm].
   static AppThemePalette _themePaletteFromV2Id(int rawId) => switch (rawId) {
-    1 => AppThemePalette.navy,
-    _ => AppThemePalette.slate,
+    0 || 1 => AppThemePalette.calm,
+    _ => AppThemePalette.calm,
   };
 
   /// Throws a [WorkspaceException] with [WorkspaceErrorKind.corruptSettingsPayload].

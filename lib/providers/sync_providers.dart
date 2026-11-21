@@ -55,6 +55,7 @@ class SyncState {
     this.errorMessage,
     this.fileReadReport,
     this.hasOpenConflict = false,
+    this.syncOutcome,
   });
 
   /// Optional error message from the most recent synchronization attempt.
@@ -72,6 +73,9 @@ class SyncState {
   /// Timestamp of the last successful synchronization.
   final DateTime? lastSyncedAt;
 
+  /// Optional structured conflict or recovery outcome when [hasOpenConflict] is true.
+  final TdfSyncOutcomeException? syncOutcome;
+
   /// Returns a copy of this [SyncState] with updated fields.
   SyncState copyWith({
     bool? isSyncing,
@@ -81,6 +85,8 @@ class SyncState {
     StorageFileReadReport? fileReadReport,
     bool clearFileReadReport = false,
     bool? hasOpenConflict,
+    TdfSyncOutcomeException? syncOutcome,
+    bool clearSyncOutcome = false,
   }) => SyncState(
     isSyncing: isSyncing ?? this.isSyncing,
     lastSyncedAt: lastSyncedAt ?? this.lastSyncedAt,
@@ -90,6 +96,9 @@ class SyncState {
         : (fileReadReport ?? this.fileReadReport),
     hasOpenConflict:
         hasOpenConflict ?? (clearError ? false : this.hasOpenConflict),
+    syncOutcome: (clearError || clearSyncOutcome)
+        ? null
+        : (syncOutcome ?? this.syncOutcome),
   );
 
   @override
@@ -100,7 +109,8 @@ class SyncState {
           other.lastSyncedAt == lastSyncedAt &&
           other.errorMessage == errorMessage &&
           other.fileReadReport == fileReadReport &&
-          other.hasOpenConflict == hasOpenConflict);
+          other.hasOpenConflict == hasOpenConflict &&
+          other.syncOutcome == syncOutcome);
 
   @override
   int get hashCode => Object.hash(
@@ -109,6 +119,7 @@ class SyncState {
     errorMessage,
     fileReadReport,
     hasOpenConflict,
+    syncOutcome,
   );
 }
 
@@ -123,16 +134,22 @@ class SyncStateNotifier extends Notifier<SyncState> {
   }
 
   /// Clears any active synchronization error banner.
-  void clearError() =>
-      state = state.copyWith(clearError: true, hasOpenConflict: false);
-
-  /// Records an unresolved synchronization conflict with [message].
-  void setConflict(String message) => state = state.copyWith(
-    isSyncing: false,
-    errorMessage: message,
-    clearFileReadReport: true,
-    hasOpenConflict: true,
+  void clearError() => state = state.copyWith(
+    clearError: true,
+    hasOpenConflict: false,
+    clearSyncOutcome: true,
   );
+
+  /// Records an unresolved synchronization conflict with [message] and optional [outcome].
+  void setConflict(String message, {TdfSyncOutcomeException? outcome}) =>
+      state = state.copyWith(
+        isSyncing: false,
+        errorMessage: message,
+        clearFileReadReport: true,
+        hasOpenConflict: true,
+        syncOutcome: outcome,
+        clearSyncOutcome: outcome == null,
+      );
 
   /// Records a synchronization failure with [message] and optional structured [fileReadReport].
   void setError(String message, {StorageFileReadReport? fileReadReport}) =>
@@ -142,6 +159,7 @@ class SyncStateNotifier extends Notifier<SyncState> {
         fileReadReport: fileReadReport,
         clearFileReadReport: fileReadReport == null,
         hasOpenConflict: false,
+        clearSyncOutcome: true,
       );
 
   /// Records a successful synchronization at [timestamp].
@@ -153,6 +171,7 @@ class SyncStateNotifier extends Notifier<SyncState> {
     isSyncing: true,
     clearError: true,
     hasOpenConflict: false,
+    clearSyncOutcome: true,
   );
 }
 
@@ -391,7 +410,7 @@ class TaskSyncPipeline {
       if (ref.mounted) {
         ref
             .read(syncStateProvider.notifier)
-            .setConflict(formatSyncOutcomeBanner(ref, error));
+            .setConflict(formatSyncOutcomeBanner(ref, error), outcome: error);
       }
       rethrow;
     } on Object catch (error) {

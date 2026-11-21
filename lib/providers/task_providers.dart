@@ -1362,7 +1362,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       TaskSyncPipeline.logSyncOutcomeEvent(error, config.storageMode);
       ref
           .read(syncStateProvider.notifier)
-          .setConflict(TaskSyncPipeline.formatSyncOutcomeBanner(ref, error));
+          .setConflict(
+            TaskSyncPipeline.formatSyncOutcomeBanner(ref, error),
+            outcome: error,
+          );
       await _recordConflictWatchDigestIfLocal(config);
     } on Object catch (error) {
       if (!ref.mounted) {
@@ -1634,7 +1637,10 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     TaskSyncPipeline.logSyncOutcomeEvent(error, config.storageMode);
     ref
         .read(syncStateProvider.notifier)
-        .setConflict(TaskSyncPipeline.formatSyncOutcomeBanner(ref, error));
+        .setConflict(
+          TaskSyncPipeline.formatSyncOutcomeBanner(ref, error),
+          outcome: error,
+        );
     if (localStageSucceeded) {
       await _recordConflictWatchDigestIfLocal(config);
       if (!ref.mounted) {

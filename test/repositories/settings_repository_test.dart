@@ -125,8 +125,8 @@ Uint8List _encodeLegacyTtwV2(
       AppThemeMode.dark => 2,
     };
     final paletteId = switch (config.themePalette) {
-      AppThemePalette.slate => 0,
-      AppThemePalette.navy => 1,
+      AppThemePalette.calm => 0,
+      AppThemePalette.plumUmber => 1,
     };
     final dueLeadId = switch (config.dueLeadWindow) {
       DueLeadWindow.off => 0,
@@ -411,7 +411,7 @@ void main() {
           storageMode: StorageMode.both,
           language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
-          themePalette: AppThemePalette.navy,
+          themePalette: AppThemePalette.plumUmber,
           timeZoneMode: AppTimeZoneMode.manual,
           manualTimeZoneOffsetMinutes: 63,
           locationEnabled: true,
@@ -551,7 +551,7 @@ void main() {
       fakeStorage.resetCounts();
 
       await repository.saveConfig(
-        webdavConfig.copyWith(themePalette: AppThemePalette.navy),
+        webdavConfig.copyWith(themePalette: AppThemePalette.plumUmber),
       );
       await repository.loadActiveWorkspace();
       await repository.loadWorkspaceSummaries();
@@ -816,11 +816,11 @@ void main() {
 
       // Missing primary with valid backup restores from backup:
       await repository.saveConfig(
-        const WebDavConfig(themePalette: AppThemePalette.navy),
+        const WebDavConfig(themePalette: AppThemePalette.plumUmber),
       );
       await repository.saveConfig(
         const WebDavConfig(
-          themePalette: AppThemePalette.navy,
+          themePalette: AppThemePalette.plumUmber,
           themeMode: AppThemeMode.dark,
         ),
       );
@@ -828,7 +828,10 @@ void main() {
       expect(backupFile.existsSync(), isTrue);
 
       final restoredFromBak = await repository.loadActiveWorkspace();
-      expect(restoredFromBak.config.themePalette, equals(AppThemePalette.navy));
+      expect(
+        restoredFromBak.config.themePalette,
+        equals(AppThemePalette.plumUmber),
+      );
       expect(primaryFile.existsSync(), isTrue);
       expect(
         repository.takeLastRecoveryNotice()?.kind,

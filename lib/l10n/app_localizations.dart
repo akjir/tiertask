@@ -2881,6 +2881,1068 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Corrupt settings were backed up and reset to defaults.'**
   String get settingsResetAfterQuarantineNotice;
+
+  /// Name of the default Calm theme preset.
+  ///
+  /// In en, this message translates to:
+  /// **'Calm'**
+  String get themePaletteCalm;
+
+  /// Name of the Plum Umber theme preset.
+  ///
+  /// In en, this message translates to:
+  /// **'Plum Umber'**
+  String get themePalettePlumUmber;
+
+  /// Inline badge marking a development build in the top chrome bar.
+  ///
+  /// In en, this message translates to:
+  /// **'DEV'**
+  String get devBuildBadge;
+
+  /// Subtitle for the Focus tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Three active tasks. One clear next step.'**
+  String get tierFocusSubtitle;
+
+  /// Subtitle for the Ready tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Up to five tasks queued to pull into Focus next.'**
+  String get tierReadySubtitle;
+
+  /// Subtitle for the Planned tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Active backlog feeding Ready automatically.'**
+  String get tierPlannedSubtitle;
+
+  /// Subtitle for the Blocked tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended or waiting on prerequisites and activation conditions.'**
+  String get tierBlockedSubtitle;
+
+  /// Subtitle for the Someday tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Collected outside the active queue.'**
+  String get tierSomedaySubtitle;
+
+  /// Subtitle for the Completed tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed tasks are retained for 30 days (UTC).'**
+  String get tierCompletedSubtitle;
+
+  /// Sidebar section heading for the six task tiers.
+  ///
+  /// In en, this message translates to:
+  /// **'Tasks'**
+  String get sectionTasksTitle;
+
+  /// Sidebar section heading for utility views and Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Tools'**
+  String get sectionToolsTitle;
+
+  /// Sidebar row clearing any active label filter.
+  ///
+  /// In en, this message translates to:
+  /// **'All Tasks'**
+  String get allTasksLabel;
+
+  /// Accessible label identifying the active label filter.
+  ///
+  /// In en, this message translates to:
+  /// **'Active filter'**
+  String get activeFilterLabel;
+
+  /// Tooltip for clearing the active label filter.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear filter (All Tasks)'**
+  String get activeFilterClearTooltip;
+
+  /// Back button label returning to the Tasks view.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to tasks'**
+  String get actionBackToTasks;
+
+  /// Back button label returning to the Global Search view.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to search'**
+  String get actionBackToSearch;
+
+  /// Action label dismissing a banner or floating notice.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get actionDismiss;
+
+  /// Banner action opening the Deletion Conflict view.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolve conflict'**
+  String get actionResolveConflict;
+
+  /// Banner action opening the Generation Recovery view.
+  ///
+  /// In en, this message translates to:
+  /// **'Open recovery'**
+  String get actionResolveRecovery;
+
+  /// Accessible action label completing an open task.
+  ///
+  /// In en, this message translates to:
+  /// **'Complete'**
+  String get actionComplete;
+
+  /// Accessible action label restoring a completed task.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get actionRestore;
+
+  /// Generic copy button label.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get actionCopy;
+
+  /// Heading for the Global Search view.
+  ///
+  /// In en, this message translates to:
+  /// **'All Tasks'**
+  String get searchViewTitle;
+
+  /// Subtitle for the Global Search view.
+  ///
+  /// In en, this message translates to:
+  /// **'Searching across all six tiers in the active context.'**
+  String get searchViewSubtitle;
+
+  /// Empty state text when Global Search finds no matching tasks.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching tasks found.'**
+  String get searchEmptyHint;
+
+  /// Tooltip closing the Global Search bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Close search'**
+  String get searchCloseTooltip;
+
+  /// Heading shown during initial workspace loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading workspace...'**
+  String get loadingBoardTitle;
+
+  /// Subtitle shown during initial workspace loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Reading TDF document and evaluating six tiers.'**
+  String get loadingBoardSubtitle;
+
+  /// Placeholder for the sidebar label filter input.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter labels...'**
+  String get sidebarFilterLabelsPlaceholder;
+
+  /// Empty state when sidebar label filter finds no matches.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching labels.'**
+  String get sidebarFilterLabelsEmpty;
+
+  /// Tooltip toggling the sidebar label filter input.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter labels'**
+  String get sidebarFilterLabelsToggle;
+
+  /// Tooltip opening the Labels manager view.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage labels'**
+  String get sidebarManageLabels;
+
+  /// Tooltip collapsing the sidebar Labels section.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse labels'**
+  String get sidebarCollapseLabels;
+
+  /// Tooltip expanding the sidebar Labels section.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand labels'**
+  String get sidebarExpandLabels;
+
+  /// Placeholder for the sidebar location filter input.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter locations...'**
+  String get sidebarFilterLocationsPlaceholder;
+
+  /// Empty state when sidebar location filter finds no matches.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching locations.'**
+  String get sidebarFilterLocationsEmpty;
+
+  /// Tooltip toggling the sidebar location filter input.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter locations'**
+  String get sidebarFilterLocationsToggle;
+
+  /// Tooltip opening the Locations manager view.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage locations'**
+  String get sidebarManageLocations;
+
+  /// Tooltip collapsing the sidebar Locations section.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse locations'**
+  String get sidebarCollapseLocations;
+
+  /// Tooltip expanding the sidebar Locations section.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand locations'**
+  String get sidebarExpandLocations;
+
+  /// Tooltip navigating to a label card in Labels manager.
+  ///
+  /// In en, this message translates to:
+  /// **'Open and expand label in Manage'**
+  String get openLabelInManagerTooltip;
+
+  /// Tooltip navigating to a location card in Locations manager.
+  ///
+  /// In en, this message translates to:
+  /// **'Open and expand location in Manage'**
+  String get openLocationInManagerTooltip;
+
+  /// Chrome sync status label in Local storage mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Local only'**
+  String get syncStatusLocalOnly;
+
+  /// Chrome sync status label when synchronized.
+  ///
+  /// In en, this message translates to:
+  /// **'Synced'**
+  String get syncStatusSynced;
+
+  /// Chrome sync status label while syncing.
+  ///
+  /// In en, this message translates to:
+  /// **'Syncing...'**
+  String get syncStatusSyncing;
+
+  /// Chrome sync status label on conflict or recovery required.
+  ///
+  /// In en, this message translates to:
+  /// **'Conflict'**
+  String get syncStatusConflict;
+
+  /// Chrome sync status label on sync failure.
+  ///
+  /// In en, this message translates to:
+  /// **'Sync error'**
+  String get syncStatusError;
+
+  /// Title for the Raw TDF 0.8.0 preview view.
+  ///
+  /// In en, this message translates to:
+  /// **'Raw TDF 0.8.0'**
+  String get rawTdfPreviewTitle;
+
+  /// Subtitle for the Raw TDF 0.8.0 preview view.
+  ///
+  /// In en, this message translates to:
+  /// **'Canonical LF-terminated TDF 0.8.0 serialization of the current workspace board.'**
+  String get rawTdfPreviewSubtitle;
+
+  /// Telemetry summary showing byte and line counts of the serialized TDF document.
+  ///
+  /// In en, this message translates to:
+  /// **'{bytes} bytes / 1 MiB · {lines} lines / 16,384 max'**
+  String rawTdfStatsSummary(String bytes, String lines);
+
+  /// Toast notice after copying raw TDF text.
+  ///
+  /// In en, this message translates to:
+  /// **'TDF document copied to clipboard.'**
+  String get rawTdfCopiedNotice;
+
+  /// Alert title when serialized TDF exceeds Section 6.2 preview bounds.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview Limit Exceeded'**
+  String get rawTdfLimitExceededTitle;
+
+  /// Alert body when serialized TDF exceeds Section 6.2 preview bounds.
+  ///
+  /// In en, this message translates to:
+  /// **'The serialized TDF document exceeds the canonical 1 MiB or 16,384-line limit (TDF 0.8.0 Section 6.2) and cannot be previewed inline.'**
+  String get rawTdfLimitExceededDescription;
+
+  /// Overflow badge showing hidden secondary indicators on a collapsed task card.
+  ///
+  /// In en, this message translates to:
+  /// **'+{count} more'**
+  String badgeMoreIndicators(String count);
+
+  /// Badge indicating automatic deadline lead-window priority escalation.
+  ///
+  /// In en, this message translates to:
+  /// **'Due · Prioritized'**
+  String get badgeAutoPriority;
+
+  /// Collapsed task badge prefix for an overdue deadline.
+  ///
+  /// In en, this message translates to:
+  /// **'Overdue: {date}'**
+  String badgeOverduePrefix(String date);
+
+  /// Collapsed task badge for a timed suspension.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended until {date}'**
+  String badgeSuspendedUntil(String date);
+
+  /// Collapsed task badge for an indefinite suspension.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended indefinitely'**
+  String get badgeSuspendedForever;
+
+  /// Collapsed task badge for unsatisfied prerequisites.
+  ///
+  /// In en, this message translates to:
+  /// **'{done}/{total} prerequisites'**
+  String badgeBlockedByProgress(String done, String total);
+
+  /// Collapsed task badge for subtask progress.
+  ///
+  /// In en, this message translates to:
+  /// **'{done}/{total} steps'**
+  String badgeStepsProgress(String done, String total);
+
+  /// Collapsed task badge for a single reference link.
+  ///
+  /// In en, this message translates to:
+  /// **'1 link'**
+  String get badgeLinkSingular;
+
+  /// Collapsed task badge for history entry count.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} history'**
+  String badgeHistoryCount(String count);
+
+  /// Formatted repeat phrase for 1 day interval.
+  ///
+  /// In en, this message translates to:
+  /// **'Every day'**
+  String get repeatEveryDay;
+
+  /// Formatted repeat phrase for 1 week interval.
+  ///
+  /// In en, this message translates to:
+  /// **'Every week'**
+  String get repeatEveryWeek;
+
+  /// Formatted repeat phrase for 1 month interval.
+  ///
+  /// In en, this message translates to:
+  /// **'Every month'**
+  String get repeatEveryMonth;
+
+  /// Status pill shown in expanded completed task cards.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed · restore task to edit'**
+  String get completedReadOnlyPill;
+
+  /// Tooltip for inline task title edit button.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit title'**
+  String get inlineEditTitleTooltip;
+
+  /// Tooltip for inline label or location name edit button.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit name'**
+  String get inlineEditNameTooltip;
+
+  /// Add chip opening inline Note editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Note'**
+  String get inlineAddNote;
+
+  /// Add chip opening inline Links editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Links'**
+  String get inlineAddLinks;
+
+  /// Add chip opening inline Subtasks editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Subtasks'**
+  String get inlineAddSubtasks;
+
+  /// Add chip opening inline Label picker.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Labels'**
+  String get inlineAddLabels;
+
+  /// Add chip opening inline Due editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Due'**
+  String get inlineAddDue;
+
+  /// Add chip opening inline Repeat editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Repeat'**
+  String get inlineAddRepeat;
+
+  /// Add chip opening inline Suspend editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Suspend'**
+  String get inlineAddSuspend;
+
+  /// Add chip opening inline Prerequisites editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Prerequisites'**
+  String get inlineAddPrerequisites;
+
+  /// Add chip opening inline Activation Conditions editor.
+  ///
+  /// In en, this message translates to:
+  /// **'+ Conditions'**
+  String get inlineAddConditions;
+
+  /// Danger action clearing an optional section inside an inline editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get inlineClearAction;
+
+  /// Danger action disabling recurrence inside an inline editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable repeat'**
+  String get inlineDisableRepeatAction;
+
+  /// Danger action clearing suspension inside an inline editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume task'**
+  String get inlineResumeTaskAction;
+
+  /// Helper hint when configuring repeat lead days without a due date.
+  ///
+  /// In en, this message translates to:
+  /// **'Set a due date to configure preparation lead days.'**
+  String get inlineRepeatLeadNeedsDueHint;
+
+  /// Section title for live task placement selector.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue & Priority'**
+  String get inlinePlacementSectionTitle;
+
+  /// Standard active queue placement option.
+  ///
+  /// In en, this message translates to:
+  /// **'Queue'**
+  String get placementQueueOption;
+
+  /// Helper hint for standard queue placement.
+  ///
+  /// In en, this message translates to:
+  /// **'Append at the end of the active queue.'**
+  String get placementQueueHint;
+
+  /// Helper hint for priority placement.
+  ///
+  /// In en, this message translates to:
+  /// **'Prioritize ahead of regular tasks in Focus or Ready.'**
+  String get placementPriorityHint;
+
+  /// Helper hint for Someday placement.
+  ///
+  /// In en, this message translates to:
+  /// **'Park outside the active queue in Someday.'**
+  String get placementSomedayHint;
+
+  /// Inline confirmation prompt for deleting a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this task?'**
+  String get inlineDeleteTaskConfirm;
+
+  /// Inline confirmation prompt for deleting a label.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this label?'**
+  String get inlineDeleteLabelConfirm;
+
+  /// Inline confirmation prompt for deleting a location.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this location?'**
+  String get inlineDeleteLocationConfirm;
+
+  /// Button cancelling an inline delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep'**
+  String get actionKeep;
+
+  /// Button confirming an inline delete confirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes, delete'**
+  String get actionConfirmDelete;
+
+  /// Button closing a compact bottom sheet or inline picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get actionDone;
+
+  /// Button opening an uncommitted entity draft card.
+  ///
+  /// In en, this message translates to:
+  /// **'Open as draft'**
+  String get actionOpenAsDraft;
+
+  /// Compact mobile trigger button expanding Quick-Add.
+  ///
+  /// In en, this message translates to:
+  /// **'New task'**
+  String get actionNewTaskCompact;
+
+  /// Primary commit button for an uncommitted Task Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'Create task'**
+  String get actionCreateTask;
+
+  /// Primary commit button for an uncommitted Label Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'Create label'**
+  String get actionCreateLabel;
+
+  /// Primary commit button for an uncommitted Location Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'Create location'**
+  String get actionCreateLocation;
+
+  /// Header title of an uncommitted Task Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'New Task (Draft)'**
+  String get draftNewTaskTitle;
+
+  /// Header title of an uncommitted Label Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'New Label (Draft)'**
+  String get draftNewLabelTitle;
+
+  /// Header title of an uncommitted Location Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'New Location (Draft)'**
+  String get draftNewLocationTitle;
+
+  /// Subtle status hint on an uncommitted Draft Card.
+  ///
+  /// In en, this message translates to:
+  /// **'Uncommitted · saved to the TDF file only when you click Create.'**
+  String get draftUncommittedHint;
+
+  /// Input placeholder in the Labels manager quick-create bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick-create a new label...'**
+  String get quickCreateLabelHint;
+
+  /// Input placeholder in the Locations manager quick-create bar.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick-create a new location...'**
+  String get quickCreateLocationHint;
+
+  /// Subtitle for the Labels manager view.
+  ///
+  /// In en, this message translates to:
+  /// **'Contexts, scoped queues, reference links, and inherited conditions.'**
+  String get labelsManagerSubtitle;
+
+  /// Subtitle for the Locations manager view.
+  ///
+  /// In en, this message translates to:
+  /// **'Reusable locations for task and label GPS conditions.'**
+  String get locationsManagerSubtitle;
+
+  /// Placeholder in the Searchable Label Picker input.
+  ///
+  /// In en, this message translates to:
+  /// **'Search or create label...'**
+  String get labelPickerSearchPlaceholder;
+
+  /// Scope filter chip showing all labels in the picker.
+  ///
+  /// In en, this message translates to:
+  /// **'All ({count})'**
+  String labelPickerFilterAll(String count);
+
+  /// Scope filter chip showing scoped queue labels in the picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Scoped ({count})'**
+  String labelPickerFilterScoped(String count);
+
+  /// Scope filter chip showing global context labels in the picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Global ({count})'**
+  String labelPickerFilterGlobal(String count);
+
+  /// Empty state when label picker filter matches nothing.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching labels found.'**
+  String get labelPickerNoMatches;
+
+  /// Empty state in label picker when no labels exist yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No labels yet. Type a name above to create one.'**
+  String get labelPickerEmptyHint;
+
+  /// Inline creation row text inside the label picker.
+  ///
+  /// In en, this message translates to:
+  /// **'Create & assign \"{name}\"'**
+  String labelPickerCreateAndAssign(String name);
+
+  /// Tooltip removing a label chip.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove label: {name}'**
+  String labelPickerRemoveTooltip(String name);
+
+  /// Count pill showing open tasks referencing a label or location.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} open'**
+  String openTasksCountPill(String count);
+
+  /// Disabled row hint preventing a prerequisite dependency cycle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cycle prevented'**
+  String get prerequisiteCyclePreventedHint;
+
+  /// Label board scope option for global context labels.
+  ///
+  /// In en, this message translates to:
+  /// **'Global Context'**
+  String get globalContextLabel;
+
+  /// Label board scope option and badge for scoped queue labels.
+  ///
+  /// In en, this message translates to:
+  /// **'Scoped Queue'**
+  String get scopedQueueLabel;
+
+  /// Condition dimension option inheriting label conditions.
+  ///
+  /// In en, this message translates to:
+  /// **'Inherit label conditions'**
+  String get conditionInheritLabel;
+
+  /// Condition dimension option configuring custom task rules.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom condition'**
+  String get conditionCustomLabel;
+
+  /// Status line when activation conditions are currently satisfied.
+  ///
+  /// In en, this message translates to:
+  /// **'Currently satisfied'**
+  String get conditionSatisfiedStatus;
+
+  /// Status line when activation conditions are currently unmet.
+  ///
+  /// In en, this message translates to:
+  /// **'Currently unmet (blocked)'**
+  String get conditionBlockedStatus;
+
+  /// Suspension mode with an explicit timestamp.
+  ///
+  /// In en, this message translates to:
+  /// **'Until a date and time'**
+  String get suspendedUntilModeLabel;
+
+  /// Suspension mode without an end timestamp.
+  ///
+  /// In en, this message translates to:
+  /// **'Indefinitely'**
+  String get suspendedForeverModeLabel;
+
+  /// Tooltip toggling optional history timestamp override field.
+  ///
+  /// In en, this message translates to:
+  /// **'Set timestamp'**
+  String get historyTimestampToggleTooltip;
+
+  /// Validation error when adding or editing a duplicate history entry.
+  ///
+  /// In en, this message translates to:
+  /// **'An identical history entry with this timestamp already exists.'**
+  String get historyErrorDuplicate;
+
+  /// Formatted radius readout in expanded location card.
+  ///
+  /// In en, this message translates to:
+  /// **'Radius: {radius}'**
+  String locationRadiusReadout(String radius);
+
+  /// Floating notice when an expanded or edited entity is deleted externally.
+  ///
+  /// In en, this message translates to:
+  /// **'This item was removed by an external update.'**
+  String get entityRemovedExternallyNotice;
+
+  /// Floating notice when an edited task is completed externally.
+  ///
+  /// In en, this message translates to:
+  /// **'This task was completed by an external update.'**
+  String get taskCompletedExternallyNotice;
+
+  /// Toast notice after copying a label ID.
+  ///
+  /// In en, this message translates to:
+  /// **'Label ID copied to clipboard.'**
+  String get labelIdCopiedNotice;
+
+  /// Toast notice after copying a location ID.
+  ///
+  /// In en, this message translates to:
+  /// **'Location ID copied to clipboard.'**
+  String get locationIdCopiedNotice;
+
+  /// Toast notice after restoring a completed task.
+  ///
+  /// In en, this message translates to:
+  /// **'\"{title}\" restored.'**
+  String taskRestoredNotice(String title);
+
+  /// Toast notice after completing a recurring task.
+  ///
+  /// In en, this message translates to:
+  /// **'\"{title}\" completed and rescheduled for the next cycle.'**
+  String taskCompletedRepeatNotice(String title);
+
+  /// Toast notice after undoing the last entry in the undo stack.
+  ///
+  /// In en, this message translates to:
+  /// **'Action undone.'**
+  String get actionUndoneNotice;
+
+  /// Toast notice after undoing with remaining undo entries.
+  ///
+  /// In en, this message translates to:
+  /// **'Action undone ({remaining} more in history).'**
+  String actionUndoneRemainingNotice(String remaining);
+
+  /// Toast notice after switching active workspace.
+  ///
+  /// In en, this message translates to:
+  /// **'Switched workspace: {name}'**
+  String workspaceSwitchedNotice(String name);
+
+  /// Toast notice after applying current GPS fix to a location.
+  ///
+  /// In en, this message translates to:
+  /// **'Current GPS position applied.'**
+  String get gpsAppliedNotice;
+
+  /// Toast notice after resolving an address or Plus Code.
+  ///
+  /// In en, this message translates to:
+  /// **'Source resolved to coordinates.'**
+  String get locationResolvedNotice;
+
+  /// Toast notice after saving a label.
+  ///
+  /// In en, this message translates to:
+  /// **'Label saved.'**
+  String get labelSavedNotice;
+
+  /// Toast notice after deleting a label.
+  ///
+  /// In en, this message translates to:
+  /// **'Label deleted.'**
+  String get labelDeletedNotice;
+
+  /// Toast notice after saving a location.
+  ///
+  /// In en, this message translates to:
+  /// **'Location saved.'**
+  String get locationSavedNotice;
+
+  /// Toast notice after deleting a location.
+  ///
+  /// In en, this message translates to:
+  /// **'Location deleted.'**
+  String get locationDeletedNotice;
+
+  /// Toast notice after saving a task in the current tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Task saved.'**
+  String get noticeTaskSaved;
+
+  /// Toast notice when a saved or created task lands in another tier.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved · now in {tier}'**
+  String noticeTaskSavedInTier(String tier);
+
+  /// Toast notice when a task moves into a scoped queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to scoped queue: {label}'**
+  String noticeTaskMovedToScopedQueue(String label);
+
+  /// Toast notice when priority placement is enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Task prioritized'**
+  String get noticePriorityEnabled;
+
+  /// Toast notice when priority placement is cleared.
+  ///
+  /// In en, this message translates to:
+  /// **'Priority cleared'**
+  String get noticePriorityDisabled;
+
+  /// Toast notice when task placement switches to Someday.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to Someday'**
+  String get noticeMovedToSomeday;
+
+  /// Toast notice when task placement switches to active queue.
+  ///
+  /// In en, this message translates to:
+  /// **'Activated in queue'**
+  String get noticeMovedToQueue;
+
+  /// Toast notice when assigning a label to a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Label added: {name}'**
+  String noticeLabelAdded(String name);
+
+  /// Toast notice when removing a label from a task.
+  ///
+  /// In en, this message translates to:
+  /// **'Label removed: {name}'**
+  String noticeLabelRemoved(String name);
+
+  /// Toast notice when creating and assigning a label inline.
+  ///
+  /// In en, this message translates to:
+  /// **'Label created and assigned: {name}'**
+  String noticeLabelCreatedAndAssigned(String name);
+
+  /// Subtitle in the Settings page header.
+  ///
+  /// In en, this message translates to:
+  /// **'Configuration for active workspace \"{workspace}\".'**
+  String settingsWorkspaceSubtitle(String workspace);
+
+  /// Badge indicating a Settings card commits changes immediately.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto-saved'**
+  String get settingsAutoSavedBadge;
+
+  /// Warning badge indicating unsaved WebDAV edits in Settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsaved changes'**
+  String get settingsUnsavedChangesBadge;
+
+  /// Tooltip explaining why Local Move is disabled when unsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Moving directories is available only on desktop platforms (Linux/Windows).'**
+  String get settingsMoveDesktopOnlyTooltip;
+
+  /// Validation error when a WebDAV URL contains userinfo.
+  ///
+  /// In en, this message translates to:
+  /// **'URL must not contain embedded credentials (user:pass@).'**
+  String get webDavUrlUserinfoError;
+
+  /// Validation error when a WebDAV remote file path is invalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid remote file path (\"..\", backslashes, and control characters are forbidden).'**
+  String get webDavPathInvalidError;
+
+  /// Subtitle for the Diagnostic Log view.
+  ///
+  /// In en, this message translates to:
+  /// **'Structured runtime entries (credentials, raw GPS coordinates, and notes redacted).'**
+  String get logViewerSubtitle;
+
+  /// Dropdown label for diagnostic log subsystem tag filter.
+  ///
+  /// In en, this message translates to:
+  /// **'Subsystem'**
+  String get logFilterSubsystemLabel;
+
+  /// Button label uploading diagnostic log to WebDAV.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload Log'**
+  String get logActionUpload;
+
+  /// Button label clearing diagnostic log entries.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get logActionClear;
+
+  /// Heading for the TDF-DEL-003 Deletion Conflict resolution view.
+  ///
+  /// In en, this message translates to:
+  /// **'Resolve Deletion Conflicts (TDF-DEL-003)'**
+  String get conflictResolutionTitle;
+
+  /// Subtitle for the Deletion Conflict resolution view.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose whether to keep the concurrent local edit or confirm deletion for each conflicted item.'**
+  String get conflictResolutionSubtitle;
+
+  /// Segmented option keeping concurrent local edits in a deletion conflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep Edit (Undelete)'**
+  String get conflictKeepEditOption;
+
+  /// Segmented option confirming deletion in a deletion conflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm Deletion'**
+  String get conflictConfirmDeleteOption;
+
+  /// Primary dock button applying deletion conflict decisions.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply Decisions & Sync'**
+  String get conflictApplyAndSyncAction;
+
+  /// Toast notice after resolving deletion conflicts.
+  ///
+  /// In en, this message translates to:
+  /// **'Deletion conflicts resolved. Synchronization resumed.'**
+  String get conflictResolvedNotice;
+
+  /// Heading for the TDF-REC-002 Generation Recovery resolution view.
+  ///
+  /// In en, this message translates to:
+  /// **'Recover After History Advancement (TDF-REC-002)'**
+  String get recoveryResolutionTitle;
+
+  /// Subtitle for the Generation Recovery resolution view.
+  ///
+  /// In en, this message translates to:
+  /// **'Shared deletion history advanced past the last acknowledged state. Choose an action for each affected local item.'**
+  String get recoveryResolutionSubtitle;
+
+  /// Segmented option recovering a retired local entity under a fresh ID.
+  ///
+  /// In en, this message translates to:
+  /// **'Recover as New (fresh ID)'**
+  String get recoveryAsNewOption;
+
+  /// Segmented option discarding an affected local change during recovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Discard Local Change'**
+  String get recoveryDiscardLocalOption;
+
+  /// Primary dock button applying generation recovery decisions.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply Recovery & Sync'**
+  String get recoveryApplyAndSyncAction;
+
+  /// Toast notice after completing generation recovery.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery completed. Synchronization resumed.'**
+  String get recoveryResolvedNotice;
+
+  /// Uppercase entity kind badge in conflict and recovery cards.
+  ///
+  /// In en, this message translates to:
+  /// **'TASK'**
+  String get entityKindTaskBadge;
+
+  /// Uppercase entity kind badge in conflict and recovery cards.
+  ///
+  /// In en, this message translates to:
+  /// **'LABEL'**
+  String get entityKindLabelBadge;
+
+  /// Uppercase entity kind badge in conflict and recovery cards.
+  ///
+  /// In en, this message translates to:
+  /// **'LOCATION'**
+  String get entityKindLocationBadge;
+
+  /// Sidebar footer version label.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String versionFooterLabel(String version);
 }
 
 class _AppLocalizationsDelegate

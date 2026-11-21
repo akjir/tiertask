@@ -97,13 +97,13 @@ enum AppThemeMode {
   }
 }
 
-/// Supported Material 3 color theme palettes in TierTask.
+/// Supported color theme palettes in TierTask (`spec/UI_DESIGN_SYSTEM.md` `U-TOKEN-005`).
 enum AppThemePalette {
-  /// Chromium-inspired Material 3 slate blue-grey palette (default).
-  slate(jsonValue: 'slate'),
+  /// Default WCAG AA verified Calm slate-teal palette (`calm`).
+  calm(jsonValue: 'calm'),
 
-  /// Signature TierTask navy and indigo palette.
-  navy(jsonValue: 'navy');
+  /// Warm WCAG AA verified Plum Umber palette (`plum_umber`).
+  plumUmber(jsonValue: 'plum_umber');
 
   /// Creates an [AppThemePalette] option.
   const AppThemePalette({required this.jsonValue});
@@ -111,14 +111,17 @@ enum AppThemePalette {
   /// Canonical lowercase JSON token persisted in `settings.json`.
   final String jsonValue;
 
-  /// Parses a canonical JSON token into an [AppThemePalette], or returns `null` when unknown.
+  /// Parses a canonical JSON token into an [AppThemePalette], silently migrating
+  /// legacy `'slate'` and `'navy'` values to [AppThemePalette.calm], or returns
+  /// `null` when unknown.
   static AppThemePalette? tryParseJson(String? raw) {
     if (raw == null) {
       return null;
     }
     return switch (raw.trim().toLowerCase()) {
-      'slate' => AppThemePalette.slate,
-      'navy' => AppThemePalette.navy,
+      'calm' => AppThemePalette.calm,
+      'plum_umber' => AppThemePalette.plumUmber,
+      'slate' || 'navy' => AppThemePalette.calm,
       _ => null,
     };
   }
@@ -248,7 +251,7 @@ class WebDavConfig {
     StorageMode? storageMode,
     this.language = AppLanguage.system,
     this.themeMode = AppThemeMode.system,
-    this.themePalette = AppThemePalette.slate,
+    this.themePalette = AppThemePalette.calm,
     this.locationEnabled = false,
     this.timeZoneMode = AppTimeZoneMode.automatic,
     int manualTimeZoneOffsetMinutes = 0,

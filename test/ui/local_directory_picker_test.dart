@@ -19,7 +19,6 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -88,7 +87,7 @@ void main() {
             supportsDirectoryPickerProvider.overrideWithValue(false),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -240,7 +239,7 @@ void main() {
             }),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -429,7 +428,7 @@ void main() {
             supportsDirectoryPickerProvider.overrideWithValue(true),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -592,7 +591,7 @@ void main() {
             }),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();

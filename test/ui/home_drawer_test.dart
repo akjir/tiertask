@@ -16,7 +16,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
@@ -769,7 +768,7 @@ task tskGenOkD2 {
   );
 }
 
-/// Pumps [TierTaskApp] with optional [config], [initialTdf], [version], and [clock] overrides.
+/// Pumps [LegacyTierTaskApp] with optional [config], [initialTdf], [version], and [clock] overrides.
 Future<void> _pumpDrawerApp(
   WidgetTester tester, {
   WebDavConfig config = const WebDavConfig(language: AppLanguage.english),
@@ -796,7 +795,7 @@ Future<void> _pumpDrawerApp(
           () => clock ?? DateTime.utc(2026, 11, 1),
         ),
       ],
-      child: const TierTaskApp(),
+      child: const LegacyTierTaskApp(),
     ),
   );
   await tester.pumpAndSettle();

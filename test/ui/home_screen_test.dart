@@ -20,7 +20,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/settings_codec.dart';
@@ -533,7 +532,7 @@ void main() {
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
 
@@ -838,7 +837,7 @@ task 000002OkD2 priority {
         await tester.pumpWidget(
           UncontrolledProviderScope(
             container: container,
-            child: const TierTaskApp(),
+            child: const LegacyTierTaskApp(),
           ),
         );
         await tester.pumpAndSettle();
@@ -950,7 +949,7 @@ task dueSoon001 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1163,7 +1162,7 @@ task maxHoriz06 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1366,7 +1365,7 @@ task maxHoriz06 {
               () => DateTime.utc(2026, 11, 20, 10),
             ),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1425,7 +1424,7 @@ task maxHoriz06 {
               () => DateTime.utc(2026, 11, 20, 10),
             ),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1480,7 +1479,7 @@ task maxHoriz06 {
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1517,7 +1516,7 @@ task maxHoriz06 {
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pump();
@@ -1566,7 +1565,7 @@ task maxHoriz06 {
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1629,7 +1628,7 @@ class _DelayedSettingsRepository extends InMemorySettingsRepository {
   }
 }
 
-/// Pumps [TierTaskApp] with optional [config] and [initialTdf] overrides.
+/// Pumps [LegacyTierTaskApp] with optional [config] and [initialTdf] overrides.
 Future<void> _pumpHomeApp(
   WidgetTester tester, {
   WebDavConfig config = const WebDavConfig(language: AppLanguage.english),
@@ -1648,13 +1647,13 @@ Future<void> _pumpHomeApp(
           ),
         clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 12, 0)),
       ],
-      child: const TierTaskApp(),
+      child: const LegacyTierTaskApp(),
     ),
   );
   await tester.pumpAndSettle();
 }
 
-/// Pumps [TierTaskApp] inside an [UncontrolledProviderScope] and returns the [ProviderContainer].
+/// Pumps [LegacyTierTaskApp] inside an [UncontrolledProviderScope] and returns the [ProviderContainer].
 Future<ProviderContainer> _pumpHomeAppWithContainer(
   WidgetTester tester, {
   required String initialTdf,
@@ -1674,7 +1673,10 @@ Future<ProviderContainer> _pumpHomeAppWithContainer(
   );
   addTearDown(container.dispose);
   await tester.pumpWidget(
-    UncontrolledProviderScope(container: container, child: const TierTaskApp()),
+    UncontrolledProviderScope(
+      container: container,
+      child: const LegacyTierTaskApp(),
+    ),
   );
   await tester.pumpAndSettle();
   return container;

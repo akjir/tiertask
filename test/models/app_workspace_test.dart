@@ -88,7 +88,7 @@ void main() {
           storageMode: StorageMode.both,
           language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
-          themePalette: AppThemePalette.navy,
+          themePalette: AppThemePalette.plumUmber,
           timeZoneMode: AppTimeZoneMode.manual,
           manualTimeZoneOffsetMinutes: 120,
           diagnosticsEnabled: true,

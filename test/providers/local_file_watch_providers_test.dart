@@ -214,7 +214,7 @@ void main() {
         // Unrelated preference edits must NOT rebuild LocalFileWatcherNotifier or resubscribe.
         final configNotifier = container.read(webDavConfigProvider.notifier);
         await configNotifier.updateThemeMode(AppThemeMode.dark);
-        await configNotifier.updateThemePalette(AppThemePalette.navy);
+        await configNotifier.updateThemePalette(AppThemePalette.plumUmber);
         await configNotifier.updateLanguage(AppLanguage.german);
         await configNotifier.updateLocationEnabled(true);
         await configNotifier.updateTimeZoneMode(AppTimeZoneMode.manual);

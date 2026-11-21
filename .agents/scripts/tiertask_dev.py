@@ -548,7 +548,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
         arb_path = root / "lib" / "l10n" / arb_name
         if not arb_path.exists():
             continue
-        if layer and layer not in ("l10n", "ui"):
+        if layer and layer not in ("l10n", "ui", "ui_v2"):
             continue
         rel = arb_path.relative_to(root).as_posix()
         for idx, line in enumerate(arb_path.read_text(encoding="utf-8").splitlines(), 1):
@@ -560,7 +560,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
         if layer == "ui_pkg":
             if not rel.startswith("packages/tiertask_ui/"):
                 continue
-        elif layer and not rel.startswith(f"lib/{layer}") and not rel.startswith(f"test/{layer}"):
+        elif layer and not rel.startswith(f"lib/{layer}/") and not rel.startswith(f"test/{layer}/"):
             continue
         lines = p.read_text(encoding="utf-8").splitlines()
         outlined = outline_dart_test(lines) if _is_test_dart(rel) else outline_dart_lib(lines)
@@ -655,7 +655,10 @@ def _extract_top_symbols(file_path: Path) -> list[str]:
 
 
 _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
-    "lib/main.dart": ["test/ui/home_screen_test.dart"],
+    "lib/main.dart": [
+        "test/ui_v2/tier_task_shell_screen_test.dart",
+        "test/ui_v2/real_mechanics_v2_test.dart",
+    ],
     "lib/l10n/tier_localization_extension.dart": ["test/ui/home_screen_test.dart"],
     "lib/models/task_board.dart": [
         "test/models/task_board_evaluation_test.dart",
@@ -765,6 +768,25 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/ui/widgets/task_editor_conditions_section.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
     "lib/ui/widgets/workspace_row_card.dart": ["test/ui/widgets/workspace_dialog_test.dart"],
     "lib/ui/widgets/tier_task_subtasks_section.dart": ["test/ui/widgets/tier_task_subtasks_test.dart"],
+    "lib/presentation/ui_v2_shell_models.dart": [
+        "test/presentation/app_shell_controller_test.dart",
+        "test/presentation/board_v2_view_models_test.dart",
+    ],
+    "lib/ui_v2/views/entity_section_widgets.dart": [
+        "test/ui_v2/tasks_view_test.dart",
+        "test/ui_v2/labels_view_test.dart",
+        "test/ui_v2/locations_view_test.dart",
+    ],
+    "lib/ui_v2/views/task_card.dart": ["test/ui_v2/tasks_view_test.dart"],
+    "lib/ui_v2/views/task_inline_editors.dart": ["test/ui_v2/tasks_view_test.dart"],
+    "lib/ui_v2/views/tasks_view.dart": ["test/ui_v2/tasks_view_test.dart"],
+    "lib/ui_v2/views/labels_view.dart": ["test/ui_v2/labels_view_test.dart"],
+    "lib/ui_v2/views/locations_view.dart": ["test/ui_v2/locations_view_test.dart"],
+    "lib/ui_v2/views/settings_view.dart": ["test/ui_v2/settings_view_test.dart"],
+    "lib/ui_v2/views/log_viewer_view.dart": ["test/ui_v2/secondary_views_test.dart"],
+    "lib/ui_v2/views/raw_tdf_view.dart": ["test/ui_v2/secondary_views_test.dart"],
+    "lib/ui_v2/views/resolution_views.dart": ["test/ui_v2/secondary_views_test.dart"],
+    "lib/ui_v2/dialogs/app_modals.dart": ["test/ui_v2/app_modals_test.dart"],
 }
 
 
@@ -818,12 +840,14 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
         "lib/main.dart",
         "lib/presentation/ui_telemetry.dart",
         "lib/ui/home_screen.dart",
+        "lib/ui_v2/tier_task_shell_screen.dart",
         "lib/providers/config_providers.dart",
         "lib/providers/sync_providers.dart",
         "lib/providers/task_providers.dart",
         "lib/providers/workspace_providers.dart",
         "lib/services/app_logger.dart",
         "test/ui/test_helpers.dart",
+        "test/ui_v2/test_helpers.dart",
         UI_BARREL_REL,
         "packages/tiertask_ui/test/test_helpers.dart",
     }
@@ -840,7 +864,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
                 continue
             if stop_at_hubs and dep in app_hubs:
                 continue
-            if is_pure_core and curr.startswith("lib/repositories/") and dep.startswith(("lib/ui/", "test/ui/")):
+            if is_pure_core and curr.startswith("lib/repositories/") and dep.startswith(("lib/ui/", "lib/ui_v2/", "test/ui/", "test/ui_v2/")):
                 continue
             visited_direct.add(dep)
             queue.append(dep)
@@ -870,7 +894,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
 
     impacted_tests: set[str] = set()
     for direct_lib in visited_direct:
-        if not is_pure_core and direct_lib.startswith(("lib/ui/", "packages/tiertask_ui/lib/")):
+        if not is_pure_core and direct_lib.startswith(("lib/ui/", "lib/ui_v2/", "packages/tiertask_ui/lib/")):
             impacted_tests.update(_find_mirror_tests(root, direct_lib))
 
     for f in sorted(visited_all):
@@ -879,7 +903,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
         if f in visited_direct or not stop_at_hubs:
             impacted_tests.add(f)
             continue
-        if is_pure_core and f.startswith("test/ui/"):
+        if is_pure_core and f.startswith(("test/ui/", "test/ui_v2/")):
             continue
         if target_symbols:
             test_text = (root / f).read_text(encoding="utf-8")
@@ -1296,7 +1320,7 @@ def _lib_layer_rank(rel_path: str) -> int | None:
         return 5
     if rel_path.startswith("lib/presentation/"):
         return 6
-    if rel_path.startswith("lib/ui/"):
+    if rel_path.startswith(("lib/ui/", "lib/ui_v2/")):
         return 7
     if rel_path == "lib/main.dart":
         return 8
@@ -1429,6 +1453,33 @@ def _check_ui_package_pubspecs(root: Path) -> list[str]:
     return issues
 
 
+def _is_allowed_ui_v2_import(root: Path, source_file: Path, uri: str) -> bool:
+    """Enforces the strict Rank 7 import whitelist for lib/ui_v2/ files."""
+    if uri in (
+        "package:tiertask_ui/tiertask_ui.dart",
+        "package:flutter_riverpod/flutter_riverpod.dart",
+        "dart:async",
+        "dart:math",
+        "dart:ui",
+        "dart:collection",
+    ):
+        return True
+    if uri.startswith(("package:flutter/", "package:material_ui/")):
+        return True
+    if uri.startswith(("dart:", "package:")):
+        return False
+    resolved = (source_file.parent / uri).resolve()
+    try:
+        rel_target = resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return False
+    return (
+        rel_target.startswith("lib/presentation/")
+        or rel_target.startswith("lib/ui_v2/")
+        or rel_target == "lib/l10n/app_localizations.dart"
+    )
+
+
 def run_static_checks(root: Path, fix: bool = False) -> list[str]:
     """Runs fast static compliance checks for AGENTS.md rules, L10N, and ARCHITECTURE.md."""
     if fix:
@@ -1489,7 +1540,36 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
                         )
                 if "HttpClient" in line and not line.strip().startswith("//"):
                     issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage in `{rel}:{idx}`")
-            if rel.startswith("lib/ui/"):
+            if rel.startswith(("lib/", "test/")):
+                m_root = _DART_IMPORT_RE.match(line)
+                if m_root and m_root.group(1).startswith("package:tiertask_ui/src/"):
+                    issues.append(
+                        f"P-FILE-SIZE: Forbidden internal import `{m_root.group(1)}` in `{rel}:{idx}` "
+                        f"(use package:tiertask_ui/tiertask_ui.dart)"
+                    )
+            if rel.startswith(
+                (
+                    "lib/models/",
+                    "lib/l10n/",
+                    "lib/services/",
+                    "lib/repositories/",
+                    "lib/providers/",
+                    "lib/presentation/",
+                )
+            ):
+                m_lower = _DART_IMPORT_RE.match(line)
+                if m_lower and m_lower.group(1).startswith("package:tiertask_ui/"):
+                    issues.append(
+                        f"P-UI-ISOLATION: Forbidden `{m_lower.group(1)}` import in lower layer `{rel}:{idx}`"
+                    )
+            if rel.startswith("lib/ui_v2/"):
+                m_v2 = _DART_IMPORT_RE.match(line)
+                if m_v2 and not _is_allowed_ui_v2_import(root, p, m_v2.group(1)):
+                    issues.append(
+                        f"P-UDF-ARCHITECTURE: Forbidden import `{m_v2.group(1)}` in `{rel}:{idx}` "
+                        f"(strict Rank 7 UI whitelist)"
+                    )
+            if rel.startswith(("lib/ui/", "lib/ui_v2/")):
                 code_part = line.split("//", 1)[0]
                 for provider_name in dict.fromkeys(_FORBIDDEN_UI_PROVIDER_RE.findall(code_part)):
                     issues.append(
@@ -1875,7 +1955,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_find.add_argument("queries", nargs="+", help="One or more substrings to search for.")
     p_find.add_argument(
         "--layer",
-        help="Optional layer filter (models, services, repositories, providers, presentation, ui, ui_pkg, l10n, spec).",
+        help="Optional layer filter (models, services, repositories, providers, presentation, ui, ui_v2, ui_pkg, l10n, spec).",
     )
 
     p_deps = sub.add_parser("deps", help="Show direct imports and transitive reverse lib/ and test/ dependents.")

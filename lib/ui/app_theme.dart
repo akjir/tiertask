@@ -712,11 +712,11 @@ class AppThemeSet {
   /// Active light [AppTheme].
   final AppTheme light;
 
-  /// Returns the [AppThemeSet] matching [palette].
+  /// Returns the legacy [AppThemeSet] matching [palette].
   static AppThemeSet forPalette(AppThemePalette palette) {
     return switch (palette) {
-      AppThemePalette.slate => slate,
-      AppThemePalette.navy => navy,
+      AppThemePalette.calm => slate,
+      AppThemePalette.plumUmber => navy,
     };
   }
 

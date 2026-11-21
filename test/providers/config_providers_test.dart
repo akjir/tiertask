@@ -205,7 +205,7 @@ void main() {
       expect(container.read(appThemeModeProvider), equals(AppThemeMode.system));
       expect(
         container.read(appThemePaletteProvider),
-        equals(AppThemePalette.slate),
+        equals(AppThemePalette.calm),
       );
       expect(container.read(diagnosticsEnabledProvider), isFalse);
 
@@ -216,10 +216,10 @@ void main() {
       await notifier.updateThemeMode(AppThemeMode.dark);
       expect(container.read(appThemeModeProvider), equals(AppThemeMode.dark));
 
-      await notifier.updateThemePalette(AppThemePalette.navy);
+      await notifier.updateThemePalette(AppThemePalette.plumUmber);
       expect(
         container.read(appThemePaletteProvider),
-        equals(AppThemePalette.navy),
+        equals(AppThemePalette.plumUmber),
       );
 
       await notifier.updateTimeZoneMode(AppTimeZoneMode.manual);

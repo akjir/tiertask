@@ -228,9 +228,22 @@ void main() {
       reason: 'setError must store optional StorageFileReadReport',
     );
 
-    notifier.setConflict('Deletion conflict on taskA');
+    const sampleConflictOutcome = TdfSyncOutcomeException(
+      kind: TdfSyncOutcomeKind.deletionConflict,
+      message: 'Deletion conflict on taskA',
+      conflictedTaskIds: <String>['taskA00001'],
+    );
+    notifier.setConflict(
+      'Deletion conflict on taskA',
+      outcome: sampleConflictOutcome,
+    );
     expect(container.read(syncStateProvider).isSyncing, isFalse);
     expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+    expect(
+      container.read(syncStateProvider).syncOutcome,
+      equals(sampleConflictOutcome),
+      reason: 'setConflict must retain optional TdfSyncOutcomeException',
+    );
     expect(
       container.read(syncStateProvider).fileReadReport,
       isNull,
@@ -242,6 +255,11 @@ void main() {
     );
 
     notifier.setError('Read failed', fileReadReport: sampleReport);
+    expect(
+      container.read(syncStateProvider).syncOutcome,
+      isNull,
+      reason: 'setError must clear syncOutcome',
+    );
     notifier.clearError();
     expect(container.read(syncStateProvider).errorMessage, isNull);
     expect(
@@ -254,18 +272,36 @@ void main() {
       isFalse,
       reason: 'clearError must reset hasOpenConflict to false',
     );
+    expect(
+      container.read(syncStateProvider).syncOutcome,
+      isNull,
+      reason: 'clearError must clear syncOutcome',
+    );
     expect(container.read(syncStateProvider).lastSyncedAt, equals(syncedAt));
 
-    notifier.setConflict('Another conflict');
+    notifier.setConflict('Another conflict', outcome: sampleConflictOutcome);
     notifier.setSyncing();
     expect(
       container.read(syncStateProvider).hasOpenConflict,
       isFalse,
       reason: 'setSyncing must reset hasOpenConflict to false',
     );
-    notifier.setConflict('Conflict before success');
+    expect(
+      container.read(syncStateProvider).syncOutcome,
+      isNull,
+      reason: 'setSyncing must clear syncOutcome',
+    );
+    notifier.setConflict(
+      'Conflict before success',
+      outcome: sampleConflictOutcome,
+    );
     notifier.setSuccess(syncedAt);
     expect(container.read(syncStateProvider).hasOpenConflict, isFalse);
+    expect(
+      container.read(syncStateProvider).syncOutcome,
+      isNull,
+      reason: 'setSuccess must clear syncOutcome',
+    );
 
     notifier.setError('Stale workspace error');
     await container

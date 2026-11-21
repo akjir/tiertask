@@ -18,15 +18,16 @@ import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'l10n/app_localizations.dart';
-import 'models/webdav_config.dart';
+import 'presentation/board_v2_view_models.dart';
 import 'providers/config_providers.dart';
 import 'providers/local_file_watch_providers.dart';
 import 'providers/workspace_providers.dart';
 import 'services/app_logger.dart';
-import 'ui/app_theme.dart';
-import 'ui/home_screen.dart';
+import 'ui_v2/tier_task_shell_screen.dart';
+import 'ui_v2/ui_v2_icon_mapper.dart';
 
 /// Root Material 3 application widget for TierTask.
 class TierTaskApp extends ConsumerStatefulWidget {
@@ -63,9 +64,8 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
   Widget build(BuildContext context) {
     ref.watch(diagnosticsEnabledProvider);
     ref.watch(localFileWatcherProvider);
-    final locale = ref.watch(appLocaleProvider);
-    final appThemeMode = ref.watch(appThemeModeProvider);
-    final appThemeSet = ref.watch(appThemeProvider);
+    final themeState = ref.watch(shellThemeStateProvider);
+    final preset = UiThemePresets.byId(themeState.presetId);
     final buildProfile = ref.watch(appBuildProfileProvider);
 
     return MaterialApp(
@@ -73,17 +73,16 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
       onGenerateTitle: (context) =>
           buildProfile.formatWindowTitle(AppLocalizations.of(context).appTitle),
       debugShowCheckedModeBanner: false,
-      locale: locale,
+      locale: themeState.locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         ...GlobalMaterialLocalizations.delegates,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      themeMode: _toFlutterThemeMode(appThemeMode),
-      theme: appThemeSet.light.toThemeData(),
-      darkTheme: appThemeSet.dark.toThemeData(),
-      builder: buildProfile.isDev ? _wrapWithDevBanner : null,
-      home: const HomeScreen(),
+      themeMode: UiV2IconMapper.flutterThemeMode(themeState.themeMode),
+      theme: preset.light.toThemeData(),
+      darkTheme: preset.dark.toThemeData(),
+      home: const TierTaskShellScreen(),
     );
   }
 
@@ -103,34 +102,6 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
         state == AppLifecycleState.paused) {
       unawaited(_flushRemoteLogQuietly());
     }
-  }
-
-  /// Maps [AppThemeMode] to Flutter's [ThemeMode].
-  ThemeMode _toFlutterThemeMode(AppThemeMode mode) {
-    return switch (mode) {
-      AppThemeMode.system => ThemeMode.system,
-      AppThemeMode.light => ThemeMode.light,
-      AppThemeMode.dark => ThemeMode.dark,
-    };
-  }
-
-  /// Wraps [child] with a non-blocking corner `DEV` banner for development builds.
-  Widget _wrapWithDevBanner(BuildContext context, Widget? child) {
-    final content = child ?? const SizedBox.shrink();
-    final colorScheme = Theme.of(context).colorScheme;
-    return Banner(
-      key: const ValueKey<String>('dev_build_banner'),
-      message: 'DEV',
-      location: BannerLocation.topEnd,
-      color: colorScheme.tertiary,
-      textStyle: TextStyle(
-        color: colorScheme.onTertiary,
-        fontSize: 10,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 1.0,
-      ),
-      child: content,
-    );
   }
 }
 

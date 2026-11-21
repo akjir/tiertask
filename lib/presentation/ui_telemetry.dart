@@ -21,6 +21,19 @@ class UiTelemetry {
   /// Prevents instantiation of [UiTelemetry].
   const UiTelemetry._();
 
+  /// Logs opening a conflict or recovery resolution view for [kind].
+  static void logConflictViewOpened(String kind) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.resolution_view.open',
+      fields: <String, Object?>{'kind': kind},
+    );
+  }
+
   /// Logs opening a modal dialog identified by [dialogName].
   static void logDialogOpened(String dialogName) {
     if (!AppLogger.shouldLog(LogLevel.info)) {
@@ -31,6 +44,121 @@ class UiTelemetry {
       LogTag.ui,
       'ui.dialog.open',
       fields: <String, Object?>{'dialog': dialogName},
+    );
+  }
+
+  /// Logs cancelling an uncommitted entity draft card of [kind].
+  static void logEntityDraftCancelled(String kind) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.entity_draft_cancelled',
+      fields: <String, Object?>{'kind': kind},
+    );
+  }
+
+  /// Logs committing an uncommitted entity draft card of [kind].
+  static void logEntityDraftCommitted(String kind) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.entity_draft_committed',
+      fields: <String, Object?>{'kind': kind},
+    );
+  }
+
+  /// Logs opening an uncommitted entity draft card of [kind].
+  static void logEntityDraftOpened(String kind) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.entity_draft_opened',
+      fields: <String, Object?>{'kind': kind},
+    );
+  }
+
+  /// Logs unwinding desktop `Escape` layer [layer].
+  static void logEscapeUnwound(String layer) {
+    if (!AppLogger.shouldLog(LogLevel.debug)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.ui,
+      'ui.escape_unwound',
+      fields: <String, Object?>{'layer': layer},
+    );
+  }
+
+  /// Logs an inline section edit failure on [kind] [entityId] [section].
+  static void logInlineEditFailed({
+    required String kind,
+    required String entityId,
+    required String section,
+  }) {
+    if (!AppLogger.shouldLog(LogLevel.warn)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.warn,
+      LogTag.ui,
+      'ui.inline_edit_failed',
+      fields: <String, Object?>{
+        'kind': kind,
+        'entity_id': entityId,
+        'section': section,
+      },
+    );
+  }
+
+  /// Logs opening an inline section editor on [kind] [entityId] [section].
+  static void logInlineEditOpened({
+    required String kind,
+    required String entityId,
+    required String section,
+  }) {
+    if (!AppLogger.shouldLog(LogLevel.debug)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.ui,
+      'ui.inline_edit_opened',
+      fields: <String, Object?>{
+        'kind': kind,
+        'entity_id': entityId,
+        'section': section,
+      },
+    );
+  }
+
+  /// Logs saving an inline section editor on [kind] [entityId] [section].
+  static void logInlineEditSaved({
+    required String kind,
+    required String entityId,
+    required String section,
+  }) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.inline_edit_saved',
+      fields: <String, Object?>{
+        'kind': kind,
+        'entity_id': entityId,
+        'section': section,
+      },
     );
   }
 
@@ -107,6 +235,19 @@ class UiTelemetry {
     );
   }
 
+  /// Logs unwinding an Android `PopScope` back layer [layer].
+  static void logPopScopeUnwound(String layer) {
+    if (!AppLogger.shouldLog(LogLevel.debug)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.debug,
+      LogTag.ui,
+      'ui.pop_scope_unwound',
+      fields: <String, Object?>{'layer': layer},
+    );
+  }
+
   /// Logs navigating to [screenName] with optional redacted [entityKey] and [entityId].
   static void logScreenOpened(
     String screenName, {
@@ -120,6 +261,19 @@ class UiTelemetry {
         ? 'Opened $screenName $entityKey=$entityId'
         : 'Opened $screenName';
     AppLogger.info(LogTag.ui, message);
+  }
+
+  /// Logs silently discarding unsaved WebDAV settings edits for [reason].
+  static void logSettingsWebDavDraftDiscarded(String reason) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.settings_webdav_draft_discarded',
+      fields: <String, Object?>{'reason': reason},
+    );
   }
 
   /// Logs expanding or collapsing inline task details for [taskId] at debug level.
@@ -227,6 +381,27 @@ class UiTelemetry {
         'id': taskId,
         'kind': kind.name,
         'seq': sequence,
+      },
+    );
+  }
+
+  /// Logs switching the active v2 shell view from [from] to [to].
+  static void logViewChanged({
+    required String from,
+    required String to,
+    required bool viaReturnContext,
+  }) {
+    if (!AppLogger.shouldLog(LogLevel.info)) {
+      return;
+    }
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.ui,
+      'ui.view_changed',
+      fields: <String, Object?>{
+        'from': from,
+        'to': to,
+        'via_return_context': viaReturnContext,
       },
     );
   }

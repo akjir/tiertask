@@ -1622,4 +1622,622 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get settingsResetAfterQuarantineNotice =>
       'Beschädigte Einstellungen wurden gesichert und auf Standardwerte zurückgesetzt.';
+
+  @override
+  String get themePaletteCalm => 'Calm';
+
+  @override
+  String get themePalettePlumUmber => 'Plum Umber';
+
+  @override
+  String get devBuildBadge => 'DEV';
+
+  @override
+  String get tierFocusSubtitle =>
+      'Drei aktive Aufgaben. Ein klarer nächster Schritt.';
+
+  @override
+  String get tierReadySubtitle =>
+      'Bis zu fünf Aufgaben, die als Nächstes in den Fokus nachrücken.';
+
+  @override
+  String get tierPlannedSubtitle =>
+      'Aktive Warteschlange, die Bereit automatisch nachfüllt.';
+
+  @override
+  String get tierBlockedSubtitle =>
+      'Zurückgestellt oder durch Voraussetzungen und Bedingungen blockiert.';
+
+  @override
+  String get tierSomedaySubtitle =>
+      'Außerhalb der aktiven Warteschlange gesammelt.';
+
+  @override
+  String get tierCompletedSubtitle =>
+      'Erledigte Aufgaben werden 30 Tage (UTC) aufbewahrt.';
+
+  @override
+  String get sectionTasksTitle => 'Aufgaben';
+
+  @override
+  String get sectionToolsTitle => 'Werkzeuge';
+
+  @override
+  String get allTasksLabel => 'Alle Aufgaben';
+
+  @override
+  String get activeFilterLabel => 'Aktiver Filter';
+
+  @override
+  String get activeFilterClearTooltip => 'Filter entfernen (Alle Aufgaben)';
+
+  @override
+  String get actionBackToTasks => 'Zurück zu den Aufgaben';
+
+  @override
+  String get actionBackToSearch => 'Zurück zur Suche';
+
+  @override
+  String get actionDismiss => 'Ausblenden';
+
+  @override
+  String get actionResolveConflict => 'Konflikt lösen';
+
+  @override
+  String get actionResolveRecovery => 'Wiederherstellung öffnen';
+
+  @override
+  String get actionComplete => 'Abschließen';
+
+  @override
+  String get actionRestore => 'Wiederherstellen';
+
+  @override
+  String get actionCopy => 'Kopieren';
+
+  @override
+  String get searchViewTitle => 'Alle Aufgaben';
+
+  @override
+  String get searchViewSubtitle =>
+      'Suche über alle sechs Tiers im aktiven Kontext.';
+
+  @override
+  String get searchEmptyHint => 'Keine passenden Aufgaben gefunden.';
+
+  @override
+  String get searchCloseTooltip => 'Suche schließen';
+
+  @override
+  String get loadingBoardTitle => 'Arbeitsbereich wird geladen...';
+
+  @override
+  String get loadingBoardSubtitle =>
+      'TDF-Dokument wird gelesen und auf sechs Tiers ausgewertet.';
+
+  @override
+  String get sidebarFilterLabelsPlaceholder => 'Labels filtern...';
+
+  @override
+  String get sidebarFilterLabelsEmpty => 'Keine passenden Labels.';
+
+  @override
+  String get sidebarFilterLabelsToggle => 'Labels filtern';
+
+  @override
+  String get sidebarManageLabels => 'Labels verwalten';
+
+  @override
+  String get sidebarCollapseLabels => 'Labels einklappen';
+
+  @override
+  String get sidebarExpandLabels => 'Labels ausklappen';
+
+  @override
+  String get sidebarFilterLocationsPlaceholder => 'Orte filtern...';
+
+  @override
+  String get sidebarFilterLocationsEmpty => 'Keine passenden Orte.';
+
+  @override
+  String get sidebarFilterLocationsToggle => 'Orte filtern';
+
+  @override
+  String get sidebarManageLocations => 'Orte verwalten';
+
+  @override
+  String get sidebarCollapseLocations => 'Orte einklappen';
+
+  @override
+  String get sidebarExpandLocations => 'Orte ausklappen';
+
+  @override
+  String get openLabelInManagerTooltip =>
+      'Label in Verwaltung öffnen und ausklappen';
+
+  @override
+  String get openLocationInManagerTooltip =>
+      'Ort in Verwaltung öffnen und ausklappen';
+
+  @override
+  String get syncStatusLocalOnly => 'Nur lokal';
+
+  @override
+  String get syncStatusSynced => 'Aktuell';
+
+  @override
+  String get syncStatusSyncing => 'Synchronisiert...';
+
+  @override
+  String get syncStatusConflict => 'Konflikt';
+
+  @override
+  String get syncStatusError => 'Sync-Fehler';
+
+  @override
+  String get rawTdfPreviewTitle => 'Raw TDF 0.8.0';
+
+  @override
+  String get rawTdfPreviewSubtitle =>
+      'Kanonische, zeilenweise LF-Serialisierung des aktuellen Boards.';
+
+  @override
+  String rawTdfStatsSummary(String bytes, String lines) {
+    return '$bytes Bytes / 1 MiB · $lines Zeilen / 16.384 max';
+  }
+
+  @override
+  String get rawTdfCopiedNotice =>
+      'TDF-Dokument in die Zwischenablage kopiert.';
+
+  @override
+  String get rawTdfLimitExceededTitle => 'Vorschau-Limit überschritten';
+
+  @override
+  String get rawTdfLimitExceededDescription =>
+      'Das serialisierte TDF-Dokument überschreitet das kanonische 1-MiB- oder 16.384-Zeilen-Limit (TDF 0.8.0 Abschnitt 6.2) und kann nicht direkt angezeigt werden.';
+
+  @override
+  String badgeMoreIndicators(String count) {
+    return '+$count weitere';
+  }
+
+  @override
+  String get badgeAutoPriority => 'Fällig · Priorisiert';
+
+  @override
+  String badgeOverduePrefix(String date) {
+    return 'Überfällig: $date';
+  }
+
+  @override
+  String badgeSuspendedUntil(String date) {
+    return 'Zurückgestellt bis $date';
+  }
+
+  @override
+  String get badgeSuspendedForever => 'Unbegrenzt zurückgestellt';
+
+  @override
+  String badgeBlockedByProgress(String done, String total) {
+    return '$done/$total Voraussetzungen';
+  }
+
+  @override
+  String badgeStepsProgress(String done, String total) {
+    return '$done/$total Schritte';
+  }
+
+  @override
+  String get badgeLinkSingular => '1 Link';
+
+  @override
+  String badgeHistoryCount(String count) {
+    return '$count Verlauf';
+  }
+
+  @override
+  String get repeatEveryDay => 'Jeden Tag';
+
+  @override
+  String get repeatEveryWeek => 'Jede Woche';
+
+  @override
+  String get repeatEveryMonth => 'Jeden Monat';
+
+  @override
+  String get completedReadOnlyPill =>
+      'Erledigt · zum Bearbeiten wiederherstellen';
+
+  @override
+  String get inlineEditTitleTooltip => 'Titel bearbeiten';
+
+  @override
+  String get inlineEditNameTooltip => 'Namen bearbeiten';
+
+  @override
+  String get inlineAddNote => '+ Notiz';
+
+  @override
+  String get inlineAddLinks => '+ Links';
+
+  @override
+  String get inlineAddSubtasks => '+ Unteraufgaben';
+
+  @override
+  String get inlineAddLabels => '+ Labels';
+
+  @override
+  String get inlineAddDue => '+ Fälligkeit';
+
+  @override
+  String get inlineAddRepeat => '+ Wiederholen';
+
+  @override
+  String get inlineAddSuspend => '+ Zurückstellen';
+
+  @override
+  String get inlineAddPrerequisites => '+ Voraussetzungen';
+
+  @override
+  String get inlineAddConditions => '+ Bedingungen';
+
+  @override
+  String get inlineClearAction => 'Entfernen';
+
+  @override
+  String get inlineDisableRepeatAction => 'Wiederholung aus';
+
+  @override
+  String get inlineResumeTaskAction => 'Wieder aktivieren';
+
+  @override
+  String get inlineRepeatLeadNeedsDueHint =>
+      'Vorbereitungszeit erfordert eine gesetzte Fälligkeit.';
+
+  @override
+  String get inlinePlacementSectionTitle => 'Warteschlange & Priorität';
+
+  @override
+  String get placementQueueOption => 'Warteschlange';
+
+  @override
+  String get placementQueueHint => 'Am Ende der Warteschlange einordnen.';
+
+  @override
+  String get placementPriorityHint =>
+      'Priorisiert vor regulären Aufgaben in Fokus oder Bereit einordnen.';
+
+  @override
+  String get placementSomedayHint =>
+      'Außerhalb der aktiven Warteschlange unter Irgendwann sammeln.';
+
+  @override
+  String get inlineDeleteTaskConfirm => 'Aufgabe löschen?';
+
+  @override
+  String get inlineDeleteLabelConfirm => 'Label löschen?';
+
+  @override
+  String get inlineDeleteLocationConfirm => 'Ort löschen?';
+
+  @override
+  String get actionKeep => 'Behalten';
+
+  @override
+  String get actionConfirmDelete => 'Ja, löschen';
+
+  @override
+  String get actionDone => 'Fertig';
+
+  @override
+  String get actionOpenAsDraft => 'Als Entwurf öffnen';
+
+  @override
+  String get actionNewTaskCompact => 'Neue Aufgabe';
+
+  @override
+  String get actionCreateTask => 'Aufgabe anlegen';
+
+  @override
+  String get actionCreateLabel => 'Label anlegen';
+
+  @override
+  String get actionCreateLocation => 'Ort anlegen';
+
+  @override
+  String get draftNewTaskTitle => 'Neue Aufgabe (Entwurf)';
+
+  @override
+  String get draftNewLabelTitle => 'Neues Label (Entwurf)';
+
+  @override
+  String get draftNewLocationTitle => 'Neuer Ort (Entwurf)';
+
+  @override
+  String get draftUncommittedHint =>
+      'Noch nicht gespeichert · erst bei Klick auf Anlegen wird in die TDF-Datei geschrieben.';
+
+  @override
+  String get quickCreateLabelHint => 'Neues Label schnell anlegen...';
+
+  @override
+  String get quickCreateLocationHint => 'Neuen Ort schnell anlegen...';
+
+  @override
+  String get labelsManagerSubtitle =>
+      'Kontexte, eigene Warteschlangen, Referenz-Links und vererbte Bedingungen.';
+
+  @override
+  String get locationsManagerSubtitle =>
+      'Wiederverwendbare Orte für GPS-Bedingungen an Aufgaben und Labels.';
+
+  @override
+  String get labelPickerSearchPlaceholder => 'Labels suchen oder anlegen...';
+
+  @override
+  String labelPickerFilterAll(String count) {
+    return 'Alle ($count)';
+  }
+
+  @override
+  String labelPickerFilterScoped(String count) {
+    return 'Eigene Queue ($count)';
+  }
+
+  @override
+  String labelPickerFilterGlobal(String count) {
+    return 'Global ($count)';
+  }
+
+  @override
+  String get labelPickerNoMatches => 'Keine passenden Labels gefunden.';
+
+  @override
+  String get labelPickerEmptyHint =>
+      'Noch keine Labels. Namen eingeben, um direkt eines anzulegen.';
+
+  @override
+  String labelPickerCreateAndAssign(String name) {
+    return '„$name“ anlegen & zuweisen';
+  }
+
+  @override
+  String labelPickerRemoveTooltip(String name) {
+    return 'Label entfernen: $name';
+  }
+
+  @override
+  String openTasksCountPill(String count) {
+    return '$count offen';
+  }
+
+  @override
+  String get prerequisiteCyclePreventedHint => 'Zyklus verhindert';
+
+  @override
+  String get globalContextLabel => 'Globaler Kontext';
+
+  @override
+  String get scopedQueueLabel => 'Eigene Warteschlange';
+
+  @override
+  String get conditionInheritLabel => 'Label-Bedingungen übernehmen';
+
+  @override
+  String get conditionCustomLabel => 'Eigene Bedingung';
+
+  @override
+  String get conditionSatisfiedStatus => 'Aktiv erfüllt';
+
+  @override
+  String get conditionBlockedStatus => 'Derzeit nicht erfüllt (blockiert)';
+
+  @override
+  String get suspendedUntilModeLabel => 'Bis zu einem Zeitpunkt';
+
+  @override
+  String get suspendedForeverModeLabel => 'Unbegrenzt';
+
+  @override
+  String get historyTimestampToggleTooltip => 'Zeitstempel wählen';
+
+  @override
+  String get historyErrorDuplicate =>
+      'Ein identischer Verlaufseintrag mit diesem Zeitstempel existiert bereits.';
+
+  @override
+  String locationRadiusReadout(String radius) {
+    return 'Radius: $radius';
+  }
+
+  @override
+  String get entityRemovedExternallyNotice =>
+      'Dieser Eintrag wurde durch eine externe Änderung entfernt.';
+
+  @override
+  String get taskCompletedExternallyNotice =>
+      'Diese Aufgabe wurde durch eine externe Änderung abgeschlossen.';
+
+  @override
+  String get labelIdCopiedNotice => 'Label-ID in die Zwischenablage kopiert.';
+
+  @override
+  String get locationIdCopiedNotice => 'Orts-ID in die Zwischenablage kopiert.';
+
+  @override
+  String taskRestoredNotice(String title) {
+    return '„$title“ wiederhergestellt.';
+  }
+
+  @override
+  String taskCompletedRepeatNotice(String title) {
+    return '„$title“ abgeschlossen und für den nächsten Zyklus neu eingeplant.';
+  }
+
+  @override
+  String get actionUndoneNotice => 'Aktion rückgängig gemacht.';
+
+  @override
+  String actionUndoneRemainingNotice(String remaining) {
+    return 'Aktion rückgängig gemacht ($remaining weitere im Verlauf).';
+  }
+
+  @override
+  String workspaceSwitchedNotice(String name) {
+    return 'Arbeitsbereich gewechselt: $name';
+  }
+
+  @override
+  String get gpsAppliedNotice => 'Aktuelle GPS-Position übernommen.';
+
+  @override
+  String get locationResolvedNotice =>
+      'Quelle erfolgreich auf Koordinaten aufgelöst.';
+
+  @override
+  String get labelSavedNotice => 'Label gespeichert.';
+
+  @override
+  String get labelDeletedNotice => 'Label gelöscht.';
+
+  @override
+  String get locationSavedNotice => 'Ort gespeichert.';
+
+  @override
+  String get locationDeletedNotice => 'Ort gelöscht.';
+
+  @override
+  String get noticeTaskSaved => 'Aufgabe gespeichert.';
+
+  @override
+  String noticeTaskSavedInTier(String tier) {
+    return 'Gespeichert · jetzt in $tier';
+  }
+
+  @override
+  String noticeTaskMovedToScopedQueue(String label) {
+    return 'In eigene Warteschlange verschoben: $label';
+  }
+
+  @override
+  String get noticePriorityEnabled => 'Aufgabe priorisiert';
+
+  @override
+  String get noticePriorityDisabled => 'Priorität entfernt';
+
+  @override
+  String get noticeMovedToSomeday => 'Nach Irgendwann verschoben';
+
+  @override
+  String get noticeMovedToQueue => 'In aktive Warteschlange aufgenommen';
+
+  @override
+  String noticeLabelAdded(String name) {
+    return 'Label hinzugefügt: $name';
+  }
+
+  @override
+  String noticeLabelRemoved(String name) {
+    return 'Label entfernt: $name';
+  }
+
+  @override
+  String noticeLabelCreatedAndAssigned(String name) {
+    return 'Label angelegt & zugewiesen: $name';
+  }
+
+  @override
+  String settingsWorkspaceSubtitle(String workspace) {
+    return 'Konfiguration für den aktiven Arbeitsbereich „$workspace“.';
+  }
+
+  @override
+  String get settingsAutoSavedBadge => 'Sofort gespeichert';
+
+  @override
+  String get settingsUnsavedChangesBadge => 'Ungespeicherte Änderungen';
+
+  @override
+  String get settingsMoveDesktopOnlyTooltip =>
+      'Verzeichniswechsel ist nur auf Desktop-Systemen (Linux/Windows) verfügbar.';
+
+  @override
+  String get webDavUrlUserinfoError =>
+      'URL darf keine eingebetteten Zugangsdaten (user:pass@) enthalten.';
+
+  @override
+  String get webDavPathInvalidError =>
+      'Ungültiger Remote-Dateipfad (\"..\", Backslashes und Steuerzeichen sind nicht erlaubt).';
+
+  @override
+  String get logViewerSubtitle =>
+      'Strukturierte Sitzungsereignisse (ohne Zugangsdaten, GPS-Rohdaten oder Notiztexte).';
+
+  @override
+  String get logFilterSubsystemLabel => 'Subsystem';
+
+  @override
+  String get logActionUpload => 'Log hochladen';
+
+  @override
+  String get logActionClear => 'Leeren';
+
+  @override
+  String get conflictResolutionTitle => 'Löschkonflikte lösen (TDF-DEL-003)';
+
+  @override
+  String get conflictResolutionSubtitle =>
+      'Entscheide für jeden betroffenen Eintrag, ob die lokale Bearbeitung behalten oder die Löschung bestätigt werden soll.';
+
+  @override
+  String get conflictKeepEditOption =>
+      'Bearbeitung behalten (Wiederherstellen)';
+
+  @override
+  String get conflictConfirmDeleteOption => 'Löschung bestätigen';
+
+  @override
+  String get conflictApplyAndSyncAction =>
+      'Entscheidungen anwenden & synchronisieren';
+
+  @override
+  String get conflictResolvedNotice =>
+      'Löschkonflikte gelöst. Synchronisierung fortgesetzt.';
+
+  @override
+  String get recoveryResolutionTitle =>
+      'Wiederherstellung nach Generationswechsel (TDF-REC-002)';
+
+  @override
+  String get recoveryResolutionSubtitle =>
+      'Die gemeinsame Synchronisierungshistorie ist über den letzten bestätigten Stand hinaus fortgeschritten. Entscheide für jeden betroffenen lokalen Eintrag.';
+
+  @override
+  String get recoveryAsNewOption => 'Als neu wiederherstellen (neue ID)';
+
+  @override
+  String get recoveryDiscardLocalOption => 'Lokale Änderung verwerfen';
+
+  @override
+  String get recoveryApplyAndSyncAction =>
+      'Wiederherstellung anwenden & synchronisieren';
+
+  @override
+  String get recoveryResolvedNotice =>
+      'Wiederherstellung abgeschlossen. Synchronisierung fortgesetzt.';
+
+  @override
+  String get entityKindTaskBadge => 'AUFGABE';
+
+  @override
+  String get entityKindLabelBadge => 'LABEL';
+
+  @override
+  String get entityKindLocationBadge => 'ORT';
+
+  @override
+  String versionFooterLabel(String version) {
+    return 'Version $version';
+  }
 }

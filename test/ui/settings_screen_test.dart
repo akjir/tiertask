@@ -20,7 +20,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -635,7 +634,7 @@ task 000004OkD2 {
               });
               return child!;
             },
-            child: const TierTaskApp(),
+            child: const LegacyTierTaskApp(),
           ),
         ),
       );
@@ -775,7 +774,7 @@ task 000004OkD2 {
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1032,7 +1031,7 @@ task task000004 {
             ),
             clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1)),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -1087,7 +1086,7 @@ class _AsyncSaveSettingsRepository extends InMemorySettingsRepository {
   }
 }
 
-/// Pumps [TierTaskApp] with shared settings overrides and optionally opens Settings.
+/// Pumps [LegacyTierTaskApp] with shared settings overrides and optionally opens Settings.
 Future<InMemorySettingsRepository> _pumpSettingsApp(
   WidgetTester tester, {
   WebDavConfig config = const WebDavConfig(language: AppLanguage.english),
@@ -1124,7 +1123,7 @@ Future<InMemorySettingsRepository> _pumpSettingsApp(
           () => clock ?? DateTime.utc(2026, 11, 1),
         ),
       ],
-      child: const TierTaskApp(),
+      child: const LegacyTierTaskApp(),
     ),
   );
   await tester.pumpAndSettle();

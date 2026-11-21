@@ -456,11 +456,11 @@ class ThemePaletteSelectionCard extends StatelessWidget {
         onChanged: onThemePaletteChanged,
         segments: [
           ButtonSegment(
-            value: AppThemePalette.slate,
+            value: AppThemePalette.calm,
             label: Text(localizations.themePaletteSlate),
           ),
           ButtonSegment(
-            value: AppThemePalette.navy,
+            value: AppThemePalette.plumUmber,
             label: Text(localizations.themePaletteNavy),
           ),
         ],

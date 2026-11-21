@@ -197,5 +197,48 @@ void main() {
         expect(selectedId, equals('b'));
       },
     );
+
+    testWidgets(
+      'honors custom searchMaxLength for inline creation length bounds',
+      (tester) async {
+        var created = '';
+        await pumpUiWidget(
+          tester,
+          SizedBox(
+            width: 420,
+            child: UiSearchablePicker<String>(
+              options: const <UiPickerOption<String>>[],
+              selectedIds: const <String>{},
+              searchMaxLength: 500,
+              emptyText: 'No matching labels',
+              inlineCreateLabel: (query) => 'Create "$query"',
+              onInlineCreate: (query) => created = query,
+              onToggleOption: (_) {},
+            ),
+          ),
+        );
+
+        final validLong = 'a' * 200;
+        await tester.enterText(find.byType(TextField), validLong);
+        await tester.pump();
+        expect(
+          find.text('Create "$validLong"'),
+          findsOneWidget,
+          reason: 'Inline creation must allow queries above 120 when searchMaxLength is 500',
+        );
+        await tester.tap(find.text('Create "$validLong"'));
+        await tester.pump();
+        expect(created, equals(validLong));
+
+        final atLimit = 'b' * 500;
+        await tester.enterText(find.byType(TextField), atLimit);
+        await tester.pump();
+        expect(
+          find.text('Create "$atLimit"'),
+          findsOneWidget,
+          reason: 'Inline creation must allow queries at exact searchMaxLength',
+        );
+      },
+    );
   });
 }

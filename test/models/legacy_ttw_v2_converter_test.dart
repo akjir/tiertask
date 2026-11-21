@@ -59,8 +59,8 @@ void _appendTestTtwV2Record(BytesBuilder builder, AppWorkspace workspace) {
     AppThemeMode.dark => 2,
   };
   final paletteId = switch (config.themePalette) {
-    AppThemePalette.slate => 0,
-    AppThemePalette.navy => 1,
+    AppThemePalette.calm => 0,
+    AppThemePalette.plumUmber => 1,
   };
   final tzId = switch (config.timeZoneMode) {
     AppTimeZoneMode.automatic => 0,
@@ -230,7 +230,7 @@ void main() {
                         logStorageMode: logMode,
                         logLevel: logLevel,
                         diagnosticsEnabled: !watchEnabled,
-                        locationEnabled: palette == AppThemePalette.navy,
+                        locationEnabled: palette == AppThemePalette.plumUmber,
                         dueLeadWindow:
                             DueLeadWindow.values[(storageMode.index +
                                     language.index +
@@ -249,9 +249,9 @@ void main() {
         final decoded = LegacyTtwV2Converter.decodeTtwV2Bytes(bytes);
         expect(
           decoded.workspaces.single.config,
-          equals(config),
+          equals(config.copyWith(themePalette: AppThemePalette.calm)),
           reason:
-              'TTW v2 decode mismatch for watch=${config.localWatchEnabled}, '
+              'TTW v2 decode mismatch (legacy palette IDs 0 and 1 must map to calm) for watch=${config.localWatchEnabled}, '
               'storage=${config.storageMode.name}, lang=${config.language.name}, '
               'theme=${config.themeMode.name}, palette=${config.themePalette.name}, '
               'logMode=${config.logStorageMode.name}, dueLead=${config.dueLeadWindow.name}',

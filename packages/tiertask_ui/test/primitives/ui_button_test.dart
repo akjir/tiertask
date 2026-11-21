@@ -173,5 +173,40 @@ void main() {
         expect(focusRingFinder, findsOneWidget);
       },
     );
+
+    testWidgets(
+      'reuses single ticker across repeated isLoading true -> false -> true transitions',
+      (tester) async {
+        var loading = true;
+        late StateSetter setOuterState;
+        await pumpUiWidget(
+          tester,
+          StatefulBuilder(
+            builder: (context, setState) {
+              setOuterState = setState;
+              return UiButton(
+                label: 'Sync',
+                leadingIcon: Icons.sync_rounded,
+                isLoading: loading,
+                onPressed: () {},
+              );
+            },
+          ),
+        );
+        final rotationFinder = find.descendant(
+          of: find.byType(UiButton),
+          matching: find.byType(RotationTransition),
+        );
+        expect(rotationFinder, findsOneWidget);
+
+        setOuterState(() => loading = false);
+        await tester.pump();
+        expect(rotationFinder, findsNothing);
+
+        setOuterState(() => loading = true);
+        await tester.pump();
+        expect(rotationFinder, findsOneWidget);
+      },
+    );
   });
 }

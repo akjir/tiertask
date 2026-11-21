@@ -144,7 +144,7 @@ class UiSearchablePicker<T> extends StatefulWidget {
   /// Accessible tooltip for per-row info buttons.
   final String? infoTooltip;
 
-  /// Formats the inline creation row text from a unique `1..120`-char trimmed query.
+  /// Formats the inline creation row text from a unique trimmed query within [searchMaxLength].
   final String Function(String trimmedQuery)? inlineCreateLabel;
 
   /// Enforces `44px` compact touch rows and disables search auto-focus inside mobile bottom sheets.
@@ -388,12 +388,14 @@ class _UiSearchablePickerState<T> extends State<UiSearchablePicker<T>> {
     return listView;
   }
 
-  /// Returns true when trimmed query is `1..120` chars and not a case-insensitive duplicate.
+  /// Returns true when trimmed query is non-empty, within [UiSearchablePicker.searchMaxLength] Unicode scalar values, and not a case-insensitive duplicate.
   bool _canInlineCreate(String trimmedQuery) {
     if (widget.onInlineCreate == null || widget.inlineCreateLabel == null) {
       return false;
     }
-    if (trimmedQuery.isEmpty || trimmedQuery.length > 120) {
+    final maxLength = widget.searchMaxLength;
+    if (trimmedQuery.isEmpty ||
+        (maxLength != null && trimmedQuery.runes.length > maxLength)) {
       return false;
     }
     final normalized = trimmedQuery.toLowerCase();

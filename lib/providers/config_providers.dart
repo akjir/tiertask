@@ -42,7 +42,7 @@ final appThemeModeProvider = Provider<AppThemeMode>((ref) {
   return resolveCurrentConfig(ref).themeMode;
 });
 
-/// Provides the selected [AppThemePalette] (`slate` or `navy`) from [webDavConfigProvider].
+/// Provides the selected [AppThemePalette] (`calm` or `plumUmber`) from [webDavConfigProvider].
 final appThemePaletteProvider = Provider<AppThemePalette>((ref) {
   return resolveCurrentConfig(ref).themePalette;
 });

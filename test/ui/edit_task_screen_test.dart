@@ -19,7 +19,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
@@ -1105,7 +1104,7 @@ task forSusp003 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -2123,7 +2122,7 @@ task doneRest02 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -2819,7 +2818,7 @@ task doneRest02 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -2956,7 +2955,7 @@ task doneRest02 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: cestContainer,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -3784,7 +3783,7 @@ Future<void> _expectLockedCompletedSubtask(
   expect(iconFinder, findsOneWidget);
 }
 
-/// Pumps [TierTaskApp] inside an [UncontrolledProviderScope] for task editor tests.
+/// Pumps [LegacyTierTaskApp] inside an [UncontrolledProviderScope] for task editor tests.
 Future<ProviderContainer> _pumpEditorApp(
   WidgetTester tester, {
   required String initialTdf,
@@ -3815,7 +3814,10 @@ Future<ProviderContainer> _pumpEditorApp(
   );
   addTearDown(container.dispose);
   await tester.pumpWidget(
-    UncontrolledProviderScope(container: container, child: const TierTaskApp()),
+    UncontrolledProviderScope(
+      container: container,
+      child: const LegacyTierTaskApp(),
+    ),
   );
   await tester.pumpAndSettle();
   return container;

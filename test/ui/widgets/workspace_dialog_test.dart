@@ -16,13 +16,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/ui/widgets/app_logo.dart';
 import 'package:tiertask/ui/widgets/workspace_dialog.dart';
+
+import '../test_helpers.dart';
 
 void main() {
   testWidgets(
@@ -40,7 +41,7 @@ void main() {
               () => DateTime.utc(2026, 11, 3, 12, 0),
             ),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -355,7 +356,7 @@ void main() {
               () => DateTime.utc(2026, 11, 3, 12, 0),
             ),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();

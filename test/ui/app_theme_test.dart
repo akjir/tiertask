@@ -18,7 +18,6 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -50,14 +49,26 @@ task 000001OkD2 priority {
 
   test('AppThemePalette, AppThemeSet, Slate and Navy themes, and Material 3 ColorScheme container roles build complete ThemeData', () {
     expect(
+      AppThemePalette.tryParseJson('calm'),
+      equals(AppThemePalette.calm),
+      reason: 'tryParseJson("calm") must resolve to AppThemePalette.calm',
+    );
+    expect(
+      AppThemePalette.tryParseJson('plum_umber'),
+      equals(AppThemePalette.plumUmber),
+      reason: 'tryParseJson("plum_umber") must resolve to AppThemePalette.plumUmber',
+    );
+    expect(
       AppThemePalette.tryParseJson('slate'),
-      equals(AppThemePalette.slate),
-      reason: 'tryParseJson("slate") must resolve to AppThemePalette.slate',
+      equals(AppThemePalette.calm),
+      reason:
+          'tryParseJson("slate") must silently migrate to AppThemePalette.calm',
     );
     expect(
       AppThemePalette.tryParseJson('navy'),
-      equals(AppThemePalette.navy),
-      reason: 'tryParseJson("navy") must resolve to AppThemePalette.navy',
+      equals(AppThemePalette.calm),
+      reason:
+          'tryParseJson("navy") must silently migrate to AppThemePalette.calm',
     );
     expect(
       AppThemePalette.tryParseJson('unknown'),
@@ -66,14 +77,14 @@ task 000001OkD2 priority {
     );
     expect(
       const WebDavConfig().themePalette,
-      equals(AppThemePalette.slate),
-      reason: 'WebDavConfig must default themePalette to AppThemePalette.slate',
+      equals(AppThemePalette.calm),
+      reason: 'WebDavConfig must default themePalette to AppThemePalette.calm',
     );
 
     const workspace = AppWorkspace(
       id: 'work',
       name: 'Work',
-      config: WebDavConfig(themePalette: AppThemePalette.navy),
+      config: WebDavConfig(themePalette: AppThemePalette.plumUmber),
     );
     final encodedJson = SettingsCodec.encodeJson(
       PersistedSettingsDocument(
@@ -88,19 +99,20 @@ task 000001OkD2 priority {
         .single;
     expect(
       roundTripped.config.themePalette,
-      equals(AppThemePalette.navy),
+      equals(AppThemePalette.plumUmber),
       reason: 'SettingsCodec JSON serialization must preserve themePalette',
     );
 
     expect(
-      AppThemeSet.forPalette(AppThemePalette.slate),
+      AppThemeSet.forPalette(AppThemePalette.calm),
       equals(AppThemeSet.slate),
-      reason: 'AppThemeSet.forPalette must map slate to AppThemeSet.slate',
+      reason:
+          'AppThemeSet.forPalette must map calm to legacy AppThemeSet.slate',
     );
     expect(
-      AppThemeSet.forPalette(AppThemePalette.navy),
+      AppThemeSet.forPalette(AppThemePalette.plumUmber),
       equals(AppThemeSet.navy),
-      reason: 'AppThemeSet.forPalette must map navy to AppThemeSet.navy',
+      reason: 'AppThemeSet.forPalette must map plumUmber to legacy AppThemeSet.navy',
     );
 
     const slateDark = AppTheme.slateDark;
@@ -297,7 +309,7 @@ task 000001OkD2 priority {
       const initialConfig = WebDavConfig(
         language: AppLanguage.english,
         themeMode: AppThemeMode.dark,
-        themePalette: AppThemePalette.slate,
+        themePalette: AppThemePalette.calm,
       );
       final settingsRepository = InMemorySettingsRepository(initialConfig);
       await tester.pumpWidget(
@@ -314,7 +326,7 @@ task 000001OkD2 priority {
               () => DateTime.utc(2026, 11, 1, 12, 0),
             ),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -358,8 +370,8 @@ task 000001OkD2 priority {
       final savedConfig = await settingsRepository.loadConfig();
       expect(
         savedConfig.themePalette,
-        equals(AppThemePalette.navy),
-        reason: 'Selecting Navy in SettingsScreen must persist AppThemePalette.navy',
+        equals(AppThemePalette.plumUmber),
+        reason: 'Selecting second palette in legacy SettingsScreen must persist AppThemePalette.plumUmber',
       );
 
       await tester.tap(find.byType(BackButton));
@@ -375,7 +387,7 @@ task 000001OkD2 priority {
       );
 
       final container = ProviderScope.containerOf(
-        tester.element(find.byType(TierTaskApp)),
+        tester.element(find.byType(LegacyTierTaskApp)),
       );
       await container
           .read(webDavConfigProvider.notifier)
@@ -416,7 +428,7 @@ task 000001OkD2 priority {
               () => DateTime.utc(2026, 11, 1, 12, 0),
             ),
           ],
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();
@@ -441,7 +453,7 @@ task 000001OkD2 priority {
       );
 
       final container = ProviderScope.containerOf(
-        tester.element(find.byType(TierTaskApp)),
+        tester.element(find.byType(LegacyTierTaskApp)),
       );
       container.read(appThemeProvider.notifier).setTheme(customTheme);
       await tester.pumpAndSettle();

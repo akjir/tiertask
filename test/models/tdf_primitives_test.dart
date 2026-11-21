@@ -362,7 +362,7 @@ void main() {
       expect(disabled.hashCode, isNot(equals(defaultConfig.hashCode)));
 
       final preservedDisabled = disabled.copyWith(
-        themePalette: AppThemePalette.navy,
+        themePalette: AppThemePalette.plumUmber,
       );
       expect(
         preservedDisabled.localWatchEnabled,
@@ -373,6 +373,38 @@ void main() {
       final reEnabled = disabled.copyWith(localWatchEnabled: true);
       expect(reEnabled, equals(defaultConfig));
       expect(reEnabled.hashCode, equals(defaultConfig.hashCode));
+    });
+
+    test('exposes AppThemePalette calm and plumUmber with silent legacy slate/navy migration', () {
+      expect(
+        AppThemePalette.values,
+        equals(const <AppThemePalette>[
+          AppThemePalette.calm,
+          AppThemePalette.plumUmber,
+        ]),
+      );
+      expect(AppThemePalette.calm.jsonValue, equals('calm'));
+      expect(AppThemePalette.plumUmber.jsonValue, equals('plum_umber'));
+      expect(const WebDavConfig().themePalette, equals(AppThemePalette.calm));
+      expect(
+        AppThemePalette.tryParseJson('calm'),
+        equals(AppThemePalette.calm),
+      );
+      expect(
+        AppThemePalette.tryParseJson('plum_umber'),
+        equals(AppThemePalette.plumUmber),
+      );
+      expect(
+        AppThemePalette.tryParseJson('slate'),
+        equals(AppThemePalette.calm),
+        reason: 'Legacy "slate" token must migrate silently to calm',
+      );
+      expect(
+        AppThemePalette.tryParseJson('navy'),
+        equals(AppThemePalette.calm),
+        reason: 'Legacy "navy" token must migrate silently to calm',
+      );
+      expect(AppThemePalette.tryParseJson('neon'), isNull);
     });
 
     test('exposes DueLeadWindow variants, jsonValue/tryParseJson, and WebDavConfig dueLeadWindow copyWith/equality/toString', () {

@@ -15,6 +15,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +25,7 @@ import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/local_file_watch_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -32,9 +34,11 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
 import 'package:tiertask/ui/app_theme.dart';
+import 'package:tiertask/ui/home_screen.dart';
 
 /// Fake [LocalFileRepository] returning an in-memory `.tdf` document for widget tests.
 class FakeLocalFileRepository extends LocalFileRepository {
@@ -178,6 +182,112 @@ class FakeWebDavRepository extends WebDavRepository {
       }
       store[path] = 'tdf ${TdfService.supportedVersion}\n';
     }
+  }
+}
+
+/// Test-only legacy root widget preserving pre-cutover `HomeScreen` and `AppThemeSet` wiring until Phase 4 (`TEP-019`).
+class LegacyTierTaskApp extends ConsumerStatefulWidget {
+  /// Creates a [LegacyTierTaskApp].
+  const LegacyTierTaskApp({super.key});
+
+  @override
+  ConsumerState<LegacyTierTaskApp> createState() => _LegacyTierTaskAppState();
+}
+
+/// State for [LegacyTierTaskApp] preserving legacy `HomeScreen` theme, watcher, and dev banner wiring.
+class _LegacyTierTaskAppState extends ConsumerState<LegacyTierTaskApp> {
+  AppLifecycleListener? _lifecycleListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycleListener = AppLifecycleListener(
+      onStateChange: _handleLifecycleStateChange,
+      onExitRequested: () async {
+        AppLogger.handleAppLifecycleState(AppLifecycleState.detached);
+        return AppExitResponse.exit;
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycleListener?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.watch(diagnosticsEnabledProvider);
+    ref.watch(localFileWatcherProvider);
+    final locale = ref.watch(appLocaleProvider);
+    final appThemeMode = ref.watch(appThemeModeProvider);
+    final appThemeSet = ref.watch(appThemeProvider);
+    final buildProfile = ref.watch(appBuildProfileProvider);
+
+    return MaterialApp(
+      title: buildProfile.formatWindowTitle('TierTask'),
+      onGenerateTitle: (context) =>
+          buildProfile.formatWindowTitle(AppLocalizations.of(context).appTitle),
+      debugShowCheckedModeBanner: false,
+      locale: locale,
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        ...GlobalMaterialLocalizations.delegates,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      themeMode: _toFlutterThemeMode(appThemeMode),
+      theme: appThemeSet.light.toThemeData(),
+      darkTheme: appThemeSet.dark.toThemeData(),
+      builder: buildProfile.isDev ? _wrapWithDevBanner : null,
+      home: const HomeScreen(),
+    );
+  }
+
+  /// Attempts a best-effort WebDAV log upload when backgrounding the application.
+  Future<void> _flushRemoteLogQuietly() async {
+    try {
+      await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
+    } on Object {
+      // Ignore background flush errors during lifecycle transitions.
+    }
+  }
+
+  /// Records lifecycle state transitions and flushes WebDAV logs on backgrounding.
+  void _handleLifecycleStateChange(AppLifecycleState state) {
+    AppLogger.handleAppLifecycleState(state);
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      unawaited(_flushRemoteLogQuietly());
+    }
+  }
+
+  /// Maps [AppThemeMode] to Flutter's [ThemeMode].
+  ThemeMode _toFlutterThemeMode(AppThemeMode mode) {
+    return switch (mode) {
+      AppThemeMode.system => ThemeMode.system,
+      AppThemeMode.light => ThemeMode.light,
+      AppThemeMode.dark => ThemeMode.dark,
+    };
+  }
+
+  /// Wraps [child] with the legacy corner `DEV` banner for development builds.
+  Widget _wrapWithDevBanner(BuildContext context, Widget? child) {
+    final content = child ?? const SizedBox.shrink();
+    final colorScheme = Theme.of(context).colorScheme;
+    return Banner(
+      key: const ValueKey<String>('dev_build_banner'),
+      message: 'DEV',
+      location: BannerLocation.topEnd,
+      color: colorScheme.tertiary,
+      textStyle: TextStyle(
+        color: colorScheme.onTertiary,
+        fontSize: 10,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.0,
+      ),
+      child: content,
+    );
   }
 }
 

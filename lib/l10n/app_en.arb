@@ -2184,5 +2184,847 @@
   "settingsResetAfterQuarantineNotice": "Corrupt settings were backed up and reset to defaults.",
   "@settingsResetAfterQuarantineNotice": {
     "description": "One-shot startup notice shown when corrupt settings were quarantined and reset to defaults."
+  },
+  "themePaletteCalm": "Calm",
+  "@themePaletteCalm": {
+    "description": "Name of the default Calm theme preset."
+  },
+  "themePalettePlumUmber": "Plum Umber",
+  "@themePalettePlumUmber": {
+    "description": "Name of the Plum Umber theme preset."
+  },
+  "devBuildBadge": "DEV",
+  "@devBuildBadge": {
+    "description": "Inline badge marking a development build in the top chrome bar."
+  },
+  "tierFocusSubtitle": "Three active tasks. One clear next step.",
+  "@tierFocusSubtitle": {
+    "description": "Subtitle for the Focus tier."
+  },
+  "tierReadySubtitle": "Up to five tasks queued to pull into Focus next.",
+  "@tierReadySubtitle": {
+    "description": "Subtitle for the Ready tier."
+  },
+  "tierPlannedSubtitle": "Active backlog feeding Ready automatically.",
+  "@tierPlannedSubtitle": {
+    "description": "Subtitle for the Planned tier."
+  },
+  "tierBlockedSubtitle": "Suspended or waiting on prerequisites and activation conditions.",
+  "@tierBlockedSubtitle": {
+    "description": "Subtitle for the Blocked tier."
+  },
+  "tierSomedaySubtitle": "Collected outside the active queue.",
+  "@tierSomedaySubtitle": {
+    "description": "Subtitle for the Someday tier."
+  },
+  "tierCompletedSubtitle": "Completed tasks are retained for 30 days (UTC).",
+  "@tierCompletedSubtitle": {
+    "description": "Subtitle for the Completed tier."
+  },
+  "sectionTasksTitle": "Tasks",
+  "@sectionTasksTitle": {
+    "description": "Sidebar section heading for the six task tiers."
+  },
+  "sectionToolsTitle": "Tools",
+  "@sectionToolsTitle": {
+    "description": "Sidebar section heading for utility views and Settings."
+  },
+  "allTasksLabel": "All Tasks",
+  "@allTasksLabel": {
+    "description": "Sidebar row clearing any active label filter."
+  },
+  "activeFilterLabel": "Active filter",
+  "@activeFilterLabel": {
+    "description": "Accessible label identifying the active label filter."
+  },
+  "activeFilterClearTooltip": "Clear filter (All Tasks)",
+  "@activeFilterClearTooltip": {
+    "description": "Tooltip for clearing the active label filter."
+  },
+  "actionBackToTasks": "Back to tasks",
+  "@actionBackToTasks": {
+    "description": "Back button label returning to the Tasks view."
+  },
+  "actionBackToSearch": "Back to search",
+  "@actionBackToSearch": {
+    "description": "Back button label returning to the Global Search view."
+  },
+  "actionDismiss": "Dismiss",
+  "@actionDismiss": {
+    "description": "Action label dismissing a banner or floating notice."
+  },
+  "actionResolveConflict": "Resolve conflict",
+  "@actionResolveConflict": {
+    "description": "Banner action opening the Deletion Conflict view."
+  },
+  "actionResolveRecovery": "Open recovery",
+  "@actionResolveRecovery": {
+    "description": "Banner action opening the Generation Recovery view."
+  },
+  "actionComplete": "Complete",
+  "@actionComplete": {
+    "description": "Accessible action label completing an open task."
+  },
+  "actionRestore": "Restore",
+  "@actionRestore": {
+    "description": "Accessible action label restoring a completed task."
+  },
+  "actionCopy": "Copy",
+  "@actionCopy": {
+    "description": "Generic copy button label."
+  },
+  "searchViewTitle": "All Tasks",
+  "@searchViewTitle": {
+    "description": "Heading for the Global Search view."
+  },
+  "searchViewSubtitle": "Searching across all six tiers in the active context.",
+  "@searchViewSubtitle": {
+    "description": "Subtitle for the Global Search view."
+  },
+  "searchEmptyHint": "No matching tasks found.",
+  "@searchEmptyHint": {
+    "description": "Empty state text when Global Search finds no matching tasks."
+  },
+  "searchCloseTooltip": "Close search",
+  "@searchCloseTooltip": {
+    "description": "Tooltip closing the Global Search bar."
+  },
+  "loadingBoardTitle": "Loading workspace...",
+  "@loadingBoardTitle": {
+    "description": "Heading shown during initial workspace loading."
+  },
+  "loadingBoardSubtitle": "Reading TDF document and evaluating six tiers.",
+  "@loadingBoardSubtitle": {
+    "description": "Subtitle shown during initial workspace loading."
+  },
+  "sidebarFilterLabelsPlaceholder": "Filter labels...",
+  "@sidebarFilterLabelsPlaceholder": {
+    "description": "Placeholder for the sidebar label filter input."
+  },
+  "sidebarFilterLabelsEmpty": "No matching labels.",
+  "@sidebarFilterLabelsEmpty": {
+    "description": "Empty state when sidebar label filter finds no matches."
+  },
+  "sidebarFilterLabelsToggle": "Filter labels",
+  "@sidebarFilterLabelsToggle": {
+    "description": "Tooltip toggling the sidebar label filter input."
+  },
+  "sidebarManageLabels": "Manage labels",
+  "@sidebarManageLabels": {
+    "description": "Tooltip opening the Labels manager view."
+  },
+  "sidebarCollapseLabels": "Collapse labels",
+  "@sidebarCollapseLabels": {
+    "description": "Tooltip collapsing the sidebar Labels section."
+  },
+  "sidebarExpandLabels": "Expand labels",
+  "@sidebarExpandLabels": {
+    "description": "Tooltip expanding the sidebar Labels section."
+  },
+  "sidebarFilterLocationsPlaceholder": "Filter locations...",
+  "@sidebarFilterLocationsPlaceholder": {
+    "description": "Placeholder for the sidebar location filter input."
+  },
+  "sidebarFilterLocationsEmpty": "No matching locations.",
+  "@sidebarFilterLocationsEmpty": {
+    "description": "Empty state when sidebar location filter finds no matches."
+  },
+  "sidebarFilterLocationsToggle": "Filter locations",
+  "@sidebarFilterLocationsToggle": {
+    "description": "Tooltip toggling the sidebar location filter input."
+  },
+  "sidebarManageLocations": "Manage locations",
+  "@sidebarManageLocations": {
+    "description": "Tooltip opening the Locations manager view."
+  },
+  "sidebarCollapseLocations": "Collapse locations",
+  "@sidebarCollapseLocations": {
+    "description": "Tooltip collapsing the sidebar Locations section."
+  },
+  "sidebarExpandLocations": "Expand locations",
+  "@sidebarExpandLocations": {
+    "description": "Tooltip expanding the sidebar Locations section."
+  },
+  "openLabelInManagerTooltip": "Open and expand label in Manage",
+  "@openLabelInManagerTooltip": {
+    "description": "Tooltip navigating to a label card in Labels manager."
+  },
+  "openLocationInManagerTooltip": "Open and expand location in Manage",
+  "@openLocationInManagerTooltip": {
+    "description": "Tooltip navigating to a location card in Locations manager."
+  },
+  "syncStatusLocalOnly": "Local only",
+  "@syncStatusLocalOnly": {
+    "description": "Chrome sync status label in Local storage mode."
+  },
+  "syncStatusSynced": "Synced",
+  "@syncStatusSynced": {
+    "description": "Chrome sync status label when synchronized."
+  },
+  "syncStatusSyncing": "Syncing...",
+  "@syncStatusSyncing": {
+    "description": "Chrome sync status label while syncing."
+  },
+  "syncStatusConflict": "Conflict",
+  "@syncStatusConflict": {
+    "description": "Chrome sync status label on conflict or recovery required."
+  },
+  "syncStatusError": "Sync error",
+  "@syncStatusError": {
+    "description": "Chrome sync status label on sync failure."
+  },
+  "rawTdfPreviewTitle": "Raw TDF 0.8.0",
+  "@rawTdfPreviewTitle": {
+    "description": "Title for the Raw TDF 0.8.0 preview view."
+  },
+  "rawTdfPreviewSubtitle": "Canonical LF-terminated TDF 0.8.0 serialization of the current workspace board.",
+  "@rawTdfPreviewSubtitle": {
+    "description": "Subtitle for the Raw TDF 0.8.0 preview view."
+  },
+  "rawTdfStatsSummary": "{bytes} bytes / 1 MiB · {lines} lines / 16,384 max",
+  "@rawTdfStatsSummary": {
+    "description": "Telemetry summary showing byte and line counts of the serialized TDF document.",
+    "placeholders": {
+      "bytes": {
+        "type": "String"
+      },
+      "lines": {
+        "type": "String"
+      }
+    }
+  },
+  "rawTdfCopiedNotice": "TDF document copied to clipboard.",
+  "@rawTdfCopiedNotice": {
+    "description": "Toast notice after copying raw TDF text."
+  },
+  "rawTdfLimitExceededTitle": "Preview Limit Exceeded",
+  "@rawTdfLimitExceededTitle": {
+    "description": "Alert title when serialized TDF exceeds Section 6.2 preview bounds."
+  },
+  "rawTdfLimitExceededDescription": "The serialized TDF document exceeds the canonical 1 MiB or 16,384-line limit (TDF 0.8.0 Section 6.2) and cannot be previewed inline.",
+  "@rawTdfLimitExceededDescription": {
+    "description": "Alert body when serialized TDF exceeds Section 6.2 preview bounds."
+  },
+  "badgeMoreIndicators": "+{count} more",
+  "@badgeMoreIndicators": {
+    "description": "Overflow badge showing hidden secondary indicators on a collapsed task card.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "badgeAutoPriority": "Due · Prioritized",
+  "@badgeAutoPriority": {
+    "description": "Badge indicating automatic deadline lead-window priority escalation."
+  },
+  "badgeOverduePrefix": "Overdue: {date}",
+  "@badgeOverduePrefix": {
+    "description": "Collapsed task badge prefix for an overdue deadline.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "badgeSuspendedUntil": "Suspended until {date}",
+  "@badgeSuspendedUntil": {
+    "description": "Collapsed task badge for a timed suspension.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "badgeSuspendedForever": "Suspended indefinitely",
+  "@badgeSuspendedForever": {
+    "description": "Collapsed task badge for an indefinite suspension."
+  },
+  "badgeBlockedByProgress": "{done}/{total} prerequisites",
+  "@badgeBlockedByProgress": {
+    "description": "Collapsed task badge for unsatisfied prerequisites.",
+    "placeholders": {
+      "done": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "badgeStepsProgress": "{done}/{total} steps",
+  "@badgeStepsProgress": {
+    "description": "Collapsed task badge for subtask progress.",
+    "placeholders": {
+      "done": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "badgeLinkSingular": "1 link",
+  "@badgeLinkSingular": {
+    "description": "Collapsed task badge for a single reference link."
+  },
+  "badgeHistoryCount": "{count} history",
+  "@badgeHistoryCount": {
+    "description": "Collapsed task badge for history entry count.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "repeatEveryDay": "Every day",
+  "@repeatEveryDay": {
+    "description": "Formatted repeat phrase for 1 day interval."
+  },
+  "repeatEveryWeek": "Every week",
+  "@repeatEveryWeek": {
+    "description": "Formatted repeat phrase for 1 week interval."
+  },
+  "repeatEveryMonth": "Every month",
+  "@repeatEveryMonth": {
+    "description": "Formatted repeat phrase for 1 month interval."
+  },
+  "completedReadOnlyPill": "Completed · restore task to edit",
+  "@completedReadOnlyPill": {
+    "description": "Status pill shown in expanded completed task cards."
+  },
+  "inlineEditTitleTooltip": "Edit title",
+  "@inlineEditTitleTooltip": {
+    "description": "Tooltip for inline task title edit button."
+  },
+  "inlineEditNameTooltip": "Edit name",
+  "@inlineEditNameTooltip": {
+    "description": "Tooltip for inline label or location name edit button."
+  },
+  "inlineAddNote": "+ Note",
+  "@inlineAddNote": {
+    "description": "Add chip opening inline Note editor."
+  },
+  "inlineAddLinks": "+ Links",
+  "@inlineAddLinks": {
+    "description": "Add chip opening inline Links editor."
+  },
+  "inlineAddSubtasks": "+ Subtasks",
+  "@inlineAddSubtasks": {
+    "description": "Add chip opening inline Subtasks editor."
+  },
+  "inlineAddLabels": "+ Labels",
+  "@inlineAddLabels": {
+    "description": "Add chip opening inline Label picker."
+  },
+  "inlineAddDue": "+ Due",
+  "@inlineAddDue": {
+    "description": "Add chip opening inline Due editor."
+  },
+  "inlineAddRepeat": "+ Repeat",
+  "@inlineAddRepeat": {
+    "description": "Add chip opening inline Repeat editor."
+  },
+  "inlineAddSuspend": "+ Suspend",
+  "@inlineAddSuspend": {
+    "description": "Add chip opening inline Suspend editor."
+  },
+  "inlineAddPrerequisites": "+ Prerequisites",
+  "@inlineAddPrerequisites": {
+    "description": "Add chip opening inline Prerequisites editor."
+  },
+  "inlineAddConditions": "+ Conditions",
+  "@inlineAddConditions": {
+    "description": "Add chip opening inline Activation Conditions editor."
+  },
+  "inlineClearAction": "Clear",
+  "@inlineClearAction": {
+    "description": "Danger action clearing an optional section inside an inline editor."
+  },
+  "inlineDisableRepeatAction": "Disable repeat",
+  "@inlineDisableRepeatAction": {
+    "description": "Danger action disabling recurrence inside an inline editor."
+  },
+  "inlineResumeTaskAction": "Resume task",
+  "@inlineResumeTaskAction": {
+    "description": "Danger action clearing suspension inside an inline editor."
+  },
+  "inlineRepeatLeadNeedsDueHint": "Set a due date to configure preparation lead days.",
+  "@inlineRepeatLeadNeedsDueHint": {
+    "description": "Helper hint when configuring repeat lead days without a due date."
+  },
+  "inlinePlacementSectionTitle": "Queue & Priority",
+  "@inlinePlacementSectionTitle": {
+    "description": "Section title for live task placement selector."
+  },
+  "placementQueueOption": "Queue",
+  "@placementQueueOption": {
+    "description": "Standard active queue placement option."
+  },
+  "placementQueueHint": "Append at the end of the active queue.",
+  "@placementQueueHint": {
+    "description": "Helper hint for standard queue placement."
+  },
+  "placementPriorityHint": "Prioritize ahead of regular tasks in Focus or Ready.",
+  "@placementPriorityHint": {
+    "description": "Helper hint for priority placement."
+  },
+  "placementSomedayHint": "Park outside the active queue in Someday.",
+  "@placementSomedayHint": {
+    "description": "Helper hint for Someday placement."
+  },
+  "inlineDeleteTaskConfirm": "Delete this task?",
+  "@inlineDeleteTaskConfirm": {
+    "description": "Inline confirmation prompt for deleting a task."
+  },
+  "inlineDeleteLabelConfirm": "Delete this label?",
+  "@inlineDeleteLabelConfirm": {
+    "description": "Inline confirmation prompt for deleting a label."
+  },
+  "inlineDeleteLocationConfirm": "Delete this location?",
+  "@inlineDeleteLocationConfirm": {
+    "description": "Inline confirmation prompt for deleting a location."
+  },
+  "actionKeep": "Keep",
+  "@actionKeep": {
+    "description": "Button cancelling an inline delete confirmation."
+  },
+  "actionConfirmDelete": "Yes, delete",
+  "@actionConfirmDelete": {
+    "description": "Button confirming an inline delete confirmation."
+  },
+  "actionDone": "Done",
+  "@actionDone": {
+    "description": "Button closing a compact bottom sheet or inline picker."
+  },
+  "actionOpenAsDraft": "Open as draft",
+  "@actionOpenAsDraft": {
+    "description": "Button opening an uncommitted entity draft card."
+  },
+  "actionNewTaskCompact": "New task",
+  "@actionNewTaskCompact": {
+    "description": "Compact mobile trigger button expanding Quick-Add."
+  },
+  "actionCreateTask": "Create task",
+  "@actionCreateTask": {
+    "description": "Primary commit button for an uncommitted Task Draft Card."
+  },
+  "actionCreateLabel": "Create label",
+  "@actionCreateLabel": {
+    "description": "Primary commit button for an uncommitted Label Draft Card."
+  },
+  "actionCreateLocation": "Create location",
+  "@actionCreateLocation": {
+    "description": "Primary commit button for an uncommitted Location Draft Card."
+  },
+  "draftNewTaskTitle": "New Task (Draft)",
+  "@draftNewTaskTitle": {
+    "description": "Header title of an uncommitted Task Draft Card."
+  },
+  "draftNewLabelTitle": "New Label (Draft)",
+  "@draftNewLabelTitle": {
+    "description": "Header title of an uncommitted Label Draft Card."
+  },
+  "draftNewLocationTitle": "New Location (Draft)",
+  "@draftNewLocationTitle": {
+    "description": "Header title of an uncommitted Location Draft Card."
+  },
+  "draftUncommittedHint": "Uncommitted · saved to the TDF file only when you click Create.",
+  "@draftUncommittedHint": {
+    "description": "Subtle status hint on an uncommitted Draft Card."
+  },
+  "quickCreateLabelHint": "Quick-create a new label...",
+  "@quickCreateLabelHint": {
+    "description": "Input placeholder in the Labels manager quick-create bar."
+  },
+  "quickCreateLocationHint": "Quick-create a new location...",
+  "@quickCreateLocationHint": {
+    "description": "Input placeholder in the Locations manager quick-create bar."
+  },
+  "labelsManagerSubtitle": "Contexts, scoped queues, reference links, and inherited conditions.",
+  "@labelsManagerSubtitle": {
+    "description": "Subtitle for the Labels manager view."
+  },
+  "locationsManagerSubtitle": "Reusable locations for task and label GPS conditions.",
+  "@locationsManagerSubtitle": {
+    "description": "Subtitle for the Locations manager view."
+  },
+  "labelPickerSearchPlaceholder": "Search or create label...",
+  "@labelPickerSearchPlaceholder": {
+    "description": "Placeholder in the Searchable Label Picker input."
+  },
+  "labelPickerFilterAll": "All ({count})",
+  "@labelPickerFilterAll": {
+    "description": "Scope filter chip showing all labels in the picker.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "labelPickerFilterScoped": "Scoped ({count})",
+  "@labelPickerFilterScoped": {
+    "description": "Scope filter chip showing scoped queue labels in the picker.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "labelPickerFilterGlobal": "Global ({count})",
+  "@labelPickerFilterGlobal": {
+    "description": "Scope filter chip showing global context labels in the picker.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "labelPickerNoMatches": "No matching labels found.",
+  "@labelPickerNoMatches": {
+    "description": "Empty state when label picker filter matches nothing."
+  },
+  "labelPickerEmptyHint": "No labels yet. Type a name above to create one.",
+  "@labelPickerEmptyHint": {
+    "description": "Empty state in label picker when no labels exist yet."
+  },
+  "labelPickerCreateAndAssign": "Create & assign \"{name}\"",
+  "@labelPickerCreateAndAssign": {
+    "description": "Inline creation row text inside the label picker.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "labelPickerRemoveTooltip": "Remove label: {name}",
+  "@labelPickerRemoveTooltip": {
+    "description": "Tooltip removing a label chip.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "openTasksCountPill": "{count} open",
+  "@openTasksCountPill": {
+    "description": "Count pill showing open tasks referencing a label or location.",
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "prerequisiteCyclePreventedHint": "Cycle prevented",
+  "@prerequisiteCyclePreventedHint": {
+    "description": "Disabled row hint preventing a prerequisite dependency cycle."
+  },
+  "globalContextLabel": "Global Context",
+  "@globalContextLabel": {
+    "description": "Label board scope option for global context labels."
+  },
+  "scopedQueueLabel": "Scoped Queue",
+  "@scopedQueueLabel": {
+    "description": "Label board scope option and badge for scoped queue labels."
+  },
+  "conditionInheritLabel": "Inherit label conditions",
+  "@conditionInheritLabel": {
+    "description": "Condition dimension option inheriting label conditions."
+  },
+  "conditionCustomLabel": "Custom condition",
+  "@conditionCustomLabel": {
+    "description": "Condition dimension option configuring custom task rules."
+  },
+  "conditionSatisfiedStatus": "Currently satisfied",
+  "@conditionSatisfiedStatus": {
+    "description": "Status line when activation conditions are currently satisfied."
+  },
+  "conditionBlockedStatus": "Currently unmet (blocked)",
+  "@conditionBlockedStatus": {
+    "description": "Status line when activation conditions are currently unmet."
+  },
+  "suspendedUntilModeLabel": "Until a date and time",
+  "@suspendedUntilModeLabel": {
+    "description": "Suspension mode with an explicit timestamp."
+  },
+  "suspendedForeverModeLabel": "Indefinitely",
+  "@suspendedForeverModeLabel": {
+    "description": "Suspension mode without an end timestamp."
+  },
+  "historyTimestampToggleTooltip": "Set timestamp",
+  "@historyTimestampToggleTooltip": {
+    "description": "Tooltip toggling optional history timestamp override field."
+  },
+  "historyErrorDuplicate": "An identical history entry with this timestamp already exists.",
+  "@historyErrorDuplicate": {
+    "description": "Validation error when adding or editing a duplicate history entry."
+  },
+  "locationRadiusReadout": "Radius: {radius}",
+  "@locationRadiusReadout": {
+    "description": "Formatted radius readout in expanded location card.",
+    "placeholders": {
+      "radius": {
+        "type": "String"
+      }
+    }
+  },
+  "entityRemovedExternallyNotice": "This item was removed by an external update.",
+  "@entityRemovedExternallyNotice": {
+    "description": "Floating notice when an expanded or edited entity is deleted externally."
+  },
+  "taskCompletedExternallyNotice": "This task was completed by an external update.",
+  "@taskCompletedExternallyNotice": {
+    "description": "Floating notice when an edited task is completed externally."
+  },
+  "labelIdCopiedNotice": "Label ID copied to clipboard.",
+  "@labelIdCopiedNotice": {
+    "description": "Toast notice after copying a label ID."
+  },
+  "locationIdCopiedNotice": "Location ID copied to clipboard.",
+  "@locationIdCopiedNotice": {
+    "description": "Toast notice after copying a location ID."
+  },
+  "taskRestoredNotice": "\"{title}\" restored.",
+  "@taskRestoredNotice": {
+    "description": "Toast notice after restoring a completed task.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "taskCompletedRepeatNotice": "\"{title}\" completed and rescheduled for the next cycle.",
+  "@taskCompletedRepeatNotice": {
+    "description": "Toast notice after completing a recurring task.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "actionUndoneNotice": "Action undone.",
+  "@actionUndoneNotice": {
+    "description": "Toast notice after undoing the last entry in the undo stack."
+  },
+  "actionUndoneRemainingNotice": "Action undone ({remaining} more in history).",
+  "@actionUndoneRemainingNotice": {
+    "description": "Toast notice after undoing with remaining undo entries.",
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      }
+    }
+  },
+  "workspaceSwitchedNotice": "Switched workspace: {name}",
+  "@workspaceSwitchedNotice": {
+    "description": "Toast notice after switching active workspace.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "gpsAppliedNotice": "Current GPS position applied.",
+  "@gpsAppliedNotice": {
+    "description": "Toast notice after applying current GPS fix to a location."
+  },
+  "locationResolvedNotice": "Source resolved to coordinates.",
+  "@locationResolvedNotice": {
+    "description": "Toast notice after resolving an address or Plus Code."
+  },
+  "labelSavedNotice": "Label saved.",
+  "@labelSavedNotice": {
+    "description": "Toast notice after saving a label."
+  },
+  "labelDeletedNotice": "Label deleted.",
+  "@labelDeletedNotice": {
+    "description": "Toast notice after deleting a label."
+  },
+  "locationSavedNotice": "Location saved.",
+  "@locationSavedNotice": {
+    "description": "Toast notice after saving a location."
+  },
+  "locationDeletedNotice": "Location deleted.",
+  "@locationDeletedNotice": {
+    "description": "Toast notice after deleting a location."
+  },
+  "noticeTaskSaved": "Task saved.",
+  "@noticeTaskSaved": {
+    "description": "Toast notice after saving a task in the current tier."
+  },
+  "noticeTaskSavedInTier": "Saved · now in {tier}",
+  "@noticeTaskSavedInTier": {
+    "description": "Toast notice when a saved or created task lands in another tier.",
+    "placeholders": {
+      "tier": {
+        "type": "String"
+      }
+    }
+  },
+  "noticeTaskMovedToScopedQueue": "Moved to scoped queue: {label}",
+  "@noticeTaskMovedToScopedQueue": {
+    "description": "Toast notice when a task moves into a scoped queue.",
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "noticePriorityEnabled": "Task prioritized",
+  "@noticePriorityEnabled": {
+    "description": "Toast notice when priority placement is enabled."
+  },
+  "noticePriorityDisabled": "Priority cleared",
+  "@noticePriorityDisabled": {
+    "description": "Toast notice when priority placement is cleared."
+  },
+  "noticeMovedToSomeday": "Moved to Someday",
+  "@noticeMovedToSomeday": {
+    "description": "Toast notice when task placement switches to Someday."
+  },
+  "noticeMovedToQueue": "Activated in queue",
+  "@noticeMovedToQueue": {
+    "description": "Toast notice when task placement switches to active queue."
+  },
+  "noticeLabelAdded": "Label added: {name}",
+  "@noticeLabelAdded": {
+    "description": "Toast notice when assigning a label to a task.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "noticeLabelRemoved": "Label removed: {name}",
+  "@noticeLabelRemoved": {
+    "description": "Toast notice when removing a label from a task.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "noticeLabelCreatedAndAssigned": "Label created and assigned: {name}",
+  "@noticeLabelCreatedAndAssigned": {
+    "description": "Toast notice when creating and assigning a label inline.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorkspaceSubtitle": "Configuration for active workspace \"{workspace}\".",
+  "@settingsWorkspaceSubtitle": {
+    "description": "Subtitle in the Settings page header.",
+    "placeholders": {
+      "workspace": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsAutoSavedBadge": "Auto-saved",
+  "@settingsAutoSavedBadge": {
+    "description": "Badge indicating a Settings card commits changes immediately."
+  },
+  "settingsUnsavedChangesBadge": "Unsaved changes",
+  "@settingsUnsavedChangesBadge": {
+    "description": "Warning badge indicating unsaved WebDAV edits in Settings."
+  },
+  "settingsMoveDesktopOnlyTooltip": "Moving directories is available only on desktop platforms (Linux/Windows).",
+  "@settingsMoveDesktopOnlyTooltip": {
+    "description": "Tooltip explaining why Local Move is disabled when unsupported."
+  },
+  "webDavUrlUserinfoError": "URL must not contain embedded credentials (user:pass@).",
+  "@webDavUrlUserinfoError": {
+    "description": "Validation error when a WebDAV URL contains userinfo."
+  },
+  "webDavPathInvalidError": "Invalid remote file path (\"..\", backslashes, and control characters are forbidden).",
+  "@webDavPathInvalidError": {
+    "description": "Validation error when a WebDAV remote file path is invalid."
+  },
+  "logViewerSubtitle": "Structured runtime entries (credentials, raw GPS coordinates, and notes redacted).",
+  "@logViewerSubtitle": {
+    "description": "Subtitle for the Diagnostic Log view."
+  },
+  "logFilterSubsystemLabel": "Subsystem",
+  "@logFilterSubsystemLabel": {
+    "description": "Dropdown label for diagnostic log subsystem tag filter."
+  },
+  "logActionUpload": "Upload Log",
+  "@logActionUpload": {
+    "description": "Button label uploading diagnostic log to WebDAV."
+  },
+  "logActionClear": "Clear",
+  "@logActionClear": {
+    "description": "Button label clearing diagnostic log entries."
+  },
+  "conflictResolutionTitle": "Resolve Deletion Conflicts (TDF-DEL-003)",
+  "@conflictResolutionTitle": {
+    "description": "Heading for the TDF-DEL-003 Deletion Conflict resolution view."
+  },
+  "conflictResolutionSubtitle": "Choose whether to keep the concurrent local edit or confirm deletion for each conflicted item.",
+  "@conflictResolutionSubtitle": {
+    "description": "Subtitle for the Deletion Conflict resolution view."
+  },
+  "conflictKeepEditOption": "Keep Edit (Undelete)",
+  "@conflictKeepEditOption": {
+    "description": "Segmented option keeping concurrent local edits in a deletion conflict."
+  },
+  "conflictConfirmDeleteOption": "Confirm Deletion",
+  "@conflictConfirmDeleteOption": {
+    "description": "Segmented option confirming deletion in a deletion conflict."
+  },
+  "conflictApplyAndSyncAction": "Apply Decisions & Sync",
+  "@conflictApplyAndSyncAction": {
+    "description": "Primary dock button applying deletion conflict decisions."
+  },
+  "conflictResolvedNotice": "Deletion conflicts resolved. Synchronization resumed.",
+  "@conflictResolvedNotice": {
+    "description": "Toast notice after resolving deletion conflicts."
+  },
+  "recoveryResolutionTitle": "Recover After History Advancement (TDF-REC-002)",
+  "@recoveryResolutionTitle": {
+    "description": "Heading for the TDF-REC-002 Generation Recovery resolution view."
+  },
+  "recoveryResolutionSubtitle": "Shared deletion history advanced past the last acknowledged state. Choose an action for each affected local item.",
+  "@recoveryResolutionSubtitle": {
+    "description": "Subtitle for the Generation Recovery resolution view."
+  },
+  "recoveryAsNewOption": "Recover as New (fresh ID)",
+  "@recoveryAsNewOption": {
+    "description": "Segmented option recovering a retired local entity under a fresh ID."
+  },
+  "recoveryDiscardLocalOption": "Discard Local Change",
+  "@recoveryDiscardLocalOption": {
+    "description": "Segmented option discarding an affected local change during recovery."
+  },
+  "recoveryApplyAndSyncAction": "Apply Recovery & Sync",
+  "@recoveryApplyAndSyncAction": {
+    "description": "Primary dock button applying generation recovery decisions."
+  },
+  "recoveryResolvedNotice": "Recovery completed. Synchronization resumed.",
+  "@recoveryResolvedNotice": {
+    "description": "Toast notice after completing generation recovery."
+  },
+  "entityKindTaskBadge": "TASK",
+  "@entityKindTaskBadge": {
+    "description": "Uppercase entity kind badge in conflict and recovery cards."
+  },
+  "entityKindLabelBadge": "LABEL",
+  "@entityKindLabelBadge": {
+    "description": "Uppercase entity kind badge in conflict and recovery cards."
+  },
+  "entityKindLocationBadge": "LOCATION",
+  "@entityKindLocationBadge": {
+    "description": "Uppercase entity kind badge in conflict and recovery cards."
+  },
+  "versionFooterLabel": "Version {version}",
+  "@versionFooterLabel": {
+    "description": "Sidebar footer version label.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
   }
 }

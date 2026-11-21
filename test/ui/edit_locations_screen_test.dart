@@ -17,7 +17,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_location.dart';
@@ -104,7 +103,7 @@ task 000001OkD2 {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const TierTaskApp(),
+          child: const LegacyTierTaskApp(),
         ),
       );
       await tester.pumpAndSettle();

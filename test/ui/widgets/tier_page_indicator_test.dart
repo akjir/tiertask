@@ -19,7 +19,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/main.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -577,7 +576,7 @@ void _expectNone(Finder finder, String reason) =>
 void _expectOne(Finder finder, String reason) =>
     expect(finder, findsOneWidget, reason: reason);
 
-/// Pumps [TierTaskApp] seeded with [seededTdf] across all six task tiers at `2026-11-01 12:00` UTC.
+/// Pumps [LegacyTierTaskApp] seeded with [seededTdf] across all six task tiers at `2026-11-01 12:00` UTC.
 Future<void> _pumpAllTiersApp(WidgetTester tester, String seededTdf) async {
   const config = WebDavConfig(language: AppLanguage.english);
   await tester.pumpWidget(
@@ -592,7 +591,7 @@ Future<void> _pumpAllTiersApp(WidgetTester tester, String seededTdf) async {
         ),
         clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 12, 0)),
       ],
-      child: const TierTaskApp(),
+      child: const LegacyTierTaskApp(),
     ),
   );
   await tester.pumpAndSettle();

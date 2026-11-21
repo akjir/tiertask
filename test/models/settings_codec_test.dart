@@ -87,7 +87,7 @@ void main() {
                           diagnosticsEnabled: logLevel == LogLevel.debug,
                           logLevel: logLevel,
                           logStorageMode: logStorageMode,
-                          localWatchEnabled: palette == AppThemePalette.slate,
+                          localWatchEnabled: palette == AppThemePalette.calm,
                           dueLeadWindow: dueLeadWindow,
                         ),
                       );
@@ -358,7 +358,7 @@ void main() {
       expect(result.document.passwordStoredWorkspaceIds, isEmpty);
       expect(config.language, equals(AppLanguage.system));
       expect(config.themeMode, equals(AppThemeMode.system));
-      expect(config.themePalette, equals(AppThemePalette.slate));
+      expect(config.themePalette, equals(AppThemePalette.calm));
       expect(config.locationEnabled, isFalse);
       expect(config.timeZoneMode, equals(AppTimeZoneMode.automatic));
       expect(config.manualTimeZoneOffsetMinutes, equals(0));
@@ -393,6 +393,37 @@ void main() {
         ]),
         reason: 'Every invalid field must emit a SettingsDecodeWarning',
       );
+
+      // Legacy "slate" and "navy" tokens migrate silently to calm with zero warnings:
+      for (final legacyToken in const <String>['slate', 'navy']) {
+        final legacyJson = <String, Object?>{
+          'schemaVersion': 1,
+          'activeWorkspaceId': 'tasks',
+          'workspaces': <Object?>[
+            <String, Object?>{
+              'id': 'tasks',
+              'name': 'Tasks',
+              'localFilePath': 'tasks.tdf',
+              'filePath': 'tasks.tdf',
+              'themePalette': legacyToken,
+            },
+          ],
+        };
+        final migrated = SettingsCodec.decodeJsonBytes(
+          utf8.encode(jsonEncode(legacyJson)),
+        );
+        expect(
+          migrated.warnings,
+          isEmpty,
+          reason:
+              'Legacy themePalette "$legacyToken" must migrate with zero warnings',
+        );
+        expect(
+          migrated.document.workspaces.single.config.themePalette,
+          equals(AppThemePalette.calm),
+          reason: 'Legacy themePalette "$legacyToken" must decode to calm',
+        );
+      }
     });
 
     test('skips malformed or colliding workspace entries when at least one valid workspace remains, and throws when zero remain', () {
