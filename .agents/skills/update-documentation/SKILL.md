@@ -25,10 +25,10 @@ Omit a Table of Contents and maintain this exact section order:
 
 ## 3. `ARCHITECTURE.md` Structure & CLI Sync
 Maintain this exact order and sync via `python3 .agents/scripts/tiertask_dev.py arch --sync-tree [--set <rel_path> "<desc>"] --audit`:
-1. **`# TierTask Architecture and File Structure`** + sync callout referencing `AGENTS.md` and `spec/TDF_SPEC_0.8.0.md`.
-2. **`## Architectural Layers`:** Layer table (`Localization`, `Models`, `Services`, `Repositories`, `Providers`, `UI`) + `P-UDF-ARCHITECTURE` / `P-ACYCLIC-DAG` / `P-IO-ISOLATION` callout.
+1. **`# TierTask Architecture and File Structure`** + sync callout referencing `AGENTS.md`, `spec/TDF_SPEC_0.8.0.md`, and `spec/UI_DESIGN_SYSTEM.md`.
+2. **`## Architectural Layers`:** Layer table (`Localization`, `Models`, `Services`, `Repositories`, `Providers`, `Presentation`, `UI Component Library`, `UI`) + `P-UDF-ARCHITECTURE` / `P-ACYCLIC-DAG` / `P-IO-ISOLATION` callout.
 3. **`## Directory Layout`:** Auto-synced ASCII tree (`arch --sync-tree`).
-4. **Layer Tables (`## Root Files`, `## Localization`, `## Domain Models`, `## Services`, `## Repositories`, `## State Providers`, `## User Interface`):** 2-column (`File | Function`) concise 1-sentence rows (`<= 65` words) listing public classes/functions and core responsibilities only; never list private `_Widget` names, icons, or widget test keys.
+4. **Layer Tables (`## Root Files`, `## Localization`, `## Domain Models`, `## Services`, `## Repositories`, `## State Providers`, `## Presentation`, `## User Interface`, `## UI Component Library`):** 2-column (`File | Function`) concise 1-sentence rows (`<= 65` words) listing public classes/functions and core responsibilities only; never list private `_Widget` names, icons, or widget test keys.
 5. **`## Execution & Synchronization Flow`:** Numbered end-to-end startup, workspace switching, multi-stage three-way `.tdf` sync, evaluation, 30-day pruning, and diagnostic logging flow.
 
 ## 4. Markdown Formatting Rules (`P-LANG-RULES`)

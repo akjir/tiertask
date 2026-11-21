@@ -58,6 +58,7 @@ class TestTierTaskDev(unittest.TestCase):
     def _build_minimal_repo(self, root: Path) -> None:
         (root / "lib" / "l10n").mkdir(parents=True)
         (root / "lib" / "models").mkdir(parents=True)
+        (root / "lib" / "presentation").mkdir(parents=True)
         (root / "lib" / "ui").mkdir(parents=True)
         (root / "test" / "models").mkdir(parents=True)
         (root / "test" / "ui").mkdir(parents=True)
@@ -104,12 +105,23 @@ class TestTierTaskDev(unittest.TestCase):
         )
         (root / "lib" / "models" / "sample_model.dart").write_text(model_code, encoding="utf-8")
 
-        ui_code = (
+        pres_code = (
             GPL_HEADER
             + "\nimport '../models/sample_model.dart';\n\n"
-            + "/// Sample screen.\nclass SampleScreen {\n"
-            + "  /// Creates a sample screen.\n  const SampleScreen(this.model);\n\n"
+            + "/// Sample presentation model.\nclass SampleViewModel {\n"
+            + "  /// Creates a sample view model.\n  const SampleViewModel(this.model);\n\n"
             + "  /// Model reference.\n  final SampleModel model;\n}\n"
+        )
+        (root / "lib" / "presentation" / "sample_view_model.dart").write_text(pres_code, encoding="utf-8")
+
+        ui_code = (
+            GPL_HEADER
+            + "\nimport '../l10n/app_localizations.dart';\n"
+            + "import '../presentation/sample_view_model.dart';\n\n"
+            + "/// Sample screen.\nclass SampleScreen {\n"
+            + "  /// Creates a sample screen.\n  const SampleScreen(this.viewModel);\n\n"
+            + "  /// Presentation model reference.\n  final SampleViewModel viewModel;\n\n"
+            + "  /// Resolves localized title.\n  String title(AppLocalizations localizations) => localizations.appTitle;\n}\n"
         )
         (root / "lib" / "ui" / "sample_screen.dart").write_text(ui_code, encoding="utf-8")
 
@@ -150,6 +162,8 @@ tiertask/
 │   │   └── app_en.arb
 │   ├── models/
 │   │   └── sample_model.dart
+│   ├── presentation/
+│   │   └── sample_view_model.dart
 │   └── ui/
 │       └── sample_screen.dart
 └── test/
@@ -191,6 +205,7 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
+| `lib/presentation/sample_view_model.dart` | Projects `SampleViewModel`. |
 
 ## User Interface
 
@@ -240,13 +255,13 @@ tiertask/
             GPL_HEADER + "\nclass UnmirroredHelper {}\n",
             encoding="utf-8",
         )
-        ui_screen = self.root / "lib" / "ui" / "sample_screen.dart"
-        ui_screen.write_text(
+        pres_vm = self.root / "lib" / "presentation" / "sample_view_model.dart"
+        pres_vm.write_text(
             GPL_HEADER
             + "\nimport '../models/sample_model.dart';\n"
             + "import '../models/unmirrored_helper.dart';\n\n"
-            + "class SampleScreen {\n"
-            + "  const SampleScreen(this.model, this.helper);\n"
+            + "class SampleViewModel {\n"
+            + "  const SampleViewModel(this.model, this.helper);\n"
             + "  final SampleModel model;\n"
             + "  final UnmirroredHelper helper;\n"
             + "}\n",
@@ -273,6 +288,12 @@ tiertask/
         self.assertIn("@greetUser", en_data)
         self.assertIn("userName", en_data["@greetUser"]["placeholders"])
         self.assertIn("count", en_data["@greetUser"]["placeholders"])
+        # Wire caller in lib/ui/sample_screen.dart so live-usage audit passes cleanly.
+        ui_file = self.root / "lib" / "ui" / "sample_screen.dart"
+        ui_file.write_text(
+            ui_file.read_text(encoding="utf-8") + "\nString greet(dynamic l10n) => l10n.greetUser('a', '1');\n",
+            encoding="utf-8",
+        )
         self.assertEqual(tiertask_dev.audit_l10n(self.root), [])
 
     def test_arch_sync_set_and_audit(self) -> None:
@@ -395,7 +416,7 @@ tiertask/
             ("lib/repositories/local_file_repository.dart", 4),
             ("lib/providers/task_providers.dart", 5),
             ("lib/presentation/settings_controller.dart", 6),
-            ("lib/ui/home_screen.dart", 7),
+            ("lib/ui/tier_task_shell_screen.dart", 7),
             ("lib/main.dart", 8),
         ]
         for rel_path, expected in expected_ranks:
@@ -404,6 +425,7 @@ tiertask/
                 expected,
                 f"Unexpected rank for {rel_path}",
             )
+        self.assertIsNone(tiertask_dev._lib_layer_rank("lib/ui_v2/tier_task_shell_screen.dart"))
 
         (self.root / "lib" / "services").mkdir(parents=True, exist_ok=True)
         (self.root / "lib" / "repositories").mkdir(parents=True, exist_ok=True)
@@ -432,9 +454,16 @@ tiertask/
             + "class SampleProvider {}\n",
             encoding="utf-8",
         )
+        (self.root / "lib" / "l10n" / "tier_localization_extension.dart").write_text(
+            GPL_HEADER + "\nclass TierExt {}\n",
+            encoding="utf-8",
+        )
         (self.root / "lib" / "ui" / "bad_ui.dart").write_text(
             GPL_HEADER
-            + "\nimport '../repositories/local_repo.dart';\n"
+            + "\nimport '../l10n/tier_localization_extension.dart';\n"
+            + "import '../models/sample_model.dart';\n"
+            + "import '../providers/sample_provider.dart';\n"
+            + "import '../repositories/local_repo.dart';\n"
             + "import '../services/app_logger.dart';\n"
             + "import '../services/tdf_service.dart';\n"
             + "class BadUi {}\n",
@@ -446,6 +475,9 @@ tiertask/
         self.assertIn("lib/presentation/sample_controller.dart -> lib/ui/sample_screen.dart", joined)
         self.assertIn("lib/providers/sample_provider.dart -> lib/presentation/sample_controller.dart", joined)
         self.assertIn("P-UDF-ARCHITECTURE", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/l10n/tier_localization_extension.dart", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/models/sample_model.dart", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/providers/sample_provider.dart", joined)
         self.assertIn("lib/ui/bad_ui.dart -> lib/repositories/local_repo.dart", joined)
         self.assertIn("lib/ui/bad_ui.dart -> lib/services/app_logger.dart", joined)
         self.assertIn("lib/ui/bad_ui.dart -> lib/services/tdf_service.dart", joined)
@@ -478,9 +510,11 @@ tiertask/
             + "  ref.read(localFileRepositoryProvider);\n"
             + "  ref.read(locationRepositoryProvider);\n"
             + "  ref.read(settingsRepositoryProvider);\n"
+            + "  ref.read(supportsDesktopWindowControlsProvider);\n"
             + "  ref.read(supportsDirectoryPickerProvider);\n"
             + "  ref.read(tdfServiceProvider);\n"
             + "  ref.read(webDavRepositoryProvider);\n"
+            + "  ref.read(windowControlRepositoryProvider);\n"
             + "}\n",
             encoding="utf-8",
         )
@@ -502,9 +536,11 @@ tiertask/
             "localFileRepositoryProvider",
             "locationRepositoryProvider",
             "settingsRepositoryProvider",
+            "supportsDesktopWindowControlsProvider",
             "supportsDirectoryPickerProvider",
             "tdfServiceProvider",
             "webDavRepositoryProvider",
+            "windowControlRepositoryProvider",
         ):
             self.assertIn(
                 f"P-UDF-ARCHITECTURE: Forbidden `{provider_name}` reference in `lib/ui/bad_providers_ui.dart",
@@ -864,6 +900,134 @@ tiertask/
         self.assertTrue(any("packages/tiertask_ui/lib/src/primitives/ui_button.dart" in m for m in pkg_matches))
         other_matches = tiertask_dev.find_in_repo(self.root, "UiButton", layer="models")
         self.assertEqual(other_matches, [])
+
+    def test_global_strict_rank7_ui_whitelist_transitional_dir_and_provider_decl_bans(self) -> None:
+        ui_file = self.root / "lib" / "ui" / "views" / "strict_view.dart"
+        ui_file.parent.mkdir(parents=True, exist_ok=True)
+        # Verify allowed vs rejected imports via _is_allowed_ui_import.
+        allowed_uris = (
+            "package:tiertask_ui/tiertask_ui.dart",
+            "package:flutter_riverpod/flutter_riverpod.dart",
+            "package:flutter/services.dart",
+            "package:material_ui/material_ui.dart",
+            "dart:async",
+            "dart:math",
+            "dart:ui",
+            "dart:collection",
+            "../../presentation/sample_view_model.dart",
+            "../sample_screen.dart",
+            "../../l10n/app_localizations.dart",
+        )
+        for uri in allowed_uris:
+            self.assertTrue(
+                tiertask_dev._is_allowed_ui_import(self.root, ui_file, uri),
+                f"Expected allowed Rank 7 UI import: {uri}",
+            )
+
+        forbidden_uris = (
+            "package:tiertask/presentation/sample_view_model.dart",
+            "package:tiertask_ui/src/primitives/ui_button.dart",
+            "package:http/http.dart",
+            "dart:io",
+            "dart:ffi",
+            "dart:isolate",
+            "../../models/sample_model.dart",
+            "../../services/app_logger.dart",
+            "../../repositories/local_file_repository.dart",
+            "../../providers/task_providers.dart",
+            "../../main.dart",
+            "../../l10n/app_localizations_en.dart",
+            "../../l10n/app_localizations_de.dart",
+            "../../l10n/tier_localization_extension.dart",
+            "../../l10n/storage_file_read_localization_extension.dart",
+        )
+        for uri in forbidden_uris:
+            self.assertFalse(
+                tiertask_dev._is_allowed_ui_import(self.root, ui_file, uri),
+                f"Expected forbidden Rank 7 UI import: {uri}",
+            )
+
+        # Write a UI file with forbidden imports and Riverpod provider/notifier declarations.
+        ui_file.write_text(
+            GPL_HEADER
+            + "\nimport '../../models/sample_model.dart';\n"
+            + "import 'package:flutter_riverpod/flutter_riverpod.dart';\n\n"
+            + "// Comment mentioning Provider() or extends Notifier must not trigger.\n"
+            + "final leakedProvider = Provider<int>((ref) => 1);\n"
+            + "final leakedNotifier = NotifierProvider<_BadNotifier, int>(_BadNotifier.new);\n"
+            + "class _BadNotifier extends Notifier<int> {\n"
+            + "  @override int build() => 0;\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+        # Empty transitional directories must also be rejected.
+        (self.root / "lib" / "ui_v2").mkdir(parents=True, exist_ok=True)
+        (self.root / "test" / "ui_v2").mkdir(parents=True, exist_ok=True)
+
+        issues = tiertask_dev.run_static_checks(self.root, fix=False)
+        joined = "\n".join(issues)
+        self.assertIn("P-UDF-ARCHITECTURE: Forbidden transitional directory 'lib/ui_v2/'", joined)
+        self.assertIn("P-UDF-ARCHITECTURE: Forbidden transitional directory 'test/ui_v2/'", joined)
+        self.assertIn("Forbidden import `../../models/sample_model.dart` in `lib/ui/views/strict_view.dart", joined)
+        self.assertIn("Forbidden Riverpod provider/notifier declaration in `lib/ui/views/strict_view.dart:20`", joined)
+        self.assertIn("Forbidden Riverpod provider/notifier declaration in `lib/ui/views/strict_view.dart:21`", joined)
+        self.assertIn("Forbidden Riverpod provider/notifier declaration in `lib/ui/views/strict_view.dart:22`", joined)
+        self.assertNotIn("strict_view.dart:19`", joined)
+
+    def test_audit_l10n_detects_orphan_metadata_and_comment_or_collision_unused_keys(self) -> None:
+        en_arb = {
+            "@@locale": "en",
+            "appTitle": "TierTask",
+            "@appTitle": {"description": "App title"},
+            "extOnlyKey": "Ext",
+            "@extOnlyKey": {"description": "Used bare in l10n extension"},
+            "urlLineKey": "URL",
+            "@urlLineKey": {"description": "Used after URL string on same line"},
+            "commentOnlyKey": "Commented",
+            "@commentOnlyKey": {"description": "Only appears in comment"},
+            "activeFilterLabel": "Legacy",
+            "@activeFilterLabel": {"description": "Collides with bare named param"},
+            "@orphanMeta": {"description": "Orphan metadata block"},
+        }
+        de_arb = {
+            "@@locale": "de",
+            "appTitle": "TierTask",
+            "extOnlyKey": "Ext DE",
+            "urlLineKey": "URL DE",
+            "commentOnlyKey": "Kommentar",
+            "activeFilterLabel": "Alt",
+        }
+        (self.root / "lib" / "l10n" / "app_en.arb").write_text(json.dumps(en_arb, indent=2) + "\n", encoding="utf-8")
+        (self.root / "lib" / "l10n" / "app_de.arb").write_text(json.dumps(de_arb, indent=2) + "\n", encoding="utf-8")
+        # Generated file mentioning every key must NOT count as real usage.
+        (self.root / "lib" / "l10n" / "app_localizations.dart").write_text(
+            "String get commentOnlyKey; String get activeFilterLabel;\n",
+            encoding="utf-8",
+        )
+        # Hand-written l10n extension using extOnlyKey bare (on `this`) must count as used.
+        (self.root / "lib" / "l10n" / "tier_localization_extension.dart").write_text(
+            GPL_HEADER + "\nextension Ext on Object { String f() => extOnlyKey; }\n",
+            encoding="utf-8",
+        )
+        # UI file with: real member access, URL literal + interpolation on same line, comment-only key, and bare param collision.
+        (self.root / "lib" / "ui" / "sample_screen.dart").write_text(
+            GPL_HEADER
+            + "\nString render(dynamic localizations, {String? activeFilterLabel}) {\n"
+            + "  // localizations.commentOnlyKey\n"
+            + "  final url = 'https://example.com/${localizations.urlLineKey}';\n"
+            + "  return '$url ${localizations.appTitle} $activeFilterLabel';\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+
+        issues = tiertask_dev.audit_l10n(self.root)
+        joined = "\n".join(issues)
+        self.assertIn("L10N: Orphan metadata '@orphanMeta' in app_en.arb", joined)
+        self.assertIn("L10N: Unused ARB key 'commentOnlyKey' in app_en.arb (P-NO-DEAD-CODE)", joined)
+        self.assertIn("L10N: Unused ARB key 'activeFilterLabel' in app_en.arb (P-NO-DEAD-CODE)", joined)
+        self.assertNotIn("'appTitle'", joined)
+        self.assertNotIn("'extOnlyKey'", joined)
+        self.assertNotIn("'urlLineKey'", joined)
 
 
 if __name__ == "__main__":

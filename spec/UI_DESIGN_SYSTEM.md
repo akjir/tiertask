@@ -1,18 +1,18 @@
 # TierTask UI Design System & Interaction Guidelines
 
 > [!IMPORTANT]
-> This specification is the authoritative source for TierTask visual design tokens, layout geometry, reusable component boundaries, interaction patterns, keyboard shortcuts, and accessibility rules derived from the approved `.agents/prototypes/ui_v2/` concept. All work on `packages/tiertask_ui/`, `lib/ui_v2/`, and redesigned `lib/ui/` MUST enforce these rules (`P-UI-DESIGN-SYSTEM`) via the **`ui-design-system`** skill.
+> This specification is the authoritative source for TierTask visual design tokens, layout geometry, reusable component boundaries, interaction patterns, keyboard shortcuts, and accessibility rules derived from the approved `.agents/prototypes/ui_v2/` concept. All work on `packages/tiertask_ui/` and `lib/ui/` MUST enforce these rules (`P-UI-DESIGN-SYSTEM`) via the **`ui-design-system`** skill.
 
 ## 1. Scope, Governance & Fidelity Policy
 
-### `U-FIDELITY-001` Initial Prototype Parity (Phases 2 and 3)
-Initial Flutter implementations of `packages/tiertask_ui/` (Phase 2) and the adaptive shell/screens (`lib/ui_v2/`, Phase 3) MUST match the visual design, layout proportions, surface hierarchy, token values, and interaction flows of `.agents/prototypes/ui_v2/` as closely as possible across Desktop (`Linux`, `Windows`) and Mobile (`Android`), English (`en`) and German (`de`), and all built-in theme presets (`Calm` and `Plum Umber`, Light and Dark).
+### `U-FIDELITY-001` Initial Prototype Parity
+The `packages/tiertask_ui/` component library and adaptive `lib/ui/` shell and views MUST match the visual design, layout proportions, surface hierarchy, token values, and interaction flows established from `.agents/prototypes/ui_v2/` across Desktop (`Linux`, `Windows`) and Mobile (`Android`), English (`en`) and German (`de`), and all built-in theme presets (`Calm` and `Plum Umber`, Light and Dark).
 
 ### `U-FIDELITY-002` Post-Cutover Evolution
-After Phase 3 cutover parity is achieved, future iterations of the Flutter application MAY refine, extend, or diverge from `.agents/prototypes/ui_v2/`. Any intentional divergence MUST update `spec/UI_DESIGN_SYSTEM.md` in the same change so this document remains the single source of truth; backporting changes to the HTML prototype is not required.
+Following completion of the UI migration, future iterations of the Flutter application MAY refine, extend, or diverge from `.agents/prototypes/ui_v2/`. Any intentional divergence MUST update `spec/UI_DESIGN_SYSTEM.md` in the same change so this document remains the single source of truth; backporting changes to the historical HTML prototype is not required.
 
 ### `U-FIDELITY-003` Maximum Reuse & Minimum Widget Count
-`packages/tiertask_ui/` MUST stay compact and orthogonal around the 17 core widgets defined in Section 6 (`8` primitives, `4` adaptive layouts, `5` domain-agnostic composites). Introduce a new widget ONLY when existing primitives and layouts cannot express a pattern cleanly through composition, slots, or semantic variants. Feature screens in `lib/ui_v2/` (`lib/ui/`) MUST compose these shared building blocks rather than duplicating bespoke one-off widgets across Tasks, Labels, Locations, Settings, Conflicts, and Modals.
+`packages/tiertask_ui/` MUST stay compact and orthogonal around the 17 core widgets defined in Section 6 (`8` primitives, `4` adaptive layouts, `5` domain-agnostic composites). Introduce a new widget ONLY when existing primitives and layouts cannot express a pattern cleanly through composition, slots, or semantic variants. Feature screens in `lib/ui/` MUST compose these shared building blocks rather than duplicating bespoke one-off widgets across Tasks, Labels, Locations, Settings, Conflicts, and Modals.
 
 ## 2. Surface Hierarchy, Flatness & Elevation
 
@@ -368,10 +368,10 @@ Widget tests in `packages/tiertask_ui/test/` MUST prove:
 - Every primitive variant, density, and tone (`M-EXHAUSTIVE-STATE-TESTS`), focus/keyboard traversal, and breakpoint boundary (`390`, `720`, `721`, `760`, `820`, `821`, `1280`; `M-EXTREME-BOUND-TESTS`) match Sections 2–9.
 - Runnable `example/` gallery exercises all 17 widgets across presets, modes, and viewports.
 
-### `U-GATE-002` Phase 3 (`lib/ui_v2/` Cutover) Verification Gate
-Feature widget and integration tests MUST prove:
-- Strict Rank `7` UI whitelist (zero `models/`, `services/`, `repositories/`, `providers/` imports in `lib/ui_v2/`).
+### `U-GATE-002` Feature Shell & Interaction Verification Gate
+Feature widget and integration tests in `test/ui/` MUST prove:
+- Strict Rank `7` UI whitelist (zero `models/`, `services/`, `repositories/`, `providers/` imports and zero Riverpod provider/notifier declarations in `lib/ui/`).
 - Full feature, `en`/`de` localization, keyboard shortcut, 9-layer `Escape`, badge-order/overflow, non-jumping task creation, Settings auto-save vs WebDAV dirty flow, and `M-REAL-MECHANICS-TESTS` parity across Linux, Android, and Windows.
 
-### `U-GATE-003` Phase 4 (Retirement & Global Lock) Verification Gate
-Legacy UI code and retired ARB keys are removed (`P-NO-DEAD-CODE`), strict Rank `7` UI whitelist applies globally across `lib/ui/`, and `spec/UI_DESIGN_SYSTEM.md`, `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, and `CHANGELOG.md` are synchronized with `tiertask_dev.py verify --full --fix` passing cleanly.
+### `U-GATE-003` Retirement & Global Lock Verification Gate
+Legacy UI code and retired ARB keys are removed (`P-NO-DEAD-CODE`), strict Rank `7` UI whitelist and no-provider-in-UI checks apply globally across `lib/ui/` (banning transitional `lib/ui_v2/` and `test/ui_v2/` directories), and `spec/UI_DESIGN_SYSTEM.md`, `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, and `CHANGELOG.md` are synchronized with `tiertask_dev.py verify --full --fix` passing cleanly.

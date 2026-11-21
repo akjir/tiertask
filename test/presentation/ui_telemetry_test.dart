@@ -32,8 +32,6 @@ void main() {
       expect(AppLogger.isEnabled, isFalse);
 
       UiTelemetry.logDialogOpened('log_viewer');
-      UiTelemetry.logLabelColorPickerOpened('#112233');
-      UiTelemetry.logLabelColorSelected('#AABBCC');
       UiTelemetry.logLabelHubOpened('lbl-1');
       UiTelemetry.logLabelNoteCopied(labelId: 'lbl-1', length: 42);
       UiTelemetry.logLocalTdfRenameConfirmed(
@@ -41,18 +39,8 @@ void main() {
         toFileName: 'work.tdf',
       );
       UiTelemetry.logLocalTdfSelectConfirmed('work.tdf');
-      UiTelemetry.logScreenOpened('EditLabelsScreen');
-      UiTelemetry.logScreenOpened(
-        'EditTaskScreen',
-        entityKey: 'task',
-        entityId: 't-1',
-      );
       UiTelemetry.logTaskDetailsToggled(taskId: 't-1', isExpanded: true);
       UiTelemetry.logTaskIdCopied('t-1');
-      UiTelemetry.logTaskInfoDialogOpened(
-        taskId: 't-1',
-        initialIndicatorKeyPrefix: 'due_task_indicator',
-      );
       UiTelemetry.logTaskNoteCopied(128);
       UiTelemetry.logUndoShortcut(stackDepth: 2);
       UiTelemetry.logUndoSnackBarAction(
@@ -82,9 +70,6 @@ void main() {
       );
 
       UiTelemetry.logDialogOpened('log_viewer');
-      UiTelemetry.logLabelColorPickerOpened('#112233');
-      UiTelemetry.logLabelColorPickerOpened(null);
-      UiTelemetry.logLabelColorSelected('#AABBCC');
       UiTelemetry.logLabelHubOpened('lbl-1');
       UiTelemetry.logLabelNoteCopied(labelId: 'lbl-1', length: 42);
       UiTelemetry.logLocalTdfRenameConfirmed(
@@ -92,19 +77,8 @@ void main() {
         toFileName: 'work.tdf',
       );
       UiTelemetry.logLocalTdfSelectConfirmed('work.tdf');
-      UiTelemetry.logScreenOpened('SettingsScreen');
-      UiTelemetry.logScreenOpened(
-        'EditTaskScreen',
-        entityKey: 'task',
-        entityId: 't-9',
-      );
       UiTelemetry.logTaskDetailsToggled(taskId: 't-9', isExpanded: true);
       UiTelemetry.logTaskIdCopied('t-9');
-      UiTelemetry.logTaskInfoDialogOpened(taskId: 't-9');
-      UiTelemetry.logTaskInfoDialogOpened(
-        taskId: 't-9',
-        initialIndicatorKeyPrefix: 'due_task_indicator',
-      );
       UiTelemetry.logTaskNoteCopied(99);
       UiTelemetry.logUndoShortcut(stackDepth: 3);
       UiTelemetry.logUndoSnackBarAction(
@@ -126,19 +100,12 @@ void main() {
       final logText = AppLogger.fullLogText;
       const expectedSubstrings = <String>[
         'ui.dialog.open | dialog=log_viewer',
-        'Opened LabelColorPickerDialog initialHex=#112233',
-        'Opened LabelColorPickerDialog initialHex=',
-        'Selected custom label color hex=#AABBCC',
         'ui.label_hub.open | id=lbl-1',
         'label.note.copied | id=lbl-1 length=42',
         'Confirmed rename local TDF dialog from=tasks.tdf to=work.tdf',
         'Confirmed select local TDF dialog file=work.tdf',
-        'Opened SettingsScreen',
-        'Opened EditTaskScreen task=t-9',
         'Toggled task details task=t-9 expanded=true',
         'task.id.copied | task=t-9',
-        'openTaskInfoDialog id=t-9 indicator=summary',
-        'openTaskInfoDialog id=t-9 indicator=due_task_indicator',
         'task.note.copied | length=99',
         'ui.undo.shortcut | depth=3',
         'ui.undo.snackbar_action | id=t-9 kind=downgrade seq=4',

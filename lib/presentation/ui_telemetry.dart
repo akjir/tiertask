@@ -162,25 +162,6 @@ class UiTelemetry {
     );
   }
 
-  /// Logs opening the custom label color picker dialog with optional [initialHex].
-  static void logLabelColorPickerOpened(String? initialHex) {
-    if (!AppLogger.shouldLog(LogLevel.info)) {
-      return;
-    }
-    AppLogger.info(
-      LogTag.ui,
-      'Opened LabelColorPickerDialog initialHex=${initialHex ?? ''}',
-    );
-  }
-
-  /// Logs confirming a custom label color [selectedHex] in the color picker dialog.
-  static void logLabelColorSelected(String selectedHex) {
-    if (!AppLogger.shouldLog(LogLevel.info)) {
-      return;
-    }
-    AppLogger.info(LogTag.ui, 'Selected custom label color hex=$selectedHex');
-  }
-
   /// Logs opening the label context hub modal for [labelId].
   static void logLabelHubOpened(String labelId) {
     if (!AppLogger.shouldLog(LogLevel.info)) {
@@ -248,21 +229,6 @@ class UiTelemetry {
     );
   }
 
-  /// Logs navigating to [screenName] with optional redacted [entityKey] and [entityId].
-  static void logScreenOpened(
-    String screenName, {
-    String? entityKey,
-    String? entityId,
-  }) {
-    if (!AppLogger.shouldLog(LogLevel.info)) {
-      return;
-    }
-    final message = (entityKey != null && entityId != null)
-        ? 'Opened $screenName $entityKey=$entityId'
-        : 'Opened $screenName';
-    AppLogger.info(LogTag.ui, message);
-  }
-
   /// Logs silently discarding unsaved WebDAV settings edits for [reason].
   static void logSettingsWebDavDraftDiscarded(String reason) {
     if (!AppLogger.shouldLog(LogLevel.info)) {
@@ -300,20 +266,6 @@ class UiTelemetry {
       LogTag.ui,
       'task.id.copied',
       fields: <String, Object?>{'task': taskId},
-    );
-  }
-
-  /// Logs opening the task info modal for [taskId] and optional [initialIndicatorKeyPrefix].
-  static void logTaskInfoDialogOpened({
-    required String taskId,
-    String? initialIndicatorKeyPrefix,
-  }) {
-    if (!AppLogger.shouldLog(LogLevel.info)) {
-      return;
-    }
-    AppLogger.info(
-      LogTag.ui,
-      'openTaskInfoDialog id=$taskId indicator=${initialIndicatorKeyPrefix ?? "summary"}',
     );
   }
 
@@ -385,7 +337,7 @@ class UiTelemetry {
     );
   }
 
-  /// Logs switching the active v2 shell view from [from] to [to].
+  /// Logs switching the active shell view from [from] to [to].
   static void logViewChanged({
     required String from,
     required String to,

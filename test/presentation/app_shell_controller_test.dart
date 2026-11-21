@@ -19,7 +19,7 @@ import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/presentation/app_shell_controller.dart';
 import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/ui_v2_shell_models.dart';
+import 'package:tiertask/presentation/shell_models.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';

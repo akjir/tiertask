@@ -13,19 +13,18 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
+import 'package:tiertask/models/app_build_profile.dart';
+import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
-import 'package:tiertask/providers/local_file_watch_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -34,11 +33,10 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
-import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/repositories/window_control_repository.dart';
 import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
-import 'package:tiertask/ui/app_theme.dart';
-import 'package:tiertask/ui/home_screen.dart';
+import 'package:tiertask_ui/tiertask_ui.dart';
 
 /// Fake [LocalFileRepository] returning an in-memory `.tdf` document for widget tests.
 class FakeLocalFileRepository extends LocalFileRepository {
@@ -185,184 +183,109 @@ class FakeWebDavRepository extends WebDavRepository {
   }
 }
 
-/// Test-only legacy root widget preserving pre-cutover `HomeScreen` and `AppThemeSet` wiring until Phase 4 (`TEP-019`).
-class LegacyTierTaskApp extends ConsumerStatefulWidget {
-  /// Creates a [LegacyTierTaskApp].
-  const LegacyTierTaskApp({super.key});
-
-  @override
-  ConsumerState<LegacyTierTaskApp> createState() => _LegacyTierTaskAppState();
-}
-
-/// State for [LegacyTierTaskApp] preserving legacy `HomeScreen` theme, watcher, and dev banner wiring.
-class _LegacyTierTaskAppState extends ConsumerState<LegacyTierTaskApp> {
-  AppLifecycleListener? _lifecycleListener;
-
-  @override
-  void initState() {
-    super.initState();
-    _lifecycleListener = AppLifecycleListener(
-      onStateChange: _handleLifecycleStateChange,
-      onExitRequested: () async {
-        AppLogger.handleAppLifecycleState(AppLifecycleState.detached);
-        return AppExitResponse.exit;
-      },
-    );
-  }
-
-  @override
-  void dispose() {
-    _lifecycleListener?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    ref.watch(diagnosticsEnabledProvider);
-    ref.watch(localFileWatcherProvider);
-    final locale = ref.watch(appLocaleProvider);
-    final appThemeMode = ref.watch(appThemeModeProvider);
-    final appThemeSet = ref.watch(appThemeProvider);
-    final buildProfile = ref.watch(appBuildProfileProvider);
-
-    return MaterialApp(
-      title: buildProfile.formatWindowTitle('TierTask'),
-      onGenerateTitle: (context) =>
-          buildProfile.formatWindowTitle(AppLocalizations.of(context).appTitle),
-      debugShowCheckedModeBanner: false,
-      locale: locale,
-      localizationsDelegates: const [
-        AppLocalizations.delegate,
-        ...GlobalMaterialLocalizations.delegates,
-      ],
-      supportedLocales: AppLocalizations.supportedLocales,
-      themeMode: _toFlutterThemeMode(appThemeMode),
-      theme: appThemeSet.light.toThemeData(),
-      darkTheme: appThemeSet.dark.toThemeData(),
-      builder: buildProfile.isDev ? _wrapWithDevBanner : null,
-      home: const HomeScreen(),
-    );
-  }
-
-  /// Attempts a best-effort WebDAV log upload when backgrounding the application.
-  Future<void> _flushRemoteLogQuietly() async {
-    try {
-      await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
-    } on Object {
-      // Ignore background flush errors during lifecycle transitions.
-    }
-  }
-
-  /// Records lifecycle state transitions and flushes WebDAV logs on backgrounding.
-  void _handleLifecycleStateChange(AppLifecycleState state) {
-    AppLogger.handleAppLifecycleState(state);
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused) {
-      unawaited(_flushRemoteLogQuietly());
-    }
-  }
-
-  /// Maps [AppThemeMode] to Flutter's [ThemeMode].
-  ThemeMode _toFlutterThemeMode(AppThemeMode mode) {
-    return switch (mode) {
-      AppThemeMode.system => ThemeMode.system,
-      AppThemeMode.light => ThemeMode.light,
-      AppThemeMode.dark => ThemeMode.dark,
-    };
-  }
-
-  /// Wraps [child] with the legacy corner `DEV` banner for development builds.
-  Widget _wrapWithDevBanner(BuildContext context, Widget? child) {
-    final content = child ?? const SizedBox.shrink();
-    final colorScheme = Theme.of(context).colorScheme;
-    return Banner(
-      key: const ValueKey<String>('dev_build_banner'),
-      message: 'DEV',
-      location: BannerLocation.topEnd,
-      color: colorScheme.tertiary,
-      textStyle: TextStyle(
-        color: colorScheme.onTertiary,
-        fontSize: 10,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 1.0,
-      ),
-      child: content,
-    );
-  }
-}
-
-/// Opens the top-left navigation drawer and navigates to SettingsScreen.
-Future<void> openSettingsFromMenu(WidgetTester tester) async {
-  await tester.tap(find.byIcon(Icons.menu_rounded));
-  await tester.pumpAndSettle();
-  final settingsIcon = find.byIcon(Icons.settings_outlined);
-  await tester.ensureVisible(settingsIcon);
-  await tester.pumpAndSettle();
-  await tester.tap(settingsIcon);
-  await tester.pumpAndSettle();
-}
-
-/// Mounts [child] inside an isolated in-memory [ProviderScope] and [MaterialApp] without booting `HomeScreen` or `TdfService.parse`.
+/// Mounts a `lib/ui/` widget under test with [UiThemePresets], `AppLocalizations`,
+/// explicit viewport [surfaceSize], and deterministic in-memory Riverpod overrides.
 Future<ProviderContainer> pumpLeafWidget(
   WidgetTester tester,
   Widget child, {
   TaskBoard? board,
-  WebDavConfig config = const WebDavConfig(),
-  Locale locale = const Locale('en'),
-  AppThemeSet? themeSet,
+  TaskNotifier Function()? taskNotifierFactory,
+  WebDavConfig config = const WebDavConfig(language: AppLanguage.english),
+  SettingsRepository? settingsRepository,
+  LocalFileRepository? localFileRepository,
+  WebDavRepository? webDavRepository,
+  DateTime? nowUtc,
+  Size surfaceSize = const Size(1280, 860),
+  String presetId = 'calm',
   ThemeMode themeMode = ThemeMode.light,
-  DateTime Function()? clock,
-  bool wrapInScaffold = true,
-  LinkLauncherRepository? linkLauncherRepository,
+  Locale locale = const Locale('en'),
+  bool supportsNativeDirectoryPicker = true,
+  bool supportsDesktopWindowControls = true,
+  AppBuildProfile buildProfile = AppBuildProfile.release,
+  LocationFix? locationFix,
   LocationRepository? locationRepository,
+  LinkLauncherRepository? linkLauncherRepository,
+  WindowControlRepository? windowControlRepository,
+  bool settle = true,
 }) async {
-  final effectiveThemeSet =
-      themeSet ?? AppThemeSet.forPalette(config.themePalette);
+  tester.view.physicalSize = surfaceSize;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.binding.setSurfaceSize(surfaceSize);
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+
+  final effectiveSettingsRepo =
+      settingsRepository ?? InMemorySettingsRepository(config);
+  final effectiveNow = nowUtc ?? DateTime.utc(2026, 11, 10, 12, 0);
+  final preset = UiThemePresets.byId(presetId);
+
   final container = ProviderContainer(
     overrides: [
-      appLocaleProvider.overrideWithValue(locale),
-      settingsRepositoryProvider.overrideWithValue(
-        InMemorySettingsRepository(config),
+      settingsRepositoryProvider.overrideWithValue(effectiveSettingsRepo),
+      if (localFileRepository != null)
+        localFileRepositoryProvider.overrideWithValue(localFileRepository),
+      if (webDavRepository != null)
+        webDavRepositoryProvider.overrideWithValue(webDavRepository),
+      taskNotifierProvider.overrideWith(
+        taskNotifierFactory ??
+            () => FakeTaskNotifier(board ?? TaskBoard.empty()),
       ),
-      localFileRepositoryProvider.overrideWith(
-        (ref) => FakeLocalFileRepository(
-          config: config,
-          initialTdf: 'tdf ${TdfService.supportedVersion}\n',
-        ),
+      clockProvider.overrideWithValue(() => effectiveNow),
+      supportsDirectoryPickerProvider.overrideWithValue(
+        supportsNativeDirectoryPicker,
       ),
-      webDavRepositoryProvider.overrideWith(
-        (ref) => FakeWebDavRepository(config: config, shouldFail: () => false),
+      supportsDesktopWindowControlsProvider.overrideWithValue(
+        supportsDesktopWindowControls,
       ),
-      clockProvider.overrideWithValue(
-        clock ?? () => DateTime.utc(2026, 11, 1, 12, 0),
+      windowControlRepositoryProvider.overrideWithValue(
+        windowControlRepository ?? FakeWindowControlRepository(),
       ),
-      taskNotifierProvider.overrideWith(() => FakeTaskNotifier(board)),
+      appBuildProfileProvider.overrideWithValue(buildProfile),
+      appVersionProvider.overrideWith((ref) async => 'v0.4.0+4.abc1234'),
+      locationRepositoryProvider.overrideWithValue(
+        locationRepository ?? FakeLocationRepository(initialFix: locationFix),
+      ),
       if (linkLauncherRepository != null)
         linkLauncherRepositoryProvider.overrideWithValue(
           linkLauncherRepository,
         ),
-      if (locationRepository != null)
-        locationRepositoryProvider.overrideWithValue(locationRepository),
     ],
   );
   addTearDown(container.dispose);
-  await container.read(taskNotifierProvider.future);
+
+  await container.read(webDavConfigProvider.future);
+  await container.read(appVersionProvider.future);
+  if (settle) {
+    try {
+      await container.read(taskNotifierProvider.future);
+    } on Object {
+      // Allow error-state widget tests to pump error UI cleanly.
+    }
+  }
+
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
       child: MaterialApp(
+        debugShowCheckedModeBanner: false,
         locale: locale,
         localizationsDelegates: const [
           AppLocalizations.delegate,
           ...GlobalMaterialLocalizations.delegates,
         ],
         supportedLocales: AppLocalizations.supportedLocales,
-        theme: effectiveThemeSet.light.toThemeData(),
-        darkTheme: effectiveThemeSet.dark.toThemeData(),
         themeMode: themeMode,
-        home: wrapInScaffold ? Scaffold(body: child) : child,
+        theme: preset.light.toThemeData(),
+        darkTheme: preset.dark.toThemeData(),
+        home: child,
       ),
     ),
   );
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    await tester.pump();
+  }
   return container;
 }

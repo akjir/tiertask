@@ -26,7 +26,7 @@ final windowControlControllerProvider = Provider<WindowControlController>(
   ),
 );
 
-/// Mediates desktop custom-chrome window commands between `lib/ui_v2/` and [WindowControlRepository].
+/// Mediates desktop custom-chrome window commands between `lib/ui/` and [WindowControlRepository].
 class WindowControlController {
   /// Creates a [WindowControlController] backed by [_repository] with [isSupported] platform gating.
   const WindowControlController(this._repository, {required this.isSupported});

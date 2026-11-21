@@ -15,15 +15,15 @@ Audit **every file in an isolated context window**:
    - For `/red changed`, resolve non-deleted `.dart` files relative to `HEAD` (`git diff --name-only --diff-filter=d HEAD -- '*.dart'` and `git ls-files --others --exclude-standard -- '*.dart'`), excluding generated `lib/l10n/app_localizations*.dart`; stop if empty.
    - Spawn **one `research` subagent per file** (`invoke_subagent`, `TypeName: "research"`, `Model: "inherit"`) with Section 2 instructions. Each subagent audits ONLY its assigned file (reading external symbols solely to verify contracts).
 3. **Full Project (`/red` or `/red all`):** Enumerate all hand-written `.dart` files under `lib/` (excluding `lib/l10n/app_localizations*.dart`) and dispatch one `research` subagent per file in waves (wait for each wave to finish before starting the next):
-   - **Wave 1 (Models, Services, L10n):** `lib/models/*`, `lib/services/*`, `lib/l10n/tier_localization_extension.dart`
+   - **Wave 1 (Models, Services, L10n):** `lib/models/*`, `lib/services/*`, `lib/l10n/storage_file_read_localization_extension.dart`, `lib/l10n/tier_localization_extension.dart`
    - **Wave 2 (Repositories & Providers):** `lib/repositories/*`, `lib/providers/*`
-   - **Wave 3 (Entry & UI):** `lib/main.dart`, `lib/presentation/**`, `lib/ui/**`, `lib/ui_v2/**`, `packages/tiertask_ui/lib/**` (as present)
+   - **Wave 3 (Presentation, Entry & UI):** `lib/presentation/**`, `lib/ui/**`, `lib/main.dart`, `packages/tiertask_ui/lib/**`
 
 ## 2. Five-Pillar Audit (Per-File Subagent Instructions)
 Assume the assigned `.dart` file is flawed. Check every pillar strictly against `AGENTS.md`:
 
 ### 2.1 Security
-1. **Layer Isolation, DAG & Transport (`P-UDF-ARCHITECTURE`, `P-ACYCLIC-DAG`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-TRANSPORT-SECURITY`):** Upward layer imports or circular SCCs (`app_logger < models < l10n < services < repositories < providers < ui < main`); `dart:io` or `dart:ffi` outside `lib/repositories/`; `HttpClient` outside `webdav_repository.dart`; `File` outside `lib/repositories/`; UI bypassing notifiers; `badCertificateCallback` TLS bypass; non-HTTP(S) schemes, URL userinfo (`user:pass@host`), query/fragment injection, or silent remote `http://` downgrades; Android `usesCleartextTraffic` / `allowBackup` regressions.
+1. **Layer Isolation, DAG & Transport (`P-UDF-ARCHITECTURE`, `P-ACYCLIC-DAG`, `P-IO-ISOLATION`, `P-WEBDAV-API`, `P-TRANSPORT-SECURITY`):** Upward layer imports or circular SCCs (`app_logger < models < l10n < services < repositories < providers < presentation < ui < main`); violations of the global strict Rank `7` `lib/ui/*` whitelist or Riverpod provider/notifier declarations in `lib/ui/*`; `dart:io` or `dart:ffi` outside `lib/repositories/`; `HttpClient` outside `webdav_repository.dart`; `File` outside `lib/repositories/`; UI bypassing notifiers; `badCertificateCallback` TLS bypass; non-HTTP(S) schemes, URL userinfo (`user:pass@host`), query/fragment injection, or silent remote `http://` downgrades; Android `usesCleartextTraffic` / `allowBackup` regressions.
 2. **Path Traversal (`Uri`, `File`):** Remote WebDAV or local paths containing `..`, `\0`, `\`, `%2F`, symlinks, or unvalidated segments escaping the intended base path on Linux, Android, or Windows.
 3. **Unbounded I/O & DoS (`P-BOUND-ALLOC`):** Unbounded stream/file reads (`response.transform(utf8.decoder).join()`, `file.readAsString()`) without `maxTdfFileBytes`, `connectionTimeout`, or guaranteed `HttpClient.close()` / handle cleanup.
 4. **TDF Injection & Control Characters (`M-DELIM-INJECT-TESTS`):** Untrusted strings with `{`, `}`, quotes, `\`, `#`, `\n`, `\r`, `\0`, C0/C1 controls (`\u{0000}..=\u{001F}`, `\u{007F}..=\u{009F}`), or Unicode BiDi overrides forging directives or corrupting round-trips.
@@ -43,7 +43,7 @@ Assume the assigned `.dart` file is flawed. Check every pillar strictly against 
 ### 2.4 Readability & Layout
 1. **7-Part Layout & Member Order (`P-LICENSE-HEADER`, `P-DIRECTIVES-ORDER`, `P-CLASS-COHESION`, `AGENTS.md` Section 2):** GPL-3.0 header + blank line, `///` doc, 3-group alphabetized imports, alphabetized constants/providers, cohesive types with strict member order, alphabetized top-level functions, `dart format` + trailing commas.
 2. **Flatness & Modularity (`P-VERTICAL-CLARITY`, `P-FILE-SIZE`, `P-FLAT-CONTROL-FLOW`, `P-FLATTEN-BUILD`, `P-NO-NESTED-LOOPS`, `P-LOOP-MODULARITY`, `P-FUNCTIONAL-COMBINATORS`):** Nested loops; multi-arm `switch`/deep `if/else` in loops; indentation $> 3$; loop bodies $\ge 25$L; `build()`/dispatchers $\ge 40$L; helper methods returning `Widget` instead of `StatelessWidget` classes; dense combinator chains; forbidden `part`/`part of`/`export`. Never flag file line counts or `_private` method counts.
-3. **Naming, Docs & UI Design System (`P-NO-ABBREV-VARS`, `P-FN-DOCS`, `P-LANG-RULES`, `P-UI-DESIGN-SYSTEM`):** Abbreviated variables; ambiguous `bool` params instead of enums/sealed types; missing `///` on production items or redundant `///` on `test()` blocks; non-English/emoji/filler prose; in `packages/tiertask_ui/`, `lib/ui_v2/`, or redesigned `lib/ui/`, violations of `spec/UI_DESIGN_SYSTEM.md` (hardcoded colors bypassing `UiThemeTokens`, unapproved drop shadows, missing `1px` focus-visible rings or accessible labels, broken `720`/`820` breakpoints, floating notices overlapping bottom docks, sliding switches, or bespoke one-off widgets bypassing the shared 17-widget catalog).
+3. **Naming, Docs & UI Design System (`P-NO-ABBREV-VARS`, `P-FN-DOCS`, `P-LANG-RULES`, `P-UI-DESIGN-SYSTEM`):** Abbreviated variables; ambiguous `bool` params instead of enums/sealed types; missing `///` on production items or redundant `///` on `test()` blocks; non-English/emoji/filler prose; in `packages/tiertask_ui/` or `lib/ui/`, violations of `spec/UI_DESIGN_SYSTEM.md` (hardcoded colors bypassing `UiThemeTokens`, unapproved drop shadows, missing `1px` focus-visible rings or accessible labels, broken `720`/`820` breakpoints, floating notices overlapping bottom docks, sliding switches, or bespoke one-off widgets bypassing the shared 17-widget catalog).
 
 ### 2.5 Code Efficiency
 1. **Dead Code & Ignores (`P-NO-DEAD-CODE`, `P-NO-IGNORE`):** Unused symbols/params/imports or `// ignore:` / `// ignore_for_file:`.
@@ -59,7 +59,7 @@ Aggregate all per-file results in the orchestrator:
 - **All Clean:** Report **"SECURE"** and stop without editing files.
 - **Findings Exist:** Present one **Audit Report & Remediation Plan** and **wait for explicit user approval** before editing:
   1. List files verified as **SECURE**.
-  2. Group findings by file in bottom-up layer order (`app_logger` -> `models` -> `l10n` -> `services` -> `repositories` -> `providers` -> `ui` -> `main`).
+  2. Group findings by file in bottom-up layer order (`app_logger` -> `models` -> `l10n` -> `services` -> `repositories` -> `providers` -> `presentation` -> `ui` -> `main`).
   3. Include pillar tag, file/lines, attack vector/defect, violated rule IDs, and planned TDD fix + regression test.
 
 ## 4. Remediation (After User Approval, Adaptive TDD)

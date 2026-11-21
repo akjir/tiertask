@@ -23,9 +23,9 @@ import '../models/task_board_undo.dart';
 import '../providers/config_providers.dart';
 import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
-import 'settings_controller.dart';
+import 'settings_storage_controller.dart';
+import 'shell_models.dart';
 import 'ui_telemetry.dart';
-import 'ui_v2_shell_models.dart';
 
 /// Provides the active [FloatingNoticeViewModel] for the floating toast and Undo overlay (`U-UX-004`).
 final floatingNoticeControllerProvider =
@@ -41,18 +41,28 @@ class FloatingNoticeController extends Notifier<FloatingNoticeViewModel?> {
   /// Auto-hide duration for Undo recovery toasts (`U-UX-004`).
   static const Duration undoDuration = Duration(milliseconds: 8000);
 
+  String? _activeWorkspaceId;
   Timer? _autoHideTimer;
   int _lastUndoSequenceShown = 0;
   int _nextNoticeId = 1;
 
   @override
   FloatingNoticeViewModel? build() {
-    ref.watch(
-      activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
-    );
     _cancelTimer();
     _lastUndoSequenceShown = 0;
     ref.onDispose(_cancelTimer);
+
+    final initialWorkspaceId = ref
+        .read(activeWorkspaceProvider)
+        .asData
+        ?.value
+        .id;
+    _activeWorkspaceId = initialWorkspaceId;
+
+    ref.listen<String?>(
+      activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
+      _handleWorkspaceIdChanged,
+    );
 
     ref.listen<TaskUndoState>(taskUndoStateProvider, (previous, next) {
       final notice = next.latestNotice;
@@ -69,6 +79,9 @@ class FloatingNoticeController extends Notifier<FloatingNoticeViewModel?> {
       _presentUndoNotice(notice);
     });
 
+    if (initialWorkspaceId != null) {
+      return _consumeStartupRecoveryNotice();
+    }
     return null;
   }
 
@@ -112,13 +125,15 @@ class FloatingNoticeController extends Notifier<FloatingNoticeViewModel?> {
 
   /// Consumes any one-shot startup settings recovery notice and presents it as a persistent warning toast.
   void showStartupRecoveryNoticeIfPending({Locale? locale}) {
-    final message = ref
-        .read(settingsControllerProvider)
-        .consumeStartupRecoveryNotice(locale: locale);
-    if (message == null || message.isEmpty) {
+    if (locale == null && !ref.read(activeWorkspaceProvider).hasValue) {
       return;
     }
-    showNotice(message, tone: NoticeTone.warning, persistent: true);
+    final notice = _consumeStartupRecoveryNotice(locale: locale);
+    if (notice == null) {
+      return;
+    }
+    _cancelTimer();
+    state = notice;
   }
 
   /// Executes the latest undoable task mutation and announces remaining Undo stack depth.
@@ -164,6 +179,45 @@ class FloatingNoticeController extends Notifier<FloatingNoticeViewModel?> {
   void _cancelTimer() {
     _autoHideTimer?.cancel();
     _autoHideTimer = null;
+  }
+
+  /// Consumes any pending one-shot startup settings recovery notice and wraps it as a persistent warning toast.
+  FloatingNoticeViewModel? _consumeStartupRecoveryNotice({Locale? locale}) {
+    final message = ref
+        .read(settingsStorageControllerProvider)
+        .consumeStartupRecoveryNotice(locale: locale);
+    if (message == null || message.isEmpty) {
+      return null;
+    }
+    return FloatingNoticeViewModel(
+      id: _nextNoticeId++,
+      message: message,
+      tone: NoticeTone.warning,
+      persistent: true,
+    );
+  }
+
+  /// Clears active notices on workspace switches and consumes startup recovery notices once a workspace resolves.
+  void _handleWorkspaceIdChanged(
+    String? previousWorkspaceId,
+    String? nextWorkspaceId,
+  ) {
+    if (nextWorkspaceId == null) {
+      if (previousWorkspaceId != null) {
+        _activeWorkspaceId = null;
+        _lastUndoSequenceShown = 0;
+        dismiss();
+      }
+      return;
+    }
+    final switchedWorkspace =
+        _activeWorkspaceId != null && _activeWorkspaceId != nextWorkspaceId;
+    _activeWorkspaceId = nextWorkspaceId;
+    if (switchedWorkspace) {
+      _lastUndoSequenceShown = 0;
+      dismiss();
+    }
+    showStartupRecoveryNoticeIfPending();
   }
 
   /// Formats and presents an `8000ms` floating Undo notice for [notice].

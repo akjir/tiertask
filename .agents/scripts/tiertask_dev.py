@@ -83,13 +83,20 @@ _FORBIDDEN_UI_PROVIDERS = (
     "localFileRepositoryProvider",
     "locationRepositoryProvider",
     "settingsRepositoryProvider",
+    "supportsDesktopWindowControlsProvider",
     "supportsDirectoryPickerProvider",
     "tdfServiceProvider",
     "webDavRepositoryProvider",
+    "windowControlRepositoryProvider",
 )
 _FORBIDDEN_UI_PROVIDER_RE = re.compile(
     r"\b(" + "|".join(_FORBIDDEN_UI_PROVIDERS) + r")\b"
 )
+_UI_FORBIDDEN_PROVIDER_DECL_RE = re.compile(
+    r"\b(?:(?:Async)?NotifierProvider|Provider)\s*(?:<|\(|\.)|\bextends\s+(?:AutoDispose)?(?:Async)?Notifier\b"
+)
+_L10N_MEMBER_TOKEN_RE = re.compile(r"\.([a-z][A-Za-z0-9_]*)\b")
+_L10N_BARE_TOKEN_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\b")
 _EMOJI_RE = re.compile(
     r"[\U0001F300-\U0001FAFF\U00002700-\U000027BF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF]",
 )
@@ -548,7 +555,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
         arb_path = root / "lib" / "l10n" / arb_name
         if not arb_path.exists():
             continue
-        if layer and layer not in ("l10n", "ui", "ui_v2"):
+        if layer and layer not in ("l10n", "ui"):
             continue
         rel = arb_path.relative_to(root).as_posix()
         for idx, line in enumerate(arb_path.read_text(encoding="utf-8").splitlines(), 1):
@@ -649,17 +656,17 @@ def _extract_top_symbols(file_path: Path) -> list[str]:
             symbols.append(pm.group(1))
     for km in _VALUE_KEY_RE.finditer(text):
         symbols.append(f"'{km.group(1)}'")
-    if file_path.name == "settings_screen.dart":
-        symbols.append("openSettingsFromMenu")
     return symbols
 
 
 _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/main.dart": [
-        "test/ui_v2/tier_task_shell_screen_test.dart",
-        "test/ui_v2/real_mechanics_v2_test.dart",
+        "test/ui/tier_task_shell_screen_test.dart",
+        "test/ui/real_mechanics_test.dart",
     ],
-    "lib/l10n/tier_localization_extension.dart": ["test/ui/home_screen_test.dart"],
+    "lib/l10n/tier_localization_extension.dart": [
+        "test/l10n/tier_localization_extension_test.dart",
+    ],
     "lib/models/task_board.dart": [
         "test/models/task_board_evaluation_test.dart",
         "test/models/task_board_lifecycle_test.dart",
@@ -742,51 +749,72 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/repositories/local_file_operations.dart": ["test/repositories/local_file_repository_test.dart"],
     "lib/providers/location_providers.dart": [
         "test/providers/workspace_providers_test.dart",
-        "test/ui/location_ui_test.dart",
+        "test/ui/real_mechanics_test.dart",
     ],
-    "lib/ui/edit_locations_screen.dart": ["test/ui/edit_locations_screen_test.dart"],
-    "lib/ui/widgets/home_top_bar.dart": ["test/ui/home_screen_test.dart"],
-    "lib/ui/widgets/home_tier_pane.dart": ["test/ui/home_screen_test.dart"],
-    "lib/ui/widgets/home_drawer.dart": ["test/ui/home_drawer_test.dart"],
-    "lib/ui/widgets/settings_preference_cards.dart": ["test/ui/settings_screen_test.dart"],
-    "lib/ui/widgets/settings_webdav_storage_section.dart": ["test/ui/settings_screen_test.dart"],
-    "lib/ui/widgets/log_viewer_dialog.dart": ["test/ui/settings_screen_test.dart"],
-    "lib/ui/widgets/settings_local_storage_section.dart": ["test/ui/local_directory_picker_test.dart"],
-    "lib/ui/widgets/local_tdf_file_dialogs.dart": ["test/ui/local_directory_picker_test.dart"],
-    "lib/ui/widgets/task_editor_sections.dart": ["test/ui/edit_task_screen_test.dart"],
-    "lib/ui/widgets/task_editor_scheduling_card.dart": ["test/ui/edit_task_screen_test.dart"],
-    "lib/ui/widgets/task_editor_subtasks_and_blockers.dart": ["test/ui/edit_task_screen_test.dart"],
-    "lib/ui/widgets/task_editor_links_section.dart": [
-        "test/ui/edit_task_screen_test.dart",
-        "test/ui/edit_labels_screen_test.dart",
-    ],
-    "lib/ui/widgets/task_editor_history_section.dart": [
-        "test/ui/widgets/task_editor_history_section_test.dart",
-        "test/ui/edit_task_screen_test.dart",
-    ],
-    "lib/ui/widgets/condition_editor_controller.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
-    "lib/ui/widgets/task_editor_conditions_section.dart": ["test/ui/widgets/task_editor_conditions_test.dart"],
-    "lib/ui/widgets/workspace_row_card.dart": ["test/ui/widgets/workspace_dialog_test.dart"],
-    "lib/ui/widgets/tier_task_subtasks_section.dart": ["test/ui/widgets/tier_task_subtasks_test.dart"],
-    "lib/presentation/ui_v2_shell_models.dart": [
+    "lib/presentation/shell_models.dart": [
         "test/presentation/app_shell_controller_test.dart",
-        "test/presentation/board_v2_view_models_test.dart",
+        "test/presentation/board_view_models_test.dart",
     ],
-    "lib/ui_v2/views/entity_section_widgets.dart": [
-        "test/ui_v2/tasks_view_test.dart",
-        "test/ui_v2/labels_view_test.dart",
-        "test/ui_v2/locations_view_test.dart",
+    "lib/presentation/view_model_primitives.dart": [
+        "test/presentation/board_view_models_test.dart",
     ],
-    "lib/ui_v2/views/task_card.dart": ["test/ui_v2/tasks_view_test.dart"],
-    "lib/ui_v2/views/task_inline_editors.dart": ["test/ui_v2/tasks_view_test.dart"],
-    "lib/ui_v2/views/tasks_view.dart": ["test/ui_v2/tasks_view_test.dart"],
-    "lib/ui_v2/views/labels_view.dart": ["test/ui_v2/labels_view_test.dart"],
-    "lib/ui_v2/views/locations_view.dart": ["test/ui_v2/locations_view_test.dart"],
-    "lib/ui_v2/views/settings_view.dart": ["test/ui_v2/settings_view_test.dart"],
-    "lib/ui_v2/views/log_viewer_view.dart": ["test/ui_v2/secondary_views_test.dart"],
-    "lib/ui_v2/views/raw_tdf_view.dart": ["test/ui_v2/secondary_views_test.dart"],
-    "lib/ui_v2/views/resolution_views.dart": ["test/ui_v2/secondary_views_test.dart"],
-    "lib/ui_v2/dialogs/app_modals.dart": ["test/ui_v2/app_modals_test.dart"],
+    "lib/presentation/shell_chrome_view_models.dart": [
+        "test/presentation/board_view_models_test.dart",
+    ],
+    "lib/presentation/tasks_view_model.dart": [
+        "test/presentation/board_view_models_test.dart",
+    ],
+    "lib/presentation/entity_view_models.dart": [
+        "test/presentation/board_view_models_test.dart",
+    ],
+    "lib/ui/dialogs/compact_label_picker_sheet.dart": ["test/ui/app_modals_test.dart"],
+    "lib/ui/dialogs/geocoding_candidates_modal.dart": ["test/ui/app_modals_test.dart"],
+    "lib/ui/dialogs/local_file_modals.dart": ["test/ui/app_modals_test.dart"],
+    "lib/ui/dialogs/location_status_modal.dart": ["test/ui/app_modals_test.dart"],
+    "lib/ui/dialogs/wipe_tdf_modal.dart": ["test/ui/app_modals_test.dart"],
+    "lib/ui/dialogs/workspaces_modal.dart": ["test/ui/app_modals_test.dart"],
+    "lib/ui/widgets/entity_card_chrome.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/locations_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_note_section.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/locations_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_conditions_section.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/labels_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_date_time_fields.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/labels_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_links_section.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/labels_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_label_picker.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+    ],
+    "lib/ui/views/tasks_view.dart": ["test/ui/tasks_view_test.dart"],
+    "lib/ui/views/task_card.dart": ["test/ui/tasks_view_test.dart"],
+    "lib/ui/views/task_draft_card.dart": ["test/ui/tasks_view_test.dart"],
+    "lib/ui/views/task_schedule_editors.dart": ["test/ui/tasks_view_test.dart"],
+    "lib/ui/views/task_detail_editors.dart": ["test/ui/tasks_view_test.dart"],
+    "lib/ui/views/labels_view.dart": ["test/ui/labels_view_test.dart"],
+    "lib/ui/views/label_card.dart": ["test/ui/labels_view_test.dart"],
+    "lib/ui/views/locations_view.dart": ["test/ui/locations_view_test.dart"],
+    "lib/ui/views/location_card.dart": ["test/ui/locations_view_test.dart"],
+    "lib/ui/views/settings_view.dart": ["test/ui/settings_view_test.dart"],
+    "lib/ui/views/log_viewer_view.dart": ["test/ui/secondary_views_test.dart"],
+    "lib/ui/views/raw_tdf_view.dart": ["test/ui/secondary_views_test.dart"],
+    "lib/ui/views/resolution_views.dart": ["test/ui/secondary_views_test.dart"],
 }
 
 
@@ -821,8 +849,6 @@ def _find_mirror_tests(root: Path, lib_rel: str) -> set[str]:
             alt = f"test/{Path(sub_rel).parent.as_posix()}/{short_stem}_test.dart"
             if (root / alt).exists():
                 matched.add(alt)
-    if stem == "location_status_dialog" and (root / "test/ui/location_ui_test.dart").exists():
-        matched.add("test/ui/location_ui_test.dart")
     layer_dir = root / "test" / Path(sub_rel).parts[0]
     if layer_dir.exists():
         for cand in layer_dir.rglob(f"{stem}_*_test.dart"):
@@ -839,15 +865,13 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
     app_hubs = {
         "lib/main.dart",
         "lib/presentation/ui_telemetry.dart",
-        "lib/ui/home_screen.dart",
-        "lib/ui_v2/tier_task_shell_screen.dart",
+        "lib/ui/tier_task_shell_screen.dart",
         "lib/providers/config_providers.dart",
         "lib/providers/sync_providers.dart",
         "lib/providers/task_providers.dart",
         "lib/providers/workspace_providers.dart",
         "lib/services/app_logger.dart",
         "test/ui/test_helpers.dart",
-        "test/ui_v2/test_helpers.dart",
         UI_BARREL_REL,
         "packages/tiertask_ui/test/test_helpers.dart",
     }
@@ -864,7 +888,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
                 continue
             if stop_at_hubs and dep in app_hubs:
                 continue
-            if is_pure_core and curr.startswith("lib/repositories/") and dep.startswith(("lib/ui/", "lib/ui_v2/", "test/ui/", "test/ui_v2/")):
+            if is_pure_core and curr.startswith("lib/repositories/") and dep.startswith(("lib/ui/", "test/ui/")):
                 continue
             visited_direct.add(dep)
             queue.append(dep)
@@ -894,7 +918,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
 
     impacted_tests: set[str] = set()
     for direct_lib in visited_direct:
-        if not is_pure_core and direct_lib.startswith(("lib/ui/", "lib/ui_v2/", "packages/tiertask_ui/lib/")):
+        if not is_pure_core and direct_lib.startswith(("lib/ui/", "packages/tiertask_ui/lib/")):
             impacted_tests.update(_find_mirror_tests(root, direct_lib))
 
     for f in sorted(visited_all):
@@ -903,7 +927,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
         if f in visited_direct or not stop_at_hubs:
             impacted_tests.add(f)
             continue
-        if is_pure_core and f.startswith(("test/ui/", "test/ui_v2/")):
+        if is_pure_core and f.startswith("test/ui/"):
             continue
         if target_symbols:
             test_text = (root / f).read_text(encoding="utf-8")
@@ -993,8 +1017,53 @@ def update_l10n(
         subprocess.run(["flutter", "gen-l10n"], cwd=root, check=True)
 
 
+def _strip_dart_line_comment(line: str) -> str:
+    """Strips a trailing `//` Dart line comment while preserving `//` inside string literals."""
+    in_str: str | None = None
+    is_raw = False
+    i = 0
+    length = len(line)
+    while i < length:
+        ch = line[i]
+        if in_str is not None:
+            if not is_raw and ch == "\\":
+                i += 2
+                continue
+            if line.startswith(in_str, i):
+                i += len(in_str)
+                in_str = None
+                is_raw = False
+                continue
+            i += 1
+            continue
+        if ch == "r" and i + 1 < length and line[i + 1] in ("'", '"'):
+            is_raw = True
+            i += 1
+            ch = line[i]
+            if line[i : i + 3] in ("'''", '"""'):
+                in_str = line[i : i + 3]
+                i += 3
+            else:
+                in_str = ch
+                i += 1
+            continue
+        if ch in ("'", '"'):
+            is_raw = False
+            if line[i : i + 3] in ("'''", '"""'):
+                in_str = line[i : i + 3]
+                i += 3
+            else:
+                in_str = ch
+                i += 1
+            continue
+        if ch == "/" and i + 1 < length and line[i + 1] == "/":
+            return line[:i]
+        i += 1
+    return line
+
+
 def audit_l10n(root: Path) -> list[str]:
-    """Verifies key and placeholder parity between app_en.arb and app_de.arb."""
+    """Verifies key parity, placeholder metadata, orphan metadata, and live ARB usage."""
     en_path = root / "lib" / "l10n" / "app_en.arb"
     de_path = root / "lib" / "l10n" / "app_de.arb"
     if not en_path.exists() or not de_path.exists():
@@ -1011,6 +1080,11 @@ def audit_l10n(root: Path) -> list[str]:
     for k in sorted(de_keys - en_keys):
         issues.append(f"L10N: Key '{k}' present in app_de.arb but missing in app_en.arb")
 
+    for meta_key in sorted(k for k in en_data if k.startswith("@") and k != "@@locale"):
+        target_key = meta_key[1:]
+        if target_key not in en_keys:
+            issues.append(f"L10N: Orphan metadata '{meta_key}' in app_en.arb")
+
     for k in sorted(en_keys & de_keys):
         en_ph = set(_PLACEHOLDER_RE.findall(str(en_data[k])))
         de_ph = set(_PLACEHOLDER_RE.findall(str(de_data[k])))
@@ -1024,6 +1098,23 @@ def audit_l10n(root: Path) -> list[str]:
                 issues.append(
                     f"L10N: Metadata '@{k}.placeholders' {sorted(meta_ph)} does not match {sorted(en_ph)}"
                 )
+
+    lib_dir = root / "lib"
+    if lib_dir.exists():
+        used_tokens: set[str] = set()
+        for dart_file in sorted(lib_dir.rglob("*.dart")):
+            rel = dart_file.relative_to(root).as_posix()
+            if _is_generated_dart(rel):
+                continue
+            token_re = _L10N_BARE_TOKEN_RE if rel.startswith("lib/l10n/") else _L10N_MEMBER_TOKEN_RE
+            for line in dart_file.read_text(encoding="utf-8").splitlines():
+                code_part = _strip_dart_line_comment(line)
+                if not code_part:
+                    continue
+                used_tokens.update(token_re.findall(code_part))
+        for k in sorted(en_keys - used_tokens):
+            issues.append(f"L10N: Unused ARB key '{k}' in app_en.arb (P-NO-DEAD-CODE)")
+
     return issues
 
 
@@ -1320,7 +1411,7 @@ def _lib_layer_rank(rel_path: str) -> int | None:
         return 5
     if rel_path.startswith("lib/presentation/"):
         return 6
-    if rel_path.startswith(("lib/ui/", "lib/ui_v2/")):
+    if rel_path.startswith("lib/ui/"):
         return 7
     if rel_path == "lib/main.dart":
         return 8
@@ -1407,10 +1498,13 @@ def _check_dag_subgraph(
                 issues.append(
                     f"P-ACYCLIC-DAG: Upward cross-layer import `{src} -> {dst}` (rank {src_rank} -> {dst_rank})"
                 )
-            if src.startswith("lib/ui/") and dst.startswith(("lib/repositories/", "lib/services/")):
+            if src.startswith("lib/ui/") and (
+                dst.startswith(("lib/models/", "lib/providers/", "lib/repositories/", "lib/services/"))
+                or (dst.startswith("lib/l10n/") and dst != "lib/l10n/app_localizations.dart")
+            ):
                 issues.append(
                     f"P-UDF-ARCHITECTURE: Forbidden direct import `{src} -> {dst}` "
-                    f"(lib/ui/ must not import repositories or services)"
+                    f"(strict Rank 7 UI whitelist)"
                 )
 
     return issues
@@ -1453,8 +1547,8 @@ def _check_ui_package_pubspecs(root: Path) -> list[str]:
     return issues
 
 
-def _is_allowed_ui_v2_import(root: Path, source_file: Path, uri: str) -> bool:
-    """Enforces the strict Rank 7 import whitelist for lib/ui_v2/ files."""
+def _is_allowed_ui_import(root: Path, source_file: Path, uri: str) -> bool:
+    """Enforces the global strict Rank 7 import whitelist for lib/ui/ files."""
     if uri in (
         "package:tiertask_ui/tiertask_ui.dart",
         "package:flutter_riverpod/flutter_riverpod.dart",
@@ -1475,7 +1569,7 @@ def _is_allowed_ui_v2_import(root: Path, source_file: Path, uri: str) -> bool:
         return False
     return (
         rel_target.startswith("lib/presentation/")
-        or rel_target.startswith("lib/ui_v2/")
+        or rel_target.startswith("lib/ui/")
         or rel_target == "lib/l10n/app_localizations.dart"
     )
 
@@ -1488,6 +1582,11 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
     issues: list[str] = []
     issues.extend(_check_markdown_rules(root, fix=fix))
     issues.extend(_check_ui_package_pubspecs(root))
+    for forbidden_dir in ("lib/ui_v2", "test/ui_v2"):
+        if (root / forbidden_dir).exists():
+            issues.append(
+                f"P-UDF-ARCHITECTURE: Forbidden transitional directory '{forbidden_dir}/'"
+            )
 
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
@@ -1562,15 +1661,18 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
                     issues.append(
                         f"P-UI-ISOLATION: Forbidden `{m_lower.group(1)}` import in lower layer `{rel}:{idx}`"
                     )
-            if rel.startswith("lib/ui_v2/"):
-                m_v2 = _DART_IMPORT_RE.match(line)
-                if m_v2 and not _is_allowed_ui_v2_import(root, p, m_v2.group(1)):
+            if rel.startswith("lib/ui/"):
+                m_ui = _DART_IMPORT_RE.match(line)
+                if m_ui and not _is_allowed_ui_import(root, p, m_ui.group(1)):
                     issues.append(
-                        f"P-UDF-ARCHITECTURE: Forbidden import `{m_v2.group(1)}` in `{rel}:{idx}` "
+                        f"P-UDF-ARCHITECTURE: Forbidden import `{m_ui.group(1)}` in `{rel}:{idx}` "
                         f"(strict Rank 7 UI whitelist)"
                     )
-            if rel.startswith(("lib/ui/", "lib/ui_v2/")):
-                code_part = line.split("//", 1)[0]
+                code_part = _strip_dart_line_comment(line)
+                if _DART_PROVIDER_RE.match(code_part.strip()) or _UI_FORBIDDEN_PROVIDER_DECL_RE.search(code_part):
+                    issues.append(
+                        f"P-UDF-ARCHITECTURE: Forbidden Riverpod provider/notifier declaration in `{rel}:{idx}`"
+                    )
                 for provider_name in dict.fromkeys(_FORBIDDEN_UI_PROVIDER_RE.findall(code_part)):
                     issues.append(
                         f"P-UDF-ARCHITECTURE: Forbidden `{provider_name}` reference in `{rel}:{idx}`"
@@ -1955,11 +2057,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_find.add_argument("queries", nargs="+", help="One or more substrings to search for.")
     p_find.add_argument(
         "--layer",
-        help="Optional layer filter (models, services, repositories, providers, presentation, ui, ui_v2, ui_pkg, l10n, spec).",
+        help="Optional layer filter (models, services, repositories, providers, presentation, ui, ui_pkg, l10n, spec).",
     )
 
     p_deps = sub.add_parser("deps", help="Show direct imports and transitive reverse lib/ and test/ dependents.")
-    p_deps.add_argument("target", help="Repository-relative Dart file path (e.g., lib/ui/settings_screen.dart).")
+    p_deps.add_argument("target", help="Repository-relative Dart file path (e.g., lib/ui/views/settings_view.dart).")
 
     p_l10n = sub.add_parser("l10n", help="Query, add/update, remove, or audit ARB localization entries.")
     p_l10n.add_argument("--query", help="Search existing ARB keys and English/German strings.")

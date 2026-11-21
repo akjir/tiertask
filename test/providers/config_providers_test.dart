@@ -120,8 +120,8 @@ void main() {
           if (!key.startsWith('@')) key,
       ];
 
-      expect(enMessageKeys, contains('sectionReadyTasks'));
-      expect(enMessageKeys, contains('sectionLabels'));
+      expect(enMessageKeys, contains('tier2Name'));
+      expect(enMessageKeys, contains('sectionTasksTitle'));
       expect(enMessageKeys, contains('drawerLabels'));
       expect(enMessageKeys, contains('emptyLabelsHint'));
       expect(deMessageKeys, equals(enMessageKeys));

@@ -28,10 +28,6 @@
   "@tier6Name": {
     "description": "Display name for tier 6 (Completed)."
   },
-  "tabFocusAndReady": "Focus & Ready",
-  "@tabFocusAndReady": {
-    "description": "Tab label for the combined Focus and Ready view."
-  },
   "emptyFocusHint": "No tasks in Focus. Tasks from Ready or Planned automatically move up here.",
   "@emptyFocusHint": {
     "description": "Empty-state hint shown when tier 1 (Focus) contains no tasks."
@@ -56,30 +52,9 @@
   "@emptyCompletedHint": {
     "description": "Empty-state hint shown when tier 6 (Completed) contains no tasks."
   },
-  "emptySectionEntries": "No entries in {heading}.",
-  "@emptySectionEntries": {
-    "description": "Fallback empty-state message for a section with the given heading.",
-    "placeholders": {
-      "heading": {
-        "type": "String"
-      }
-    }
-  },
   "tooltipSyncWebDav": "Synchronize with WebDAV",
   "@tooltipSyncWebDav": {
     "description": "Tooltip for the WebDAV synchronization button in the app bar."
-  },
-  "tooltipMarkdownPreview": "Show TDF preview",
-  "@tooltipMarkdownPreview": {
-    "description": "Tooltip for the raw TDF preview button in the app bar."
-  },
-  "tooltipSettings": "Settings",
-  "@tooltipSettings": {
-    "description": "Tooltip for the settings button in the app bar."
-  },
-  "markdownPreviewTitle": "Raw TDF",
-  "@markdownPreviewTitle": {
-    "description": "Dialog title for the raw TDF preview dialog."
   },
   "actionClose": "Close",
   "@actionClose": {
@@ -93,10 +68,6 @@
   "@actionConfigure": {
     "description": "Button label to open configuration settings from the banner."
   },
-  "syncErrorTitle": "WebDAV Synchronization Error",
-  "@syncErrorTitle": {
-    "description": "Heading for the WebDAV synchronization error card."
-  },
   "actionSettings": "Settings",
   "@actionSettings": {
     "description": "Button label to navigate to the settings screen."
@@ -109,25 +80,9 @@
   "@quickAddPriority": {
     "description": "Toggle button label for marking a new task as priority in the quick-add bar."
   },
-  "quickAddAdvanced": "Advanced",
-  "@quickAddAdvanced": {
-    "description": "Button label in the quick-add bar to open the extended task view."
-  },
-  "advancedTaskTitle": "Extended Task View",
-  "@advancedTaskTitle": {
-    "description": "Header title for the extended task creation view."
-  },
-  "editTaskTitle": "Edit Task",
-  "@editTaskTitle": {
-    "description": "Header title when editing an existing task in the extended task view."
-  },
   "tooltipDowngradeTask": "Downgrade task",
   "@tooltipDowngradeTask": {
     "description": "Tooltip for the downward arrow button that downgrades a task."
-  },
-  "tooltipEditTask": "Edit task",
-  "@tooltipEditTask": {
-    "description": "Tooltip for the edit button on a task card."
   },
   "taskNameLabel": "Task Name",
   "@taskNameLabel": {
@@ -262,17 +217,9 @@
   "@localSectionDescription": {
     "description": "Helper description explaining local TDF file persistence."
   },
-  "localFilePathLabel": "Local TDF File Name",
-  "@localFilePathLabel": {
-    "description": "Input label for the local TDF file name or path field."
-  },
   "localFilePathHint": "tiertask.tdf or t2.tdf",
   "@localFilePathHint": {
     "description": "Placeholder hint for the local TDF file name field."
-  },
-  "localFilePathErrorEmpty": "Please enter a local file name.",
-  "@localFilePathErrorEmpty": {
-    "description": "Validation error shown when the local file name field is empty."
   },
   "resolvedLocalPathLabel": "Resolved Local File Path:",
   "@resolvedLocalPathLabel": {
@@ -454,38 +401,6 @@
       }
     }
   },
-  "sectionFocusTasks": "FOCUS TASKS",
-  "@sectionFocusTasks": {
-    "description": "Uppercase section label above the Focus tasks list on the landing page."
-  },
-  "sectionReadyTasks": "READY TASKS",
-  "@sectionReadyTasks": {
-    "description": "Uppercase section label above the Ready tasks list on the Ready tier panel."
-  },
-  "sectionPlannedTasks": "PLANNED TASKS",
-  "@sectionPlannedTasks": {
-    "description": "Uppercase section label above the Planned tasks list on the Planned tier panel."
-  },
-  "sectionBlockedTasks": "BLOCKED TASKS",
-  "@sectionBlockedTasks": {
-    "description": "Uppercase section label above the Blocked tasks list on the Blocked tier panel."
-  },
-  "sectionSomedayTasks": "SOMEDAY TASKS",
-  "@sectionSomedayTasks": {
-    "description": "Uppercase section label above the Someday tasks list on the Someday tier panel."
-  },
-  "sectionCompletedTasks": "COMPLETED TASKS",
-  "@sectionCompletedTasks": {
-    "description": "Uppercase section label above the Completed tasks list on the Completed tier panel."
-  },
-  "sectionAllTasks": "ALL TASKS",
-  "@sectionAllTasks": {
-    "description": "Uppercase section label above the All Tasks list in the search view."
-  },
-  "sectionLabels": "LABELS",
-  "@sectionLabels": {
-    "description": "Uppercase section label above the label chips or summary cards."
-  },
   "tooltipMenu": "Open menu",
   "@tooltipMenu": {
     "description": "Tooltip for the top-left navigation menu button."
@@ -506,10 +421,6 @@
   "@labelNameHint": {
     "description": "Placeholder hint inside the label name input field."
   },
-  "colorHexLabel": "Hex Color",
-  "@colorHexLabel": {
-    "description": "Input label for the direct hexadecimal color field."
-  },
   "emptyLabelsHint": "No labels created yet.",
   "@emptyLabelsHint": {
     "description": "Empty-state hint shown when no labels exist."
@@ -522,14 +433,6 @@
   "@actionEdit": {
     "description": "Button label to edit labels in the navigation drawer."
   },
-  "createNewLabel": "Create new label",
-  "@createNewLabel": {
-    "description": "Action label and input hint for creating a new label."
-  },
-  "editLabelsTitle": "Edit labels",
-  "@editLabelsTitle": {
-    "description": "Screen title for the label management screen."
-  },
   "taskSuspendedLabel": "Suspended",
   "@taskSuspendedLabel": {
     "description": "Toggle chip label for marking a task as suspended in the task editor."
@@ -537,10 +440,6 @@
   "taskSuspendedUntilLabel": "Suspended until (optional)",
   "@taskSuspendedUntilLabel": {
     "description": "Input field label for an optional suspension timestamp in the task editor."
-  },
-  "taskSuspendedUntilHint": "YYYY-MM-DD [HH:MM] (empty = indefinite)",
-  "@taskSuspendedUntilHint": {
-    "description": "Placeholder hint inside the suspended-until timestamp field."
   },
   "taskSuspendedErrorInvalid": "Enter a valid timestamp (YYYY-MM-DD or YYYY-MM-DD HH:MM).",
   "@taskSuspendedErrorInvalid": {
@@ -626,37 +525,9 @@
   "@conditionLocationAnyLabel": {
     "description": "Toggle chip label for the location any group reset directive."
   },
-  "conditionLocationLatHint": "Latitude",
-  "@conditionLocationLatHint": {
-    "description": "Input hint for latitude in a GPS location condition."
-  },
-  "conditionLocationLonHint": "Longitude",
-  "@conditionLocationLonHint": {
-    "description": "Input hint for longitude in a GPS location condition."
-  },
-  "conditionLocationRadiusHint": "Radius (m/km)",
-  "@conditionLocationRadiusHint": {
-    "description": "Input hint for radius in a GPS location condition."
-  },
   "conditionLocationErrorInvalid": "Enter valid latitude, longitude, and radius (e.g. 200m or 1.5km).",
   "@conditionLocationErrorInvalid": {
     "description": "Validation error shown when a GPS location condition input is invalid."
-  },
-  "tooltipAddLocationCondition": "Add location rule",
-  "@tooltipAddLocationCondition": {
-    "description": "Tooltip for the button that adds a GPS location condition."
-  },
-  "tooltipRemoveLocationCondition": "Remove location rule",
-  "@tooltipRemoveLocationCondition": {
-    "description": "Tooltip for the button that removes a GPS location condition."
-  },
-  "taskDetailsSectionTitle": "Task Details",
-  "@taskDetailsSectionTitle": {
-    "description": "Section card title for task name and note in the task editor."
-  },
-  "taskSchedulingSectionTitle": "Scheduling & Status",
-  "@taskSchedulingSectionTitle": {
-    "description": "Section card title for scheduling mode and suspension in the task editor."
   },
   "taskLabelsSectionTitle": "Labels",
   "@taskLabelsSectionTitle": {
@@ -686,10 +557,6 @@
   "@taskConditionsSectionTitle": {
     "description": "Section card title for activation conditions in the task editor."
   },
-  "taskConditionsSectionDescription": "Restrict when and where this task becomes active, or override inherited label conditions.",
-  "@taskConditionsSectionDescription": {
-    "description": "Section card description for activation conditions in the task editor."
-  },
   "tooltipPickDate": "Pick date",
   "@tooltipPickDate": {
     "description": "Tooltip for the date picker button on the suspended timestamp field."
@@ -698,18 +565,6 @@
   "@tooltipPickTime": {
     "description": "Tooltip for the time picker button on the suspended timestamp field."
   },
-  "tooltipClearDate": "Clear timestamp",
-  "@tooltipClearDate": {
-    "description": "Tooltip for clearing the suspended timestamp field."
-  },
-  "tooltipPickStartTime": "Pick start time",
-  "@tooltipPickStartTime": {
-    "description": "Tooltip for the start time picker button in time window conditions."
-  },
-  "tooltipPickEndTime": "Pick end time",
-  "@tooltipPickEndTime": {
-    "description": "Tooltip for the end time picker button in time window conditions."
-  },
   "themePaletteSectionTitle": "Color Palette",
   "@themePaletteSectionTitle": {
     "description": "Settings section title for choosing the Material 3 color palette."
@@ -717,14 +572,6 @@
   "themePaletteSectionDescription": "Select the Material 3 color palette for surfaces and highlights.",
   "@themePaletteSectionDescription": {
     "description": "Settings section description for choosing the Material 3 color palette."
-  },
-  "themePaletteSlate": "Slate",
-  "@themePaletteSlate": {
-    "description": "Label for the Slate Material 3 color palette."
-  },
-  "themePaletteNavy": "Navy",
-  "@themePaletteNavy": {
-    "description": "Label for the Navy Material 3 color palette."
   },
   "timeZoneSectionTitle": "Time Zone",
   "@timeZoneSectionTitle": {
@@ -773,10 +620,6 @@
   "tooltipClearInput": "Clear text",
   "@tooltipClearInput": {
     "description": "Tooltip for the button that clears the text in a focused input field."
-  },
-  "actionChangeDirectory": "Change Directory",
-  "@actionChangeDirectory": {
-    "description": "Button label to select a different local TDF directory on desktop platforms."
   },
   "localDirectoryMovedBanner": "Local TDF directory updated and file moved.",
   "@localDirectoryMovedBanner": {
@@ -902,22 +745,6 @@
   "errorDuplicateWorkspaceFilePath": "Another workspace already uses this TDF file path.",
   "@errorDuplicateWorkspaceFilePath": {
     "description": "Error message shown when the target TDF file path collides with another workspace."
-  },
-  "tooltipIndicatorPriority": "Priority",
-  "@tooltipIndicatorPriority": {
-    "description": "Tooltip for the passive priority indicator icon on a task card."
-  },
-  "tooltipIndicatorRepeat": "Repeating task",
-  "@tooltipIndicatorRepeat": {
-    "description": "Tooltip for the passive repeat indicator icon on a task card."
-  },
-  "tooltipIndicatorSubtasks": "Subtasks",
-  "@tooltipIndicatorSubtasks": {
-    "description": "Tooltip for the passive subtasks indicator icon on a task card when auto-finish is disabled."
-  },
-  "tooltipIndicatorSubtasksAutoFinish": "Subtasks (auto-finish)",
-  "@tooltipIndicatorSubtasksAutoFinish": {
-    "description": "Tooltip for the passive subtasks indicator icon on a task card when auto-finish is enabled."
   },
   "tooltipManageWorkspaces": "Switch or manage workspaces",
   "@tooltipManageWorkspaces": {
@@ -1057,18 +884,6 @@
   "@actionRefresh": {
     "description": "Button label to manually refresh the current location."
   },
-  "editLabelTitle": "Edit Label",
-  "@editLabelTitle": {
-    "description": "Header title when editing a label in the label editor screen."
-  },
-  "tooltipEditLabel": "Edit label",
-  "@tooltipEditLabel": {
-    "description": "Tooltip for the edit button on a label row."
-  },
-  "labelDetailsSectionTitle": "Label Details",
-  "@labelDetailsSectionTitle": {
-    "description": "Section card title for label name and note in the label editor."
-  },
   "labelNameLabel": "Label Name",
   "@labelNameLabel": {
     "description": "Input label for the label name field in the label editor."
@@ -1125,10 +940,6 @@
   "@tooltipIndicatorNote": {
     "description": "Tooltip for the passive note indicator icon on a task pill."
   },
-  "tooltipIndicatorLinks": "Has links",
-  "@tooltipIndicatorLinks": {
-    "description": "Tooltip for the passive link indicator icon on a task pill."
-  },
   "linkErrorInvalid": "Enter both a link title and a valid URI with scheme (e.g. https://...).",
   "@linkErrorInvalid": {
     "description": "Validation error shown when a link title or URI is empty or invalid."
@@ -1168,10 +979,6 @@
   "tooltipScrollToBottom": "Scroll to Bottom",
   "@tooltipScrollToBottom": {
     "description": "Tooltip for the Scroll to Bottom button in the diagnostic log viewer."
-  },
-  "tooltipClearLog": "Clear Log",
-  "@tooltipClearLog": {
-    "description": "Tooltip for the Clear Log button in the diagnostic log viewer."
   },
   "logCopiedSnackBar": "Diagnostic log copied to clipboard.",
   "@logCopiedSnackBar": {
@@ -1326,51 +1133,11 @@
   "@logStorageBoth": {
     "description": "Localized string for logStorageBoth"
   },
-  "logMetadataSectionTitle": "Session Metadata",
-  "@logMetadataSectionTitle": {
-    "description": "Localized string for logMetadataSectionTitle"
-  },
   "logMetadataFile": "File: {fileName}",
   "@logMetadataFile": {
     "description": "Localized string for logMetadataFile",
     "placeholders": {
       "fileName": {
-        "type": "String"
-      }
-    }
-  },
-  "logMetadataVersion": "Version: {version}",
-  "@logMetadataVersion": {
-    "description": "Localized string for logMetadataVersion",
-    "placeholders": {
-      "version": {
-        "type": "String"
-      }
-    }
-  },
-  "logMetadataPlatform": "Platform: {platform}",
-  "@logMetadataPlatform": {
-    "description": "Localized string for logMetadataPlatform",
-    "placeholders": {
-      "platform": {
-        "type": "String"
-      }
-    }
-  },
-  "logMetadataWorkspace": "Workspace: {workspace}",
-  "@logMetadataWorkspace": {
-    "description": "Localized string for logMetadataWorkspace",
-    "placeholders": {
-      "workspace": {
-        "type": "String"
-      }
-    }
-  },
-  "logMetadataTimeZone": "Time Zone: {timeZone}",
-  "@logMetadataTimeZone": {
-    "description": "Localized string for logMetadataTimeZone",
-    "placeholders": {
-      "timeZone": {
         "type": "String"
       }
     }
@@ -1394,10 +1161,6 @@
   "@logFilterAllTags": {
     "description": "Localized string for logFilterAllTags"
   },
-  "tooltipSyncLogWebDav": "Sync log to WebDAV",
-  "@tooltipSyncLogWebDav": {
-    "description": "Localized string for tooltipSyncLogWebDav"
-  },
   "logSyncedSnackBar": "Diagnostic log synced to WebDAV.",
   "@logSyncedSnackBar": {
     "description": "Localized string for logSyncedSnackBar"
@@ -1418,34 +1181,6 @@
   "@actionSelectColor": {
     "description": "Confirm button label in the custom color wheel dialog."
   },
-  "tooltipConditionDayAny": "Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.",
-  "@tooltipConditionDayAny": {
-    "description": "Tooltip for the Any day condition reset chip in the task editor."
-  },
-  "tooltipConditionTimeAny": "Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.",
-  "@tooltipConditionTimeAny": {
-    "description": "Tooltip for the Any time condition reset chip in the task editor."
-  },
-  "tooltipConditionLocationAny": "Explicitly overrides all location restrictions from assigned labels so this task is active at any location.",
-  "@tooltipConditionLocationAny": {
-    "description": "Tooltip for the Any location condition reset chip in the task editor."
-  },
-  "tooltipTaskEditorPriority": "Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.",
-  "@tooltipTaskEditorPriority": {
-    "description": "Tooltip for the Priority toggle chip in the task editor."
-  },
-  "tooltipTaskEditorSomeday": "Parks this task in the Someday backlog without pulling it into active tiers.",
-  "@tooltipTaskEditorSomeday": {
-    "description": "Tooltip for the Someday toggle chip in the task editor."
-  },
-  "tooltipTaskEditorSuspended": "Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.",
-  "@tooltipTaskEditorSuspended": {
-    "description": "Tooltip for the Suspended toggle chip in the task editor."
-  },
-  "tooltipTaskEditorRepeat": "Automatically reschedules this task after the configured interval upon completion and resets all subtasks.",
-  "@tooltipTaskEditorRepeat": {
-    "description": "Tooltip for the Repeat toggle chip in the task editor."
-  },
   "tooltipTaskEditorAutoFinish": "Automatically completes the entire task as soon as all subtasks are checked off.",
   "@tooltipTaskEditorAutoFinish": {
     "description": "Tooltip for the Auto-finish toggle chip in the subtasks section of the task editor."
@@ -1454,18 +1189,6 @@
   "@drawerLocations": {
     "description": "Section title for locations in the navigation drawer."
   },
-  "createNewLocation": "Create new location",
-  "@createNewLocation": {
-    "description": "Action label and input hint for creating a new location."
-  },
-  "editLocationsTitle": "Edit locations",
-  "@editLocationsTitle": {
-    "description": "Screen title for the location management screen."
-  },
-  "editLocationTitle": "Edit Location",
-  "@editLocationTitle": {
-    "description": "Header title when editing a location in the location editor screen."
-  },
   "emptyLocationsHint": "No locations created yet.",
   "@emptyLocationsHint": {
     "description": "Empty-state hint shown when no locations exist."
@@ -1473,14 +1196,6 @@
   "tooltipDeleteLocation": "Delete location",
   "@tooltipDeleteLocation": {
     "description": "Tooltip for the button that deletes a location."
-  },
-  "tooltipEditLocation": "Edit location",
-  "@tooltipEditLocation": {
-    "description": "Tooltip for the edit button on a location row."
-  },
-  "locationDetailsSectionTitle": "Location Details",
-  "@locationDetailsSectionTitle": {
-    "description": "Section card title for location name, source, and note in the location editor."
   },
   "locationNameLabel": "Location Name",
   "@locationNameLabel": {
@@ -1526,10 +1241,6 @@
   "@labelScopedSectionTitle": {
     "description": "Section card title for the scoped label switch in the label editor."
   },
-  "labelScopedSwitchTitle": "Scoped Label",
-  "@labelScopedSwitchTitle": {
-    "description": "Switch title for marking a label as scoped in the label editor."
-  },
   "labelScopedSwitchSubtitle": "Hide tasks with this label unless this label filter is active.",
   "@labelScopedSwitchSubtitle": {
     "description": "Switch subtitle explaining scoped label behavior in the label editor."
@@ -1537,10 +1248,6 @@
   "taskDueButtonLabel": "Due (optional)",
   "@taskDueButtonLabel": {
     "description": "Input field label for an optional due timestamp in the task editor."
-  },
-  "taskDueClearTooltip": "Clear due timestamp",
-  "@taskDueClearTooltip": {
-    "description": "Tooltip for clearing the due timestamp field."
   },
   "pillDuePrefix": "Due: {date}",
   "@pillDuePrefix": {
@@ -1550,10 +1257,6 @@
         "type": "String"
       }
     }
-  },
-  "errorLocalFileCasExhausted": "Local file was modified concurrently and exceeded maximum merge retries.",
-  "@errorLocalFileCasExhausted": {
-    "description": "Error message shown when concurrent local file edits exceed maxCasRetries."
   },
   "locationSourceTypeLabel": "Source Type",
   "@locationSourceTypeLabel": {
@@ -1595,34 +1298,9 @@
   "@locationResolveErrorInvalidPlusCode": {
     "description": "Validation error when the entered Plus Code syntax is invalid."
   },
-  "tooltipIndicatorSuspended": "Suspended",
-  "@tooltipIndicatorSuspended": {
-    "description": "Tooltip for the suspended task indicator icon."
-  },
-  "tooltipIndicatorBlockedBy": "Prerequisite tasks",
-  "@tooltipIndicatorBlockedBy": {
-    "description": "Tooltip for the prerequisite tasks indicator icon."
-  },
   "tooltipIndicatorConditions": "Activation conditions",
   "@tooltipIndicatorConditions": {
     "description": "Tooltip for the activation conditions indicator icon."
-  },
-  "tooltipIndicatorSummary": "Task information ({count} indicators)",
-  "@tooltipIndicatorSummary": {
-    "description": "Tooltip for the summary indicator icon when more than 3 indicators are active.",
-    "placeholders": {
-      "count": {
-        "type": "String"
-      }
-    }
-  },
-  "taskInfoDialogTitle": "Task Information",
-  "@taskInfoDialogTitle": {
-    "description": "Dialog title for the task information overlay."
-  },
-  "taskInfoPriorityValue": "Prioritized in queue",
-  "@taskInfoPriorityValue": {
-    "description": "Value text shown for a prioritized task in the task information dialog."
   },
   "taskInfoSuspendedForever": "Indefinitely",
   "@taskInfoSuspendedForever": {
@@ -1756,19 +1434,6 @@
       }
     }
   },
-  "deleteTaskDialogTitle": "Delete Task",
-  "@deleteTaskDialogTitle": {
-    "description": "Dialog title when confirming deletion of a task."
-  },
-  "deleteTaskConfirmMessage": "Delete task \"{title}\"? This action can be undone while the workspace remains open.",
-  "@deleteTaskConfirmMessage": {
-    "description": "Confirmation prompt shown before deleting a task.",
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
   "tooltipCopyNote": "Copy note",
   "@tooltipCopyNote": {
     "description": "Tooltip for the button that copies the expanded task note to the clipboard."
@@ -1833,14 +1498,6 @@
   "@taskIdCopiedSnackBar": {
     "description": "SnackBar confirmation message shown after copying a task ID to the clipboard."
   },
-  "labelHubDialogTitle": "Label Context",
-  "@labelHubDialogTitle": {
-    "description": "Title of the Label Context Hub dialog."
-  },
-  "labelHubEmptyHint": "No note, links, or activation conditions configured for this label.",
-  "@labelHubEmptyHint": {
-    "description": "Empty-state hint inside the Label Context Hub dialog when no metadata is set."
-  },
   "labelLinkErrorMaxExceeded": "Maximum of 20 links per label reached.",
   "@labelLinkErrorMaxExceeded": {
     "description": "Validation error when adding more than 20 links to a label."
@@ -1860,10 +1517,6 @@
   "tooltipMoveLinkUp": "Move link up",
   "@tooltipMoveLinkUp": {
     "description": "Tooltip for moving a link row up by one position."
-  },
-  "tooltipOpenLabelHub": "Show label details and links",
-  "@tooltipOpenLabelHub": {
-    "description": "Tooltip for opening the Label Context Hub dialog."
   },
   "tooltipSaveLink": "Update link",
   "@tooltipSaveLink": {
@@ -2002,10 +1655,6 @@
   "historySectionTitle": "History",
   "@historySectionTitle": {
     "description": "Section title for the task history journal card in TaskInfoDialog and EditTaskScreen."
-  },
-  "tooltipIndicatorHistory": "Has history entries",
-  "@tooltipIndicatorHistory": {
-    "description": "Tooltip shown on the history indicator icon on a task pill."
   },
   "historyEmptyHint": "No history entries recorded yet.",
   "@historyEmptyHint": {
@@ -2232,10 +1881,6 @@
   "allTasksLabel": "All Tasks",
   "@allTasksLabel": {
     "description": "Sidebar row clearing any active label filter."
-  },
-  "activeFilterLabel": "Active filter",
-  "@activeFilterLabel": {
-    "description": "Accessible label identifying the active label filter."
   },
   "activeFilterClearTooltip": "Clear filter (All Tasks)",
   "@activeFilterClearTooltip": {
@@ -3017,15 +2662,6 @@
   "entityKindLocationBadge": "LOCATION",
   "@entityKindLocationBadge": {
     "description": "Uppercase entity kind badge in conflict and recovery cards."
-  },
-  "versionFooterLabel": "Version {version}",
-  "@versionFooterLabel": {
-    "description": "Sidebar footer version label.",
-    "placeholders": {
-      "version": {
-        "type": "String"
-      }
-    }
   },
   "tooltipCloseApp": "Close TierTask",
   "@tooltipCloseApp": {

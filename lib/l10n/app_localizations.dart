@@ -140,12 +140,6 @@ abstract class AppLocalizations {
   /// **'Completed'**
   String get tier6Name;
 
-  /// Tab label for the combined Focus and Ready view.
-  ///
-  /// In en, this message translates to:
-  /// **'Focus & Ready'**
-  String get tabFocusAndReady;
-
   /// Empty-state hint shown when tier 1 (Focus) contains no tasks.
   ///
   /// In en, this message translates to:
@@ -182,35 +176,11 @@ abstract class AppLocalizations {
   /// **'No completed tasks from the last 30 days.'**
   String get emptyCompletedHint;
 
-  /// Fallback empty-state message for a section with the given heading.
-  ///
-  /// In en, this message translates to:
-  /// **'No entries in {heading}.'**
-  String emptySectionEntries(String heading);
-
   /// Tooltip for the WebDAV synchronization button in the app bar.
   ///
   /// In en, this message translates to:
   /// **'Synchronize with WebDAV'**
   String get tooltipSyncWebDav;
-
-  /// Tooltip for the raw TDF preview button in the app bar.
-  ///
-  /// In en, this message translates to:
-  /// **'Show TDF preview'**
-  String get tooltipMarkdownPreview;
-
-  /// Tooltip for the settings button in the app bar.
-  ///
-  /// In en, this message translates to:
-  /// **'Settings'**
-  String get tooltipSettings;
-
-  /// Dialog title for the raw TDF preview dialog.
-  ///
-  /// In en, this message translates to:
-  /// **'Raw TDF'**
-  String get markdownPreviewTitle;
 
   /// Button label to close a dialog.
   ///
@@ -230,12 +200,6 @@ abstract class AppLocalizations {
   /// **'Configure'**
   String get actionConfigure;
 
-  /// Heading for the WebDAV synchronization error card.
-  ///
-  /// In en, this message translates to:
-  /// **'WebDAV Synchronization Error'**
-  String get syncErrorTitle;
-
   /// Button label to navigate to the settings screen.
   ///
   /// In en, this message translates to:
@@ -254,35 +218,11 @@ abstract class AppLocalizations {
   /// **'Priority'**
   String get quickAddPriority;
 
-  /// Button label in the quick-add bar to open the extended task view.
-  ///
-  /// In en, this message translates to:
-  /// **'Advanced'**
-  String get quickAddAdvanced;
-
-  /// Header title for the extended task creation view.
-  ///
-  /// In en, this message translates to:
-  /// **'Extended Task View'**
-  String get advancedTaskTitle;
-
-  /// Header title when editing an existing task in the extended task view.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit Task'**
-  String get editTaskTitle;
-
   /// Tooltip for the downward arrow button that downgrades a task.
   ///
   /// In en, this message translates to:
   /// **'Downgrade task'**
   String get tooltipDowngradeTask;
-
-  /// Tooltip for the edit button on a task card.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit task'**
-  String get tooltipEditTask;
 
   /// Input label for the task name field in the extended task view.
   ///
@@ -476,23 +416,11 @@ abstract class AppLocalizations {
   /// **'Stores all tasks in a local TDF file on this device.'**
   String get localSectionDescription;
 
-  /// Input label for the local TDF file name or path field.
-  ///
-  /// In en, this message translates to:
-  /// **'Local TDF File Name'**
-  String get localFilePathLabel;
-
   /// Placeholder hint for the local TDF file name field.
   ///
   /// In en, this message translates to:
   /// **'tiertask.tdf or t2.tdf'**
   String get localFilePathHint;
-
-  /// Validation error shown when the local file name field is empty.
-  ///
-  /// In en, this message translates to:
-  /// **'Please enter a local file name.'**
-  String get localFilePathErrorEmpty;
 
   /// Label above the resolved local TDF file path preview.
   ///
@@ -704,54 +632,6 @@ abstract class AppLocalizations {
   /// **'Failed to write local TDF file ({details}).'**
   String errorSaveLocalFileFailed(String details);
 
-  /// Uppercase section label above the Focus tasks list on the landing page.
-  ///
-  /// In en, this message translates to:
-  /// **'FOCUS TASKS'**
-  String get sectionFocusTasks;
-
-  /// Uppercase section label above the Ready tasks list on the Ready tier panel.
-  ///
-  /// In en, this message translates to:
-  /// **'READY TASKS'**
-  String get sectionReadyTasks;
-
-  /// Uppercase section label above the Planned tasks list on the Planned tier panel.
-  ///
-  /// In en, this message translates to:
-  /// **'PLANNED TASKS'**
-  String get sectionPlannedTasks;
-
-  /// Uppercase section label above the Blocked tasks list on the Blocked tier panel.
-  ///
-  /// In en, this message translates to:
-  /// **'BLOCKED TASKS'**
-  String get sectionBlockedTasks;
-
-  /// Uppercase section label above the Someday tasks list on the Someday tier panel.
-  ///
-  /// In en, this message translates to:
-  /// **'SOMEDAY TASKS'**
-  String get sectionSomedayTasks;
-
-  /// Uppercase section label above the Completed tasks list on the Completed tier panel.
-  ///
-  /// In en, this message translates to:
-  /// **'COMPLETED TASKS'**
-  String get sectionCompletedTasks;
-
-  /// Uppercase section label above the All Tasks list in the search view.
-  ///
-  /// In en, this message translates to:
-  /// **'ALL TASKS'**
-  String get sectionAllTasks;
-
-  /// Uppercase section label above the label chips or summary cards.
-  ///
-  /// In en, this message translates to:
-  /// **'LABELS'**
-  String get sectionLabels;
-
   /// Tooltip for the top-left navigation menu button.
   ///
   /// In en, this message translates to:
@@ -782,12 +662,6 @@ abstract class AppLocalizations {
   /// **'New label name...'**
   String get labelNameHint;
 
-  /// Input label for the direct hexadecimal color field.
-  ///
-  /// In en, this message translates to:
-  /// **'Hex Color'**
-  String get colorHexLabel;
-
   /// Empty-state hint shown when no labels exist.
   ///
   /// In en, this message translates to:
@@ -806,18 +680,6 @@ abstract class AppLocalizations {
   /// **'Edit'**
   String get actionEdit;
 
-  /// Action label and input hint for creating a new label.
-  ///
-  /// In en, this message translates to:
-  /// **'Create new label'**
-  String get createNewLabel;
-
-  /// Screen title for the label management screen.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit labels'**
-  String get editLabelsTitle;
-
   /// Toggle chip label for marking a task as suspended in the task editor.
   ///
   /// In en, this message translates to:
@@ -829,12 +691,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Suspended until (optional)'**
   String get taskSuspendedUntilLabel;
-
-  /// Placeholder hint inside the suspended-until timestamp field.
-  ///
-  /// In en, this message translates to:
-  /// **'YYYY-MM-DD [HH:MM] (empty = indefinite)'**
-  String get taskSuspendedUntilHint;
 
   /// Validation error shown when the suspended-until timestamp is malformed.
   ///
@@ -962,53 +818,11 @@ abstract class AppLocalizations {
   /// **'Any location'**
   String get conditionLocationAnyLabel;
 
-  /// Input hint for latitude in a GPS location condition.
-  ///
-  /// In en, this message translates to:
-  /// **'Latitude'**
-  String get conditionLocationLatHint;
-
-  /// Input hint for longitude in a GPS location condition.
-  ///
-  /// In en, this message translates to:
-  /// **'Longitude'**
-  String get conditionLocationLonHint;
-
-  /// Input hint for radius in a GPS location condition.
-  ///
-  /// In en, this message translates to:
-  /// **'Radius (m/km)'**
-  String get conditionLocationRadiusHint;
-
   /// Validation error shown when a GPS location condition input is invalid.
   ///
   /// In en, this message translates to:
   /// **'Enter valid latitude, longitude, and radius (e.g. 200m or 1.5km).'**
   String get conditionLocationErrorInvalid;
-
-  /// Tooltip for the button that adds a GPS location condition.
-  ///
-  /// In en, this message translates to:
-  /// **'Add location rule'**
-  String get tooltipAddLocationCondition;
-
-  /// Tooltip for the button that removes a GPS location condition.
-  ///
-  /// In en, this message translates to:
-  /// **'Remove location rule'**
-  String get tooltipRemoveLocationCondition;
-
-  /// Section card title for task name and note in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Task Details'**
-  String get taskDetailsSectionTitle;
-
-  /// Section card title for scheduling mode and suspension in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Scheduling & Status'**
-  String get taskSchedulingSectionTitle;
 
   /// Section card title for labels in the task editor.
   ///
@@ -1052,12 +866,6 @@ abstract class AppLocalizations {
   /// **'Activation Conditions'**
   String get taskConditionsSectionTitle;
 
-  /// Section card description for activation conditions in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Restrict when and where this task becomes active, or override inherited label conditions.'**
-  String get taskConditionsSectionDescription;
-
   /// Tooltip for the date picker button on the suspended timestamp field.
   ///
   /// In en, this message translates to:
@@ -1070,24 +878,6 @@ abstract class AppLocalizations {
   /// **'Pick time'**
   String get tooltipPickTime;
 
-  /// Tooltip for clearing the suspended timestamp field.
-  ///
-  /// In en, this message translates to:
-  /// **'Clear timestamp'**
-  String get tooltipClearDate;
-
-  /// Tooltip for the start time picker button in time window conditions.
-  ///
-  /// In en, this message translates to:
-  /// **'Pick start time'**
-  String get tooltipPickStartTime;
-
-  /// Tooltip for the end time picker button in time window conditions.
-  ///
-  /// In en, this message translates to:
-  /// **'Pick end time'**
-  String get tooltipPickEndTime;
-
   /// Settings section title for choosing the Material 3 color palette.
   ///
   /// In en, this message translates to:
@@ -1099,18 +889,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Select the Material 3 color palette for surfaces and highlights.'**
   String get themePaletteSectionDescription;
-
-  /// Label for the Slate Material 3 color palette.
-  ///
-  /// In en, this message translates to:
-  /// **'Slate'**
-  String get themePaletteSlate;
-
-  /// Label for the Navy Material 3 color palette.
-  ///
-  /// In en, this message translates to:
-  /// **'Navy'**
-  String get themePaletteNavy;
 
   /// Settings section title for choosing the local time zone mode and offset.
   ///
@@ -1183,12 +961,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Clear text'**
   String get tooltipClearInput;
-
-  /// Button label to select a different local TDF directory on desktop platforms.
-  ///
-  /// In en, this message translates to:
-  /// **'Change Directory'**
-  String get actionChangeDirectory;
 
   /// Status message shown when the local TDF directory is changed and the file is moved.
   ///
@@ -1279,30 +1051,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Another workspace already uses this TDF file path.'**
   String get errorDuplicateWorkspaceFilePath;
-
-  /// Tooltip for the passive priority indicator icon on a task card.
-  ///
-  /// In en, this message translates to:
-  /// **'Priority'**
-  String get tooltipIndicatorPriority;
-
-  /// Tooltip for the passive repeat indicator icon on a task card.
-  ///
-  /// In en, this message translates to:
-  /// **'Repeating task'**
-  String get tooltipIndicatorRepeat;
-
-  /// Tooltip for the passive subtasks indicator icon on a task card when auto-finish is disabled.
-  ///
-  /// In en, this message translates to:
-  /// **'Subtasks'**
-  String get tooltipIndicatorSubtasks;
-
-  /// Tooltip for the passive subtasks indicator icon on a task card when auto-finish is enabled.
-  ///
-  /// In en, this message translates to:
-  /// **'Subtasks (auto-finish)'**
-  String get tooltipIndicatorSubtasksAutoFinish;
 
   /// Tooltip for the active workspace card beneath the TierTask title in the navigation drawer.
   ///
@@ -1496,24 +1244,6 @@ abstract class AppLocalizations {
   /// **'Refresh'**
   String get actionRefresh;
 
-  /// Header title when editing a label in the label editor screen.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit Label'**
-  String get editLabelTitle;
-
-  /// Tooltip for the edit button on a label row.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit label'**
-  String get tooltipEditLabel;
-
-  /// Section card title for label name and note in the label editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Label Details'**
-  String get labelDetailsSectionTitle;
-
   /// Input label for the label name field in the label editor.
   ///
   /// In en, this message translates to:
@@ -1598,12 +1328,6 @@ abstract class AppLocalizations {
   /// **'Note'**
   String get tooltipIndicatorNote;
 
-  /// Tooltip for the passive link indicator icon on a task pill.
-  ///
-  /// In en, this message translates to:
-  /// **'Has links'**
-  String get tooltipIndicatorLinks;
-
   /// Validation error shown when a link title or URI is empty or invalid.
   ///
   /// In en, this message translates to:
@@ -1663,12 +1387,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Scroll to Bottom'**
   String get tooltipScrollToBottom;
-
-  /// Tooltip for the Clear Log button in the diagnostic log viewer.
-  ///
-  /// In en, this message translates to:
-  /// **'Clear Log'**
-  String get tooltipClearLog;
 
   /// SnackBar confirmation message shown after copying the diagnostic log to the clipboard.
   ///
@@ -1868,41 +1586,11 @@ abstract class AppLocalizations {
   /// **'Both'**
   String get logStorageBoth;
 
-  /// Localized string for logMetadataSectionTitle
-  ///
-  /// In en, this message translates to:
-  /// **'Session Metadata'**
-  String get logMetadataSectionTitle;
-
   /// Localized string for logMetadataFile
   ///
   /// In en, this message translates to:
   /// **'File: {fileName}'**
   String logMetadataFile(String fileName);
-
-  /// Localized string for logMetadataVersion
-  ///
-  /// In en, this message translates to:
-  /// **'Version: {version}'**
-  String logMetadataVersion(String version);
-
-  /// Localized string for logMetadataPlatform
-  ///
-  /// In en, this message translates to:
-  /// **'Platform: {platform}'**
-  String logMetadataPlatform(String platform);
-
-  /// Localized string for logMetadataWorkspace
-  ///
-  /// In en, this message translates to:
-  /// **'Workspace: {workspace}'**
-  String logMetadataWorkspace(String workspace);
-
-  /// Localized string for logMetadataTimeZone
-  ///
-  /// In en, this message translates to:
-  /// **'Time Zone: {timeZone}'**
-  String logMetadataTimeZone(String timeZone);
 
   /// Localized string for logMetadataStats
   ///
@@ -1915,12 +1603,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'All'**
   String get logFilterAllTags;
-
-  /// Localized string for tooltipSyncLogWebDav
-  ///
-  /// In en, this message translates to:
-  /// **'Sync log to WebDAV'**
-  String get tooltipSyncLogWebDav;
 
   /// Localized string for logSyncedSnackBar
   ///
@@ -1952,48 +1634,6 @@ abstract class AppLocalizations {
   /// **'Select'**
   String get actionSelectColor;
 
-  /// Tooltip for the Any day condition reset chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.'**
-  String get tooltipConditionDayAny;
-
-  /// Tooltip for the Any time condition reset chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.'**
-  String get tooltipConditionTimeAny;
-
-  /// Tooltip for the Any location condition reset chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Explicitly overrides all location restrictions from assigned labels so this task is active at any location.'**
-  String get tooltipConditionLocationAny;
-
-  /// Tooltip for the Priority toggle chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.'**
-  String get tooltipTaskEditorPriority;
-
-  /// Tooltip for the Someday toggle chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Parks this task in the Someday backlog without pulling it into active tiers.'**
-  String get tooltipTaskEditorSomeday;
-
-  /// Tooltip for the Suspended toggle chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.'**
-  String get tooltipTaskEditorSuspended;
-
-  /// Tooltip for the Repeat toggle chip in the task editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Automatically reschedules this task after the configured interval upon completion and resets all subtasks.'**
-  String get tooltipTaskEditorRepeat;
-
   /// Tooltip for the Auto-finish toggle chip in the subtasks section of the task editor.
   ///
   /// In en, this message translates to:
@@ -2006,24 +1646,6 @@ abstract class AppLocalizations {
   /// **'Locations'**
   String get drawerLocations;
 
-  /// Action label and input hint for creating a new location.
-  ///
-  /// In en, this message translates to:
-  /// **'Create new location'**
-  String get createNewLocation;
-
-  /// Screen title for the location management screen.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit locations'**
-  String get editLocationsTitle;
-
-  /// Header title when editing a location in the location editor screen.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit Location'**
-  String get editLocationTitle;
-
   /// Empty-state hint shown when no locations exist.
   ///
   /// In en, this message translates to:
@@ -2035,18 +1657,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete location'**
   String get tooltipDeleteLocation;
-
-  /// Tooltip for the edit button on a location row.
-  ///
-  /// In en, this message translates to:
-  /// **'Edit location'**
-  String get tooltipEditLocation;
-
-  /// Section card title for location name, source, and note in the location editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Location Details'**
-  String get locationDetailsSectionTitle;
 
   /// Input label for the location name field in the location editor.
   ///
@@ -2114,12 +1724,6 @@ abstract class AppLocalizations {
   /// **'Board Scope'**
   String get labelScopedSectionTitle;
 
-  /// Switch title for marking a label as scoped in the label editor.
-  ///
-  /// In en, this message translates to:
-  /// **'Scoped Label'**
-  String get labelScopedSwitchTitle;
-
   /// Switch subtitle explaining scoped label behavior in the label editor.
   ///
   /// In en, this message translates to:
@@ -2132,23 +1736,11 @@ abstract class AppLocalizations {
   /// **'Due (optional)'**
   String get taskDueButtonLabel;
 
-  /// Tooltip for clearing the due timestamp field.
-  ///
-  /// In en, this message translates to:
-  /// **'Clear due timestamp'**
-  String get taskDueClearTooltip;
-
   /// Badge text on a task pill showing the due date.
   ///
   /// In en, this message translates to:
   /// **'Due: {date}'**
   String pillDuePrefix(String date);
-
-  /// Error message shown when concurrent local file edits exceed maxCasRetries.
-  ///
-  /// In en, this message translates to:
-  /// **'Local file was modified concurrently and exceeded maximum merge retries.'**
-  String get errorLocalFileCasExhausted;
 
   /// Label for the location source type dropdown.
   ///
@@ -2210,41 +1802,11 @@ abstract class AppLocalizations {
   /// **'Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).'**
   String get locationResolveErrorInvalidPlusCode;
 
-  /// Tooltip for the suspended task indicator icon.
-  ///
-  /// In en, this message translates to:
-  /// **'Suspended'**
-  String get tooltipIndicatorSuspended;
-
-  /// Tooltip for the prerequisite tasks indicator icon.
-  ///
-  /// In en, this message translates to:
-  /// **'Prerequisite tasks'**
-  String get tooltipIndicatorBlockedBy;
-
   /// Tooltip for the activation conditions indicator icon.
   ///
   /// In en, this message translates to:
   /// **'Activation conditions'**
   String get tooltipIndicatorConditions;
-
-  /// Tooltip for the summary indicator icon when more than 3 indicators are active.
-  ///
-  /// In en, this message translates to:
-  /// **'Task information ({count} indicators)'**
-  String tooltipIndicatorSummary(String count);
-
-  /// Dialog title for the task information overlay.
-  ///
-  /// In en, this message translates to:
-  /// **'Task Information'**
-  String get taskInfoDialogTitle;
-
-  /// Value text shown for a prioritized task in the task information dialog.
-  ///
-  /// In en, this message translates to:
-  /// **'Prioritized in queue'**
-  String get taskInfoPriorityValue;
 
   /// Value text shown when a task is suspended indefinitely.
   ///
@@ -2330,18 +1892,6 @@ abstract class AppLocalizations {
   /// **'{count} links'**
   String taskInfoLinksCount(String count);
 
-  /// Dialog title when confirming deletion of a task.
-  ///
-  /// In en, this message translates to:
-  /// **'Delete Task'**
-  String get deleteTaskDialogTitle;
-
-  /// Confirmation prompt shown before deleting a task.
-  ///
-  /// In en, this message translates to:
-  /// **'Delete task \"{title}\"? This action can be undone while the workspace remains open.'**
-  String deleteTaskConfirmMessage(String title);
-
   /// Tooltip for the button that copies the expanded task note to the clipboard.
   ///
   /// In en, this message translates to:
@@ -2408,18 +1958,6 @@ abstract class AppLocalizations {
   /// **'Task ID copied to clipboard.'**
   String get taskIdCopiedSnackBar;
 
-  /// Title of the Label Context Hub dialog.
-  ///
-  /// In en, this message translates to:
-  /// **'Label Context'**
-  String get labelHubDialogTitle;
-
-  /// Empty-state hint inside the Label Context Hub dialog when no metadata is set.
-  ///
-  /// In en, this message translates to:
-  /// **'No note, links, or activation conditions configured for this label.'**
-  String get labelHubEmptyHint;
-
   /// Validation error when adding more than 20 links to a label.
   ///
   /// In en, this message translates to:
@@ -2449,12 +1987,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Move link up'**
   String get tooltipMoveLinkUp;
-
-  /// Tooltip for opening the Label Context Hub dialog.
-  ///
-  /// In en, this message translates to:
-  /// **'Show label details and links'**
-  String get tooltipOpenLabelHub;
 
   /// Tooltip for confirming an inline link edit.
   ///
@@ -2647,12 +2179,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'History'**
   String get historySectionTitle;
-
-  /// Tooltip shown on the history indicator icon on a task pill.
-  ///
-  /// In en, this message translates to:
-  /// **'Has history entries'**
-  String get tooltipIndicatorHistory;
 
   /// Empty-state hint shown inside the history section of TaskInfoDialog when no history entries exist.
   ///
@@ -2953,12 +2479,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'All Tasks'**
   String get allTasksLabel;
-
-  /// Accessible label identifying the active label filter.
-  ///
-  /// In en, this message translates to:
-  /// **'Active filter'**
-  String get activeFilterLabel;
 
   /// Tooltip for clearing the active label filter.
   ///
@@ -3937,12 +3457,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'LOCATION'**
   String get entityKindLocationBadge;
-
-  /// Sidebar footer version label.
-  ///
-  /// In en, this message translates to:
-  /// **'Version {version}'**
-  String versionFooterLabel(String version);
 
   /// Tooltip for the desktop top chrome window close button
   ///

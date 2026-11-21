@@ -31,9 +31,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tier6Name => 'Completed';
 
   @override
-  String get tabFocusAndReady => 'Focus & Ready';
-
-  @override
   String get emptyFocusHint =>
       'No tasks in Focus. Tasks from Ready or Planned automatically move up here.';
 
@@ -53,21 +50,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emptyCompletedHint => 'No completed tasks from the last 30 days.';
 
   @override
-  String emptySectionEntries(String heading) {
-    return 'No entries in $heading.';
-  }
-
-  @override
   String get tooltipSyncWebDav => 'Synchronize with WebDAV';
-
-  @override
-  String get tooltipMarkdownPreview => 'Show TDF preview';
-
-  @override
-  String get tooltipSettings => 'Settings';
-
-  @override
-  String get markdownPreviewTitle => 'Raw TDF';
 
   @override
   String get actionClose => 'Close';
@@ -80,9 +63,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get actionConfigure => 'Configure';
 
   @override
-  String get syncErrorTitle => 'WebDAV Synchronization Error';
-
-  @override
   String get actionSettings => 'Settings';
 
   @override
@@ -92,19 +72,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get quickAddPriority => 'Priority';
 
   @override
-  String get quickAddAdvanced => 'Advanced';
-
-  @override
-  String get advancedTaskTitle => 'Extended Task View';
-
-  @override
-  String get editTaskTitle => 'Edit Task';
-
-  @override
   String get tooltipDowngradeTask => 'Downgrade task';
-
-  @override
-  String get tooltipEditTask => 'Edit task';
 
   @override
   String get taskNameLabel => 'Task Name';
@@ -209,13 +177,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Stores all tasks in a local TDF file on this device.';
 
   @override
-  String get localFilePathLabel => 'Local TDF File Name';
-
-  @override
   String get localFilePathHint => 'tiertask.tdf or t2.tdf';
-
-  @override
-  String get localFilePathErrorEmpty => 'Please enter a local file name.';
 
   @override
   String get resolvedLocalPathLabel => 'Resolved Local File Path:';
@@ -346,30 +308,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get sectionFocusTasks => 'FOCUS TASKS';
-
-  @override
-  String get sectionReadyTasks => 'READY TASKS';
-
-  @override
-  String get sectionPlannedTasks => 'PLANNED TASKS';
-
-  @override
-  String get sectionBlockedTasks => 'BLOCKED TASKS';
-
-  @override
-  String get sectionSomedayTasks => 'SOMEDAY TASKS';
-
-  @override
-  String get sectionCompletedTasks => 'COMPLETED TASKS';
-
-  @override
-  String get sectionAllTasks => 'ALL TASKS';
-
-  @override
-  String get sectionLabels => 'LABELS';
-
-  @override
   String get tooltipMenu => 'Open menu';
 
   @override
@@ -385,9 +323,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get labelNameHint => 'New label name...';
 
   @override
-  String get colorHexLabel => 'Hex Color';
-
-  @override
   String get emptyLabelsHint => 'No labels created yet.';
 
   @override
@@ -397,20 +332,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get actionEdit => 'Edit';
 
   @override
-  String get createNewLabel => 'Create new label';
-
-  @override
-  String get editLabelsTitle => 'Edit labels';
-
-  @override
   String get taskSuspendedLabel => 'Suspended';
 
   @override
   String get taskSuspendedUntilLabel => 'Suspended until (optional)';
-
-  @override
-  String get taskSuspendedUntilHint =>
-      'YYYY-MM-DD [HH:MM] (empty = indefinite)';
 
   @override
   String get taskSuspendedErrorInvalid =>
@@ -478,29 +403,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get conditionLocationAnyLabel => 'Any location';
 
   @override
-  String get conditionLocationLatHint => 'Latitude';
-
-  @override
-  String get conditionLocationLonHint => 'Longitude';
-
-  @override
-  String get conditionLocationRadiusHint => 'Radius (m/km)';
-
-  @override
   String get conditionLocationErrorInvalid =>
       'Enter valid latitude, longitude, and radius (e.g. 200m or 1.5km).';
-
-  @override
-  String get tooltipAddLocationCondition => 'Add location rule';
-
-  @override
-  String get tooltipRemoveLocationCondition => 'Remove location rule';
-
-  @override
-  String get taskDetailsSectionTitle => 'Task Details';
-
-  @override
-  String get taskSchedulingSectionTitle => 'Scheduling & Status';
 
   @override
   String get taskLabelsSectionTitle => 'Labels';
@@ -525,23 +429,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get taskConditionsSectionTitle => 'Activation Conditions';
 
   @override
-  String get taskConditionsSectionDescription =>
-      'Restrict when and where this task becomes active, or override inherited label conditions.';
-
-  @override
   String get tooltipPickDate => 'Pick date';
 
   @override
   String get tooltipPickTime => 'Pick time';
-
-  @override
-  String get tooltipClearDate => 'Clear timestamp';
-
-  @override
-  String get tooltipPickStartTime => 'Pick start time';
-
-  @override
-  String get tooltipPickEndTime => 'Pick end time';
 
   @override
   String get themePaletteSectionTitle => 'Color Palette';
@@ -549,12 +440,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get themePaletteSectionDescription =>
       'Select the Material 3 color palette for surfaces and highlights.';
-
-  @override
-  String get themePaletteSlate => 'Slate';
-
-  @override
-  String get themePaletteNavy => 'Navy';
 
   @override
   String get timeZoneSectionTitle => 'Time Zone';
@@ -593,9 +478,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipClearInput => 'Clear text';
-
-  @override
-  String get actionChangeDirectory => 'Change Directory';
 
   @override
   String get localDirectoryMovedBanner =>
@@ -669,18 +551,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get errorDuplicateWorkspaceFilePath =>
       'Another workspace already uses this TDF file path.';
-
-  @override
-  String get tooltipIndicatorPriority => 'Priority';
-
-  @override
-  String get tooltipIndicatorRepeat => 'Repeating task';
-
-  @override
-  String get tooltipIndicatorSubtasks => 'Subtasks';
-
-  @override
-  String get tooltipIndicatorSubtasksAutoFinish => 'Subtasks (auto-finish)';
 
   @override
   String get tooltipManageWorkspaces => 'Switch or manage workspaces';
@@ -789,15 +659,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get actionRefresh => 'Refresh';
 
   @override
-  String get editLabelTitle => 'Edit Label';
-
-  @override
-  String get tooltipEditLabel => 'Edit label';
-
-  @override
-  String get labelDetailsSectionTitle => 'Label Details';
-
-  @override
   String get labelNameLabel => 'Label Name';
 
   @override
@@ -842,9 +703,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipIndicatorNote => 'Note';
 
   @override
-  String get tooltipIndicatorLinks => 'Has links';
-
-  @override
   String get linkErrorInvalid =>
       'Enter both a link title and a valid URI with scheme (e.g. https://...).';
 
@@ -875,9 +733,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipScrollToBottom => 'Scroll to Bottom';
-
-  @override
-  String get tooltipClearLog => 'Clear Log';
 
   @override
   String get logCopiedSnackBar => 'Diagnostic log copied to clipboard.';
@@ -989,31 +844,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get logStorageBoth => 'Both';
 
   @override
-  String get logMetadataSectionTitle => 'Session Metadata';
-
-  @override
   String logMetadataFile(String fileName) {
     return 'File: $fileName';
-  }
-
-  @override
-  String logMetadataVersion(String version) {
-    return 'Version: $version';
-  }
-
-  @override
-  String logMetadataPlatform(String platform) {
-    return 'Platform: $platform';
-  }
-
-  @override
-  String logMetadataWorkspace(String workspace) {
-    return 'Workspace: $workspace';
-  }
-
-  @override
-  String logMetadataTimeZone(String timeZone) {
-    return 'Time Zone: $timeZone';
   }
 
   @override
@@ -1023,9 +855,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get logFilterAllTags => 'All';
-
-  @override
-  String get tooltipSyncLogWebDav => 'Sync log to WebDAV';
 
   @override
   String get logSyncedSnackBar => 'Diagnostic log synced to WebDAV.';
@@ -1043,34 +872,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get actionSelectColor => 'Select';
 
   @override
-  String get tooltipConditionDayAny =>
-      'Explicitly overrides all weekday restrictions from assigned labels so this task is active on any day.';
-
-  @override
-  String get tooltipConditionTimeAny =>
-      'Explicitly overrides all time window restrictions from assigned labels so this task is active at any time.';
-
-  @override
-  String get tooltipConditionLocationAny =>
-      'Explicitly overrides all location restrictions from assigned labels so this task is active at any location.';
-
-  @override
-  String get tooltipTaskEditorPriority =>
-      'Marks this task as priority so it is pulled into Focus or Ready ahead of standard tasks.';
-
-  @override
-  String get tooltipTaskEditorSomeday =>
-      'Parks this task in the Someday backlog without pulling it into active tiers.';
-
-  @override
-  String get tooltipTaskEditorSuspended =>
-      'Defers this task to Blocked (optionally until a chosen timestamp) and disables condition evaluation while active.';
-
-  @override
-  String get tooltipTaskEditorRepeat =>
-      'Automatically reschedules this task after the configured interval upon completion and resets all subtasks.';
-
-  @override
   String get tooltipTaskEditorAutoFinish =>
       'Automatically completes the entire task as soon as all subtasks are checked off.';
 
@@ -1078,25 +879,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get drawerLocations => 'Locations';
 
   @override
-  String get createNewLocation => 'Create new location';
-
-  @override
-  String get editLocationsTitle => 'Edit locations';
-
-  @override
-  String get editLocationTitle => 'Edit Location';
-
-  @override
   String get emptyLocationsHint => 'No locations created yet.';
 
   @override
   String get tooltipDeleteLocation => 'Delete location';
-
-  @override
-  String get tooltipEditLocation => 'Edit location';
-
-  @override
-  String get locationDetailsSectionTitle => 'Location Details';
 
   @override
   String get locationNameLabel => 'Location Name';
@@ -1135,9 +921,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get labelScopedSectionTitle => 'Board Scope';
 
   @override
-  String get labelScopedSwitchTitle => 'Scoped Label';
-
-  @override
   String get labelScopedSwitchSubtitle =>
       'Hide tasks with this label unless this label filter is active.';
 
@@ -1145,16 +928,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get taskDueButtonLabel => 'Due (optional)';
 
   @override
-  String get taskDueClearTooltip => 'Clear due timestamp';
-
-  @override
   String pillDuePrefix(String date) {
     return 'Due: $date';
   }
-
-  @override
-  String get errorLocalFileCasExhausted =>
-      'Local file was modified concurrently and exceeded maximum merge retries.';
 
   @override
   String get locationSourceTypeLabel => 'Source Type';
@@ -1189,24 +965,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Enter a valid Plus Code (e.g. 9F2PXXH7+F4 or XXH7+F4 Erfurt).';
 
   @override
-  String get tooltipIndicatorSuspended => 'Suspended';
-
-  @override
-  String get tooltipIndicatorBlockedBy => 'Prerequisite tasks';
-
-  @override
   String get tooltipIndicatorConditions => 'Activation conditions';
-
-  @override
-  String tooltipIndicatorSummary(String count) {
-    return 'Task information ($count indicators)';
-  }
-
-  @override
-  String get taskInfoDialogTitle => 'Task Information';
-
-  @override
-  String get taskInfoPriorityValue => 'Prioritized in queue';
 
   @override
   String get taskInfoSuspendedForever => 'Indefinitely';
@@ -1273,14 +1032,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get deleteTaskDialogTitle => 'Delete Task';
-
-  @override
-  String deleteTaskConfirmMessage(String title) {
-    return 'Delete task \"$title\"? This action can be undone while the workspace remains open.';
-  }
-
-  @override
   String get tooltipCopyNote => 'Copy note';
 
   @override
@@ -1323,13 +1074,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get taskIdCopiedSnackBar => 'Task ID copied to clipboard.';
 
   @override
-  String get labelHubDialogTitle => 'Label Context';
-
-  @override
-  String get labelHubEmptyHint =>
-      'No note, links, or activation conditions configured for this label.';
-
-  @override
   String get labelLinkErrorMaxExceeded =>
       'Maximum of 20 links per label reached.';
 
@@ -1344,9 +1088,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipMoveLinkUp => 'Move link up';
-
-  @override
-  String get tooltipOpenLabelHub => 'Show label details and links';
 
   @override
   String get tooltipSaveLink => 'Update link';
@@ -1455,9 +1196,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get historySectionTitle => 'History';
-
-  @override
-  String get tooltipIndicatorHistory => 'Has history entries';
 
   @override
   String get historyEmptyHint => 'No history entries recorded yet.';
@@ -1634,9 +1372,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get allTasksLabel => 'All Tasks';
-
-  @override
-  String get activeFilterLabel => 'Active filter';
 
   @override
   String get activeFilterClearTooltip => 'Clear filter (All Tasks)';
@@ -2199,11 +1934,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get entityKindLocationBadge => 'LOCATION';
-
-  @override
-  String versionFooterLabel(String version) {
-    return 'Version $version';
-  }
 
   @override
   String get tooltipCloseApp => 'Close TierTask';

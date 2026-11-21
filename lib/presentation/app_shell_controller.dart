@@ -23,10 +23,10 @@ import '../providers/sync_providers.dart';
 import '../providers/task_providers.dart';
 import '../providers/workspace_providers.dart';
 import 'floating_notice_controller.dart';
+import 'shell_models.dart';
 import 'ui_telemetry.dart';
-import 'ui_v2_shell_models.dart';
 
-/// Provides centralized shell navigation, filtering, expansion, draft, and unwind state for `lib/ui_v2/`.
+/// Provides centralized shell navigation, filtering, expansion, draft, and unwind state for `lib/ui/`.
 final appShellControllerProvider =
     NotifierProvider<AppShellController, AppShellState>(AppShellController.new);
 

@@ -48,10 +48,10 @@ flutter build windows --release --obfuscate --split-debug-info=build/symbols
 
 ## Quick Start
 
-1. Open **Settings** from the navigation drawer to configure language, theme, time zone, and deadline lead window.
-2. Select a storage mode (`Local`, `WebDAV`, or `Both`) and set the local `.tdf` path (`tasks.tdf`) and/or WebDAV endpoint (`https://cloud.example.com`, username `example-user`, remote path `tasks.tdf`).
-3. Add tasks via the bottom bar (`Priority`, `Someday`, `Labels`, or `Advanced` for subtasks, conditions, and recurrence).
-4. Switch between the global board and `scoped` label queues in the navigation drawer, or inspect a label's notes, reference links, and conditions in its context hub; changes persist and synchronize automatically.
+1. Open **Settings** from the adaptive sidebar (or mobile drawer) to configure language, theme preset (`Calm` or `Plum Umber`), brightness mode, time zone, and deadline lead window; preference cards save automatically.
+2. Select a storage mode (`Local`, `WebDAV`, or `Both`), manage the local `.tdf` file (`tasks.tdf`), and save any WebDAV endpoint edits (`https://cloud.example.com`, username `example-user`, remote path `tasks.tdf`) from the docked footer (`Save` / `Test & Sync`).
+3. Add tasks from the pinned Quick-Add composer (`Queue`, `Priority`, `Someday`, searchable `Labels`, or `Open as draft` for subtasks, due dates, recurrence, prerequisites, and conditions).
+4. Expand any task, label, or location card inline to view or edit notes, links, schedules, conditions, and history; filter global or `scoped` label queues from the sidebar; changes persist and synchronize automatically.
 
 ## Tier System & Documentation
 
@@ -104,10 +104,11 @@ task 3nR8vWOkD8 {
 ```
 
 Repository documentation:
-- [`spec/TDF_SPEC_0.8.0.md`](spec/TDF_SPEC_0.8.0.md) — TDF `0.8.0` grammar, tier derivation rules, and three-way merge specification.
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — Layer architecture, directory layout, file responsibilities, and execution flow.
-- [`AGENTS.md`](AGENTS.md) — Engineering standards, TDD rules, and verification workflow.
-- [`CHANGELOG.md`](CHANGELOG.md) — Release history.
+- [`spec/TDF_SPEC_0.8.0.md`](spec/TDF_SPEC_0.8.0.md): TDF `0.8.0` grammar, tier derivation rules, and three-way merge specification.
+- [`spec/UI_DESIGN_SYSTEM.md`](spec/UI_DESIGN_SYSTEM.md): Visual tokens, WCAG AA presets, breakpoints, 17-widget catalog, and UX guidelines.
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): Layer architecture, directory layout, file responsibilities, and execution flow.
+- [`AGENTS.md`](AGENTS.md): Engineering standards, TDD rules, and verification workflow.
+- [`CHANGELOG.md`](CHANGELOG.md): Release history.
 
 ## Development
 

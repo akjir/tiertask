@@ -21,13 +21,13 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'l10n/app_localizations.dart';
-import 'presentation/board_v2_view_models.dart';
+import 'presentation/shell_chrome_view_models.dart';
 import 'providers/config_providers.dart';
 import 'providers/local_file_watch_providers.dart';
 import 'providers/workspace_providers.dart';
 import 'services/app_logger.dart';
-import 'ui_v2/tier_task_shell_screen.dart';
-import 'ui_v2/ui_v2_icon_mapper.dart';
+import 'ui/tier_task_shell_screen.dart';
+import 'ui/ui_icon_mapper.dart';
 
 /// Root Material 3 application widget for TierTask.
 class TierTaskApp extends ConsumerStatefulWidget {
@@ -79,7 +79,7 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
         ...GlobalMaterialLocalizations.delegates,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      themeMode: UiV2IconMapper.flutterThemeMode(themeState.themeMode),
+      themeMode: UiIconMapper.flutterThemeMode(themeState.themeMode),
       theme: preset.light.toThemeData(),
       darkTheme: preset.dark.toThemeData(),
       home: const TierTaskShellScreen(),

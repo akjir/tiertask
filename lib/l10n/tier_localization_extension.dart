@@ -62,16 +62,4 @@ extension TierLocalizationExtension on AppLocalizations {
       TaskTier.completed => tier6Name,
     };
   }
-
-  /// Returns the localized uppercase section heading for [tier].
-  String tierSectionTitle(TaskTier tier) {
-    return switch (tier) {
-      TaskTier.focus => sectionFocusTasks,
-      TaskTier.ready => sectionReadyTasks,
-      TaskTier.planned => sectionPlannedTasks,
-      TaskTier.blocked => sectionBlockedTasks,
-      TaskTier.someday => sectionSomedayTasks,
-      TaskTier.completed => sectionCompletedTasks,
-    };
-  }
 }
