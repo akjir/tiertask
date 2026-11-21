@@ -30,7 +30,7 @@ final appThemeProvider = NotifierProvider<AppThemeNotifier, AppThemeSet>(
 /// Immutable semantic palette and Material 3 theme definition for TierTask.
 ///
 /// Every visual surface, text style, icon accent, indicator dot, and vector
-/// logo gradient across the application derives from the active [AppTheme].
+/// logo mark across the application derives from the active [AppTheme].
 /// Registered as a [ThemeExtension] inside [toThemeData] so widgets can read
 /// both standard [Theme.of] properties and [AppTheme.of] semantic tokens.
 @immutable
@@ -47,14 +47,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     required this.indicatorActiveIconColor,
     required this.indicatorInactiveDotColor,
     required this.indicatorIntermediateColor,
-    required this.logoBackgroundEnd,
-    required this.logoBackgroundStart,
-    required this.logoTier1End,
-    required this.logoTier1Start,
-    required this.logoTier2End,
-    required this.logoTier2Start,
-    required this.logoTier3End,
-    required this.logoTier3Start,
     required this.mutedTextColor,
     required this.onErrorContainerColor,
     required this.onPrimaryColor,
@@ -88,14 +80,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     indicatorActiveIconColor: Color(0xFFFFFFFF),
     indicatorInactiveDotColor: Color(0x8A9BA8E5),
     indicatorIntermediateColor: Color(0xC5CED4F2),
-    logoBackgroundEnd: Color(0xFF071A52),
-    logoBackgroundStart: Color(0xFF0D256C),
-    logoTier1End: Color(0xFF00BFA5),
-    logoTier1Start: Color(0xFF00E5FF),
-    logoTier2End: Color(0xFF009688),
-    logoTier2Start: Color(0xFF26A69A),
-    logoTier3End: Color(0xFF004D40),
-    logoTier3Start: Color(0xFF00796B),
     mutedTextColor: Color(0xFF9BA8E5),
     onErrorContainerColor: Color(0xFFFFB4AB),
     onPrimaryColor: Color(0xFFFFFFFF),
@@ -123,14 +107,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     indicatorActiveIconColor: Color(0xFF071A52),
     indicatorInactiveDotColor: Color(0x8A4A5B8C),
     indicatorIntermediateColor: Color(0xC5283A6F),
-    logoBackgroundEnd: Color(0xFF071A52),
-    logoBackgroundStart: Color(0xFF0D256C),
-    logoTier1End: Color(0xFF00BFA5),
-    logoTier1Start: Color(0xFF00E5FF),
-    logoTier2End: Color(0xFF009688),
-    logoTier2Start: Color(0xFF26A69A),
-    logoTier3End: Color(0xFF004D40),
-    logoTier3Start: Color(0xFF00796B),
     mutedTextColor: Color(0xFF4A5B8C),
     onErrorContainerColor: Color(0xFF7F1D1D),
     onPrimaryColor: Color(0xFFFFFFFF),
@@ -158,14 +134,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     indicatorActiveIconColor: Color(0xFFF3F5F6),
     indicatorInactiveDotColor: Color(0x8AB8C4CC),
     indicatorIntermediateColor: Color(0xC5DCE3E8),
-    logoBackgroundEnd: Color(0xFF243037),
-    logoBackgroundStart: Color(0xFF2D3B44),
-    logoTier1End: Color(0xFF7EBAB1),
-    logoTier1Start: Color(0xFF8AB4F8),
-    logoTier2End: Color(0xFF4A7880),
-    logoTier2Start: Color(0xFF628687),
-    logoTier3End: Color(0xFF004C6B),
-    logoTier3Start: Color(0xFF1D617E),
     mutedTextColor: Color(0xFFB8C4CC),
     onErrorContainerColor: Color(0xFFFFDAD6),
     onPrimaryColor: Color(0xFF003258),
@@ -193,14 +161,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     indicatorActiveIconColor: Color(0xFF1B242B),
     indicatorInactiveDotColor: Color(0x8A52606B),
     indicatorIntermediateColor: Color(0xC52F3D47),
-    logoBackgroundEnd: Color(0xFF243037),
-    logoBackgroundStart: Color(0xFF2D3B44),
-    logoTier1End: Color(0xFF7EBAB1),
-    logoTier1Start: Color(0xFF8AB4F8),
-    logoTier2End: Color(0xFF4A7880),
-    logoTier2Start: Color(0xFF628687),
-    logoTier3End: Color(0xFF004C6B),
-    logoTier3Start: Color(0xFF1D617E),
     mutedTextColor: Color(0xFF52606B),
     onErrorContainerColor: Color(0xFF410002),
     onPrimaryColor: Color(0xFFFFFFFF),
@@ -245,30 +205,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
 
   /// Intermediate wave neighbor and hover color in the tier page indicator.
   final Color indicatorIntermediateColor;
-
-  /// Ending gradient color for the application logo background.
-  final Color logoBackgroundEnd;
-
-  /// Starting gradient color for the application logo background.
-  final Color logoBackgroundStart;
-
-  /// Ending gradient color for the top logo tier bar.
-  final Color logoTier1End;
-
-  /// Starting gradient color for the top logo tier bar.
-  final Color logoTier1Start;
-
-  /// Ending gradient color for the middle logo tier bar.
-  final Color logoTier2End;
-
-  /// Starting gradient color for the middle logo tier bar.
-  final Color logoTier2Start;
-
-  /// Ending gradient color for the bottom logo tier bar.
-  final Color logoTier3End;
-
-  /// Starting gradient color for the bottom logo tier bar.
-  final Color logoTier3Start;
 
   /// Secondary label, hint, subtitle, and unselected icon color.
   final Color mutedTextColor;
@@ -321,14 +257,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     Color? indicatorActiveIconColor,
     Color? indicatorInactiveDotColor,
     Color? indicatorIntermediateColor,
-    Color? logoBackgroundEnd,
-    Color? logoBackgroundStart,
-    Color? logoTier1End,
-    Color? logoTier1Start,
-    Color? logoTier2End,
-    Color? logoTier2Start,
-    Color? logoTier3End,
-    Color? logoTier3Start,
     Color? mutedTextColor,
     Color? onErrorContainerColor,
     Color? onPrimaryColor,
@@ -357,14 +285,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
           indicatorInactiveDotColor ?? this.indicatorInactiveDotColor,
       indicatorIntermediateColor:
           indicatorIntermediateColor ?? this.indicatorIntermediateColor,
-      logoBackgroundEnd: logoBackgroundEnd ?? this.logoBackgroundEnd,
-      logoBackgroundStart: logoBackgroundStart ?? this.logoBackgroundStart,
-      logoTier1End: logoTier1End ?? this.logoTier1End,
-      logoTier1Start: logoTier1Start ?? this.logoTier1Start,
-      logoTier2End: logoTier2End ?? this.logoTier2End,
-      logoTier2Start: logoTier2Start ?? this.logoTier2Start,
-      logoTier3End: logoTier3End ?? this.logoTier3End,
-      logoTier3Start: logoTier3Start ?? this.logoTier3Start,
       mutedTextColor: mutedTextColor ?? this.mutedTextColor,
       onErrorContainerColor:
           onErrorContainerColor ?? this.onErrorContainerColor,
@@ -425,24 +345,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
             t,
           ) ??
           indicatorIntermediateColor,
-      logoBackgroundEnd:
-          Color.lerp(logoBackgroundEnd, other.logoBackgroundEnd, t) ??
-          logoBackgroundEnd,
-      logoBackgroundStart:
-          Color.lerp(logoBackgroundStart, other.logoBackgroundStart, t) ??
-          logoBackgroundStart,
-      logoTier1End:
-          Color.lerp(logoTier1End, other.logoTier1End, t) ?? logoTier1End,
-      logoTier1Start:
-          Color.lerp(logoTier1Start, other.logoTier1Start, t) ?? logoTier1Start,
-      logoTier2End:
-          Color.lerp(logoTier2End, other.logoTier2End, t) ?? logoTier2End,
-      logoTier2Start:
-          Color.lerp(logoTier2Start, other.logoTier2Start, t) ?? logoTier2Start,
-      logoTier3End:
-          Color.lerp(logoTier3End, other.logoTier3End, t) ?? logoTier3End,
-      logoTier3Start:
-          Color.lerp(logoTier3Start, other.logoTier3Start, t) ?? logoTier3Start,
       mutedTextColor:
           Color.lerp(mutedTextColor, other.mutedTextColor, t) ?? mutedTextColor,
       onErrorContainerColor:
@@ -718,14 +620,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
         other.indicatorActiveIconColor == indicatorActiveIconColor &&
         other.indicatorInactiveDotColor == indicatorInactiveDotColor &&
         other.indicatorIntermediateColor == indicatorIntermediateColor &&
-        other.logoBackgroundEnd == logoBackgroundEnd &&
-        other.logoBackgroundStart == logoBackgroundStart &&
-        other.logoTier1End == logoTier1End &&
-        other.logoTier1Start == logoTier1Start &&
-        other.logoTier2End == logoTier2End &&
-        other.logoTier2Start == logoTier2Start &&
-        other.logoTier3End == logoTier3End &&
-        other.logoTier3Start == logoTier3Start &&
         other.mutedTextColor == mutedTextColor &&
         other.onErrorContainerColor == onErrorContainerColor &&
         other.onPrimaryColor == onPrimaryColor &&
@@ -753,14 +647,6 @@ class AppTheme extends ThemeExtension<AppTheme> {
     indicatorActiveIconColor,
     indicatorInactiveDotColor,
     indicatorIntermediateColor,
-    logoBackgroundEnd,
-    logoBackgroundStart,
-    logoTier1End,
-    logoTier1Start,
-    logoTier2End,
-    logoTier2Start,
-    logoTier3End,
-    logoTier3Start,
     mutedTextColor,
     onErrorContainerColor,
     onPrimaryColor,

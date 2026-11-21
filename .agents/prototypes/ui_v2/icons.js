@@ -112,14 +112,5 @@
     `<svg class="icon${extraClass ? ` ${extraClass}` : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name] ?? ''}</svg>`;
 
   window.TT2.renderAppLogo = () =>
-    `<svg class="app-logo" viewBox="0 0 512 512" aria-hidden="true">
-      <rect x="0" y="0" width="512" height="512" rx="112" ry="112" fill="var(--logo-bg)"/>
-      <rect x="3" y="3" width="506" height="506" rx="109" ry="109" fill="none" stroke="var(--logo-bar-1)" stroke-opacity="0.25" stroke-width="8"/>
-      <rect x="96" y="116" width="320" height="56" rx="28" ry="28" fill="var(--logo-bar-1)"/>
-      <rect x="96" y="204" width="248" height="56" rx="28" ry="28" fill="var(--logo-bar-2)"/>
-      <rect x="96" y="292" width="176" height="56" rx="28" ry="28" fill="var(--logo-bar-3)"/>
-      <circle cx="348" cy="332" r="98" fill="var(--logo-bg)"/>
-      <circle cx="348" cy="332" r="82" fill="var(--logo-badge)"/>
-      <path d="M 308 334 L 336 362 L 392 302" fill="none" stroke="var(--logo-check)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>`;
+    '<span class="mark" aria-hidden="true"><b></b><b></b><b></b></span>';
 })();

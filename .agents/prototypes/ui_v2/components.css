@@ -546,12 +546,27 @@ body {
   color: var(--ink);
 }
 
-#tt2 .app-logo {
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
+#tt2 .mark {
+  display: grid;
+  gap: 3px;
+  width: 22px;
   flex-shrink: 0;
-  display: inline-block;
+}
+
+#tt2 .mark b {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+#tt2 .mark b:nth-child(2) {
+  width: 75%;
+  opacity: 0.72;
+}
+
+#tt2 .mark b:nth-child(3) {
+  width: 50%;
+  opacity: 0.42;
 }
 
 #tt2 .dev-badge {

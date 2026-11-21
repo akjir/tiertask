@@ -7,33 +7,19 @@
     <group
         android:translateX="128"
         android:translateY="128">
-        <!-- Top tier bar (Focus) -->
+        <!-- Top tier bar (100% width, 1.00 opacity) -->
         <path
-            android:fillColor="#00E5FF"
-            android:pathData="M124,116 L388,116 A28,28 0 0,1 416,144 A28,28 0 0,1 388,172 L124,172 A28,28 0 0,1 96,144 A28,28 0 0,1 124,116 Z" />
-        <!-- Middle tier bar (Ready) -->
+            android:fillColor="#00648B"
+            android:pathData="M130,130 L382,130 A28,28 0 0,1 410,158 A28,28 0 0,1 382,186 L130,186 A28,28 0 0,1 102,158 A28,28 0 0,1 130,130 Z" />
+        <!-- Middle tier bar (75% width, 0.72 opacity) -->
         <path
-            android:fillColor="#009688"
-            android:pathData="M124,204 L316,204 A28,28 0 0,1 344,232 A28,28 0 0,1 316,260 L124,260 A28,28 0 0,1 96,232 A28,28 0 0,1 124,204 Z" />
-        <!-- Bottom tier bar (Planned) -->
+            android:fillAlpha="0.72"
+            android:fillColor="#00648B"
+            android:pathData="M130,228 L305,228 A28,28 0 0,1 333,256 A28,28 0 0,1 305,284 L130,284 A28,28 0 0,1 102,256 A28,28 0 0,1 130,228 Z" />
+        <!-- Bottom tier bar (50% width, 0.42 opacity) -->
         <path
-            android:fillColor="#00796B"
-            android:pathData="M124,292 L244,292 A28,28 0 0,1 272,320 A28,28 0 0,1 244,348 L124,348 A28,28 0 0,1 96,320 A28,28 0 0,1 124,292 Z" />
-        <!-- Completion badge halo -->
-        <path
-            android:fillColor="#071A52"
-            android:pathData="M348,234 A98,98 0 1,1 348,430 A98,98 0 1,1 348,234 Z" />
-        <!-- Completion badge circle -->
-        <path
-            android:fillColor="#00BFA5"
-            android:pathData="M348,250 A82,82 0 1,1 348,414 A82,82 0 1,1 348,250 Z" />
-        <!-- Checkmark stroke -->
-        <path
-            android:fillColor="#00000000"
-            android:pathData="M308,334 L336,362 L392,302"
-            android:strokeColor="#FFFFFF"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:strokeWidth="22" />
+            android:fillAlpha="0.42"
+            android:fillColor="#00648B"
+            android:pathData="M130,326 L228,326 A28,28 0 0,1 256,354 A28,28 0 0,1 228,382 L130,382 A28,28 0 0,1 102,354 A28,28 0 0,1 130,326 Z" />
     </group>
 </vector>
